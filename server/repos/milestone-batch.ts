@@ -36,7 +36,7 @@ export interface MilestoneArchiveCascadeInput {
   /** The human-readable archive message; passed to each task's
    *  activity row. */
   message: string;
-  viaHerald: boolean;
+  viaAssistant: boolean;
 }
 
 export function buildMilestoneArchiveCascadeBatch(input: MilestoneArchiveCascadeInput): BatchStmt[] {
@@ -57,7 +57,7 @@ export function buildMilestoneArchiveCascadeBatch(input: MilestoneArchiveCascade
       params: [input.archivedAt, input.archivedAt, t.id],
     });
     stmts.push({
-      sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_herald)
+      sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
       params: [
         t.id,
@@ -66,7 +66,7 @@ export function buildMilestoneArchiveCascadeBatch(input: MilestoneArchiveCascade
         input.actorUserId,
         "archived",
         input.message,
-        input.viaHerald ? 1 : 0,
+        input.viaAssistant ? 1 : 0,
       ],
     });
   }

@@ -62,7 +62,7 @@ describe("ProjectMemoryRepo CRUD", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "Prefer bun over node" });
-        yield* repo.create({ id: "m2", projectId: "p1", content: "API keys rotate quarterly", source: "herald" });
+        yield* repo.create({ id: "m2", projectId: "p1", content: "API keys rotate quarterly", source: "assistant" });
         const got = yield* repo.get("m1");
         expect(got.projectId).toBe("p1");
         expect(got.content).toBe("Prefer bun over node");

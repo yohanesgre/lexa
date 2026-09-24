@@ -91,7 +91,7 @@ export class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")
   attempts?: unknown;
   errorTag?: string | null;
 }> {}
-export class HeraldGenerationFailed extends Data.TaggedError("HeraldGenerationFailed")<{
+export class AssistantGenerationFailed extends Data.TaggedError("AssistantGenerationFailed")<{
   message: string;
   status?: number | null;
   providerMessage?: string | null;
@@ -102,9 +102,9 @@ export class HeraldGenerationFailed extends Data.TaggedError("HeraldGenerationFa
   attempts?: unknown;
   errorTag?: string | null;
 }> {}
-export class HeraldToolBudgetExceeded extends Data.TaggedError("HeraldToolBudgetExceeded")<{ rounds: number }> {}
-export class HeraldTaskActive extends Data.TaggedError("HeraldTaskActive")<{}> {}
-export class HeraldThreadNotFound extends Data.TaggedError("HeraldThreadNotFound")<{ documentType: string; documentId: string }> {}
+export class AssistantToolBudgetExceeded extends Data.TaggedError("AssistantToolBudgetExceeded")<{ rounds: number }> {}
+export class AssistantTaskActive extends Data.TaggedError("AssistantTaskActive")<{}> {}
+export class AssistantThreadNotFound extends Data.TaggedError("AssistantThreadNotFound")<{ documentType: string; documentId: string }> {}
 export class VisionNotConfigured extends Data.TaggedError("VisionNotConfigured")<{}> {}
 export class EngineNotSupportedForChat extends Data.TaggedError("EngineNotSupportedForChat")<{ engine: string }> {}
 export class ApprovalNotFound extends Data.TaggedError("ApprovalNotFound")<{ id: string }> {}
@@ -182,10 +182,10 @@ export const errorCodeMap: Record<string, string> = {
   ProviderNotConfigured: "PROVIDER_NOT_CONFIGURED",
   ProviderAuthFailed: "PROVIDER_AUTH_FAILED",
   ProviderUnreachable: "PROVIDER_UNREACHABLE",
-  HeraldGenerationFailed: "HERALD_GENERATION_FAILED",
-  HeraldToolBudgetExceeded: "HERALD_TOOL_BUDGET_EXCEEDED",
-  HeraldTaskActive: "HERALD_TASK_ACTIVE",
-  HeraldThreadNotFound: "HERALD_THREAD_NOT_FOUND",
+  AssistantGenerationFailed: "ASSISTANT_GENERATION_FAILED",
+  AssistantToolBudgetExceeded: "ASSISTANT_TOOL_BUDGET_EXCEEDED",
+  AssistantTaskActive: "ASSISTANT_TASK_ACTIVE",
+  AssistantThreadNotFound: "ASSISTANT_THREAD_NOT_FOUND",
   VisionNotConfigured: "VISION_NOT_CONFIGURED",
   EngineNotSupportedForChat: "ENGINE_NOT_SUPPORTED_FOR_CHAT",
   ApprovalNotFound: "APPROVAL_NOT_FOUND",
@@ -248,7 +248,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InviteNotFound":
     case "WorkspaceUserNotFound":
     case "SessionNotFound":
-    case "HeraldThreadNotFound":
+    case "AssistantThreadNotFound":
     case "ApprovalNotFound":
     case "RowNotFound":
       return 404;
@@ -266,7 +266,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "AgentEntityInUse":
     case "RuntimeSessionActive":
     case "ProviderNotConfigured":
-    case "HeraldTaskActive":
+    case "AssistantTaskActive":
     case "VisionNotConfigured":
     case "EngineNotSupportedForChat":
     case "ApprovalExpired":
@@ -311,8 +311,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SourceFetchError":
     case "ProviderAuthFailed":
     case "ProviderUnreachable":
-    case "HeraldGenerationFailed":
-    case "HeraldToolBudgetExceeded":
+    case "AssistantGenerationFailed":
+    case "AssistantToolBudgetExceeded":
       return 502;
     case "DbError":
       return 500;
@@ -440,23 +440,23 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "DeviceLoginDenied":
       return "Device login request denied";
     case "ProviderNotConfigured":
-      return `Herald provider is not configured for this project — enable at least one model in Workspace → Herald Providers`;
+      return `Assistant provider is not configured for this project — enable at least one model in Workspace → Assistant Providers`;
     case "ProviderAuthFailed":
       return typeof error.message === "string" && error.message ? error.message : "The AI provider rejected the API key";
     case "ProviderUnreachable":
       return typeof error.message === "string" && error.message ? error.message : "The AI provider could not be reached";
-    case "HeraldGenerationFailed":
-      return String(error.message ?? "Herald generation failed");
-    case "HeraldToolBudgetExceeded":
-      return `Herald exceeded its tool budget (${error.rounds} rounds)`;
-    case "HeraldTaskActive":
-      return `A Herald task is still running for this document — reset once it finishes`;
-    case "HeraldThreadNotFound":
-      return `No Herald thread exists for ${error.documentType} '${error.documentId}'`;
+    case "AssistantGenerationFailed":
+      return String(error.message ?? "Assistant generation failed");
+    case "AssistantToolBudgetExceeded":
+      return `Assistant exceeded its tool budget (${error.rounds} rounds)`;
+    case "AssistantTaskActive":
+      return `An Assistant task is still running for this document — reset once it finishes`;
+    case "AssistantThreadNotFound":
+      return `No Assistant thread exists for ${error.documentType} '${error.documentId}'`;
     case "VisionNotConfigured":
       return `Image attachments need vision — enable primary image support or configure a vision model in Settings`;
     case "EngineNotSupportedForChat":
-      return `Freeform chat runs on the Herald engine — this project's engine is '${error.engine}'`;
+      return `Freeform chat runs on the Assistant engine — this project's engine is '${error.engine}'`;
     case "ApprovalNotFound":
       return "Approval not found";
     case "ApprovalExpired":

@@ -6,7 +6,7 @@ export interface ProjectMemoryEntry {
   id: ID;
   projectId: ID;
   content: string;
-  source: "manual" | "herald";
+  source: "manual" | "assistant";
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -15,7 +15,7 @@ interface ProjectMemoryRow {
   id: string;
   project_id: string;
   content: string;
-  source: "manual" | "herald";
+  source: "manual" | "assistant";
   created_at: string;
   updated_at: string;
 }
@@ -44,7 +44,7 @@ export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa
       run(db, `INSERT INTO project_memory_fts(rowid, content) SELECT rowid, content FROM project_memory WHERE id = ?`, id);
 
     return {
-      create: (input: { id: string; projectId: string; content: string; source?: "manual" | "herald" }): Effect.Effect<ProjectMemoryEntry, ConstraintViolation | DbError> =>
+      create: (input: { id: string; projectId: string; content: string; source?: "manual" | "assistant" }): Effect.Effect<ProjectMemoryEntry, ConstraintViolation | DbError> =>
         withTx(
           db,
           Effect.gen(function* () {

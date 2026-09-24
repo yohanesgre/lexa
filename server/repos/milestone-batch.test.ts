@@ -12,7 +12,7 @@ describe("buildMilestoneArchiveCascadeBatch", () => {
       actorLabel: "Maria",
       actorUserId: "u1",
       message: "Maria archived this milestone",
-      viaHerald: false,
+      viaAssistant: false,
     });
     expect(stmts).toHaveLength(4);
     expect(stmts[0]!.sql).toMatch(/UPDATE milestones SET archived_at/);
@@ -31,10 +31,10 @@ describe("buildMilestoneArchiveCascadeBatch", () => {
       swimlanes: [{ id: "s1" }, { id: "s2" }, { id: "s3" }],
       tasks: [{ id: "t1" }, { id: "t2" }, { id: "t3" }, { id: "t4" }, { id: "t5" }],
       actorKind: "agent",
-      actorLabel: "herald",
+      actorLabel: "assistant",
       actorUserId: null,
-      message: "herald archived this milestone",
-      viaHerald: true,
+      message: "assistant archived this milestone",
+      viaAssistant: true,
     });
     expect(stmts).toHaveLength(1 + 3 + 2 * 5);
     const inserts = stmts.filter((s) => s.sql.startsWith("INSERT INTO task_activity"));
@@ -53,7 +53,7 @@ describe("buildMilestoneArchiveCascadeBatch", () => {
       actorLabel: "Maria",
       actorUserId: "u1",
       message: "x",
-      viaHerald: false,
+      viaAssistant: false,
     });
     expect(stmts).toHaveLength(1);
     expect(stmts[0]!.sql).toMatch(/UPDATE milestones/);

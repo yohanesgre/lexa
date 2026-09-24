@@ -71,14 +71,14 @@ function validateRequiredFields(
   return Effect.void;
 }
 
-function asInput(actor: Actor, type: string, message: string, viaHerald: boolean): ActivityInput {
+function asInput(actor: Actor, type: string, message: string, viaAssistant: boolean): ActivityInput {
   return {
     actorKind: actor.kind,
     actorLabel: actor.label,
     actorUserId: actor.userId ?? null,
     type,
     message,
-    viaHerald,
+    viaAssistant,
   };
 }
 
@@ -135,7 +135,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         assignees?: string[];
         parentId?: string;            // create as subtask of this task
         dueAt?: string | null;
-      }, opts?: { viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
+      }, opts?: { viaAssistant?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const project = yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -222,7 +222,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               key,
               assignees: input.assignees ?? [],
               ...(parent ? { subtaskOfParentId: parent.id } : {}),
-              activity: [asInput(actor, "created", msg.created(actor.label), opts?.viaHerald === true)],
+              activity: [asInput(actor, "created", msg.created(actor.label), opts?.viaAssistant === true)],
             }));
             return yield* taskRepo.findById(taskId).pipe(
               Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -284,7 +284,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           assignees?: string[];
           dueAt?: string | null;
         },
-        opts?: { viaHerald?: boolean }
+        opts?: { viaAssistant?: boolean }
       ): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
@@ -315,29 +315,29 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
           // Diff against the pre-update row — only real changes emit rows
           // (messages are frozen at write time with option LABELS, not ids).
-          const viaHerald = opts?.viaHerald === true;
+          const viaAssistant = opts?.viaAssistant === true;
           const rows: ActivityInput[] = [];
           if (input.title !== undefined && input.title !== task.title) {
-            rows.push(asInput(actor, "field_changed", msg.titleChanged(actor.label), viaHerald));
+            rows.push(asInput(actor, "field_changed", msg.titleChanged(actor.label), viaAssistant));
           }
           if (input.description !== undefined && JSON.stringify(input.description) !== JSON.stringify(task.description)) {
-            rows.push(asInput(actor, "field_changed", msg.descriptionUpdated(actor.label), viaHerald));
+            rows.push(asInput(actor, "field_changed", msg.descriptionUpdated(actor.label), viaAssistant));
           }
           if (input.priority !== undefined && input.priority !== task.priority) {
             const opts = yield* fieldConfigRepo.findPrioritiesByProject(task.projectId);
             const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
-            rows.push(asInput(actor, "field_changed", msg.priorityChanged(label(task.priority), label(input.priority)), viaHerald));
+            rows.push(asInput(actor, "field_changed", msg.priorityChanged(label(task.priority), label(input.priority)), viaAssistant));
           }
           if (input.type !== undefined && input.type !== task.type) {
             const opts = yield* fieldConfigRepo.findTypesByProject(task.projectId);
             const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
-            rows.push(asInput(actor, "field_changed", msg.typeChanged(label(task.type), label(input.type)), viaHerald));
+            rows.push(asInput(actor, "field_changed", msg.typeChanged(label(task.type), label(input.type)), viaAssistant));
           }
           if (input.assignees !== undefined && input.assignees.toSorted().join("\u0000") !== task.assignees.toSorted().join("\u0000")) {
-            rows.push(asInput(actor, "field_changed", msg.assigneesUpdated(actor.label), viaHerald));
+            rows.push(asInput(actor, "field_changed", msg.assigneesUpdated(actor.label), viaAssistant));
           }
           if (input.dueAt !== undefined && input.dueAt !== task.dueAt) {
-            rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null), viaHerald));
+            rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null), viaAssistant));
           }
 
           const updated = yield* withTx(db, Effect.gen(function* () {
@@ -362,7 +362,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return updated;
         }),
 
-      move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean; viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound> =>
+      move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean; viaAssistant?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
@@ -500,7 +500,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
           const movedActivity = () => asInput(actor, "moved", msg.moved(
             actor.label, oldCol.name, column.name, oldLane?.name ?? null, newLane?.name ?? null
-          ), opts?.viaHerald === true);
+          ), opts?.viaAssistant === true);
 
           const moved = yield* withTx(
             db,
@@ -583,7 +583,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return undefined;
         }),
 
-      archive: (actor: Actor, id: string, opts?: { viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
+      archive: (actor: Actor, id: string, opts?: { viaAssistant?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -594,7 +594,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             yield* batch(db, buildTaskArchiveBatch({
               taskId: id,
               archivedAt,
-              activity: asInput(actor, "archived", msg.archived(actor.label), opts?.viaHerald === true),
+              activity: asInput(actor, "archived", msg.archived(actor.label), opts?.viaAssistant === true),
             }));
             const a = yield* taskRepo.findById(id).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -605,7 +605,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return archived;
         }),
 
-      restore: (actor: Actor, id: string, opts?: { viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
+      restore: (actor: Actor, id: string, opts?: { viaAssistant?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -615,7 +615,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             yield* batch(db, buildTaskArchiveBatch({
               taskId: id,
               archivedAt: null,
-              activity: asInput(actor, "restored", msg.restored(actor.label), opts?.viaHerald === true),
+              activity: asInput(actor, "restored", msg.restored(actor.label), opts?.viaAssistant === true),
             }));
             const r = yield* taskRepo.findById(id).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))

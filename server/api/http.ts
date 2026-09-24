@@ -10,7 +10,7 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
 import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed, HasChildren } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -67,22 +67,22 @@ import { PasswordLinksService } from "../services/password-links.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { RuntimeService } from "../services/runtime.service";
-import { HeraldService } from "../services/herald.service";
-import { HeraldChatService } from "../services/herald-chat.service";
-import { HeraldTaskService } from "../services/herald-task.service";
-import { HeraldSettingsRepo } from "../repos/herald-settings.repo";
-import { HeraldThreadRepo } from "../repos/herald-thread.repo";
-import { buildChatExport } from "../services/herald.service";
+import { AssistantService } from "../services/assistant.service";
+import { AssistantChatService } from "../services/assistant-chat.service";
+import { AssistantTaskService } from "../services/assistant-task.service";
+import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
+import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
+import { buildChatExport } from "../services/assistant.service";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { listModels, normalizeProviderKind, inferModelKind, heraldLog, type ProviderConfig } from "../herald/provider";
-import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
-import { HeraldModelsRepo } from "../repos/herald-models.repo";
-import { HeraldCallLogsRepo } from "../repos/herald-call-logs.repo";
-import { HeraldModelPricesRepo } from "../repos/herald-model-prices.repo";
-import { HeraldHealthRepo } from "../repos/herald-health.repo";
-import { HeraldHealthService } from "../services/herald-health.service";
-import { HeraldGateway } from "../herald/gateway.service";
-import { syncModelPrices } from "../herald/price-sync";
+import { listModels, normalizeProviderKind, inferModelKind, assistantLog, type ProviderConfig } from "../assistant/provider";
+import { AssistantProvidersRepo } from "../repos/assistant-providers.repo";
+import { AssistantModelsRepo } from "../repos/assistant-models.repo";
+import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
+import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
+import { AssistantHealthRepo } from "../repos/assistant-health.repo";
+import { AssistantHealthService } from "../services/assistant-health.service";
+import { AssistantGateway } from "../assistant/gateway.service";
+import { syncModelPrices } from "../assistant/price-sync";
 import { RuntimeEventService } from "../services/runtime-event.service";
 import { RuntimeRepo } from "../repos/runtime.repo";
 import { RuntimeEventRepo } from "../repos/runtime-event.repo";
@@ -103,7 +103,7 @@ import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
 import type { ActivityEvent, RuntimeTask, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
-import type { StreamFrame } from "../../shared/herald";
+import type { StreamFrame } from "../../shared/assistant";
 
 const ApiKeySchema = Schema.Struct({
   id: Schema.String,
@@ -463,7 +463,7 @@ const RuntimeTaskSchema = Schema.Struct({
   selection: Schema.String,
   docContext: Schema.String,
   status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
-  kind: Schema.Literal("blacksmith", "herald"),
+  kind: Schema.Literal("blacksmith", "assistant"),
   result: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -832,7 +832,7 @@ const ActivityEventSchema = Schema.Struct({
     "commented", "comment_deleted",
     "attachment_added", "attachment_removed"),
   message: Schema.String,
-  viaHerald: Schema.Boolean,
+  viaAssistant: Schema.Boolean,
   createdAt: Schema.String,
 });
 
@@ -843,7 +843,7 @@ const TaskCommentSchema = Schema.Struct({
   authorKind: Schema.Literal("user", "agent", "system"),
   authorLabel: Schema.String,
   body: Schema.Any,
-  viaHerald: Schema.Boolean,
+  viaAssistant: Schema.Boolean,
   editedAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
 });
@@ -981,15 +981,15 @@ const skillsGroup = HttpApiGroup.make("skills")
   .add(HttpApiEndpoint.post("resetSkill", "/skills/:id/reset")
     .setPath(LexaSkillPath).addSuccess(LexaSkillSchema));
 
-// ── Herald assistant tier (S3/S5/S9/S15) ──
+// ── Assistant assistant tier (S3/S5/S9/S15) ──
 const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible", "openai_responses");
 
-const HeraldReasoningEffortSchema = Schema.Literal("minimal", "low", "medium", "high");
+const AssistantReasoningEffortSchema = Schema.Literal("minimal", "low", "medium", "high");
 
-const HeraldSettingsPath = Schema.Struct({ projectId: Schema.String });
+const AssistantSettingsPath = Schema.Struct({ projectId: Schema.String });
 
 // Keys are write-only: omitted apiKey/searchApiKey keep the stored values.
-const HeraldSettingsInputPayload = Schema.Struct({
+const AssistantSettingsInputPayload = Schema.Struct({
   providerId: Schema.optional(Schema.NullOr(Schema.String)),
   modelId: Schema.optional(Schema.NullOr(Schema.String)),
   kind: Schema.optional(ProviderKindSchema),
@@ -999,16 +999,16 @@ const HeraldSettingsInputPayload = Schema.Struct({
   searchProvider: Schema.optional(Schema.NullOr(Schema.Literal("exa"))),
   searchApiKey: Schema.optional(Schema.NullOr(Schema.String)),
   urlAllowlist: Schema.optional(Schema.NullOr(Schema.String)),
-  engine: Schema.optional(Schema.Literal("herald", "blacksmith")),
+  engine: Schema.optional(Schema.Literal("assistant", "blacksmith")),
   engineSwitcherEnabled: Schema.optional(Schema.Boolean),
   primarySupportsImages: Schema.optional(Schema.Boolean),
   visionModel: Schema.optional(Schema.NullOr(Schema.String)),
-  reasoningEffort: Schema.optional(Schema.NullOr(HeraldReasoningEffortSchema)),
+  reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
   writeTools: Schema.optional(Schema.Array(Schema.String)),
   fallbackModelIds: Schema.optional(Schema.Array(Schema.String)),
 });
 
-const HeraldSettingsMaskedSchema = Schema.Struct({
+const AssistantSettingsMaskedSchema = Schema.Struct({
   projectId: Schema.String,
   providerId: Schema.NullOr(Schema.String),
   modelId: Schema.NullOr(Schema.String),
@@ -1020,11 +1020,11 @@ const HeraldSettingsMaskedSchema = Schema.Struct({
   searchProvider: Schema.NullOr(Schema.Literal("exa")),
   hasSearchKey: Schema.Boolean,
   urlAllowlist: Schema.NullOr(Schema.String),
-  engine: Schema.Literal("herald", "blacksmith"),
+  engine: Schema.Literal("assistant", "blacksmith"),
   engineSwitcherEnabled: Schema.Boolean,
   primarySupportsImages: Schema.Boolean,
   visionModel: Schema.optional(Schema.NullOr(Schema.String)),
-  reasoningEffort: Schema.NullOr(HeraldReasoningEffortSchema),
+  reasoningEffort: Schema.NullOr(AssistantReasoningEffortSchema),
   writeTools: Schema.Array(Schema.String),
   fallbackModelIds: Schema.optional(Schema.Array(Schema.String)),
 });
@@ -1032,17 +1032,17 @@ const HeraldSettingsMaskedSchema = Schema.Struct({
 // test/models take UNSAVED submitted values (never persist); an omitted
 // apiKey falls back to the stored one so testing a saved config doesn't
 // require re-entering the key.
-const HeraldSettingsTestPayload = HeraldSettingsInputPayload;
+const AssistantSettingsTestPayload = AssistantSettingsInputPayload;
 
 const ModelListResponse = Schema.Struct({ models: Schema.Array(Schema.Struct({ id: Schema.String })) });
 
-const HeraldAttachmentRef = Schema.Struct({
+const AssistantAttachmentRef = Schema.Struct({
   storageKey: Schema.String,
   mimeType: Schema.String,
   name: Schema.String,
 });
 
-const CreateHeraldTaskInput = Schema.Struct({
+const CreateAssistantTaskInput = Schema.Struct({
   slug: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
@@ -1050,25 +1050,25 @@ const CreateHeraldTaskInput = Schema.Struct({
   agentId: Schema.String,
   skillId: Schema.String,
   selection: Schema.optional(Schema.String),
-  attachments: Schema.optional(Schema.Array(HeraldAttachmentRef)),
+  attachments: Schema.optional(Schema.Array(AssistantAttachmentRef)),
 });
 
-const HeraldThreadPath = Schema.Struct({ documentType: Schema.Literal("task", "wiki"), documentId: Schema.String });
+const AssistantThreadPath = Schema.Struct({ documentType: Schema.Literal("task", "wiki"), documentId: Schema.String });
 
-const HeraldChatStreamInput = Schema.Struct({
+const AssistantChatStreamInput = Schema.Struct({
   projectId: Schema.String,
   chatId: Schema.String,
   message: Schema.String,
   agentId: Schema.optional(Schema.String),
   skillId: Schema.optional(Schema.String),
-  attachments: Schema.optional(Schema.Array(HeraldAttachmentRef)),
+  attachments: Schema.optional(Schema.Array(AssistantAttachmentRef)),
   fromIndex: Schema.optional(Schema.Number),
-  reasoningEffort: Schema.optional(Schema.NullOr(HeraldReasoningEffortSchema)),
+  reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
 });
 
-const HeraldChatPath = Schema.Struct({ chatId: Schema.String });
+const AssistantChatPath = Schema.Struct({ chatId: Schema.String });
 
-const HeraldChatTranscriptSchema = Schema.Struct({
+const AssistantChatTranscriptSchema = Schema.Struct({
   chatId: Schema.String,
   projectId: Schema.String,
   ownerUserId: Schema.NullOr(Schema.String),
@@ -1085,7 +1085,7 @@ const MemoryEntrySchema = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
   content: Schema.String,
-  source: Schema.Literal("manual", "herald"),
+  source: Schema.Literal("manual", "assistant"),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -1095,7 +1095,7 @@ const MemoryCreatePayload = Schema.Struct({ content: Schema.String });
 const MemoryProjectPath = Schema.Struct({ projectId: Schema.String });
 const MemoryDeletePath = Schema.Struct({ projectId: Schema.String, memoryId: Schema.String });
 
-const HeraldChatThreadSummarySchema = Schema.Struct({
+const AssistantChatThreadSummarySchema = Schema.Struct({
   chatId: Schema.String,
   title: Schema.NullOr(Schema.String),
   pinned: Schema.Boolean,
@@ -1104,57 +1104,57 @@ const HeraldChatThreadSummarySchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-const HeraldChatListResponse = Schema.Struct({ data: Schema.Array(HeraldChatThreadSummarySchema) });
+const AssistantChatListResponse = Schema.Struct({ data: Schema.Array(AssistantChatThreadSummarySchema) });
 const ChatMetaPayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   pinned: Schema.optional(Schema.Boolean),
 });
 const ChatMetaResponse = Schema.Struct({ chatId: Schema.String, title: Schema.NullOr(Schema.String), pinned: Schema.Boolean });
 
-const heraldGroup = HttpApiGroup.make("herald")
-  .add(HttpApiEndpoint.get("getHeraldSettings", "/herald/settings/:projectId")
-    .setPath(HeraldSettingsPath).addSuccess(HeraldSettingsMaskedSchema))
-  .add(HttpApiEndpoint.put("putHeraldSettings", "/herald/settings/:projectId")
-    .setPath(HeraldSettingsPath).setPayload(HeraldSettingsInputPayload).addSuccess(HeraldSettingsMaskedSchema))
-  .add(HttpApiEndpoint.post("testHeraldSettings", "/herald/settings/:projectId/test")
-    .setPath(HeraldSettingsPath).setPayload(HeraldSettingsTestPayload)
+const assistantGroup = HttpApiGroup.make("assistant")
+  .add(HttpApiEndpoint.get("getAssistantSettings", "/assistant/settings/:projectId")
+    .setPath(AssistantSettingsPath).addSuccess(AssistantSettingsMaskedSchema))
+  .add(HttpApiEndpoint.put("putAssistantSettings", "/assistant/settings/:projectId")
+    .setPath(AssistantSettingsPath).setPayload(AssistantSettingsInputPayload).addSuccess(AssistantSettingsMaskedSchema))
+  .add(HttpApiEndpoint.post("testAssistantSettings", "/assistant/settings/:projectId/test")
+    .setPath(AssistantSettingsPath).setPayload(AssistantSettingsTestPayload)
     .addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
-  .add(HttpApiEndpoint.post("listHeraldModels", "/herald/settings/:projectId/models")
-    .setPath(HeraldSettingsPath).setPayload(HeraldSettingsTestPayload).addSuccess(ModelListResponse))
-  .add(HttpApiEndpoint.post("createHeraldTask", "/herald/tasks")
-    .setPayload(CreateHeraldTaskInput).addSuccess(RuntimeTaskSchema, { status: 201 }))
-  .add(HttpApiEndpoint.post("streamHeraldTask", "/herald/tasks/:id/stream")
+  .add(HttpApiEndpoint.post("listAssistantModels", "/assistant/settings/:projectId/models")
+    .setPath(AssistantSettingsPath).setPayload(AssistantSettingsTestPayload).addSuccess(ModelListResponse))
+  .add(HttpApiEndpoint.post("createAssistantTask", "/assistant/tasks")
+    .setPayload(CreateAssistantTaskInput).addSuccess(RuntimeTaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.post("streamAssistantTask", "/assistant/tasks/:id/stream")
     .setPath(RuntimeTaskPath).addSuccess(Schema.Void))
-  .add(HttpApiEndpoint.post("cancelHeraldTask", "/herald/tasks/:id/cancel")
+  .add(HttpApiEndpoint.post("cancelAssistantTask", "/assistant/tasks/:id/cancel")
     .setPath(RuntimeTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
-  .add(HttpApiEndpoint.del("resetHeraldThread", "/herald/threads/:documentType/:documentId")
-    .setPath(HeraldThreadPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("streamHeraldChat", "/herald/chat/stream")
-    .setPayload(HeraldChatStreamInput).addSuccess(Schema.Void))
-  .add(HttpApiEndpoint.get("getHeraldChat", "/herald/chat/:chatId")
-    .setPath(HeraldChatPath).addSuccess(HeraldChatTranscriptSchema))
-  .add(HttpApiEndpoint.del("resetHeraldChat", "/herald/chat/:chatId")
-    .setPath(HeraldChatPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.get("listHeraldChats", "/herald/chats/:projectId")
-    .setPath(MemoryProjectPath).addSuccess(HeraldChatListResponse))
-  .add(HttpApiEndpoint.patch("renameHeraldChat", "/herald/chat/:chatId")
-    .setPath(HeraldChatPath).setPayload(ChatMetaPayload).addSuccess(ChatMetaResponse))
-  .add(HttpApiEndpoint.get("exportHeraldChat", "/herald/chat/:chatId/export")
-    .setPath(HeraldChatPath).addSuccess(Schema.Void))
-  .add(HttpApiEndpoint.get("listHeraldMemory", "/herald/memory/:projectId")
+  .add(HttpApiEndpoint.del("resetAssistantThread", "/assistant/threads/:documentType/:documentId")
+    .setPath(AssistantThreadPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("streamAssistantChat", "/assistant/chat/stream")
+    .setPayload(AssistantChatStreamInput).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.get("getAssistantChat", "/assistant/chat/:chatId")
+    .setPath(AssistantChatPath).addSuccess(AssistantChatTranscriptSchema))
+  .add(HttpApiEndpoint.del("resetAssistantChat", "/assistant/chat/:chatId")
+    .setPath(AssistantChatPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.get("listAssistantChats", "/assistant/chats/:projectId")
+    .setPath(MemoryProjectPath).addSuccess(AssistantChatListResponse))
+  .add(HttpApiEndpoint.patch("renameAssistantChat", "/assistant/chat/:chatId")
+    .setPath(AssistantChatPath).setPayload(ChatMetaPayload).addSuccess(ChatMetaResponse))
+  .add(HttpApiEndpoint.get("exportAssistantChat", "/assistant/chat/:chatId/export")
+    .setPath(AssistantChatPath).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.get("listAssistantMemory", "/assistant/memory/:projectId")
     .setPath(MemoryProjectPath).addSuccess(MemoryListResponse))
-  .add(HttpApiEndpoint.post("addHeraldMemory", "/herald/memory/:projectId")
+  .add(HttpApiEndpoint.post("addAssistantMemory", "/assistant/memory/:projectId")
     .setPath(MemoryProjectPath).setPayload(MemoryCreatePayload).addSuccess(MemoryEntrySchema, { status: 201 }))
-  .add(HttpApiEndpoint.del("removeHeraldMemory", "/herald/memory/:projectId/:memoryId")
+  .add(HttpApiEndpoint.del("removeAssistantMemory", "/assistant/memory/:projectId/:memoryId")
     .setPath(MemoryDeletePath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("decideHeraldApproval", "/herald/approvals/:id/decide")
+  .add(HttpApiEndpoint.post("decideAssistantApproval", "/assistant/approvals/:id/decide")
     .setPath(Schema.Struct({ id: Schema.String }))
     .setPayload(Schema.Struct({ verdict: Schema.Literal("approve", "reject") }))
     .addSuccess(Schema.Struct({ approvalId: Schema.String, batchId: Schema.String, status: Schema.String, remaining: Schema.Number })))
-  .add(HttpApiEndpoint.post("resumeHeraldChat", "/herald/chat/:chatId/resume")
-    .setPath(HeraldChatPath).addSuccess(Schema.Void))
-  .add(HttpApiEndpoint.post("resumeHeraldThread", "/herald/threads/:documentType/:documentId/resume")
-    .setPath(HeraldThreadPath).addSuccess(Schema.Void));
+  .add(HttpApiEndpoint.post("resumeAssistantChat", "/assistant/chat/:chatId/resume")
+    .setPath(AssistantChatPath).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.post("resumeAssistantThread", "/assistant/threads/:documentType/:documentId/resume")
+    .setPath(AssistantThreadPath).addSuccess(Schema.Void));
 
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
@@ -1730,7 +1730,7 @@ const meGroup = HttpApiGroup.make("me")
   .add(HttpApiEndpoint.del("deleteMyApiKey", "/me/api-keys/:id")
     .setPath(ApiKeyPath).addSuccess(Schema.Void, { status: 204 }));
 
-const HeraldUsageSummarySchema = Schema.Struct({
+const AssistantUsageSummarySchema = Schema.Struct({
   totalTokens: Schema.Number,
   promptTokens: Schema.Number,
   completionTokens: Schema.Number,
@@ -1743,7 +1743,7 @@ const HeraldUsageSummarySchema = Schema.Struct({
   totalCalls: Schema.Number,
   errorCalls: Schema.Number,
 });
-const HeraldByDayRowSchema = Schema.Struct({
+const AssistantByDayRowSchema = Schema.Struct({
   day: Schema.String,
   tokens: Schema.Number,
   costCents: Schema.Number,
@@ -1752,7 +1752,7 @@ const HeraldByDayRowSchema = Schema.Struct({
   calls: Schema.Number,
   errorRate: Schema.Number,
 });
-const HeraldByModelRowSchema = Schema.Struct({
+const AssistantByModelRowSchema = Schema.Struct({
   model: Schema.String,
   tokens: Schema.Number,
   costCents: Schema.Number,
@@ -1761,21 +1761,21 @@ const HeraldByModelRowSchema = Schema.Struct({
   calls: Schema.Number,
   errorRate: Schema.Number,
 });
-const HeraldUsageResponseSchema = Schema.Struct({
-  summary: HeraldUsageSummarySchema,
+const AssistantUsageResponseSchema = Schema.Struct({
+  summary: AssistantUsageSummarySchema,
   totalCostCents: Schema.Number,
-  byDay: Schema.Array(HeraldByDayRowSchema),
-  byModel: Schema.Array(HeraldByModelRowSchema),
+  byDay: Schema.Array(AssistantByDayRowSchema),
+  byModel: Schema.Array(AssistantByModelRowSchema),
 });
 
-const HeraldPriceInputSchema = Schema.Struct({
+const AssistantPriceInputSchema = Schema.Struct({
   model: Schema.String,
   prompt_price: Schema.Number,
   completion_price: Schema.Number,
   cached_read_price: Schema.Number,
   cached_write_price: Schema.Number,
 });
-const HeraldPriceResponseSchema = Schema.Struct({
+const AssistantPriceResponseSchema = Schema.Struct({
   model: Schema.String,
   prompt_price: Schema.Number,
   completion_price: Schema.Number,
@@ -1784,26 +1784,26 @@ const HeraldPriceResponseSchema = Schema.Struct({
   updated_at: Schema.String,
 });
 
-const adminHeraldGroup = HttpApiGroup.make("adminHerald")
-  .add(HttpApiEndpoint.get("adminHeraldUsage", "/admin/herald/usage").addSuccess(HeraldUsageResponseSchema))
-  .add(HttpApiEndpoint.get("adminHeraldUsageCsv", "/admin/herald/usage.csv").addSuccess(Schema.Void, { status: 200 }))
-  .add(HttpApiEndpoint.get("adminHeraldPrices", "/admin/herald/prices").addSuccess(Schema.Struct({ data: Schema.Array(HeraldPriceResponseSchema) })))
-  .add(HttpApiEndpoint.put("adminHeraldPutPrices", "/admin/herald/prices").setPayload(HeraldPriceInputSchema).addSuccess(HeraldPriceResponseSchema))
-  .add(HttpApiEndpoint.get("adminHeraldCalls", "/admin/herald/calls").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.post("adminHeraldPriceSync", "/admin/herald/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number })))
-  .add(HttpApiEndpoint.get("adminHeraldProviders", "/admin/herald/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.post("adminHeraldCreateProvider", "/admin/herald/providers").setPayload(Schema.Struct({ label: Schema.String, baseUrl: Schema.String, apiKey: Schema.String })).addSuccess(Schema.Any))
-  .add(HttpApiEndpoint.patch("adminHeraldUpdateProvider", "/admin/herald/providers/:id").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ label: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String), apiKey: Schema.optional(Schema.String) })).addSuccess(Schema.Any))
-  .add(HttpApiEndpoint.del("adminHeraldDeleteProvider", "/admin/herald/providers/:id").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("adminHeraldTestProvider", "/admin/herald/providers/:id/test").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
-  .add(HttpApiEndpoint.post("adminHeraldProviderModels", "/admin/herald/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.patch("adminHeraldUpdateModel", "/admin/herald/providers/:id/models/:modelId").setPath(Schema.Struct({ id: Schema.String, modelId: Schema.String })).setPayload(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), priority: Schema.optional(Schema.Number) })).addSuccess(Schema.Any))
-  .add(HttpApiEndpoint.post("adminHeraldReorderModels", "/admin/herald/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.get("adminHeraldHealth", "/admin/herald/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })))
-  .add(HttpApiEndpoint.post("adminHeraldProbeProvider", "/admin/herald/providers/:id/probe").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
+const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
+  .add(HttpApiEndpoint.get("adminAssistantUsage", "/admin/assistant/usage").addSuccess(AssistantUsageResponseSchema))
+  .add(HttpApiEndpoint.get("adminAssistantUsageCsv", "/admin/assistant/usage.csv").addSuccess(Schema.Void, { status: 200 }))
+  .add(HttpApiEndpoint.get("adminAssistantPrices", "/admin/assistant/prices").addSuccess(Schema.Struct({ data: Schema.Array(AssistantPriceResponseSchema) })))
+  .add(HttpApiEndpoint.put("adminAssistantPutPrices", "/admin/assistant/prices").setPayload(AssistantPriceInputSchema).addSuccess(AssistantPriceResponseSchema))
+  .add(HttpApiEndpoint.get("adminAssistantCalls", "/admin/assistant/calls").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.post("adminAssistantPriceSync", "/admin/assistant/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number })))
+  .add(HttpApiEndpoint.get("adminAssistantProviders", "/admin/assistant/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.post("adminAssistantCreateProvider", "/admin/assistant/providers").setPayload(Schema.Struct({ label: Schema.String, baseUrl: Schema.String, apiKey: Schema.String })).addSuccess(Schema.Any))
+  .add(HttpApiEndpoint.patch("adminAssistantUpdateProvider", "/admin/assistant/providers/:id").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ label: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String), apiKey: Schema.optional(Schema.String) })).addSuccess(Schema.Any))
+  .add(HttpApiEndpoint.del("adminAssistantDeleteProvider", "/admin/assistant/providers/:id").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("adminAssistantTestProvider", "/admin/assistant/providers/:id/test").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
+  .add(HttpApiEndpoint.post("adminAssistantProviderModels", "/admin/assistant/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.patch("adminAssistantUpdateModel", "/admin/assistant/providers/:id/models/:modelId").setPath(Schema.Struct({ id: Schema.String, modelId: Schema.String })).setPayload(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), priority: Schema.optional(Schema.Number) })).addSuccess(Schema.Any))
+  .add(HttpApiEndpoint.post("adminAssistantReorderModels", "/admin/assistant/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.get("adminAssistantHealth", "/admin/assistant/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })))
+  .add(HttpApiEndpoint.post("adminAssistantProbeProvider", "/admin/assistant/providers/:id/probe").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
 
-const projectHeraldUsageGroup = HttpApiGroup.make("projectHeraldUsage")
-  .add(HttpApiEndpoint.get("projectHeraldUsage", "/projects/:slug/herald/usage").setPath(SlugPath).addSuccess(HeraldUsageResponseSchema));
+const projectAssistantUsageGroup = HttpApiGroup.make("projectAssistantUsage")
+  .add(HttpApiEndpoint.get("projectAssistantUsage", "/projects/:slug/assistant/usage").setPath(SlugPath).addSuccess(AssistantUsageResponseSchema));
 
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
@@ -1816,7 +1816,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(runtimesGroup)
   .add(agentsGroup)
   .add(skillsGroup)
-  .add(heraldGroup)
+  .add(assistantGroup)
   .add(taskLinksGroup)
   .add(tasksGroup)
   .add(boardGroup)
@@ -1825,8 +1825,8 @@ export const LexaApi = HttpApi.make("lexa")
   .add(apiKeysGroup)
   .add(deviceLoginGroup)
   .add(adminGroup)
-  .add(adminHeraldGroup)
-  .add(projectHeraldUsageGroup)
+  .add(adminAssistantGroup)
+  .add(projectAssistantUsageGroup)
   .add(meGroup)
   .add(teamsGroup)
   .add(workspaceGroup)
@@ -1908,7 +1908,7 @@ const requireAdmin = Effect.gen(function* () {
   return identity;
 });
 
-// Superadmin-only gate (Herald Gateway): same identity check as
+// Superadmin-only gate (Assistant Gateway): same identity check as
 // Workspace/Teams requireSuperadmin — superadmin sessions (role "admin"
 // after middleware mapping) and bare API keys (role "admin") pass; member
 // sessions (role "member") get 403 FORBIDDEN.
@@ -1949,7 +1949,7 @@ const requireProjectRead = (slug: string): Effect.Effect<DomainProject, ProjectN
     return project;
   });
 
-// Same gate as requireProjectRead but keyed by project id (herald settings,
+// Same gate as requireProjectRead but keyed by project id (assistant settings,
 // memory, and chat paths carry ids, not slugs).
 const requireProjectReadById = (projectId: string): Effect.Effect<DomainProject, ProjectNotFound | DbError | ProjectAccessDenied, AuthIdentity | ProjectService | AuthorizationService> =>
   Effect.gen(function* () {
@@ -3018,21 +3018,21 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     )
 );
 
-const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
+const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
   handlers
-    .handle("getHeraldSettings", (req) =>
+    .handle("getAssistantSettings", (req) =>
       respond(Effect.gen(function* () {
         yield* requireProjectReadById(req.path.projectId);
-        const repo = yield* HeraldSettingsRepo;
+        const repo = yield* AssistantSettingsRepo;
         return yield* repo.maskedView(req.path.projectId).pipe(
           Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId: req.path.projectId }))
         );
       }))
     )
-    .handle("putHeraldSettings", (req) =>
+    .handle("putAssistantSettings", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldSettingsRepo;
+        const repo = yield* AssistantSettingsRepo;
         const payload = {
           ...req.payload,
           ...(req.payload.writeTools !== undefined ? { writeTools: [...req.payload.writeTools] } : {}),
@@ -3041,10 +3041,10 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         return yield* repo.maskedView(req.path.projectId);
       }))
     )
-    .handle("testHeraldSettings", (req) =>
+    .handle("testAssistantSettings", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const gateway = yield* HeraldGateway;
+        const gateway = yield* AssistantGateway;
         return yield* gateway.testConnection(req.path.projectId, {
           ...( (req.payload as { providerId?: string | null }).providerId !== undefined ? { providerId: (req.payload as { providerId?: string | null }).providerId } : {}),
           ...( (req.payload as { modelId?: string | null }).modelId !== undefined ? { modelId: (req.payload as { modelId?: string | null }).modelId } : {}),
@@ -3077,8 +3077,8 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
               try {
                 const line = JSON.stringify({
                   level: "ERROR",
-                  service: "herald-http",
-                  message: `testHeraldSettings failed: ${String(err.message ?? err._tag ?? e).slice(0, 500)}`,
+                  service: "assistant-http",
+                  message: `testAssistantSettings failed: ${String(err.message ?? err._tag ?? e).slice(0, 500)}`,
                   meta: {
                     projectId: req.path.projectId,
                     errorTag: err._tag ?? null,
@@ -3096,12 +3096,12 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
             })
           ),
           Effect.catchAllCause((cause) =>
-            Effect.flatMap(Effect.logError(`[herald-http] testHeraldSettings fiber failure: ${String(Cause.pretty(cause)).slice(0, 800)}`), () => Effect.failCause(cause))
+            Effect.flatMap(Effect.logError(`[assistant-http] testAssistantSettings fiber failure: ${String(Cause.pretty(cause)).slice(0, 800)}`), () => Effect.failCause(cause))
           )
         );
       }))
     )
-    .handle("listHeraldModels", (req) =>
+    .handle("listAssistantModels", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
         const config = yield* resolveProviderConfig(req.path.projectId, req.payload);
@@ -3111,10 +3111,10 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         });
       }))
     )
-    .handle("createHeraldTask", (req) =>
+    .handle("createAssistantTask", (req) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         return yield* service.enqueue({
           projectId: project.id,
           documentType: req.payload.documentType,
@@ -3127,7 +3127,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         });
       }))
     )
-    .handle("streamHeraldTask", (req) =>
+    .handle("streamAssistantTask", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         const runtimeService = yield* RuntimeService;
@@ -3137,15 +3137,15 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
           const access = yield* authz.projectAccess(identity.userId, task.projectId);
           if (!access) return yield* new ProjectAccessDenied({ project: task.projectId, role: "member" });
         }
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const frames = yield* service.runStream(req.path.id, { ...(identity.userId !== undefined && identity.userId !== null ? { userId: identity.userId } : {}) });
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.id));
         return sseHttpResponse(frames);
       }))
     )
-    .handle("cancelHeraldTask", (req) =>
+    .handle("cancelAssistantTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const runtimeService = yield* RuntimeService;
         if (!service.abortStream(req.path.id)) {
           yield* runtimeService.cancel(req.path.id);
@@ -3153,24 +3153,24 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         return { ok: true as const };
       }))
     )
-    .handle("resetHeraldThread", (req) =>
+    .handle("resetAssistantThread", (req) =>
       respond(Effect.gen(function* () {
-        const threadRepo = yield* HeraldThreadRepo;
+        const threadRepo = yield* AssistantThreadRepo;
         const thread = yield* threadRepo.loadThread(req.path.documentType, req.path.documentId).pipe(
-          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
         );
         yield* requireProjectReadById(thread.projectId);
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         yield* service.resetThread(thread.projectId, req.path.documentType, req.path.documentId);
         return undefined;
       }))
     )
-    .handle("streamHeraldChat", (req) =>
+    .handle("streamAssistantChat", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
         yield* requireProjectReadById(req.payload.projectId);
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const frames = yield* service.runChatStream(req.payload.chatId, identity.userId, {
           projectId: req.payload.projectId,
           chatId: req.payload.chatId,
@@ -3185,49 +3185,49 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         return sseHttpResponse(frames);
       }))
     )
-    .handle("decideHeraldApproval", (req) =>
+    .handle("decideAssistantApproval", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         return yield* service.decideApproval(req.path.id, identity.userId, req.payload.verdict);
       }))
     )
-    .handle("resumeHeraldChat", (req) =>
+    .handle("resumeAssistantChat", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
-        const threadRepo = yield* HeraldThreadRepo;
+        const threadRepo = yield* AssistantThreadRepo;
         const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
-          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         yield* requireProjectReadById(t.projectId);
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
         return sseHttpResponse(frames);
       }))
     )
-    .handle("resumeHeraldThread", (req) =>
+    .handle("resumeAssistantThread", (req) =>
       respond(Effect.gen(function* () {
-        const threadRepo = yield* HeraldThreadRepo;
+        const threadRepo = yield* AssistantThreadRepo;
         const thread = yield* threadRepo.loadThread(req.path.documentType, req.path.documentId).pipe(
-          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
         );
         yield* requireProjectReadById(thread.projectId);
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const frames = yield* service.resumeThreadStream(req.path.documentType, req.path.documentId);
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.documentId));
         return sseHttpResponse(frames);
       }))
     )
-    .handle("getHeraldChat", (req) =>
+    .handle("getAssistantChat", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
-        const threadRepo = yield* HeraldThreadRepo;
+        const threadRepo = yield* AssistantThreadRepo;
         const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
-          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         return {
           chatId: t.documentId,
@@ -3243,69 +3243,69 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         };
       }))
     )
-    .handle("resetHeraldChat", (req) =>
+    .handle("resetAssistantChat", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
-        const service = yield* HeraldService;
-        if (service.chatActive(req.path.chatId)) return yield* new HeraldTaskActive();
-        const threadRepo = yield* HeraldThreadRepo;
+        const service = yield* AssistantService;
+        if (service.chatActive(req.path.chatId)) return yield* new AssistantTaskActive();
+        const threadRepo = yield* AssistantThreadRepo;
         yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
-          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         yield* threadRepo.resetThread("chat", req.path.chatId);
         return undefined;
       }))
     )
-    .handle("listHeraldChats", (req) =>
+    .handle("listAssistantChats", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
         const project = yield* requireProjectReadById(req.path.projectId);
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const q = searchParams(req).get("q") ?? undefined;
         return { data: yield* service.listChats(project.id, identity.userId, { ...(q !== undefined ? { q } : {}) }) };
       }))
     )
-    .handle("renameHeraldChat", (req) =>
+    .handle("renameAssistantChat", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
-        const service = yield* HeraldService;
+        const service = yield* AssistantService;
         const t = yield* service
           .updateChatMeta(req.path.chatId, identity.userId, { ...(req.payload.title !== undefined ? { title: req.payload.title } : {}), ...(req.payload.pinned !== undefined ? { pinned: req.payload.pinned } : {}) })
           .pipe(
-            Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+            Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
           );
         return { chatId: t.documentId, title: t.title, pinned: t.pinned };
       }))
     )
-    .handle("exportHeraldChat", (req) =>
+    .handle("exportAssistantChat", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
-        const threadRepo = yield* HeraldThreadRepo;
+        const threadRepo = yield* AssistantThreadRepo;
         const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
-          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         return chatExportHttpResponse(t);
       }))
     )
-    .handle("listHeraldMemory", (req) =>
+    .handle("listAssistantMemory", (req) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectReadById(req.path.projectId);
         const repo = yield* ProjectMemoryRepo;
         return { data: yield* repo.list(project.id) };
       }))
     )
-    .handle("addHeraldMemory", (req) =>
+    .handle("addAssistantMemory", (req) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectReadById(req.path.projectId);
         const repo = yield* ProjectMemoryRepo;
         return yield* repo.create({ id: crypto.randomUUID(), projectId: project.id, content: req.payload.content });
       }))
     )
-    .handle("removeHeraldMemory", (req) =>
+    .handle("removeAssistantMemory", (req) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectReadById(req.path.projectId);
         const repo = yield* ProjectMemoryRepo;
@@ -3997,7 +3997,7 @@ function sseHttpResponse(frames: ReadableStream<StreamFrame>): HttpServerRespons
     },
   });
   return HttpServerResponse.stream(
-    Stream.fromReadableStream(() => stream, () => new HeraldGenerationFailed({ message: "SSE encode failed" })),
+    Stream.fromReadableStream(() => stream, () => new AssistantGenerationFailed({ message: "SSE encode failed" })),
     { contentType: "text/event-stream", headers: { "Cache-Control": "no-cache" } }
   );
 }
@@ -4015,15 +4015,15 @@ function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): 
 // test/models take UNSAVED submitted values; an omitted apiKey falls back to
 // the stored one so testing a saved config doesn't require re-entering the key.
 // After 0017 legacy kind/baseUrl/model/apiKey columns are gone — payload is optional and fallback is gateway.
-// Unsaved providerId/modelId (herald-project.tsx Test) resolves to the same ProviderConfig as the persisted binding.
+// Unsaved providerId/modelId (assistant-project.tsx Test) resolves to the same ProviderConfig as the persisted binding.
 const resolveProviderConfig = (
   projectId: string,
   payload: { providerId?: string | null | undefined; modelId?: string | null | undefined; kind?: string | undefined; baseUrl?: string | undefined; model?: string | undefined; apiKey?: string | undefined }
-): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError, HeraldGateway | HeraldProvidersRepo | HeraldModelsRepo> =>
+): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError, AssistantGateway | AssistantProvidersRepo | AssistantModelsRepo> =>
   Effect.gen(function* () {
     if (payload.providerId && payload.modelId) {
-      const providerRepo = yield* HeraldProvidersRepo;
-      const modelRepo = yield* HeraldModelsRepo;
+      const providerRepo = yield* AssistantProvidersRepo;
+      const modelRepo = yield* AssistantModelsRepo;
       const provider = (yield* providerRepo.getById(payload.providerId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))))) as unknown as { base_url: string; api_key: string };
       const model = yield* modelRepo.findByProviderAndModelId(payload.providerId, payload.modelId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))));
       if (!model.enabled) return yield* Effect.fail(new ProviderNotConfigured({ projectId }));
@@ -4043,7 +4043,7 @@ const resolveProviderConfig = (
         apiKey: payload.apiKey ?? "",
       };
     }
-    const gateway = yield* HeraldGateway;
+    const gateway = yield* AssistantGateway;
     const configs = yield* gateway.resolveFallback(projectId);
     if (configs.length === 0) return yield* new ProviderNotConfigured({ projectId });
     return configs[0]!;
@@ -4345,12 +4345,12 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
 // Self-service profile: the acting user comes from the session cookie (or a
 // key-bound user), resolved by the middleware into AuthIdentity.userId. Bare
 // API keys have no user context — agents have no profile to edit.
-const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) =>
+const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (handlers) =>
   handlers
-    .handle("adminHeraldUsage", (req) =>
+    .handle("adminAssistantUsage", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldCallLogsRepo;
+        const repo = yield* AssistantCallLogsRepo;
         const sp = searchParams(req);
         const from = sp.get("from");
         const to = sp.get("to");
@@ -4360,10 +4360,10 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         return { summary: stats, totalCostCents: stats.totalCostCents, byDay, byModel };
       }))
     )
-    .handle("adminHeraldUsageCsv", (req) =>
+    .handle("adminAssistantUsageCsv", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldCallLogsRepo;
+        const repo = yield* AssistantCallLogsRepo;
         const sp = searchParams(req);
         const from = sp.get("from");
         const to = sp.get("to");
@@ -4372,19 +4372,19 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         const csv = yield* repo.csv(filters);
         return HttpServerResponse.raw(csv, {
           status: 200,
-          headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="herald-usage.csv"` },
+          headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="assistant-usage.csv"` },
         });
       }))
     )
-    .handle("adminHeraldPrices", () =>
+    .handle("adminAssistantPrices", () =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldModelPricesRepo;
+        const repo = yield* AssistantModelPricesRepo;
         const rows = yield* repo.list();
         return { data: rows.map((r) => ({ model: r.model, prompt_price: r.promptPrice, completion_price: r.completionPrice, cached_read_price: r.cachedReadPrice, cached_write_price: r.cachedWritePrice, updated_at: r.updatedAt })) };
       }))
     )
-    .handle("adminHeraldPutPrices", (req) =>
+    .handle("adminAssistantPutPrices", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const model = req.payload.model?.trim();
@@ -4411,61 +4411,61 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         if (typeof cachedWritePrice !== "number" || !Number.isFinite(cachedWritePrice) || cachedWritePrice < 0 || !decimalsOk(cachedWritePrice)) {
           return yield* new InvalidArgs({ reason: "cached_write_price must be a number >= 0 with max 6 decimals" });
         }
-        const repo = yield* HeraldModelPricesRepo;
+        const repo = yield* AssistantModelPricesRepo;
         const row = yield* repo.upsert({ model, promptPrice, completionPrice, cachedReadPrice, cachedWritePrice });
         return { model: row.model, prompt_price: row.promptPrice, completion_price: row.completionPrice, cached_read_price: row.cachedReadPrice, cached_write_price: row.cachedWritePrice, updated_at: row.updatedAt };
       }))
     )
-    .handle("adminHeraldCalls", () =>
+    .handle("adminAssistantCalls", () =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldCallLogsRepo;
+        const repo = yield* AssistantCallLogsRepo;
         const logs = yield* repo.listRecent(100);
         return { data: logs };
       }))
     )
-    .handle("adminHeraldPriceSync", () =>
+    .handle("adminAssistantPriceSync", () =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const n = yield* syncModelPrices().pipe(Effect.catchAll(() => Effect.succeed(0)));
         return { synced: n };
       }))
     )
-    .handle("adminHeraldProviders", () =>
+    .handle("adminAssistantProviders", () =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldProvidersRepo;
+        const repo = yield* AssistantProvidersRepo;
         const rows = yield* repo.maskedList();
         return { data: rows };
       }))
     )
-    .handle("adminHeraldCreateProvider", (req) =>
+    .handle("adminAssistantCreateProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldProvidersRepo;
+        const repo = yield* AssistantProvidersRepo;
         const id = crypto.randomUUID();
         const row = yield* repo.create({ id, label: req.payload.label!, baseUrl: req.payload.baseUrl!, apiKey: req.payload.apiKey ?? "" });
         const masked = yield* repo.maskedView(row.id);
         return masked;
       }))
     )
-    .handle("adminHeraldUpdateProvider", (req) =>
+    .handle("adminAssistantUpdateProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldProvidersRepo;
+        const repo = yield* AssistantProvidersRepo;
         yield* repo.update(req.path.id, { ...(req.payload.label !== undefined ? { label: req.payload.label } : {}), ...(req.payload.baseUrl !== undefined ? { baseUrl: req.payload.baseUrl } : {}), ...(req.payload.apiKey !== undefined ? { apiKey: req.payload.apiKey } : {}) });
         return yield* repo.maskedView(req.path.id);
       }))
     )
-    .handle("adminHeraldDeleteProvider", (req) =>
+    .handle("adminAssistantDeleteProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const db = yield* Db;
-        const mRepo = yield* HeraldModelsRepo;
+        const mRepo = yield* AssistantModelsRepo;
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ id: string }>)));
         if (models.length > 0) {
           const modelIds = new Set(models.map((m) => m.id));
-          const rows = yield* queryAll<{ fallback_model_ids: string }>(db, `SELECT fallback_model_ids FROM herald_settings`);
+          const rows = yield* queryAll<{ fallback_model_ids: string }>(db, `SELECT fallback_model_ids FROM assistant_settings`);
           let refs = 0;
           for (const r of rows) {
             try {
@@ -4475,16 +4475,16 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
           }
           if (refs > 0) return yield* new HasChildren({ count: refs });
         }
-        const repo = yield* HeraldProvidersRepo;
+        const repo = yield* AssistantProvidersRepo;
         yield* repo.delete(req.path.id);
         return undefined;
       }))
     )
-    .handle("adminHeraldTestProvider", (req) =>
+    .handle("adminAssistantTestProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* HeraldProvidersRepo;
-        const mRepo = yield* HeraldModelsRepo;
+        const pRepo = yield* AssistantProvidersRepo;
+        const mRepo = yield* AssistantModelsRepo;
         const prov = yield* pRepo.getById(req.path.id);
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean; modelId: string }>)));
         const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
@@ -4496,11 +4496,11 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         return { ok: true, latencyMs: Date.now() - start };
       }))
     )
-    .handle("adminHeraldProviderModels", (req) =>
+    .handle("adminAssistantProviderModels", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* HeraldProvidersRepo;
-        const mRepo = yield* HeraldModelsRepo;
+        const pRepo = yield* AssistantProvidersRepo;
+        const mRepo = yield* AssistantModelsRepo;
         const prov = yield* pRepo.getById(req.path.id);
         const existing = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean }>)));
         const enabledKind = (existing as Array<{ kind: string; enabled: boolean }>).find((m) => m.enabled)?.kind;
@@ -4527,7 +4527,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
               if (found) {
                 if (normalizeProviderKind(found.kind) !== inferred) {
                   yield* mRepo.update(found.id, { kind: inferred });
-                  heraldLog("WARN", "herald model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });
+                  assistantLog("WARN", "assistant model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });
                 }
                 continue;
               }
@@ -4540,11 +4540,11 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         return { data: rows };
       }))
     )
-    .handle("adminHeraldUpdateModel", (req) =>
+    .handle("adminAssistantUpdateModel", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* HeraldProvidersRepo;
-        const mRepo = yield* HeraldModelsRepo;
+        const pRepo = yield* AssistantProvidersRepo;
+        const mRepo = yield* AssistantModelsRepo;
         yield* pRepo.getById(req.path.id);
         const found = yield* mRepo.findByProviderAndModelId(req.path.id, req.path.modelId);
         const patch: { enabled?: boolean; priority?: number } = {};
@@ -4553,27 +4553,27 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         return yield* mRepo.update(found.id, patch);
       }))
     )
-    .handle("adminHeraldReorderModels", (req) =>
+    .handle("adminAssistantReorderModels", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldModelsRepo;
+        const repo = yield* AssistantModelsRepo;
         const rows = yield* repo.reorder(req.path.id, [...req.payload.orderedIds]);
         return { data: rows };
       }))
     )
-    .handle("adminHeraldHealth", (req) =>
+    .handle("adminAssistantHealth", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const svc = yield* HeraldHealthService;
+        const svc = yield* AssistantHealthService;
         return yield* svc.getHealth(req.path.id);
       }))
     )
-    .handle("adminHeraldProbeProvider", (req) =>
+    .handle("adminAssistantProbeProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* HeraldProvidersRepo;
-        const mRepo = yield* HeraldModelsRepo;
-        const healthSvc = yield* HeraldHealthService;
+        const pRepo = yield* AssistantProvidersRepo;
+        const mRepo = yield* AssistantModelsRepo;
+        const healthSvc = yield* AssistantHealthService;
         const prov = yield* pRepo.getById(req.path.id);
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean; modelId: string }>)));
         const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
@@ -4591,12 +4591,12 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
     )
 );
 
-const projectHeraldUsageLive = HttpApiBuilder.group(LexaApi, "projectHeraldUsage", (handlers) =>
-  handlers.handle("projectHeraldUsage", (req) =>
+const projectAssistantUsageLive = HttpApiBuilder.group(LexaApi, "projectAssistantUsage", (handlers) =>
+  handlers.handle("projectAssistantUsage", (req) =>
     respond(Effect.gen(function* () {
       yield* requireSuperadmin;
       const projectService = yield* ProjectService;
-      const repo = yield* HeraldCallLogsRepo;
+      const repo = yield* AssistantCallLogsRepo;
       const project = yield* projectService.findBySlug(req.path.slug);
       const sp = searchParams(req);
       const from = sp.get("from");
@@ -4703,7 +4703,7 @@ function formatWikiPageRevision<T>(r: T): T {
 
 function routeGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, runtimesLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, runtimesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }
@@ -4749,14 +4749,14 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
     RuntimeRepo.Default, RuntimeService.Default,
-    HeraldSettingsRepo.Default, HeraldThreadRepo.Default, ProjectMemoryRepo.Default,
-    HeraldChatService.Default.pipe(
+    AssistantSettingsRepo.Default, AssistantThreadRepo.Default, ProjectMemoryRepo.Default,
+    AssistantChatService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
     ),
-    HeraldTaskService.Default.pipe(
+    AssistantTaskService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
     ),
-    HeraldService.Default.pipe(
+    AssistantService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
     ),
     RuntimeEventRepo.Default, RuntimeEventService.Default,
@@ -4777,8 +4777,8 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     DashboardService.Default,
     TeamsService.Default, WorkspaceService.Default, AuthorizationService.Default,
     WorkspaceInvitesService.Default, PasswordLinksService.Default,
-    HeraldProvidersRepo.Default, HeraldModelsRepo.Default, HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default,
-    HeraldHealthRepo.Default, HeraldHealthService.Default, HeraldGateway.Default,
+    AssistantProvidersRepo.Default, AssistantModelsRepo.Default, AssistantCallLogsRepo.Default, AssistantModelPricesRepo.Default,
+    AssistantHealthRepo.Default, AssistantHealthService.Default, AssistantGateway.Default,
   );
 }
 

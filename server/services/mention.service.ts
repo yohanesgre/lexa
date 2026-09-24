@@ -23,9 +23,9 @@ export interface MentionSearchResult {
 export const MENTION_RESULTS_CAP = 8;
 
 // GET /api/projects/:slug/mentions?q= — read-only cross-repo lookup for the
-// editor @-autocomplete. Deliberately NOT folded into HeraldService: this is
+// editor @-autocomplete. Deliberately NOT folded into AssistantService: this is
 // a plain project-scoped read with no provider/thread coupling. Chat-side
-// @-token resolution is herald-domain logic and lives in HeraldService's
+// @-token resolution is assistant-domain logic and lives in AssistantService's
 // chat branch (ephemeral system-prompt injection, never persisted).
 export class MentionService extends Effect.Service<MentionService>()("Lexa/Mention", {
   dependencies: [TaskRepo.Default, WikiRepo.Default],

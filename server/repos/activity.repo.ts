@@ -10,16 +10,16 @@ export class ActivityRepo extends Effect.Service<ActivityRepo>()("Lexa/ActivityR
     const insert = (input: {
       taskId: string; actorKind: ActorKind; actorLabel: string;
       actorUserId: string | null; type: ActivityType; message: string;
-      viaHerald?: boolean;
+      viaAssistant?: boolean;
     }): Effect.Effect<ActivityEvent, DbError | ConstraintViolation> =>
       Effect.gen(function* () {
         const row = yield* runReturning<ActivityRow>(
           db,
-          `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_herald)
+          `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
            VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_herald, created_at`,
+           RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`,
           input.taskId, input.actorKind, input.actorLabel, input.actorUserId,
-          input.type, input.message, input.viaHerald === true ? 1 : 0
+          input.type, input.message, input.viaAssistant === true ? 1 : 0
         ).pipe(
           Effect.catchTag("RowNotFound", () => Effect.fail(new DbError({ message: "activity row vanished after insert" })))
         );
@@ -29,7 +29,7 @@ export class ActivityRepo extends Effect.Service<ActivityRepo>()("Lexa/ActivityR
     const listByTaskKeyset = (taskId: string, cursor: { createdAt: string; id: number } | null, limit: number): Effect.Effect<ActivityEvent[], DbError> =>
       queryAll<ActivityRow>(
         db,
-        `SELECT id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_herald, created_at
+        `SELECT id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at
          FROM task_activity
          WHERE task_id = ?
            AND (? IS NULL OR created_at < ? OR (created_at = ? AND id < ?))

@@ -374,5 +374,5 @@ VALUES
     'Draft access notes — work in progress.',
     'autosave', datetime('now', '-1 day'));
 
--- Herald Gateway: no seed provider — registry is superadmin-managed (see /runtimes/providers).
--- Projects start with no herald_settings row; user creates provider via POST /api/admin/herald/providers.
+-- Assistant Gateway: no seed provider — registry is superadmin-managed (see /runtimes/providers).
+-- Projects start with no assistant_settings row; user creates provider via POST /api/admin/assistant/providers.
