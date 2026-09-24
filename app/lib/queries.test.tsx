@@ -157,12 +157,12 @@ describe("prependActivity", () => {
   it("appends items to the end of page 1 only", () => {
     queryClient.setQueryData(["task-activity", "demo", "t1"], {
       pages: [
-        { data: [{ kind: "event" as const, id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "created" as const, message: "m1", viaHerald: false, createdAt: "t1" }], nextCursor: "c1" },
+        { data: [{ kind: "event" as const, id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "created" as const, message: "m1", viaAssistant: false, createdAt: "t1" }], nextCursor: "c1" },
         { data: [], nextCursor: null },
       ],
       pageParams: [null, "c1"],
     });
-    prependActivity(queryClient, "demo", "t1", [{ kind: "event" as const, id: 2, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "moved" as const, message: "m2", viaHerald: false, createdAt: "t2" }]);
+    prependActivity(queryClient, "demo", "t1", [{ kind: "event" as const, id: 2, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "moved" as const, message: "m2", viaAssistant: false, createdAt: "t2" }]);
     const cached = queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: unknown[] }[] };
     expect(cached.pages[0]!.data).toHaveLength(2);
     expect(cached.pages[1]!.data).toHaveLength(0);

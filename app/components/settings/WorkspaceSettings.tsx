@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects, useRuntimes } from "../../lib/queries";
 import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
-import { HeraldProvidersSection } from "./HeraldProvidersSection";
+import { AssistantProvidersSection } from "./AssistantProvidersSection";
 import { formatRelative } from "../../lib/relative-time";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../runtimes/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -354,7 +354,7 @@ export function WorkspaceSettings() {
         <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <span className="text-sm text-lx-text-secondary">Gateway usage, cost, latency &amp; health — all projects aggregated.</span>
           <Link to="/runtimes/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
-            Herald Usage · Gateway
+            Assistant Usage · Gateway
           </Link>
         </div>
       )}
@@ -394,7 +394,7 @@ export function WorkspaceSettings() {
       {tab === "integrations" && (
         <>
           <GithubSyncSection />
-          {isSuperadmin && <HeraldProvidersSection />}
+          {isSuperadmin && <AssistantProvidersSection />}
           <AgentsSkillsSections />
         </>
       )}

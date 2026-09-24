@@ -371,11 +371,11 @@
   }
 }
 
-/* Herald streaming cursor — blinking block caret appended after the
+/* Assistant streaming cursor — blinking block caret appended after the
    streaming assistant bubble text; rendered only while the stream is in
    progress, removed on done/error. Deeper blink than lx-wip-pulse — a
    cursor is an attention beat, not ambient life. */
-@keyframes lx-herald-caret-blink {
+@keyframes lx-assistant-caret-blink {
   0%,
   100% {
     opacity: 1;
@@ -2439,25 +2439,25 @@
     vertical-align: middle;
   }
 
-  .settings-table--herald-usage,
-  .settings-table--herald-prices,
-  .settings-table--herald-health {
+  .settings-table--assistant-usage,
+  .settings-table--assistant-prices,
+  .settings-table--assistant-health {
     width: 100%;
     table-layout: fixed;
   }
-  .settings-table--herald-usage th,
-  .settings-table--herald-prices th,
-  .settings-table--herald-health th {
+  .settings-table--assistant-usage th,
+  .settings-table--assistant-prices th,
+  .settings-table--assistant-health th {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .settings-table--herald-usage td:first-child,
-  .settings-table--herald-prices td:first-child {
+  .settings-table--assistant-usage td:first-child,
+  .settings-table--assistant-prices td:first-child {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .settings-table--herald-prices .prop-input {
+  .settings-table--assistant-prices .prop-input {
     width: 100% !important;
     max-width: 120px;
     box-sizing: border-box;
@@ -5901,7 +5901,7 @@
   background: var(--lx-text-link);
 }
 
-/* ---- Herald Chat (herald-chat.html) — page-scoped layout glue ---- */
+/* ---- Assistant Chat (assistant-chat.html) — page-scoped layout glue ---- */
 .chat-layout {
   display: flex;
   height: calc(100vh - 48px);
@@ -5979,12 +5979,12 @@
 }
 /* Streaming-only assistant bubble caret — mounted/unmounted with the
    streaming turn, so it never renders on done/error turns. */
-.herald-stream-caret {
+.assistant-stream-caret {
   color: var(--lx-border-focus);
-  animation: lx-herald-caret-blink 1.2s ease-in-out infinite;
+  animation: lx-assistant-caret-blink 1.2s ease-in-out infinite;
 }
 
-/* ---- Herald Activity Strip ----
+/* ---- Assistant Activity Strip ----
    Streaming-process surface inside the assistant bubble (codex/opencode-style
    verbose tool transcript): a collapsible Thinking row fed by live reasoning
    deltas + one always-visible mono line per tool call — `[tool_name]
@@ -5993,13 +5993,13 @@
    by contract — driven only by live SSE frames, never persisted; a fetched
    transcript renders no strip. After done it folds to one subtle summary
    line ("Thought for 6s · 3 tools"), expandable. Tokens only. */
-.herald-activity {
+.assistant-activity {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-bottom: 8px;
 }
-.herald-activity-toggle {
+.assistant-activity-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -6014,8 +6014,8 @@
   cursor: pointer;
   text-align: left;
 }
-.herald-activity-toggle:hover { color: var(--lx-text-secondary); }
-.herald-activity-chevron {
+.assistant-activity-toggle:hover { color: var(--lx-text-secondary); }
+.assistant-activity-chevron {
   width: 11px;
   height: 11px;
   stroke: currentColor;
@@ -6024,8 +6024,8 @@
   flex-shrink: 0;
   transition: transform 0.15s var(--lx-ease-out);
 }
-.herald-activity-chevron.collapsed { transform: rotate(-90deg); }
-.herald-activity-reasoning {
+.assistant-activity-chevron.collapsed { transform: rotate(-90deg); }
+.assistant-activity-reasoning {
   margin: 2px 0 2px 17px;
   padding: 6px 10px;
   background: var(--lx-surface-elevated);
@@ -6041,7 +6041,7 @@
   max-height: 160px;
   overflow-y: auto;
 }
-.herald-activity-tool {
+.assistant-activity-tool {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -6053,29 +6053,29 @@
   color: var(--lx-text-primary);
   min-width: 0;
 }
-.herald-activity-tool.done { color: var(--lx-text-muted); }
-.herald-activity-tool-name {
+.assistant-activity-tool.done { color: var(--lx-text-muted); }
+.assistant-activity-tool-name {
   flex-shrink: 0;
   font-weight: 500;
   color: var(--lx-text-secondary);
 }
-.herald-activity-tool.done .herald-activity-tool-name { color: var(--lx-text-muted); }
+.assistant-activity-tool.done .assistant-activity-tool-name { color: var(--lx-text-muted); }
 /* Process sentence (frame `detail`) — ellipsized to one line after the
    bracketed name; falls back to the humanized verb phrase when absent. */
-.herald-activity-tool-detail {
+.assistant-activity-tool-detail {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.herald-activity-caret {
+.assistant-activity-caret {
   flex-shrink: 0;
   color: var(--lx-text-muted);
-  animation: lx-herald-caret-blink 1.2s ease-in-out infinite;
+  animation: lx-assistant-caret-blink 1.2s ease-in-out infinite;
 }
 /* Compact result marker under a completed call — result-frame `detail`
    truncated to one muted mono line. */
-.herald-activity-result {
+.assistant-activity-result {
   margin-left: 17px;
   padding-left: 12px;
   border-left: 2px solid var(--lx-border-subtle);
@@ -6088,7 +6088,7 @@
   text-overflow: ellipsis;
 }
 
-/* ---- Herald Chat — assistant bubble markdown ----
+/* ---- Assistant Chat — assistant bubble markdown ----
    Assistant turns render markdown client-side (no raw HTML injection).
    Scoped to .bubble-md so user bubbles stay plain text. Element styles
    mirror the TipTap read-mode prose used by wiki pages (.wiki-prose) and
@@ -6332,11 +6332,11 @@
 }
 .runtime-result-md a { color: var(--lx-text-link); }
 
-/* ---- Herald chat — highlighted code block (done-turn fenced segments) ----
+/* ---- Assistant chat — highlighted code block (done-turn fenced segments) ----
    Same elevated surface as .bubble-md pre, plus a chrome row: micro-caps
    language label + copy button, top-right. Body is highlight.js output
    themed by .hljs-theme below. Tokens only. */
-.herald-codeblock {
+.assistant-codeblock {
   position: relative;
   background: var(--lx-surface-elevated);
   border: 1px solid var(--lx-border-default);
@@ -6351,8 +6351,8 @@
   color: var(--lx-text-secondary);
   overflow-x: auto;
 }
-.herald-codeblock:first-child { margin-top: 0; }
-.herald-codeblock-chrome {
+.assistant-codeblock:first-child { margin-top: 0; }
+.assistant-codeblock-chrome {
   position: absolute;
   top: 4px;
   right: 4px;
@@ -6360,7 +6360,7 @@
   align-items: center;
   gap: 4px;
 }
-.herald-codeblock-lang {
+.assistant-codeblock-lang {
   font-family: var(--lx-font-micro);
   font-size: 10px;
   text-transform: uppercase;
@@ -6410,7 +6410,7 @@
 .hljs-theme .hljs-emphasis { font-style: italic; }
 .hljs-theme .hljs-strong { font-weight: 600; }
 
-/* ---- Herald chat upgrades (herald-chat-upgrades.html) ---- *//* Hover affordance row under user bubbles — pointer-only (hidden until
+/* ---- Assistant chat upgrades (assistant-chat-upgrades.html) ---- *//* Hover affordance row under user bubbles — pointer-only (hidden until
    hover/focus-within so icon buttons are never focus-invisible). */
 .bubble-actions {
   display: flex;
@@ -6433,7 +6433,7 @@
   margin: 0 auto;
 }
 
-/* ---- Herald chat — Threads sidebar (herald-chat.html) ---- */
+/* ---- Assistant chat — Threads sidebar (assistant-chat.html) ---- */
 .threads-sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -6594,7 +6594,7 @@
   overflow-y: auto;
 }
 
-/* ---- Herald write approvals (herald-write-approvals.html) ----
+/* ---- Assistant write approvals (assistant-write-approvals.html) ----
    Approval batch groups one turn's pending write proposals; each chip is
    one proposed write. Pending carries a warning LED edge (status-accent
    language: full-height 3px left border, same as toasts / card-row--warning);
@@ -6749,7 +6749,7 @@
   }
 }
 
-/* "via Herald" provenance pill — accent-subtle like the builtin chips in
+/* "via Assistant" provenance pill — accent-subtle like the builtin chips in
    Project Settings, so it reads as metadata, not alarm. */
 .via-pill {
   font-family: var(--lx-font-micro);
@@ -6763,7 +6763,7 @@
   border-radius: 9999px;
 }
 
-/* Settings callout note (settings-project-herald.html pattern) */
+/* Settings callout note (settings-project-assistant.html pattern) */
 .responsive-note {
   background: var(--lx-surface-elevated);
   border: 1px solid var(--lx-border-default);
@@ -7224,12 +7224,12 @@
   }
 }
 
-/* ---- 9. Chat (Herald threads + chat page) ----
+/* ---- 9. Chat (Assistant threads + chat page) ----
    Threads sidebar already becomes an overlay below 900px. Tighten the
    chat surface so the composer and message bubbles use full width. */
 @media (max-width: 767.98px) {
   .chat-page,
-  .herald-chat-page {
+  .assistant-chat-page {
     /* nothing specific; the threads sidebar already handles its mobile
        breakpoint. We just ensure the message column takes full width. */
   }
@@ -7425,16 +7425,16 @@
   }
 }
 
-/* ---- 16. Herald chat composer + message bubbles ----
-   The Herald panel uses a 2-column layout (sidebar + thread). On mobile
+/* ---- 16. Assistant chat composer + message bubbles ----
+   The Assistant panel uses a 2-column layout (sidebar + thread). On mobile
    the sidebar already becomes overlay (existing rule). Tighten message
    composer and prevent iOS zoom. */
 @media (max-width: 767.98px) {
-  .herald-panel,
-  .herald-chat-page {
+  .assistant-panel,
+  .assistant-chat-page {
     gap: 0;
   }
-  .herald-thread {
+  .assistant-thread {
     padding: 0;
   }
   .message-bubble {
@@ -7445,7 +7445,7 @@
     min-height: 36px;
     padding: 0 10px;
   }
-  .herald-input,
+  .assistant-input,
   .composer-editor {
     font-size: 16px;
   }
@@ -7619,7 +7619,7 @@
 
 /* ---- 23. Mobile refinements ----
    The top-nav sidebar toggle duplicates the in-header collapse button on
-   the wiki page tree and Herald threads sidebars. On mobile we hide the
+   the wiki page tree and Assistant threads sidebars. On mobile we hide the
    in-header button (the nav has the toggle) — desktop keeps it.
    Also: shrink the nav sidebar toggle to match the brand. */
 @media (max-width: 1023.98px) {
@@ -7825,8 +7825,8 @@
 }
 
 /* ---- 29. Chat thread header on mobile ----
-   The thread header renders the title ("Herald Chat") and a long subtitle
-   ("NIMBUS · THREAD WITH HERALD — NOT TIED TO ANY DOCUMENT") side by side.
+   The thread header renders the title ("Assistant Chat") and a long subtitle
+   ("NIMBUS · THREAD WITH ASSISTANT — NOT TIED TO ANY DOCUMENT") side by side.
    On mobile the subtitle overflows past the right edge. Stack the
    subtitle below the title and let it wrap. */
 @media (max-width: 767.98px) {
@@ -8093,7 +8093,7 @@
   display: block;
 }
 
-  /* Admin — Herald Usage & Health (wireframes/src/admin-herald-usage.html) */
+  /* Admin — Assistant Usage & Health (wireframes/src/admin-assistant-usage.html) */
   .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
   @media (max-width:900px){ .kpi-grid{ grid-template-columns:repeat(2,1fr);} }
   @media (max-width:520px){ .kpi-grid{ grid-template-columns:1fr;} }

@@ -3,11 +3,11 @@ import { useEffect, useMemo } from "react";
 import { useRuntimeRole } from "../lib/useRuntimeRole";
 import { useProjects } from "../lib/queries";
 import { useToast } from "../components/ui/Toast";
-import { HeraldProjectProviderSection } from "../components/settings/herald-project";
-import { HeraldEngineSection } from "../components/settings/herald/HeraldEngineSection";
-import { HeraldWriteToolsSection } from "../components/settings/herald/HeraldWriteToolsSection";
-import { ProjectMemorySection } from "../components/settings/herald/HeraldProjectMemory";
-import { AgentSkillAvailabilitySection } from "../components/settings/herald/HeraldAgentSkills";
+import { AssistantProjectProviderSection } from "../components/settings/assistant-project";
+import { AssistantEngineSection } from "../components/settings/assistant/AssistantEngineSection";
+import { AssistantWriteToolsSection } from "../components/settings/assistant/AssistantWriteToolsSection";
+import { ProjectMemorySection } from "../components/settings/assistant/AssistantProjectMemory";
+import { AgentSkillAvailabilitySection } from "../components/settings/assistant/AssistantAgentSkills";
 
 export const Route = createFileRoute("/runtimes/bindings/$projectId")({
   ssr:false,
@@ -73,9 +73,9 @@ function RuntimeBindingDetailRoute() {
         <Link to="/runtimes/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }}>← Back to bindings</Link>
         <span className="font-mono text-xs color-muted">{project.slug} · {project.name}</span>
       </div>
-      <HeraldProjectProviderSection key={project.id} project={project} />
-      <HeraldEngineSection key={project.id} project={project} />
-      <HeraldWriteToolsSection key={project.id} project={project} />
+      <AssistantProjectProviderSection key={project.id} project={project} />
+      <AssistantEngineSection key={project.id} project={project} />
+      <AssistantWriteToolsSection key={project.id} project={project} />
       <AgentSkillAvailabilitySection projectId={project.id} />
       <ProjectMemorySection projectId={project.id} />
     </section>

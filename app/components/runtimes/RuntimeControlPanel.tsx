@@ -292,7 +292,7 @@ function HistoryRow({ task, copiedId, onCopyId, onSelect, onCancel, runtimeName 
       </td>
       <td className="text-xs text-lx-text-secondary">{task.projectName || "—"}</td>
       <td className="text-xs text-lx-text-secondary">{runtimeName(task.runtimeId)}</td>
-      <td className="text-xs text-lx-text-secondary">{task.kind === "blacksmith" ? "Blacksmith" : "Herald"}</td>
+      <td className="text-xs text-lx-text-secondary">{task.kind === "blacksmith" ? "Blacksmith" : "Assistant"}</td>
       <td>
         {isActive ? (
           <span className="flex items-center gap-2">
@@ -492,7 +492,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canVie
               </div>
               <div>
                 <span className="prop-label">Type</span>
-                <div className="text-sm text-lx-text-primary">{detail.kind === "blacksmith" ? "Blacksmith" : "Herald"}</div>
+                <div className="text-sm text-lx-text-primary">{detail.kind === "blacksmith" ? "Blacksmith" : "Assistant"}</div>
               </div>
               <DetailRuntime detail={detail} runtimes={runtimes} runtimeName={runtimeName} />
               <div>

@@ -1,13 +1,13 @@
 import { useCallback, useState, useEffect, useRef } from "react";
 import { Effect, Schedule, Duration, Fiber } from "effect";
-import type { RuntimeEngine, HeraldSettingsMasked } from "../../shared/herald";
+import type { RuntimeEngine, AssistantSettingsMasked } from "../../shared/assistant";
 import { runtimePollingSchedule, ApiError } from "./effect-api";
 
-// Member-facing personal engine overlay (settings-project-herald.html Engine
+// Member-facing personal engine overlay (settings-project-assistant.html Engine
 // section + runtime-popover.html annotations): merely SHOWS the toggle in the
 // Runtime popover header; the choice is a client-side preference persisted per
 // project that overrides the DISPLAYED default — it never writes
-// herald_settings.engine (that column stays the admin-written project
+// assistant_settings.engine (that column stays the admin-written project
 // default).
 
 export function runtimeEngineOverlayKey(projectId: string): string {
@@ -17,7 +17,7 @@ export function runtimeEngineOverlayKey(projectId: string): string {
 export function loadEngineOverlay(projectId: string): RuntimeEngine | null {
   try {
     const raw = window.localStorage.getItem(runtimeEngineOverlayKey(projectId));
-    return raw === "herald" || raw === "blacksmith" ? raw : null;
+    return raw === "assistant" || raw === "blacksmith" ? raw : null;
   } catch {
     return null;
   }
@@ -32,9 +32,9 @@ export function saveEngineOverlay(projectId: string, engine: RuntimeEngine): voi
 }
 
 // Resolved once per render: personal overlay wins when present, else the
-// project default. Missing settings row behaves as the herald default.
-export function resolveActiveEngine(settings: HeraldSettingsMasked | null | undefined, projectId: string | undefined): RuntimeEngine {
-  if (!projectId || !settings) return "herald";
+// project default. Missing settings row behaves as the assistant default.
+export function resolveActiveEngine(settings: AssistantSettingsMasked | null | undefined, projectId: string | undefined): RuntimeEngine {
+  if (!projectId || !settings) return "assistant";
   if (settings.engineSwitcherEnabled) {
     const overlay = loadEngineOverlay(projectId);
     if (overlay) return overlay;
@@ -54,26 +54,26 @@ export function useRuntimeEngineOverlay(): [RuntimeEngine | null, (engine: Runti
 // The persona is NEVER picked client-side; it resolves from the active
 // engine and the server re-resolves it authoritatively.
 export const ENGINE_AGENT_IDS: Record<RuntimeEngine, string> = {
-  herald: "herald",
+  assistant: "assistant",
   blacksmith: "blacksmith",
 };
 
 export const ENGINE_AGENT_NAMES: Record<RuntimeEngine, string> = {
-  herald: "Herald Agent",
+  assistant: "Assistant Agent",
   blacksmith: "Blacksmith Agent",
 };
 
 // Vision resolution order (per request): primary_supports_images=1 → inline
 // parts; else vision_model configured → internal analyze_image delegation;
 // else attachments are rejected up front with VISION_NOT_CONFIGURED.
-export function hasVisionCapability(settings: HeraldSettingsMasked | null | undefined): boolean {
+export function hasVisionCapability(settings: AssistantSettingsMasked | null | undefined): boolean {
   if (!settings) return false;
   return Boolean(settings.primarySupportsImages || settings.visionModel);
 }
 
 export const RUNTIME_ENGINE_POLL_BASE_MS = 1500;
 
-export function useRuntimeEnginePolling(enabled: boolean, fetcher: () => Promise<HeraldSettingsMasked | null>, onData: (data: HeraldSettingsMasked | null) => void) {
+export function useRuntimeEnginePolling(enabled: boolean, fetcher: () => Promise<AssistantSettingsMasked | null>, onData: (data: AssistantSettingsMasked | null) => void) {
   const fetcherRef = useRef(fetcher);
   const onDataRef = useRef(onData);
   useEffect(() => {

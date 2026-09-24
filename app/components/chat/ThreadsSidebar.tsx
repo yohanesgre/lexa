@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { matchMedia } from "../../lib/viewport";
-import type { HeraldChatThreadSummary } from "../../lib/api";
+import type { AssistantChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 
-// Transcribed from herald-chat.html (Threads sidebar) +
-// herald-chat-upgrades.html: persistent left column — collapse control +
+// Transcribed from assistant-chat.html (Threads sidebar) +
+// assistant-chat-upgrades.html: persistent left column — collapse control +
 // "New chat" pinned top (wiki arrangement), search below, thread rows ordered
 // pinned-first then most-recent, active row accent-tinted. Rows carry
 // hover/focus-within-revealed inline actions (Pin/Unpin · Rename inline ·
@@ -16,7 +16,7 @@ import { formatRelative } from "../../lib/relative-time";
 // width. Below 900px the expanded column is an overlay drawer — `open`
 // toggles it, backdrop/Esc dismiss.
 interface ThreadsSidebarProps {
-  threads: HeraldChatThreadSummary[];
+  threads: AssistantChatThreadSummary[];
   activeChatId: string;
   search: string;
   onSearchChange: (q: string) => void;
@@ -95,7 +95,7 @@ export function ThreadsSidebar({
 }: ThreadsSidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
-  const [confirmTarget, setConfirmTarget] = useState<HeraldChatThreadSummary | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<AssistantChatThreadSummary | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -110,7 +110,7 @@ export function ThreadsSidebar({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, onClose, renamingId, confirmTarget]);
 
-  const startRename = (thread: HeraldChatThreadSummary) => {
+  const startRename = (thread: AssistantChatThreadSummary) => {
     setRenamingId(thread.chatId);
     setRenameDraft(thread.title ?? "");
   };
@@ -132,7 +132,7 @@ export function ThreadsSidebar({
       setConfirmTarget(null);
       setConfirmError(null);
     } catch (err) {
-      // HERALD_TASK_ACTIVE etc — dialog stays open, code surfaced inline.
+      // ASSISTANT_TASK_ACTIVE etc — dialog stays open, code surfaced inline.
       const code = (err as { code?: string }).code;
       setConfirmError(code ?? (err as Error).message ?? "Delete failed");
     } finally {
@@ -146,7 +146,7 @@ export function ThreadsSidebar({
   const pinned = useMemo(() => threads.filter((t) => t.pinned), [threads]);
   const recent = useMemo(() => threads.filter((t) => !t.pinned), [threads]);
 
-  const renderRow = (thread: HeraldChatThreadSummary) => {
+  const renderRow = (thread: AssistantChatThreadSummary) => {
     const isActive = thread.chatId === activeChatId;
     const title = thread.title ?? "New chat";
     if (renamingId === thread.chatId) {
@@ -303,7 +303,7 @@ export function ThreadsSidebar({
         )}
       </div>
 
-      {/* Delete confirm — reset-confirm dialog anatomy from herald-chat.html */}
+      {/* Delete confirm — reset-confirm dialog anatomy from assistant-chat.html */}
       {confirmTarget && (
         <>
           <button type="button" className="slideover-overlay" style={{ zIndex: 90 }} aria-label="Close" onClick={() => !deleting && setConfirmTarget(null)} />

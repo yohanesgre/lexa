@@ -2,8 +2,8 @@ import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tansta
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
 import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, RuntimeTask, TaskLink, Runtime, LexaAgent, LexaSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
-import type { HeraldSettingsMasked, HeraldSettingsInput } from "../../shared/herald";
-import type { HeraldMemoryEntry } from "./api";
+import type { AssistantSettingsMasked, AssistantSettingsInput } from "../../shared/assistant";
+import type { AssistantMemoryEntry } from "./api";
 import * as api from "./api";
 import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
@@ -2052,7 +2052,7 @@ export function useDeleteComment(slug: string, taskId: string) {
         const local: ActivityItem = {
           kind: "event", id: -Date.now(), taskId, type: "comment_deleted",
           actorKind: "user", actorLabel: label, actorUserId: null,
-          message: `${label} deleted a comment`, viaHerald: false, createdAt: now,
+          message: `${label} deleted a comment`, viaAssistant: false, createdAt: now,
         };
         return {
           ...old,
@@ -2152,43 +2152,43 @@ export function useDeleteAttachment(slug: string, documentType: "task" | "wiki",
   });
 }
 
-// ── Herald (server-side assistant tier) ──
-// Cache keys: chat list ["herald-chats",projectId] vs doc thread ["herald-thread",projectId,docType,docId] vs single chat ["herald-chat",chatId] — distinct prefixes, no collision. Verified 2026-08-27 concern split.
+// ── Assistant (server-side assistant tier) ──
+// Cache keys: chat list ["assistant-chats",projectId] vs doc thread ["assistant-thread",projectId,docType,docId] vs single chat ["assistant-chat",chatId] — distinct prefixes, no collision. Verified 2026-08-27 concern split.
 
 // Masked provider settings for a project. A missing row is the "not
 // configured" state, not an error — surfaced as null so surfaces can swap
 // in their empty state (PROVIDER_NOT_CONFIGURED).
-// ── Herald chat history (multi-thread) ──
+// ── Assistant chat history (multi-thread) ──
 
-export function useHeraldChatList(projectId: string | undefined, q?: string) {
+export function useAssistantChatList(projectId: string | undefined, q?: string) {
   const query = q && q.trim() ? q.trim() : undefined;
   return useQuery({
-    queryKey: ["herald-chats", projectId, query ?? null],
-    queryFn: () => api.listHeraldChats(projectId!, query).then((r) => r.data),
+    queryKey: ["assistant-chats", projectId, query ?? null],
+    queryFn: () => api.listAssistantChats(projectId!, query).then((r) => r.data),
     enabled: !!projectId,
   });
 }
 
-function sortThreads(threads: api.HeraldChatThreadSummary[]): api.HeraldChatThreadSummary[] {
+function sortThreads(threads: api.AssistantChatThreadSummary[]): api.AssistantChatThreadSummary[] {
   return threads.toSorted((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.updatedAt.localeCompare(a.updatedAt);
   });
 }
 
-// PATCH /herald/chat/:chatId ({title?, pinned?}). The response body is not
+// PATCH /assistant/chat/:chatId ({title?, pinned?}). The response body is not
 // part of the pinned contract, so the cache is patched from the request
 // args (deterministic — the caller knows what it sent). A pin toggle also
 // re-sorts locally (pinned-first then updatedAt DESC, the server's list
 // ordering) so no refetch is needed.
-export function useUpdateHeraldChatMeta(projectId: string | undefined) {
+export function useUpdateAssistantChatMeta(projectId: string | undefined) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: ({ chatId, ...patch }: { chatId: string; title?: string | undefined; pinned?: boolean }) =>
-      api.updateHeraldChatMeta(chatId, patch),
+      api.updateAssistantChatMeta(chatId, patch),
     onSuccess: (_result, { chatId, title, pinned }) => {
-      qc.setQueriesData<api.HeraldChatThreadSummary[]>({ queryKey: ["herald-chats", projectId] }, (old) => {
+      qc.setQueriesData<api.AssistantChatThreadSummary[]>({ queryKey: ["assistant-chats", projectId] }, (old) => {
         if (!old?.some((t) => t.chatId === chatId)) return old;
         return sortThreads(
           old.map((t) =>
@@ -2198,48 +2198,48 @@ export function useUpdateHeraldChatMeta(projectId: string | undefined) {
           )
         );
       });
-      void qc.invalidateQueries({ queryKey: ["herald-chats"] });
+      void qc.invalidateQueries({ queryKey: ["assistant-chats"] });
     },
     onError: (err) => toast.push("error", "Update failed", toastMessage(err)),
   });
 }
 
-export function useRenameHeraldChat(projectId: string | undefined) {
+export function useRenameAssistantChat(projectId: string | undefined) {
   const qc = useQueryClient();
-  const meta = useUpdateHeraldChatMeta(projectId);
+  const meta = useUpdateAssistantChatMeta(projectId);
   const toast = useToast();
   return useMutation({
     mutationFn: ({ chatId, title }: { chatId: string; title: string }) =>
       meta.mutateAsync({ chatId, title }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["herald-chats"] });
+      void qc.invalidateQueries({ queryKey: ["assistant-chats"] });
     },
     onError: (err) => toast.push("error", "Rename failed", toastMessage(err)),
   });
 }
 
-export function useDeleteHeraldChat(projectId: string | undefined) {
+export function useDeleteAssistantChat(projectId: string | undefined) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ chatId }: { chatId: string }) => api.resetHeraldChat(chatId),
+    mutationFn: ({ chatId }: { chatId: string }) => api.resetAssistantChat(chatId),
     onSuccess: (_, { chatId }) => {
       // 204 — drop the row from every cached list variant and evict the
       // transcript entry (cache hygiene for a deleted entity, not a refetch).
-      qc.setQueriesData<api.HeraldChatThreadSummary[]>({ queryKey: ["herald-chats", projectId] }, (old) =>
+      qc.setQueriesData<api.AssistantChatThreadSummary[]>({ queryKey: ["assistant-chats", projectId] }, (old) =>
         (old ?? []).filter((t) => t.chatId !== chatId)
       );
-      qc.removeQueries({ queryKey: ["herald-chat", chatId] });
+      qc.removeQueries({ queryKey: ["assistant-chat", chatId] });
     },
     onError: (err) => toast.push("error", "Delete failed", toastMessage(err)),
   });
 }
 
-export function useHeraldSettings(projectId: string | undefined) {  return useQuery({
-    queryKey: ["herald-settings", projectId],
+export function useAssistantSettings(projectId: string | undefined) {  return useQuery({
+    queryKey: ["assistant-settings", projectId],
     queryFn: async () => {
       try {
-        return await api.getHeraldSettings(projectId!);
+        return await api.getAssistantSettings(projectId!);
       } catch (err) {
         if ((err as { code?: string }).code === "PROVIDER_NOT_CONFIGURED") return null;
         throw err;
@@ -2251,52 +2251,52 @@ export function useHeraldSettings(projectId: string | undefined) {  return useQu
 }
 
 // PUT returns the fresh masked view — cache it directly (invariant 6).
-export function useSaveHeraldSettings(projectId: string) {
+export function useSaveAssistantSettings(projectId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (input: HeraldSettingsInput) => api.putHeraldSettings(projectId, input),
+    mutationFn: (input: AssistantSettingsInput) => api.putAssistantSettings(projectId, input),
     onSuccess: (masked, input) => {
-      qc.setQueryData<HeraldSettingsMasked | null>(["herald-settings", projectId], masked);
+      qc.setQueryData<AssistantSettingsMasked | null>(["assistant-settings", projectId], masked);
       if (input.engine !== undefined) {
-        const label = input.engine === "blacksmith" ? "Blacksmith" : input.engine === "herald" ? "Herald" : String(input.engine);
+        const label = input.engine === "blacksmith" ? "Blacksmith" : input.engine === "assistant" ? "Assistant" : String(input.engine);
         toast.push("success", `Default engine updated to ${label}`);
       } else if (input.engineSwitcherEnabled !== undefined) {
         toast.push("success", input.engineSwitcherEnabled ? "Engine switcher enabled" : "Engine switcher disabled");
       } else {
-        toast.push("success", "Herald provider saved");
+        toast.push("success", "Assistant provider saved");
       }
     },
     onError: (err) => {
-      toast.push("error", "Failed to save Herald provider", toastMessage(err));
+      toast.push("error", "Failed to save Assistant provider", toastMessage(err));
     },
   });
 }
 
-// Write-tools gate (herald-write-approvals.html State 4): PUT rides on the
+// Write-tools gate (assistant-write-approvals.html State 4): PUT rides on the
 // stored masked provider fields; only writeTools changes. Response is the
 // fresh masked view — cached directly (invariant 6).
-export function useSaveHeraldWriteTools(projectId: string) {
+export function useSaveAssistantWriteTools(projectId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (input: HeraldSettingsInput) => api.putHeraldSettings(projectId, input),
+    mutationFn: (input: AssistantSettingsInput) => api.putAssistantSettings(projectId, input),
     onSuccess: (masked) => {
-      qc.setQueryData<HeraldSettingsMasked | null>(["herald-settings", projectId], masked);
-      toast.push("success", "Herald write tools saved");
+      qc.setQueryData<AssistantSettingsMasked | null>(["assistant-settings", projectId], masked);
+      toast.push("success", "Assistant write tools saved");
     },
     onError: (err) => {
-      toast.push("error", "Failed to save Herald write tools", toastMessage(err));
+      toast.push("error", "Failed to save Assistant write tools", toastMessage(err));
     },
   });
 }
 
 // Test + models-list consume UNSAVED form values and persist nothing — no
 // cache writes, results render inline.
-export function useTestHeraldSettings(projectId: string) {
+export function useTestAssistantSettings(projectId: string) {
   const toast = useToast();
   return useMutation({
-    mutationFn: (input: HeraldSettingsInput) => api.testHeraldSettings(projectId, input),
+    mutationFn: (input: AssistantSettingsInput) => api.testAssistantSettings(projectId, input),
     onError: (err) => {
       if (!toastMessage(err).includes("PROVIDER_")) {
         toast.push("error", "Test connection failed", toastMessage(err));
@@ -2305,21 +2305,21 @@ export function useTestHeraldSettings(projectId: string) {
   });
 }
 
-export function useFetchHeraldModels(projectId: string) {
+export function useFetchAssistantModels(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: HeraldSettingsInput) => api.listHeraldModels(projectId, input),
+    mutationFn: (input: AssistantSettingsInput) => api.listAssistantModels(projectId, input),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["herald-providers"] });
+      void qc.invalidateQueries({ queryKey: ["assistant-providers"] });
     },
   });
 }
 
-export function useCreateHeraldTask() {
+export function useCreateAssistantTask() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: api.createHeraldTask,
+    mutationFn: api.createAssistantTask,
     onSuccess: (task) => {
       const projects = qc.getQueryData<Project[]>(["projects"]);
       const project = projects?.find((p) => p.id === task.projectId);
@@ -2330,42 +2330,42 @@ export function useCreateHeraldTask() {
       void qc.invalidateQueries({ queryKey: ["runtime-recent-tasks"] });
     },
     onError: (err) => {
-      toast.push("error", "Herald unavailable", toastMessage(err));
+      toast.push("error", "Assistant unavailable", toastMessage(err));
     },
   });
 }
 
-export function useCancelHeraldTask() {
+export function useCancelAssistantTask() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.cancelHeraldTask(id),
+    mutationFn: (id: string) => api.cancelAssistantTask(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["runtime-recent-tasks"] });
-      toast.push("success", "Herald run stopped");
+      toast.push("success", "Assistant run stopped");
     },
     onError: (err) => {
-      toast.push("error", "Failed to stop Herald run", toastMessage(err));
+      toast.push("error", "Failed to stop Assistant run", toastMessage(err));
     },
   });
 }
 
-export function useHeraldMemory(projectId: string | undefined) {
+export function useAssistantMemory(projectId: string | undefined) {
   return useQuery({
-    queryKey: ["herald-memory", projectId],
-    queryFn: () => api.listHeraldMemory(projectId!).then((r) => r.data),
+    queryKey: ["assistant-memory", projectId],
+    queryFn: () => api.listAssistantMemory(projectId!).then((r) => r.data),
     enabled: !!projectId,
   });
 }
 
-export function useAddHeraldMemory(projectId: string) {
+export function useAddAssistantMemory(projectId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (content: string) => api.addHeraldMemory(projectId, content),
+    mutationFn: (content: string) => api.addAssistantMemory(projectId, content),
     onSuccess: (entry) => {
       // Newest-first display order matches the wireframe rows.
-      qc.setQueryData<HeraldMemoryEntry[]>(["herald-memory", projectId], (rows) => [entry, ...(rows ?? [])]);
+      qc.setQueryData<AssistantMemoryEntry[]>(["assistant-memory", projectId], (rows) => [entry, ...(rows ?? [])]);
       toast.push("success", "Memory added");
     },
     onError: (err) => {
@@ -2374,13 +2374,13 @@ export function useAddHeraldMemory(projectId: string) {
   });
 }
 
-export function useRemoveHeraldMemory(projectId: string) {
+export function useRemoveAssistantMemory(projectId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (memoryId: string) => api.removeHeraldMemory(projectId, memoryId),
+    mutationFn: (memoryId: string) => api.removeAssistantMemory(projectId, memoryId),
     onSuccess: (_, memoryId) => {
-      qc.setQueryData<HeraldMemoryEntry[]>(["herald-memory", projectId], (rows) => (rows ?? []).filter((m) => m.id !== memoryId));
+      qc.setQueryData<AssistantMemoryEntry[]>(["assistant-memory", projectId], (rows) => (rows ?? []).filter((m) => m.id !== memoryId));
       toast.push("success", "Memory deleted");
     },
     onError: (err) => {

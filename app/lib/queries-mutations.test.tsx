@@ -43,7 +43,7 @@ const BOARD2: Board = { ...BOARD, columns: [...BOARD.columns, { ...COLUMN, id: "
 const PAGE: WikiPage = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedBy: null, updatedByName: null, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" };
 const PAGE2: WikiPage = { ...PAGE, id: "w2", slug: "other", title: "Other" };
 const EV = { id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "Maria", actorUserId: null, type: "created" as const, message: "m", createdAt: "t" };
-const COMMENT = { id: 9, taskId: "t1", authorId: "u1", authorKind: "user" as const, authorLabel: "Maria", body: { type: "doc", content: [] }, viaHerald: false, editedAt: null, deletedAt: null, createdAt: "t" };
+const COMMENT = { id: 9, taskId: "t1", authorId: "u1", authorKind: "user" as const, authorLabel: "Maria", body: { type: "doc", content: [] }, viaAssistant: false, editedAt: null, deletedAt: null, createdAt: "t" };
 const KEY = { id: "k1", name: "ops", createdAt: "t", lastUsedAt: null };
 const LINK = { id: "l1", projectId: "p1", fromTaskId: "t1", toTaskId: "t2", relation: "blocked_by" as const, createdAt: "t" };
 
