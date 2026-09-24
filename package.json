@@ -1,7 +1,7 @@
 {
   "name": "lexa",
   "version": "2026.3.0",
-  "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
+  "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, AI Runtimes.",
   "scripts": {
     "test": "vitest run",
     "test:critical": "vitest run shared server/services server/db server/repos",
@@ -10,7 +10,7 @@
     "test:be": "vitest run shared server",
     "test:fe": "vitest run shared app",
     "test:cli": "vitest run cli/src",
-    "test:hearth": "vitest run hearth",
+    "test:daemon": "vitest run daemon shared/runtime-log",
     "prepare": "./scripts/prepare-effect.sh",
     "dev": "vite dev",
     "dev:server": "bun --env-file=.env run server/entry.ts",

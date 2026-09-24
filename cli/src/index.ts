@@ -6,7 +6,7 @@
  *   lx-dev <command> [options]    (dev: bun run cli/index.ts)
  *
  * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app.
- * The Hearth daemon stays a polling process; this CLI installs/starts/stops it
+ * The runtime daemon stays a polling process; this CLI installs/starts/stops it
  * and gives humans/scripts a non-browser way to drive Lexa.
  *
  * Env fallbacks (overridden by --url/--key or saved login):

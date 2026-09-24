@@ -237,7 +237,7 @@ describe("login (legacy key + device flow)", () => {
       }
       if (url.pathname === "/api/health") { res.writeHead(200); res.end(JSON.stringify({ ok: true })); return; }
       if (url.pathname === "/api/projects") { res.writeHead(200); res.end(JSON.stringify({ data: [] })); return; }
-      if (req.method === "POST" && url.pathname === "/api/hearth/machines/register") {
+      if (req.method === "POST" && url.pathname === "/api/runtimes/machines/register") {
         registerCalls++;
         // Device flow must authenticate machine registration with the minted
         // key — an empty Bearer would 401 against a real server.

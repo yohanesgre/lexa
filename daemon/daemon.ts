@@ -1,22 +1,22 @@
 #!/usr/bin/env bun
 /**
- * Hearth daemon — the multica-style runtime for Lexa.
+ * Runtime daemon — the multica-style runtime for Lexa.
  *
  * Runs on a machine with an agent CLI installed (opencode or hermes),
- * registers itself with the Lexa server, polls for Hearth tasks, spawns the
+ * registers itself with the Lexa server, polls for runtime tasks, spawns the
  * agent CLI in one-shot mode per task, and reports the result back.
  *
  * Env:
  *   LEXA_URL            server base URL (default http://localhost:3000)
- *   LEXA_API_KEY        server API key (Bearer) — or LXK_HEARTH_DAEMON_TOKEN
- *   LXK_HEARTH_DAEMON_TOKEN  shared secret (sent as x-hearth-token)
- *   HEARTH_AGENT         opencode | hermes | command-code (default: opencode)
- *   HEARTH_MODEL         bootstrap model id; the server's runtime row config
+ *   LEXA_API_KEY        server API key (Bearer) — or LXK_RUNTIME_DAEMON_TOKEN
+ *   LXK_RUNTIME_DAEMON_TOKEN  shared secret (sent as x-runtime-token)
+ *   RUNTIME_AGENT        opencode | hermes | command-code (default: opencode)
+ *   RUNTIME_MODEL        bootstrap model id; the server's runtime row config
  *                       (Settings → Edit runtime) overrides it at spawn time
- *   HEARTH_RUNTIME_NAME  human name for this runtime (default: hostname)
- *   HEARTH_RUNTIME_ID    stable runtime id managed by the CLI listener
- *   HEARTH_MACHINE_ID    stable machine id managed by the CLI listener
- *   HEARTH_POLL_MS       poll interval (default 3000)
+ *   RUNTIME_NAME         human name for this runtime (default: hostname)
+ *   RUNTIME_ID           stable runtime id managed by the CLI listener
+ *   RUNTIME_MACHINE_ID   stable machine id managed by the CLI listener
+ *   RUNTIME_POLL_MS      poll interval (default 3000)
  *
  * Run: the machine listener spawns this as a child (`lx machine listen`,
  * or `bun run cli/src/index.ts machine listen` from source).
@@ -24,7 +24,7 @@
 import { spawn } from "node:child_process";
 import { hostname as osHostname } from "node:os";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
-import { classifyLogLine } from "../shared/hearth-log";
+import { classifyLogLine } from "../shared/runtime-log";
 import { join } from "node:path";
 import { Effect, Data, Fiber } from "effect";
 
@@ -69,33 +69,33 @@ function readTextFile(path: string): string {
   }
 }
 const cliConfig = readJson(join(LEXA_DIR, "config.json"));
-const hearthEnv = readEnvFile(join(LEXA_DIR, "env"));
+const runtimeEnv = readEnvFile(join(LEXA_DIR, "env"));
 const persistedMachineId = readTextFile(join(LEXA_DIR, "machine-id"));
 
-const SERVER = process.env.LEXA_URL || hearthEnv.LEXA_URL || cliConfig?.url || "http://localhost:3000";
-const API_KEY = process.env.LEXA_API_KEY || hearthEnv.LEXA_API_KEY || cliConfig?.apiKey || "";
-const DAEMON_TOKEN = process.env.LXK_HEARTH_DAEMON_TOKEN || hearthEnv.LXK_HEARTH_DAEMON_TOKEN || "";
+const SERVER = process.env.LEXA_URL || runtimeEnv.LEXA_URL || cliConfig?.url || "http://localhost:3000";
+const API_KEY = process.env.LEXA_API_KEY || runtimeEnv.LEXA_API_KEY || cliConfig?.apiKey || "";
+const DAEMON_TOKEN = process.env.LXK_RUNTIME_DAEMON_TOKEN || runtimeEnv.LXK_RUNTIME_DAEMON_TOKEN || "";
 
 // Server-issued API keys (Settings → API Keys) always start with "lxk_".
 // A Settings key may arrive in either env var — the daemon shared secret
-// (LXK_HEARTH_DAEMON_TOKEN) is a plain hex value. If the "daemon token" is
+// (LXK_RUNTIME_DAEMON_TOKEN) is a plain hex value. If the "daemon token" is
 // actually an API key, use it as the Bearer credential instead of sending
-// it as x-hearth-token (which the server rejects — it only equals its own
-// LXK_HEARTH_DAEMON_TOKEN secret).
+// it as x-runtime-token (which the server rejects — it only equals its own
+// LXK_RUNTIME_DAEMON_TOKEN secret).
 const isApiKey = (v: string) => v.startsWith("lxk_");
 const BEARER_KEY = API_KEY || (DAEMON_TOKEN && isApiKey(DAEMON_TOKEN) ? DAEMON_TOKEN : "");
-const X_HEARTH_TOKEN = DAEMON_TOKEN && !isApiKey(DAEMON_TOKEN) ? DAEMON_TOKEN : "";
-const AGENT = (process.env.HEARTH_AGENT ?? "opencode") as "opencode" | "hermes" | "command-code";
-const MODEL = process.env.HEARTH_MODEL ?? "";
-const RUNTIME_NAME = process.env.HEARTH_RUNTIME_NAME ?? `${osHostname()}-${AGENT}`;
-const MACHINE_ID = process.env.HEARTH_MACHINE_ID || persistedMachineId;
-const CONFIGURED_RUNTIME_ID = process.env.HEARTH_RUNTIME_ID ?? "";
-const POLL_MS = Number(process.env.HEARTH_POLL_MS ?? 3000);
+const X_RUNTIME_TOKEN = DAEMON_TOKEN && !isApiKey(DAEMON_TOKEN) ? DAEMON_TOKEN : "";
+const AGENT = (process.env.RUNTIME_AGENT ?? "opencode") as "opencode" | "hermes" | "command-code";
+const MODEL = process.env.RUNTIME_MODEL ?? "";
+const RUNTIME_NAME = process.env.RUNTIME_NAME ?? `${osHostname()}-${AGENT}`;
+const MACHINE_ID = process.env.RUNTIME_MACHINE_ID || persistedMachineId;
+const CONFIGURED_RUNTIME_ID = process.env.RUNTIME_ID ?? "";
+const POLL_MS = Number(process.env.RUNTIME_POLL_MS ?? 3000);
 // Max wall-clock time for one agent run. A hung agent CLI (provider outage,
 // model stall) must not pin the runtime forever; the server-side cancel poll
-// still handles explicit user cancels. Override with HEARTH_RUN_TIMEOUT_MS.
+// still handles explicit user cancels. Override with RUNTIME_RUN_TIMEOUT_MS.
 const RUN_TIMEOUT_MS = (() => {
-  const v = Number(process.env.HEARTH_RUN_TIMEOUT_MS);
+  const v = Number(process.env.RUNTIME_RUN_TIMEOUT_MS);
   return Number.isFinite(v) && v > 0 ? v : 900_000;
 })();
 // Per-task workdirs under the machine state root — ephemeral by design:
@@ -107,7 +107,8 @@ const WORKDIR_ROOT = join(LEXA_DIR, "runs");
 // Project workspaces — one persistent dir per project, provisioned by the
 // listener (README.md + orchestrator AGENTS.md). opencode runs from the
 // workspace root; per-agent rule bundles + skills are written under
-// .agents/ at claim time; the per-run sandbox HOME lives under .hearth/.
+// .agents/ at claim time; the per-run sandbox HOME lives under the
+// runtime's runtime-home dir.
 const WORKSPACE_ROOT = join(LEXA_DIR, "projects");
 
 // Project index written by the listener from the server heartbeat payload —
@@ -122,13 +123,13 @@ const projectIndex: Record<string, { name: string; slug: string; description: st
   }
 })();
 
-const CMD_BIN = process.env.HEARTH_CMD_BIN ?? "cmd";
+const CMD_BIN = process.env.RUNTIME_CMD_BIN ?? "cmd";
 
 // Guards + main are behind import.meta.main (bun-only, undefined under node)
 // so importing this module for tests does not boot the daemon or exit.
 if (import.meta.main) {
-  if (!BEARER_KEY && !X_HEARTH_TOKEN) {
-    console.error("No credential found. Set LEXA_API_KEY (server API key) or LXK_HEARTH_DAEMON_TOKEN (shared secret),");
+  if (!BEARER_KEY && !X_RUNTIME_TOKEN) {
+    console.error("No credential found. Set LEXA_API_KEY (server API key) or LXK_RUNTIME_DAEMON_TOKEN (shared secret),");
     console.error("or log in first with `lx login --url <base> --key <lxk_...>` — the daemon falls back to that saved config.");
     process.exit(1);
   }
@@ -139,7 +140,7 @@ if (import.meta.main) {
   }
 }
 
-export interface HearthTask {
+export interface RuntimeTask {
   id: string;
   projectId: string;
   documentType: "task" | "wiki";
@@ -194,7 +195,7 @@ function api(path: string, init?: RequestInit): Effect.Effect<Response, DaemonEr
   return Effect.tryPromise({
     try: async () => {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (X_HEARTH_TOKEN) headers["x-hearth-token"] = X_HEARTH_TOKEN;
+      if (X_RUNTIME_TOKEN) headers["x-runtime-token"] = X_RUNTIME_TOKEN;
       else if (BEARER_KEY) headers["Authorization"] = `Bearer ${BEARER_KEY}`;
       const res = await fetch(`${SERVER}${path}`, { ...init, headers, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
       if (res.status === 401) {
@@ -202,7 +203,7 @@ function api(path: string, init?: RequestInit): Effect.Effect<Response, DaemonEr
         // us (exit code 3 = auth failure); re-run Setup runtime for a fresh key.
         // Kill serve first (SIGTERM) so it never orphans on the runtime machine;
         // sessions persist for the next boot.
-        console.error("  API key revoked or invalid (HTTP 401) — re-run Setup runtime (Settings → Hearth Runtimes).");
+        console.error("  API key revoked or invalid (HTTP 401) — re-run Setup runtime (Settings → Runtimes).");
         killServeTree();
         process.exit(3);
       }
@@ -215,7 +216,7 @@ function api(path: string, init?: RequestInit): Effect.Effect<Response, DaemonEr
 const main = Effect.gen(function* () {
   yield* Effect.sync(() => mkdirSync(WORKDIR_ROOT, { recursive: true }));
 
-  console.log(`── Hearth daemon ──`);
+  console.log(`── Runtime daemon ──`);
   console.log(`  Server:   ${SERVER}`);
   console.log(`  Agent:    ${AGENT}${MODEL ? ` (${MODEL})` : ""}`);
   console.log(`  Runtime:  ${RUNTIME_NAME}`);
@@ -223,7 +224,7 @@ const main = Effect.gen(function* () {
 
   // Register
   const runtimeId = yield* Effect.gen(function* () {
-    const res = yield* api("/api/hearth/runtimes/register", {
+    const res = yield* api("/api/runtimes/register", {
       method: "POST",
       body: JSON.stringify({
         id: CONFIGURED_RUNTIME_ID || undefined,
@@ -276,7 +277,7 @@ const main = Effect.gen(function* () {
         yield* Effect.sleep(15_000);
         yield* Effect.gen(function* () {
           const body: Record<string, unknown> = { runtimeId };
-          yield* api("/api/hearth/daemon/heartbeat", {
+          yield* api("/api/runtimes/daemon/heartbeat", {
             method: "POST",
             body: JSON.stringify(body),
           });
@@ -286,17 +287,17 @@ const main = Effect.gen(function* () {
   );
 
   // Poll loop
-  console.log("  Waiting for Hearth tasks…");
+  console.log("  Waiting for runtime tasks…");
   return yield* Effect.forever(
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
-        const res = yield* api("/api/hearth/daemon/claim", {
+        const res = yield* api("/api/runtimes/daemon/claim", {
           method: "POST",
           body: JSON.stringify({ runtimeId }),
         });
         if (res.ok) {
           const claim = yield* Effect.tryPromise({
-            try: () => res.json() as Promise<{ task: HearthTask | null; provider: string; agent: string; model: string; printLogs: boolean; logLevel: string; extraArgs: string[]; prompt: string; agentMarkdown: string; skillMarkdown: string; skillIds: string[]; repoContent: RepoContentEntry[] | null; runtimeSessionId?: string | null }>,
+            try: () => res.json() as Promise<{ task: RuntimeTask | null; provider: string; agent: string; model: string; printLogs: boolean; logLevel: string; extraArgs: string[]; prompt: string; agentMarkdown: string; skillMarkdown: string; skillIds: string[]; repoContent: RepoContentEntry[] | null; runtimeSessionId?: string | null }>,
             catch: toDaemonError,
           });
           if (claim.task) {
@@ -318,7 +319,7 @@ const main = Effect.gen(function* () {
 });
 
 // opencode ≥1.18 requires full "provider/model" ids — bare ids fail with
-// "Unexpected server error". Bare ids can still reach us via HEARTH_MODEL env
+// "Unexpected server error". Bare ids can still reach us via RUNTIME_MODEL env
 // or a custom entry, so resolve them against the live catalog first.
 export function resolveModelId(model: string): string {
   if (!model || model.includes("/")) return model;
@@ -330,9 +331,9 @@ export function resolveModelId(model: string): string {
 // pure HTTP (spike: the `run --attach` client is unreliable on 1.18.11 — it
 // exits without mirroring text parts, so the daemon never spawns it).
 // Sessions are minted per-workspace via POST /session?directory= and survive
-// serve restarts (the session DB lives in the persistent hearth-home).
+// serve restarts (the session DB lives in the persistent runtime-home).
 
-const SERVE_PORT_OVERRIDE = process.env.HEARTH_SERVE_PORT ?? "";
+const SERVE_PORT_OVERRIDE = process.env.RUNTIME_SERVE_PORT ?? "";
 const SERVE_READY_TIMEOUT_MS = 30_000;
 const SERVE_READY_POLL_MS = 500;
 const SERVE_BACKOFF_MIN_MS = 5_000;
@@ -382,8 +383,8 @@ function servePidPath(runtimeId: string): string {
   return join(LEXA_DIR, "runtimes", runtimeId, "serve.pid");
 }
 
-function hearthHomePath(runtimeId: string): string {
-  return join(LEXA_DIR, "runtimes", runtimeId, "hearth-home");
+function runtimeHomePath(runtimeId: string): string {
+  return join(LEXA_DIR, "runtimes", runtimeId, "runtime-home");
 }
 
 // ── HTTP message client (pure) ──
@@ -457,12 +458,12 @@ export function parseSessionInfo(json: string, workspace: string): { id: string 
 // The agent env is a WHITELIST — the daemon's own env is never inherited
 // wholesale. Lexa credentials must not reach the agent: LEXA_API_KEY
 // breaks opencode (≥1.18 treats it as its own server auth key — every run
-// fails with "Unexpected server error"), and LXK_HEARTH_DAEMON_TOKEN /
+// fails with "Unexpected server error"), and LXK_RUNTIME_DAEMON_TOKEN /
 // LXK_API_KEY / LEXA_URL / LEXA_DIR would leak the server credential to
 // unsandboxed hermes/command-code runs (they read the real HOME, incl.
-// ~/.lexa/config.json). Hearth runs on the prompt alone, so the agent needs
+// ~/.lexa/config.json). Runtime runs on the prompt alone, so the agent needs
 // no Lexa env at all. No provider reads
-// HEARTH_* either — HEARTH_CMD_BIN only picks the binary the daemon spawns.
+// RUNTIME_* either — RUNTIME_CMD_BIN only picks the binary the daemon spawns.
 export function buildChildEnv(
   env: Record<string, string | undefined>,
   cwd: string,
@@ -496,12 +497,12 @@ export function buildChildEnv(
   return childEnv;
 }
 
-// Fire-and-heartht task log POST — never awaited (the imperative version
+// Fire-and-forget task log POST — never awaited (the imperative version
 // dropped its promise). Runs on its own runtime so the raw spawn callbacks
 // inside runAgent can post log lines too.
 function logTask(taskId: string, message: string, meta: { stream?: "out" | "err"; level?: "info" | "warn" | "error" } = {}): void {
   void Effect.runPromise(
-    api(`/api/hearth/daemon/tasks/${taskId}/log`, {
+    api(`/api/runtimes/daemon/tasks/${taskId}/log`, {
       method: "POST",
       body: JSON.stringify({ message, ...(meta.stream ? { stream: meta.stream } : {}), ...(meta.level ? { level: meta.level } : {}) }),
     }).pipe(Effect.catchAll(() => Effect.void)),
@@ -515,7 +516,7 @@ function logTask(taskId: string, message: string, meta: { stream?: "out" | "err"
 // deleted; the static orchestrator AGENTS.md + the prompt name the active
 // bundle each run. Path + frontmatter match opencode's skill discovery
 // (.agents/skills/<name>/SKILL.md).
-function writeRuleBundles(workspace: string, task: HearthTask, agentMarkdown: string, skillMarkdown: string) {
+function writeRuleBundles(workspace: string, task: RuntimeTask, agentMarkdown: string, skillMarkdown: string) {
   try {
     if (agentMarkdown) {
       const agentDir = join(workspace, ".agents", "agents", task.agentId);
@@ -544,7 +545,7 @@ function writeRuleBundles(workspace: string, task: HearthTask, agentMarkdown: st
 // empty) and skipped when unsafe; a write failure only logs — the claim
 // continues. Mirrors writeRuleBundles: per-claim overwrite, never removed
 // at run end.
-export function writeRepoContent(workdir: string, task: HearthTask, repoContent: RepoContentEntry[] | null) {
+export function writeRepoContent(workdir: string, task: RuntimeTask, repoContent: RepoContentEntry[] | null) {
   const dir = join(workdir, "repo-content");
   try {
     if (!repoContent || repoContent.length === 0) {
@@ -604,7 +605,7 @@ function pruneStaleSkillDirs(workspace: string, skillIds: string[]) {
 }
 
 // Persistent per-runtime sandbox HOME at
-// <LEXA_DIR>/runtimes/<runtimeId>/hearth-home/: the only config serve (and
+// <LEXA_DIR>/runtimes/<runtimeId>/runtime-home/: the only config serve (and
 // every session it hosts) loads is the deny-rule opencode.json — the global
 // config (permission: allow, MCP servers, plugins) never reaches the agent —
 // and provider auth is copied from the real HOME. Seeded once, write-once;
@@ -618,13 +619,13 @@ function pruneStaleSkillDirs(workspace: string, skillIds: string[]) {
 // bash cannot be path-scoped so it is fully denied. The `skill` tool is
 // denied because opencode discovers the host's GLOBAL skills (~/.agents,
 // ~/.config/opencode — resolved via os.homedir, not $HOME) into every run:
-// hiding them keeps the personal skill library out of Hearth context (the
+// hiding them keeps the personal skill library out of runtime context (the
 // run's skill is read from the workspace directly). `webfetch` is denied —
-// Hearth output is the document text; the model has no reason to touch the
+// runtime output is the document text; the model has no reason to touch the
 // network. auth.json copies are the only sensitive file in the sandbox —
 // explicitly denied.
-function seedHearthHome(runtimeId: string): string {
-  const home = hearthHomePath(runtimeId);
+function seedRuntimeHome(runtimeId: string): string {
+  const home = runtimeHomePath(runtimeId);
   const configDir = join(home, ".config", "opencode");
   const dataDir = join(home, ".local", "share", "opencode");
   mkdirSync(configDir, { recursive: true });
@@ -769,13 +770,13 @@ async function trySpawnServe(runtimeId: string, port: number, sandboxHome: strin
 }
 
 // Boot + respawn entry: sweep any stale pid, seed the persistent sandbox,
-// try candidate ports (HEARTH_SERVE_PORT override first). On success record
+// try candidate ports (RUNTIME_SERVE_PORT override first). On success record
 // { pid, port } and persist serve.pid; on failure keep retrying with the
 // 5s→30s backoff — never give up, never exit the daemon.
 async function startServe(runtimeId: string) {
   if (serveState.shuttingDown) return;
   sweepStaleServe(runtimeId);
-  const sandboxHome = seedHearthHome(runtimeId);
+  const sandboxHome = seedRuntimeHome(runtimeId);
   const candidates = deriveServePort(runtimeId, flavorBaseFor(LEXA_DIR), SERVE_PORT_OVERRIDE);
   for (const port of candidates) {
     const child = await trySpawnServe(runtimeId, port, sandboxHome);
@@ -814,7 +815,7 @@ function killServeTree() {
 
 // Report a task failure to the server (or just log a user cancel — the row
 // is already 'cancelled' server-side, so a cancel skips the fail round-trip).
-function failTask(task: HearthTask, msg: string): Effect.Effect<void, never> {
+function failTask(task: RuntimeTask, msg: string): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     if (msg === "cancelled") {
       console.log(`[task ${task.id}] cancelled`);
@@ -823,14 +824,14 @@ function failTask(task: HearthTask, msg: string): Effect.Effect<void, never> {
     }
     console.error(`[task ${task.id}] failed: ${msg}`);
     logTask(task.id, `failed: ${msg.slice(0, 200)}`);
-    yield* api(`/api/hearth/daemon/tasks/${task.id}/fail`, {
+    yield* api(`/api/runtimes/daemon/tasks/${task.id}/fail`, {
       method: "POST",
       body: JSON.stringify({ error: msg }),
     }).pipe(Effect.catchAll(() => Effect.void));
   });
 }
 
-function runTask(task: HearthTask, serverProvider: string, serverAgent: string, serverModel: string, serverLogLevel: string, extraArgs: string[], serverPrompt: string, agentMarkdown: string, skillMarkdown: string, skillIds: string[] = [], repoContent: RepoContentEntry[] | null = null, runtimeId = "", claimRuntimeSessionId: string | null = null): Effect.Effect<void, never> {
+function runTask(task: RuntimeTask, serverProvider: string, serverAgent: string, serverModel: string, serverLogLevel: string, extraArgs: string[], serverPrompt: string, agentMarkdown: string, skillMarkdown: string, skillIds: string[] = [], repoContent: RepoContentEntry[] | null = null, runtimeId = "", claimRuntimeSessionId: string | null = null): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     console.log(`\n[task ${task.id}] ${task.skillName} — ${task.documentType}:${task.documentId}`);
 
@@ -922,10 +923,10 @@ function runTask(task: HearthTask, serverProvider: string, serverAgent: string, 
           return serveState.ready;
         });
         if (!serveUp) {
-          return yield* Effect.fail(new DaemonError({ reason: `Hearth runtime unavailable — opencode serve did not start (${serveState.lastError || "not ready"})` }));
+          return yield* Effect.fail(new DaemonError({ reason: `Runtime unavailable — opencode serve did not start (${serveState.lastError || "not ready"})` }));
         }
         servePort = serveState.port;
-        refreshSandboxAuth(hearthHomePath(runtimeId));
+        refreshSandboxAuth(runtimeHomePath(runtimeId));
         const mapping: SessionMapping = {
           documentType: task.documentType,
           documentId: task.documentId,
@@ -982,7 +983,7 @@ function runTask(task: HearthTask, serverProvider: string, serverAgent: string, 
           )
         : yield* runAgentWithCancel(prompt, workdir, provider, agentFlag, model, serverLogLevel, extraArgs, task.id, CANCEL_POLL_MS);
       logTask(task.id, "generating text…");
-      const res = yield* api(`/api/hearth/daemon/tasks/${task.id}/complete`, {
+      const res = yield* api(`/api/runtimes/daemon/tasks/${task.id}/complete`, {
         method: "POST",
         body: JSON.stringify({ result: output }),
       });
@@ -1008,7 +1009,7 @@ function runTask(task: HearthTask, serverProvider: string, serverAgent: string, 
       Effect.ensuring(
         Effect.sync(() => {
           // opencode: no cleanup — the workspace root, seeds, and the
-          // persistent hearth-home sandbox stay (spec §8 step 9: no .hearth/
+          // persistent runtime-home sandbox stay (spec §8 step 9: no sandbox
           // wipe anymore). Legacy providers: the whole ephemeral run dir is
           // removed (Artifact retention is backlogged).
           if (!isOpencode) {
@@ -1059,7 +1060,7 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
       // all would grow daemon RAM without limit (the 16MB server cap only
       // rejects the final POST, after buffering). Keep the LAST STDOUT_TAIL of
       // stdout (rolling tail) plus a total count; the complete POST sends the
-      // tail. Server-side storage is capped separately (hearth.repo: 1MB).
+      // tail. Server-side storage is capped separately (runtime.repo: 1MB).
       const STDOUT_TAIL = 1024 * 1024;
       const STDERR_TAIL = 64 * 1024;
       let stdout = "";
@@ -1073,7 +1074,7 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
       // Verbose streaming: tee the agent's stdout/stderr into the task log as
       // it arrives. Lines are batched and flushed every STREAM_FLUSH_MS so a
       // chatty agent doesn't POST per line. stream + level are classified ONCE
-      // here (shared/hearth-log.ts — stderr ≠ error; retries/rate-limits land in
+      // here (shared/runtime-log.ts — stderr ≠ error; retries/rate-limits land in
       // warn) and stored; the UI renders the stored level. The [stderr]/▸
       // markers still prefix the raw message so Copy output is unchanged.
       const STREAM_FLUSH_MS = 300;
@@ -1164,13 +1165,13 @@ interface SessionMapping {
   skillId: string;
 }
 
-// Pre-spawn mapping write (spec §8 step 3): the hearth_sessions row exists
+// Pre-spawn mapping write (spec §8 step 3): the runtime_sessions row exists
 // before the run starts, so crash-resume and complete-failure retention work.
 // A failed upsert only logs — the task still runs; the next claim mints a
 // fresh session instead of continuing.
 function upsertMapping(mapping: SessionMapping): Effect.Effect<void, DaemonError> {
   return Effect.gen(function* () {
-    const res = yield* api("/api/hearth/sessions", { method: "PUT", body: JSON.stringify(mapping) });
+    const res = yield* api("/api/runtimes/sessions", { method: "PUT", body: JSON.stringify(mapping) });
     if (!res.ok) return yield* Effect.fail(new DaemonError({ reason: `sessions PUT failed: ${res.status}` }));
   });
 }
@@ -1179,7 +1180,7 @@ function upsertMapping(mapping: SessionMapping): Effect.Effect<void, DaemonError
 // (that is the user-facing reset endpoint's job). Best-effort: a failure only
 // logs; a fresh session can never inherit the aborted run's damage.
 function deleteMapping(mapping: Pick<SessionMapping, "documentType" | "documentId" | "runtimeId">): Effect.Effect<void, never> {
-  return api("/api/hearth/sessions", { method: "DELETE", body: JSON.stringify(mapping) }).pipe(
+  return api("/api/runtimes/sessions", { method: "DELETE", body: JSON.stringify(mapping) }).pipe(
     Effect.flatMap((res) => res.ok ? Effect.void : Effect.fail(new DaemonError({ reason: `sessions DELETE failed: ${res.status}` }))),
     Effect.catchAllCause((e) => Effect.sync(() => console.warn("  [serve] mapping drop failed:", e._tag === "Fail" ? e.error.message : "error"))),
   );
@@ -1285,7 +1286,7 @@ export function runHttpTask(opts: HttpRunOptions): Effect.Effect<string, AgentEr
       Effect.gen(function* () {
         yield* Effect.sleep(opts.pollMs);
         const cancelled = yield* Effect.gen(function* () {
-          const res = yield* api(`/api/hearth/daemon/tasks/${opts.taskId}/status`);
+          const res = yield* api(`/api/runtimes/daemon/tasks/${opts.taskId}/status`);
           if (!res.ok) return false;
           const body = yield* Effect.tryPromise({ try: () => res.json() as Promise<{ status: string }>, catch: toDaemonError });
           return body.status === "cancelled";
@@ -1344,7 +1345,7 @@ export function runHttpTask(opts: HttpRunOptions): Effect.Effect<string, AgentEr
 // Run the agent, racing its completion against a wall-clock timeout and a
 // server cancel poll (legacy providers — hermes/command-code keep the spawn
 // path; opencode runs over HTTP via runHttpTask). When the user cancels the
-// task (POST /api/hearth/tasks/:id/cancel flips the row to 'cancelled') or the
+// task (POST /api/runtimes/tasks/:id/cancel flips the row to 'cancelled') or the
 // timeout fires, SIGTERM the child, schedule a force-kill of the whole tree
 // 1500ms later, and fail — runTask's catch then logs it and skips the
 // complete/fail round-trips (the "cancelled" message keeps its special
@@ -1366,7 +1367,7 @@ function runAgentWithCancel(prompt: string, cwd: string, provider: "opencode" | 
       Effect.gen(function* () {
         yield* Effect.sleep(pollMs);
         const cancelled = yield* Effect.gen(function* () {
-          const res = yield* api(`/api/hearth/daemon/tasks/${taskId}/status`);
+          const res = yield* api(`/api/runtimes/daemon/tasks/${taskId}/status`);
           if (!res.ok) return false;
           const body = yield* Effect.tryPromise({ try: () => res.json() as Promise<{ status: string }>, catch: toDaemonError });
           return body.status === "cancelled";

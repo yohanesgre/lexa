@@ -29,7 +29,7 @@ export const COMPILED = (import.meta.dir ?? "").startsWith("/$bunfs");
 // bun-only import.meta.dir — undefined under node (vitest workers); fall back
 // to the URL-derived dir so the module is importable in tests.
 const META_DIR = import.meta.dir ?? dirname(fileURLToPath(import.meta.url));
-const INSTALL_DIR = join(homedir(), ".local", "share", "lexa-hearth");
+const INSTALL_DIR = join(homedir(), ".local", "share", "lexa-runtimes");
 // Host-keyed state — everything lives under the group dir derived from the
 // server URL (~/.lexa/<host>/): config.json, machine-id, runtimes/<id>/env,
 // projects/, projects.json, runs/. Multiple servers never share state; the
@@ -37,19 +37,19 @@ const INSTALL_DIR = join(homedir(), ".local", "share", "lexa-hearth");
 const runtimesDir = (dir: string) => join(dir, "runtimes");
 // Project workspaces — one persistent dir per project under <group>/projects/,
 // seeded on first sight with README.md (project context) + AGENTS.md (static
-// orchestrator). The Hearth daemon runs opencode from the workspace dir with a
+// orchestrator). The runtime daemon runs opencode from the workspace dir with a
 // sealed per-run HOME; per-agent rule bundles live in .agents/agents/<id>/.
 const projectsDir = (dir: string) => join(dir, "projects");
 const projectIndexPath = (dir: string) => join(dir, "projects.json");
 const LISTENER_UNIT_PATH = join(homedir(), ".config", "systemd", "user", `${SERVICE_NAME}.service`);
-const DAEMON_SRC = join(META_DIR, "..", "..", "hearth", "daemon.ts");
+const DAEMON_SRC = join(META_DIR, "..", "..", "daemon", "daemon.ts");
 const CLI_ENTRY = join(META_DIR, "index.ts");
 const machineIdPath = (dir: string) => join(dir, "machine-id");
 const machineSecretPath = (dir: string) => join(dir, "machine-secret");
 const EVENT_POLL_MS = 3000;
 const CATALOG_REFRESH_MS = 10 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 30_000;
-const CMD_BIN = process.env.HEARTH_CMD_BIN ?? "cmd";
+const CMD_BIN = process.env.RUNTIME_CMD_BIN ?? "cmd";
 
 // Typed failures. `reason` carries the message the imperative version printed
 // or threw, so a caller that logs `error.message` reproduces the output.
@@ -248,9 +248,9 @@ function listRuntimeEnvs(dir: string): RuntimeEnv[] {
   for (const runtimeId of readdirSync(root)) {
     const path = join(root, runtimeId, "env");
     const env = readEnvFile(path);
-    const agentCli = env.HEARTH_AGENT;
-    if (!env.HEARTH_RUNTIME_ID || !isAgentCli(agentCli)) continue;
-    result.push({ runtimeId: env.HEARTH_RUNTIME_ID, agentCli, path, env });
+    const agentCli = env.RUNTIME_AGENT;
+    if (!env.RUNTIME_ID || !isAgentCli(agentCli)) continue;
+    result.push({ runtimeId: env.RUNTIME_ID, agentCli, path, env });
   }
   return result;
 }
@@ -261,7 +261,7 @@ function isAgentCli(value: string | undefined): value is "opencode" | "hermes" |
 
 // Daemons (and every agent run beneath them) must not inherit the listener
 // shell's secrets — a dev loop with `set -a; . ./.env` would leak them into
-// every spawned agent env, and an inherited LXK_HEARTH_DAEMON_TOKEN masks
+// every spawned agent env, and an inherited LXK_RUNTIME_DAEMON_TOKEN masks
 // revoked runtime keys (the daemon would authenticate with the stale
 // inherited value instead of its env-file key, defeating exit-code-3
 // detection). The listener itself still reads its own env; only the spawned
@@ -335,7 +335,7 @@ export const saveMachineSecret = (secret: string, dir: string): Effect.Effect<vo
 // round-trip) and provisions one workspace dir per project. Seeding is
 // write-once: README.md and the orchestrator AGENTS.md are never overwritten
 // once they exist (operator edits survive; daemon per-run files live in
-// .agents/ and .hearth/).
+// .agents/ and the runtime-home sandbox).
 export interface WorkspaceProjectInfo {
   id: string;
   name: string;
@@ -523,7 +523,7 @@ function writeRuntimeEnv(path: string, env: Record<string, string>): void {
   chmodSync(path, 0o600);
 }
 
-// The daemon imports shared modules (shared/hearth-log.ts), so the standalone
+// The daemon imports shared modules (shared/runtime-log.ts), so the standalone
 // child must be BUNDLED before install — raw source would fail to resolve
 // imports from INSTALL_DIR. `bun build` inlines everything into daemon.js.
 function buildDaemon(outfile: string, sourceFile?: string): void {
@@ -556,9 +556,9 @@ function normalizeRuntimeEnv(runtime: RuntimeEnv, serverUrl: string, machineId: 
   const env: Record<string, string> = {
     ...runtime.env,
     LEXA_URL: serverUrl,
-    HEARTH_RUNTIME_ID: runtime.runtimeId,
-    HEARTH_RUNTIME_NAME: runtime.env.HEARTH_RUNTIME_NAME || `${hostname}-${runtime.agentCli}`,
-    HEARTH_MACHINE_ID: machineId,
+    RUNTIME_ID: runtime.runtimeId,
+    RUNTIME_NAME: runtime.env.RUNTIME_NAME || `${hostname}-${runtime.agentCli}`,
+    RUNTIME_MACHINE_ID: machineId,
   };
   const changed = Object.keys(env).some((key) => env[key] !== runtime.env[key]);
   if (changed) writeRuntimeEnv(runtime.path, env);
@@ -717,10 +717,10 @@ function handleSetupEvent(
         const env: Record<string, string> = {
           ...(existing?.env ?? {}),
           LEXA_URL: serverUrl,
-          HEARTH_AGENT: event.agentCli,
-          HEARTH_RUNTIME_ID: runtimeId,
-          HEARTH_RUNTIME_NAME: `${hostname}-${event.agentCli}`,
-          HEARTH_MACHINE_ID: machineId,
+          RUNTIME_AGENT: event.agentCli,
+          RUNTIME_ID: runtimeId,
+          RUNTIME_NAME: `${hostname}-${event.agentCli}`,
+          RUNTIME_MACHINE_ID: machineId,
         };
         if (event.action === "install") {
           if (!rawKey) return yield* Effect.fail(new Error("Install event did not include its one-time API key"));

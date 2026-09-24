@@ -1,4 +1,4 @@
-// hearth/daemon.ts — the agent child-env whitelist (buildChildEnv), model id
+// daemon/daemon.ts — the agent child-env whitelist (buildChildEnv), model id
 // resolution, claim repo-content writing (writeRepoContent), and the
 // import.meta.main guard. The daemon's main loop
 // (register/heartbeat/claim/spawn) is process+network-bound and is not
@@ -7,12 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildChildEnv, resolveModelId, writeRepoContent, deriveServePort, flavorBaseFor, buildMessageBody, parseMessageResponse, buildMessageUrl, abortUrl, buildMintUrl, parseSessionInfo, type HearthTask } from "./daemon";
+import { buildChildEnv, resolveModelId, writeRepoContent, deriveServePort, flavorBaseFor, buildMessageBody, parseMessageResponse, buildMessageUrl, abortUrl, buildMintUrl, parseSessionInfo, type RuntimeTask } from "./daemon";
 
-const TASK = { id: "t1" } as HearthTask;
+const TASK = { id: "t1" } as RuntimeTask;
 
 function tmpRun(): string {
-  return mkdtempSync(join(tmpdir(), "lexa-hearth-daemon-"));
+  return mkdtempSync(join(tmpdir(), "lexa-runtime-daemon-"));
 }
 
 describe("buildChildEnv", () => {
@@ -22,7 +22,7 @@ describe("buildChildEnv", () => {
   });
 
   it("keeps LC_* vars but drops every other unknown var (closed whitelist)", () => {
-    const env = { PATH: "/usr/bin", LC_ALL: "C", LC_MESSAGES: "en", FOO: "bar", EDITOR: "vim", HEARTH_RUNTIME_ID: "r1" };
+    const env = { PATH: "/usr/bin", LC_ALL: "C", LC_MESSAGES: "en", FOO: "bar", EDITOR: "vim", RUNTIME_ID: "r1" };
     expect(buildChildEnv(env, "/w", null)).toEqual({ PATH: "/usr/bin", LC_ALL: "C", LC_MESSAGES: "en", PWD: "/w" });
   });
 
@@ -31,7 +31,7 @@ describe("buildChildEnv", () => {
       PATH: "/usr/bin",
       LEXA_API_KEY: "lxk_secret",
       LXK_API_KEY: "lxk_secret2",
-      LXK_HEARTH_DAEMON_TOKEN: "deadbeef",
+      LXK_RUNTIME_DAEMON_TOKEN: "deadbeef",
       LEXA_URL: "http://localhost:3000",
       LEXA_DIR: "/home/u/.lexa",
       GITHUB_PRIVATE_KEY: "-----BEGIN",
@@ -54,12 +54,12 @@ describe("buildChildEnv", () => {
 
   it("sandbox HOME overrides HOME and pins the XDG_* dirs inside it", () => {
     const env = { PATH: "/usr/bin", HOME: "/real/home" };
-    const out = buildChildEnv(env, "/w", "/workspace/proj/.hearth");
-    expect(out.HOME).toBe("/workspace/proj/.hearth");
-    expect(out.XDG_CONFIG_HOME).toBe("/workspace/proj/.hearth/.config");
-    expect(out.XDG_DATA_HOME).toBe("/workspace/proj/.hearth/.local/share");
-    expect(out.XDG_CACHE_HOME).toBe("/workspace/proj/.hearth/.cache");
-    expect(out.XDG_STATE_HOME).toBe("/workspace/proj/.hearth/.local/state");
+    const out = buildChildEnv(env, "/w", "/workspace/proj/runtime-home");
+    expect(out.HOME).toBe("/workspace/proj/runtime-home");
+    expect(out.XDG_CONFIG_HOME).toBe("/workspace/proj/runtime-home/.config");
+    expect(out.XDG_DATA_HOME).toBe("/workspace/proj/runtime-home/.local/share");
+    expect(out.XDG_CACHE_HOME).toBe("/workspace/proj/runtime-home/.cache");
+    expect(out.XDG_STATE_HOME).toBe("/workspace/proj/runtime-home/.local/state");
     expect(out.PATH).toBe("/usr/bin");
   });
 

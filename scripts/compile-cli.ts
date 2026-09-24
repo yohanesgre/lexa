@@ -3,9 +3,9 @@
  *
  *   bun run compile:cli
  *
- * Bundles the Hearth daemon (hearth/daemon.ts imports shared modules) —
+ * Bundles the runtime daemon (daemon/daemon.ts imports shared modules) —
  * the bundled JS is embedded into cli/src/packed.ts so the compiled
- * binary can write it to ~/.local/share/lexa-hearth/daemon.js — then runs
+ * binary can write it to ~/.local/share/lexa-runtimes/daemon.js — then runs
  * `bun build --compile` → bin/lx.
  *
  * The compiled binary is distributed via `scripts/install-cli.sh`
@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { PACKED_STUB, packedEmbed } from "../cli/src/packed-embed";
 
 const root = join(import.meta.dir, "..");
-const daemonPath = join(root, "hearth", "daemon.ts");
+const daemonPath = join(root, "daemon", "daemon.ts");
 const packedPath = join(root, "cli", "src", "packed.ts");
 const outfile = join(root, "bin", "lx");
 const bundlePath = join(root, "bin", "daemon-bundle.js");
@@ -39,7 +39,7 @@ if (!existsSync(daemonPath)) {
   process.exit(1);
 }
 
-// The daemon imports shared modules (shared/hearth-log.ts) — bundle it so the
+// The daemon imports shared modules (shared/runtime-log.ts) — bundle it so the
 // embedded copy is self-contained on machines without the repo.
 mkdirSync(join(root, "bin"), { recursive: true });
 const bundle = spawnSync("bun", ["build", "--target=bun", "--outfile", bundlePath, daemonPath], { stdio: "pipe" });
