@@ -348,7 +348,7 @@ export function WorkspaceSettings() {
     <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
       <p className="text-sm text-lx-text-secondary mb-6" style={{ maxWidth: 560 }}>
-        Superadmin-only surface. Members, invites, teams, machines &amp; runtimes, API keys, rate limiting, GitHub sync, Hearth agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.
+        Superadmin-only surface. Members, invites, teams, machines &amp; runtimes, API keys, rate limiting, GitHub sync, AI agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.
       </p>
       {isSuperadmin && (
         <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -379,7 +379,7 @@ export function WorkspaceSettings() {
       {tab === "compute" && (
         <>
           <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
-            <span className="text-sm text-lx-text-secondary">Hearth operations (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/hearth</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
+            <span className="text-sm text-lx-text-secondary">AI Runtimes (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/hearth</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
             <Link to="/hearth/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /hearth</Link>
           </div>
           <MachinesRuntimesSection showTeamColumn />

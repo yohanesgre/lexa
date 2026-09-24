@@ -21,7 +21,7 @@ export function HeraldPanelHeader({
     <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
       <span className="text-sm font-medium text-lx-text-primary font-body" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <HeraldFlameIcon />
-        Hearth
+        AI
       </span>
       {running ? (
         <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">● Generating…</span>

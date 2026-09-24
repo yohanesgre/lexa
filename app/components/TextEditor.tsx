@@ -200,8 +200,8 @@ export function Toolbar({
           ref={hearthBtnRef}
           type="button"
           className={cn("toolbar-btn", hearthOpen && "active")}
-          title={hearth ? "AI project assistant (Hearth)" : "AI writing assistant (coming soon)"}
-          aria-label="Hearth AI writing assistant"
+          title={hearth ? "AI project assistant" : "AI writing assistant (coming soon)"}
+          aria-label="AI writing assistant"
           disabled={!hearth}
           onClick={() => {
             setHearthAnchor(hearthBtnRef.current?.getBoundingClientRect() ?? null);
@@ -209,7 +209,7 @@ export function Toolbar({
           }}
         >
           <Flame size={16} strokeWidth={1.5} />
-          Hearth
+          AI
         </button>
       </div>
       </div>

@@ -162,7 +162,7 @@ function MobileMenuLinks({ targets }: { targets: {
         Chat
       </Link>
       <Link to="/hearth" className="app-nav-menu-link">
-        Hearth
+        AI Runtimes
       </Link>
     </>
   );
@@ -250,7 +250,7 @@ export function AppShell() {
             <NavLink {...linkProps(targets.chat)} active={routeType === "chat"}>
               Chat
             </NavLink>
-            <NavLink to="/hearth" active={routeType === "hearth"}>Hearth</NavLink>
+            <NavLink to="/hearth" active={routeType === "hearth"}>AI Runtimes</NavLink>
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">

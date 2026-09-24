@@ -42,7 +42,7 @@ export function AgentsSettingsSection() {
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Named rule bundles sent to the runtime agent on every Hearth run (as AGENTS.md). The agent's instructions define behavior; skills define what it can do. Not to be confused with a runtime's CLI agent — that's the CLI/Persona on the runtime row. Exactly two builtin agents exist; custom agents are not creatable.
+        Named rule bundles sent to the runtime agent on every AI run (as AGENTS.md). The agent's instructions define behavior; skills define what it can do. Not to be confused with a runtime's CLI agent — that's the CLI/Persona on the runtime row. Exactly two builtin agents exist; custom agents are not creatable.
       </p>
 
       {isLoading ? (
@@ -118,7 +118,7 @@ export function SkillsSettingsSection() {
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Named operation bundles attached to agents. On a Hearth run the chosen skill's instructions become <span className="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins: Requirements · Deliverables · Review · Definition of done · Status · Polish.
+        Named operation bundles attached to agents. On an AI run the chosen skill's instructions become <span className="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins: Requirements · Deliverables · Review · Definition of done · Status · Polish.
       </p>
 
       {isLoading ? (

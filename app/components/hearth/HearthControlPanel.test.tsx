@@ -44,7 +44,7 @@ describe("HistoryStates empty state", () => {
       </HistoryStates>
     );
 
-    expect(screen.getByText("No Hearth runs yet")).toBeInTheDocument();
+    expect(screen.getByText("No AI runs yet")).toBeInTheDocument();
     const path = container.querySelector("svg path");
     expect(path?.getAttribute("d")).toContain("M8.5 14.5A2.5 2.5");
   });

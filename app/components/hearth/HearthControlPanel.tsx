@@ -118,14 +118,14 @@ function emptyStateTitle(status: HearthTaskStatus | null, slug: string, skillId:
   const filtered = status !== null || slug !== "" || skillId !== "" || teamId !== "";
   if (filtered) return "No runs match the current filters";
   if (cursor !== null) return "No older runs";
-  return "No Hearth runs yet";
+  return "No AI runs yet";
 }
 
 function emptyStateHint(status: HearthTaskStatus | null, slug: string, skillId: string, teamId: string, cursor: string | null): string {
   const filtered = status !== null || slug !== "" || skillId !== "" || teamId !== "";
   if (filtered) return "Try widening the filters — for example by clearing the status chip or choosing another project.";
   if (cursor !== null) return "You've reached the end of the run history.";
-  return "Hearth tasks are created from the editor toolbar in any task or wiki page. Open a document and press the Hearth button to start your first run.";
+  return "AI tasks are created from the editor toolbar in any task or wiki page. Open a document and press the AI button to start your first run.";
 }
 
 function SummaryStrip({ summary, activeCount, online, total }: {
@@ -328,7 +328,7 @@ function HistoryRow({ task, copiedId, onCopyId, onSelect, onCancel, runtimeName 
           <button type="button"
             className="btn btn-ghost"
             aria-label="Cancel task"
-            title="Cancel this Hearth task"
+            title="Cancel this AI task"
             style={{ width: 26, height: 26, padding: 0 }}
             onClick={(e) => {
               e.stopPropagation();
@@ -347,8 +347,8 @@ function HistoryRow({ task, copiedId, onCopyId, onSelect, onCancel, runtimeName 
 
 function DetailCrumb({ detail }: { detail: HearthTaskRow | null }) {
   const label = detail
-    ? `${detail.projectName || "Hearth"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}`
-    : "Hearth";
+    ? `${detail.projectName || "AI"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}`
+    : "AI";
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-lx-text-muted font-body">{label}</span>
@@ -467,7 +467,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canVie
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
-      <dialog open className="slideover" aria-modal="true" aria-label="Hearth task details" style={{ width: 520 }}>
+      <dialog open className="slideover" aria-modal="true" aria-label="AI task details" style={{ width: 520 }}>
         <div className="slideover-header border-b border-lx-border-subtle">
           <DetailCrumb detail={detail} />
           <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={onClose} aria-label="Close">
@@ -476,7 +476,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canVie
         </div>
 
         {detail === null ? (
-          <TaskNotFoundBody message="This Hearth task was deleted or is no longer visible." onClose={onClose} />
+          <TaskNotFoundBody message="This AI task was deleted or is no longer visible." onClose={onClose} />
         ) : (
           <>
             <div className="px-4 pt-4">
@@ -551,7 +551,7 @@ export function HistoryStates({ history, page, filters, cursor, children }: {
           <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="text-sm weight-500 text-lx-text-primary">Could not load Hearth history</div>
+          <div className="text-sm weight-500 text-lx-text-primary">Could not load AI history</div>
           <div className="text-xs text-lx-text-secondary">The server may be unreachable. Check that the daemon and API are running.</div>
         </div>
         <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, flexShrink: 0 }} onClick={() => history.refetch()}>
@@ -677,11 +677,11 @@ export function HearthControlPanel({ embedded = false }: { embedded?: boolean })
   const header = !embedded ? (
     <>
       <div className="flex items-center justify-between mb-3">
-        <h1 className="font-display text-2xl weight-600 text-lx-text-primary mb-0">Hearth</h1>
+        <h1 className="font-display text-2xl weight-600 text-lx-text-primary mb-0">AI Runtimes</h1>
         <div className="flex items-center gap-3">
           <Link to="/hearth/runtimes" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <LayoutGrid size={14} strokeWidth={1.5} />
-            Hearth runtimes
+            Runtimes settings
           </Link>
         </div>
       </div>

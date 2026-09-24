@@ -116,7 +116,7 @@ function SkillsAttachField({ allSkills, attachedSkillIds, setAttachedSkillIds }:
           ))
         )}
       </div>
-      <div className="field-hint">The Hearth popover only offers skills attached here. An agent with none can't generate.</div>
+      <div className="field-hint">The AI popover only offers skills attached here. An agent with none can't generate.</div>
     </div>
   );
 }

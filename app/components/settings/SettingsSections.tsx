@@ -394,7 +394,7 @@ export function RateLimitSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Per-client-IP request budget for the API surface. Applies to /api; Hearth machine surfaces are exempt. Changes apply immediately — no restart needed.
+        Per-client-IP request budget for the API surface. Applies to /api; AI machine surfaces are exempt. Changes apply immediately — no restart needed.
       </p>
 
       {data?.envOverride && (
@@ -529,7 +529,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machines running the Hearth daemon (AI project assistant). The listener owns daemon children and reports installed agent/model catalogs.
+        Machines running the AI daemon (AI project assistant). The listener owns daemon children and reports installed agent/model catalogs.
       </p>
 
       <div className="mb-4 card-panel" style={{ overflow: "hidden" }}>
@@ -571,7 +571,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
         </div>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Daemon runtimes bound to machines. Every runtime carries a team (or "Global"). Claiming a Hearth task requires the runtime's team to match the task's project team.
+        Daemon runtimes bound to machines. Every runtime carries a team (or "Global"). Claiming an AI task requires the runtime's team to match the task's project team.
       </p>
 
       {runtimesLoading ? (

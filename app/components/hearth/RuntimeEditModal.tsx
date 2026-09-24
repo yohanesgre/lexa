@@ -368,7 +368,7 @@ function LogLevelField({ logLevel, setLogLevel }: { logLevel: Runtime["logLevel"
           <option key={l} value={l}>{l}</option>
         ))}
       </select>
-      <div className="field-hint">Controls the always-on opencode diagnostic stderr stream. The activity log captures stdout and stderr separately, with stored info/warn/error levels. Applies on the next Hearth task — no daemon restart needed.</div>
+      <div className="field-hint">Controls the always-on opencode diagnostic stderr stream. The activity log captures stdout and stderr separately, with stored info/warn/error levels. Applies on the next AI task — no daemon restart needed.</div>
     </div>
   );
 }
@@ -453,7 +453,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
 
             <div className="notice mt-2 flex items-center gap-2">
               <Info size={16} strokeWidth={1.5} className="text-lx-text-link flex-shrink-0" />
-              <span className="text-xs text-lx-text-secondary">Applies to the next Hearth task on this runtime. No daemon restart needed.</span>
+              <span className="text-xs text-lx-text-secondary">Applies to the next AI task on this runtime. No daemon restart needed.</span>
             </div>
 
             <RuntimeEditFooter canSave={canSave} saving={update.isPending} onClose={onClose} onSave={save} />
