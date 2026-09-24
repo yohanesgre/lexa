@@ -75,7 +75,7 @@ function StatusPill({ active, doneCount, failedCount, idle }: {
     return (
       <>
         <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
-        Hearth · {active.skillName || active.skillId}
+        AI · {active.skillName || active.skillId}
       </>
     );
   }
@@ -91,7 +91,7 @@ function StatusPill({ active, doneCount, failedCount, idle }: {
     return (
       <>
         <Flame size={12} strokeWidth={1.5} />
-        Hearth
+        AI
       </>
     );
   }
@@ -134,8 +134,8 @@ function TaskRowActions({ t, isActive, copiedId, onCopy, onCancel, onDismiss, ca
         <button
           type="button"
           className="hearth-dismiss"
-          aria-label="Cancel Hearth task"
-          title="Cancel this Hearth task"
+          aria-label="Cancel AI task"
+          title="Cancel this AI task"
           onClick={() => onCancel(t.id)}
           disabled={cancelPending}
         >
@@ -312,10 +312,10 @@ export function HearthStatus() {
 
       {open &&
         createPortal(
-          <div className="menu-popover" role="menu" aria-label="Hearth tasks" ref={panelRef} style={popoverStyle}>
-            <div className="dropdown-label">Hearth · recent</div>
+          <div className="menu-popover" role="menu" aria-label="AI tasks" ref={panelRef} style={popoverStyle}>
+            <div className="dropdown-label">AI · recent</div>
             {visible.length === 0 ? (
-              <div className="text-xs text-lx-text-muted px-3 py-3">No Hearth tasks yet.</div>
+              <div className="text-xs text-lx-text-muted px-3 py-3">No AI tasks yet.</div>
             ) : (
               visible.slice(0, 6).map((t) => {
                 const isActive = t.status === "queued" || t.status === "running";
@@ -350,7 +350,7 @@ export function HearthStatus() {
               style={{ height: 28, textDecoration: "none" }}
             >
               <List size={14} strokeWidth={1.5} />
-              <span className="text-xs text-lx-text-secondary">Hearth control panel</span>
+              <span className="text-xs text-lx-text-secondary">AI Runtimes</span>
             </Link>
             <div className="dropdown-separator" />
             <Link
@@ -361,7 +361,7 @@ export function HearthStatus() {
               style={{ height: 28, textDecoration: "none" }}
             >
               <Flame size={14} strokeWidth={1.5} />
-              <span className="text-xs text-lx-text-secondary">Hearth runtimes</span>
+              <span className="text-xs text-lx-text-secondary">Runtimes settings</span>
             </Link>
           </div>,
           document.body

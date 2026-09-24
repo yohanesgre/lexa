@@ -1,6 +1,8 @@
-# Hearth — AI execution runtime
+# AI Runtimes — AI execution runtime
 
-Hearth is Lexa's AI execution umbrella. Two co-existing active tiers (see
+_Internal codename: Hearth — identifiers, routes, env keys, and tables keep the old name._
+
+AI Runtimes is Lexa's AI execution umbrella. Two co-existing active tiers (see
 `docs/ARCHITECTURE.md` §Hearth — two active AI tiers for the decision record,
 formerly ADR-0001, now merged; `docs/HEARTH.md` for runtime details;
 amendments 2026-08-23/24 merged into ARCHITECTURE.md — two-agent catalog,
@@ -38,7 +40,7 @@ popover picks per-run.
 
 ## Daemon + listener
 
-- The Hearth button in the task/wiki editors needs at least one online daemon
+- The AI button in the task/wiki editors needs at least one online daemon
   child, managed by `lx machine listen` (env: `LEXA_URL`,
   `LEXA_API_KEY` or `LXK_HEARTH_DAEMON_TOKEN`,
   `HEARTH_AGENT=opencode|hermes|command-code`). The listener owns per-runtime
@@ -141,7 +143,7 @@ everything outside is blocked. Sessions bind to their workspace at mint and
 keep it on continuation; a re-provisioned workspace (listener sync / manual
 wipe) leaves a stale file context — reset the session after wiping a
 workspace. Global opencode config — permissions, plugins — never loads into
-Hearth runs.
+AI runs.
 
 `lx machine workspace list|sync` inspects/re-syncs local workspaces.
 hermes/command-code keep the legacy ephemeral `~/.lexa/<host>/runs/` layout.

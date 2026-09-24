@@ -188,7 +188,7 @@ function TaskRunPanel({ taskData, running, followLog, setFollowLog, logBodyRef, 
               }
             }}
             disabled={cancelTask.isPending}
-            title="Cancel this Hearth task — it stops working server-side"
+            title="Cancel this AI task — it stops working server-side"
           >
             Cancel
           </button>

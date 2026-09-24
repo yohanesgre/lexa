@@ -86,7 +86,7 @@ export function HeraldEngineSection({ project }: { project: Project }) {
               className={cn("toggle-switch", switcher && "is-on")}
               onClick={() => { const next = !switcher; setSwitcher(next); persist({ engineSwitcherEnabled: next }); }}
             />
-            <span className="text-sm text-lx-text-secondary">Members get a personal Herald | Blacksmith toggle in the Hearth popover header</span>
+            <span className="text-sm text-lx-text-secondary">Members get a personal Herald | Blacksmith toggle in the AI popover header</span>
           </div>
           <div className="field-hint">Off (default) = members never see a toggle; every run uses the default engine above.</div>
         </div>

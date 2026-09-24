@@ -589,7 +589,7 @@ Wiki:
 Projects:
   project list [--json]
 
-Runtimes (Hearth daemon):
+Runtimes (AI daemon):
   runtime list                                   server-side daemon view
   runtime delete <id>                            remove a runtime (daemon + env
                                                   cleaned up by its machine's
@@ -608,7 +608,7 @@ Machine listener:
                                                   (reappears if still listening — stop
                                                   the listener first for permanent removal)
 
-Hearth workspaces (local machine view):
+AI workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision
 
@@ -651,7 +651,7 @@ const GROUP_HELP: Record<string, string> = {
   wiki: `Wiki:
   wiki list --project <slug> [--json]
   wiki get  <pageSlug> --project <slug> [--json]`,
-  runtime: `Runtimes (Hearth daemon):
+  runtime: `Runtimes (AI daemon):
   runtime list                                   server-side daemon view
   runtime delete <id>                            remove a runtime (daemon + env
                                                   cleaned up by its machine's
@@ -669,7 +669,7 @@ const GROUP_HELP: Record<string, string> = {
                                                   (reappears if still listening — stop
                                                   the listener first for permanent removal)
 
-Hearth workspaces (local machine view):
+AI workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision`,
 

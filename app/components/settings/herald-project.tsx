@@ -85,7 +85,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         <span className="text-xs text-lx-text-muted">GET /api/herald/settings/:projectId</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Herald (the writing assistant in the Hearth popover) runs against a provider from the workspace registry. Base URLs and keys live on the provider registry (Workspace → Herald Providers); this project picks a primary provider + model and an optional ordered fallback chain.
+        Herald (the writing assistant in the AI popover) runs against a provider from the workspace registry. Base URLs and keys live on the provider registry (Workspace → Herald Providers); this project picks a primary provider + model and an optional ordered fallback chain.
       </p>
 
       <div className="card-panel card-panel--elevated">

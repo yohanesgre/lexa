@@ -1557,7 +1557,7 @@ export function useUpdateRuntime() {
     mutationFn: ({ id, patch }: { id: string; patch: { name?: string | undefined; provider?: "opencode" | "hermes" | "command-code"; agent?: string | undefined; model?: string | undefined; printLogs?: boolean | undefined; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] } }) => api.updateRuntime(id, patch),
     onSuccess: (runtime) => {
       qc.setQueryData<Runtime[]>(["hearth-runtimes"], (rows) => rows?.map((r) => (r.id === runtime.id ? runtime : r)));
-      toast.push("success", "Runtime updated — applies on the next Hearth task");
+      toast.push("success", "Runtime updated — applies on the next AI task");
     },
     onError: (err) => {
       toast.push("error", "Failed to update runtime", toastMessage(err));
@@ -1635,7 +1635,7 @@ export function useCreateHearthTask() {
       ]);
     },
     onError: (err) => {
-      toast.push("error", "Hearth unavailable", toastMessage(err));
+      toast.push("error", "AI unavailable", toastMessage(err));
     },
   });
 }
@@ -1655,10 +1655,10 @@ export function useCancelHearthTask() {
       qc.setQueriesData<HearthHistoryPage>({ queryKey: ["hearth-task-history"] }, (page) =>
         page ? { ...page, data: page.data.map((r) => (r.id === task.id ? { ...r, status: task.status } : r)) } : page
       );
-      toast.push("success", "Hearth task cancelled");
+      toast.push("success", "AI task cancelled");
     },
     onError: (err) => {
-      toast.push("error", "Failed to cancel Hearth task", toastMessage(err));
+      toast.push("error", "Failed to cancel AI task", toastMessage(err));
     },
   });
 }

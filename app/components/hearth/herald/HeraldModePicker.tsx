@@ -28,7 +28,7 @@ export function HeraldModePicker({ mode, onChange, disabled }: {
     <div
       className="flex items-center"
       role="radiogroup"
-      aria-label="Hearth mode"
+      aria-label="AI mode"
       style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 2, opacity: disabled ? 0.45 : undefined, pointerEvents: disabled ? "none" : undefined }}
     >
       <button

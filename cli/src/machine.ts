@@ -106,7 +106,7 @@ function listenerUnit(url: string): string {
     ? `${process.execPath} machine listen --url ${url}`
     : `bun run ${CLI_ENTRY} machine listen --url ${url}`;
   return `[Unit]
-Description=Lexa Hearth machine listener (web wizard → runtime daemons)
+Description=Lexa AI machine listener (web wizard → runtime daemons)
 After=network-online.target
 
 [Service]
@@ -368,8 +368,8 @@ function provisionWorkspaces(projects: WorkspaceProjectInfo[], dir: string): { t
         "",
         p.description || "(no description)",
         "",
-        "This is the Lexa Hearth workspace for this project. Clone or symlink the",
-        "project's repository here — e.g. `ln -s /path/to/repo repo/`. The Hearth",
+        "This is the Lexa AI workspace for this project. Clone or symlink the",
+        "project's repository here — e.g. `ln -s /path/to/repo repo/`. The AI",
         "agent works from this directory and can only read files inside it.",
         "",
       ].join("\n"), { mode: 0o644 });
@@ -867,7 +867,7 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
     if (Object.keys(process.env).some(isSecretEnvKey)) {
       console.warn("  [listen] WARNING: started with .env exported — server secrets are in this shell. Daemons will NOT inherit them (scrubbed at spawn); put runtime credentials in the runtime env file (Setup runtime wizard).");
     }
-    console.log(`  Lexa Hearth machine listener — ${machineId}`);
+    console.log(`  Lexa AI machine listener — ${machineId}`);
     console.log(`  Polling ${config.url} every ${EVENT_POLL_MS}ms. Press Ctrl-C to stop.`);
 
     return yield* Effect.forever(

@@ -56,7 +56,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
 
       <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
         <span className="text-sm text-lx-text-secondary">Herald provider, engine, write tools, memory, and skill bindings are now managed in <span className="font-mono text-xs">/hearth/bindings</span>.</span>
-        <Link to="/hearth/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open in Hearth · Bindings</Link>
+        <Link to="/hearth/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open in AI Runtimes · Bindings</Link>
       </div>
       <TeamAssignmentSection project={project} />
       <ProjectBasicSection project={project} />
@@ -87,7 +87,7 @@ function TeamAssignmentSection({ project }: { project: Project }) {
       </div>
       <div className="card-panel card-panel--elevated mt-4">
         <p className="text-sm text-lx-text-secondary mb-3" style={{ marginTop: 0 }}>
-          The owning team scopes Hearth claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
+          The owning team scopes AI claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
           {!isSuperadmin && " As a team admin you can assign this project to your own team only."}
         </p>
         <div className="flex items-center gap-3 flex-wrap">
@@ -228,7 +228,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
         <span className="text-xs text-lx-text-muted">Per project</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Repos this project can read (source — Hearth agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead shows repos already linked in the workspace plus GitHub App search results.
+        Repos this project can read (source — AI agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead shows repos already linked in the workspace plus GitHub App search results.
       </p>
 
       <div style={{ position: "relative", maxWidth: 420, marginBottom: 16 }} ref={dropdownRef}>
@@ -292,7 +292,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
       ) : repos.length === 0 ? (
         <div className="empty-box mb-4">
           <div className="text-sm font-medium text-lx-text-primary">No linked repos</div>
-          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let Hearth read it and to sync issues with the board.</p>
+          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let the AI read it and to sync issues with the board.</p>
         </div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
