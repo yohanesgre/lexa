@@ -187,3 +187,4 @@
 2026-09-24 | assistant-rename | DONE | PR #100 squash-merged to main 3b7c40a (CI 4/4 green); gate 180/1625; report written | status/assistant-rename/report.md
 2026-09-25 | db-backend-review-fixes | PLAN | opened; fixes from db+backend review of 0f4caa4; branch fix/db-backend-review-fixes @3b7c40a; 3 lanes; gate ack branch→commit→push→PR | status/db-backend-review-fixes/plan.md
 2026-09-25 | db-backend-review-fixes | PR | pushed; PR #101 open to main; gate 186/1680; reviewer PASS | https://github.com/yohanesgre/lexa/pull/101
+2026-09-25 | db-backend-review-fixes | DONE | PR #101 open (merge pending user); gate 186/1680; reviewer PASS; report written | status/db-backend-review-fixes/report.md
