@@ -782,10 +782,10 @@ export class MentionService extends Effect.Service<MentionService>()("Lexa/Menti
 }) {}
 ```
 
-**Deliberately NOT folded into HeraldService:** this is a plain project-scoped
+**Deliberately NOT folded into AssistantService:** this is a plain project-scoped
 read with no provider/thread coupling; folding it in would give MentionService
 transitive provider deps for zero benefit. Chat-side @-token resolution is
-herald-domain logic and lives in HeraldService's chat branch instead. The
+assistant-domain logic and lives in AssistantService's chat branch instead. The
 service adds zero TaggedErrors — the only failure surface is `DbError`, and
 access control happens at the route (`PROJECT_ACCESS_DENIED` 404), matching
 every other project-scoped read.
@@ -829,21 +829,21 @@ On `POST /api/runtimes/daemon/claim` the handler assembles the claim: task, runt
 - **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
 - **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
 
-### Lexa/Herald Gateway — provider registry + cross-kind fallback
+### Lexa/Assistant Gateway — provider registry + cross-kind fallback
 
 ```typescript
-export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldGateway", {
-  dependencies: [HeraldProvidersRepo.Default, HeraldModelsRepo.Default,
-                 HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default,
-                 HeraldSettingsRepo.Default],
+export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/AssistantGateway", {
+  dependencies: [AssistantProvidersRepo.Default, AssistantModelsRepo.Default,
+                 AssistantCallLogsRepo.Default, AssistantModelPricesRepo.Default,
+                 AssistantSettingsRepo.Default],
   effect: Effect.gen(function* () {
     // resolveFallback(projectId) → ProviderConfig[] (≤3, priority-ordered,
     // enabled models cross-kind, fresh adapter per attempt via buildAdapter).
     // streamChat(input) → AsyncIterable<StreamChunk>: iterates fallback configs,
     // fresh normalizeBaseUrl + buildAdapter per attempt, isRetriable = ProviderAuthFailed
-    // | ProviderUnreachable | HeraldGenerationFailed, call_logs insert per attempt
-    // (done/error/aborted/suspended), cost via herald_model_prices (OpenRouter fetch).
-    // No cycles: gateway depends on repos + Sqlite only — never on HeraldService.
+    // | ProviderUnreachable | AssistantGenerationFailed, call_logs insert per attempt
+    // (done/error/aborted/suspended), cost via assistant_model_prices (OpenRouter fetch).
+    // No cycles: gateway depends on repos + Sqlite only — never on AssistantService.
   }),
 }) {}
 ```
@@ -851,54 +851,54 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
 Thin gateway repos (Effect.Service, Sqlite only, no business logic):
 
 ```typescript
-export class HeraldProvidersRepo extends Effect.Service<HeraldProvidersRepo>()("Lexa/HeraldProvidersRepo", {
-  // herald_providers(id,label,base_url,api_key,created_at,updated_at) — global, no project_id
+export class AssistantProvidersRepo extends Effect.Service<AssistantProvidersRepo>()("Lexa/AssistantProvidersRepo", {
+  // assistant_providers(id,label,base_url,api_key,created_at,updated_at) — global, no project_id
   // thin: create/getById/list/maskedList/maskedView/update/delete; update sets updated_at = datetime('now')
 }) {}
-export class HeraldModelsRepo extends Effect.Service<HeraldModelsRepo>()("Lexa/HeraldModelsRepo", {
-  // herald_models(id,provider_id→herald_providers ON DELETE CASCADE,model_id,kind CHECK openai_compatible|anthropic_compatible,priority,enabled)
+export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("Lexa/AssistantModelsRepo", {
+  // assistant_models(id,provider_id→assistant_providers ON DELETE CASCADE,model_id,kind CHECK openai_compatible|anthropic_compatible,priority,enabled)
   // thin: create/getById/listByProvider/listAll/update/delete
 }) {}
-export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Lexa/HeraldCallLogsRepo", {
-  // herald_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→herald_providers ON DELETE SET NULL,model,kind,status CHECK done|error|suspended|aborted,error_code,usage_in/out,cached_in,latency_ms,cost_cents,estimated,created_at)
+export class AssistantCallLogsRepo extends Effect.Service<AssistantCallLogsRepo>()("Lexa/AssistantCallLogsRepo", {
+  // assistant_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→assistant_providers ON DELETE SET NULL,model,kind,status CHECK done|error|suspended|aborted,error_code,usage_in/out,cached_in,latency_ms,cost_cents,estimated,created_at)
   // thin: insert/getById/listByProject/listByProvider/listByModel/listRecent
 }) {}
-export class HeraldModelPricesRepo extends Effect.Service<HeraldModelPricesRepo>()("Lexa/HeraldModelPricesRepo", {
-  // herald_model_prices(model PK,prompt_price,completion_price,cached_read_price,cached_write_price,updated_at) — OpenRouter cache, USD per 1M, price-sync upserts
+export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPricesRepo>()("Lexa/AssistantModelPricesRepo", {
+  // assistant_model_prices(model PK,prompt_price,completion_price,cached_read_price,cached_write_price,updated_at) — OpenRouter cache, USD per 1M, price-sync upserts
   // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,cached_read_price,cached_write_price,updated_at=datetime('now')
 }) {}
-// HeraldSettingsRepo after the squashed baseline: herald_settings dropped kind/base_url/api_key/model/vision_model —
+// AssistantSettingsRepo after the squashed baseline: assistant_settings dropped kind/base_url/api_key/model/vision_model —
 // now only search_provider, search_api_key, url_allowlist, engine, engine_switcher_enabled,
 // primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
-// price-sync: server/herald/price-sync.ts fetch OpenRouter → herald_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/herald/prices/sync).
+// price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
 ```
 
-### Lexa/Herald — assistant tier (server-side TanStack AI)
+### Lexa/Assistant — assistant tier (server-side TanStack AI)
 
 ```typescript
-export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa/HeraldTaskService", {
-  dependencies: [RuntimeRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default,
-                 HeraldPendingWritesRepo.Default, ProjectMemoryRepo.Default, RuntimeService.Default,
-                 Storage.Default, TaskRepo.Default, WikiRepo.Default, HeraldGateway.Default,
+export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
+  dependencies: [RuntimeRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default,
+                 AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, RuntimeService.Default,
+                 Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default,
                  TaskService.Default, CommentService.Default, WikiService.Default,
                  MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
     return {
       // enqueue: guard provider configured (ProviderNotConfigured), validate
       //   agent/skill/document/attachments, then runtimeRepo.createTask (queued).
-      //   Engine routing: resolve the project's herald_settings.engine ONCE
+      //   Engine routing: resolve the project's assistant_settings.engine ONCE
       //   per request (single settings read — the engine resolution seam).
-      //   engine='herald' → kind='herald' row, runtime-online guard skipped
+      //   engine='assistant' → kind='assistant' row, runtime-online guard skipped
       //   (unchanged). engine='blacksmith' → kind='blacksmith' row +
       //   NoRuntimeOnline guard; claim payload carries .agents/ bundles.
       //   skillId must be junction-bound to the resolved engine's agent —
       //   else SkillNotFound.
-      // runStream(taskId) → ReadableStream<StreamFrame>: claimHeraldTask
+      // runStream(taskId) → ReadableStream<StreamFrame>: claimAssistantTask
       //   (conditional UPDATE queued→running, kind-scoped), assemble prompt,
       //   stream chat(), persist at terminal points.
       // runChatStream(chatId, userId, req): same engine, no queue row; one
-      //   thread per (project, user); second concurrent stream → HeraldTaskActive.
-      //   ALWAYS the herald lane — project engine='blacksmith' →
+      //   thread per (project, user); second concurrent stream → AssistantTaskActive.
+      //   ALWAYS the assistant lane — project engine='blacksmith' →
       //   EngineNotSupportedForChat (409), checked before any provider work.
       // resetThread / testConnection / abortStream / abortChat.
     };
@@ -907,18 +907,18 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
 ```
 
 - **Provider seam:** `@tanstack/ai` is imported in exactly one file —
-  `server/herald/provider.ts` (adapters `openai_compatible` |
+  `server/assistant/provider.ts` (adapters `openai_compatible` |
   `anthropic_compatible`, both custom-`baseURL`-capable; `streamChat`,
   `completeText`, `listModels`, `testConnection`, `translateRunError`).
   Routes and services never import the SDK; an upgrade touches two files.
   Pinned exact (`0.47.x`, no caret).
-- **Prompt assembly** (`server/herald/prompt.ts`, cache-friendly order):
+- **Prompt assembly** (`server/assistant/prompt.ts`, cache-friendly order):
   `systemPrompts[0]` identity + markdown contract + `project_memory` block
   (Anthropic `cache_control` breakpoint), `[1]` agent+skill markdown
   (breakpoint), `[2]` prefetched repo content + document context; user
   message carries the instruction (+ rolling-summary segment when present).
   Object form `{content, metadata}` carries `cache_control`.
-- **Tools** (`server/herald/tools.ts`) are declared with
+- **Tools** (`server/assistant/tools.ts`) are declared with
   `toolDefinition().server(fn)` — the read toolset: `web_search` (Exa),
   SSRF-guarded `fetch_url` (allowlist-enforced, PDF-capable),
   `read_s3_file` via `Lexa/Storage`, PM reads (`get_task` accepts the
@@ -928,12 +928,12 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   (`get_all_tasks` — full markdown per task, 60k-char total cap;
   `get_all_wiki_pages` — ~8k per page, 60k total; `get_board_structure` —
   columns/swimlanes/milestones projection); bulk outputs carry
-  `truncated: true` when the cap dropped content. Round caps → `HeraldToolBudgetExceeded`: document-task
+  `truncated: true` when the cap dropped content. Round caps → `AssistantToolBudgetExceeded`: document-task
   streams `MAX_TOOL_ROUNDS=12`; freeform chat `MAX_CHAT_TOOL_ROUNDS=24` (the
   chat toolset chains reads — search_wiki → read_wiki_page → search_tasks —
   so it gets a wider budget; threaded through `StreamRunContext.toolRoundCap`).
-- **Write tools** (`server/herald/write-tools.ts`) are a second toolset,
-  gated by `herald_settings.write_tools` (comma-separated names, parsed by
+- **Write tools** (`server/assistant/write-tools.ts`) are a second toolset,
+  gated by `assistant_settings.write_tools` (comma-separated names, parsed by
   `parseWriteTools` — unknown names dropped, duplicates collapse; empty →
   read-only turn). 13 proposal-only tools (`create_task`, `update_task`,
   `move_task`, `archive_task`, `restore_task`, `add_comment`,
@@ -942,8 +942,8 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   `update_sprint`) — none apply a write directly; each validates refs and
   persists a pending row via `createWriteRecorder` (per-turn budget:
   `MAX_WRITES_PER_TURN=8`; over-budget proposals return a tool error).
-  Diffs are server-computed plain-text projections (`HeraldWriteDiff` in
-  `shared/herald.ts`, TipTap-aware text extraction, capped) — what the
+  Diffs are server-computed plain-text projections (`AssistantWriteDiff` in
+  `shared/assistant.ts`, TipTap-aware text extraction, capped) — what the
   approver sees; raw args ride the row for execution.
 - **Approval protocol:** when a turn queued write proposals, the stream ends
   at the suspend checkpoint instead of `done`: every pending row is emitted
@@ -952,14 +952,14 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   `approvals` pairs each row's `approvalId` with the provider `toolCallId`
   of the write call that proposed it (legacy string shape still read) — and
   the terminal frame is `suspended { batchId }`. The owner decides each row
-  via `POST /api/herald/approvals/:id/decide` (order pinned: sweep → fetch →
+  via `POST /api/assistant/approvals/:id/decide` (order pinned: sweep → fetch →
   owner check hidden as NotFound → lazy TTL flip → already-decided guard →
-  conditional decide). Resume (`POST /api/herald/chat/:chatId/resume` /
-  `POST /api/herald/threads/:documentType/:documentId/resume`) sweeps TTLs,
+  conditional decide). Resume (`POST /api/assistant/chat/:chatId/resume` /
+  `POST /api/assistant/threads/:documentType/:documentId/resume`) sweeps TTLs,
   locates the suspended batch via `findPendingBatch` (newest-first scan of
   the transcript, both marker shapes), refuses while approvals are
   outstanding (`APPROVALS_PENDING`), executes approved rows in seq order as
-  the herald actor (per-row domain failures recorded on the row via
+  the assistant actor (per-row domain failures recorded on the row via
   `markExecutionError` — never abort the batch), emits one `approval_result`
   frame per decided row right after the start frame (applied|failed with
   "CODE: message" error for executed rows, denied for rejected rows), clears
@@ -976,18 +976,18 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
 - **Reasoning frames:** `REASONING_MESSAGE_CONTENT` chunks from reasoning
   models stream as `{ type: "reasoning", delta }` frames, live and in order,
   interleaved with `delta`/`tool` frames. Ephemeral — never persisted into
-  `herald_threads` messages or the rolling summary; the transcript stores only
+  `assistant_threads` messages or the rolling summary; the transcript stores only
   the final assistant text. Models without reasoning simply never emit them
   (no capability flag).
 - **RUN_ERROR translation:** a `RUN_ERROR` chunk inside the stream is thrown
   through `translateRunError` — recognizable upstream failures map to catalog
   codes (`PROVIDER_AUTH_FAILED`, `PROVIDER_UNREACHABLE`), everything else to
-  `HERALD_GENERATION_FAILED`; the frame carries the mapped code, the task is
+  `ASSISTANT_GENERATION_FAILED`; the frame carries the mapped code, the task is
   failed via `RuntimeService.fail`. Upstream bodies never echoed raw.
 - **Stall watchdog:** every chunk race in `buildStream`'s consume loop runs
   against a fresh timer (`STREAM_STALL_TIMEOUT_MS = 90_000`, reset on ANY
   chunk). If no chunk arrives for 90s, the provider request is aborted and
-  `HeraldGenerationFailed("stream stalled — no response from provider")` is
+  `AssistantGenerationFailed("stream stalled — no response from provider")` is
   thrown — the normal failure path persists the partial text as a failed turn
   (`error` marker) so the UI shows Retry instead of an infinite spinner. The
   watchdog's own abort is flagged (`stalled`) so it is never misclassified as
@@ -995,7 +995,7 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   tools).
 - **Tool frame detail:** `tool` frames carry an optional `detail` — a short
   human-readable summary of the call INPUT (≤80 chars), built by
-  `toolCallDetail` (`server/herald/tools.ts`) from the validated args:
+  `toolCallDetail` (`server/assistant/tools.ts`) from the validated args:
   search_wiki → `Searching wiki for "<query>"`, read_wiki_page → `Reading
   wiki page "<slug>"`, search_tasks → `Searching tasks for "<query>"`,
   get_task → `Looking up task <key>`, web_search → `Searching the web for
@@ -1005,8 +1005,8 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   the name), so both frames are emitted at `TOOL_CALL_END` — call frame first,
   then result — each riding the same detail; unparseable or missing args yield
   no detail (name-only frames).
-- **Thread persistence floor:** `herald_threads` rows are read/written only
-  through `HeraldThreadRepo.loadThread(doc)` / `saveThread(doc, patch)` —
+- **Thread persistence floor:** `assistant_threads` rows are read/written only
+  through `AssistantThreadRepo.loadThread(doc)` / `saveThread(doc, patch)` —
   called directly at the terminal points (post-`done` persist, enqueue-time
   attachment pre-save, reset). A future D1 swap touches the repo only.
   Continue-vs-fresh: same doc + same agentId+skillId + existing row →
@@ -1014,9 +1014,9 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   reset a thread.
 - **No new services for chat upgrades:** edit/regenerate/retry
   (`truncateChatFrom`), pinning/list metadata (`updateChatMeta`, `listChats`)
-  and citation collection stay INSIDE `HeraldService` +
-  `HeraldThreadRepo` — no new Effect services/layers. Citations ride the
-  existing tool deps (`HeraldToolDeps.onCitation` callback) and are persisted
+  and citation collection stay INSIDE `AssistantService` +
+  `AssistantThreadRepo` — no new Effect services/layers. Citations ride the
+  existing tool deps (`AssistantToolDeps.onCitation` callback) and are persisted
   inline in the transcript JSON; there is no citations table.
 - **Rolling summary:** after `done`, if messages >40 entries or >64KB text
   bytes → summarize all-but-last-8 into `summary` (cheap completion call),
@@ -1030,12 +1030,12 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   by silent truncation, never errors. Resolved context rides an ephemeral
   system-prompt segment — never persisted to the thread, so transcripts stay
   byte-stable across turns.
-- **Engine resolution seam:** every Herald request reads the project's
-  settings row exactly once; `engine` ∈ `'herald'|'blacksmith'` routes the
+- **Engine resolution seam:** every Assistant request reads the project's
+  settings row exactly once; `engine` ∈ `'assistant'|'blacksmith'` routes the
   enqueue branch (kind discriminator + runtime-online guard) and gates chat
-  (always herald lane; blacksmith → `EngineNotSupportedForChat`). The
+  (always assistant lane; blacksmith → `EngineNotSupportedForChat`). The
   member-facing engine toggle is a personal overlay (client-side session
-  preference) — it never writes `herald_settings.engine`; that column is the
+  preference) — it never writes `assistant_settings.engine`; that column is the
   admin-written project default. The toggle renders only when
   `engine_switcher_enabled=1`.
 - **Vision resolution chain** (two outcomes; `vision_model` delegation
@@ -1045,7 +1045,7 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
   2. else attachments are rejected up front with `VisionNotConfigured`
      (409) — never a mid-stream failure.
 - **Two-agent seed constants:** the single `DEFAULT_AGENT` ('lexa') is
-  replaced by two builtin seed constants — `herald` ("Herald Agent",
+  replaced by two builtin seed constants — `assistant` ("Assistant Agent",
   companion-persona instructions) and `blacksmith` ("Blacksmith
   Agent") — mirrored by `0005_runtime_rename.sql`'s rebinding SQL. Skill availability
   per agent = `lexa_agent_skills` junction rows only (admin-editable); no
@@ -1143,13 +1143,13 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `PayloadTooLarge` | 413 | upload exceeds `LXK_MAX_UPLOAD_MB` (default 25) — route-level cap; the global body cap stays `BODY_TOO_LARGE` |
 | `AttachmentDeleteForbidden` | 403 | delete without uploader/admin authority |
 | `ShareLinkNotFound` | 404 | wiki share link resolve/revoke: unknown, expired, and revoked all fail identically (no existence oracle) |
-| `ProviderNotConfigured` | 409 | Herald generate/test/chat without saved provider settings for the project |
+| `ProviderNotConfigured` | 409 | Assistant generate/test/chat without saved provider settings for the project |
 | `ProviderAuthFailed` | 502 | upstream 401/403 (provider or Exa) |
 | `ProviderUnreachable` | 502 | provider network/timeout/DNS failure |
-| `HeraldGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream |
-| `HeraldToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| `HeraldTaskActive` | 409 | thread reset or second chat stream while a Herald stream is running |
-| `HeraldThreadNotFound` | 404 | missing thread row (`herald_threads`) |
+| `AssistantGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream |
+| `AssistantToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
+| `AssistantTaskActive` | 409 | thread reset or second chat stream while a Assistant stream is running |
+| `AssistantThreadNotFound` | 404 | missing thread row (`assistant_threads`) |
 | `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
 | `EngineNotSupportedForChat` | 409 | freeform chat while the project engine is `blacksmith` |
 | `ApprovalNotFound` | 404 | unknown approval id, or not the pending row's owner (owner mismatch hidden as NotFound) |
@@ -1170,8 +1170,8 @@ Defined in the error map but never raised by any REST handler — do not match o
 TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo, ActivityService
 FieldConfigService → FieldConfigRepo, ProjectRepo
 RuntimeService       → RuntimeRepo, RuntimeSessionRepo, RuntimeEventRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo, ActivityService
-HeraldTaskService  → RuntimeRepo, HeraldSettingsRepo, HeraldThreadRepo, HeraldPendingWritesRepo, ProjectMemoryRepo, RuntimeService, Storage, TaskRepo, WikiRepo, HeraldGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
-HeraldService      → HeraldChatService, HeraldTaskService (thin facade — delegates; see §Lexa/Herald)
+AssistantTaskService  → RuntimeRepo, AssistantSettingsRepo, AssistantThreadRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, RuntimeService, Storage, TaskRepo, WikiRepo, AssistantGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
+AssistantService      → AssistantChatService, AssistantTaskService (thin facade — delegates; see §Lexa/Assistant)
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo

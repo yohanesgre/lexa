@@ -229,7 +229,7 @@ months; one wire-format break already shipped). Core is web-standard JS — work
 clean. Official `@cloudflare/tanstack-ai` 0.2.1 exists (Workers AI binding + AI
 Gateway routing; published from `cloudflare/ai`, not the TanStack monorepo).
 
-Decision (2026-08-22): the chat() path IS the assistant tier — **Herald** (writing
+Decision (2026-08-22): the chat() path IS the assistant tier — **Assistant** (writing
 assistant and PM assistant). The daemon/opencode runtime remains for coding tasks —
 **Blacksmith**; both tiers are active and co-exist under the Runtimes umbrella (the
 shared queue/catalog: `runtime_*` tables feed both tiers). See `docs/ARCHITECTURE.md` §Runtimes — two active AI tiers.
@@ -246,7 +246,7 @@ POST /api/runtimes/tasks → queue → server-side chat():
   tools         = toolDefinition().server(fn) — web_search/fetch_url (SSRF-guarded),
                   get_task/search_tasks reads; PM memory injected as a prompt
                   block (read-only) — PM writes deferred, no approval gate shipped
-  middleware    = withPersistence → herald_threads (ModelMessage[] JSON)
+  middleware    = withPersistence → assistant_threads (ModelMessage[] JSON)
 → SSE stream back (RUN_STARTED → TEXT_MESSAGE_CONTENT* → RUN_FINISHED | RUN_ERROR)
 ```
 
