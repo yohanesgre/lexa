@@ -57,3 +57,40 @@ With `teamId = NULL` the second clause short-circuits **true** → eligible for 
 4. Should `status='offline'` block claims generally (couples to heartbeat cadence)?
 5. Is `runtime_events.team_id SET NULL` in scope (same widening class at re-register)?
 6. If team-delete UI gains a "reassign/detach runtimes" state, wireframe-first pass required.
+
+---
+
+# Addendum: `runtime_events.team_id` residual widening (architect, 2026-09-25)
+
+Claim **CONFIRMED**. Post-Option-A residual: 0007 blocks deleting a team while runtimes are bound, but an event can reference org A while the existing runtime row is scoped to org B (reassigned via PATCH); delete A → its latest event becomes `team_id NULL` → re-register inherits NULL → global. Not dead code.
+
+**Recommendation — (a), one condition:** `fromEvent.found && fromEvent.teamId !== null`. A NULL event means "no team information", not "explicit global", when an existing row can answer.
+
+- `server/services/runtime.service.ts:507` — `let teamId = input.teamId ?? null` (inference only when payload team null/absent).
+- `:512-514` — `if (fromEvent.found) teamId = fromEvent.teamId;` skips the existing-row fallback whenever any event exists, even `teamId: null`.
+- `server/repos/runtime-event.repo.ts:95` — latest event returns `{ found: true, teamId: row.team_id ?? null }`; comment `:80-82` calls "found + null" an explicit global choice — to be corrected for inference.
+- `migrations/0004_ui_gaps_w4.sql:8` + `docs/SCHEMA.md:684` — `SET NULL` is intentional and doc-matching; keep.
+
+Why not CASCADE: deletes operational history to fix a semantics bug. Why not fail-closed register: breaks the declared `NULL = global` first-install default and legacy no-event machines.
+
+```ts
+if (teamId === null) {
+  const fromEvent = yield* runtimeEventRepo.latestSetupEventTeam(input.machineId, input.provider);
+  if (fromEvent.found && fromEvent.teamId !== null) {
+    teamId = fromEvent.teamId;
+  } else if (input.id) {
+    const existing = yield* repo.findRuntimeById(input.id).pipe(
+      Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+    );
+    teamId = existing?.teamId ?? null;
+  }
+}
+```
+
+**Migration: none.** Code + comments only; orphaned events keep NULL.
+
+**Tests:** NULL event + existing scoped row keeps team (fails pre-fix); global event + no row → global; no event + existing row keeps team; no event + no row → global; PATCH `teamId: null` detach regression; raw org delete under FK ON still RESTRICT.
+
+**Docs:** `RUNTIMES.md` inference order + NULL-event semantics; `API.md` register + PATCH detach; `SCHEMA.md:684` wording (NULL = no binding / global on first install); `LAYERS.md` inference note.
+
+**Residual maintainer questions:** (1) keep "explicit global event overrides a scoped row"? needs sentinel/column — not recommended; (2) orphaned-event cleanup / team-name snapshot for audit; (3) register payload `?? null` conflates omitted with explicit null (daemon does not send it).

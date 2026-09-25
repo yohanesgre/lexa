@@ -1380,13 +1380,18 @@ Handled: event "issues" with payload.action closed | reopened | edited
 POST   /api/runtimes/register        (daemon child; x-runtime-token or Bearer)
 body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, model?, hostname?, teamId? }
 → 201 Runtime
-  teamId omitted/NULL = global runtime (superadmin-owned; claims any team's
-  project tasks). A non-null teamId scopes the runtime to that team's tasks.
+  teamId omitted/NULL = no explicit payload team; the server infers a binding.
+  A non-null teamId scopes the runtime to that team's tasks; global
+  (superadmin-owned) claims any team's project tasks.
   (R13: team admin registers for own team; superadmin any team + global.)
-  When teamId is omitted, the server applies the machine's latest setup event
-  (runtime_events.team_id) for this provider — the web wizard's team picker
-  binds the runtime without the daemon sending it; an explicit null teamId in
-  that event means Global.
+  Team resolution order: explicit payload team → the machine's latest setup
+  event (runtime_events.team_id) for this provider with a non-null
+  team (the web wizard's team picker binds the runtime without the daemon
+  sending it) → the existing runtime row's team on re-registration → global
+  (no team binding; the first-install default). A NULL team in that latest
+  event means "no team binding for inference", NOT explicit Global — it never
+  overrides an existing scoped row. Explicit global is a first install or
+  PATCH teamId: null.
 
 PATCH  /api/runtimes/:id              (browser)
 body { name?, provider?, agent?, model?, printLogs?, logLevel?,
@@ -1395,7 +1400,8 @@ body { name?, provider?, agent?, model?, printLogs?, logLevel?,
   | 403 FORBIDDEN (a teamId field requires superadmin)
   | 404 RUNTIME_NOT_FOUND | 404 TEAM_NOT_FOUND (unknown teamId)
   (team admin: own team's runtimes only; superadmin: all + global)
-teamId scopes the runtime to that team; null detaches it to a global runtime
+teamId scopes the runtime to that team; explicit null detaches it to a global runtime
+(a later register re-infers from the latest non-null event team, if any)
 (superadmin-owned, claims any team's tasks). The other fields are
 server-authoritative config. Edits apply to the daemon's next claim — no
 restart needed. provider switches

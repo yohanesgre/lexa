@@ -65,7 +65,7 @@ describe("RuntimeService.registerRuntime team binding", () => {
     expect(runtime.teamId).toBe("t1");
   });
 
-  it("treats an explicit Global event as a global runtime", async () => {
+  it("defaults to global for a NULL-team event on first install (no runtime row)", async () => {
     db.prepare(`INSERT INTO runtime_events (id, machine_id, action, agent_cli, team_id, status, created_at)
                 VALUES ('e1','m1','install','opencode',NULL,'completed','2026-01-01 10:00:00')`).run();
     const svc = makeService(db);
@@ -86,6 +86,18 @@ describe("RuntimeService.registerRuntime team binding", () => {
     const svc = makeService(db);
     const first = await Effect.runPromise(svc.registerRuntime({ ...base, teamId: "t1" }));
     expect(first.teamId).toBe("t1");
+    const again = await Effect.runPromise(svc.registerRuntime({ ...base, id: first.id }));
+    expect(again.teamId).toBe("t1");
+  });
+
+  it("keeps the existing runtime's team when a later setup event has a NULL team", async () => {
+    db.prepare(`INSERT INTO runtime_events (id, machine_id, action, agent_cli, team_id, status, created_at)
+                VALUES ('e1','m1','install','opencode','t1','completed','2026-01-01 10:00:00')`).run();
+    const svc = makeService(db);
+    const first = await Effect.runPromise(svc.registerRuntime({ ...base, teamId: "t1" }));
+    expect(first.teamId).toBe("t1");
+    db.prepare(`INSERT INTO runtime_events (id, machine_id, action, agent_cli, team_id, status, created_at)
+                VALUES ('e2','m1','update','opencode',NULL,'completed','2026-01-02 10:00:00')`).run();
     const again = await Effect.runPromise(svc.registerRuntime({ ...base, id: first.id }));
     expect(again.teamId).toBe("t1");
   });

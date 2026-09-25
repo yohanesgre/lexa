@@ -681,7 +681,7 @@ CREATE TABLE runtime_events (
                 CHECK (action IN ('install', 'update', 'remove')),
   agent_cli   TEXT NOT NULL CHECK (agent_cli IN ('opencode','hermes','command-code')),
   api_key_id  TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
-  team_id     TEXT REFERENCES organization(id) ON DELETE SET NULL,  -- team the installed runtime binds to; NULL = global
+  team_id     TEXT REFERENCES organization(id) ON DELETE SET NULL,  -- team the installed runtime binds to; NULL = no team binding (global on first install)
   status      TEXT NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending','claimed','completed','failed')),
   error       TEXT,
