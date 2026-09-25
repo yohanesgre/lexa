@@ -140,3 +140,31 @@ describe("TaskRepo GitHub issue title", () => {
     expect(linked.githubs[0]!.title).toBe("a || b, c");
   });
 });
+
+describe("TaskRepo.searchByTitle", () => {
+  it("returns one hit per task with per-task assignees, not merged across tasks", async () => {
+    seed(db);
+    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u2','joao@lexa.test','João','member')").run();
+    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u3','ana@lexa.test','Ana','member')").run();
+    const repo = makeRepo(db);
+    const create = (input: { id: string; title: string; position: string; number: number; key: string; assignees: string[] }) =>
+      Effect.runPromise(repo.create({
+        projectId: "p1",
+        columnId: "c1",
+        swimlaneId: "s1",
+        description: '{"type":"doc","content":[]}',
+        priority: "prio-1",
+        type: "type-1",
+        ...input,
+      }));
+    await create({ id: "t-search-a", title: "Searchable needle alpha", position: "b0", number: 1, key: "P-1", assignees: ["Maria", "João"] });
+    await create({ id: "t-search-b", title: "Searchable needle beta", position: "b1", number: 2, key: "P-2", assignees: ["Ana"] });
+    const hits = await Effect.runPromise(repo.searchByTitle("p1", "needle"));
+    // Without GROUP BY t.id the assignee join's GROUP_CONCAT collapses every
+    // matching task into ONE aggregate row with assignees merged across rows.
+    expect(hits.map((h) => h.id).sort()).toEqual(["t-search-a", "t-search-b"]);
+    const byId = new Map(hits.map((h) => [h.id, h]));
+    expect(byId.get("t-search-a")!.assignees.slice().sort()).toEqual(["João", "Maria"]);
+    expect(byId.get("t-search-b")!.assignees.slice().sort()).toEqual(["Ana"]);
+  });
+});

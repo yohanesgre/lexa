@@ -149,6 +149,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           db,
           `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
            WHERE t.project_id = ? AND t.title LIKE ? ESCAPE '\\'
+           GROUP BY t.id
            ORDER BY t.archived_at IS NOT NULL, t.updated_at DESC
            LIMIT ?`,
           projectId,

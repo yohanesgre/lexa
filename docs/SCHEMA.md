@@ -1200,10 +1200,12 @@ SET column_id = ?2,
 WHERE id = ?1
   AND (
     column_id = ?2             -- within-column reorder: count unchanged → skip WIP check
-    OR (SELECT COUNT(*) FROM tasks WHERE project_id = ?5 AND column_id = ?2)
+    OR (SELECT COUNT(*) FROM tasks WHERE project_id = ?5 AND column_id = ?2 AND archived_at IS NULL)
        < COALESCE((SELECT wip_limit FROM columns WHERE id = ?2), 9223372036854775807)
   );
 ```
+
+Normative: archived tasks do not count toward WIP limits.
 
 `rowsChanged = 0` after confirming the task exists → `WipLimitExceeded` (409). Webhook-driven moves use a separate statement without the count clause (robots bypass WIP limits — see LAYERS.md).
 
