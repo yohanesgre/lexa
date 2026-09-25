@@ -468,17 +468,22 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
                 });
               }
             }
-            // Column OR lane change emits; position-only reorders don't.
+            // Column OR lane change emits; position-only reorders don't. A
+            // clearDueAt that actually clears a due date also emits.
             const emitMoved = columnChanged || laneChanged;
+            const dueCleared = (target.clearDueAt ?? false) && task.dueAt !== null;
+            const rows: ActivityInput[] = [];
+            if (emitMoved) rows.push(movedActivity());
+            if (dueCleared) rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt, null), opts?.viaAssistant === true));
             const rest = [
               ...buildPlainMoveStmts(childMoves),
-              ...buildActivityStmts(taskId, emitMoved ? [movedActivity()] : []),
+              ...buildActivityStmts(taskId, rows),
             ];
             if (rest.length > 0) yield* batch(db, rest);
             const m = yield* taskRepo.findById(taskId).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
             );
-            return { task: m, emitMoved };
+            return { task: m, activityCount: rows.length };
           });
 
           // Old/new names for the moved message — captured before the move
@@ -514,7 +519,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
                   () => doMoveWithCascade
                 )
               );
-              const activity = r.emitMoved ? yield* activityService.listLatest(taskId, 1) : [] as ActivityEvent[];
+              const activity = r.activityCount > 0 ? yield* activityService.listLatest(taskId, r.activityCount) : [] as ActivityEvent[];
               return { task: r.task, activity };
             })
           );

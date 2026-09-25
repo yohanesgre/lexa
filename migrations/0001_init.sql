@@ -6,7 +6,7 @@
 -- upgraded databases) are no-ops on a fresh database and are intentionally
 -- absent. There are no tagged releases before 2026.1.0, so no live database
 -- carries the old _migrations rows — a fresh database applies exactly this
--- file. Future migrations continue at 0025_*.sql.
+-- file. Future migrations continue at 0007_*.sql.
 --
 -- Verified equivalent to applying 0001-0024 in order (schema + seed dump-diff).
 -- D1 note: PRAGMA defer_foreign_keys (same pattern as the old 0013) keeps the

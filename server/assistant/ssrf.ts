@@ -55,8 +55,10 @@ async function validateIpBlocks(hostname: string): Promise<void> {
   try {
     addrs = await lookup(hostname, { all: true });
   } catch {
-    return;
+    // Fail closed: an unresolvable host cannot be vetted, so it is blocked.
+    throw new UrlBlocked({ reason: "host could not be resolved" });
   }
+  if (addrs.length === 0) throw new UrlBlocked({ reason: "host could not be resolved" });
   for (const a of addrs) {
     const ip = a.address;
     if (isPrivateIpv4(ip) || isPrivateIpv6(ip)) {

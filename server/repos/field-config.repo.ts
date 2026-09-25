@@ -69,7 +69,6 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
           params.push(input.position);
         }
         if (sets.length === 0) return Effect.succeed(undefined);
-        sets.push("updated_at = datetime('now')");
         params.push(id);
         return run(db, `UPDATE ${table(kind)} SET ${sets.join(", ")} WHERE id = ?`, ...params).pipe(Effect.map(() => undefined));
       },

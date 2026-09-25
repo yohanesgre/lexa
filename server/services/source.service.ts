@@ -2,8 +2,9 @@ import { Effect } from "effect";
 import { SourceRepo } from "../repos/source.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { WikiRepo } from "../repos/wiki.repo";
+import { TaskRepo } from "../repos/task.repo";
 import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
-import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable } from "../api/errors";
+import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable, TaskNotFound } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
 import { extractText } from "../../shared/tiptap-text";
@@ -11,11 +12,12 @@ import { isPrivateIp, isPublicUrl } from "../ssrf";
 import type { DocumentSource, TipTapDoc, Actor, ActivityEvent } from "../../shared/types";
 
 export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceService", {
-  dependencies: [SourceRepo.Default, ProjectRepo.Default, WikiRepo.Default, ActivityService.Default],
+  dependencies: [SourceRepo.Default, ProjectRepo.Default, WikiRepo.Default, TaskRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* SourceRepo;
     const projectRepo = yield* ProjectRepo;
     const wikiRepo = yield* WikiRepo;
+    const taskRepo = yield* TaskRepo;
     const activityService = yield* ActivityService;
     const db = yield* Db;
 
@@ -140,11 +142,25 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
         documentId: string;
         kind: "wiki" | "external";
         ref: string;
-      }): Effect.Effect<{ source: DocumentSource; activity: ActivityEvent[] }, ProjectNotFound | WikiPageNotFound | SourceFetchError | SourceUnreachable | ConstraintViolation | DbError | RowNotFound> =>
+      }): Effect.Effect<{ source: DocumentSource; activity: ActivityEvent[] }, ProjectNotFound | WikiPageNotFound | TaskNotFound | SourceFetchError | SourceUnreachable | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
+          // The document the source attaches to must live in the SAME project:
+          // otherwise the row (and a task's source_added activity) writes into
+          // another project's timeline from a foreign document id.
+          if (input.documentType === "task") {
+            const task = yield* taskRepo.findById(input.documentId).pipe(
+              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId }))
+            );
+            if (task.projectId !== input.projectId) return yield* new TaskNotFound({ id: input.documentId });
+          } else {
+            const page = yield* wikiRepo.findById(input.documentId).pipe(
+              Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId }))
+            );
+            if (page.projectId !== input.projectId) return yield* new WikiPageNotFound({ id: input.documentId });
+          }
           let title = input.ref;
           if (input.kind === "wiki") {
             const page = yield* wikiRepo.findBySlug(input.projectId, input.ref).pipe(
@@ -174,11 +190,15 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
           }));
         }),
 
-      remove: (actor: Actor, id: string): Effect.Effect<{ activity: ActivityEvent[] }, SourceNotFound | ConstraintViolation | DbError | RowNotFound> =>
+      remove: (actor: Actor, projectId: string, id: string): Effect.Effect<{ activity: ActivityEvent[] }, SourceNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const source = yield* repo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new SourceNotFound({ id }))
           );
+          // Scope to the gated project: a foreign sourceId must not be
+          // deletable through another project's path. SourceNotFound keeps
+          // existence unobservable.
+          if (source.projectId !== projectId) return yield* new SourceNotFound({ id });
           if (source.documentType !== "task") {
             const n = yield* repo.delete(id);
             if (n === 0) return yield* new SourceNotFound({ id });

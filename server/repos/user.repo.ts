@@ -21,7 +21,7 @@ export class UserRepo extends Effect.Service<UserRepo>()("Lexa/UserRepo", {
       updateName: (id: string, name: string): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* queryFirst<{ id: string }>(db, `SELECT id FROM users WHERE id = ?`, id);
-          yield* run(db, `UPDATE users SET name = ? WHERE id = ?`, name, id);
+          yield* run(db, `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`, name, id);
         }),
 
       deleteById: (id: string): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>

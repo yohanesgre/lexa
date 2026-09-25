@@ -426,6 +426,24 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
+  it("same-cell move with clearDueAt emits a due-date field_changed row; a reorder still emits nothing", async () => {
+    seedDeadline(db);
+    const svc = makeService(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        // t2 (due 2026-07-01) stays in c-todo/s-backlog — clearing the due
+        // date must still be audited even though no column/lane changed.
+        const { task, activity } = yield* svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "s-backlog", clearDueAt: true });
+        expect(task.dueAt).toBeNull();
+        expect(activity.map((a) => a.type)).toEqual(["field_changed"]);
+        expect(activity[0]!.message).toBe("Due date cleared");
+        // Position-only reorder must not add an activity row.
+        const { activity: reorder } = yield* svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "s-backlog", beforeTaskId: "t1" });
+        expect(reorder).toEqual([]);
+      })
+    );
+  });
+
   it("a dueAt exactly equal to the lane's deadline is allowed on create, update, and move", async () => {
     seedDeadline(db);
     const svc = makeService(db);

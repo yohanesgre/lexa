@@ -9,6 +9,7 @@ import {
   resolveOpencodeSessionId,
   OPENCODE_SESSION_HEADER,
   translateRunError,
+  clientFacingErrorMessage,
   extractRetryAfter,
   extractUpstreamBody,
   isTransientUpstream,
@@ -556,5 +557,29 @@ describe("assistantLog levels", () => {
     }
     const warn = writes.find((s) => s.includes('"level":"WARN"') && s.includes("ProviderUnreachable"));
     expect(warn).toBeDefined();
+  });
+});
+
+describe("clientFacingErrorMessage", () => {
+  it("exposes providerMessage but never raw for provider-tagged errors", () => {
+    const msg = clientFacingErrorMessage({
+      _tag: "ProviderAuthFailed",
+      message: "raw-secret sk-live-123",
+      providerMessage: "Incorrect API key",
+      raw: "RAW_BODY",
+    });
+    expect(msg).toBe("Incorrect API key");
+    expect(msg).not.toContain("raw-secret");
+  });
+
+  it("falls back to a generic string when no providerMessage", () => {
+    expect(clientFacingErrorMessage({ _tag: "ProviderAuthFailed", message: "raw-secret", raw: "RAW" })).toBe("The AI provider rejected the API key");
+    expect(clientFacingErrorMessage({ _tag: "ProviderUnreachable", message: "raw", raw: "RAW" })).toBe("The AI provider could not be reached");
+    expect(clientFacingErrorMessage({ _tag: "AssistantGenerationFailed", message: "upstream response mapping failed: RAW" })).toBe("Assistant generation failed");
+  });
+
+  it("keeps the domain message for non-provider errors", () => {
+    expect(clientFacingErrorMessage(new Error("boom"))).toBe("boom");
+    expect(clientFacingErrorMessage(null)).toBe("Assistant generation failed");
   });
 });

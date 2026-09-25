@@ -105,8 +105,8 @@ describe("rowToTask", () => {
     expect(rowToTask(row).dueAt).toBeNull();
   });
 
-  it("builds githubs array from raw concat string", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0" };
+  it("builds githubs array from the JSON aggregate", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 42, repo: "owner/repo", syncedState: "open", pushFailed: 0, title: null }]) };
     const t = rowToTask(linked);
     expect(t.githubs).toEqual([{
       issueId: "ghi1", issueNumber: 42, repo: "owner/repo", title: null,
@@ -115,33 +115,49 @@ describe("rowToTask", () => {
     }]);
   });
 
-  it("parses the issue title (6th field), preserving commas in the title", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0,Fix a, b and c" };
+  it("parses the issue title, preserving commas in the title", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 42, repo: "owner/repo", syncedState: "open", pushFailed: 0, title: "Fix a, b and c" }]) };
     const t = rowToTask(linked);
     expect(t.githubs[0]!.title).toBe("Fix a, b and c");
   });
 
+  it("does not fabricate a phantom link when the title contains ||", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 42, repo: "owner/repo", syncedState: "open", pushFailed: 0, title: "a || b, c" }]) };
+    const t = rowToTask(linked);
+    expect(t.githubs).toHaveLength(1);
+    expect(t.githubs[0]!.title).toBe("a || b, c");
+  });
+
   it("treats an empty title field as null", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0," };
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 42, repo: "owner/repo", syncedState: "open", pushFailed: 0, title: "" }]) };
     const t = rowToTask(linked);
     expect(t.githubs[0]!.title).toBeNull();
   });
 
   it("builds multiple githubs", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r1,open,0||ghi2,2,r2,closed,0" };
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([
+      { issueId: "ghi1", issueNumber: 1, repo: "r1", syncedState: "open", pushFailed: 0, title: null },
+      { issueId: "ghi2", issueNumber: 2, repo: "r2", syncedState: "closed", pushFailed: 0, title: null },
+    ]) };
     const t = rowToTask(linked);
     expect(t.githubs).toHaveLength(2);
     expect(t.githubs[1]!).toMatchObject({ issueId: "ghi2", issueNumber: 2, repo: "r2", syncedState: "closed" });
   });
 
+  it("still accepts the legacy delimiter aggregate", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0,Legacy, title" };
+    const t = rowToTask(linked);
+    expect(t.githubs[0]!.title).toBe("Legacy, title");
+  });
+
   it("detects outOfSync when column githubState differs", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,open,0" };
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 1, repo: "r", syncedState: "open", pushFailed: 0, title: null }]) };
     const t = rowToTask(linked, "closed");
     expect(t.githubs[0]!.outOfSync).toBe(true);
   });
 
   it("uses column_github_state from row when arg not provided", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,closed,0", column_github_state: "open" };
+    const linked: TaskRow = { ...row, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 1, repo: "r", syncedState: "closed", pushFailed: 0, title: null }]), column_github_state: "open" };
     const t = rowToTask(linked);
     expect(t.githubs[0]!.outOfSync).toBe(true);
   });

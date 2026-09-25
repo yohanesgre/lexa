@@ -392,7 +392,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               if (i === attemptConfigs.length - 1) {
                 if (attempts.length > 1 || attemptConfigs.length > 1) {
                   gatewayLog("FATAL", `assistant stream all ${attemptConfigs.length} models failed (baseUrl)`, { projectId: input.projectId, total: attemptConfigs.length, lastError: (err as { message?: string }).message ?? String(err), attempts, errorTag: (err as { _tag?: string })._tag ?? null, status: diag.status, providerMessage: diag.providerMessage, retryAfter: diag.retryAfter });
-                  const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? a.raw.slice(0, 80)} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
+                  const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? "request failed"} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
                   const combined = `all models failed — ${detail}`.slice(0, 500);
                   throw new AssistantGenerationFailed({ message: combined, status: diag.status, providerMessage: diag.providerMessage, raw: diag.raw.slice(0, 500), attempts } as never);
                 }
@@ -535,7 +535,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               if (i === attemptConfigs.length - 1) {
                 if (attempts.length > 1 || attemptConfigs.length > 1) {
                   gatewayLog("FATAL", `assistant stream all ${attemptConfigs.length} models failed`, { projectId: input.projectId, total: attemptConfigs.length, lastError: (err as { message?: string }).message ?? String(err), lastStack: diag.stack, attempts, singleRetry: isSingleRetry, errorTag: (err as { _tag?: string })._tag ?? null, status: diag.status, providerMessage: diag.providerMessage, retryAfter: diag.retryAfter });
-                  const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? a.raw.slice(0, 80)} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
+                  const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? "request failed"} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
                   const combined = `all models failed — ${detail}`.slice(0, 500);
                   throw new AssistantGenerationFailed({ message: combined, status: diag.status, providerMessage: diag.providerMessage, raw: diag.raw.slice(0, 500), attempts, errorTag: (err as { _tag?: string })._tag ?? null } as never);
                 }
@@ -548,7 +548,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
           }
           if (attempts.length > 0) {
             const first = attempts[0]!;
-            const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? a.raw.slice(0, 80)} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
+            const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? "request failed"} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
             const combined = `all models failed — ${detail}`.slice(0, 500);
             const lastDiag = lastError ? diagFromError(lastError) : { status: first.status, providerMessage: first.providerMessage, raw: first.raw };
             throw new AssistantGenerationFailed({ message: combined, status: lastDiag.status, providerMessage: lastDiag.providerMessage, raw: lastDiag.raw.slice(0, 500), attempts, errorTag: (lastError as { _tag?: string })?._tag ?? null } as never);

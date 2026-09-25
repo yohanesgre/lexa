@@ -509,8 +509,24 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
   }
 }
 
+// Provider errors carry provider diagnostics (`raw`, `rawEvent`,
+// `upstreamBody`, `attempts`) used only for server-side logs. Only the fields
+// the API contract exposes cross the boundary.
+const PROVIDER_ERROR_TAGS = new Set(["ProviderAuthFailed", "ProviderUnreachable", "AssistantGenerationFailed"]);
+const PROVIDER_ERROR_DETAIL_KEYS = ["message", "status", "providerMessage", "retryAfter", "errorTag"] as const;
+
 export function errorDetails(error: { _tag: string } & Record<string, unknown>): Record<string, unknown> {
   const { _tag, ...rest } = error;
+  if (PROVIDER_ERROR_TAGS.has(_tag)) {
+    // `message` is Error.message (non-enumerable), so the spread misses it —
+    // read it off the error itself for the allowlist.
+    const source: Record<string, unknown> = { ...rest, message: (error as { message?: unknown }).message };
+    const details: Record<string, unknown> = {};
+    for (const key of PROVIDER_ERROR_DETAIL_KEYS) {
+      if (source[key] !== undefined) details[key] = source[key];
+    }
+    return details;
+  }
   if (_tag === "DbError" || _tag === "ConstraintViolation") {
     // Scrub raw SQLite text (message/cause) from client-visible details; raw
     // detail is preserved in server logs via http.ts respond()'s rawMessage.

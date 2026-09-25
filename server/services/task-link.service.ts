@@ -106,11 +106,17 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
           );
         }),
 
-      remove: (actor: Actor, linkId: string): Effect.Effect<{ activity: ActivityEvent[] }, TaskLinkNotFound | TaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
+      remove: (actor: Actor, taskId: string, linkId: string): Effect.Effect<{ activity: ActivityEvent[] }, TaskLinkNotFound | TaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const link = yield* repo.findById(linkId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskLinkNotFound({ id: linkId }))
           );
+          // Scope the link to the path task: a foreign/allochthonous linkId
+          // must not be deletable through another project's task.
+          // TaskLinkNotFound keeps existence unobservable.
+          if (link.fromTaskId !== taskId && link.toTaskId !== taskId) {
+            return yield* new TaskLinkNotFound({ id: linkId });
+          }
           const other = yield* taskRepo.findById(link.toTaskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: link.toTaskId }))
           );

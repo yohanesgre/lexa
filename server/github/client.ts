@@ -106,9 +106,32 @@ interface GithubIssueApiShape {
   body?: string;
 }
 
+const GITHUB_TIMEOUT_MS = 15_000;
+const GITHUB_MAX_RETRIES = 2;
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD"]);
+
+function retryAfterMs(res: Response, attempt: number): number {
+  const header = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(header) && header > 0) return Math.min(header * 1000, 8_000);
+  return 250 * 2 ** attempt;
+}
+
+// One network chokepoint for the client: every call is bounded by a timeout,
+// and idempotent (GET/HEAD) requests retry a small number of times on 429/5xx
+// with backoff that honors Retry-After. Non-idempotent calls (POST/PATCH) are
+// never retried — a duplicate write is worse than a surfaced error.
 async function githubFetch(config: GitHubConfig["Type"], path: string, init: RequestInit): Promise<Response> {
   requireConfig(config);
-  return fetch(`${API_BASE}${path}`, init);
+  const url = `${API_BASE}${path}`;
+  const method = (init.method ?? "GET").toUpperCase();
+  const retriable = IDEMPOTENT_METHODS.has(method);
+  let attempt = 0;
+  for (;;) {
+    const res = await fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(GITHUB_TIMEOUT_MS) });
+    if (!retriable || attempt >= GITHUB_MAX_RETRIES || (res.status !== 429 && res.status < 500)) return res;
+    await new Promise((resolve) => setTimeout(resolve, retryAfterMs(res, attempt)));
+    attempt++;
+  }
 }
 
 function requireConfig(config: GitHubConfig["Type"]): void {
@@ -140,8 +163,7 @@ async function installationIdFor(config: GitHubConfig["Type"], repo: string): Pr
   return String(body.id);
 }
 
-async function installationTokenFor(config: GitHubConfig["Type"], repo: string): Promise<string> {
-  const installationId = await installationIdFor(config, repo);
+async function installationTokenForId(config: GitHubConfig["Type"], installationId: string): Promise<string> {
   const cached = tokenCache.get(installationId);
   if (cached && cached.expiresAt > Date.now()) return cached.token;
   const jwt = await createAppJwt(config.appId, config.privateKey);
@@ -161,6 +183,46 @@ async function installationTokenFor(config: GitHubConfig["Type"], repo: string):
   const expiresMs = body.expires_at ? Date.parse(body.expires_at) : Date.now() + 60 * 60 * 1000;
   tokenCache.set(installationId, { token: body.token, expiresAt: expiresMs - 10 * 60 * 1000 });
   return body.token;
+}
+
+async function installationTokenFor(config: GitHubConfig["Type"], repo: string): Promise<string> {
+  return installationTokenForId(config, await installationIdFor(config, repo));
+}
+
+// App-token listing of this App's installations (the repo-search type-ahead
+// has no repo to resolve one from).
+async function listInstallations(config: GitHubConfig["Type"]): Promise<string[]> {
+  requireConfig(config);
+  const jwt = await createAppJwt(config.appId, config.privateKey);
+  const res = await githubFetch(config, "/app/installations?per_page=100", {
+    method: "GET",
+    headers: { ...API_HEADERS, Authorization: `Bearer ${jwt}` },
+  });
+  if (!res.ok) {
+    throw new GithubApiError({
+      message: `GitHub installation list failed: ${res.status} ${await res.text().catch(() => "")}`,
+    });
+  }
+  const body = (await res.json()) as { id?: number }[];
+  return body.filter((i): i is { id: number } => typeof i.id === "number").map((i) => String(i.id));
+}
+
+// Fallback for the repo search: every repo the App can see, filtered locally.
+async function installedRepoNames(config: GitHubConfig["Type"], installationIds: string[]): Promise<string[]> {
+  const names: string[] = [];
+  for (const id of installationIds) {
+    const token = await installationTokenForId(config, id);
+    const res = await githubFetch(config, "/installation/repositories?per_page=100", {
+      method: "GET",
+      headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) continue;
+    const body = (await res.json()) as { repositories?: { full_name?: string }[] };
+    for (const repo of body.repositories ?? []) {
+      if (typeof repo.full_name === "string") names.push(repo.full_name);
+    }
+  }
+  return names;
 }
 
 // ── Client service ──
@@ -275,16 +337,25 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
       searchRepos: (query: string): Effect.Effect<string[], GithubApiError> =>
         Effect.tryPromise({
           try: async () => {
-            const res = await githubFetch(config, `/search/repositories?q=${encodeURIComponent(query)}&per_page=8&sort=stars`, {
-              method: "GET",
-            });
-            if (!res.ok) {
-              throw new GithubApiError({
-                message: `GitHub search repos failed: ${res.status} ${await res.text().catch(() => "")}`,
+            const installations = await listInstallations(config);
+            const first = installations[0];
+            if (first !== undefined) {
+              const token = await installationTokenForId(config, first);
+              const res = await githubFetch(config, `/search/repositories?q=${encodeURIComponent(query)}&per_page=8&sort=stars`, {
+                method: "GET",
+                headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
               });
+              if (res.ok) {
+                const body = (await res.json()) as { items?: { full_name: string }[] };
+                return (body.items ?? []).map((i) => i.full_name);
+              }
             }
-            const body = (await res.json()) as { items?: { full_name: string }[] };
-            return (body.items ?? []).map((i) => i.full_name);
+            // Installation tokens may not be able to query the search API (or
+            // no installation exists yet): fall back to the App's installed
+            // repositories, filtered locally.
+            const all = await installedRepoNames(config, installations);
+            const q = query.trim().toLowerCase();
+            return all.filter((name) => name.toLowerCase().includes(q)).slice(0, 8);
           },
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),
@@ -350,7 +421,11 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
         }),
 
       verifyWebhookSignature: (rawBody: ArrayBuffer, signatureHeader: string | null): Effect.Effect<boolean, never> =>
-        Effect.promise(() => verifyWebhookSignature(rawBody, signatureHeader, config.webhookSecret)),
+        // Belt-and-braces: refuse up front when no secret is configured rather
+        // than relying on the HMAC(empty) guard alone.
+        config.webhookSecret.trim() === ""
+          ? Effect.succeed(false)
+          : Effect.promise(() => verifyWebhookSignature(rawBody, signatureHeader, config.webhookSecret)),
     };
   }),
 }) {}

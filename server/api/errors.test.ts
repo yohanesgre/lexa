@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
 import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, VisionNotConfigured, EngineNotSupportedForChat, errorToStatus, errorResponse, errorMessage, errorDetails } from "./errors";
 import { CommentNotFound, CommentInvalid } from "./errors";
+import { ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
 
@@ -56,5 +57,46 @@ describe("errorDetails scrubbing", () => {
     const response = errorResponse(asCatalogError(err));
     expect(JSON.stringify(response)).not.toContain("UNIQUE constraint failed");
     expect(response.error.code).toBe("CONSTRAINT");
+  });
+
+  it("strips provider diagnostics (raw/rawEvent/upstreamBody/attempts) from client details", () => {
+    const err = asCatalogError(new ProviderAuthFailed({
+      message: "provider 401",
+      status: 401,
+      providerMessage: "bad key",
+      raw: "RAW_UPSTREAM",
+      rawEvent: "RAW_EVENT",
+      upstreamBody: "UPSTREAM_BODY",
+      retryAfter: 3,
+      attempts: [{ model: "x" }],
+      errorTag: "openai",
+    }));
+    expect(errorDetails(err)).toEqual({
+      message: "provider 401",
+      status: 401,
+      providerMessage: "bad key",
+      retryAfter: 3,
+      errorTag: "openai",
+    });
+    const wire = JSON.stringify(errorResponse(err));
+    expect(wire).not.toContain("RAW_UPSTREAM");
+    expect(wire).not.toContain("RAW_EVENT");
+    expect(wire).not.toContain("UPSTREAM_BODY");
+    expect(wire).not.toContain("attempts");
+  });
+
+  it("applies the provider allowlist to every provider tag", () => {
+    const cases = [
+      new ProviderUnreachable({ message: "x", raw: "r", rawEvent: "e", upstreamBody: "b", attempts: [1] }),
+      new AssistantGenerationFailed({ message: "x", raw: "r", rawEvent: "e", upstreamBody: "b", attempts: [1] }),
+    ];
+    for (const err of cases) {
+      const details = errorDetails(asCatalogError(err));
+      expect("raw" in details).toBe(false);
+      expect("rawEvent" in details).toBe(false);
+      expect("upstreamBody" in details).toBe(false);
+      expect("attempts" in details).toBe(false);
+      expect(details.message).toBe("x");
+    }
   });
 });

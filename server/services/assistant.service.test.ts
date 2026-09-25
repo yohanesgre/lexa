@@ -49,6 +49,18 @@ vi.mock("../assistant/provider", () => ({
   },
   testConnection: async () => undefined,
   translateRunError: (e: unknown) => e,
+  clientFacingErrorMessage: (err: unknown) => {
+    const e = err as { _tag?: string; message?: unknown; providerMessage?: unknown } | null;
+    const tag = typeof e?._tag === "string" ? e._tag : "";
+    const providerMessage = typeof e?.providerMessage === "string" && e.providerMessage.length > 0 ? e.providerMessage : null;
+    if (tag === "ProviderAuthFailed" || tag === "ProviderUnreachable" || tag === "AssistantGenerationFailed") {
+      if (providerMessage) return providerMessage.slice(0, 500);
+      if (tag === "ProviderAuthFailed") return "The AI provider rejected the API key";
+      if (tag === "ProviderUnreachable") return "The AI provider could not be reached";
+      return "Assistant generation failed";
+    }
+    return typeof e?.message === "string" && e.message.length > 0 ? e.message : "Assistant generation failed";
+  },
 }));
 
 describe("Assistant toolset", () => {
@@ -738,12 +750,12 @@ describe("stream stall watchdog", () => {
       const frames = await pending;
       const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
       expect(err?.code).toBe("ASSISTANT_GENERATION_FAILED");
-      expect(err?.message).toBe("stream stalled — no response from provider");
+      expect(err?.message).toBe("Assistant generation failed");
       const last = (ctx.persistCalls.at(-1)! as Array<{ role?: string; content?: unknown; error?: unknown }>).at(-1)!;
       expect(last).toMatchObject({
         role: "assistant",
         content: "par",
-        error: { code: "ASSISTANT_GENERATION_FAILED", message: "stream stalled — no response from provider" },
+        error: { code: "ASSISTANT_GENERATION_FAILED", message: "Assistant generation failed" },
       });
     } finally {
       vi.useRealTimers();

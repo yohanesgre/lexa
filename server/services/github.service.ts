@@ -185,15 +185,23 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           const incomingState = action === "closed" ? "closed" : "open";
 
           // 3. ECHO SUPPRESSION (per link): we already pushed this exact
-          //    state → skip.
+          //    state → deliberate no-op; record the delivery (post-success)
+          //    so GitHub stops retrying it.
           const link = task.githubs.find((g) => g.issueId === nodeId);
-          if (link && link.syncedState === incomingState) return;
+          if (link && link.syncedState === incomingState) {
+            yield* webhookEvents.recordDelivery(deliveryId);
+            return;
+          }
 
           // 4. Column lookup by explicit mapping — never by name
           //    (renaming "Done" → "Shipped" can't break sync).
           const columns = yield* columnRepo.findByProject(task.projectId);
           const target = columns.find((c) => c.githubState === incomingState);
-          if (!target) return; // no mapped column → no-op
+          if (!target) {
+            // No mapped column → deliberate no-op; the delivery succeeded.
+            yield* webhookEvents.recordDelivery(deliveryId);
+            return;
+          }
 
           // 5. Webhook moves bypass WIP limits and required_fields
           //    (log-and-skip semantics: robots ≠ humans). Move + synced-state

@@ -22,8 +22,27 @@ export const PUBLIC_URL = resolvePublicUrl(getEnv());
 const authIpBuckets = new Map<string, { count: number; windowStart: number }>();
 const AUTH_IP_LIMIT = 120;
 const AUTH_IP_WINDOW_MS = 60_000;
+// Mirrors server/api/rate-limit.ts: sweep expired buckets once a Map crosses
+// this size so an attacker cycling keys can't grow it without bound.
+const AUTH_SWEEP_THRESHOLD = 10_000;
+
+export function sweepAuthLimiters(now: number = Date.now()): void {
+  for (const [k, b] of authIpBuckets) {
+    if (now - b.windowStart >= AUTH_IP_WINDOW_MS) authIpBuckets.delete(k);
+  }
+  for (const [k, b] of loginBuckets) {
+    if (b.lockedUntil <= now && now - b.windowStart > LOGIN_WINDOW_MS) loginBuckets.delete(k);
+  }
+}
+
+// Test-only observability for the sweep bounds.
+export function authLimiterSizes(): { ip: number; login: number } {
+  return { ip: authIpBuckets.size, login: loginBuckets.size };
+}
+
 export function authIpLimiter(ip: string): { ok: boolean; retryAfterSec: number } {
   const now = Date.now();
+  if (authIpBuckets.size >= AUTH_SWEEP_THRESHOLD) sweepAuthLimiters(now);
   const bucket = authIpBuckets.get(ip);
   if (!bucket || now - bucket.windowStart >= AUTH_IP_WINDOW_MS) {
     authIpBuckets.set(ip, { count: 1, windowStart: now });
@@ -51,6 +70,7 @@ const loginBuckets = new Map<string, LoginBucket>();
 export const loginLimiter = {
   check(email: string): { ok: boolean; retryAfterSec: number } {
     const now = Date.now();
+    if (loginBuckets.size >= AUTH_SWEEP_THRESHOLD) sweepAuthLimiters(now);
     const bucket = loginBuckets.get(email.toLowerCase());
     if (!bucket) return { ok: true, retryAfterSec: 0 };
     if (bucket.lockedUntil > now) {
@@ -79,6 +99,89 @@ export const loginLimiter = {
     loginBuckets.delete(email.toLowerCase());
   },
 };
+
+export type ReadBodyResult = { ok: true; bytes: ArrayBuffer } | { ok: false };
+
+// Streams the request body up to maxBytes; ok:false → caller replies 413.
+// Shared by the Bun host (server/entry.ts) and the Workers entry so the
+// /api/auth/* body cap is identical on both.
+export async function readBodyWithLimit(req: Request, maxBytes: number): Promise<ReadBodyResult> {
+  const reader = req.body?.getReader();
+  if (!reader) return { ok: true, bytes: new ArrayBuffer(0) };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > maxBytes) return { ok: false };
+      chunks.push(value);
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes: out.buffer as ArrayBuffer };
+}
+
+export interface AuthSurfaceDeps {
+  ip: string;
+  handler: (req: Request) => Promise<Response>;
+  maxBodyBytes: number;
+}
+
+// Shared /api/auth/* middleware for both hosts: per-IP throttle → streamed
+// body cap → sign-in email throttle → better-auth handler. The caller applies
+// its own security headers. The reconstructed request only re-attaches a body
+// when the original had one — better-call treats a present-but-empty body as a
+// body and 415s bodyless GETs (e.g. get-session).
+export async function handleAuthSurface(req: Request, deps: AuthSurfaceDeps): Promise<Response> {
+  const ipVerdict = authIpLimiter(deps.ip);
+  if (!ipVerdict.ok) {
+    return new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many requests — try again later" } }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": String(ipVerdict.retryAfterSec) },
+    });
+  }
+  const read = await readBodyWithLimit(req, deps.maxBodyBytes);
+  if (!read.ok) {
+    const path = new URL(req.url).pathname;
+    console.warn(`[Auth] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
+    return new Response(JSON.stringify({ error: { code: "BODY_TOO_LARGE", message: "Request body too large" } }), {
+      status: 413,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  const authReq = new Request(req.url, {
+    method: req.method,
+    headers: req.headers,
+    ...(req.body ? { body: read.bytes as BodyInit } : {}),
+  });
+  if (new URL(req.url).pathname === "/api/auth/sign-in/email" && req.method === "POST") {
+    let email = "";
+    try {
+      email = String(((await authReq.clone().json()) as { email?: unknown })?.email ?? "");
+    } catch {}
+    if (email) {
+      const verdict = loginLimiter.check(email);
+      if (!verdict.ok) {
+        return new Response(
+          JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many login attempts — try again later" } }),
+          { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(verdict.retryAfterSec) } }
+        );
+      }
+      const res = await deps.handler(authReq);
+      if (res.status === 401) loginLimiter.recordFailure(email);
+      else if (res.status === 200) loginLimiter.recordSuccess(email);
+      return res;
+    }
+  }
+  return deps.handler(authReq);
+}
 
 const adminAc = createAccessControl({
   user: ["create", "list", "set-role", "ban", "delete", "set-password", "set-email", "get", "update", "impersonate"],

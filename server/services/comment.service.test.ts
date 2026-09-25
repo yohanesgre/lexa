@@ -99,17 +99,21 @@ describe("CommentService", () => {
       Effect.gen(function* () {
         const { comment } = yield* svc.create("t1", maria, BODY);
         // non-author → CommentEditForbidden
-        const forbidden = yield* Effect.either(svc.edit(comment.id, idOf("u2"), BODY));
+        const forbidden = yield* Effect.either(svc.edit(comment.id, idOf("u2"), BODY, "t1"));
         expect(Either.isLeft(forbidden)).toBe(true);
         if (Either.isLeft(forbidden)) expect(forbidden.left).toBeInstanceOf(CommentEditForbidden);
+        // comment belongs to a different task → TaskNotFound-equivalent (CommentNotFound)
+        const wrongTask = yield* Effect.either(svc.edit(comment.id, idOf("u1"), BODY, "t2"));
+        expect(Either.isLeft(wrongTask)).toBe(true);
+        if (Either.isLeft(wrongTask)) expect(wrongTask.left).toBeInstanceOf(CommentNotFound);
         // author → editedAt set, no new activity row
-        const edited = yield* Effect.either(svc.edit(comment.id, idOf("u1"), { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "edited" }] }] }));
+        const edited = yield* Effect.either(svc.edit(comment.id, idOf("u1"), { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "edited" }] }] }, "t1"));
         expect(Either.isRight(edited)).toBe(true);
         if (Either.isRight(edited)) expect(edited.right.editedAt).not.toBeNull();
-        const commented = yield* Effect.either(svc.edit(comment.id, idOf("u1"), EMPTY));
+        const commented = yield* Effect.either(svc.edit(comment.id, idOf("u1"), EMPTY, "t1"));
         expect(Either.isLeft(commented)).toBe(true);
         if (Either.isLeft(commented)) expect(commented.left).toBeInstanceOf(CommentInvalid);
-        const missing = yield* Effect.either(svc.edit(9999, idOf("u1"), BODY));
+        const missing = yield* Effect.either(svc.edit(9999, idOf("u1"), BODY, "t1"));
         expect(Either.isLeft(missing)).toBe(true);
         if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(CommentNotFound);
         const count = (db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE type = 'commented'").get() as { n: number }).n;
@@ -125,11 +129,11 @@ describe("CommentService", () => {
       Effect.gen(function* () {
         const { comment: c1 } = yield* svc.create("t1", maria, BODY);
         // plain member (u3) → CommentDeleteForbidden
-        const forbidden = yield* Effect.either(svc.remove(c1.id, idOf("u3"), "p1"));
+        const forbidden = yield* Effect.either(svc.remove(c1.id, idOf("u3"), "p1", "t1"));
         expect(Either.isLeft(forbidden)).toBe(true);
         if (Either.isLeft(forbidden)) expect(forbidden.left).toBeInstanceOf(CommentDeleteForbidden);
         // project admin (u2) → ok, soft-deleted + 'comment_deleted' activity
-        const removed = yield* Effect.either(svc.remove(c1.id, idOf("u2"), "p1"));
+        const removed = yield* Effect.either(svc.remove(c1.id, idOf("u2"), "p1", "t1"));
         expect(Either.isRight(removed)).toBe(true);
         if (Either.isRight(removed)) {
           expect(removed.right.comment.deletedAt).not.toBeNull();
@@ -138,16 +142,20 @@ describe("CommentService", () => {
         }
         // author can delete her own
         const { comment: c2 } = yield* svc.create("t1", maria, BODY);
-        const authorRemoved = yield* Effect.either(svc.remove(c2.id, idOf("u1"), "p1"));
+        const authorRemoved = yield* Effect.either(svc.remove(c2.id, idOf("u1"), "p1", "t1"));
         expect(Either.isRight(authorRemoved)).toBe(true);
         if (Either.isRight(authorRemoved)) expect(authorRemoved.right.comment.deletedAt).not.toBeNull();
+        // comment belongs to a different task → CommentNotFound, even for the author
+        const wrongTask = yield* Effect.either(svc.remove(c2.id, idOf("u1"), "p1", "t2"));
+        expect(Either.isLeft(wrongTask)).toBe(true);
+        if (Either.isLeft(wrongTask)) expect(wrongTask.left).toBeInstanceOf(CommentNotFound);
         // missing id → CommentNotFound
-        const missing = yield* Effect.either(svc.remove(9999, idOf("u1"), "p1"));
+        const missing = yield* Effect.either(svc.remove(9999, idOf("u1"), "p1", "t1"));
         expect(Either.isLeft(missing)).toBe(true);
         if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(CommentNotFound);
         // agent identity (no userId) can never delete
         const { comment: c3 } = yield* svc.create("t1", maria, BODY);
-        const agent = yield* Effect.either(svc.remove(c3.id, idOf(null), "p1"));
+        const agent = yield* Effect.either(svc.remove(c3.id, idOf(null), "p1", "t1"));
         expect(Either.isLeft(agent)).toBe(true);
         if (Either.isLeft(agent)) expect(agent.left).toBeInstanceOf(CommentDeleteForbidden);
       })

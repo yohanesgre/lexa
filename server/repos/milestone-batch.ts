@@ -42,19 +42,19 @@ export interface MilestoneArchiveCascadeInput {
 export function buildMilestoneArchiveCascadeBatch(input: MilestoneArchiveCascadeInput): BatchStmt[] {
   const stmts: BatchStmt[] = [];
   stmts.push({
-    sql: `UPDATE milestones SET archived_at = ?, updated_at = ? WHERE id = ?`,
-    params: [input.archivedAt, input.archivedAt, input.milestoneId],
+    sql: `UPDATE milestones SET archived_at = ?, updated_at = datetime('now') WHERE id = ?`,
+    params: [input.archivedAt, input.milestoneId],
   });
   for (const s of input.swimlanes) {
     stmts.push({
-      sql: `UPDATE swimlanes SET archived_at = ?, updated_at = ? WHERE id = ?`,
-      params: [input.archivedAt, input.archivedAt, s.id],
+      sql: `UPDATE swimlanes SET archived_at = ? WHERE id = ?`,
+      params: [input.archivedAt, s.id],
     });
   }
   for (const t of input.tasks) {
     stmts.push({
-      sql: `UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`,
-      params: [input.archivedAt, input.archivedAt, t.id],
+      sql: `UPDATE tasks SET archived_at = ?, updated_at = datetime('now') WHERE id = ?`,
+      params: [input.archivedAt, t.id],
     });
     stmts.push({
       sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)

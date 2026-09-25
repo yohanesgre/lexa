@@ -35,6 +35,10 @@ export async function verifyWebhookSignature(
   signatureHeader: string | null,
   secret: string
 ): Promise<boolean> {
+  // An empty/blank secret must never verify: HMAC("") is computable by
+  // anyone, so accepting it would be a fail-open webhook (accept forged
+  // payloads when the secret is unset).
+  if (!secret || secret.trim() === "") return false;
   if (!signatureHeader || !signatureHeader.startsWith("sha256=")) return false;
   const expected = signatureHeader.slice("sha256=".length).toLowerCase();
   const key = await crypto.subtle.importKey(

@@ -67,7 +67,7 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       const request = yield* HttpServerRequest;
       const path = request.url.split(/[?#]/)[0] ?? "";
 
-      const isSetup = path.startsWith("/api/setup");
+      const isSetup = path === "/api/setup" || path.startsWith("/api/setup/");
       const isHealth = path === "/api/health";
       // Public wiki share reads: token IS the auth (capability URL). Skipped by
       // AUTH below but still rate-limited — with the dedicated stricter

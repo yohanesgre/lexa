@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { marked, type Token, type Tokens } from "marked";
 import hljs from "highlight.js/lib/common";
 import { withKeys } from "./withKeys";
+import { safeHref } from "../../shared/safe-href";
 
 // Assistant-transcript markdown → React elements. LLM output is UNTRUSTED,
 // so this never touches dangerouslySetInnerHTML EXCEPT for highlighted code:
@@ -28,11 +29,6 @@ export function highlightCode(code: string, lang?: string): string {
   } catch {
     return code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
-}
-
-function safeHref(href: unknown): string | null {
-  if (typeof href !== "string") return null;
-  return /^https?:\/\//i.test(href) ? href : null;
 }
 
 export const BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4"]);
