@@ -8,6 +8,7 @@ import {
   resolveDatabasePath,
   resolvePublicUrl,
   resolveTrustedOrigins,
+  resolveTrustedProxyCidrs,
 } from "./env";
 
 describe("getEnv", () => {
@@ -88,6 +89,15 @@ describe("resolvers", () => {
       LXK_TRUSTED_ORIGINS: "https://a.test,, ,https://b.test",
     });
     expect(origins).toEqual(["https://x.test", "https://a.test", "https://b.test"]);
+  });
+
+  it("resolveTrustedProxyCidrs splits, trims and dedupes; empty → []", () => {
+    expect(resolveTrustedProxyCidrs({})).toEqual([]);
+    expect(resolveTrustedProxyCidrs({ LXK_TRUSTED_PROXY_CIDRS: "" })).toEqual([]);
+    expect(resolveTrustedProxyCidrs({ LXK_TRUSTED_PROXY_CIDRS: "10.0.0.0/8, 192.168.0.0/16 ,10.0.0.0/8," })).toEqual([
+      "10.0.0.0/8",
+      "192.168.0.0/16",
+    ]);
   });
 });
 

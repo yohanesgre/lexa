@@ -52,11 +52,11 @@ INSERT INTO api_keys (id, name, key_hash) VALUES ('k1', 'test-admin', '${adminHa
 INSERT INTO runtimes (id, name, provider, model, status, agent, print_logs, log_level) VALUES
   ('rt1', 'dev', 'opencode', 'claude', 'online', 'lexa', 0, 'INFO'),
   ('rt2', 'dev2', 'opencode', 'claude', 'online', 'lexa', 0, 'INFO');
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'PK', 2);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1', 'p1', 'Main', 0, 'backlog');
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
-  ('t1', 'p1', 'c1', 's1', 'T1', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at, key, number) VALUES
+  ('t1', 'p1', 'c1', 's1', 'T1', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00', 'PK-1', 1);
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES
   ('a1', 'Test Agent', '', 'Agent instructions', 0);
 INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES
@@ -214,5 +214,23 @@ describe("POST /api/runtimes/sessions/reset", () => {
   it("no 404s: resetting a missing mapping is 204", async () => {
     const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "ghost", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
+  });
+});
+
+describe("ticket-key documentId alias", () => {
+  it("resolves PREFIX-n on upsert, list and delete", async () => {
+    const put = await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody({ runtimeId: "rt2", documentId: "PK-1" }) }));
+    expect(put.status).toBe(204);
+
+    const list = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=PK-1"));
+    expect(list.status).toBe(200);
+    const mine = (await list.json()).data.filter((r: { runtimeId: string }) => r.runtimeId === "rt2");
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.documentId).toBe("t1");
+
+    const del = await handler(adminReq("/api/runtimes/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "PK-1", runtimeId: "rt2" }) }));
+    expect(del.status).toBe(204);
+    const after = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
+    expect((await after.json()).data.some((r: { runtimeId: string }) => r.runtimeId === "rt2")).toBe(false);
   });
 });

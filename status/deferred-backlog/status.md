@@ -1,3 +1,3 @@
 state: PLAN
-ts: 1790286600
-msg: waves 2-3 running in repo-coverage-2; coverage backlog completes there; open decisions remain
+ts: 1790292600
+msg: coverage waves complete; PREFIX-n + cf-IP implemented (PR pending); runtimes.team_id pick still pending

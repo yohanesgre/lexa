@@ -18,6 +18,7 @@ export interface RuntimeEnv {
   LXK_ENV?: string | undefined;
   LXK_PUBLIC_URL?: string | undefined;
   LXK_TRUSTED_ORIGINS?: string | undefined;
+  LXK_TRUSTED_PROXY_CIDRS?: string | undefined;
   LXK_ADMIN_EMAILS?: string | undefined;
   // GitHub
   GITHUB_APP_ID?: string | undefined;
@@ -71,6 +72,7 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_ENV: source.LXK_ENV,
     LXK_PUBLIC_URL: source.LXK_PUBLIC_URL,
     LXK_TRUSTED_ORIGINS: source.LXK_TRUSTED_ORIGINS,
+    LXK_TRUSTED_PROXY_CIDRS: source.LXK_TRUSTED_PROXY_CIDRS,
     LXK_ADMIN_EMAILS: source.LXK_ADMIN_EMAILS,
     GITHUB_APP_ID: source.GITHUB_APP_ID,
     GITHUB_PRIVATE_KEY: source.GITHUB_PRIVATE_KEY,
@@ -115,6 +117,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_ENV: s("LXK_ENV"),
     LXK_PUBLIC_URL: s("LXK_PUBLIC_URL"),
     LXK_TRUSTED_ORIGINS: s("LXK_TRUSTED_ORIGINS"),
+    LXK_TRUSTED_PROXY_CIDRS: s("LXK_TRUSTED_PROXY_CIDRS"),
     LXK_ADMIN_EMAILS: s("LXK_ADMIN_EMAILS"),
     GITHUB_APP_ID: s("GITHUB_APP_ID"),
     GITHUB_PRIVATE_KEY: s("GITHUB_PRIVATE_KEY"),
@@ -208,6 +211,21 @@ export function resolveTrustedOrigins(env: RuntimeEnv, publicUrl: string = resol
       ? [publicUrl, "http://localhost:5173", ...extra]
       : [publicUrl, ...extra];
   return [...new Set(origins)];
+}
+
+// Comma-separated IPv4/IPv6 CIDRs (or bare IPs) whose peer addresses are
+// allowed to contribute a trusted `cf-connecting-ip` forwarding header.
+// Unset/empty means loopback-only trust. Malformed entries are ignored by the
+// matcher (server/api/rate-limit.ts) — never a boot failure.
+export function resolveTrustedProxyCidrs(env: RuntimeEnv): string[] {
+  return [
+    ...new Set(
+      (env.LXK_TRUSTED_PROXY_CIDRS ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0)
+    ),
+  ];
 }
 
 // ─── Workers / Bun dispatch ──────────────────────────────────────────────

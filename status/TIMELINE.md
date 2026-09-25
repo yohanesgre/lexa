@@ -201,3 +201,7 @@
 2026-09-25 | deferred-followups | DONE | PR #103 open (merge pending user); report written | status/deferred-followups/report.md
 2026-09-25 | repo-coverage-2 | PR | pushed; PR #104 open to main; gate 200/1772; reviewer PASS | https://github.com/yohanesgre/lexa/pull/104
 2026-09-25 | repo-coverage-2 | DONE | PR #104 open (merge pending user); report written | status/repo-coverage-2/report.md
+2026-09-25 | repo-coverage-2 | DONE | PR #104 squash-merged to main (b46576c); merge resolved | https://github.com/yohanesgre/lexa/pull/104
+2026-09-25 | open-decisions | PLAN | opened; worktree .worktrees/open-decisions branch omos/open-decisions @b46576c; PREFIX-n + cf-IP lanes; runtimes.team_id design persisted | status/open-decisions/plan.md
+2026-09-25 | open-decisions | PR | pushed; PR #106 open to main; full suite 201/1793; reviewer PASS | https://github.com/yohanesgre/lexa/pull/106
+2026-09-25 | open-decisions | DONE | PR #106 open (merge pending user); report written | status/open-decisions/report.md

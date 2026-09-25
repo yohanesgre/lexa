@@ -7,8 +7,8 @@ import { AuthIdentity, AuthIdentityShape } from "./auth";
 import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
 import { bodyCapFor, resolveStorageConfig } from "../storage/config";
-import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath, shareRateLimiter } from "./rate-limit";
-import { getEnv, type RuntimeEnv } from "../env";
+import { apiRateLimiter, isRateLimitExemptPath, resolveClientIp, shareRateLimiter } from "./rate-limit";
+import { getEnv, resolveTrustedProxyCidrs, type RuntimeEnv } from "../env";
 import { storageEnvFrom } from "../runtime-env";
 
 export interface MiddlewareSession {
@@ -62,6 +62,7 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
   // body pre-check on attachment-upload paths so a legit large upload reaches
   // the route, which enforces the exact per-file cap.
   const storageCfg = resolveStorageConfig(storageEnvFrom(env), dirname(dbPath));
+  const trustedProxyCidrs = resolveTrustedProxyCidrs(env);
   return HttpApiBuilder.middleware((httpApp) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest;
@@ -93,8 +94,7 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       // stamped on the reconstructed Request — any inbound x-lexa-remote-ip is
       // deleted first.
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
-      const cfIp = request.headers["cf-connecting-ip"];
-      const ip = stampedIp && isPrivateIp(stampedIp) && cfIp ? cfIp : (stampedIp || cfIp || "unknown");
+      const ip = resolveClientIp(stampedIp, request.headers["cf-connecting-ip"], trustedProxyCidrs);
       const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
       if (!isRateLimitExemptPath(path) && !limiter.check(ip)) {
         const retryAfter = Math.ceil(limiter.retryAfterMs(ip) / 1000);
