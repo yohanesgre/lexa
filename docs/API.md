@@ -712,7 +712,7 @@ body { columnId*, swimlaneId?, title*, description?, priority?, type?, parentId?
   priority/type = option IDs from field-config; omitted → first option (position 0)
   swimlaneId omitted → task lands in the project's Backlog lane
   parentId = create as subtask of that task (inherits parent's column/swimlane,
-             inserts a subtask_of link)
+             inserts a subtask_of link); accepts the ticket key (PREFIX-N) alias
   dueAt = "YYYY-MM-DD" — must not be later than the lane's due date (when it has one)
 → 201 Task
   | 404 COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND / TASK_NOT_FOUND (bad parentId)
@@ -725,6 +725,14 @@ GET    /api/projects/:slug/tasks/:id
 → 200 Task | 404
   `:id` accepts the ticket key (PREFIX-N, e.g. "NIM-12") as a lookup alias —
   resolved via the project's key prefix + number (server/api/task-id.ts).
+  The same alias is accepted for task ids carried in payloads/query on the
+  endpoints that resolve them: `parentId` on POST /tasks, `toTaskId` on
+  POST /tasks/:id/links, `beforeTaskId`/`afterTaskId` on POST /tasks/:id/move,
+  `exclude` on GET /tasks/search, the `:id` of `/documents/task/:id/sources`
+  (`:type=task`), and `documentId` on `/runtimes/sessions*`
+  (`documentType=task`). A resolvable key becomes the task UUID; a UUID is
+  passed through unchanged. On `exclude` (a filter, not a lookup) an
+  unresolvable key is ignored — no exclusions, never a 404.
 
 PATCH  /api/projects/:slug/tasks/:id
 body { title?, description?, priority?, type?, assignees?, dueAt? }
@@ -738,6 +746,7 @@ body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId?, clearDueAt? }
   - swimlaneId required — every task belongs to a swimlane
   - beforeTaskId/afterTaskId omitted → append to end of target column
   - before/after must belong to target column
+  - beforeTaskId/afterTaskId accept the ticket key (PREFIX-N) alias
   - clearDueAt=true → card deadline cleared in the SAME atomic UPDATE as the move
     (required when the card's deadline is later than the target lane's)
 → 200 Task
@@ -886,6 +895,7 @@ GET    /api/projects/:slug/tasks/:id/links
 
 POST   /api/projects/:slug/tasks/:id/links
 body { toTaskId*, relation*: "subtask_of"|"blocked_by"|"related_to" }
+  toTaskId accepts the ticket key (PREFIX-N) alias
 → 201 TaskLink
   | 404 TASK_NOT_FOUND
   | 409 TASK_LINK_CYCLE            // subtask_of would create a cycle
@@ -896,7 +906,8 @@ DELETE /api/projects/:slug/tasks/:id/links/:linkId
 
 GET    /api/projects/:slug/tasks/search?q&exclude
 → 200 { data: TaskLinkSuggestion[] }   // @-autocomplete; title LIKE, cap 10
-  exclude = task id to skip (the current task)
+  exclude = task id to skip (the current task); accepts the ticket key
+  (PREFIX-N) alias too — an unresolvable key is ignored (no exclusions)
   When q matches the PREFIX-N ticket-key pattern, the exact key match is
   surfaced first (server pre-checks the same way the UI does)
 ```

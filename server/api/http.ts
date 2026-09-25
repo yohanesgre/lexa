@@ -46,10 +46,10 @@ import { AttachmentRepo } from "../repos/attachment.repo";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, bodyCapFor, type StorageConfigShape } from "../storage/config";
 import { adminEmailsFrom, currentEnv, storageEnvFrom, RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
-import { getEnv, resolvePublicUrl } from "../env";
+import { getEnv, resolvePublicUrl, resolveTrustedProxyCidrs } from "../env";
 import { resolveApiKeyIdentityAsync, constantTimeTokenEqual } from "./auth-key";
 import { resolveMaxApiBody, X_LEXA_REMOTE_IP } from "./limits";
-import { apiRateLimiter, shareRateLimiter, isPrivateIp, isRateLimitExemptPath } from "./rate-limit";
+import { apiRateLimiter, shareRateLimiter, resolveClientIp, isRateLimitExemptPath } from "./rate-limit";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { DeviceLoginService } from "../services/device-login.service";
@@ -2878,7 +2878,8 @@ const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* SourceService;
         const project = yield* requireProjectRead(req.path.slug);
-        const sources = yield* service.findByDocument(project.id, req.path.type, req.path.id);
+        const documentId = req.path.type === "task" ? yield* resolveTaskId(req.path.id, req.path.slug) : req.path.id;
+        const sources = yield* service.findByDocument(project.id, req.path.type, documentId);
         return { data: sources };
       }))
     )
@@ -2890,7 +2891,7 @@ const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
         const { source, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
           documentType: req.path.type,
-          documentId: req.path.id,
+          documentId: req.path.type === "task" ? yield* resolveTaskId(req.path.id, req.path.slug) : req.path.id,
           kind: req.payload.kind,
           ref: req.payload.ref,
         });
@@ -2916,27 +2917,33 @@ const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
         // empty list (never 404).
         if (documentType !== "task" && documentType !== "wiki") return { data: [] };
         if (!documentId) return { data: [] };
-        return { data: yield* service.runtimeSessionList(documentType, documentId) };
+        const resolvedId = documentType === "task" ? yield* resolveTaskId(documentId) : documentId;
+        return { data: yield* service.runtimeSessionList(documentType, resolvedId) };
       }))
     )
     .handle("upsertRuntimeSession", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* RuntimeService;
-        yield* service.runtimeSessionUpsert(req.payload);
+        const payload = req.payload.documentType === "task"
+          ? { ...req.payload, documentId: yield* resolveTaskId(req.payload.documentId) }
+          : req.payload;
+        yield* service.runtimeSessionUpsert(payload);
         return undefined;
       }))
     )
     .handle("removeRuntimeSession", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* RuntimeService;
-        yield* service.runtimeSessionRemove(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        const documentId = req.payload.documentType === "task" ? yield* resolveTaskId(req.payload.documentId) : req.payload.documentId;
+        yield* service.runtimeSessionRemove(req.payload.documentType, documentId, req.payload.runtimeId);
         return undefined;
       }))
     )
     .handle("resetRuntimeSession", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* RuntimeService;
-        yield* service.runtimeSessionReset(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        const documentId = req.payload.documentType === "task" ? yield* resolveTaskId(req.payload.documentId) : req.payload.documentId;
+        yield* service.runtimeSessionReset(req.payload.documentType, documentId, req.payload.runtimeId);
         return undefined;
       }))
     )
@@ -3355,10 +3362,11 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         const service = yield* TaskLinkService;
         const identity = yield* AuthIdentity;
         const task = yield* requireTaskInProject(req.path.slug, req.path.id);
+        const toTaskId = yield* resolveTaskId(req.payload.toTaskId, req.path.slug);
         const { link, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: task.projectId,
           fromTaskId: task.id,
-          toTaskId: req.payload.toTaskId,
+          toTaskId,
           relation: req.payload.relation,
         });
         return { data: link, activity: activityPayload(activity) };
@@ -3378,7 +3386,12 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         const service = yield* TaskLinkService;
         const project = yield* requireProjectRead(req.path.slug);
         const q = searchParams(req).get("q") ?? "";
-        const exclude = searchParams(req).get("exclude") ?? "";
+        const rawExclude = searchParams(req).get("exclude") ?? "";
+        // `exclude` is a filter, not a lookup: an unresolved ticket key must
+        // degrade to "no exclusions", never 404 the search. UUIDs and
+        // resolvable keys pass through unchanged.
+        const resolvedExclude = rawExclude ? yield* resolveTaskId(rawExclude, req.path.slug) : "";
+        const exclude = rawExclude && parseTaskKey(rawExclude) && resolvedExclude === rawExclude ? "" : resolvedExclude;
         // Exact KEY-N pre-check before FTS: a ticket key is a first-class
         // lookup, so a query that IS a key returns the exact task first.
         const parsed = parseTaskKey(q);
@@ -3446,7 +3459,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
           ...(req.payload.priority !== undefined ? { priority: req.payload.priority } : {}),
           ...(req.payload.type !== undefined ? { type: req.payload.type } : {}),
-          ...(req.payload.parentId !== undefined ? { parentId: req.payload.parentId } : {}),
+          ...(req.payload.parentId !== undefined ? { parentId: yield* resolveTaskId(req.payload.parentId, req.path.slug) } : {}),
           ...(req.payload.assignees !== undefined ? { assignees: [...req.payload.assignees] } : {}),
           ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
         });
@@ -3499,8 +3512,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const existing = yield* requireTaskInProject(req.path.slug, req.path.id);
         const { task, activity } = yield* taskService.move(actorFromIdentity(identity), existing.id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
-          ...(req.payload.beforeTaskId !== undefined ? { beforeTaskId: req.payload.beforeTaskId } : {}),
-          ...(req.payload.afterTaskId !== undefined ? { afterTaskId: req.payload.afterTaskId } : {}),
+          ...(req.payload.beforeTaskId !== undefined ? { beforeTaskId: yield* resolveTaskId(req.payload.beforeTaskId, req.path.slug) } : {}),
+          ...(req.payload.afterTaskId !== undefined ? { afterTaskId: yield* resolveTaskId(req.payload.afterTaskId, req.path.slug) } : {}),
           ...(req.payload.clearDueAt !== undefined ? { clearDueAt: req.payload.clearDueAt } : {}),
         });
         const column = yield* columnService.getById(req.payload.columnId);
@@ -4870,6 +4883,19 @@ export interface WorkersApiHandlerOptions {
 const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
   HttpServerResponse.setHeaders(resp, { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
 
+// Workers have no socket address: requests reach the isolate only through
+// Cloudflare's edge, so `cf-connecting-ip` is authoritative there. Any inbound
+// `x-lexa-remote-ip` (a Bun-host stamp, never set on this path) is deleted
+// first, so a leaked or spoofed value cannot be mistaken for a socket peer.
+export function workersClientIp(
+  headers: Record<string, string | undefined>,
+  trustedProxyCidrs?: readonly string[] | undefined
+): string {
+  const copy: Record<string, string | undefined> = { ...headers };
+  delete copy[X_LEXA_REMOTE_IP];
+  return resolveClientIp(copy[X_LEXA_REMOTE_IP] ?? "", copy["cf-connecting-ip"], trustedProxyCidrs);
+}
+
 const workersSessionIdentity = (
   headers: Headers,
   getSession?: (headers: Headers) => Promise<MiddlewareSession | null>
@@ -4898,6 +4924,7 @@ function createWorkersApiMiddleware(
   deps: { getSession?: ((headers: Headers) => Promise<MiddlewareSession | null>) | undefined } = {}
 ) {
   const maxApiBody = resolveMaxApiBody(runtimeEnv);
+  const trustedProxyCidrs = resolveTrustedProxyCidrs(runtimeEnv);
   return HttpApiBuilder.middleware((httpApp) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest;
@@ -4915,9 +4942,7 @@ function createWorkersApiMiddleware(
       const isDeviceLogin = request.method === "POST" && path === "/api/device-login/requests"
         || request.method === "GET" && /^\/api\/device-login\/requests\/[^/]+$/.test(path);
 
-      const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
-      const cfIp = request.headers["cf-connecting-ip"];
-      const ip = stampedIp && isPrivateIp(stampedIp) && cfIp ? cfIp : (stampedIp || cfIp || "unknown");
+      const ip = workersClientIp(request.headers, trustedProxyCidrs);
       const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
       if (!isRateLimitExemptPath(path) && !limiter.check(ip)) {
         const retryAfter = Math.ceil(limiter.retryAfterMs(ip) / 1000);

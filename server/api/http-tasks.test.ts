@@ -171,7 +171,11 @@ describe("task ticket key routes", () => {
     db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p-key2', 'Key2', 'p-key2', 'WC')").run();
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('ck1', 'p-key', 'Todo', 0)").run();
     db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('sk', 'p-key', 'Backlog', 0, 'backlog')").run();
+    db.prepare("INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('pk-prio', 'p-key', 'Medium', '#888', 0)").run();
+    db.prepare("INSERT INTO type_options (id, project_id, label, color, position) VALUES ('pk-type', 'p-key', 'Bug', '#f00', 0)").run();
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, key, number, created_at) VALUES ('tk1', 'p-key', 'ck1', 'sk', 'Key Task', 'a0', 'EMB-1', 1, '2026-01-01 10:00:00')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, key, number, created_at) VALUES ('tk2', 'p-key', 'ck1', 'sk', 'Key Task 2', 'a1', 'EMB-2', 2, '2026-01-01 10:00:00')").run();
+    db.prepare("UPDATE projects SET next_task_number = 3 WHERE id = 'p-key'").run();
   });
 
   it("GET by ticket key resolves the task", async () => {
@@ -179,6 +183,75 @@ describe("task ticket key routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.key).toBe("EMB-1");
+  });
+
+  it("GET by UUID path still resolves the task", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/tk1"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe("tk1");
+  });
+
+  it("POST task with a ticket-key parentId resolves to a subtask_of link", async () => {
+    const res = await handler(json("POST", "/api/projects/p-key/tasks", { columnId: "ck1", title: "Sub of EMB-1", parentId: "EMB-1" }));
+    expect(res.status).toBe(201);
+    const created = await res.json();
+    const links = await handler(json("GET", `/api/projects/p-key/tasks/${created.data.id}/links`));
+    expect(links.status).toBe(200);
+    const rows = (await links.json()).data as Array<{ toTaskId: string; relation: string }>;
+    expect(rows).toEqual([expect.objectContaining({ toTaskId: "tk1", relation: "subtask_of" })]);
+  });
+
+  it("POST link with a ticket-key toTaskId resolves to the target UUID", async () => {
+    const res = await handler(json("POST", "/api/projects/p-key/tasks/EMB-2/links", { toTaskId: "EMB-1", relation: "related_to" }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.data.toTaskId).toBe("tk1");
+    expect(body.data.fromTaskId).toBe("tk2");
+  });
+
+  it("search exclude accepts a ticket key and filters that task", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/search?q=Key&exclude=EMB-1"));
+    expect(res.status).toBe(200);
+    const ids = ((await res.json()).data as Array<{ id: string }>).map((t) => t.id);
+    expect(ids).not.toContain("tk1");
+    expect(ids).toContain("tk2");
+  });
+
+  it("search exclude with a UUID behaves like the key form", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/search?q=Key&exclude=tk1"));
+    expect(res.status).toBe(200);
+    const ids = ((await res.json()).data as Array<{ id: string }>).map((t) => t.id);
+    expect(ids).not.toContain("tk1");
+  });
+
+  it("search exclude with an unresolvable ticket key is treated as no exclusions (200)", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/search?q=Key&exclude=EMB-999"));
+    expect(res.status).toBe(200);
+    const ids = ((await res.json()).data as Array<{ id: string }>).map((t) => t.id);
+    expect(ids).toContain("tk1");
+    expect(ids).toContain("tk2");
+  });
+
+  it("move accepts ticket-key anchors (beforeTaskId/afterTaskId)", async () => {
+    const res = await handler(json("POST", "/api/projects/p-key/tasks/EMB-2/move", { columnId: "ck1", swimlaneId: "sk", afterTaskId: "EMB-1" }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.id).toBe("tk2");
+  });
+
+  it("move with an unresolvable key anchor → 404, not 500", async () => {
+    const res = await handler(json("POST", "/api/projects/p-key/tasks/EMB-2/move", { columnId: "ck1", swimlaneId: "sk", afterTaskId: "EMB-999" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("document sources accept a ticket-key task id", async () => {
+    const add = await handler(json("POST", "/api/projects/p1/documents/task/EG-1/sources", { kind: "external", ref: "https://example.com/eg" }));
+    expect(add.status).toBe(201);
+    expect((await add.json()).data.documentId).toBe("t1");
+
+    const list = await handler(json("GET", "/api/projects/p1/documents/task/EG-1/sources"));
+    expect(list.status).toBe(200);
+    const ids = ((await list.json()).data as Array<{ documentId: string }>).map((s) => s.documentId);
+    expect(ids).toContain("t1");
   });
 });
 

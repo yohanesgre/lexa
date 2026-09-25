@@ -136,6 +136,7 @@ compdir="$(mktemp -d)"
 DEPLOY_DIR="${compdir}" lib_eval "compose_render direct 8080 127.0.0.1" >/dev/null 2>&1
 assert_grep "compose direct forwards LXK_PUBLIC_URL" '^\s+- LXK_PUBLIC_URL=' "$(cat "${compdir}/docker-compose.yml")"
 assert_grep "compose direct forwards LXK_TRUSTED_ORIGINS" '^\s+- LXK_TRUSTED_ORIGINS=' "$(cat "${compdir}/docker-compose.yml")"
+assert_grep "compose direct forwards LXK_TRUSTED_PROXY_CIDRS" '^\s+- LXK_TRUSTED_PROXY_CIDRS=' "$(cat "${compdir}/docker-compose.yml")"
 DEPLOY_DIR="${compdir}" lib_eval "compose_render staging 8080 127.0.0.1" >/dev/null 2>&1
 assert_grep "compose staging forwards LXK_PUBLIC_URL" '^\s+- LXK_PUBLIC_URL=' "$(cat "${compdir}/docker-compose.yml")"
 

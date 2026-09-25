@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
-import { legacyRuntimeEnvWarning } from "./env";
-import { syncRateLimitFromDb } from "./api/rate-limit";
+import { getEnv, legacyRuntimeEnvWarning, resolveTrustedProxyCidrs } from "./env";
+import { resolveClientIp, syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import { bodyCapFor, resolveStorageConfig } from "./storage/config";
@@ -51,6 +51,8 @@ const STORAGE_CFG = resolveStorageConfig(process.env, dirname(DATABASE_PATH));
 
 const legacyEnvWarning = legacyRuntimeEnvWarning(process.env);
 if (legacyEnvWarning) console.warn(`[lexa] ${legacyEnvWarning}`);
+
+const TRUSTED_PROXY_CIDRS = resolveTrustedProxyCidrs(getEnv());
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
@@ -181,7 +183,7 @@ const server: Server<unknown> = Bun.serve({
         // is keyless by design (session cookies); the surfaces still get the
         // /api limits (unbounded JSON parse + scrypt cost).
         const socketIp = server.requestIP(req)?.address ?? "";
-        const ip = req.headers.get("cf-connecting-ip") || socketIp || "unknown";
+        const ip = resolveClientIp(socketIp, req.headers.get("cf-connecting-ip"), TRUSTED_PROXY_CIDRS);
         const res = await handleAuthSurface(req, {
           ip,
           handler: (r) => auth.handler(r),

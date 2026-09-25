@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Database } from "bun:sqlite";
 import { setSetting } from "../db/settings";
-import { apiRateLimiter, createRateLimiter, DEFAULT_RATE_LIMIT_MAX, isPrivateIp, isRateLimitExemptPath, resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
+import { apiRateLimiter, createRateLimiter, DEFAULT_RATE_LIMIT_MAX, isRateLimitExemptPath, isTrustedProxyPeer, resolveClientIp, resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
 
 describe("createRateLimiter", () => {
   it("allows up to max, denies max+1 in the same window", () => {
@@ -194,34 +194,72 @@ describe("isRateLimitExemptPath", () => {
   });
 });
 
-describe("isPrivateIp", () => {
-  it("accepts IPv4 loopback and RFC1918 ranges", () => {
-    expect(isPrivateIp("127.0.0.1")).toBe(true);
-    expect(isPrivateIp("10.0.0.1")).toBe(true);
-    expect(isPrivateIp("172.16.0.1")).toBe(true);
-    expect(isPrivateIp("172.31.255.255")).toBe(true);
-    expect(isPrivateIp("192.168.1.1")).toBe(true);
+describe("isTrustedProxyPeer", () => {
+  it("trusts loopback peers (v4, v6, mapped)", () => {
+    expect(isTrustedProxyPeer("127.0.0.1")).toBe(true);
+    expect(isTrustedProxyPeer("::1")).toBe(true);
+    expect(isTrustedProxyPeer("::ffff:127.0.0.1")).toBe(true);
   });
 
-  it("rejects public IPv4 addresses", () => {
-    expect(isPrivateIp("8.8.8.8")).toBe(false);
-    expect(isPrivateIp("11.0.0.1")).toBe(false);
-    expect(isPrivateIp("172.32.0.1")).toBe(false);
+  it("parses embedded IPv4 after '::' (::1.2.3.4 and 2001:db8::1.2.3.4)", () => {
+    expect(isTrustedProxyPeer("::1.2.3.4", ["::1.2.3.4"])).toBe(true);
+    expect(isTrustedProxyPeer("2001:db8::1.2.3.4", ["2001:db8::1.2.3.4"])).toBe(true);
+    expect(isTrustedProxyPeer("2001:db8::1.2.3.4", ["2001:db8::/32"])).toBe(true);
   });
 
-  it("accepts IPv6 loopback and unique-local", () => {
-    expect(isPrivateIp("::1")).toBe(true);
-    expect(isPrivateIp("fc00::1")).toBe(true);
-    expect(isPrivateIp("fd12:3456::1")).toBe(true);
-    expect(isPrivateIp("::ffff:10.0.0.1")).toBe(true);
+  it("matches a v4-mapped peer against a v4 CIDR", () => {
+    expect(isTrustedProxyPeer("::ffff:10.0.0.5", ["10.0.0.0/8"])).toBe(true);
+    expect(isTrustedProxyPeer("::ffff:192.168.1.9", ["10.0.0.0/8"])).toBe(false);
   });
 
-  it("rejects IPv6-mapped public IPv4 and garbage input", () => {
-    expect(isPrivateIp("::ffff:8.8.8.8")).toBe(false);
-    expect(isPrivateIp("::ffff:11.0.0.1")).toBe(false);
-    expect(isPrivateIp("")).toBe(false);
-    expect(isPrivateIp("not-an-ip")).toBe(false);
-    expect(isPrivateIp("999.1.1.1")).toBe(false);
-    expect(isPrivateIp("::ffff:999.1.1.1")).toBe(false);
+  it("ignores non-loopback private peers unless a CIDR matches them", () => {
+    expect(isTrustedProxyPeer("10.0.0.5")).toBe(false);
+    expect(isTrustedProxyPeer("192.168.1.9")).toBe(false);
+    expect(isTrustedProxyPeer("10.0.0.5", ["10.0.0.0/8"])).toBe(true);
+    expect(isTrustedProxyPeer("192.168.1.9", ["10.0.0.0/8"])).toBe(false);
+    expect(isTrustedProxyPeer("10.0.0.5", ["10.0.0.5"])).toBe(true);
+    expect(isTrustedProxyPeer("10.0.0.6", ["10.0.0.5"])).toBe(false);
+  });
+
+  it("matches IPv6 CIDRs (bare and prefixed)", () => {
+    expect(isTrustedProxyPeer("fd00:1234::5", ["fd00:1234::/32"])).toBe(true);
+    expect(isTrustedProxyPeer("fd00:1234::5", ["fd00:1234::"])).toBe(false);
+    expect(isTrustedProxyPeer("fd00:1234::5", ["fd00:1234::5"])).toBe(true);
+  });
+
+  it("ignores malformed CIDR entries and garbage peers", () => {
+    expect(isTrustedProxyPeer("10.0.0.5", ["not-a-cidr", "10.0.0.0/99", "10.0.0.0/"])).toBe(false);
+    expect(isTrustedProxyPeer("not-an-ip", ["0.0.0.0/0"])).toBe(false);
+    expect(isTrustedProxyPeer("", [])).toBe(false);
+  });
+});
+
+describe("resolveClientIp", () => {
+  it("honors the forwarding header from a loopback peer", () => {
+    expect(resolveClientIp("127.0.0.1", "203.0.113.7", [])).toBe("203.0.113.7");
+    expect(resolveClientIp("::1", "203.0.113.7", [])).toBe("203.0.113.7");
+    expect(resolveClientIp("::ffff:127.0.0.1", "203.0.113.7", [])).toBe("203.0.113.7");
+  });
+
+  it("ignores the forwarding header from a private non-loopback peer", () => {
+    expect(resolveClientIp("10.0.0.5", "203.0.113.7", [])).toBe("10.0.0.5");
+    expect(resolveClientIp("192.168.1.9", "203.0.113.7", ["10.0.0.0/8"])).toBe("192.168.1.9");
+  });
+
+  it("honors the header when a configured CIDR matches the peer", () => {
+    expect(resolveClientIp("10.0.0.5", "203.0.113.7", ["10.0.0.0/8"])).toBe("203.0.113.7");
+    expect(resolveClientIp("172.18.0.4", "203.0.113.7", ["172.16.0.0/12"])).toBe("203.0.113.7");
+  });
+
+  it("handles malformed config safely (peer wins, no throw)", () => {
+    expect(() => resolveClientIp("10.0.0.5", "203.0.113.7", ["garbage"])).not.toThrow();
+    expect(resolveClientIp("10.0.0.5", "203.0.113.7", ["garbage"])).toBe("10.0.0.5");
+  });
+
+  it("falls back when either side is absent", () => {
+    expect(resolveClientIp("10.0.0.5", "", [])).toBe("10.0.0.5");
+    expect(resolveClientIp("10.0.0.5", null, [])).toBe("10.0.0.5");
+    expect(resolveClientIp("", "203.0.113.7", [])).toBe("203.0.113.7");
+    expect(resolveClientIp("", "", [])).toBe("unknown");
   });
 });
