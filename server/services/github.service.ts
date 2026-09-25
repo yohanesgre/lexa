@@ -50,7 +50,9 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             // time) — never parsed out of an html_url, never assumed to be
             // project.github_repo
             yield* client.updateIssueState(issue.repo, issue.issueNumber, columnGithubState);
-            yield* taskRepo.setGithubSyncedState(taskId, issue.issueId, columnGithubState);
+            yield* taskRepo.setGithubSyncedState(taskId, issue.issueId, columnGithubState).pipe(
+              Effect.catchTag("RowNotFound", () => new DbError({ message: "github link row missing during state sync" }))
+            );
           }
         }),
 
@@ -79,11 +81,25 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             const bodyChanged = normalizeMarkdownForEcho(link.pushed_body) !== normalizeMarkdownForEcho(body);
             if (!titleChanged && !bodyChanged) continue;
             yield* client.updateIssueContent(link.repo, link.issue_number, { title: task.title, body }).pipe(
-              Effect.tap(() => taskRepo.setPushedContent(taskId, link.issue_id, task.title, body, false)),
-              Effect.catchAll((e) =>
-                taskRepo.setPushedContent(taskId, link.issue_id, null, null, true).pipe(
-                  Effect.tap(() => Effect.logWarning(`[GitHub] content push failed for task ${taskId} issue ${link.issue_id}`, e))
+              Effect.tap(() =>
+                taskRepo.setPushedContent(taskId, link.issue_id, task.title, body, false).pipe(
+                  // Success-path missing row (link removed concurrently) is not
+                  // a push failure: log it instead of re-entering the failure
+                  // branch below and re-attempting a doomed push_failed write.
+                  Effect.catchTag("RowNotFound", (e) =>
+                    Effect.logWarning(`[GitHub] github link row missing during content push for task ${taskId} issue ${link.issue_id}`, e)
+                  )
                 )
+              ),
+              Effect.catchAll((e) =>
+                Effect.gen(function* () {
+                  // Log the original push error first — the flag write below may
+                  // itself fail (link row gone) and must not swallow it.
+                  yield* Effect.logWarning(`[GitHub] content push failed for task ${taskId} issue ${link.issue_id}`, e);
+                  yield* taskRepo.setPushedContent(taskId, link.issue_id, null, null, true).pipe(
+                    Effect.catchTag("RowNotFound", () => new DbError({ message: "github link row missing during content push" }))
+                  );
+                })
               )
             );
           }

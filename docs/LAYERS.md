@@ -159,6 +159,50 @@ export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("Webhoo
 // Repos surface: RowNotFound, DbError, ConstraintViolation (SQLITE_CONSTRAINT_*).
 ```
 
+### Repo write contract (`void` writes)
+
+- **`delete*` are idempotent** — 0 rows matched is not an error, they resolve
+  `void`. Two exceptions fail `RowNotFound`:
+  - Owner/pair-scoped deletes that must not leak existence: `ApiKeyRepo.deleteOwn`,
+    `RuntimeRepo.deleteRuntime`, `RuntimeRepo.deleteAgent`,
+    `RuntimeRepo.deleteSkill`, `RuntimeMachineRepo.delete`,
+    `AssistantThreadRepo.resetThread`, `ProjectMemoryRepo.remove`.
+  - `CommentRepo.softDelete` — a second delete of an already-deleted row matches
+    0 rows and raises `RowNotFound` (`server/repos/comment.repo.ts:47-55`).
+- **`update*`/`set*` fail `RowNotFound` when no row matched** — never a silent
+  no-op. Repos get this either by re-reading the row through `queryFirst`
+  after the UPDATE (which raises `RowNotFound`) or by checking
+  `changes === 0` explicitly. `task.repo`'s link setters
+  (`setGithubIssueTitle`/`setGithubSyncedState`/`setPushedContent`) check
+  `changes === 0`; the two sync callers (`syncStateFromLexa`,
+  `syncContentFromLexa`) map `RowNotFound` to `DbError` so no route status
+  changes, while the webhook title-refresh callers
+  (`handleWebhook` edit path on `setGithubIssueTitle`) log-and-continue.
+  The one exception is `FieldConfigRepo.updateOption` — a plain void UPDATE on
+  0 rows with no production caller (`server/repos/field-config.repo.ts:56-74`).
+- **Audited exceptions** (keep `void`; caller must pre-check before
+  strictifying):
+  - `ApiKeyRepo.touchIfStale` — conditional stale-only touch; 0 rows is normal.
+  - `RuntimeRepo.updateRuntimeHeartbeat` / `setRuntimeLastError` /
+    `clearRuntimeLastError` / `updateRuntimeCatalogs` — daemon-driven writes;
+    callers hold no pre-check and a missing runtime is a benign no-op.
+  - `RuntimeRepo.markRuntimesOffline` and `RuntimeMachineRepo.markOffline`
+    (`server/repos/runtime-machine.repo.ts:109`) — bulk void sweeps; 0 rows is
+    normal.
+  - `RuntimeRepo.updateRuntimeModels` / `updateRuntimeAgents` — unused helpers;
+    strict-safe but left `void` (no caller).
+  - `AssistantPendingWritesRepo.markExecutionError` — best-effort flag; caller
+    must pre-check.
+  - `AssistantPendingWritesRepo.decide` / `expireIfDue` / `sweepExpired` —
+    conditional transitions: the first two return the updated row or `null`
+    when the guard fails, the third returns a count
+    (`server/repos/assistant-pending-writes.repo.ts:56-83`); 0 rows is a
+    normal guard, not an error.
+  - `WebhookEventRepo.recordDelivery` (INSERT OR IGNORE) / `prune` — 0 rows is
+    normal.
+- **Count-returning sweeps** (not `void`): `RuntimeRepo.sweepStuckTasks` /
+  `RuntimeRepo.deleteStaleRuns` return the affected row count; 0 is normal.
+
 ## Services
 
 ### TaskService — core logic, no GitHub dependency
@@ -993,6 +1037,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   watchdog's own abort is flagged (`stalled`) so it is never misclassified as
   a client abort. Wraps both consume calls (document + chat, with/without
   tools).
+- **Client-facing error copy:** provider-tagged errors (`ProviderAuthFailed`,
+  `ProviderUnreachable`, `AssistantGenerationFailed`) expose only
+  `providerMessage` (≤500 chars) or a fixed generic string via
+  `clientFacingErrorMessage`; raw upstream text (`raw` / `rawEvent` /
+  `upstreamBody`) stays server-log-only. Locally-generated watchdog failures
+  (e.g. the stall watchdog) are generic. Untagged errors keep their domain
+  message.
 - **Tool frame detail:** `tool` frames carry an optional `detail` — a short
   human-readable summary of the call INPUT (≤80 chars), built by
   `toolCallDetail` (`server/assistant/tools.ts`) from the validated args:
