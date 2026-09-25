@@ -47,6 +47,33 @@ function stagePreAssistant(): string {
   return dir;
 }
 
+// Copy every migration before 0007 so the DB is exactly the shape 0007 must
+// upgrade (runtimes.team_id still ON DELETE SET NULL).
+function stagePre0007(): string {
+  const dir = tmpDir();
+  for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f < "0007")) {
+    copyFileSync(join(MIGRATIONS, f), join(dir, f));
+  }
+  return dir;
+}
+
+// A team-scoped runtime (r1), a queued runtime task linked to it (rt1), and a
+// team-less project whose task is queued but unlinked. Used by 0007's rebuild
+// tests to prove the parent FK flips to RESTRICT and the child link survives.
+const SEED_0007 = `
+  INSERT INTO organization (id, name, slug, createdAt) VALUES ('org1', 'Team', 'team', '2026-01-01');
+  INSERT INTO machines (id, hostname) VALUES ('m1', 'host');
+  INSERT INTO runtimes (id, name, provider, machine_id, team_id) VALUES ('r1', 'R', 'opencode', 'm1', 'org1');
+  INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+  INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
+  INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1', 'p1', 'Main', 0, 'backlog');
+  INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position) VALUES ('t1', 'p1', 'c1', 's1', 'T', 'a0');
+  INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
+  INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
+  INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id)
+    VALUES ('rt1', 'p1', 'task', 't1', 'a1', 'sk1', 'queued', 'r1');
+`;
+
 const SEED_PRE_RENAME = `
   INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
   INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
@@ -138,7 +165,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -149,7 +176,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -176,7 +203,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -546,6 +573,60 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
       { id: "assistant", name: "Assistant Agent" },
       { id: "blacksmith", name: "Blacksmith Agent" },
     ]);
+    db.close();
+  });
+
+  it("0007 flips runtimes.team_id to ON DELETE RESTRICT (raw org delete fails) and keeps indexes", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    const fks = db.prepare("PRAGMA foreign_key_list(runtimes)").all() as Array<{ from: string; table: string; on_delete: string }>;
+    const teamFk = fks.find((f) => f.from === "team_id");
+    expect(teamFk?.table).toBe("organization");
+    expect(teamFk?.on_delete).toBe("RESTRICT");
+
+    db.exec(SEED_0007);
+    expect(() => db.prepare("DELETE FROM organization WHERE id = 'org1'").run()).toThrow(/FOREIGN KEY constraint failed/i);
+    expect(db.prepare("SELECT team_id FROM runtimes WHERE id = 'r1'").get()).toEqual({ team_id: "org1" });
+    expect(db.prepare("SELECT runtime_id FROM runtime_tasks WHERE id = 'rt1'").get()).toEqual({ runtime_id: "r1" });
+    const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toContain("idx_runtimes_machine");
+    expect(idx).toContain("idx_runtimes_team");
+    db.close();
+  });
+
+  it("0007 is FK-safe with foreign_keys=ON (Workers/D1 runner): parent + child links survive the rebuild", () => {
+    const dir = stagePre0007();
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_0007);
+
+    const sql = readFileSync(join(MIGRATIONS, "0007_runtimes_team_restrict.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0007_runtimes_team_restrict.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    const fks = db.prepare("PRAGMA foreign_key_list(runtimes)").all() as Array<{ from: string; table: string; on_delete: string }>;
+    expect(fks.find((f) => f.from === "team_id")?.on_delete).toBe("RESTRICT");
+    // The DROP's implicit DELETE must not have nulled the child link.
+    expect(db.prepare("SELECT runtime_id FROM runtime_tasks WHERE id = 'rt1'").get()).toEqual({ runtime_id: "r1" });
+    expect(db.prepare("SELECT team_id FROM runtimes WHERE id = 'r1'").get()).toEqual({ team_id: "org1" });
+    expect(() => db.prepare("DELETE FROM organization WHERE id = 'org1'").run()).toThrow(/FOREIGN KEY constraint failed/i);
+    // The child FK action is still SET NULL after the rebuild.
+    db.prepare("INSERT INTO runtimes (id, name, provider, team_id) VALUES ('r2', 'R2', 'opencode', 'org1')").run();
+    db.prepare("INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id) VALUES ('rt2', 'p1', 'task', 't1', 'a1', 'sk1', 'queued', 'r2')").run();
+    db.prepare("DELETE FROM runtimes WHERE id = 'r2'").run();
+    expect(db.prepare("SELECT runtime_id FROM runtime_tasks WHERE id = 'rt2'").get()).toEqual({ runtime_id: null });
     db.close();
   });
 });

@@ -205,3 +205,7 @@
 2026-09-25 | open-decisions | PLAN | opened; worktree .worktrees/open-decisions branch omos/open-decisions @b46576c; PREFIX-n + cf-IP lanes; runtimes.team_id design persisted | status/open-decisions/plan.md
 2026-09-25 | open-decisions | PR | pushed; PR #106 open to main; full suite 201/1793; reviewer PASS | https://github.com/yohanesgre/lexa/pull/106
 2026-09-25 | open-decisions | DONE | PR #106 open (merge pending user); report written | status/open-decisions/report.md
+2026-09-25 | open-decisions | DONE | PR #106 squash-merged to main (b107f82); merge resolved | https://github.com/yohanesgre/lexa/pull/106
+2026-09-25 | runtimes-team-id | PLAN | opened; worktree branch omos/runtimes-team-id @b107f82; Option A migration+guard+PATCH | status/runtimes-team-id/plan.md
+2026-09-25 | runtimes-team-id | PR | pushed; PR #107 open to main; full suite 201/1798; reviewer PASS | https://github.com/yohanesgre/lexa/pull/107
+2026-09-25 | runtimes-team-id | DONE | PR #107 open (merge pending user); report written | status/runtimes-team-id/report.md

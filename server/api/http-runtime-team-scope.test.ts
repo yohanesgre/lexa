@@ -159,3 +159,27 @@ describe("project team assignment", () => {
     expect(missing.status).toBe(404);
   });
 });
+
+describe("claim scope regression (runtimes.team_id)", () => {
+  it("a scoped runtime cannot claim another team's queued task; a NULL-team runtime can", async () => {
+    const db = new Database(dbPath);
+    db.exec(`
+      INSERT INTO runtimes (id, name, provider, status, team_id) VALUES
+        ('r-x', 'scoped', 'opencode', 'online', 'team-a'),
+        ('r-y', 'global', 'opencode', 'online', NULL);
+      INSERT INTO projects (id, name, slug, key, next_task_number, team_id) VALUES ('p-x', 'PX', 'p-x', 'PX', 1, 'team-b');
+      INSERT INTO columns (id, project_id, name, position) VALUES ('c-x', 'p-x', 'Todo', 0);
+      INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-x', 'p-x', 'Main', 0, 'backlog');
+      INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position) VALUES ('t-x', 'p-x', 'c-x', 's-x', 'TX', 'a0');
+      INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at)
+        VALUES ('ft-x', 'p-x', 'task', 't-x', 'a1', 'sk1', '', 'X', 'queued', '2025-01-01 00:00:00');
+    `);
+    db.close();
+    // team-a runtime must not see team-b's task.
+    const scoped = (await (await claim("r-x")).json()) as { task: { id: string } | null };
+    expect(scoped.task).toBeNull();
+    // ...but a global (NULL-team) runtime may claim it.
+    const global = (await (await claim("r-y")).json()) as { task: { id: string } | null };
+    expect(global.task?.id).toBe("ft-x");
+  });
+});

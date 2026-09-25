@@ -198,6 +198,7 @@ export const errorCodeMap: Record<string, string> = {
   DbError: "DATABASE_ERROR",
   TeamNotFound: "TEAM_NOT_FOUND",
   TeamHasProjects: "TEAM_HAS_PROJECTS",
+  TeamHasRuntimes: "TEAM_HAS_RUNTIMES",
   SoleOwner: "SOLE_OWNER",
   TeamMemberNotFound: "USER_NOT_FOUND",
   MemberNotInWorkspace: "NOT_WORKSPACE_MEMBER",
@@ -275,6 +276,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ConstraintViolation":
     case "MachineIdTaken":
     case "TeamHasProjects":
+    case "TeamHasRuntimes":
     case "InviteAlreadyPending":
       return 409;
     case "RequiredFieldMissing":
@@ -481,6 +483,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.message ?? "Cannot modify the last owner — transfer ownership first");
     case "TeamHasProjects":
       return `Team still owns ${error.count} project(s) — reassign them first`;
+    case "TeamHasRuntimes":
+      return `Team still has ${error.count} AI runtime(s) bound — detach or reassign them first`;
     case "TeamNotFound":
       return "Team not found";
     case "MemberNotInWorkspace":

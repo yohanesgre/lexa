@@ -629,8 +629,12 @@ CREATE TABLE runtimes (
   log_level      TEXT NOT NULL DEFAULT '',     -- daemon log verbosity
   agents_catalog TEXT NOT NULL DEFAULT '[]',
   machine_id     TEXT REFERENCES machines(id) ON DELETE SET NULL,
-  team_id        TEXT REFERENCES organization(id),            -- owning team; NULL = global runtime
-                                                              -- (superadmin-owned, claims any team's tasks)
+  team_id        TEXT REFERENCES organization(id) ON DELETE RESTRICT,
+                                                              -- owning team; NULL = global runtime
+                                                              -- (superadmin-owned, claims any team's tasks).
+                                                              -- RESTRICT: deleting a team with bound runtimes
+                                                              -- fails (TEAM_HAS_RUNTIMES) — reassign or detach
+                                                              -- via PATCH /api/runtimes/:id { teamId } first.
   status         TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
   hostname       TEXT NOT NULL DEFAULT '',
   last_seen      TEXT,

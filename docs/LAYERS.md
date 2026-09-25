@@ -1151,6 +1151,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `MachineIdTaken` | 409 | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
 | `MachineSecretMismatch` | 403 | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
 | `TeamHasProjects` | 409 | delete team while it owns projects — reassign first (payload `{ count }`) |
+| `TeamHasRuntimes` | 409 | delete team while team-scoped runtimes are bound (FK `RESTRICT`) — reassign or detach them first (payload `{ teamId, count }`) |
 | `SoleOwner` | 403 | demoting/removing the last owner of a team — transfer ownership first (payload `{ message }`) |
 | `CannotDeleteSelf` | 403 | removing the last superadmin / self-removal via the workspace member routes |
 | `TaskLinkNotFound` | 404 | delete a link that doesn't exist |

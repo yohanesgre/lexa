@@ -57,6 +57,7 @@ All non-2xx responses share one shape:
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
 | 409 | `AGENT_ENTITY_IN_USE` | Delete agent/skill still used by runtime tasks (details: `{ kind, name, count }`) |
 | 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
+| 409 | `TEAM_HAS_RUNTIMES` | Delete team while team-scoped runtimes are bound (details: `{ teamId, count }` — reassign or detach first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
 | 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`) |
@@ -1268,7 +1269,11 @@ body { name*, slug? }
 DELETE /api/teams/:teamId  (superadmin only)
 → 204 | 403 FORBIDDEN | 404
   | 409 TEAM_HAS_PROJECTS { count }   (blocked while the team owns projects — reassign first)
-  Cascades: memberships; owning projects' team_id → NULL.
+  | 409 TEAM_HAS_RUNTIMES { teamId, count }  (FK backstop: blocked while
+    team-scoped runtimes are bound — reassign or PATCH /api/runtimes/:id
+    { teamId: null } first)
+  Cascades: memberships. Runtimes block (ON DELETE RESTRICT); projects block
+  at the service guard.
 
 GET    /api/teams/:teamId/members     (team admin own team / superadmin)
 → 200 { data: TeamMember[] }
@@ -1384,11 +1389,16 @@ body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, mo
   that event means Global.
 
 PATCH  /api/runtimes/:id              (browser)
-body { name?, provider?, agent?, model?, printLogs?, logLevel?, extraArgs?: string[] }   (server-authoritative config)
+body { name?, provider?, agent?, model?, printLogs?, logLevel?,
+       extraArgs?: string[], teamId?: string | null }
 → 200 Runtime
-  | 404 RUNTIME_NOT_FOUND
+  | 403 FORBIDDEN (a teamId field requires superadmin)
+  | 404 RUNTIME_NOT_FOUND | 404 TEAM_NOT_FOUND (unknown teamId)
   (team admin: own team's runtimes only; superadmin: all + global)
-Edits apply to the daemon's next claim — no restart needed. provider switches
+teamId scopes the runtime to that team; null detaches it to a global runtime
+(superadmin-owned, claims any team's tasks). The other fields are
+server-authoritative config. Edits apply to the daemon's next claim — no
+restart needed. provider switches
 which CLI the daemon spawns (the daemon machine must have it installed);
 agent is the CLI's internal persona flag (opencode --agent build/plan; empty =
 default) — labelled "Persona" in the UI to distinguish it from Lexa's own
