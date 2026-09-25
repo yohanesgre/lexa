@@ -1243,3 +1243,10 @@ Routes            → all services (orchestration layer — the only place
                      TaskService and GitHubService meet; content push is
                      called from REST updateTask)
 ```
+
+**Runtime team inference.** `RuntimeService.registerRuntime` infers a team only
+when the payload team is absent: latest provider setup event with a non-null
+team → the existing runtime row's team (re-registration) → global. A NULL team
+on the latest event is "no binding for inference", never an explicit global
+override of an existing scoped row. Explicit global is a first install or
+`PATCH /api/runtimes/:id { teamId: null }`.

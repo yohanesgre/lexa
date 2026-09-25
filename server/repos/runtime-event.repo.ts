@@ -78,8 +78,13 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
         }),
 
       // Team the machine's most recent setup event binds its runtime to.
-      // `found: false` means no install/update event exists (legacy machine);
-      // found + teamId null is an explicit Global choice.
+      // `found: false` means no install/update event exists (legacy machine).
+      // found + teamId null carries NO inference binding — it must not be read
+      // as an explicit Global when an existing runtime row can answer (a
+      // register payload null and an omitted team both fall through; only a
+      // first install with a global event — or no event and no existing row —
+      // yields global that way). Explicit global after registration is via
+      // PATCH /api/runtimes/:id { teamId: null }.
       latestSetupEventTeam: (
         machineId: string,
         agentCli: AgentCli

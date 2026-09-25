@@ -508,13 +508,19 @@ export class RuntimeService extends Effect.Service<RuntimeService>()("Lexa/Runti
           if (teamId === null) {
             // The daemon doesn't carry the setup event's team — apply it here
             // from the machine's most recent install/update event (scoped to
-            // the provider). found + null is an explicit Global choice.
+            // the provider). A NULL team on that event means "no team binding
+            // for inference", NOT "explicit global" — fall through to the
+            // existing runtime row instead of widening it. Explicit global is
+            // PATCH /api/runtimes/:id { teamId: null } after registration, or a
+            // global event on a first install (no existing row).
             const fromEvent = yield* runtimeEventRepo.latestSetupEventTeam(input.machineId, input.provider);
-            if (fromEvent.found) {
+            if (fromEvent.found && fromEvent.teamId !== null) {
               teamId = fromEvent.teamId;
             } else if (input.id) {
-              // Legacy machine with no event: keep the existing runtime's team
-              // on re-registration rather than resetting it to global.
+              // No usable event (or a NULL-team event): keep the existing
+              // runtime's team on re-registration rather than resetting it to
+              // global (e.g. a reassigned runtime whose old team's event was
+              // nulled by ON DELETE SET NULL).
               const existing = yield* repo.findRuntimeById(input.id).pipe(
                 Effect.catchTag("RowNotFound", () => Effect.succeed(null))
               );

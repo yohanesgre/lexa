@@ -1,3 +1,3 @@
 state: WORKING
-ts: 1790293400
-msg: Option A in progress in runtimes-team-id; runtime_events.team_id + claim status gating stay out
+ts: 1790296400
+msg: runtime_events.team_id fix (a) in progress; design note addendum persisted

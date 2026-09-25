@@ -75,6 +75,20 @@ and owns one daemon child per runtime under
 a thin listener alias; `--no-systemd` writes no daemon files and runs the
 listener under your own supervisor.
 
+## Team binding
+
+`POST /api/runtimes/register` infers the runtime's team when the daemon omits
+`teamId`, in order: explicit payload team → the machine's most recent non-remove
+setup event for the provider **with a non-null `team_id`** → the existing
+runtime row's team on re-registration → global (no team binding; the
+first-install default). A NULL `team_id` on the latest event does **not** mean
+"explicit global" — it means "no team binding for inference" and never
+overrides an existing scoped row. That matters because deleting an organization
+nulls any referencing event's `team_id` (`ON DELETE SET NULL`), so a runtime
+reassigned to another team would otherwise silently widen to global on its next
+register. Explicit global is a first install or
+`PATCH /api/runtimes/:id { teamId: null }`.
+
 ## Warm opencode runtimes (opencode only)
 
 The daemon owns one `opencode serve` per runtime and drives every task over
