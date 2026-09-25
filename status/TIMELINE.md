@@ -193,6 +193,8 @@
 2026-09-25 | deferred-backlog | PLAN | recorded deferred follow-ups + open decisions; not scheduled | status/deferred-backlog/plan.md
 2026-09-25 | backlog-cleanup | DONE | PR #102 squash-merged to main (a0dfc01); merge resolved | https://github.com/yohanesgre/lexa/pull/102
 2026-09-25 | deferred-followups | PLAN | opened; branch chore/deferred-followups @a0dfc01; lanes: RowNotFound+doc notes, coverage 1a/1b | status/deferred-followups/plan.md
+2026-09-25 | deferred-followups | DONE | PR #103 squash-merged to main (d283867); merge resolved | https://github.com/yohanesgre/lexa/pull/103
+2026-09-25 | repo-coverage-2 | PLAN | opened; branch chore/repo-coverage-2 @d283867; waves 2-3 coverage lanes A/B/C | status/repo-coverage-2/plan.md
 2026-09-25 | backlog-cleanup | PR | pushed; PR #102 open to main; gate 186/1687; reviewer PASS | https://github.com/yohanesgre/lexa/pull/102
 2026-09-25 | backlog-cleanup | DONE | PR #102 open (merge pending user); report written | status/backlog-cleanup/report.md
 2026-09-25 | deferred-followups | PR | pushed; PR #103 open to main; gate 192/1725; reviewer PASS | https://github.com/yohanesgre/lexa/pull/103
