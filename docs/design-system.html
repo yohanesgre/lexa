@@ -44,6 +44,12 @@
   --lx-text-warning: #FCD34D;
   --lx-text-success: #86EFAC;
 
+  /* Badge text — dark palette (canonical, app/styles/phosphor.css) */
+  --lx-badge-feature: #4ADE80;
+  --lx-badge-bug: #FF9999;
+  --lx-badge-task: #67E8F9;
+  --lx-badge-asset: #F9A8D4;
+
   --lx-bg-danger-subtle: rgba(255, 68, 68, 0.10);
   --lx-bg-warning-subtle: rgba(240, 192, 64, 0.10);
   --lx-bg-success-subtle: rgba(74, 222, 128, 0.10);
@@ -283,10 +289,10 @@ a:hover { color: var(--lx-text-link-hover); }
   line-height: 14px;
 }
 
-.type-feature { background: rgba(74, 222, 128, 0.10); color: #4ADE80; }
-.type-bug     { background: rgba(255, 68, 68, 0.10); color: #FF9999; }
-.type-task    { background: rgba(34, 211, 238, 0.10); color: #67E8F9; }
-.type-asset   { background: rgba(244, 114, 182, 0.10); color: #F9A8D4; }
+.type-feature { background: rgba(74, 222, 128, 0.10); color: var(--lx-badge-feature); }
+.type-bug     { background: rgba(255, 68, 68, 0.10); color: var(--lx-badge-bug); }
+.type-task    { background: rgba(34, 211, 238, 0.10); color: var(--lx-badge-task); }
+.type-asset   { background: rgba(244, 114, 182, 0.10); color: var(--lx-badge-asset); }
 
 .wip-badge {
   display: inline-flex;
@@ -764,8 +770,8 @@ a:hover { color: var(--lx-text-link-hover); }
   opacity: 0.55;
 }
 
-/* ---- Move-confirm dialog: clear-deadline checkbox ---- */
-.check-row {
+/* ---- Move-confirm dialog: clear-deadline checkbox card ---- */
+.check-row-card {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -793,12 +799,6 @@ a:hover { color: var(--lx-text-link-hover); }
 .checkbox.checked {
   border-color: var(--lx-border-focus);
   background: var(--lx-border-focus);
-}
-.checkbox.checked::after {
-  content: "✓";
-  font-size: 10px;
-  color: var(--lx-surface-app);
-  font-weight: 700;
 }
 
 .chevron {
@@ -1507,22 +1507,7 @@ a:hover { color: var(--lx-text-link-hover); }
   text-decoration: line-through;
 }
 
-.checkbox {
-  width: 14px;
-  height: 14px;
-  border: 1px solid var(--lx-border-strong);
-  border-radius: 3px;
-  margin-top: 3px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.checkbox.checked {
-  background: var(--lx-border-focus);
-  border-color: var(--lx-border-focus);
-}
+.checklist .checkbox { margin-top: 3px; }
 
 .checkbox.checked::after {
   content: "";
@@ -1590,7 +1575,7 @@ a:hover { color: var(--lx-text-link-hover); }
   z-index: 30;
 }
 
-.menu-item {
+.menu .menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1603,15 +1588,15 @@ a:hover { color: var(--lx-text-link-hover); }
   cursor: pointer;
   transition: background 100ms;
 }
-.menu-item:hover {
+.menu .menu-item:hover {
   background: var(--lx-surface-card-hover);
   color: var(--lx-text-primary);
 }
-.menu-item.active {
+.menu .menu-item.active {
   background: var(--lx-surface-selected);
   color: var(--lx-text-primary);
 }
-.menu-item svg {
+.menu .menu-item svg {
   width: 14px;
   height: 14px;
   stroke: currentColor;
@@ -1619,10 +1604,10 @@ a:hover { color: var(--lx-text-link-hover); }
   fill: none;
   flex-shrink: 0;
 }
-.menu-item.danger { color: var(--lx-text-danger); }
-.menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+.menu .menu-item.danger { color: var(--lx-text-danger); }
+.menu .menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
 
-.menu-separator {
+.menu .menu-separator {
   height: 1px;
   background: var(--lx-border-subtle);
   margin: 4px 0;
@@ -1811,6 +1796,12 @@ mark {
   --lx-text-warning: #92400E;
   --lx-text-success: #166534;
 
+  /* Badge text needs darker values for contrast on light tints */
+  --lx-badge-feature: #15803D;
+  --lx-badge-bug: #991B1B;
+  --lx-badge-task: #0E7490;
+  --lx-badge-asset: #BE185D;
+
   --lx-bg-danger-subtle: rgba(220, 38, 38, 0.08);
   --lx-bg-warning-subtle: rgba(212, 160, 23, 0.08);
   --lx-bg-success-subtle: rgba(22, 163, 74, 0.08);
@@ -1853,6 +1844,18 @@ mark {
 [data-theme="light"] .tl-tooltip .tt-line {
   color: #948E88;
 }
+
+/* ---- Light-theme contrast fixes (WCAG AA) ----
+   Dark-palette text/icon hexes that fail AA on light surfaces are remapped
+   to the light badge/text tokens (DESIGN_SYSTEM.md §2 light palette). */
+[data-theme="light"] .toast-success .toast-icon { color: var(--lx-badge-feature); }
+[data-theme="light"] .toast-warning .toast-icon { color: var(--lx-text-warning); }
+[data-theme="light"] .toast-error   .toast-icon { color: var(--lx-badge-bug); }
+
+/* Solid danger button: DS §2.1 light phosphor-red (#DC2626) carries white
+   text at AA; the dark #FF4444 uses dark text via --lx-text-inverse. */
+[data-theme="light"] .btn-danger-solid { background: #DC2626; }
+[data-theme="light"] .btn-danger-solid:hover { background: #B91C1C; }
 
 /* ---- Reduced Motion (DESIGN_SYSTEM.md §6.8, verbatim) ---- */
 @media (prefers-reduced-motion: reduce) {
@@ -2001,22 +2004,22 @@ mark {
   50%      { opacity: 0.45; }
 }
 
-/* ---- Assistant Streaming Cursor ----
+/* ---- Herald Streaming Cursor ----
    Blinking block caret appended after the streaming assistant bubble text.
    Rendered only while the stream is in progress; removed on done/error.
    Deeper blink than .skeleton / lx-wip-pulse — a cursor is an attention
    beat, not ambient life. Reduced-motion flattens it via the global
    media query above. */
-.assistant-stream-caret {
+.herald-stream-caret {
   color: var(--lx-border-focus);
-  animation: lx-assistant-caret-blink 1.2s var(--lx-ease-in-out) infinite;
+  animation: lx-herald-caret-blink 1.2s var(--lx-ease-in-out) infinite;
 }
-@keyframes lx-assistant-caret-blink {
+@keyframes lx-herald-caret-blink {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.2; }
 }
 
-/* ---- Assistant Activity Strip ----
+/* ---- Herald Activity Strip ----
    Streaming-process surface inside the assistant bubble (codex/opencode-style
    verbose tool transcript): a collapsible Thinking row fed by live reasoning
    deltas + one always-visible mono line per tool call — `[tool_name] detail…`
@@ -2025,13 +2028,13 @@ mark {
    contract — driven only by live SSE frames, never persisted; a fetched
    transcript renders no strip. After done it folds to one subtle summary
    line ("Thought for 6s · 3 tools"), expandable. Tokens only. */
-.assistant-activity {
+.herald-activity {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-bottom: 8px;
 }
-.assistant-activity-toggle {
+.herald-activity-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2046,8 +2049,8 @@ mark {
   cursor: pointer;
   text-align: left;
 }
-.assistant-activity-toggle:hover { color: var(--lx-text-secondary); }
-.assistant-activity-chevron {
+.herald-activity-toggle:hover { color: var(--lx-text-secondary); }
+.herald-activity-chevron {
   width: 11px;
   height: 11px;
   stroke: currentColor;
@@ -2056,8 +2059,8 @@ mark {
   flex-shrink: 0;
   transition: transform 0.15s var(--lx-ease-out);
 }
-.assistant-activity-chevron.collapsed { transform: rotate(-90deg); }
-.assistant-activity-reasoning {
+.herald-activity-chevron.collapsed { transform: rotate(-90deg); }
+.herald-activity-reasoning {
   margin: 2px 0 2px 17px;
   padding: 6px 10px;
   background: var(--lx-surface-elevated);
@@ -2073,7 +2076,7 @@ mark {
   max-height: 160px;
   overflow-y: auto;
 }
-.assistant-activity-tool {
+.herald-activity-tool {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -2085,29 +2088,29 @@ mark {
   color: var(--lx-text-primary);
   min-width: 0;
 }
-.assistant-activity-tool.done { color: var(--lx-text-muted); }
-.assistant-activity-tool-name {
+.herald-activity-tool.done { color: var(--lx-text-muted); }
+.herald-activity-tool-name {
   flex-shrink: 0;
   font-weight: 500;
   color: var(--lx-text-secondary);
 }
-.assistant-activity-tool.done .assistant-activity-tool-name { color: var(--lx-text-muted); }
+.herald-activity-tool.done .herald-activity-tool-name { color: var(--lx-text-muted); }
 /* Process sentence (frame `detail`) — ellipsized to one line after the
    bracketed name; falls back to the humanized verb phrase when absent. */
-.assistant-activity-tool-detail {
+.herald-activity-tool-detail {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.assistant-activity-caret {
+.herald-activity-caret {
   flex-shrink: 0;
   color: var(--lx-text-muted);
-  animation: lx-assistant-caret-blink 1.2s var(--lx-ease-in-out) infinite;
+  animation: lx-herald-caret-blink 1.2s var(--lx-ease-in-out) infinite;
 }
 /* Compact result marker under a completed call — result-frame `detail`
    truncated to one muted mono line. */
-.assistant-activity-result {
+.herald-activity-result {
   margin-left: 17px;
   padding-left: 12px;
   border-left: 2px solid var(--lx-border-subtle);
@@ -2120,7 +2123,7 @@ mark {
   text-overflow: ellipsis;
 }
 
-/* ---- Assistant Chat — assistant bubble markdown ----
+/* ---- Herald Chat — assistant bubble markdown ----
    Assistant turns render markdown client-side (no raw HTML injection).
    Scoped to .bubble-md so user bubbles stay plain text. Headings are
    demoted to bubble-appropriate sizes; code blocks reuse the input
@@ -2133,16 +2136,23 @@ mark {
 .bubble-md > *:first-child { margin-top: 0; }
 .bubble-md > *:last-child { margin-bottom: 0; }
 .bubble-md p { margin: 0 0 8px; }
-.bubble-md h1, .bubble-md h2, .bubble-md h3, .bubble-md h4 {
+.bubble-md h1, .bubble-md h2, .bubble-md h3 {
   font-family: var(--lx-font-display);
   font-weight: 600;
   color: var(--lx-text-primary);
   margin: 10px 0 6px;
 }
+.bubble-md h4 {
+  font-family: var(--lx-font-display);
+  color: var(--lx-text-primary);
+  margin: 10px 0 6px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
 .bubble-md h1 { font-size: 15px; line-height: 20px; }
 .bubble-md h2 { font-size: 14px; line-height: 19px; }
 .bubble-md h3 { font-size: 13px; line-height: 18px; }
-.bubble-md h4 { font-size: 13px; line-height: 18px; font-weight: 500; }
 .bubble-md ul, .bubble-md ol {
   margin: 0 0 8px;
   padding-left: 18px;
@@ -2192,15 +2202,6 @@ mark {
 .bubble-md a { color: var(--lx-text-link); }
 
 /* ---- Dropdown Menu ---- */
-.dropdown-menu {
-  min-width: 220px;
-  background: var(--lx-surface-elevated);
-  border: 1px solid var(--lx-border-default);
-  border-radius: 6px;
-  box-shadow: var(--lx-shadow-lg);
-  padding: 4px;
-}
-
 .dropdown-label {
   font-family: var(--lx-font-micro);
   font-size: 11px;
@@ -2211,21 +2212,8 @@ mark {
   padding: 6px 10px 2px;
 }
 
-.dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-family: var(--lx-font-body);
-  color: var(--lx-text-secondary);
-  cursor: pointer;
-}
-
-/* AI status pill in the navbar (running / done states) */
-.runtime-status {
+/* Hearth status pill in the navbar (running / done states) */
+.hearth-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2239,7 +2227,6 @@ mark {
   transition: background 100ms, border-color 100ms;
 }
 .dropdown-item svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; flex-shrink: 0; }
-.dropdown-item:hover { background: var(--lx-surface-selected); color: var(--lx-text-primary); }
 
 /* Keyboard focus position — selected bg + phosphor focus ring (§6.7) */
 .dropdown-item.focused {
@@ -2261,16 +2248,6 @@ mark {
 }
 
 /* ---- Mobile Nav (≤768px breakpoint) ---- */
-.mobile-frame {
-  width: 390px;
-  border: 1px solid var(--lx-border-default);
-  border-radius: 12px;
-  overflow: hidden;
-  position: relative;
-  background: var(--lx-surface-app);
-  flex-shrink: 0;
-}
-
 .mobile-nav-panel {
   position: absolute;
   top: 48px;
@@ -2332,7 +2309,8 @@ mark {
   z-index: 30;
 }
 
-.menu-item {
+.menu-popover .menu-item,
+.dropdown-menu .menu-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2346,10 +2324,19 @@ mark {
   white-space: nowrap;
   transition: background 100ms;
 }
-.menu-item:hover { background: var(--lx-surface-card-hover); }
-.menu-item.danger { color: var(--lx-text-danger); }
-.menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
-.menu-item svg {
+.menu-popover .menu-item:hover,
+.dropdown-menu .menu-item:hover { background: var(--lx-surface-card-hover); }
+.menu-popover .menu-item.active,
+.dropdown-menu .menu-item.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+}
+.menu-popover .menu-item.danger,
+.dropdown-menu .menu-item.danger { color: var(--lx-text-danger); }
+.menu-popover .menu-item.danger:hover,
+.dropdown-menu .menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+.menu-popover .menu-item svg,
+.dropdown-menu .menu-item svg {
   width: 14px;
   height: 14px;
   stroke: currentColor;
@@ -2358,7 +2345,8 @@ mark {
   flex-shrink: 0;
 }
 
-.menu-separator {
+.menu-popover .menu-separator,
+.dropdown-menu .menu-separator {
   height: 1px;
   background: var(--lx-border-subtle);
   margin: 4px 6px;
@@ -2409,7 +2397,7 @@ mark {
 
 .filter-chip-label { color: var(--lx-text-secondary); }
 
-/* Status chips (runtime history filter): one segmented control, status color as identity */
+/* Status chips (hearth history filter): one segmented control, status color as identity */
 .status-chip {
   display: inline-flex;
   align-items: center;
@@ -2884,10 +2872,10 @@ textarea.prop-input {
 /* ---- Solid danger button (destructive confirmations) ---- */
 .btn-danger-solid {
   background: #FF4444;
-  color: var(--lx-text-primary);
+  color: var(--lx-text-inverse);
   border-color: transparent;
 }
-.btn-danger-solid:hover { background: #E03A3A; }
+.btn-danger-solid:hover { background: #FF5C5C; }
 
 /* ---- Unlinked sync dot (completes sync-dot set per spec 2.5) ---- */
 .sync-unlinked { background: #6B6560; }
@@ -2902,7 +2890,7 @@ textarea.prop-input {
     display: inline-flex;
   }
 
-/* Unified navbar pill — same geometry as the AI status pill.
+/* Unified navbar pill — same geometry as the Hearth status pill.
    Used by: project switcher trigger, user profile trigger. */
 .nav-pill {
   display: inline-flex;
@@ -3442,12 +3430,12 @@ textarea.prop-input {
 
 .history-badge-auto {
   background: rgba(34, 211, 238, 0.10);
-  color: #67E8F9;
+  color: var(--lx-badge-task);
 }
 
 .history-badge-manual {
   background: rgba(240, 192, 64, 0.10);
-  color: #FCD34D;
+  color: var(--lx-text-warning);
 }
 
 .history-actions {
@@ -5067,7 +5055,7 @@ textarea.prop-input {
   padding: 2px 7px;
   border-radius: 4px;
   background: rgba(34, 211, 238, 0.10);
-  color: #67E8F9;
+  color: var(--lx-badge-task);
 }
 .sl-kind-chip.backlog {
   background: rgba(255, 255, 255, 0.06);
@@ -5123,7 +5111,7 @@ textarea.prop-input {
   color: var(--lx-text-muted);
 }
 
-/* ---- Assistant chat — Threads sidebar (assistant-chat.html) ---- */
+/* ---- Herald chat — Threads sidebar (herald-chat.html) ---- */
 .threads-sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -5225,7 +5213,7 @@ textarea.prop-input {
 }
 
 /* =========================================================
-   Admin — Assistant Usage & Health (admin-assistant-usage.html)
+   Admin — Herald Usage & Health (admin-herald-usage.html)
    KPI row 4 cards, by_day chart, by_model + price tables, health badges.
    ========================================================= */
 .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
@@ -5414,6 +5402,30 @@ textarea.prop-input {
         </div>
       </div>
 
+      <h3 class="font-display text-base weight-600 color-primary">Badge text</h3>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-badge-feature);"></div>
+          <div class="token-name font-mono text-xs">--lx-badge-feature</div>
+          <div class="token-value text-2xs color-muted">#4ADE80 / #15803D</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-badge-bug);"></div>
+          <div class="token-name font-mono text-xs">--lx-badge-bug</div>
+          <div class="token-value text-2xs color-muted">#FF9999 / #991B1B</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-badge-task);"></div>
+          <div class="token-name font-mono text-xs">--lx-badge-task</div>
+          <div class="token-value text-2xs color-muted">#67E8F9 / #0E7490</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-badge-asset);"></div>
+          <div class="token-name font-mono text-xs">--lx-badge-asset</div>
+          <div class="token-value text-2xs color-muted">#F9A8D4 / #BE185D</div>
+        </div>
+      </div>
+
       <h3 class="font-display text-base weight-600 color-primary">Status backgrounds</h3>
       <div class="token-grid">
         <div class="token-cell">
@@ -5526,7 +5538,7 @@ textarea.prop-input {
         <div class="token-cell">
           <div class="token-name font-mono text-xs">--lx-font-display</div>
           <div class="font-display text-xl" style="margin-top:6px;">Space Grotesk</div>
-          <div class="token-value text-2xs color-muted" style="margin-top:6px;">Page titles, dashboard project names, empty-state headings, swimlane names. Never below 16px.</div>
+          <div class="token-value text-2xs color-muted" style="margin-top:6px;">Page titles, dashboard project names, empty-state headings, swimlane names. Never below 16px outside the documented dense-context exceptions.</div>
         </div>
         <div class="token-cell">
           <div class="token-name font-mono text-xs">--lx-font-body</div>
@@ -5544,6 +5556,7 @@ textarea.prop-input {
           <div class="token-value text-2xs color-muted" style="margin-top:6px;">Tiny HUD labels, WIP counters, priority abbreviations. 10–11px only.</div>
         </div>
       </div>
+      <span class="annotation-tag" style="display:block;margin-top:8px;">Dense-context exceptions to the 16px display floor (deliberate, compact contexts only): <span class="font-mono">.bubble-md</span> H1 15 / H2 14 / H3–H4 13px (markdown inside AI chat bubbles, not §3.4 wiki prose), <span class="font-mono">.datepicker-month</span> 14px, <span class="font-mono">.swimlane-name</span> 13px, <span class="font-mono">.tl-label.group</span> 13px, <span class="font-mono">.sl-group-title</span> 14px, <span class="font-mono">.milestone-name</span> 15px. Page/modal/section display headings keep the ≥16px floor. Weight: 700 is never used (600 is the ceiling).</span>
       <h3 class="font-display text-base weight-600 color-primary">Type scale — when to use</h3>
       <div class="token-grid">
         <div class="token-cell"><span class="font-mono text-xs">text-2xs · 11px</span><div class="text-2xs" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">WIP counters, timestamps, HUD labels</div></div>
@@ -5593,7 +5606,7 @@ textarea.prop-input {
       <h3 class="font-display text-base weight-600 color-primary">Motion</h3>
       <div class="token-grid">
         <div class="token-cell"><div class="token-name font-mono text-xs">--lx-ease-out</div><div class="token-value text-2xs color-muted">cubic-bezier(0.16, 1, 0.3, 1)</div></div>
-        <div class="token-cell"><div class="token-name font-mono text-xs">--lx-ease-in-out</div><div class="token-value text-2xs color-muted">cubic-bezier(0.65, 0, 0.35, 1)</div></div>
+        <div class="token-cell"><div class="token-name font-mono text-xs">--lx-ease-in-out</div><div class="token-value text-2xs color-muted">cubic-bezier(0.45, 0, 0.55, 1)</div></div>
       </div>
     </section>
 
@@ -5692,7 +5705,7 @@ textarea.prop-input {
           <span class="state-label">Card row · danger</span>
           <div class="card-row card-row--danger" style="width:280px;">
             <div class="text-sm weight-500 color-primary">Daemon offline</div>
-            <div class="text-xs color-secondary">AI runtime unreachable since 14:02</div>
+            <div class="text-xs color-secondary">Hearth runtime unreachable since 14:02</div>
           </div>
         </div>
         <div class="state-row">
@@ -6026,7 +6039,7 @@ textarea.prop-input {
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.status-chip` + `.status-dot` for runtime/task run states (queued/running/done/failed/cancelled).<br/>
+          <strong>Use</strong> — `.status-chip` + `.status-dot` for hearth/task run states (queued/running/done/failed/cancelled).<br/>
           <strong>Avoid</strong> — a status chip for a persistent field value; color alone without a label.<br/>
           <strong>Instead</strong> — `.type-badge`/`.priority-dot` for task fields; keep label + dot for status.
         </div>
@@ -6350,7 +6363,7 @@ textarea.prop-input {
             <div class="px-4 pt-4">
               <h2 class="slideover-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                 <span class="task-key">EG-18</span>
-                <span class="detail-title">Crash on large board load</span>
+                <span>Crash on large board load</span>
               </h2>
             </div>
           </div>
@@ -6369,7 +6382,7 @@ textarea.prop-input {
       <h2 class="font-display text-xl weight-600 color-primary">Markdown / rich-text prose</h2>
       <p class="text-sm color-secondary" style="max-width:640px;margin-bottom:16px;">Canonical spec for rendered markdown (assistant replies, wiki pages, task descriptions). One heading scale, one code/pre treatment, one list rhythm — every prose surface copies these values; do not re-derive.</p>
 
-      <span class="annotation-tag" style="display:block;margin-bottom:16px;">Consumers: <span class="font-mono">.wiki-prose</span> (wiki pages) · <span class="font-mono">.td-*</span> (task detail TipTap read-mode) · <span class="font-mono">.bubble-md</span> (Assistant chat). Intentional deltas — do NOT "unify" blindly: wiki base reads 15px/26px line-height vs chat+task 15px/22px (long-form reading vs narrow columns); chat trims the first/last child margins at bubble edges (<span class="font-mono">.bubble-md &gt; *:first-child/last-child</span>) because bubbles sit flush in the transcript; task detail ships per-element classes instead of a scoped wrapper.</span>
+      <span class="annotation-tag" style="display:block;margin-bottom:16px;">Consumers: <span class="font-mono">.wiki-prose</span> (wiki pages) · <span class="font-mono">.td-*</span> (task detail TipTap read-mode) · <span class="font-mono">.bubble-md</span> (Herald chat). Intentional deltas — do NOT "unify" blindly: wiki base reads 15px/26px line-height vs chat+task 15px/22px (long-form reading vs narrow columns); chat trims the first/last child margins at bubble edges (<span class="font-mono">.bubble-md &gt; *:first-child/last-child</span>) because bubbles sit flush in the transcript; task detail ships per-element classes instead of a scoped wrapper.</span>
 
       <!-- Headings -->
       <div class="block-shell">
@@ -6462,7 +6475,7 @@ pre code { background:transparent; padding:0; font-size:12px; line-height:20px; 
             <li style="margin-bottom:0;"><input type="checkbox" checked disabled style="margin-right:5px;vertical-align:-1px;accent-color:var(--lx-border-focus);" /> done task item</li>
           </ul>
         </div>
-        <span class="annotation-tag" style="display:block;margin:12px 0;">CRITICAL — Tailwind v4 preflight sets <span class="font-mono">ol, ul, menu &#123; list-style: none &#125;</span> in @layer base. EVERY prose surface MUST explicitly restore markers under its own scope (<span class="font-mono">ul &#123; list-style: disc &#125;</span>, <span class="font-mono">ul ul &#123; circle &#125;</span>, <span class="font-mono">ol &#123; decimal &#125;</span>) or bullets and numbering vanish in BOTH themes. This bit Assistant chat already; restore it in any new consumer.</span>
+        <span class="annotation-tag" style="display:block;margin:12px 0;">CRITICAL — Tailwind v4 preflight sets <span class="font-mono">ol, ul, menu &#123; list-style: none &#125;</span> in @layer base. EVERY prose surface MUST explicitly restore markers under its own scope (<span class="font-mono">ul &#123; list-style: disc &#125;</span>, <span class="font-mono">ul ul &#123; circle &#125;</span>, <span class="font-mono">ol &#123; decimal &#125;</span>) or bullets and numbering vanish in BOTH themes. This bit Herald chat already; restore it in any new consumer.</span>
         <pre class="code-block" id="code-prose-lists">ul   { list-style: disc;    margin:0 0 12px 20px; padding-left:2px; }
 ul ul{ list-style: circle; }
 ol   { list-style: decimal; }
@@ -6555,10 +6568,10 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
         <div class="token-contract">Tokens: --lx-surface-card-hover (bg), --lx-text-secondary</div>
       </div>
 
-      <!-- Highlighted code block (Assistant chat fenced segments) -->
+      <!-- Highlighted code block (Herald chat fenced segments) -->
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.assistant-codeblock` for Assistant chat done-turn fenced code: elevated surface matching `.bubble-md pre`, micro-caps language label + copy button in the top-right chrome row, body highlighted by highlight.js and themed through the opt-in `.hljs-theme` class on the `code` element.<br/>
+          <strong>Use</strong> — `.herald-codeblock` for Herald chat done-turn fenced code: elevated surface matching `.bubble-md pre`, micro-caps language label + copy button in the top-right chrome row, body highlighted by highlight.js and themed through the opt-in `.hljs-theme` class on the `code` element.<br/>
           <strong>Avoid</strong> — raw hex token colors or extra hljs scopes outside `.hljs-theme`; labels in sentence case inside the text (caps come from CSS).<br/>
           <strong>Instead</strong> — plain `.bubble-md pre` for streaming/inline code (no chrome, same surface).
         </div>
@@ -6573,9 +6586,9 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
           </div>
           <span class="annotation-tag" style="display:block;margin-top:8px;">Token mapping (.hljs-theme): keywords/literals → --lx-text-link · strings/additions → --lx-text-success · numbers/deletions → --lx-text-danger · functions → --lx-badge-task · types/built-ins → --lx-badge-asset · attributes → --lx-text-warning · comments → --lx-text-tertiary italic. Unknown fence languages fall back to highlightAuto; grammar errors fall back to escaped plain text (streaming-safe).</span>
         </div>
-        <pre class="code-block" id="code-misc-codeblock">&lt;div class="assistant-codeblock"&gt;
-  &lt;span class="assistant-codeblock-chrome"&gt;
-    &lt;span class="assistant-codeblock-lang"&gt;ts&lt;/span&gt;
+        <pre class="code-block" id="code-misc-codeblock">&lt;div class="herald-codeblock"&gt;
+  &lt;span class="herald-codeblock-chrome"&gt;
+    &lt;span class="herald-codeblock-lang"&gt;ts&lt;/span&gt;
   &lt;/span&gt;
   &lt;code class="hljs-theme"&gt;…highlight.js output…&lt;/code&gt;
 &lt;/div&gt;</pre>
