@@ -188,3 +188,8 @@
 2026-09-25 | db-backend-review-fixes | PLAN | opened; fixes from db+backend review of 0f4caa4; branch fix/db-backend-review-fixes @3b7c40a; 3 lanes; gate ack branch→commit→push→PR | status/db-backend-review-fixes/plan.md
 2026-09-25 | db-backend-review-fixes | PR | pushed; PR #101 open to main; gate 186/1680; reviewer PASS | https://github.com/yohanesgre/lexa/pull/101
 2026-09-25 | db-backend-review-fixes | DONE | PR #101 open (merge pending user); gate 186/1680; reviewer PASS; report written | status/db-backend-review-fixes/report.md
+2026-09-25 | db-backend-review-fixes | DONE | PR #101 squash-merged to main (eb4ce70); merge resolved | https://github.com/yohanesgre/lexa/pull/101
+2026-09-25 | backlog-cleanup | PLAN | opened; branch fix/backlog-cleanup @eb4ce70; code+docs lanes | status/backlog-cleanup/plan.md
+2026-09-25 | deferred-backlog | PLAN | recorded deferred follow-ups + open decisions; not scheduled | status/deferred-backlog/plan.md
+2026-09-25 | backlog-cleanup | PR | pushed; PR #102 open to main; gate 186/1687; reviewer PASS | https://github.com/yohanesgre/lexa/pull/102
+2026-09-25 | backlog-cleanup | DONE | PR #102 open (merge pending user); report written | status/backlog-cleanup/report.md

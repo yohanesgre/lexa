@@ -208,7 +208,7 @@ describe("emission builders (B2 batch re-expression)", () => {
   });
 
   it("buildTaskDeleteBatch emits only the DELETE (activity row cascades)", () => {
-    const stmts = buildTaskDeleteBatch({ taskId: "t1", activity: { ...actor, type: "deleted", message: "Maria deleted this task" } });
+    const stmts = buildTaskDeleteBatch({ taskId: "t1" });
     expect(stmts).toHaveLength(1);
     expect(stmts[0]!.sql).toMatch(/DELETE FROM tasks WHERE id = \?/);
     expect(stmts[0]!.params).toEqual(["t1"]);

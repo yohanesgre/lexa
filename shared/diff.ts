@@ -110,6 +110,10 @@ function splitLines(text: string): string[] {
 
 type Op = { kind: "equal" | "del" | "add"; a: number; b: number };
 
+// Upper bound on the LCS DP matrix cells. Above it, fall back to a coarse
+// line-level diff so a pathological document can't allocate gigabytes.
+const CELL_BUDGET = 1_000_000;
+
 // LCS over lines/tokens (suffix DP, tie-break deletes first like git).
 function lcsOps(a: string[], b: string[]): Op[] {
   const n = a.length;
@@ -152,16 +156,56 @@ function lcsOps(a: string[], b: string[]): Op[] {
   return ops;
 }
 
+// Every old line is a deletion and every new line an addition, with no word
+// spans — the memory-safe shape for inputs past CELL_BUDGET. `lineOffset` is
+// the count of equal lines trimmed from the front, so hunks stay anchored to
+// the original line numbers. Identical text has an empty middle, so this
+// returns zero counts without a special case.
+function coarseDiff(
+  oldText: string,
+  newText: string,
+  a: string[],
+  b: string[],
+  lineOffset: number
+): DiffResult {
+  const lines: DiffLine[] = [
+    ...a.map((text): DiffLine => ({ kind: "del", text, spans: [] })),
+    ...b.map((text): DiffLine => ({ kind: "add", text, spans: [] })),
+  ];
+  const hunks: DiffHunk[] =
+    a.length + b.length > 0
+      ? [{ oldStart: lineOffset + 1, oldLines: a.length, newStart: lineOffset + 1, newLines: b.length, lines }]
+      : [];
+  return { oldText, newText, additions: b.length, deletions: a.length, hunks };
+}
+
+// Common-prefix/suffix line trim: O(n) and safe to strip before the LCS
+// because equal leading/trailing lines always belong to some optimal LCS.
+function commonAffix(a: string[], b: string[]): { pre: number; suf: number } {
+  const max = Math.min(a.length, b.length);
+  let pre = 0;
+  while (pre < max && a[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (suf < max - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+  return { pre, suf };
+}
+
 export function diffText(oldText: string, newText: string): DiffResult {
   const a = splitLines(oldText);
   const b = splitLines(newText);
-  const ops = lcsOps(a, b);
+  const { pre, suf } = commonAffix(a, b);
+  const midA = a.slice(pre, a.length - suf);
+  const midB = b.slice(pre, b.length - suf);
+  if ((midA.length + 1) * (midB.length + 1) > CELL_BUDGET) {
+    return coarseDiff(oldText, newText, midA, midB, pre);
+  }
+  const ops = lcsOps(midA, midB);
 
   const hunks: DiffHunk[] = [];
   let additions = 0;
   let deletions = 0;
-  let oldBefore = 0;
-  let newBefore = 0;
+  let oldBefore = pre;
+  let newBefore = pre;
 
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i]!;
@@ -180,8 +224,8 @@ export function diffText(oldText: string, newText: string): DiffResult {
     additions += addB.length;
     deletions += delA.length;
 
-    const oldStart = delA.length > 0 ? delA[0]!.a + 1 : oldBefore + 1;
-    const newStart = addB.length > 0 ? addB[0]!.b + 1 : newBefore + 1;
+    const oldStart = delA.length > 0 ? delA[0]!.a + 1 + pre : oldBefore + 1;
+    const newStart = addB.length > 0 ? addB[0]!.b + 1 + pre : newBefore + 1;
 
     // Word-level spans: pair the i-th deleted line with the i-th added line
     // only when the counts match (unbalanced hunks render plain, like the
@@ -193,16 +237,16 @@ export function diffText(oldText: string, newText: string): DiffResult {
     const lines: DiffLine[] = [];
     for (const o of run) {
       if (o.kind === "del") {
-        const text = a[o.a] ?? "";
+        const text = midA[o.a] ?? "";
         const pairIdx = delLines.indexOf(o);
         const paired = pairWordDiff ? addLines[pairIdx] : undefined;
-        const spans = pairWordDiff && paired ? wordSpans(text, b[paired.b] ?? "").del : [];
+        const spans = pairWordDiff && paired ? wordSpans(text, midB[paired.b] ?? "").del : [];
         lines.push({ kind: "del", text, spans });
       } else {
-        const text = b[o.b] ?? "";
+        const text = midB[o.b] ?? "";
         const pairIdx = addLines.indexOf(o);
         const paired = pairWordDiff ? delLines[pairIdx] : undefined;
-        const spans = pairWordDiff && paired ? wordSpans(a[paired.a] ?? "", text).add : [];
+        const spans = pairWordDiff && paired ? wordSpans(midA[paired.a] ?? "", text).add : [];
         lines.push({ kind: "add", text, spans });
       }
     }
@@ -236,6 +280,7 @@ function tokenize(text: string): Token[] {
 function wordSpans(aText: string, bText: string): { del: DiffSpan[]; add: DiffSpan[] } {
   const a = tokenize(aText);
   const b = tokenize(bText);
+  if ((a.length + 1) * (b.length + 1) > CELL_BUDGET) return { del: [], add: [] };
   const ops = lcsOps(a.map((t) => t.text), b.map((t) => t.text));
   const del: DiffSpan[] = [];
   const add: DiffSpan[] = [];

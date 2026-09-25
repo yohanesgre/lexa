@@ -135,4 +135,78 @@ describe("diffText", () => {
     expect(r.additions).toBe(1);
     expect(r.hunks).toHaveLength(1);
   });
+
+  it("keeps exact hunks under the cell budget", () => {
+    const r = diffText("a\nb\nc", "a\nX\nc");
+    expect(r.hunks).toHaveLength(1);
+    expect(r.hunks[0]!.lines).toHaveLength(2);
+    expect(r.additions).toBe(1);
+    expect(r.deletions).toBe(1);
+  });
+
+  it("falls back to a coarse line diff past the cell budget", () => {
+    const n = 1200;
+    const oldText = Array.from({ length: n }, (_, i) => `old line ${i}`).join("\n");
+    const newText = Array.from({ length: n }, (_, i) => `new line ${i}`).join("\n");
+    const r = diffText(oldText, newText);
+    expect(r.hunks).toHaveLength(1);
+    expect(r.hunks[0]!).toMatchObject({ oldStart: 1, oldLines: n, newStart: 1, newLines: n });
+    expect(r.additions).toBe(n);
+    expect(r.deletions).toBe(n);
+    expect(r.hunks[0]!.lines).toHaveLength(2 * n);
+    expect(r.hunks[0]!.lines.every((l) => l.spans.length === 0)).toBe(true);
+    expect(r.hunks[0]!.lines[0]!.kind).toBe("del");
+    expect(r.hunks[0]!.lines[n]!.kind).toBe("add");
+  });
+
+  it("trims common prefix/suffix so a one-line change in a huge doc stays exact", () => {
+    const n = 1500;
+    const before = Array.from({ length: n }, (_, i) => `line ${i}`);
+    const after = before.slice();
+    after[700] = "changed line 700";
+    const r = diffText(before.join("\n"), after.join("\n"));
+    // Untrimmed this doc is past CELL_BUDGET and would coarse-diff the whole
+    // document (n deletions + n additions); the trim must yield exactly one
+    // changed line on each side, anchored at the original line number.
+    expect(r.additions).toBe(1);
+    expect(r.deletions).toBe(1);
+    expect(r.hunks).toHaveLength(1);
+    expect(r.hunks[0]!).toMatchObject({ oldStart: 701, oldLines: 1, newStart: 701, newLines: 1 });
+    expect(r.hunks[0]!.lines.map((l) => l.kind)).toEqual(["del", "add"]);
+  });
+
+  it("returns zero counts for identical large inputs", () => {
+    const n = 1500;
+    const text = Array.from({ length: n }, (_, i) => `line ${i}`).join("\n");
+    const r = diffText(text, text);
+    expect(r.additions).toBe(0);
+    expect(r.deletions).toBe(0);
+    expect(r.hunks).toEqual([]);
+  });
+
+  it("uses the coarse path when the trimmed middle still exceeds the cell budget", () => {
+    const common = Array.from({ length: 50 }, (_, i) => `common ${i}`);
+    const oldMid = Array.from({ length: 1100 }, (_, i) => `old ${i}`);
+    const newMid = Array.from({ length: 1100 }, (_, i) => `new ${i}`);
+    const r = diffText([...common, ...oldMid, ...common].join("\n"), [...common, ...newMid, ...common].join("\n"));
+    expect(r.additions).toBe(1100);
+    expect(r.deletions).toBe(1100);
+    expect(r.hunks).toHaveLength(1);
+    expect(r.hunks[0]!).toMatchObject({ oldStart: 51, oldLines: 1100, newStart: 51, newLines: 1100 });
+    expect(r.hunks[0]!.lines).toHaveLength(2200);
+    expect(r.hunks[0]!.lines.every((l) => l.spans.length === 0)).toBe(true);
+    expect(r.hunks[0]!.lines[0]!.kind).toBe("del");
+    expect(r.hunks[0]!.lines[1100]!.kind).toBe("add");
+  });
+
+  it("skips word spans when a line pair exceeds the cell budget", () => {
+    const oldLine = Array.from({ length: 1001 }, (_, i) => `o${i}`).join(" ");
+    const newLine = Array.from({ length: 1001 }, (_, i) => `n${i}`).join(" ");
+    const r = diffText(oldLine, newLine);
+    expect(r.hunks).toHaveLength(1);
+    expect(r.hunks[0]!.lines).toHaveLength(2);
+    expect(r.hunks[0]!.lines.every((l) => l.spans.length === 0)).toBe(true);
+    expect(r.additions).toBe(1);
+    expect(r.deletions).toBe(1);
+  });
 });

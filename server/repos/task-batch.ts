@@ -170,7 +170,7 @@ export function buildWebhookMoveAndEmitBatch(input: {
   return stmts;
 }
 
-export function buildTaskDeleteBatch(input: { taskId: string; activity: ActivityInput }): BatchStmt[] {
+export function buildTaskDeleteBatch(input: { taskId: string }): BatchStmt[] {
   return [{ sql: `DELETE FROM tasks WHERE id = ?`, params: [input.taskId] }];
 }
 

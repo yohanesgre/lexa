@@ -575,12 +575,12 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       delete: (actor: Actor, id: string): Effect.Effect<void, TaskNotFound | TaskHasChildren | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* taskRepo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id })));
-          // deleted row lands in the same batch as the delete — if the
-          // delete fails (children), the rollback removes the activity row
-          // too.
+          // The batch is a single DELETE: task_activity rows cascade with the
+          // task (FK ON DELETE CASCADE), and withTx keeps the delete atomic —
+          // if it fails (children), the transaction rolls back with nothing
+          // removed.
           yield* withTx(db, batch(db, buildTaskDeleteBatch({
             taskId: id,
-            activity: asInput(actor, "deleted", msg.deletedTask(actor.label), false),
           })).pipe(
             Effect.catchTag("ConstraintViolation", () => new TaskHasChildren({ taskId: id }))
           ));
