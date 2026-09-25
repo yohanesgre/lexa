@@ -30,7 +30,7 @@ export class SourceRepo extends Effect.Service<SourceRepo>()("Lexa/SourceRepo", 
         kind: "wiki" | "external";
         title: string;
         ref: string;
-      }): Effect.Effect<DocumentSource, ConstraintViolation | DbError> =>
+      }): Effect.Effect<DocumentSource, ConstraintViolation | RowNotFound | DbError> =>
         Effect.gen(function* () {
           yield* run(
             db,
@@ -44,16 +44,8 @@ export class SourceRepo extends Effect.Service<SourceRepo>()("Lexa/SourceRepo", 
             input.title,
             input.ref
           );
-          return rowToDocumentSource({
-            id: input.id,
-            project_id: input.projectId,
-            document_type: input.documentType,
-            document_id: input.documentId,
-            kind: input.kind,
-            title: input.title,
-            ref: input.ref,
-            created_at: new Date().toISOString(),
-          });
+          const row = yield* queryFirst<DocumentSourceRow>(db, `SELECT * FROM document_sources WHERE id = ?`, input.id);
+          return rowToDocumentSource(row);
         }),
 
       delete: (id: string): Effect.Effect<number, ConstraintViolation | DbError> =>
