@@ -525,7 +525,7 @@ export class RuntimeService extends Effect.Service<RuntimeService>()("Lexa/Runti
         }),
 
       // Server-authoritative config: edits apply on the daemon's next claim/spawn.
-      updateRuntime: (id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<RuntimeWithTeam, RuntimeNotFound | ConstraintViolation | DbError> =>
+      updateRuntime: (id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[]; teamId?: string | null }): Effect.Effect<RuntimeWithTeam, RuntimeNotFound | ConstraintViolation | DbError> =>
         repo.updateRuntime(id, patch).pipe(
           Effect.catchTag("RowNotFound", () => new RuntimeNotFound({ id }))
         ),

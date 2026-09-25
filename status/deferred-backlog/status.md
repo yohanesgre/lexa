@@ -1,3 +1,3 @@
-state: PLAN
-ts: 1790292600
-msg: coverage waves complete; PREFIX-n + cf-IP implemented (PR pending); runtimes.team_id pick still pending
+state: WORKING
+ts: 1790293400
+msg: Option A in progress in runtimes-team-id; runtime_events.team_id + claim status gating stay out

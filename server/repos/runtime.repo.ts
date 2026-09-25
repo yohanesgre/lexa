@@ -113,13 +113,17 @@ export class RuntimeRepo extends Effect.Service<RuntimeRepo>()("Lexa/RuntimeRepo
           Effect.map(() => undefined)
         ),
 
-      updateRuntime: (id: string, patch: { name?: string; provider?: AgentCli; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<RuntimeWithTeam, RowNotFound | ConstraintViolation | DbError> =>
+      updateRuntime: (id: string, patch: { name?: string; provider?: AgentCli; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[]; teamId?: string | null }): Effect.Effect<RuntimeWithTeam, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const sets: string[] = [];
           const params: unknown[] = [];
           if (patch.name !== undefined) {
             sets.push("name = ?");
             params.push(patch.name);
+          }
+          if (patch.teamId !== undefined) {
+            sets.push("team_id = ?");
+            params.push(patch.teamId);
           }
           if (patch.provider !== undefined) {
             sets.push("provider = ?");
@@ -151,7 +155,8 @@ export class RuntimeRepo extends Effect.Service<RuntimeRepo>()("Lexa/RuntimeRepo
             );
           }
           params.push(id);
-          yield* run(db, `UPDATE runtimes SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          const changes = yield* run(db, `UPDATE runtimes SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          if (changes === 0) return yield* Effect.fail(new RowNotFound({ table: "runtimes" }));
           return yield* queryFirst<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, id).pipe(
             Effect.map(rowToRuntime)
           );

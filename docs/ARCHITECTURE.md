@@ -98,7 +98,11 @@ clients, no callback URIs, no SMTP anywhere.
   (`LXK_ADMIN_EMAILS`, applied at provisioning), never edited at runtime.
   Team-admin authority comes from the org `member.role` (owner/admin) on the
   team. Teams = Better Auth organizations; projects carry `team_id`;
-  runtimes are team-scoped (`team_id` NULL = superadmin-owned global).
+  runtimes are team-scoped (`team_id` NULL = superadmin-owned global). A
+  team-scoped runtime is never silently widened: deleting its team is blocked
+  by the `runtimes.team_id ON DELETE RESTRICT` backstop (all paths, incl. raw
+  SQL), and widening requires an explicit superadmin reassign/detach via
+  `PATCH /api/runtimes/:id { teamId }`.
 - **Authorization order (project access):** superadmin > explicit
   `user_project_roles` grant > team membership > deny (see LAYERS.md →
   AuthorizationService).

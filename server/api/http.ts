@@ -712,6 +712,8 @@ const UpdateRuntimeInput = Schema.Struct({
   printLogs: Schema.optional(Schema.Boolean),
   logLevel: Schema.optional(Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR")),
   extraArgs: Schema.optional(Schema.Array(Schema.String)),
+  // Owning-team reassignment/detach; null = explicit global. Superadmin-only.
+  teamId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const HeartbeatInput = Schema.Struct({
@@ -2548,6 +2550,18 @@ const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
     .handle("updateRuntime", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* RuntimeService;
+        // Reassigning/detaching a runtime changes its claim scope (a NULL
+        // team_id claims any team's tasks) — superadmin-only, even though the
+        // other config fields stay available to any authenticated caller.
+        if (req.payload.teamId !== undefined) {
+          const identity = yield* AuthIdentity;
+          if (identity.role !== "admin") return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+          if (req.payload.teamId !== null) {
+            const teams = yield* TeamsService;
+            const team = yield* teams.findById(req.payload.teamId);
+            if (!team) return yield* Effect.fail(new TeamNotFound({ teamId: req.payload.teamId }));
+          }
+        }
         return yield* service.updateRuntime(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.provider !== undefined ? { provider: req.payload.provider } : {}),
@@ -2556,6 +2570,7 @@ const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
           ...(req.payload.printLogs !== undefined ? { printLogs: req.payload.printLogs } : {}),
           ...(req.payload.logLevel !== undefined ? { logLevel: req.payload.logLevel } : {}),
           ...(req.payload.extraArgs !== undefined ? { extraArgs: [...req.payload.extraArgs] } : {}),
+          ...(req.payload.teamId !== undefined ? { teamId: req.payload.teamId } : {}),
         });
       }))
     )

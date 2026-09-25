@@ -5,6 +5,7 @@ import type { Team, TeamMember, TeamMemberRole } from "../../shared/types";
 
 export class TeamNotFound extends Data.TaggedError("TeamNotFound")<{ teamId: string }> {}
 export class TeamHasProjects extends Data.TaggedError("TeamHasProjects")<{ teamId: string; count: number }> {}
+export class TeamHasRuntimes extends Data.TaggedError("TeamHasRuntimes")<{ teamId: string; count: number }> {}
 export class SoleOwner extends Data.TaggedError("SoleOwner")<{ message: string }> {}
 export class TeamMemberNotFound extends Data.TaggedError("TeamMemberNotFound")<{ userId: string }> {}
 export class MemberNotInWorkspace extends Data.TaggedError("MemberNotInWorkspace")<{ email: string; available: string[] }> {}
@@ -102,7 +103,7 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
         Effect.map((row) => (row ? toTeam(row) : null))
       );
 
-    const remove = (teamId: string): Effect.Effect<void, TeamNotFound | TeamHasProjects | DbError> =>
+    const remove = (teamId: string): Effect.Effect<void, TeamNotFound | TeamHasProjects | TeamHasRuntimes | DbError> =>
       Effect.gen(function* () {
         const org = yield* firstOrNull(queryFirst<OrgRow>(db, "SELECT id FROM organization WHERE id = ?", teamId));
         if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
@@ -110,14 +111,24 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
           Effect.catchTag("RowNotFound", () => Effect.succeed({ c: 0 }))
         );
         if (owned.c > 0) return yield* Effect.fail(new TeamHasProjects({ teamId, count: owned.c }));
-        // runtimes are ephemeral infra — unassign them (fresh DBs get
-        // ON DELETE SET NULL from the FK; this explicit clear also covers
-        // DBs migrated before that FK action existed).
-        yield* run(db, "UPDATE runtimes SET team_id = NULL WHERE team_id = ?", teamId).pipe(
-          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
-        );
+        // The runtimes FK (team_id ON DELETE RESTRICT) is the race-free guard:
+        // deleting a team with bound runtimes must never silently widen them
+        // into global ones. Let the single DELETE hit the FK, then re-count
+        // only to build the error payload.
         yield* run(db, "DELETE FROM organization WHERE id = ?", teamId).pipe(
-          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+          Effect.catchTag("ConstraintViolation", (e) =>
+            Effect.gen(function* () {
+              const bound = yield* queryFirst<{ c: number }>(db, "SELECT COUNT(*) c FROM runtimes WHERE team_id = ?", teamId).pipe(
+                Effect.catchTag("RowNotFound", () => Effect.succeed({ c: 0 }))
+              );
+              // A different FK can block the delete; never misreport it as
+              // bound runtimes (payload stays truthful).
+              if (bound.c === 0) {
+                return yield* Effect.fail(new DbError({ message: `organization delete blocked: ${e.message}` }));
+              }
+              return yield* Effect.fail(new TeamHasRuntimes({ teamId, count: bound.c }));
+            })
+          )
         );
       });
 

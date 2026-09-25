@@ -207,6 +207,67 @@ describe("teams + workspace + sessions endpoints", () => {
     expect(membersLeft.c).toBe(0);
   });
 
+  it("delete team blocked while team-scoped runtimes are bound (409 TEAM_HAS_RUNTIMES), then detach → 204", async () => {
+    const created = await withKey("POST", "/api/teams", { name: "Runtime Team" });
+    expect(created.status).toBe(201);
+    const team = (await created.json()) as { id: string };
+    const db = new Database(dbPath);
+    db.prepare("INSERT INTO runtimes (id, name, provider, team_id) VALUES ('rt-bound', 'Bound', 'opencode', ?)").run(team.id);
+    db.close();
+
+    const blocked = await withKey("DELETE", `/api/teams/${team.id}`);
+    expect(blocked.status).toBe(409);
+    const body = (await blocked.json()) as { error: { code: string; details: { teamId: string; count: number } } };
+    expect(body.error.code).toBe("TEAM_HAS_RUNTIMES");
+    expect(body.error.details.teamId).toBe(team.id);
+    expect(body.error.details.count).toBe(1);
+
+    // The runtime survived — the rejected delete never nulled it.
+    const db2 = new Database(dbPath);
+    expect(db2.prepare("SELECT team_id FROM runtimes WHERE id = 'rt-bound'").get()).toEqual({ team_id: team.id });
+    db2.close();
+
+    const detach = await withKey("PATCH", "/api/runtimes/rt-bound", { teamId: null });
+    expect(detach.status).toBe(200);
+    expect(((await detach.json()) as { teamId: string | null }).teamId).toBeNull();
+
+    const ok = await withKey("DELETE", `/api/teams/${team.id}`);
+    expect(ok.status).toBe(204);
+  });
+
+  it("PATCH runtime teamId: reassign, unknown runtime/team, and member session forbidden", async () => {
+    const from = (await (await withKey("POST", "/api/teams", { name: "From Team" })).json()) as { id: string };
+    const to = (await (await withKey("POST", "/api/teams", { name: "To Team" })).json()) as { id: string };
+    const db = new Database(dbPath);
+    db.prepare("INSERT INTO runtimes (id, name, provider, team_id) VALUES ('rt-move', 'Move', 'opencode', ?)").run(from.id);
+    db.close();
+
+    const reassign = await withKey("PATCH", "/api/runtimes/rt-move", { teamId: to.id });
+    expect(reassign.status).toBe(200);
+    expect(((await reassign.json()) as { teamId: string | null }).teamId).toBe(to.id);
+
+    // The runtime left `from` — deleting it now succeeds.
+    const delFrom = await withKey("DELETE", `/api/teams/${from.id}`);
+    expect(delFrom.status).toBe(204);
+
+    const unknownTeam = await withKey("PATCH", "/api/runtimes/rt-move", { teamId: "ghost-team" });
+    expect(unknownTeam.status).toBe(404);
+    expect(((await unknownTeam.json()) as { error: { code: string } }).error.code).toBe("TEAM_NOT_FOUND");
+
+    const unknownRuntime = await withKey("PATCH", "/api/runtimes/ghost", { teamId: null });
+    expect(unknownRuntime.status).toBe(404);
+    expect(((await unknownRuntime.json()) as { error: { code: string } }).error.code).toBe("RUNTIME_NOT_FOUND");
+
+    // A member session cannot change a runtime's claim scope.
+    const memberRes = await withCookie(await signIn("member2@lexa.test"), "PATCH", "/api/runtimes/rt-move", { teamId: to.id });
+    expect(memberRes.status).toBe(403);
+
+    // Empty patch is a no-op (never `UPDATE runtimes SET  WHERE id = ?`).
+    const empty = await withKey("PATCH", "/api/runtimes/rt-move", {});
+    expect(empty.status).toBe(200);
+    expect(((await empty.json()) as { teamId: string | null }).teamId).toBe(to.id);
+  });
+
   it("workspace members list carries teams + banned; deactivate kills sessions and blocks login, reactivate restores", async () => {
     const list = await withKey("GET", "/api/workspace/members");
     expect(list.status).toBe(200);
