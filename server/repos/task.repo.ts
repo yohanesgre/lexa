@@ -372,23 +372,32 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         ).pipe(Effect.map(() => undefined)),
 
       // Refreshes the last-known upstream title (webhook edit / post-push).
-      setGithubIssueTitle: (taskId: string, issueId: string, title: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+      // Strict: a missing link row is RowNotFound, never a silent no-op.
+      setGithubIssueTitle: (taskId: string, issueId: string, title: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
         run(
           db,
           `UPDATE task_github_issues SET issue_title = ? WHERE task_id = ? AND issue_id = ?`,
           title,
           taskId,
           issueId
-        ).pipe(Effect.map(() => undefined)),
+        ).pipe(
+          Effect.flatMap((changes) =>
+            changes === 0 ? Effect.fail(new RowNotFound({ table: "task_github_issues" })) : Effect.void
+          )
+        ),
 
-      setGithubSyncedState: (taskId: string, issueId: string, state: "open" | "closed"): Effect.Effect<void, ConstraintViolation | DbError> =>
+      setGithubSyncedState: (taskId: string, issueId: string, state: "open" | "closed"): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
         run(
           db,
           `UPDATE task_github_issues SET synced_state = ? WHERE task_id = ? AND issue_id = ?`,
           state,
           taskId,
           issueId
-        ).pipe(Effect.map(() => undefined)),
+        ).pipe(
+          Effect.flatMap((changes) =>
+            changes === 0 ? Effect.fail(new RowNotFound({ table: "task_github_issues" })) : Effect.void
+          )
+        ),
 
       // Full link rows incl. content-echo columns — used by the push flow and
       // the webhook echo check (never exposed through task payloads).
@@ -403,14 +412,18 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       // (echo detection) and clears push_failed; on failure only flags
       // push_failed — pushed_* stays at the last SUCCESSFUL push so the next
       // save's diff (against pushed_*) naturally retries.
-      setPushedContent: (taskId: string, issueId: string, title: string | null, body: string | null, failed: boolean): Effect.Effect<void, ConstraintViolation | DbError> =>
+      setPushedContent: (taskId: string, issueId: string, title: string | null, body: string | null, failed: boolean): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
         run(
           db,
           failed
             ? `UPDATE task_github_issues SET push_failed = 1 WHERE task_id = ? AND issue_id = ?`
             : `UPDATE task_github_issues SET pushed_title = ?, pushed_body = ?, issue_title = COALESCE(?, issue_title), push_failed = 0 WHERE task_id = ? AND issue_id = ?`,
           ...(failed ? [taskId, issueId] : [title, body, title, taskId, issueId])
-        ).pipe(Effect.map(() => undefined)),
+        ).pipe(
+          Effect.flatMap((changes) =>
+            changes === 0 ? Effect.fail(new RowNotFound({ table: "task_github_issues" })) : Effect.void
+          )
+        ),
 
       unlinkGithubIssue: (taskId: string, issueId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(

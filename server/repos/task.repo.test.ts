@@ -141,6 +141,42 @@ describe("TaskRepo GitHub issue title", () => {
   });
 });
 
+describe("TaskRepo GitHub link setters — strict RowNotFound", () => {
+  it("setGithubIssueTitle fails RowNotFound when the link row is absent", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    const err = await Effect.runPromise(Effect.flip(repo.setGithubIssueTitle("t-live", "missing", "x")));
+    expect(err._tag).toBe("RowNotFound");
+  });
+
+  it("setGithubSyncedState fails RowNotFound when the link row is absent", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    const err = await Effect.runPromise(Effect.flip(repo.setGithubSyncedState("t-live", "missing", "closed")));
+    expect(err._tag).toBe("RowNotFound");
+  });
+
+  it("setPushedContent fails RowNotFound when the link row is absent", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    const err = await Effect.runPromise(Effect.flip(repo.setPushedContent("t-live", "missing", "t", "b", false)));
+    expect(err._tag).toBe("RowNotFound");
+  });
+
+  it("still updates an existing link row (strict path stays green)", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      repo.setGithubLink("t-live", { issueId: "ghi9", issueNumber: 9, repo: "owner/repo", title: "Original" })
+    );
+    await Effect.runPromise(repo.setGithubSyncedState("t-live", "ghi9", "closed"));
+    await Effect.runPromise(repo.setPushedContent("t-live", "ghi9", "Push title", "Push body", false));
+    const links = await Effect.runPromise(repo.findGithubLinks("t-live"));
+    expect(links[0]!.synced_state).toBe("closed");
+    expect(links[0]!.pushed_title).toBe("Push title");
+  });
+});
+
 describe("TaskRepo.searchByTitle", () => {
   it("returns one hit per task with per-task assignees, not merged across tasks", async () => {
     seed(db);

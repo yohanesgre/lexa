@@ -14,6 +14,11 @@ export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
 // (SQLite forbids nested transactions on one connection).
 let txDepth = 0;
 
+/**
+ * @deprecated Legacy test harness. Production paths use `server/db/db.ts`
+ * (`Db` + the driver); this module exists only for the test harness (repo and
+ * service tests).
+ */
 export function initSqlite(dbPath: string): Layer.Layer<Sqlite> {
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
