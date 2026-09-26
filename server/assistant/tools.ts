@@ -465,6 +465,8 @@ export function toolCallDetail(name: string, rawArgs: unknown): string | undefin
   const str = (key: string): string | null =>
     typeof args[key] === "string" && args[key] !== "" ? (args[key] as string) : null;
   const quoted = (prefix: string, value: string | null) => (value ? `${prefix} "${value}"` : undefined);
+  const mcp = /^mcp__([a-z0-9_]+)__(.+)$/.exec(name);
+  if (mcp) return `${mcp[1]} · ${mcp[2]}`;
   let detail: string | undefined;
   switch (name) {
     case "search_wiki":

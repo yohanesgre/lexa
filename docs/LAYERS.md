@@ -919,8 +919,8 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
   dependencies: [AssistantMcpRepo.Default],
   effect: Effect.gen(function* () {
     // Also requires McpConnector (injectable seam @Context.Tag). The live connector
-    // (stdio spawn / HTTP+SSE JSON-RPC tools/list) lands in server/assistant/mcp.ts
-    // in the tool-loop phase; Phase 1 wires McpConnectorUnavailable.
+    // (stdio spawn / HTTP+SSE JSON-RPC tools/list) is server/assistant/mcp.ts
+    // `LiveMcpConnector`, wired as the default in the API layer; tests inject a fake.
     return {
       // list/create/update/remove — id is slugified from the label, 'jev' reserved;
       // listForProject/setProjectServers — replace-set availability (validates ids);
@@ -935,6 +935,65 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
   }),
 }) {}
 ```
+
+### Assistant MCP tool bridge — `server/assistant/mcp.ts`
+
+Read-only MCP tools reach the model through the same `tools` array as the
+in-repo registry; there is no second execution path.
+
+```typescript
+// server/assistant/mcp.ts — plain module in the assistant tier (no service cycle).
+export async function buildMcpTools(opts: {
+  servers: McpServerRow[]; projectId: string; env: RuntimeEnv; allowlist: string | null;
+  connector?: McpClientFactory;   // injectable fake for tests; default = live
+  onToolCall?: McpToolCallSink; discoveryTimeoutMs?: number; toolCallTimeoutMs?: number;
+}): Promise<{ tools: unknown[]; close: () => Promise<void> }>
+
+// ENABLED_MCP_SERVERS_SQL: global `enabled = 1` AND project row `enabled = 1`.
+// LiveMcpConnector: Layer for the McpConnector tag (registry test endpoint).
+```
+
+- **Names:** `mcp__<serverId>__<tool>`; the id is sanitized to `[a-z0-9_]`
+  (segment capped 24) and the tool segment truncated so the joined name never
+  exceeds the provider limit (`MCP_TOOL_NAME_MAX = 64`). Collisions across
+  servers are skipped (logged), never fused.
+- **Filtering is manual and default-deny:** `isReadOnlyMcpTool` reads
+  `tool.metadata.mcp.annotations.readOnlyHint === true` (ai-mcp 0.4.6 has no
+  `toolFilter`). Tools without the annotation are listed nowhere and never
+  handed to the model — v1 exposes only provably read-only tools.
+- **Lifecycle:** one `createMCPClient` per server, discovery under
+  `Promise.allSettled` with a 5s per-server timeout; a failed/timed-out server
+  is skipped (fail-open, logged). `close()` is idempotent (double-close guarded)
+  and is passed to `buildStream` as `onDispose`.
+- **Dispose:** `StreamRunContext.onDispose` runs in `buildStream`'s existing
+  `finally`, so the done / fail / cancel paths each close the MCP clients
+  exactly once (tests cover all three).
+- **Caps:** 30s per tool call (`MCP_TOOL_CALL_TIMEOUT_MS`, abort + race) and
+  100 000 chars per result (`MCP_TOOL_RESULT_CAP`).
+- **SSRF:** http/sse URLs re-run `validateUrl(url, allowlist)` at connect time
+  (`validateMcpTransportUrl`) — the save-time pass is fast feedback only.
+- **stdio:** `server/assistant/mcp-stdio.ts`, imported lazily
+  (`await import("@tanstack/ai-mcp/stdio")`), guarded by `isWorkers()`; command
+  + args array (never a shell string); child env = `STDIO_ENV_ALLOWLIST` host
+  vars + the resolved `secret_ref` (`env:NAME` → that name, `file:/abs/path` →
+  `MCP_SECRET`). Stdio is skipped on Workers with `McpStdioUnavailable`.
+- **Workers output-schema validation:** the SDK's AJV validator compiles with
+  `new Function`, forbidden on workerd; on Workers a permissive
+  `jsonSchemaValidator` is supplied and wrapped tools drop `outputSchema`.
+- **Audit (deviation):** each call logs a structured call-log line
+  (`service: "assistant-mcp"`: serverId, toolName, ok/error, durationMs;
+  injectable `onToolCall`). `assistant_call_logs.kind` is CHECK-pinned to
+  provider kinds, so a real DB row needs a rebuild migration — deferred, not
+  smuggled into this change. No `task_activity` rows (MCP calls are not task
+  mutations).
+- **No cycle:** `mcp.ts` imports the repo type, env, errors, ssrf, the
+  `McpConnector` tag, and `@tanstack/ai-mcp` — never a chat/task service.
+
+Wiring: `AssistantChatService` (stream + resume) and `AssistantTaskService`
+(stream + resume) load `ENABLED_MCP_SERVERS_SQL` for the project, call
+`buildMcpTools`, append `.tools` after the registry/write tools (and the vision
+tool), and pass `onDispose: toolset.close`. The live connector is the API-layer
+default (`createApiHandler(..., { mcpConnector })` still overrides for tests).
 
 ### Lexa/Assistant — assistant tier (server-side TanStack AI)
 

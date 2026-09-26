@@ -82,7 +82,8 @@ import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
 import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
-import { AssistantMcpService, McpConnector, McpConnectorUnavailable, type McpUpdateInput } from "../services/assistant-mcp.service";
+import { AssistantMcpService, McpConnector, type McpUpdateInput } from "../services/assistant-mcp.service";
+import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
 import { SourceService } from "../services/source.service";
@@ -4347,9 +4348,9 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnect
     WorkspaceInvitesService.Default, PasswordLinksService.Default,
     AssistantProvidersRepo.Default, AssistantModelsRepo.Default, AssistantCallLogsRepo.Default, AssistantModelPricesRepo.Default,
     AssistantHealthRepo.Default, AssistantHealthService.Default, AssistantGateway.Default,
-    // MCP connector seam: the live impl lands in the tool-loop phase; tests may
-    // inject a fake, otherwise the unavailable default reports a failed connect.
-    AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? McpConnectorUnavailable)),
+    // MCP connector seam: tests may inject a fake, otherwise the live
+    // stdio/HTTP/SSE connector backs the registry test endpoint.
+    AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? LiveMcpConnector)),
   );
 }
 

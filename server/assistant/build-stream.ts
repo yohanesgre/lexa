@@ -79,6 +79,52 @@ export interface StreamRunContext {
   writeTools?: string[] | undefined;
   modelOptions?: Record<string, unknown> | undefined;
   gatewayStream?: ((input: unknown) => AsyncIterable<StreamChunk>) | undefined;
+  onDispose?: (() => Promise<void>) | undefined;
+}
+
+export interface NormalizedRunUsage {
+  input: number;
+  output: number;
+  cached: number;
+  cacheWrite: number;
+}
+
+const numberOr = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+
+// `RUN_FINISHED.usage` is either a TanStack TokenUsage object (in-process) or an
+// AG-UI `usage[]` array (post-wire). The array form sums one entry per
+// provider/model; dropping it silently forces the estimate fallback.
+export function normalizeRunUsage(raw: unknown, fallback: NormalizedRunUsage): NormalizedRunUsage {
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return fallback;
+    let input = 0;
+    let output = 0;
+    let cached = 0;
+    let cacheWrite = 0;
+    for (const entry of raw as Array<Record<string, unknown>>) {
+      if (entry === null || typeof entry !== "object") continue;
+      input += numberOr(entry.inputTokens ?? entry.input ?? entry.promptTokens);
+      output += numberOr(entry.outputTokens ?? entry.output ?? entry.completionTokens);
+      cached += numberOr(entry.cachedInputTokens ?? entry.cached ?? entry.cachedTokens ?? entry.cached_tokens ?? entry.cache_read_input_tokens);
+      cacheWrite += numberOr(entry.cacheWriteInputTokens ?? entry.cacheWriteTokens ?? entry.cache_write_input_tokens);
+    }
+    return { input, output, cached, cacheWrite };
+  }
+  if (raw !== null && typeof raw === "object") {
+    const u = raw as Record<string, unknown>;
+    const details = (u.promptTokensDetails ?? u.prompt_tokens_details ?? {}) as Record<string, unknown>;
+    const input = u.input ?? u.promptTokens;
+    const output = u.output ?? u.completionTokens;
+    const cached = u.cached ?? u.cachedTokens ?? u.cached_tokens ?? u.cache_read_input_tokens ?? details.cached_tokens ?? details.cachedTokens;
+    const cacheWrite = u.cacheWriteInputTokens ?? u.cacheWriteTokens ?? u.cache_write_input_tokens ?? details.cacheWriteTokens ?? details.cache_write_tokens;
+    return {
+      input: typeof input === "number" ? input : fallback.input,
+      output: typeof output === "number" ? output : fallback.output,
+      cached: typeof cached === "number" ? cached : fallback.cached,
+      cacheWrite: typeof cacheWrite === "number" ? cacheWrite : fallback.cacheWrite,
+    };
+  }
+  return fallback;
 }
 
 async function summarizeOlder(config: import("./provider").ProviderConfig, older: unknown[], sessionId: string): Promise<string> {
@@ -281,7 +327,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 }
                 if (finalArgs !== null && typeof finalArgs === "object") {
                   const rec = finalArgs as Record<string, unknown>;
-                  if (Object.keys(rec).length === 0 && !ZERO_ARG_TOOLS.has(name)) {
+                  if (Object.keys(rec).length === 0 && !ZERO_ARG_TOOLS.has(name) && !name.startsWith("mcp__")) {
                     toolRounds += 1;
                     if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
                     push({ type: "error", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
@@ -305,9 +351,9 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 if (isAssistantWriteTool(toolName)) { writeToolCallIds.push(id); if (!abort.signal.aborted) abort.abort(); }
               } else if (chunk.type === "RUN_FINISHED") {
                 didFinish = true;
-                const u = chunk.usage as { input?: number; output?: number; promptTokens?: number; completionTokens?: number } | undefined;
-                usageIn = Number(u?.input ?? u?.promptTokens ?? usageIn);
-                usageOut = Number(u?.output ?? u?.completionTokens ?? usageOut);
+                const u = normalizeRunUsage((chunk as { usage?: unknown }).usage, { input: usageIn, output: usageOut, cached: 0, cacheWrite: 0 });
+                usageIn = u.input;
+                usageOut = u.output;
               } else if (chunk.type === "RUN_ERROR") {
                 try {
                   const line = JSON.stringify({ level: "ERROR", service: "assistant-build-stream", message: `assistant RUN_ERROR chunk before translate: ${String(chunk.message).slice(0, 500)}`, meta: { threadId: ctx.threadId, keyId: ctx.keyId, code: (chunk as unknown as { code?: unknown }).code ?? null, rawEvent: (chunk as unknown as { rawEvent?: unknown }).rawEvent ?? null }, timestamp: new Date().toISOString() });
@@ -449,6 +495,9 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           if (ctx.registry.get(ctx.keyId) === abort) ctx.registry.delete(ctx.keyId);
           closed = true;
           try { controller.close(); } catch {}
+          if (ctx.onDispose) {
+            try { await ctx.onDispose(); } catch {}
+          }
         }
       })();
     },

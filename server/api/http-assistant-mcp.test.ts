@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { Effect, Layer } from "effect";
 import { runMigrations } from "../db/migrate";
 import { createApiHandler } from "./http";
+import { McpConnectFailed } from "./errors";
 import { McpConnector } from "../services/assistant-mcp.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -24,12 +25,17 @@ async function sha256(text: string): Promise<string> {
 let dir: string;
 let handler: (req: Request) => Promise<Response>;
 let okHandler: (req: Request) => Promise<Response>;
+let failHandler: (req: Request) => Promise<Response>;
 let db: Database;
 
-// Fake connector: Phase 1 ships no live connector, so the HTTP layer's ok
-// shape is exercised through this injected layer.
+// Injected connectors keep the HTTP shapes deterministic: the live default
+// would spawn/hit whatever server the row points at.
 const okConnector = Layer.succeed(McpConnector, {
   connect: () => Effect.succeed({ toolCount: 3, readOnlyToolCount: 2 }),
+});
+
+const failConnector = Layer.succeed(McpConnector, {
+  connect: () => Effect.fail(new McpConnectFailed({ message: "no route to host" })),
 });
 
 const authed = (method: string, path: string, body?: unknown, key = ADMIN_KEY) =>
@@ -71,6 +77,7 @@ beforeAll(async () => {
   `);
   handler = createApiHandler(dbPath);
   okHandler = createApiHandler(dbPath, undefined, { mcpConnector: okConnector });
+  failHandler = createApiHandler(dbPath, undefined, { mcpConnector: failConnector });
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });
@@ -160,17 +167,17 @@ describe("MCP server registry (superadmin)", () => {
   });
 
   it("test endpoint returns 200 with a failed-connect result for an existing row; 404 for unknown", async () => {
-    const res = await handler(authed("POST", "/api/assistant/mcp-servers/jev/test"));
+    const res = await failHandler(authed("POST", "/api/assistant/mcp-servers/jev/test"));
     expect(res.status).toBe(200);
     const body = await res.json() as { ok: boolean; toolCount: number; readOnlyToolCount: number; latencyMs: number; error: { code: string; message: string } | null };
-    // Phase 1 ships no live connector, so a failed connect is the expected result.
+    // A failed connect is an expected result, not a 5xx.
     expect(body.ok).toBe(false);
     expect(body.toolCount).toBe(0);
     expect(body.readOnlyToolCount).toBe(0);
     expect(typeof body.latencyMs).toBe("number");
     expect(body.error?.code).toBe("MCP_CONNECT_FAILED");
 
-    const unknown = await handler(authed("POST", "/api/assistant/mcp-servers/ghost/test"));
+    const unknown = await failHandler(authed("POST", "/api/assistant/mcp-servers/ghost/test"));
     expect(unknown.status).toBe(404);
     expect((await unknown.json() as { error: { code: string } }).error.code).toBe("MCP_SERVER_NOT_FOUND");
   });

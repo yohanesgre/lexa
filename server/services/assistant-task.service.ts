@@ -1,5 +1,8 @@
 import { Effect } from "effect";
 import { buildAssistantTools, MAX_TOOL_ROUNDS } from "../assistant/tools";
+import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
+import type { McpServerRow } from "../repos/assistant-mcp.repo";
+import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, IDENTITY, buildUserMessage } from "../assistant/prompt";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
@@ -61,6 +64,19 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     const swimlaneService = yield* SwimlaneService;
     const authz = yield* AuthorizationService;
     const gateway = yield* AssistantGateway;
+
+    // Read-only MCP tools for this project: globally + project enabled servers,
+    // discovered fail-open. Undefined when the project has none.
+    const loadAssistantMcp = (projectId: string, allowlist: string | null): Effect.Effect<McpToolset | undefined> =>
+      Effect.gen(function* () {
+        const env = yield* currentEnv;
+        const servers = yield* Effect.tryPromise({
+          try: () => dbAll<McpServerRow>(ENABLED_MCP_SERVERS_SQL, projectId),
+          catch: () => new DbError({ message: "failed to load enabled MCP servers" }),
+        }).pipe(Effect.catchAll(() => Effect.succeed([] as McpServerRow[])));
+        if (servers.length === 0) return undefined;
+        return yield* Effect.promise(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined));
+      });
 
     // Assistant runs are unattended — the actor is the agent itself. Agent name
     // resolved at write time; falls back to the agent id.
@@ -306,9 +322,12 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const memoryHits = yield* memoryRepo.searchByProject(task.projectId, extractMemoryTerms(doc.title, doc.context));
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
-        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key));
+        const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
+        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key));
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
-        const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: task.documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(task.projectId, key), fetchImpl: fetch }), ...writeSet.tools] : [...baseTools, ...writeSet.tools];
+        const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
+        const mcpTools = mcp?.tools ?? [];
+        const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: task.documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(task.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         let effectiveSelection = task.selection ?? "";
         if (skill.id === "polish" && !effectiveSelection.trim()) { const fallback = doc.context?.trim() ? doc.context : ""; if (fallback) effectiveSelection = fallback; }
         const instruction = [effectiveSelection.trim() ? `Selected text:\n"""\n${effectiveSelection}\n"""` : null, task.extraPrompt].filter((s): s is string => !!s && s.trim() !== "").join("\n\n");
@@ -316,7 +335,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         return buildStream({
           keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
+          historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: (text) => Effect.runPromise(completeTask(taskId, text)).then(() => {}).catch(() => {}),
           onFail: (message) => Effect.runPromise(failTask(taskId, message)).then(() => {}).catch(() => {}),
@@ -338,13 +357,16 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms(doc.title, doc.context));
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
-        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key));
+        const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
+        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key));
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
-        const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(thread.projectId, key), fetchImpl: fetch }), ...writeSet.tools] : [...baseTools, ...writeSet.tools];
+        const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
+        const mcpTools = mcp?.tools ?? [];
+        const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(thread.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         return buildStream({
           keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          userContent: "", skipUserEntry: true, approvalResults, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount,
+          userContent: "", skipUserEntry: true, approvalResults, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
