@@ -68,6 +68,7 @@ All non-2xx responses share one shape:
 | 422 | `INVALID_TASK_LINK` | Self-link or cross-project task link (details: `{ message }`) |
 | 422 | `AGENT_BUILTIN_DELETE` | Delete/reset of a builtin agent or skill (details: `{ kind, name }`) |
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
+| 422 | `INVALID_PARENT` | Wiki reparent: self, cross-project, or descendant cycle (details: `{ reason: "self" \| "cross-project" \| "cycle" }`) |
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
@@ -1007,7 +1008,10 @@ PATCH  /api/projects/:slug/wiki/:pageSlug
 body { title?, slug?, content?, parentId?, position?, saveType?: "autosave"|"manual" }
   saveType defaults to "autosave" — controls which revision bucket the update
   lands in.
-→ 200 WikiPage | 404 | 409 CONSTRAINT
+→ 200 WikiPage | 404 | 409 SLUG_TAKEN | 422 INVALID_PARENT
+  parentId must be null, the page's own current parent, or a page in the same
+  project that is not a descendant (self / cross-project / cycle → INVALID_PARENT,
+  details: { reason }).
 
 DELETE /api/projects/:slug/wiki/:pageSlug
 → 204 | 404 | 409 HAS_CHILDREN { count }

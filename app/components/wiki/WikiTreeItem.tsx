@@ -4,18 +4,8 @@ import type { WikiPageMeta } from "../../../shared/types";
 import { cn } from "../ui/cn";
 import type { WikiNode } from "./wiki-tree";
 
-const indentPadding: Record<number, number> = {
-  0: 12,
-  1: 28,
-  2: 44,
-  3: 60,
-  4: 76,
-  5: 92,
-};
-
-function getIndentPadding(level: number, isActive: boolean): number {
-  const base = indentPadding[level] ?? indentPadding[5]!;
-  return isActive ? base - 2 : base;
+function indentClass(level: number): string | undefined {
+  return level > 0 ? `tree-indent-${Math.min(level, 5)}` : undefined;
 }
 
 function PageIcon({ className }: { className?: string }) {
@@ -45,6 +35,8 @@ export function TreeItem({
   onContextMenu,
   contextMenuPageId,
   onNavigate,
+  tabbableId,
+  onFocus,
 }: {
   node: WikiNode;
   level: number;
@@ -55,6 +47,8 @@ export function TreeItem({
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
   contextMenuPageId: string | null;
   onNavigate?: (() => void) | undefined;
+  tabbableId: string | null;
+  onFocus: (id: string) => void;
 }) {
   const isActive = node.slug === activeSlug;
   const isExpanded = expanded.has(node.id);
@@ -62,40 +56,46 @@ export function TreeItem({
 
   return (
     <>
-      <Link
-        to="/$slug/wiki/$pageSlug"
-        params={{ slug, pageSlug: node.slug }}
+      <div
+        role="treeitem"
+        data-node-id={node.id}
+        aria-level={level + 1}
+        aria-selected={isActive}
+        aria-current={isActive ? "page" : undefined}
+        aria-expanded={hasChildren ? isExpanded : undefined}
+        tabIndex={node.id === tabbableId ? 0 : -1}
+        onFocus={() => onFocus(node.id)}
+        onContextMenu={(event) => onContextMenu(event, node)}
         className={cn(
           "tree-item",
-          isActive && "active border-l-2 border-l-lx-border-focus",
+          indentClass(level),
+          isActive && "active",
           contextMenuPageId === node.id && "bg-lx-surface-card-hover"
         )}
-        style={{
-          paddingLeft: getIndentPadding(level, isActive),
-          marginLeft: isActive ? 6 : undefined,
-        }}
-        onClick={onNavigate}
-        onContextMenu={(event) => onContextMenu(event, node)}
       >
         {hasChildren ? (
           <button
             type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onToggle(node.id);
-            }}
+            tabIndex={-1}
+            onClick={() => onToggle(node.id)}
             className="chevron-small p-0.5 -ml-0.5"
             style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
-            aria-label={isExpanded ? "Collapse" : "Expand"}
-            onContextMenu={(event) => onContextMenu(event, node)}
+            aria-label={isExpanded ? `Collapse ${node.title}` : `Expand ${node.title}`}
           >
             <ChevronRight size={12} strokeWidth={2} />
           </button>
         ) : null}
-        <PageIcon className="text-lx-text-muted mr-1.5 shrink-0" />
-        <span className="truncate">{node.title}</span>
-      </Link>
+        <Link
+          to="/$slug/wiki/$pageSlug"
+          params={{ slug, pageSlug: node.slug }}
+          tabIndex={-1}
+          className="tree-item-link"
+          onClick={onNavigate}
+        >
+          <PageIcon className="text-lx-text-muted mr-1.5 shrink-0" />
+          <span className="truncate">{node.title}</span>
+        </Link>
+      </div>
       {isExpanded &&
         node.children.map((child) => (
           <TreeItem
@@ -109,6 +109,8 @@ export function TreeItem({
             onContextMenu={onContextMenu}
             contextMenuPageId={contextMenuPageId}
             onNavigate={onNavigate}
+            tabbableId={tabbableId}
+            onFocus={onFocus}
           />
         ))}
     </>

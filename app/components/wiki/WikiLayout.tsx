@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { PanelLeft } from "lucide-react";
 import { lockScroll } from "../../lib/scroll-lock";
-import { hasMatchMedia, isNarrowViewport } from "../../lib/viewport";
+import { useOverlayFocusTrap, useSidebarState } from "../../lib/sidebar-state";
 import { useWikiPages, useDeleteWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
 import { NewPageModal } from "./NewPageModal";
@@ -25,12 +25,12 @@ interface WikiContextMenuState {
   pageId: string;
   pageTitle: string;
   pageSlug: string;
-  x: number;
-  y: number;
+  anchor: { top: number; left: number };
 }
 
 // Right-click menu lifecycle: open on contextmenu, dismiss on outside
-// mousedown or Escape. Menu + viewport position live in one state object.
+// mousedown or Escape. The menu anchors below the row it was opened from
+// (D3, never at the cursor); Escape returns focus to that row.
 function useWikiPageContextMenu(
   pages: WikiPageMeta[] | undefined,
   actions: {
@@ -41,6 +41,14 @@ function useWikiPageContextMenu(
   }
 ) {
   const [menu, setMenu] = useState<WikiContextMenuState | null>(null);
+  const rowRef = useRef<HTMLElement | null>(null);
+
+  const close = useCallback(() => {
+    setMenu(null);
+    const row = rowRef.current;
+    rowRef.current = null;
+    if (row && row.isConnected) row.focus();
+  }, []);
 
   useEffect(() => {
     if (!menu) return;
@@ -49,13 +57,14 @@ function useWikiPageContextMenu(
       if (!target || !(target instanceof Node)) return;
       const menuEl = document.getElementById("wiki-page-context-menu");
       if (menuEl && !menuEl.contains(target)) {
+        rowRef.current = null;
         setMenu(null);
       }
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
-        setMenu(null);
+        close();
       }
     }
     document.addEventListener("mousedown", handleMouseDown);
@@ -64,20 +73,20 @@ function useWikiPageContextMenu(
       document.removeEventListener("mousedown", handleMouseDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [menu]);
+  }, [menu, close]);
 
   const open = useCallback((event: React.MouseEvent, page: WikiPageMeta) => {
     event.preventDefault();
+    const row = event.currentTarget as HTMLElement;
+    const rect = row.getBoundingClientRect();
+    rowRef.current = row;
     setMenu({
       pageId: page.id,
       pageTitle: page.title,
       pageSlug: page.slug,
-      x: event.clientX,
-      y: event.clientY,
+      anchor: { top: rect.bottom, left: rect.left },
     });
   }, []);
-
-  const close = useCallback(() => setMenu(null), []);
 
   const addChild = useCallback(() => {
     if (!menu) return;
@@ -113,13 +122,15 @@ function useWikiPageContextMenu(
 
 function SidebarRail({ onExpand }: { onExpand: () => void }) {
   return (
-    <aside className="wiki-sidebar wiki-sidebar-rail">
+    <aside id="wiki-sidebar" className="wiki-sidebar wiki-sidebar-rail">
       <button
         type="button"
-        className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
+        className="sidebar-toggle w-8 h-8 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
         onClick={onExpand}
         aria-label="Expand sidebar"
-        title="Pages"
+        aria-expanded={false}
+        aria-controls="wiki-sidebar"
+        title="Expand sidebar"
       >
         <PanelLeft size={14} strokeWidth={1.5} />
       </button>
@@ -129,7 +140,7 @@ function SidebarRail({ onExpand }: { onExpand: () => void }) {
 
 export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) {
   const navigate = useNavigate();
-  const { data: pages, isLoading, error } = useWikiPages(slug);
+  const { data: pages, isLoading, error, refetch: refetchPages } = useWikiPages(slug);
   const deletePage = useDeleteWikiPage(slug);
 
   const [newPageModal, setNewPageModal] = useState<{ isOpen: boolean; defaultParentId: string | null }>({
@@ -167,13 +178,14 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     onDelete: (page) => setDeleteConfirm(page),
   });
 
-  // Narrow screens start collapsed so the tree never starves the content.
-  // Static default (same on server + client); the viewport is read once on
-  // mount and the user's manual choice sticks afterwards.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  useEffect(() => {
-    if (isNarrowViewport()) setSidebarCollapsed(true);
-  }, []);
+  // Unified sidebar mechanic: desktop intent persists in localStorage, mobile
+  // open is ephemeral, and the 768px breakpoint is live in both directions.
+  const { open, toggle, overlayActive } = useSidebarState({
+    storageKey: "lexa.wiki.sidebar",
+    defaultOpen: true,
+  });
+  const panelRef = useRef<HTMLElement | null>(null);
+  useOverlayFocusTrap(overlayActive, panelRef);
 
   // Tree + search state lives here so collapsing to the rail (which unmounts
   // the sidebar) never discards the user's expand choices or query.
@@ -198,70 +210,51 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
   }, []);
 
   const closeOnMobile = useCallback(() => {
-    if (hasMatchMedia() && isNarrowViewport()) setSidebarCollapsed(true);
-  }, []);
+    // Selecting a page dismisses the mobile overlay only; desktop keeps the
+    // tree open across navigation.
+    if (overlayActive) toggle();
+  }, [overlayActive, toggle]);
 
-  // The top nav's "PanelLeft" button dispatches this event. On narrow screens
-  // it toggles the overlay (the in-header collapse is hidden there, so the
-  // nav owns both open and close). Desktop behavior is unchanged (the rail
-  // remains the entry point there).
+  // The top nav's "PanelLeft" button dispatches this event. One toggle flips
+  // the active viewport's flag; the trigger's visibility stays CSS-only.
   useEffect(() => {
-    function handleToggle() {
-      if (hasMatchMedia() && isNarrowViewport()) {
-        setSidebarCollapsed((v) => !v);
-      }
-    }
-    window.addEventListener("lexa:toggle-wiki-sidebar", handleToggle);
-    return () => window.removeEventListener("lexa:toggle-wiki-sidebar", handleToggle);
-  }, []);
+    window.addEventListener("lexa:toggle-wiki-sidebar", toggle);
+    return () => window.removeEventListener("lexa:toggle-wiki-sidebar", toggle);
+  }, [toggle]);
 
-  // Esc dismisses the overlay on narrow screens.
+  // Esc dismisses the overlay while it is open; desktop never traps Escape.
   useEffect(() => {
-    if (sidebarCollapsed) return;
+    if (!overlayActive) return;
     function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape" && isNarrowViewport()) setSidebarCollapsed(true);
+      if (event.key === "Escape") toggle();
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [sidebarCollapsed]);
+  }, [overlayActive, toggle]);
 
-  // Selecting a page dismisses the overlay on narrow screens — the tree and
-  // search links call `closeOnMobile` directly, so no route-change effect is
-  // needed here (and no state is adjusted after the prop changes).
-
-  // Narrow viewport tracking so the body scroll lock follows resizes and
-  // rotations, not just the collapse toggle.
-  const [isNarrow, setIsNarrow] = useState(false);
+  // Body scroll locks only while the mobile overlay is open. Desktop keeps the
+  // sidebar inline, so locking there would freeze the page underneath.
   useEffect(() => {
-    if (!hasMatchMedia()) return;
-    const mq = window.matchMedia("(max-width: 767px)");
-    const update = () => setIsNarrow(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-
-  // Body scroll locks only while the narrow overlay is open. Desktop keeps
-  // the sidebar inline, so locking there would freeze the page underneath.
-  useEffect(() => {
-    return lockScroll(!sidebarCollapsed && isNarrow);
-  }, [sidebarCollapsed, isNarrow]);
+    return lockScroll(overlayActive);
+  }, [overlayActive]);
 
   return (
     <div className="wiki-layout">
-      {sidebarCollapsed ? (
-        <SidebarRail onExpand={() => setSidebarCollapsed(false)} />
+      {!open ? (
+        <SidebarRail onExpand={toggle} />
       ) : (
         <WikiPageSidebar
+          panelRef={panelRef}
           slug={slug}
           activePageSlug={activePageSlug}
           pages={pages}
           isLoading={isLoading}
           error={error}
+          onRetryPages={refetchPages}
           contextMenuPageId={contextMenu.menu?.pageId ?? null}
           onContextMenu={contextMenu.open}
           onNewPage={openNewPage}
-          onClose={() => setSidebarCollapsed(true)}
+          onClose={toggle}
           expanded={expanded}
           onToggleExpand={toggleExpanded}
           query={wikiQuery}
@@ -271,19 +264,18 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           onNavigate={closeOnMobile}
         />
       )}
-      {!sidebarCollapsed && (
+      {overlayActive && (
         <button
           type="button"
           className="wiki-sidebar-backdrop"
           aria-label="Close sidebar"
-          onClick={() => setSidebarCollapsed(true)}
+          onClick={toggle}
         />
       )}
 
       {contextMenu.menu && (
         <WikiPageContextMenu
-          x={contextMenu.menu.x}
-          y={contextMenu.menu.y}
+          anchor={contextMenu.menu.anchor}
           onAddChild={contextMenu.addChild}
           onRename={contextMenu.rename}
           onMove={contextMenu.move}

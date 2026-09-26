@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, PanelRight } from "lucide-react";
 import { cn } from "../ui/cn";
+import { lockScroll } from "../../lib/scroll-lock";
+import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 import type { HeadingOutline } from "../tiptap-render";
 
 interface OutlineSidebarProps {
   headings: HeadingOutline[];
-  collapsed?: boolean | undefined;
-  onToggle?: () => void;
+  open: boolean;
+  onToggle: () => void;
+  overlayActive?: boolean | undefined;
 }
 
 interface TreeNode {
@@ -138,8 +141,23 @@ function TreeItems({
   );
 }
 
-export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebarProps) {
+export function OutlineSidebar({ headings, open, onToggle, overlayActive = false }: OutlineSidebarProps) {
   const [activeId, setActiveId] = useState<string>("");
+  const panelRef = useRef<HTMLElement | null>(null);
+  useOverlayFocusTrap(overlayActive, panelRef);
+
+  // Esc dismisses the mobile overlay; desktop never owns Escape.
+  useEffect(() => {
+    if (!overlayActive) return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onToggle();
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [overlayActive, onToggle]);
+
+  useEffect(() => lockScroll(overlayActive), [overlayActive]);
+
   const tree = useMemo(() => toTree(headings), [headings]);
   // Lazy-init from the initial tree: sections start EXPANDED on first mount,
   // identical to the tree-change sync below (mount == update == wireframe).
@@ -179,72 +197,78 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
   // Persistent third column — pages without headings show an empty state
   // instead of collapsing the layout back to two columns.
   const isEmpty = headings.length === 0;
-  const isCollapsed = collapsed ?? false;
 
-  if (isCollapsed) {
+  if (!open) {
     return (
-      <aside
-        className="outline-sidebar outline-sidebar-rail flex-shrink-0 flex flex-col bg-lx-surface-elevated"
-        style={{
-          width: 36,
-          minWidth: 36,
-          borderLeft: "1px solid var(--lx-border-default)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          paddingTop: 8,
-        }}
-      >
+      <aside id="wiki-outline" ref={panelRef} className="outline-sidebar outline-sidebar-rail flex-shrink-0 flex flex-col bg-lx-surface-elevated">
         <button
           type="button"
-          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
+          className="sidebar-toggle w-8 h-8 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
           onClick={onToggle}
           aria-label="Expand sidebar"
+          aria-expanded={false}
+          aria-controls="wiki-outline"
           title="Contents"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
+          <PanelRight size={14} strokeWidth={1.5} />
         </button>
       </aside>
     );
   }
 
   return (
-    <aside
-      className="outline-sidebar outline-sidebar-open flex-shrink-0 flex flex-col bg-lx-surface-elevated"
-      style={{ width: 220, overflow: "hidden", borderLeft: "1px solid var(--lx-border-default)" }}
-    >
-      <div className="sidebar-header">
+    <>
+      <aside
+        id="wiki-outline"
+        ref={panelRef}
+        className="outline-sidebar outline-sidebar-open flex-shrink-0 flex flex-col bg-lx-surface-elevated"
+        role={overlayActive ? "dialog" : undefined}
+        aria-modal={overlayActive ? true : undefined}
+        aria-label={overlayActive ? "Contents" : undefined}
+      >
+        <div className="sidebar-header">
+          <button
+            type="button"
+            className="sidebar-toggle w-8 h-8 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
+            onClick={onToggle}
+            aria-label="Collapse sidebar"
+            aria-expanded={true}
+            aria-controls="wiki-outline"
+          >
+            <PanelRight size={14} strokeWidth={1.5} />
+          </button>
+          <span className="text-xs font-medium font-body uppercase tracking-[0.05em] text-lx-text-secondary">Contents</span>
+        </div>
+        <div className="flex-1 overflow-y-auto" style={{ padding: "8px 0" }}>
+          {isEmpty ? (
+            <div className="px-4 py-3 text-xs text-lx-text-muted">No headings yet</div>
+          ) : (
+            <TreeItems
+              nodes={tree}
+              depth={0}
+              activeId={activeId}
+              expandedKeys={expandedKeys}
+              onToggleExpand={(key) =>
+                setExpandedKeys((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                })
+              }
+              onClick={(node) => setActiveId(node.key)}
+            />
+          )}
+        </div>
+      </aside>
+      {overlayActive && (
         <button
           type="button"
-          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
+          className="wiki-sidebar-backdrop"
+          aria-label="Close contents"
           onClick={onToggle}
-          aria-label="Collapse sidebar"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
-        </button>
-        <span className="text-xs font-medium font-body uppercase tracking-[0.05em] text-lx-text-secondary">Contents</span>
-      </div>
-      <div className="flex-1 overflow-y-auto" style={{ padding: "8px 0" }}>
-        {isEmpty ? (
-          <div className="px-4 py-3 text-xs text-lx-text-muted">No headings yet</div>
-        ) : (
-          <TreeItems
-            nodes={tree}
-            depth={0}
-            activeId={activeId}
-            expandedKeys={expandedKeys}
-            onToggleExpand={(key) =>
-              setExpandedKeys((prev) => {
-                const next = new Set(prev);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-              })
-            }
-            onClick={(node) => setActiveId(node.key)}
-          />
-        )}
-      </div>
-    </aside>
+        />
+      )}
+    </>
   );
 }

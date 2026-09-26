@@ -7,10 +7,13 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { DbBunLive, ConstraintViolation, RowNotFound } from "../db/db";
+import { WikiRepo } from "../repos/wiki.repo";
+import { ProjectRepo } from "../repos/project.repo";
+import { UserRepo } from "../repos/user.repo";
 import { WikiService } from "./wiki.service";
-import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
-import type { TipTapDoc } from "../../shared/types";
+import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent, SearchError } from "../api/errors";
+import type { TipTapDoc, WikiPage } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -54,6 +57,44 @@ function seed(db: Database) {
 
 function makeService(db: Database) {
   const layer = WikiService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
+  return Context.get(ctx, WikiService);
+}
+
+const MOCK_PAGE: WikiPage = {
+  id: "a",
+  projectId: "p1",
+  title: "A",
+  slug: "a",
+  parentId: null,
+  position: 0,
+  updatedBy: null,
+  updatedByName: null,
+  updatedAt: "2026-01-01T00:00:00.000Z",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  content: { type: "doc", content: [] },
+};
+
+// Provides a stub WikiRepo (DefaultWithoutDependencies bypasses the baked-in
+// WikiRepo.Default) so a specific repo error can be injected deterministically.
+function makeServiceWithRepo(db: Database, overrides: Record<string, unknown>) {
+  const base = {
+    findById: () => Effect.succeed(MOCK_PAGE),
+    isDescendant: () => Effect.succeed(false),
+    createRevision: () => Effect.succeed(undefined as never),
+    pruneRevisions: () => Effect.void,
+    update: () => Effect.fail(new RowNotFound({ table: "wiki_pages" })),
+  };
+  const layer = WikiService.DefaultWithoutDependencies.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(WikiRepo, { ...base, ...overrides } as unknown as never),
+        ProjectRepo.Default,
+        UserRepo.Default
+      )
+    ),
+    Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db)))
+  );
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, WikiService);
 }
@@ -164,14 +205,128 @@ describe("WikiService.update", () => {
     expect(revisions).toEqual([{ title: "Old", content_text: "hello", save_type: "autosave" }]);
   });
 
-  it("slug conflict on update → ConstraintViolation (no SlugTaken at service layer)", async () => {
+  it("slug conflict on update → SlugTaken", async () => {
     seed(db);
     const svc = makeService(db);
     const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
     await Effect.runPromise(svc.create("p1", { title: "B" }));
     const res = await Effect.runPromise(Effect.either(svc.update(a.id, { slug: "b" })));
     expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left._tag).toBe("ConstraintViolation");
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(SlugTaken);
+      if (res.left instanceof SlugTaken) expect(res.left.slug).toBe("b");
+    }
+  });
+
+  it("unique-slug ConstraintViolation → SlugTaken (narrowed mapping)", async () => {
+    seed(db);
+    const svc = makeServiceWithRepo(db, {
+      update: () =>
+        Effect.fail(
+          new ConstraintViolation({
+            message: "SQLiteError: UNIQUE constraint failed: wiki_pages.project_id, wiki_pages.slug",
+            isPositionConflict: false,
+          })
+        ),
+    });
+    const res = await Effect.runPromise(Effect.either(svc.update("a", { slug: "b" })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(SlugTaken);
+      if (res.left instanceof SlugTaken) expect(res.left.slug).toBe("b");
+    }
+  });
+
+  it("FK ConstraintViolation → WikiPageNotFound, not SlugTaken (narrowed mapping)", async () => {
+    seed(db);
+    const svc = makeServiceWithRepo(db, {
+      update: () =>
+        Effect.fail(
+          new ConstraintViolation({ message: "SQLiteError: FOREIGN KEY constraint failed", isPositionConflict: false })
+        ),
+    });
+    const res = await Effect.runPromise(Effect.either(svc.update("a", { parentId: "other" })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(WikiPageNotFound);
+      expect(res.left).not.toBeInstanceOf(SlugTaken);
+      if (res.left instanceof WikiPageNotFound) expect(res.left.id).toBe("a");
+    }
+  });
+
+  it("self-parent → InvalidParent(self), page unchanged", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const page = await Effect.runPromise(svc.create("p1", { title: "P" }));
+    const res = await Effect.runPromise(Effect.either(svc.update(page.id, { parentId: page.id })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(InvalidParent);
+      if (res.left instanceof InvalidParent) expect(res.left.reason).toBe("self");
+    }
+    const raw = db.prepare("SELECT parent_id FROM wiki_pages WHERE id = ?").get(page.id) as { parent_id: string | null };
+    expect(raw.parent_id).toBeNull();
+  });
+
+  it("direct cycle (parent under its own child) → InvalidParent(cycle), unchanged", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    const b = await Effect.runPromise(svc.create("p1", { title: "B", parentId: a.id }));
+    const res = await Effect.runPromise(Effect.either(svc.update(a.id, { parentId: b.id })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(InvalidParent);
+      if (res.left instanceof InvalidParent) expect(res.left.reason).toBe("cycle");
+    }
+    const raw = db.prepare("SELECT parent_id FROM wiki_pages WHERE id = ?").get(a.id) as { parent_id: string | null };
+    expect(raw.parent_id).toBeNull();
+  });
+
+  it("deep cycle (grandchild as parent) → InvalidParent(cycle)", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    const b = await Effect.runPromise(svc.create("p1", { title: "B", parentId: a.id }));
+    const c = await Effect.runPromise(svc.create("p1", { title: "C", parentId: b.id }));
+    const res = await Effect.runPromise(Effect.either(svc.update(a.id, { parentId: c.id })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(InvalidParent);
+      if (res.left instanceof InvalidParent) expect(res.left.reason).toBe("cycle");
+    }
+  });
+
+  it("cross-project parent → InvalidParent(cross-project)", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    const other = await Effect.runPromise(svc.create("p2", { title: "Other" }));
+    const res = await Effect.runPromise(Effect.either(svc.update(a.id, { parentId: other.id })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) {
+      expect(res.left).toBeInstanceOf(InvalidParent);
+      if (res.left instanceof InvalidParent) expect(res.left.reason).toBe("cross-project");
+    }
+  });
+
+  it("missing parent → WikiPageNotFound", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const page = await Effect.runPromise(svc.create("p1", { title: "P" }));
+    const res = await Effect.runPromise(Effect.either(svc.update(page.id, { parentId: "nope" })));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
+  });
+
+  it("reparenting to the current parent is a no-op success", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    const b = await Effect.runPromise(svc.create("p1", { title: "B", parentId: a.id }));
+    const res = await Effect.runPromise(Effect.either(svc.update(b.id, { parentId: a.id })));
+    expect(Either.isRight(res)).toBe(true);
+    if (Either.isRight(res)) expect(res.right.parentId).toBe(a.id);
   });
 
   it("moves a page under a new parent and repositions it", async () => {
