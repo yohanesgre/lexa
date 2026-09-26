@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { Pencil, Share2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
-import { useSidebarState } from "../../lib/sidebar-state";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { WikiEditSplit } from "./WikiEditSplit";
-import { EditSidebar } from "./EditSidebar";
-import { OutlineSidebar } from "./OutlineSidebar";
+import { PageSettingsPanel } from "./PageSettingsPanel";
+import { OutlinePill } from "./OutlinePill";
 import { SourcesSection } from "../document/SourcesSection";
 import { useWikiEditor } from "./useWikiEditor";
 import { parseApiDate } from "../../lib/date";
@@ -51,24 +50,24 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, headings, outlineOpen, onToggleOutline, outlineOverlayActive, onEdit, onShare, slug, pageSlug }: {
+function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, headings, onEdit, onShare, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
   content: TipTapDoc | undefined;
   updatedAt: string;
   updatedByName: string | null;
   headings: { level: number; text: string; id: string }[];
-  outlineOpen: boolean;
-  onToggleOutline: () => void;
-  outlineOverlayActive: boolean;
   onEdit: () => void;
   onShare: () => void;
   slug: string;
   pageSlug: string;
 }) {
+  const hasOutline = headings.some((heading) => heading.level >= 2);
   return (
     <>
-      <div className="wiki-content">
+      <div
+        className={`wiki-content wiki-read-area${hasOutline ? " wiki-read-area--outline" : ""}`}
+      >
         <div className="wiki-prose" style={{ maxWidth: 760, margin: "0 auto" }}>
           <div className="text-xs text-lx-text-muted font-body" style={{ marginBottom: 4 }}>
             {breadcrumb}
@@ -100,21 +99,17 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, he
           </div>
         </div>
       </div>
-      <OutlineSidebar
-        headings={headings}
-        open={outlineOpen}
-        onToggle={onToggleOutline}
-        overlayActive={outlineOverlayActive}
-      />
+      <OutlinePill headings={headings} />
     </>
   );
 }
 
-function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, onCancel, onSave, onTitleChange }: {
+function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, settingsPanel, onCancel, onSave, onTitleChange }: {
   breadcrumb: string;
   title: string;
   isSaving: boolean;
   historyPreviewId: string | null;
+  settingsPanel: React.ReactNode;
   onCancel: () => void;
   onSave: () => void;
   onTitleChange: (title: string) => void;
@@ -128,6 +123,7 @@ function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, onCancel, o
         <div className="flex items-center gap-2">
           <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
           <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Editing</span>
+          {settingsPanel}
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
@@ -178,8 +174,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     handleTitleChange,
   } = useWikiEditor({ slug, page });
 
-  const outline = useSidebarState({ storageKey: "lexa.wiki.outline", defaultOpen: true });
-  const pageSettings = useSidebarState({ storageKey: "lexa.wiki.pageSettings", defaultOpen: true });
   const [shareOpen, setShareOpen] = useState(false);
 
   const breadcrumb = buildAncestors(pages, page)
@@ -201,9 +195,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           updatedAt={page.updatedAt}
           updatedByName={page.updatedByName}
           headings={headings}
-          outlineOpen={outline.open}
-          onToggleOutline={outline.toggle}
-          outlineOverlayActive={outline.overlayActive}
           onEdit={handleStartEditing}
           onShare={() => setShareOpen(true)}
           slug={slug}
@@ -225,6 +216,21 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           onCancel={handleCancel}
           onSave={handleSave}
           onTitleChange={handleTitleChange}
+          settingsPanel={
+            <PageSettingsPanel
+              slug={slug}
+              pageSlug={page.slug}
+              autosaveEnabled={autosaveEnabled}
+              autosaveDelay={autosaveDelay}
+              onAutosaveChange={setAutosaveEnabled}
+              onDelayChange={setAutosaveDelay}
+              selectedRevisionId={historyPreviewId}
+              onSelectRevision={(id) => void handleSelectRevision(id)}
+              onRestore={(id) => void handleRestore(id)}
+              onClosePreview={handleClosePreview}
+              restoring={restoring}
+            />
+          }
         />
 
         <WikiEditSplit
@@ -240,23 +246,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           onReviewStateChange={handleReviewStateChange}
         />
       </div>
-
-      <EditSidebar
-        slug={slug}
-        pageSlug={page.slug}
-        autosaveEnabled={autosaveEnabled}
-        autosaveDelay={autosaveDelay}
-        onAutosaveChange={setAutosaveEnabled}
-        onDelayChange={setAutosaveDelay}
-        open={pageSettings.open}
-        onToggle={pageSettings.toggle}
-        overlayActive={pageSettings.overlayActive}
-        selectedRevisionId={historyPreviewId}
-        onSelectRevision={(id) => void handleSelectRevision(id)}
-        onRestore={(id) => void handleRestore(id)}
-        onClosePreview={handleClosePreview}
-        restoring={restoring}
-      />
     </div>
   );
 }

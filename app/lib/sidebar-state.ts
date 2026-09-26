@@ -193,9 +193,15 @@ function resolveReturnFocus(
 // open, trap Tab/Shift+Tab inside it, and return focus to the panel's rail
 // toggle on close. Inactive on desktop, where the panel is inline. The repo has
 // no existing focus-trap utility — this is the local one.
+//
+// `suppressReturnFocusRef` lets a dismissal that was itself a focus move (an
+// outside mousedown targeting another control) skip the return-focus restore,
+// so closing the panel never yanks focus back to its trigger. Programmatic
+// dismissals (Esc / scrim / row select) leave it false and still restore.
 export function useOverlayFocusTrap(
   active: boolean,
-  containerRef: React.RefObject<HTMLElement | null>
+  containerRef: React.RefObject<HTMLElement | null>,
+  suppressReturnFocusRef?: React.RefObject<boolean>
 ): void {
   useEffect(() => {
     if (!active) return;
@@ -233,7 +239,9 @@ export function useOverlayFocusTrap(
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      resolveReturnFocus(panelId, captured)?.focus();
+      const suppress = suppressReturnFocusRef?.current ?? false;
+      if (suppressReturnFocusRef) suppressReturnFocusRef.current = false;
+      if (!suppress) resolveReturnFocus(panelId, captured)?.focus();
     };
-  }, [active, containerRef]);
+  }, [active, containerRef, suppressReturnFocusRef]);
 }
