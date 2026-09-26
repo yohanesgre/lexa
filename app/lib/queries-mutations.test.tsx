@@ -16,7 +16,7 @@ import {
   useUpdateComment, useCancelRuntimeTask, useAddTaskLink, useRemoveTaskLink,
   useAddSource, useRemoveSource, useCreateRuntimeTask, useCreateAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
-  useCreateMyApiKey, useDeleteMyApiKey,
+  useCreateMyApiKey, useDeleteMyApiKey, useRestoreWikiRevision, wikiKeys,
 } from "./queries";
 
 const fetchMock = vi.fn();
@@ -221,6 +221,29 @@ describe("wiki mutations", () => {
     await act(async () => { await result.current.mutateAsync("home"); });
     expect(queryClient.getQueryData<WikiPage[]>(["wiki", "demo"])!.map((p) => p.slug)).toEqual(["other"]);
     expect(queryClient.getQueryData(["wikiPage", "demo", "home"])).toBeUndefined();
+  });
+
+  it("useUpdateWikiPage surfaces the server error and leaves the caches untouched", async () => {
+    fetchMock.mockImplementationOnce(() => Promise.resolve(json({ error: { code: "INVALID_PARENT", message: "nope" } }, 422)));
+    queryClient.setQueryData(wikiKeys.pages("demo"), [PAGE, PAGE2]);
+    queryClient.setQueryData(wikiKeys.page("demo", "home"), PAGE);
+    const { result } = renderHook(() => useUpdateWikiPage("demo"), { wrapper });
+    await expect(result.current.mutateAsync({ pageSlug: "home", title: "Renamed" })).rejects.toThrow("nope");
+    expect(queryClient.getQueryData(wikiKeys.pages("demo"))).toEqual([PAGE, PAGE2]);
+    expect(queryClient.getQueryData(wikiKeys.page("demo", "home"))).toEqual(PAGE);
+  });
+
+  it("useRestoreWikiRevision refetches the limit-aware revisions key used by useRevisions", async () => {
+    routes.set("POST /api/projects/demo/wiki/home/restore", PAGE);
+    const fresh = [{ id: "r2", title: "Home", saveType: "manual" as const, createdAt: "t2" }];
+    routes.set("GET /api/projects/demo/wiki/home/revisions?limit=20", { revisions: fresh });
+    expect(wikiKeys.revisions("demo", "home", 20)).toEqual(["wikiRevisions", "demo", "home", 20]);
+    queryClient.setQueryData(wikiKeys.revisions("demo", "home", 20), []);
+    const { result } = renderHook(() => useRestoreWikiRevision("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ pageSlug: "home", revisionId: "r1" }); });
+    await waitFor(() => {
+      expect(queryClient.getQueryData(wikiKeys.revisions("demo", "home", 20))).toEqual(fresh);
+    });
   });
 });
 

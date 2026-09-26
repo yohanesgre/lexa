@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import { useCreateWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
+import { flattenPages } from "./wiki-tree";
 
 interface NewPageModalProps {
   slug: string;
@@ -10,27 +11,6 @@ interface NewPageModalProps {
   onClose: () => void;
   defaultParentId?: string | null | undefined;
   pages: WikiPageMeta[];
-}
-
-type PageWithDepth = WikiPageMeta & { depth: number };
-
-function buildFlatPages(pages: WikiPageMeta[]): PageWithDepth[] {
-  const byParent = new Map<string | null, WikiPageMeta[]>();
-  for (const page of pages) {
-    const list = byParent.get(page.parentId) ?? [];
-    list.push(page);
-    byParent.set(page.parentId, list);
-  }
-  const sort = (list: WikiPageMeta[]) => [...list].toSorted((a, b) => a.position - b.position);
-  const result: PageWithDepth[] = [];
-  const recurse = (parentId: string | null, depth: number) => {
-    for (const page of sort(byParent.get(parentId) ?? [])) {
-      result.push({ ...page, depth });
-      recurse(page.id, depth + 1);
-    }
-  };
-  recurse(null, 0);
-  return result;
 }
 
 export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: NewPageModalProps) {
@@ -43,7 +23,7 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
   const [error, setError] = useState<string | null>(null);
 
   const pagesById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
-  const flatPages = useMemo(() => buildFlatPages(pages), [pages]);
+  const flatPages = useMemo(() => flattenPages(pages), [pages]);
 
   const resetForm = useCallback((nextParentId: string | null = null) => {
     setTitle("");

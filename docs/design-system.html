@@ -1058,6 +1058,16 @@ a:hover { color: var(--lx-text-link-hover); }
   flex-direction: column;
 }
 
+/* Collapsed left rail: 36px constant, flush left, 32px labelled toggle.
+   Class hook for the unified sidebar mechanic (.wiki-sidebar base wins order,
+   rail rule declared after it). */
+.wiki-sidebar-rail {
+  width: 36px;
+  min-width: 36px;
+  align-items: center;
+  padding: 12px 0;
+}
+
 .wiki-content {
   flex: 1;
   overflow-y: auto;
@@ -1702,6 +1712,42 @@ a:hover { color: var(--lx-text-link-hover); }
   transition: background 100ms;
 }
 .search-result:hover { background: var(--lx-surface-card-hover); }
+
+/* Right sidebar — read-mode Contents (.outline-sidebar). Mirrors the left
+   .wiki-sidebar surface/divider, flush right; its rail sits on the same edge
+   and its toggle glyph mirrors that edge (PanelRight, divider line M15 3v18). */
+.outline-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--lx-surface-elevated);
+  border-left: 1px solid var(--lx-border-default);
+  overflow: hidden;
+}
+
+.outline-sidebar-rail {
+  width: 36px;
+  min-width: 36px;
+  align-items: center;
+  padding-top: 8px;
+}
+
+/* Keyboard focus-visible ring — one shared pattern mirroring
+   .card-tile:focus-visible: outline:none + --lx-focus-ring. Applies to the
+   wiki tree rows, Contents links, search results, context-menu items and the
+   sidebar collapse/expand toggle buttons. Mouse clicks never show the ring. */
+.tree-item:focus-visible,
+.outline-sidebar a:focus-visible,
+.search-result:focus-visible,
+.menu .menu-item:focus-visible,
+.wiki-sidebar button:focus-visible,
+.outline-sidebar button:focus-visible,
+.wiki-edit-sidebar button:focus-visible,
+.sidebar-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
 
 /* FTS highlight (snippet marks) */
 mark {
@@ -3294,6 +3340,16 @@ textarea.prop-input {
   padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--lx-border-subtle);
   flex-shrink: 0;
+}
+
+/* Collapsed Page settings rail: 36px constant, flush right, 32px labelled
+   toggle. Class hook so the mobile hide/overlay rule can target the rail
+   (the collapsed state previously carried no className at all). */
+.wiki-edit-sidebar-rail {
+  width: 36px;
+  min-width: 36px;
+  align-items: center;
+  padding: 8px 0;
 }
 
 .sidebar-section {
@@ -5602,6 +5658,26 @@ textarea.prop-input {
           <button class="btn btn-primary" style="box-shadow:var(--lx-focus-ring),var(--lx-focus-glow);">Focused button</button>
           <span class="token-contract">Tokens: --lx-focus-ring, --lx-focus-glow</span>
         </div>
+      </div>
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Keyboard focus-visible rule set</strong> — one ring pattern for the wiki navigation surfaces, mirroring <span class="font-mono">.card-tile:focus-visible</span>.<br/>
+          <strong>Applies to</strong> — <span class="font-mono">.tree-item</span> · <span class="font-mono">.outline-sidebar a</span> · <span class="font-mono">.search-result</span> · <span class="font-mono">.menu .menu-item</span> · sidebar toggle buttons (<span class="font-mono">.wiki-sidebar button</span>, <span class="font-mono">.outline-sidebar button</span>, <span class="font-mono">.wiki-edit-sidebar button</span>, <span class="font-mono">.sidebar-toggle</span>).<br/>
+          <strong>Edge &amp; icon contract</strong> — a rail sits on the same edge as its panel and its glyph mirrors that edge: left = <span class="font-mono">M9 3v18 / PanelLeft</span> (rail flush left), right = <span class="font-mono">M15 3v18 / PanelRight</span> (rail flush right). Never reuse the left glyph on a right sidebar.
+        </div>
+        <pre class="code-block" id="code-misc-focus-visible">.tree-item:focus-visible,
+.outline-sidebar a:focus-visible,
+.search-result:focus-visible,
+.menu .menu-item:focus-visible,
+.wiki-sidebar button:focus-visible,
+.outline-sidebar button:focus-visible,
+.wiki-edit-sidebar button:focus-visible,
+.sidebar-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-misc-focus-visible">Copy</button>
+        <div class="token-contract">Tokens: --lx-focus-ring. Ring shows on keyboard focus only — never on hover or mouse click.</div>
       </div>
       <h3 class="font-display text-base weight-600 color-primary">Motion</h3>
       <div class="token-grid">

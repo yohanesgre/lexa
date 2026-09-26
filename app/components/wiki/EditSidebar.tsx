@@ -12,8 +12,9 @@ interface EditSidebarProps {
   autosaveDelay: number;
   onAutosaveChange: (enabled: boolean) => void;
   onDelayChange: (delay: number) => void;
-  collapsed: boolean;
+  open: boolean;
   onToggle: () => void;
+  overlayActive?: boolean | undefined;
   selectedRevisionId: string | null;
   onSelectRevision: (id: string) => void;
   onRestore: (id: string) => void;
@@ -186,8 +187,9 @@ export function EditSidebar({
   autosaveDelay,
   onAutosaveChange,
   onDelayChange,
-  collapsed,
+  open,
   onToggle,
+  overlayActive,
   selectedRevisionId,
   onSelectRevision,
   onRestore,
@@ -198,7 +200,13 @@ export function EditSidebar({
   const activeRevisionId = selectedRevisionId ?? revisions?.[0]?.id ?? null;
 
   return (
-    <WikiSidebar title="Page settings" collapsed={collapsed} onToggle={onToggle}>
+    <WikiSidebar
+      id="wiki-page-settings"
+      title="Page settings"
+      open={open}
+      onToggle={onToggle}
+      overlayActive={overlayActive}
+    >
       <AutosaveSection
         autosaveEnabled={autosaveEnabled}
         autosaveDelay={autosaveDelay}

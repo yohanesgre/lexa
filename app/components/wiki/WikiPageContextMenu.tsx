@@ -1,24 +1,86 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FolderInput, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useUpdateWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
+import { buildParentOptions, collectDescendantIds } from "./wiki-tree";
 
 interface WikiPageContextMenuProps {
-  x: number;
-  y: number;
+  anchor: { top: number; left: number };
   onAddChild: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
 }
 
-export function WikiPageContextMenu({ x, y, onAddChild, onRename, onMove, onDelete }: WikiPageContextMenuProps) {
+const VIEWPORT_MARGIN = 8;
+
+// D3: anchored below the row it was opened from, clamped to the viewport.
+// Opening moves focus to the first item; ↑↓/Home/End move between items and
+// Enter/Space activate (native button). Escape is handled by the owner hook,
+// which returns focus to the originating row.
+export function WikiPageContextMenu({ anchor, onAddChild, onRename, onMove, onDelete }: WikiPageContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState(anchor);
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || 0;
+    const viewportHeight = window.innerHeight || 0;
+    let left = anchor.left;
+    let top = anchor.top;
+    if (viewportWidth > 0 && left + rect.width > viewportWidth - VIEWPORT_MARGIN) {
+      left = Math.max(VIEWPORT_MARGIN, viewportWidth - rect.width - VIEWPORT_MARGIN);
+    }
+    if (viewportHeight > 0 && top + rect.height > viewportHeight - VIEWPORT_MARGIN) {
+      top = Math.max(VIEWPORT_MARGIN, viewportHeight - rect.height - VIEWPORT_MARGIN);
+    }
+    setPosition({ left, top });
+  }, [anchor.left, anchor.top]);
+
+  useLayoutEffect(() => {
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, []);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []
+    );
+    if (items.length === 0) return;
+    const current = document.activeElement as HTMLElement | null;
+    const index = current ? items.indexOf(current) : -1;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        items[(index + 1 + items.length) % items.length]!.focus();
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        items[(index - 1 + items.length) % items.length]!.focus();
+        break;
+      case "Home":
+        event.preventDefault();
+        items[0]!.focus();
+        break;
+      case "End":
+        event.preventDefault();
+        items[items.length - 1]!.focus();
+        break;
+      default:
+        break;
+    }
+  };
+
   return (
     <div
       id="wiki-page-context-menu"
+      ref={menuRef}
       className="menu"
-      style={{ left: x, top: y }}
+      style={{ position: "fixed", left: position.left, top: position.top }}
       role="menu"
+      aria-label="Page actions"
+      onKeyDown={handleKeyDown}
     >
       <button type="button" className="menu-item" onClick={onAddChild} role="menuitem">
         <Plus size={14} strokeWidth={1.5} />
@@ -32,58 +94,13 @@ export function WikiPageContextMenu({ x, y, onAddChild, onRename, onMove, onDele
         <FolderInput size={14} strokeWidth={1.5} />
         Move
       </button>
-      <div className="menu-separator" />
+      <div className="menu-separator" role="separator" />
       <button type="button" className="menu-item danger" onClick={onDelete} role="menuitem">
         <Trash2 size={14} strokeWidth={1.5} />
         Delete
       </button>
     </div>
   );
-}
-
-type PageOption = WikiPageMeta & { depth: number };
-
-// A page can never be reparented under itself or one of its descendants.
-function collectDescendants(pages: WikiPageMeta[], rootId: string): Set<string> {
-  const childrenByParent = new Map<string, WikiPageMeta[]>();
-  for (const page of pages) {
-    if (!page.parentId) continue;
-    const list = childrenByParent.get(page.parentId) ?? [];
-    list.push(page);
-    childrenByParent.set(page.parentId, list);
-  }
-  const excluded = new Set<string>([rootId]);
-  const stack = [rootId];
-  while (stack.length > 0) {
-    const id = stack.pop()!;
-    for (const child of childrenByParent.get(id) ?? []) {
-      if (!excluded.has(child.id)) {
-        excluded.add(child.id);
-        stack.push(child.id);
-      }
-    }
-  }
-  return excluded;
-}
-
-function buildParentOptions(pages: WikiPageMeta[], excluded: Set<string>): PageOption[] {
-  const byParent = new Map<string | null, WikiPageMeta[]>();
-  for (const page of pages) {
-    const list = byParent.get(page.parentId) ?? [];
-    list.push(page);
-    byParent.set(page.parentId, list);
-  }
-  const sort = (list: WikiPageMeta[]) => [...list].toSorted((a, b) => a.position - b.position);
-  const result: PageOption[] = [];
-  const recurse = (parentId: string | null, depth: number) => {
-    for (const page of sort(byParent.get(parentId) ?? [])) {
-      if (excluded.has(page.id)) continue;
-      result.push({ ...page, depth });
-      recurse(page.id, depth + 1);
-    }
-  };
-  recurse(null, 0);
-  return result;
 }
 
 interface MovePageModalProps {
@@ -122,7 +139,7 @@ export function MovePageModal({ slug, isOpen, page, pages, onClose }: MovePageMo
   }, [isOpen, onClose]);
 
   const excluded = useMemo(
-    () => (page ? collectDescendants(pages, page.id) : new Set<string>()),
+    () => (page ? collectDescendantIds(pages, page.id) : new Set<string>()),
     [page, pages]
   );
   const options = useMemo(() => buildParentOptions(pages, excluded), [pages, excluded]);

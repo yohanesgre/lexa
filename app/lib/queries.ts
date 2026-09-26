@@ -467,17 +467,25 @@ export function useUnlinkGithubIssue(slug: string) {
   };
 }
 
+export const wikiKeys = {
+  pages: (slug: string) => ["wiki", slug] as const,
+  page: (slug: string, pageSlug: string) => ["wikiPage", slug, pageSlug] as const,
+  search: (slug: string, query: string) => ["wikiSearch", slug, query] as const,
+  revisions: (slug: string, pageSlug: string, limit?: number) => ["wikiRevisions", slug, pageSlug, limit] as const,
+  shareLinks: (slug: string, pageSlug: string) => ["wikiShareLinks", slug, pageSlug] as const,
+};
+
 export function useWikiPages(slug: string) {
-  return useQuery({ queryKey: ["wiki", slug], queryFn: () => api.listWikiPages(slug).then((r) => r.data) });
+  return useQuery({ queryKey: wikiKeys.pages(slug), queryFn: () => api.listWikiPages(slug).then((r) => r.data) });
 }
 
 export function useWikiPage(slug: string, pageSlug: string) {
-  return useQuery({ queryKey: ["wikiPage", slug, pageSlug], queryFn: () => api.getWikiPage(slug, pageSlug) });
+  return useQuery({ queryKey: wikiKeys.page(slug, pageSlug), queryFn: () => api.getWikiPage(slug, pageSlug) });
 }
 
 export function useSearchWikiPages(slug: string, query: string) {
   return useQuery({
-    queryKey: ["wikiSearch", slug, query],
+    queryKey: wikiKeys.search(slug, query),
     queryFn: () => api.searchWikiPages(slug, query).then((r) => r.data),
     enabled: query.length > 0,
   });
@@ -489,11 +497,11 @@ export function useCreateWikiPage(slug: string) {
   return useMutation({
     mutationFn: (input: Parameters<typeof api.createWikiPage>[1]) => api.createWikiPage(slug, input),
     onSuccess: (page) => {
-      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(slug), (old) => {
         if (!old) return [page];
         return [...old, page];
       });
-      qc.setQueryData(["wikiPage", slug, page.slug], page);
+      qc.setQueryData(wikiKeys.page(slug, page.slug), page);
       toast.push("success", "Page created");
     },
     onError: (err) => {
@@ -504,22 +512,26 @@ export function useCreateWikiPage(slug: string) {
 
 export function useUpdateWikiPage(slug: string) {
   const qc = useQueryClient();
+  const toast = useToast();
   return useMutation({
     mutationFn: ({ pageSlug, ...input }: { pageSlug: string } & Parameters<typeof api.updateWikiPage>[2]) =>
       api.updateWikiPage(slug, pageSlug, input),
     onSuccess: (page) => {
-      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(slug), (old) => {
         if (!old) return old;
         return old.map((p) => (p.id === page.id ? page : p));
       });
-      qc.setQueryData(["wikiPage", slug, page.slug], page);
+      qc.setQueryData(wikiKeys.page(slug, page.slug), page);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update page", toastMessage(err));
     },
   });
 }
 
 export function useRevisions(slug: string, pageSlug: string, limit?: number) {
   return useQuery({
-    queryKey: ["wikiRevisions", slug, pageSlug, limit],
+    queryKey: wikiKeys.revisions(slug, pageSlug, limit),
     queryFn: () => api.listRevisions(slug, pageSlug, limit).then((r) => r.revisions),
   });
 }
@@ -530,14 +542,14 @@ export function useRestoreWikiRevision(slug: string) {
     mutationFn: ({ pageSlug, revisionId }: { pageSlug: string; revisionId: string }) =>
       api.restoreWikiRevision(slug, pageSlug, revisionId),
     onSuccess: (page, variables) => {
-      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(slug), (old) => {
         if (!old) return old;
         return old.map((p) => (p.id === page.id ? page : p));
       });
-      qc.setQueryData(["wikiPage", slug, variables.pageSlug], page);
-      qc.setQueryData(["wikiPage", slug, page.slug], page);
+      qc.setQueryData(wikiKeys.page(slug, variables.pageSlug), page);
+      qc.setQueryData(wikiKeys.page(slug, page.slug), page);
       void qc.fetchQuery({
-        queryKey: ["wikiRevisions", slug, variables.pageSlug, 20],
+        queryKey: wikiKeys.revisions(slug, variables.pageSlug, 20),
         queryFn: () => api.listRevisions(slug, variables.pageSlug, 20).then((r) => r.revisions),
       });
     },
@@ -550,11 +562,11 @@ export function useDeleteWikiPage(slug: string) {
   return useMutation({
     mutationFn: (pageSlug: string) => api.deleteWikiPage(slug, pageSlug),
     onSuccess: (_data, pageSlug) => {
-      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(slug), (old) => {
         if (!old) return old;
         return old.filter((p) => p.slug !== pageSlug);
       });
-      qc.removeQueries({ queryKey: ["wikiPage", slug, pageSlug] });
+      qc.removeQueries({ queryKey: wikiKeys.page(slug, pageSlug) });
       toast.push("success", "Page deleted");
     },
     onError: (err) => {
@@ -565,7 +577,7 @@ export function useDeleteWikiPage(slug: string) {
 
 export function useWikiShareLinks(slug: string, pageSlug: string) {
   return useQuery({
-    queryKey: ["wikiShareLinks", slug, pageSlug],
+    queryKey: wikiKeys.shareLinks(slug, pageSlug),
     queryFn: () => api.listWikiShareLinks(slug, pageSlug).then((r) => r.data),
   });
 }
@@ -575,7 +587,7 @@ export function useCreateWikiShareLink(slug: string, pageSlug: string) {
   return useMutation({
     mutationFn: (expiresAt?: string) => api.createWikiShareLink(slug, pageSlug, expiresAt),
     onSuccess: ({ link }) => {
-      qc.setQueryData<WikiShareLink[]>(["wikiShareLinks", slug, pageSlug], (old) => {
+      qc.setQueryData<WikiShareLink[]>(wikiKeys.shareLinks(slug, pageSlug), (old) => {
         if (!old) return [link];
         return [...old, link];
       });
@@ -588,7 +600,7 @@ export function useRevokeWikiShareLink(slug: string, pageSlug: string) {
   return useMutation({
     mutationFn: (linkId: string) => api.revokeWikiShareLink(slug, linkId),
     onSuccess: (_data, linkId) => {
-      qc.setQueryData<WikiShareLink[]>(["wikiShareLinks", slug, pageSlug], (old) => {
+      qc.setQueryData<WikiShareLink[]>(wikiKeys.shareLinks(slug, pageSlug), (old) => {
         if (!old) return old;
         return old.filter((l) => l.id !== linkId);
       });

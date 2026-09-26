@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { WikiPageMeta } from "../../../shared/types";
 
@@ -22,11 +22,68 @@ const grand = meta("w3", "Grand", "w2");
 const other = meta("w4", "Other", null, 1);
 const pages = [root, child, grand, other];
 
+function renderMenu(anchor = { top: 0, left: 0 }) {
+  return render(
+    <WikiPageContextMenu
+      anchor={anchor}
+      onAddChild={vi.fn()}
+      onRename={vi.fn()}
+      onMove={vi.fn()}
+      onDelete={vi.fn()}
+    />
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("WikiPageContextMenu", () => {
+  it("anchors below the row, exposes menu semantics, and focuses the first item", () => {
+    renderMenu({ top: 100, left: 40 });
+    const menu = screen.getByRole("menu", { name: "Page actions" });
+    expect(menu).toHaveStyle({ position: "fixed", left: "40px", top: "100px" });
+    const items = screen.getAllByRole("menuitem");
+    expect(items).toHaveLength(4);
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it("moves focus with ArrowUp/ArrowDown and Home/End", () => {
+    renderMenu();
+    const items = screen.getAllByRole("menuitem");
+    fireEvent.keyDown(items[0]!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(items[1]!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[3]);
+    fireEvent.keyDown(items[3]!, { key: "Home" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0]!, { key: "End" });
+    expect(document.activeElement).toBe(items[3]);
+  });
+
+  it("clamps the position to the viewport", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      left: 0,
+      right: 200,
+      bottom: 100,
+      width: 200,
+      height: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+    renderMenu({ top: 2000, left: 2000 });
+    // jsdom viewport is 1024x768: left = 1024 - 200 - 8, top = 768 - 100 - 8.
+    expect(screen.getByRole("menu")).toHaveStyle({ left: "816px", top: "660px" });
+  });
+
   it("enables Move and invokes onMove", () => {
     const onMove = vi.fn();
     render(
-      <WikiPageContextMenu x={10} y={10} onAddChild={vi.fn()} onRename={vi.fn()} onMove={onMove} onDelete={vi.fn()} />
+      <WikiPageContextMenu anchor={{ top: 0, left: 0 }} onAddChild={vi.fn()} onRename={vi.fn()} onMove={onMove} onDelete={vi.fn()} />
     );
     const move = screen.getByRole("menuitem", { name: "Move" });
     expect(move).not.toBeDisabled();

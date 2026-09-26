@@ -64,6 +64,21 @@ describe("WikiRepo", () => {
     expect(child1.parentId).toBe("a");
   });
 
+  it("isDescendant walks the ancestor chain (direct, deep, negative, root)", async () => {
+    setup();
+    await Effect.runPromise(repo.create({ id: "a", projectId: "p1", title: "A", slug: "a", content: DOC, contentText: "", position: 0 }));
+    await Effect.runPromise(repo.create({ id: "b", projectId: "p1", title: "B", slug: "b", content: DOC, contentText: "", parentId: "a", position: 0 }));
+    await Effect.runPromise(repo.create({ id: "c", projectId: "p1", title: "C", slug: "c", content: DOC, contentText: "", parentId: "b", position: 0 }));
+    await Effect.runPromise(repo.create({ id: "x", projectId: "p1", title: "X", slug: "x", content: DOC, contentText: "", position: 1 }));
+
+    expect(await Effect.runPromise(repo.isDescendant("b", "a"))).toBe(true);
+    expect(await Effect.runPromise(repo.isDescendant("c", "a"))).toBe(true);
+    expect(await Effect.runPromise(repo.isDescendant("c", "b"))).toBe(true);
+    expect(await Effect.runPromise(repo.isDescendant("a", "c"))).toBe(false);
+    expect(await Effect.runPromise(repo.isDescendant("x", "a"))).toBe(false);
+    expect(await Effect.runPromise(repo.isDescendant("a", "a"))).toBe(false);
+  });
+
   it("update moves a page under a new parent and changes fields; unknown id → RowNotFound", async () => {
     setup();
     await Effect.runPromise(repo.create({ id: "a", projectId: "p1", title: "A", slug: "a", content: DOC, contentText: "", position: 0 }));

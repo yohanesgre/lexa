@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
 import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, VisionNotConfigured, EngineNotSupportedForChat, errorToStatus, errorResponse, errorMessage, errorDetails } from "./errors";
 import { CommentNotFound, CommentInvalid } from "./errors";
+import { InvalidParent } from "./errors";
 import { ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
@@ -29,6 +30,13 @@ describe("errorToStatus", () => {
   it("maps MilestoneNotFound → 404 and InvalidArgs → 422", () => {
     expect(errorToStatus(new MilestoneNotFound({ id: "ms1" }))).toBe(404);
     expect(errorToStatus(new InvalidArgs({ reason: "startAt cannot be later than dueAt" }))).toBe(422);
+  });
+
+  it("maps InvalidParent → 422 with INVALID_PARENT code and reason details", () => {
+    expect(errorToStatus(new InvalidParent({ reason: "cycle" }))).toBe(422);
+    const response = errorResponse(asCatalogError(new InvalidParent({ reason: "cross-project" })));
+    expect(response.error.code).toBe("INVALID_PARENT");
+    expect(response.error.details).toEqual({ reason: "cross-project" });
   });
 
   it("maps VisionNotConfigured and EngineNotSupportedForChat → 409", () => {
