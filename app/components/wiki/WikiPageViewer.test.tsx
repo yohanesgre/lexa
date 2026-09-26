@@ -8,7 +8,7 @@ const editorState = vi.hoisted(() => ({ editing: false }));
 
 vi.mock("../tiptap-render", () => ({
   renderDoc: () => null,
-  extractHeadings: () => [],
+  extractHeadings: () => [{ level: 2, text: "Basics", id: "basics" }],
   slugifyHeading: (value: string) => value,
 }));
 
@@ -103,16 +103,17 @@ describe("WikiPageViewer last-edited author", () => {
 });
 
 describe("WikiPageViewer sidebar exclusivity", () => {
-  it("mounts only the Contents panel in read mode", () => {
+  it("mounts only the outline pill in read mode", () => {
     render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
-    expect(document.querySelector(".outline-sidebar")).toBeInTheDocument();
-    expect(document.querySelector(".wiki-edit-sidebar")).toBeNull();
+    expect(document.querySelector(".wiki-outline-dock")).toBeInTheDocument();
+    expect(document.querySelector(".wiki-settings-btn")).toBeNull();
+    expect(document.querySelector(".wiki-read-area")).toHaveClass("wiki-read-area--outline");
   });
 
-  it("mounts only the Page settings panel in edit mode", () => {
+  it("mounts only the Page settings trigger in edit mode", () => {
     editorState.editing = true;
     render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
-    expect(document.querySelector(".wiki-edit-sidebar")).toBeInTheDocument();
-    expect(document.querySelector(".outline-sidebar")).toBeNull();
+    expect(screen.getByRole("button", { name: "Page settings" })).toBeInTheDocument();
+    expect(document.querySelector(".wiki-outline-dock")).toBeNull();
   });
 });
