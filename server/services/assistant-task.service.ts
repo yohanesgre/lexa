@@ -5,15 +5,16 @@ import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assis
 import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
 import { AssistantPendingWritesRepo } from "../repos/assistant-pending-writes.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { RuntimeRepo } from "../repos/runtime.repo";
+import { AssistantTaskRepo } from "../repos/assistant-task.repo";
+import { AssistantCatalogRepo } from "../repos/assistant-catalog.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
-import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
-import { RuntimeService, BLACKSMITH_AGENT, ASSISTANT_AGENT } from "./runtime.service";
-import { loadTaskRepoContent } from "./runtime-repo-content";
+import { Db, DbError, RowNotFound, queryFirst, run, withTx, ConstraintViolation, type SqlParam } from "../db/db";
+import { AssistantCatalogService } from "./assistant-catalog.service";
+import { loadTaskRepoContent } from "./assistant-repo-content";
 import { AssistantGateway } from "../assistant/gateway.service";
-import { ProviderNotConfigured, AgentNotFound, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantTaskActive, RuntimeTaskNotFound, TaskNotFound, WikiPageNotFound, NoRuntimeOnline, AssistantThreadNotFound, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
+import { ProviderNotConfigured, AgentNotFound, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantTaskActive, AssistantTaskNotFound, TaskNotFound, WikiPageNotFound, AssistantThreadNotFound, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
 import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
 import { executeAssistantWrite } from "../assistant/write-execution";
 import { AuthorizationService } from "./authorization.service";
@@ -22,9 +23,11 @@ import { CommentService } from "./comment.service";
 import { WikiService } from "./wiki.service";
 import { MilestoneService } from "./milestone.service";
 import { SwimlaneService } from "./swimlane.service";
+import { ActivityService } from "./activity.service";
 import { docToMarkdown } from "../../shared/markdown";
 import { extractText } from "../../shared/tiptap-text";
-import type { TipTapDoc, Task, WikiPage, Actor } from "../../shared/types";
+import * as msg from "../activity-messages";
+import type { TipTapDoc, Task, WikiPage, Actor, AssistantTask, ActivityType } from "../../shared/types";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import { buildStream, findPendingBatch, applyResumeResults } from "../assistant/build-stream";
 import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64 } from "./assistant-helpers";
@@ -34,14 +37,15 @@ import type { TaskRef } from "../assistant/tools";
 const activeTasks = new Map<string, AbortController>();
 
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
-  dependencies: [RuntimeRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, RuntimeService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
-    const runtimeRepo = yield* RuntimeRepo;
+    const queueRepo = yield* AssistantTaskRepo;
+    const catalogRepo = yield* AssistantCatalogRepo;
     const settingsRepo = yield* AssistantSettingsRepo;
     const threadRepo = yield* AssistantThreadRepo;
     const pendingWritesRepo = yield* AssistantPendingWritesRepo;
     const memoryRepo = yield* ProjectMemoryRepo;
-    const runtimeService = yield* RuntimeService;
+    const activityService = yield* ActivityService;
     const storage = yield* Storage;
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
@@ -57,6 +61,27 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     const swimlaneService = yield* SwimlaneService;
     const authz = yield* AuthorizationService;
     const gateway = yield* AssistantGateway;
+
+    // Assistant runs are unattended — the actor is the agent itself. Agent name
+    // resolved at write time; falls back to the agent id.
+    const agentName = (agentId: string): Effect.Effect<string, never> =>
+      catalogRepo.findAgentById(agentId).pipe(
+        Effect.map((a) => a.name),
+        Effect.catchAll(() => Effect.succeed(agentId))
+      );
+
+    // Terminal statuses emit a task-activity row (document_type 'task' only)
+    // in the SAME transaction as the status write. Message builds with the
+    // RESOLVED agent name.
+    const emitTerminal = (task: AssistantTask, type: ActivityType, buildMessage: (agentName: string) => string): Effect.Effect<void, never> =>
+      task.documentType === "task"
+        ? Effect.gen(function* () {
+            const name = yield* agentName(task.agentId);
+            yield* activityService.append(task.documentId, { kind: "agent", label: name }, type, buildMessage(name));
+          }).pipe(
+            Effect.catchAll(() => Effect.void) // a timeline row must never fail the stream round-trip
+          )
+        : Effect.void;
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
     const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
@@ -143,20 +168,98 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       return { messages: applyResumeResults(thread.messages, [batchId]), results };
     });
 
+    // Terminal transitions. Local so the stream callbacks (onDone/onFail/
+    // onCancel) and the public methods share one path; terminal activity
+    // emission stays inside the SAME transaction as the status write
+    // (invariant #12).
+    const completeTask = (id: string, result: string) =>
+      withTx(db, Effect.gen(function* () {
+        const updated = yield* queueRepo.updateTaskStatus(id, "completed", result, null).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
+        );
+        yield* emitTerminal(updated, "assistant_completed", (name) => msg.assistantCompleted(name));
+        return updated;
+      }));
+    const failTask = (id: string, error: string) =>
+      withTx(db, Effect.gen(function* () {
+        const updated = yield* queueRepo.updateTaskStatus(id, "failed", null, error).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
+        );
+        yield* emitTerminal(updated, "assistant_failed", () => msg.assistantFailed());
+        return updated;
+      }));
+    const cancelTask = (id: string) =>
+      withTx(db, Effect.gen(function* () {
+        const updated = yield* queueRepo.updateTaskStatus(id, "cancelled", null, null).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
+        );
+        yield* emitTerminal(updated, "assistant_cancelled", () => msg.assistantCancelled());
+        return updated;
+      }));
+
     return {
       activeTasks,
       MAX_TOOL_ROUNDS,
       abortStream: (taskId: string): boolean => { activeTasks.get(taskId)?.abort(); return activeTasks.has(taskId); },
+
+      // ── Queue lifecycle ──
+      create: (input: {
+        projectId: string;
+        documentType: "task" | "wiki";
+        documentId: string;
+        agentId: string;
+        skillId: string;
+        extraPrompt?: string;
+        selection: string;
+      }): Effect.Effect<AssistantTask, TaskNotFound | WikiPageNotFound | AgentNotFound | SkillNotFound | DbError | RowNotFound | ConstraintViolation> =>
+        Effect.gen(function* () {
+          yield* catalogRepo.findAgentById(input.agentId).pipe(
+            Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId }))
+          );
+          yield* catalogRepo.findSkillById(input.skillId).pipe(
+            Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId }))
+          );
+          if (input.documentType === "task") {
+            yield* taskRepo.findById(input.documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId })));
+          } else {
+            yield* wikiRepo.findBySlug(input.projectId, input.documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId })));
+          }
+          return yield* queueRepo.createTask({
+            id: crypto.randomUUID(),
+            projectId: input.projectId,
+            documentType: input.documentType,
+            documentId: input.documentId,
+            agentId: input.agentId,
+            skillId: input.skillId,
+            extraPrompt: input.extraPrompt ?? "",
+            selection: input.selection,
+          });
+        }),
+
+      getById: (id: string): Effect.Effect<AssistantTask, AssistantTaskNotFound | DbError> =>
+        queueRepo.findTaskById(id).pipe(Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))),
+
+      listForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<AssistantTask[], DbError> =>
+        queueRepo.listTasksForDocument(projectId, documentType, documentId),
+
+      hasRunning: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<boolean, DbError> =>
+        queueRepo.listTasksForDocument(projectId, documentType, documentId).pipe(
+          Effect.map((tasks) => tasks.some((t) => t.status === "running"))
+        ),
+
+      complete: (id: string, result: string) => completeTask(id, result),
+
+      fail: (id: string, error: string) => failTask(id, error),
+
+      cancel: (id: string) => cancelTask(id),
+
       enqueue: (input: { projectId: string; documentType: "task" | "wiki"; documentId: string; prompt: string; agentId: string; skillId: string; selection?: string; attachments?: Array<{ storageKey: string; mimeType: string; name: string }> }) => Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(input.projectId);
-        yield* runtimeRepo.findAgentById(input.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId })));
-        yield* runtimeRepo.findSkillById(input.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId })));
-        const engine = (settingsRow as unknown as { engine: string }).engine;
-        const engineAgentId = engine === "blacksmith" ? BLACKSMITH_AGENT.id : ASSISTANT_AGENT.id;
-        if (!(yield* Effect.promise(() => skillJunctionBound(engineAgentId, input.skillId)))) return yield* new SkillNotFound({ id: input.skillId });
+        yield* catalogRepo.findAgentById(input.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId })));
+        yield* catalogRepo.findSkillById(input.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId })));
+        if (!(yield* Effect.promise(() => skillJunctionBound(input.agentId, input.skillId)))) return yield* new SkillNotFound({ id: input.skillId });
         if (input.documentType === "task") yield* taskRepo.findById(input.documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId })));
         else yield* wikiRepo.findBySlug(input.projectId, input.documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId })));
-        if (engine === "blacksmith") { const runtimes = yield* runtimeRepo.listRuntimes(); if (!runtimes.some((r) => r.status === "online")) return yield* new NoRuntimeOnline(); }
         const attachments = input.attachments ?? [];
         if (attachments.length > 0) {
           yield* validateAttachments(input.projectId, attachments, DOC_IMAGE_CAPS);
@@ -165,16 +268,15 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           const verdict = resolveAssistantThread(existing, input.agentId, input.skillId);
           yield* threadRepo.saveThread(input.documentType, input.documentId, { projectId: input.projectId, agentId: input.agentId, skillId: input.skillId, messages: [...verdict.messages, { role: "user", content: attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType })) }], summary: verdict.summary, summarizedCount: verdict.summarizedCount });
         }
-        const docContext = engine === "blacksmith" ? (yield* loadDocContext(input.projectId, input.documentType, input.documentId)).context : "";
-        return yield* runtimeRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId: input.skillId, extraPrompt: input.prompt, selection: input.selection ?? "", docContext, kind: engine as "assistant" | "blacksmith" });
+        return yield* queueRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId: input.skillId, extraPrompt: input.prompt, selection: input.selection ?? "" });
       }),
       resetThread: (projectId: string, documentType: "task" | "wiki", documentId: string) => Effect.gen(function* () {
-        const tasks = yield* runtimeRepo.listTasksForDocument(projectId, documentType, documentId);
-        if (tasks.some((t) => t.kind === "assistant" && t.status === "running")) return yield* new AssistantTaskActive();
+        const tasks = yield* queueRepo.listTasksForDocument(projectId, documentType, documentId);
+        if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         yield* threadRepo.resetThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType, documentId })));
       }),
       runStream: (taskId: string, opts?: { userId?: string }) => Effect.gen(function* () {
-        const task = yield* runtimeRepo.claimAssistantTask(taskId).pipe(Effect.catchTag("ConstraintViolation", () => new AssistantTaskActive()), Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id: taskId })));
+        const task = yield* queueRepo.claimAssistantTask(taskId).pipe(Effect.catchTag("ConstraintViolation", () => new AssistantTaskActive()), Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id: taskId })));
         const settingsRow = yield* getSettingsOrFail(task.projectId);
         const config = configFromRow(settingsRow);
         const existing = yield* threadRepo.loadThread(task.documentType, task.documentId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
@@ -196,8 +298,8 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
             catch: () => new DbError({ message: "failed to init task thread" }),
           }).pipe(Effect.catchAll(() => Effect.succeed(0)));
         }
-        const agent = yield* runtimeRepo.findAgentById(task.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId })));
-        const skill = yield* runtimeRepo.findSkillById(task.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: task.skillId })));
+        const agent = yield* catalogRepo.findAgentById(task.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId })));
+        const skill = yield* catalogRepo.findSkillById(task.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: task.skillId })));
         const doc = yield* loadDocContext(task.projectId, task.documentType, task.documentId);
         const repoContent = yield* loadTaskRepoContent(task).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
@@ -216,20 +318,20 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
-          onDone: (text) => Effect.runPromise(runtimeService.complete(taskId, text)).then(() => {}).catch(() => {}),
-          onFail: (message) => Effect.runPromise(runtimeService.fail(taskId, message)).then(() => {}).catch(() => {}),
-          onCancel: async () => { await Effect.runPromise(runtimeService.cancel(taskId)).catch(() => {}); await Effect.runPromise(runtimeRepo.appendLog(crypto.randomUUID(), taskId, "aborted")).catch(() => {}); },
+          onDone: (text) => Effect.runPromise(completeTask(taskId, text)).then(() => {}).catch(() => {}),
+          onFail: (message) => Effect.runPromise(failTask(taskId, message)).then(() => {}).catch(() => {}),
+          onCancel: async () => { await Effect.runPromise(cancelTask(taskId)).catch(() => {}); },
         });
       }),
       resumeThreadStream: (documentType: "task" | "wiki", documentId: string) => Effect.gen(function* () {
         const thread = yield* threadRepo.loadThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType, documentId })));
-        const tasks = yield* runtimeRepo.listTasksForDocument(thread.projectId, documentType, documentId);
-        if (tasks.some((t) => t.kind === "assistant" && t.status === "running")) return yield* new AssistantTaskActive();
+        const tasks = yield* queueRepo.listTasksForDocument(thread.projectId, documentType, documentId);
+        if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         const { messages: history, results: approvalResults } = yield* prepareResume(thread);
         if (!thread.agentId || !thread.skillId) return yield* new AgentNotFound({ id: "" });
-        const agent = yield* runtimeRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
-        const skill = yield* runtimeRepo.findSkillById(thread.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" })));
+        const agent = yield* catalogRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
+        const skill = yield* catalogRepo.findSkillById(thread.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" })));
         const doc = yield* loadDocContext(thread.projectId, documentType, documentId);
         const repoContent = yield* loadTaskRepoContent({ projectId: thread.projectId, documentType, documentId } as Parameters<typeof loadTaskRepoContent>[0]).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);

@@ -5501,6 +5501,38 @@ button.history-item {
 .health-closed{ background:var(--lx-bg-success-subtle); color:var(--lx-text-success); border-color:rgba(74,222,128,0.18);}
 .health-half{ background:var(--lx-bg-warning-subtle); color:var(--lx-text-warning); border-color:rgba(240,192,64,0.18);}
 
+/* =========================================================
+   Gateway health — plain-language provider status
+   (the section lives on the /admin/assistant Overview tab,
+   admin-assistant.html; self-contained, no page-scoped CSS).
+   ========================================================= */
+.health-summary { font-size:13px; line-height:18px; color:var(--lx-text-secondary); }
+.health-status { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:500; line-height:16px; color:var(--lx-text-secondary); }
+.health-status svg { width:14px; height:14px; flex-shrink:0; }
+.health-status--ok { color:var(--lx-text-success); }
+.health-status--warn { color:var(--lx-text-warning); }
+.health-status--danger { color:var(--lx-text-danger); }
+.health-status--muted { color:var(--lx-text-muted); }
+.health-provider-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.health-provider-label { font-size:13px; font-weight:600; color:var(--lx-text-primary); }
+.health-provider-meta { font-family:var(--lx-font-micro); font-size:11px; line-height:15px; letter-spacing:0.02em; color:var(--lx-text-muted); }
+.health-provider-note { font-size:12px; line-height:16px; color:var(--lx-text-secondary); }
+.health-provider-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.health-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:10px 12px; border:1px dashed var(--lx-border-strong); border-radius:8px; background:var(--lx-surface-elevated); }
+.health-legend-item { display:flex; align-items:center; gap:6px; font-size:12px; line-height:16px; color:var(--lx-text-secondary); }
+
+/* Disclosure — native <details>, chevron rotates on [open]. Zero JS. */
+.health-details > summary { display:inline-flex; align-items:center; gap:6px; list-style:none; cursor:pointer; font-family:var(--lx-font-micro); font-size:10px; line-height:14px; text-transform:uppercase; letter-spacing:0.05em; color:var(--lx-text-muted); }
+.health-details > summary::-webkit-details-marker { display:none; }
+.health-details > summary:hover { color:var(--lx-text-secondary); }
+.health-details-chevron { width:11px; height:11px; stroke:currentColor; stroke-width:2; fill:none; flex-shrink:0; transform:rotate(-90deg); transition:transform 0.15s var(--lx-ease-out); }
+.health-details[open] .health-details-chevron { transform:rotate(0deg); }
+.health-details-body { margin-top:8px; padding:10px 12px; background:var(--lx-surface-elevated); border:1px solid var(--lx-border-subtle); border-radius:6px; }
+.health-details-kv { display:grid; grid-template-columns:minmax(120px,190px) 1fr; gap:3px 16px; margin:0; font-family:var(--lx-font-mono); font-size:11px; line-height:16px; }
+.health-details-kv dt { color:var(--lx-text-muted); }
+.health-details-kv dd { margin:0; color:var(--lx-text-secondary); word-break:break-all; }
+@media (max-width:640px){ .health-details-kv { grid-template-columns:1fr; gap:0; } .health-details-kv dt { margin-top:6px; } }
+
 </style>
   <style>
     /* Page-scoped layout only — no design tokens defined here */
@@ -5912,20 +5944,20 @@ button.history-item {
         <div class="state-row">
           <span class="state-label">Card row · default</span>
           <div class="card-row" style="width:280px;">
-            <div class="text-sm weight-500 color-primary">Runtime row</div>
+            <div class="text-sm weight-500 color-primary">Member row</div>
             <div class="text-xs color-secondary">Selectable row example</div>
           </div>
         </div>
         <div class="state-row">
           <span class="state-label">Card row · hover</span>
           <div class="card-row" style="width:280px;background:var(--lx-surface-card-hover);border-color:var(--lx-border-default);">
-            <div class="text-sm weight-500 color-primary">Runtime row</div>
+            <div class="text-sm weight-500 color-primary">Member row</div>
           </div>
         </div>
         <div class="state-row">
           <span class="state-label">Card row · selected</span>
           <div class="card-row state-selected" style="width:280px;">
-            <div class="text-sm weight-500 color-primary">Runtime row</div>
+            <div class="text-sm weight-500 color-primary">Member row</div>
           </div>
         </div>
         <div class="state-row">
@@ -5967,7 +5999,7 @@ button.history-item {
       </div>
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — status-accent variants (<span class="font-mono">.card-row--neutral</span> / <span class="font-mono">--success</span> / <span class="font-mono">--warning</span> / <span class="font-mono">--danger</span>; same modifiers on <span class="font-mono">.card-panel</span>) when the card itself reports state: sync health panels, runtime/daemon status, warning banners. <span class="font-mono">--neutral</span> marks informational/no-status state (queued, idle, in-progress). Full-height 3px left border — same treatment as toasts.<br/>
+          <strong>Use</strong> — status-accent variants (<span class="font-mono">.card-row--neutral</span> / <span class="font-mono">--success</span> / <span class="font-mono">--warning</span> / <span class="font-mono">--danger</span>; same modifiers on <span class="font-mono">.card-panel</span>) when the card itself reports state: sync health panels, provider/gateway status, warning banners. <span class="font-mono">--neutral</span> marks informational/no-status state (queued, idle, in-progress). Full-height 3px left border — same treatment as toasts.<br/>
           <strong>Avoid</strong> — accents as decoration on every card; status colors on kanban task cards (priority/type dots own color there); accent hues outside the status palette.<br/>
           <strong>Instead</strong> — neutral primitives for content that isn't stateful; <span class="font-mono">.toast</span> for transient feedback; <span class="font-mono">.notice</span> for inline form errors.
         </div>
@@ -5995,8 +6027,8 @@ button.history-item {
         <div class="state-row">
           <span class="state-label">Card row · danger</span>
           <div class="card-row card-row--danger" style="width:280px;">
-            <div class="text-sm weight-500 color-primary">Daemon offline</div>
-            <div class="text-xs color-secondary">Hearth runtime unreachable since 14:02</div>
+            <div class="text-sm weight-500 color-primary">Provider unreachable</div>
+            <div class="text-xs color-secondary">Gateway returned 502 on the last 3 calls</div>
           </div>
         </div>
         <div class="state-row">
@@ -6330,7 +6362,7 @@ button.history-item {
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.status-chip` + `.status-dot` for hearth/task run states (queued/running/done/failed/cancelled).<br/>
+          <strong>Use</strong> — `.status-chip` + `.status-dot` for assistant/task run states (queued/running/done/failed/cancelled).<br/>
           <strong>Avoid</strong> — a status chip for a persistent field value; color alone without a label.<br/>
           <strong>Instead</strong> — `.type-badge`/`.priority-dot` for task fields; keep label + dot for status.
         </div>
@@ -6346,6 +6378,39 @@ button.history-item {
 &lt;button class="status-chip" aria-pressed="false"&gt;&lt;span class="status-dot" style="background:var(--lx-text-danger);"&gt;&lt;/span&gt;Failed&lt;/button&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-status">Copy</button>
         <div class="token-contract">Tokens: --lx-text-success, --lx-text-warning, --lx-text-danger, --lx-text-muted</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.health-status` for plain-language health/status lines (gateway provider status): a 14×14 icon + a text label, one distinct icon SHAPE per status so meaning never rests on color. Tone modifiers: <span class="font-mono">--ok</span> (Working) · <span class="font-mono">--warn</span> (Slow / Having trouble) · <span class="font-mono">--danger</span> (Offline) · <span class="font-mono">--muted</span> (Not checked yet / Checked…). Pair with <span class="font-mono">.health-legend</span> for the vocabulary strip and <span class="font-mono">.card-row--success/--warning/--danger/--neutral</span> for the row accent.<br/>
+          <strong>Avoid</strong> — a status conveyed by color alone; circuit-breaker jargon (open/closed/half-open) or raw HTTP codes in the primary label (move them to <span class="font-mono">.health-details</span>); a dot where the statuses need distinguishable shapes.<br/>
+          <strong>Instead</strong> — <span class="font-mono">.health-dot</span> for project health trends; <span class="font-mono">.status-chip</span> for interactive run-state filters; <span class="font-mono">.health-badge</span> (open/closed/half) only for the technical badge inside a Details disclosure.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Health status line</span>
+          <span class="health-status health-status--ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>Working</span>
+          <span class="health-status health-status--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 7v5"/><path d="M12 16h.01"/></svg>Slow</span>
+          <span class="health-status health-status--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>Having trouble</span>
+          <span class="health-status health-status--danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>Offline</span>
+          <span class="health-status health-status--muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 2"/></svg>Not checked yet</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Health legend</span>
+          <div class="health-legend" style="width:100%;">
+            <span class="health-legend-item"><span class="health-status health-status--ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>Working</span></span>
+            <span class="health-legend-item"><span class="health-status health-status--muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 2"/></svg>Not checked yet</span></span>
+          </div>
+        </div>
+        <pre class="code-block" id="code-badges-health-status">&lt;span class="health-status health-status--ok"&gt;
+  &lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"&gt;…&lt;/svg&gt;
+  Working
+&lt;/span&gt;
+&lt;!-- modifiers: --ok · --warn · --danger · --muted ; icon shape is unique per status --&gt;
+&lt;div class="health-legend"&gt;
+  &lt;span class="health-legend-item"&gt;&lt;span class="health-status health-status--ok"&gt;…Working&lt;/span&gt;&lt;/span&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-health-status">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-success, --lx-text-warning, --lx-text-danger, --lx-text-muted, --lx-border-strong, --lx-surface-elevated · icon 14×14, stroke currentColor 1.5, aria-hidden (label carries meaning)</div>
       </div>
 
       <div class="block-shell">
@@ -6508,6 +6573,62 @@ button.history-item {
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-feedback-empty">Copy</button>
         <div class="token-contract">Tokens: --lx-text-muted, --lx-text-secondary</div>
       </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.health-details` (native <span class="font-mono">&lt;details&gt;/&lt;summary&gt;</span>) for secondary, technical detail behind a disclosure: gateway provider health (circuit state, failure counts, ISO timestamps), advanced settings, raw diagnostics. The summary renders as a micro uppercase "Details" affordance with a chevron that rotates on open. Native semantics = keyboard-operable, screen-reader-announced, zero JS.<br/>
+          <strong>Avoid</strong> — hiding a primary action, status, or error message behind it (Details is additive, never the only place a fact appears); a JS-only toggle where native <span class="font-mono">&lt;details&gt;</span> suffices; primary-UI jargon that belongs inside the disclosure.<br/>
+          <strong>Instead</strong> — put the plain-language state in the row (<span class="font-mono">.health-status</span>) and only the raw values here.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Details · collapsed</span>
+          <details class="health-details">
+            <summary><svg class="health-details-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Details</summary>
+            <div class="health-details-body">
+              <dl class="health-details-kv">
+                <dt>Circuit</dt><dd>closed</dd>
+                <dt>Failed checks in a row</dt><dd>0</dd>
+                <dt>Last breaker event</dt><dd>2026-08-27T14:22:11Z</dd>
+              </dl>
+            </div>
+          </details>
+        </div>
+        <div class="state-row" style="align-items:flex-start;">
+          <span class="state-label">Details · expanded</span>
+          <details class="health-details" open>
+            <summary><svg class="health-details-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>Details</summary>
+            <div class="health-details-body">
+              <dl class="health-details-kv">
+                <dt>Circuit</dt><dd>open</dd>
+                <dt>Failed checks in a row</dt><dd>5</dd>
+                <dt>Opened at</dt><dd>2026-08-26T18:04:02Z</dd>
+                <dt>Endpoint</dt><dd>https://openrouter.ai/api/v1</dd>
+              </dl>
+            </div>
+          </details>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Technical badge inside disclosure</span>
+          <span class="health-badge health-open">open</span>
+          <span class="health-badge health-half">half-open</span>
+          <span class="health-badge health-closed">closed</span>
+           <span class="annotation-tag">.health-badge (open/closed/half) is the technical vocabulary — keep it inside Details, never as the primary status.</span>
+        </div>
+        <pre class="code-block" id="code-feedback-disclosure">&lt;details class="health-details"&gt;
+  &lt;summary&gt;
+    &lt;svg class="health-details-chevron" viewBox="0 0 24 24" aria-hidden="true"&gt;&lt;path d="m6 9 6 6 6-6"/&gt;&lt;/svg&gt;
+    Details
+  &lt;/summary&gt;
+  &lt;div class="health-details-body"&gt;
+    &lt;dl class="health-details-kv"&gt;
+      &lt;dt&gt;Circuit&lt;/dt&gt;&lt;dd&gt;open&lt;/dd&gt;
+      &lt;dt&gt;Failed checks in a row&lt;/dt&gt;&lt;dd&gt;5&lt;/dd&gt;
+    &lt;/dl&gt;
+  &lt;/div&gt;
+&lt;/details&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-feedback-disclosure">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-muted, --lx-text-secondary, --lx-surface-elevated, --lx-border-subtle, --lx-ease-out · native &lt;details&gt;, chevron rotates via [open], no JS</div>
+      </div>
     </section>
 
     <section id="overlays">
@@ -6605,6 +6726,112 @@ button.history-item {
 &lt;/div&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-dropdown">Copy</button>
         <div class="token-contract">Tokens: --lx-surface-elevated, --lx-border-focus (focused), --lx-text-danger (danger)</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — the user menu is a `.dropdown-menu` instance anchored to the top-right `nav-pill`. Entries are role-scoped from <span class="font-mono">users.role</span> (superadmin | member) + team membership role: User settings (all) · Team settings (superadmin + team admin) · Workspace settings + Assistant (superadmin only) · Log out (all, pinned `.danger`).<br/>
+          <strong>Avoid</strong> — showing a gated entry to a role the server will reject; the FE hides entry points, the server stays authoritative on every endpoint.<br/>
+          <strong>Instead</strong> — render the role state below; the live instance is `partials/navbar.html`.
+        </div>
+        <div class="state-row">
+          <span class="state-label">User menu · superadmin (full entry set)</span>
+          <div class="dropdown-menu" style="position:relative;width:240px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;">
+              <div class="avatar" style="width:28px;height:28px;font-size:12px;">A</div>
+              <div style="flex:1;min-width:0;">
+                <div class="text-sm weight-600 color-primary" style="line-height:1.2;">Alex</div>
+                <div class="text-xs color-muted" style="line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">alex@example.com</div>
+              </div>
+              <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;flex-shrink:0;">superadmin</span>
+            </div>
+            <div class="dropdown-separator"></div>
+            <a class="dropdown-item" href="settings-me.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span class="text-sm color-secondary">User settings</span>
+            </a>
+            <a class="dropdown-item" href="settings-team.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span class="text-sm color-secondary">Team settings</span>
+            </a>
+            <a class="dropdown-item" href="settings-workspace.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+              <span class="text-sm color-secondary">Workspace settings</span>
+            </a>
+            <a class="dropdown-item" href="admin-assistant.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              <span class="text-sm color-secondary">Assistant</span>
+            </a>
+            <div class="dropdown-separator"></div>
+            <button type="button" class="dropdown-item danger" style="gap:8px;width:100%;text-align:left;border:none;background:none;font:inherit;padding:0 10px;cursor:pointer;height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+              <span class="text-sm">Log out</span>
+            </button>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">User menu · team admin (no Workspace settings, no Assistant)</span>
+          <div class="dropdown-menu" style="position:relative;width:240px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;">
+              <div class="avatar" style="width:28px;height:28px;font-size:12px;">D</div>
+              <div style="flex:1;min-width:0;">
+                <div class="text-sm weight-600 color-primary" style="line-height:1.2;">Dana</div>
+                <div class="text-xs color-muted" style="line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">dana@example.com</div>
+              </div>
+              <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;flex-shrink:0;">team admin</span>
+            </div>
+            <div class="dropdown-separator"></div>
+            <a class="dropdown-item" href="settings-me.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span class="text-sm color-secondary">User settings</span>
+            </a>
+            <a class="dropdown-item" href="settings-team.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span class="text-sm color-secondary">Team settings</span>
+            </a>
+            <div class="dropdown-separator"></div>
+            <button type="button" class="dropdown-item danger" style="gap:8px;width:100%;text-align:left;border:none;background:none;font:inherit;padding:0 10px;cursor:pointer;height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+              <span class="text-sm">Log out</span>
+            </button>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">User menu · member (User settings + Log out only)</span>
+          <div class="dropdown-menu" style="position:relative;width:240px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;">
+              <div class="avatar" style="width:28px;height:28px;font-size:12px;">K</div>
+              <div style="flex:1;min-width:0;">
+                <div class="text-sm weight-600 color-primary" style="line-height:1.2;">Kai</div>
+                <div class="text-xs color-muted" style="line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">kai@example.com</div>
+              </div>
+              <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;flex-shrink:0;">member</span>
+            </div>
+            <div class="dropdown-separator"></div>
+            <a class="dropdown-item" href="settings-me.html" style="height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span class="text-sm color-secondary">User settings</span>
+            </a>
+            <div class="dropdown-separator"></div>
+            <button type="button" class="dropdown-item danger" style="gap:8px;width:100%;text-align:left;border:none;background:none;font:inherit;padding:0 10px;cursor:pointer;height:32px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+              <span class="text-sm">Log out</span>
+            </button>
+          </div>
+        </div>
+        <span class="annotation-tag" style="display:block;margin:2px 0 8px;">Role scoping: User settings (all) · Team settings (superadmin + team admin) · Workspace settings + Assistant (superadmin only). "Assistant" routes to the Assistant control panel shell (<span class="font-mono">/admin/assistant</span>, admin-assistant.html → Overview tab); the legacy usage page stays at <span class="font-mono">/admin/assistant/usage</span> (admin-herald-usage.html). The server enforces <span class="font-mono">requireSuperadmin</span> on every endpoint, so it is hidden — never disabled — for other roles.</span>
+        <pre class="code-block" id="code-overlays-usermenu">&lt;div class="dropdown-menu"&gt;
+  &lt;!-- identity header: avatar + name/email + role pill (superadmin | team admin | member) --&gt;
+  &lt;div class="dropdown-separator"&gt;&lt;/div&gt;
+  &lt;a class="dropdown-item" href="/settings/me"&gt;User settings&lt;/a&gt;
+  &lt;!-- superadmin + team admin --&gt; &lt;a class="dropdown-item" href="/settings/team"&gt;Team settings&lt;/a&gt;
+  &lt;!-- superadmin only     --&gt; &lt;a class="dropdown-item" href="/settings/workspace"&gt;Workspace settings&lt;/a&gt;
+  &lt;!-- superadmin only     --&gt; &lt;a class="dropdown-item" href="/admin/assistant"&gt;Assistant&lt;/a&gt;
+  &lt;div class="dropdown-separator"&gt;&lt;/div&gt;
+  &lt;button class="dropdown-item danger"&gt;Log out&lt;/button&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-usermenu">Copy</button>
+        <div class="token-contract">Role source: users.role (superadmin | member) + team membership role (GET /api/teams). Server authoritative on every gated endpoint.</div>
       </div>
 
       <div class="block-shell">

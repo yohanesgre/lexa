@@ -180,13 +180,10 @@ describe("syncRateLimitFromDb", () => {
 });
 
 describe("isRateLimitExemptPath", () => {
-  it("exempts token-gated runtime machine surfaces", () => {
-    expect(isRateLimitExemptPath("/api/runtimes/daemon/tasks/abc/log")).toBe(true);
-    expect(isRateLimitExemptPath("/api/runtimes/register")).toBe(true);
-    expect(isRateLimitExemptPath("/api/runtimes/machines/heartbeat")).toBe(true);
-  });
-
-  it("keeps everything else limited", () => {
+  it("nothing is exempt now that the runtime daemon surfaces are gone", () => {
+    expect(isRateLimitExemptPath("/api/runtimes/daemon/tasks/abc/log")).toBe(false);
+    expect(isRateLimitExemptPath("/api/runtimes/register")).toBe(false);
+    expect(isRateLimitExemptPath("/api/runtimes/machines/heartbeat")).toBe(false);
     expect(isRateLimitExemptPath("/api/runtimes/machines")).toBe(false);
     expect(isRateLimitExemptPath("/api/runtimes/tasks/history")).toBe(false);
     expect(isRateLimitExemptPath("/api/projects")).toBe(false);

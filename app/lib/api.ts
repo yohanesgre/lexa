@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, RuntimeTask, RuntimeTaskLog, RuntimeTaskStatus, LexaAgent, LexaSkill, AgentCli, RuntimeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
 import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantProjectSettings } from "../../shared/assistant";
 
 const BASE = "/api";
@@ -502,88 +502,7 @@ export function removeProjectMember(userId: string, projectId: string): Promise<
   return request(`${BASE}/admin/users/${userId}/projects/${projectId}`, { method: "DELETE" });
 }
 
-// ── Runtime (AI writing assistant) ──
-
-export function createRuntimeTask(input: {
-  slug: string;
-  documentType: "task" | "wiki";
-  documentId: string;
-  agentId: string;
-  skillId: string;
-  extraPrompt?: string | undefined;
-  selection?: string | undefined;
-  runtimeId?: string | undefined;
-}): Promise<RuntimeTask> {
-  return request(`${BASE}/runtimes/tasks`, { method: "POST", body: JSON.stringify(input) });
-}
-
-export function getRuntimeTask(id: string): Promise<RuntimeTask> {
-  return request(`${BASE}/runtimes/tasks/${id}`);
-}
-
-export function cancelRuntimeTask(id: string): Promise<RuntimeTask> {
-  return request(`${BASE}/runtimes/tasks/${id}/cancel`, { method: "POST" });
-}
-
-export function listRuntimeTaskLogs(id: string): Promise<{ data: RuntimeTaskLog[] }> {
-  return request(`${BASE}/runtimes/tasks/${id}/logs`);
-}
-
-export function listRuntimeTasks(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: RuntimeTask[] }> {
-  return request(`${BASE}/runtimes/tasks?slug=${encodeURIComponent(slug)}&documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
-}
-
-export interface RecentRuntimeTask extends RuntimeTask {
-  projectName: string;
-}
-
-export function listRecentRuntimeTasks(): Promise<{ data: RecentRuntimeTask[] }> {
-  return request(`${BASE}/runtimes/tasks/recent`);
-}
-
-export interface RuntimeHistoryPage {
-  data: RecentRuntimeTask[];
-  nextCursor: string | null;
-  summary: Record<RuntimeTaskStatus, number>;
-}
-
-// Full Runtime task history (control panel): optional filters + keyset cursor.
-export function listRuntimeTaskHistory(filters: {
-  slug?: string | undefined;
-  status?: RuntimeTaskStatus;
-  skillId?: string | undefined;
-  documentType?: "task" | "wiki";
-  teamId?: string | undefined;
-  limit?: number | undefined;
-  cursor?: string | undefined;
-}): Promise<RuntimeHistoryPage> {
-  const q = new URLSearchParams();
-  if (filters.slug) q.set("slug", filters.slug);
-  if (filters.status) q.set("status", filters.status);
-  if (filters.skillId) q.set("skillId", filters.skillId);
-  if (filters.documentType) q.set("documentType", filters.documentType);
-  if (filters.teamId) q.set("teamId", filters.teamId);
-  if (filters.limit) q.set("limit", String(filters.limit));
-  if (filters.cursor) q.set("cursor", filters.cursor);
-  const qs = q.toString();
-  return request(`${BASE}/runtimes/tasks/history${qs ? `?${qs}` : ""}`);
-}
-
-// ── Runtime sessions (warm opencode serve conversation mappings) ──
-
-export function listRuntimeSessions(documentType: "task" | "wiki", documentId: string): Promise<{ data: RuntimeSession[] }> {
-  return request(`${BASE}/runtimes/sessions?documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
-}
-
-// Drops the session mapping so the next Generate mints a fresh session.
-// Returns 409 (RUNTIME_SESSION_ACTIVE) while a task for the document runs on
-// that runtime — surfaced as an error toast by the caller.
-export function resetRuntimeSession(input: { documentType: "task" | "wiki"; documentId: string; runtimeId: string }): Promise<void> {
-  return request(`${BASE}/runtimes/sessions/reset`, { method: "POST", body: JSON.stringify(input) });
-}
-
-// ── Lexa Agents & Skills (global rule bundles, shared by both Runtime tiers) ──
-// Routes moved off /runtimes/* in migration 0010 (S14 hard cutover).
+// ── Lexa Agents & Skills (global rule bundles used by the Assistant) ──
 
 export function listAgents(): Promise<{ data: LexaAgent[] }> {
   return request(`${BASE}/agents`);
@@ -627,44 +546,6 @@ export function deleteSkill(id: string): Promise<void> {
 
 export function resetSkill(id: string): Promise<LexaSkill> {
   return request(`${BASE}/skills/${id}/reset`, { method: "POST" });
-}
-
-export function listRuntimes(teamId?: string): Promise<{ data: Runtime[] }> {
-  const qs = teamId ? `?teamId=${encodeURIComponent(teamId)}` : "";
-  return request(`${BASE}/runtimes${qs}`);
-}
-
-export function updateRuntime(id: string, patch: { name?: string | undefined; provider?: "opencode" | "hermes" | "command-code"; agent?: string | undefined; model?: string | undefined; printLogs?: boolean | undefined; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] }): Promise<Runtime> {
-  return request(`${BASE}/runtimes/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
-}
-
-export function removeRuntime(id: string): Promise<void> {
-  return request(`${BASE}/runtimes/${id}`, { method: "DELETE" });
-}
-
-export function removeMachine(id: string): Promise<void> {
-  return request(`${BASE}/runtimes/machines/${id}`, { method: "DELETE" });
-}
-
-// ── Runtime setup events (web wizard → machine CLI listener) ──
-
-export function createRuntimeEvent(input: {
-  machineId: string;
-  action: "install" | "update";
-  agentCli: "opencode" | "hermes" | "command-code";
-  teamId?: string | null | undefined;
-  apiKeyId?: string | undefined;
-  rawKey?: string | undefined;
-}): Promise<RuntimeEvent> {
-  return request(`${BASE}/runtimes/events`, { method: "POST", body: JSON.stringify(input) });
-}
-
-export function getRuntimeEvent(id: string): Promise<RuntimeEvent> {
-  return request(`${BASE}/runtimes/events/${id}`);
-}
-
-export function listMachines(): Promise<{ data: Machine[] }> {
-  return request(`${BASE}/runtimes/machines`);
 }
 
 export function listSources(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: DocumentSource[] }> {
@@ -786,6 +667,11 @@ export interface AssistantProviderHealth {
   openedAt: string | null;
   lastProbeAt: string | null;
   consecutiveFailures: number;
+  latencyMs: number | null;
+  retryAfterSeconds: number | null;
+  lastFailureCode: string | null;
+  lastFailureAt: string | null;
+  lastCheckedAt: string | null;
 }
 
 export function getAssistantProviderHealth(id: string): Promise<AssistantProviderHealth> {
@@ -820,6 +706,83 @@ export function listAssistantCalls(params?: { projectId?: string | undefined; li
   return request(`${BASE}/admin/assistant/calls${q ? `?${q}` : ""}`);
 }
 
+export type AssistantRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AssistantRunRow {
+  id: string;
+  key: string;
+  projectId: string;
+  documentType: "task" | "wiki";
+  documentId: string;
+  documentTitle: string;
+  agentId: string;
+  skillId: string;
+  agentName: string;
+  skillName: string;
+  status: AssistantRunStatus;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface AssistantRunsResponse {
+  data: AssistantRunRow[];
+  nextCursor: string | null;
+  counts: Record<AssistantRunStatus, number>;
+}
+
+export interface AssistantBindingRow {
+  projectId: string;
+  projectName: string;
+  projectSlug: string;
+  providerId: string | null;
+  providerLabel: string | null;
+  modelId: string | null;
+  modelLabel: string | null;
+  fallbackCount: number;
+  writeToolsCount: number;
+  memoryCount: number;
+  hasSearchKey: boolean;
+  reasoningEffort: "minimal" | "low" | "medium" | "high" | null;
+  updatedAt: string | null;
+}
+
+export interface AssistantPriceSyncResult {
+  synced: number;
+  data: {
+    model: string;
+    prompt_price: number;
+    completion_price: number;
+    cached_read_price: number;
+    cached_write_price: number;
+    updated_at: string;
+  }[];
+}
+
+export function listAssistantRuns(params?: {
+  status?: string | undefined;
+  projectId?: string | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+}): Promise<AssistantRunsResponse> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.projectId) qs.set("projectId", params.projectId);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  const q = qs.toString();
+  return request(`${BASE}/admin/assistant/runs${q ? `?${q}` : ""}`);
+}
+
+export function listAssistantBindings(): Promise<{ data: AssistantBindingRow[] }> {
+  return request(`${BASE}/admin/assistant/bindings`);
+}
+
+export function syncAssistantPrices(): Promise<AssistantPriceSyncResult> {
+  return request(`${BASE}/admin/assistant/prices/sync`, { method: "POST" });
+}
+
 export function getAssistantProjectSettings(projectId: string): Promise<AssistantProjectSettings> {
   return request(`${BASE}/assistant/settings/${projectId}`);
 }
@@ -837,8 +800,12 @@ export function createAssistantTask(input: {
   skillId: string;
   selection?: string | undefined;
   attachments?: { storageKey: string; mimeType: string; name: string }[];
-}): Promise<RuntimeTask> {
+}): Promise<AssistantTask> {
   return request(`${BASE}/assistant/tasks`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getAssistantTask(id: string): Promise<AssistantTask> {
+  return request(`${BASE}/assistant/tasks/${id}`);
 }
 
 export function cancelAssistantTask(id: string): Promise<{ ok: boolean }> {

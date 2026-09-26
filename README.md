@@ -1,6 +1,6 @@
 # Lexa
 
-Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, AI Runtimes and AI Agents, Assistant chat, team auth, and two-way GitHub issue sync.
+Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, an in-process AI Assistant, team auth, and two-way GitHub issue sync.
 
 Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (docker, bare metal, Cloudflare Workers, or dev).
 
@@ -10,11 +10,10 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self
 - **Tasks** — rich TipTap descriptions, assignees, activity timeline + comments, attachments, subtasks / blocked-by / related links, GitHub issue links with sync status
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions with restore, public share links
 - **Milestones** — goals above sprints with target dates, progress tracking, timeline gantt
-- **AI Runtimes & AI Agents** — AI execution runtime with builtin agents + skills rule bundles, per-project engines, pluggable runtimes (OpenCode / Hermes / Command Code), machine listener with persistent daemon
-- **Assistant chat** — streaming AI chat with threads, multi-provider gateway, and a proposed-actions approval flow for task/wiki writes
-- **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for machines
+- **AI Assistant** — one in-process AI tier: streaming chat with threads, document Generate with review-in-editor, a multi-provider gateway, builtin agent + skills rule bundles, and a proposed-actions approval flow for task/wiki writes
+- **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for scripts and the CLI
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
-- **`lx`** — headless operator CLI for tasks, wiki, machines, keys, and upgrades
+- **`lx`** — headless operator CLI for tasks, wiki, projects, GitHub status, and upgrades; also the integration surface for external agents
 
 ## Quickstart (local dev)
 
@@ -64,9 +63,10 @@ Flags: `--ref <tag|branch>`, `--name <name>` (workers), `--port`, `--bind`, `--d
 (email + password, min 8 chars). The wizard is the **only** provisioning path;
 passwords never pass through the shell.
 
-**lx** is the headless operator frontend for the running server (tasks,
-wiki, machines, keys, upgrades) — it installs separately and has **no deploy
-commands** (removed in cli-v2026.2.0):
+**lx** is the headless operator frontend for the running server (tasks, wiki,
+projects, GitHub status, keys, upgrades) — it installs separately and has **no
+deploy commands** (removed in cli-v2026.2.0; self-hosting is
+`scripts/install.sh`):
 
 ```bash
 curl -fsSL https://install.yohanesgre.com/lexa/install-cli.sh | bash
@@ -116,9 +116,9 @@ lx wiki get getting-started --project my-project
   ticket key; every `list`/`get` takes `--json`.
 - For anything the CLI doesn't cover, speak the REST contract directly:
   [`docs/API.md`](docs/API.md).
-- To run Lexa tasks *as* an agent runtime (persistent workspace, repo
-  context, heartbeat), install the machine listener:
-  `lx machine install`.
+- `lx task list|get|create|move|update` and `lx wiki list|get` are the
+  supported integration surface for external harnesses. Nothing else is
+  API-stable; there is no agent-runtime/machine listener to install.
 
 ## Environment variables
 
@@ -129,9 +129,9 @@ the machine and never committed (`.env*` is gitignored):
 
 | Situation | What's needed |
 |---|---|
-| Local dev (`.env`) | `bun run setup` records `LXK_ADMIN_EMAILS`; machine keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
-| Self-hosted (install script) | the script writes the env file (`LXK_ENV`, `LXK_PUBLIC_URL`); machine keys minted post-setup (login → Settings → API Keys); `GITHUB_*` preserved across re-runs |
-| Optional | `LXK_RUNTIME_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
+| Local dev (`.env`) | `bun run setup` records `LXK_ADMIN_EMAILS`; API keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
+| Self-hosted (install script) | the script writes the env file (`LXK_ENV`, `LXK_PUBLIC_URL`); API keys minted post-setup (login → Settings → API Keys); `GITHUB_*` preserved across re-runs |
+| Optional | `LXK_ASSISTANT_REPO_CAP` (assistant repo-grounding cap, default 3), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation
 
@@ -146,6 +146,7 @@ Design and API docs live in [`docs/`](docs/):
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: targets, env reference, bootstrap |
 | [`docs/CLOUDFLARE_WORKERS.md`](docs/CLOUDFLARE_WORKERS.md) | Workers runtime: D1/R2/KV bindings, quirks, cron |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | Release policy, pre-tag checklist, image/CLI build flow |
 
 ## Contributing
 

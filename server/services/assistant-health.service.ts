@@ -32,6 +32,31 @@ function isExpired(iso: string | null, ms: number): boolean {
   return Date.now() - t >= ms;
 }
 
+// Timestamps arrive in two shapes: JS ISO (health row, written by nowIso) and
+// SQLite "YYYY-MM-DD HH:MM:SS" UTC (call log created_at). Normalize both to an
+// epoch before comparing so lastCheckedAt picks the truly latest signal.
+function parseTimestamp(s: string | null): number | null {
+  if (!s) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s) ? `${s.replace(" ", "T")}Z` : s;
+  const t = Date.parse(normalized);
+  return Number.isNaN(t) ? null : t;
+}
+
+function latestIso(a: string | null, b: string | null): string | null {
+  const ta = parseTimestamp(a);
+  const tb = parseTimestamp(b);
+  if (ta === null && tb === null) return null;
+  const max = ta === null ? (tb as number) : tb === null ? ta : Math.max(ta, tb);
+  return new Date(max).toISOString();
+}
+
+function retryAfterSeconds(state: "open" | "closed" | "half-open", openedAt: string | null): number | null {
+  if (state !== "open") return null;
+  const opened = parseTimestamp(openedAt);
+  if (opened === null) return null;
+  return Math.max(0, Math.ceil((OPEN_MS - (Date.now() - opened)) / 1000));
+}
+
 export class AssistantHealthService extends Effect.Service<AssistantHealthService>()("Lexa/AssistantHealth", {
   dependencies: [AssistantHealthRepo.Default],
   effect: Effect.gen(function* () {
@@ -131,22 +156,43 @@ export class AssistantHealthService extends Effect.Service<AssistantHealthServic
         }
       });
 
-    const getHealth = (providerId: string): Effect.Effect<{ providerId: string; circuitState: "open" | "closed" | "half-open"; failureCount: number; openedAt: string | null; lastProbeAt: string | null; consecutiveFailures: number }, DbError> =>
+    const getHealth = (providerId: string): Effect.Effect<{
+      providerId: string;
+      circuitState: "open" | "closed" | "half-open";
+      failureCount: number;
+      openedAt: string | null;
+      lastProbeAt: string | null;
+      consecutiveFailures: number;
+      latencyMs: number | null;
+      retryAfterSeconds: number | null;
+      lastFailureCode: string | null;
+      lastFailureAt: string | null;
+      lastCheckedAt: string | null;
+    }, DbError> =>
       Effect.gen(function* () {
         const row = yield* getOrDefault(providerId);
+        const signals = yield* repo.lastProviderSignals(providerId);
+        const enrich = <T extends { circuitState: "open" | "closed" | "half-open"; openedAt: string | null; lastProbeAt: string | null }>(base: T) => ({
+          ...base,
+          latencyMs: signals.latencyMs,
+          retryAfterSeconds: retryAfterSeconds(base.circuitState, base.openedAt),
+          lastFailureCode: signals.lastFailureCode,
+          lastFailureAt: signals.lastFailureAt,
+          lastCheckedAt: latestIso(base.lastProbeAt, signals.lastCallAt),
+        });
         if (row.circuit_state === "open" && isExpired(row.opened_at, OPEN_MS)) {
           const iso = nowIso();
           yield* repo.upsert({ providerId, circuitState: "half-open", lastProbeAt: iso }).pipe(Effect.catchAll(() => Effect.void));
-          return { providerId, circuitState: "half-open" as const, failureCount: row.failure_count, openedAt: row.opened_at, lastProbeAt: iso, consecutiveFailures: row.consecutive_failures };
+          return enrich({ providerId, circuitState: "half-open" as const, failureCount: row.failure_count, openedAt: row.opened_at, lastProbeAt: iso, consecutiveFailures: row.consecutive_failures });
         }
-        return {
+        return enrich({
           providerId: row.provider_id,
           failureCount: row.failure_count,
           circuitState: row.circuit_state,
           openedAt: row.opened_at,
           lastProbeAt: row.last_probe_at,
           consecutiveFailures: row.consecutive_failures,
-        };
+        });
       });
 
     return { isAllowed, recordFailure, recordSuccess, getHealth } as const;

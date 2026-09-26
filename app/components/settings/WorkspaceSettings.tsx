@@ -1,20 +1,20 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
-import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects, useRuntimes } from "../../lib/queries";
-import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
+import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects } from "../../lib/queries";
+import { ApiKeysSection, GithubSyncSection, RateLimitSection } from "./SettingsSections";
 import { AssistantProvidersSection } from "./AssistantProvidersSection";
 import { formatRelative } from "../../lib/relative-time";
-import { AgentsSettingsSection, SkillsSettingsSection } from "../runtimes/AgentSkillSettings";
+import { AgentsSettingsSection, SkillsSettingsSection } from "./assistant/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import type { Project, Runtime, WorkspaceInvite } from "../../../shared/types";
+import type { Project, WorkspaceInvite } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 
-// Superadmin-only workspace settings: Members + invites, Teams, Machines &
-// runtimes, API keys, rate limiting, GitHub sync, Runtime agents & skills.
+// Superadmin-only workspace settings: Members + invites, Teams, API keys,
+// rate limiting, GitHub sync, Assistant providers, agents & skills.
 // NO Superadmins section — superadmin is env-only (LXK_ADMIN_EMAILS).
 
 function LinkCopyModal({ title, link, onDone }: { title: string; link: string; onDone: () => void }) {
@@ -222,7 +222,6 @@ function TeamsSection() {
   const { data: teams = [], isLoading } = useTeams();
   const { data: members = [] } = useWorkspaceMembers();
   const { data: projects = [] } = useProjects();
-  const { data: runtimes = [] } = useRuntimes();
   const createTeam = useCreateTeam();
   const deleteTeam = useDeleteTeam();
   const [name, setName] = useState("");
@@ -231,7 +230,6 @@ function TeamsSection() {
 
   const memberCountByTeam = (teamId: string) => members.filter((m) => m.teams?.some((t) => t.teamId === teamId)).length;
   const projectCountByTeam = (teamId: string) => projects.filter((p) => (p as Project & { teamId?: string | null }).teamId === teamId).length;
-  const runtimeCountByTeam = (teamId: string) => runtimes.filter((r: Runtime) => (r as Runtime & { teamId?: string | null }).teamId === teamId).length;
 
   return (
     <section className="mb-8">
@@ -240,7 +238,7 @@ function TeamsSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Teams group members, projects, and runtimes. Every project and runtime belongs to exactly one team (or none — "Global"). Team admins manage their own team from /settings/team.
+        Teams group members and projects. Every project belongs to exactly one team (or none — "Global"). Team admins manage their own team from /settings/team.
       </p>
 
       <div className="card-panel card-panel--elevated" style={{ marginBottom: 12 }}>
@@ -269,7 +267,7 @@ function TeamsSection() {
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
-              <tr><th>Team</th><th>Members</th><th>Projects</th><th>Runtimes</th><th>Created</th><th /></tr>
+              <tr><th>Team</th><th>Members</th><th>Projects</th><th>Created</th><th /></tr>
             </thead>
             <tbody>
               {teams.map((t) => (
@@ -283,7 +281,6 @@ function TeamsSection() {
                   </td>
                   <td className="text-xs text-lx-text-secondary">{memberCountByTeam(t.id)}</td>
                   <td className="text-xs text-lx-text-secondary">{projectCountByTeam(t.id)}</td>
-                  <td className="text-xs text-lx-text-secondary">{runtimeCountByTeam(t.id)}</td>
                   <td className="text-xs text-lx-text-secondary">{t.createdAt?.slice(0, 10) ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     <button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} aria-label={`Delete team ${t.name}`} onClick={() => setDeleting({ id: t.id, name: t.name })}><Trash2 size={14} strokeWidth={1.5} /></button>
@@ -330,12 +327,11 @@ function AgentsSkillsSections() {
   );
 }
 
-type WorkspaceTab = "members" | "teams" | "compute" | "access" | "integrations";
+type WorkspaceTab = "members" | "teams" | "access" | "integrations";
 
 const WORKSPACE_TABS: { id: WorkspaceTab; label: string }[] = [
   { id: "members", label: "Members" },
   { id: "teams", label: "Teams" },
-  { id: "compute", label: "Compute" },
   { id: "access", label: "Access" },
   { id: "integrations", label: "Integrations" },
 ];
@@ -348,12 +344,12 @@ export function WorkspaceSettings() {
     <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
       <p className="text-sm text-lx-text-secondary mb-6" style={{ maxWidth: 560 }}>
-        Superadmin-only surface. Members, invites, teams, machines &amp; runtimes, API keys, rate limiting, GitHub sync, AI agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.
+        Superadmin-only surface. Members, invites, teams, API keys, rate limiting, GitHub sync, Assistant providers, agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.
       </p>
       {isSuperadmin && (
         <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <span className="text-sm text-lx-text-secondary">Gateway usage, cost, latency &amp; health — all projects aggregated.</span>
-          <Link to="/runtimes/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
+          <Link to="/admin/assistant/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
             Assistant Usage · Gateway
           </Link>
         </div>
@@ -376,15 +372,6 @@ export function WorkspaceSettings() {
 
       {tab === "members" && <WorkspaceMembersSection />}
       {tab === "teams" && <TeamsSection />}
-      {tab === "compute" && (
-        <>
-          <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
-            <span className="text-sm text-lx-text-secondary">AI Runtimes (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/runtimes</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
-            <Link to="/runtimes/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /runtimes</Link>
-          </div>
-          <MachinesRuntimesSection showTeamColumn />
-        </>
-      )}
       {tab === "access" && (
         <>
           <ApiKeysSection />

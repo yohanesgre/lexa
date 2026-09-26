@@ -14,7 +14,7 @@ const childMocks = vi.hoisted(() => ({
   curlStatuses: [] as number[],
 }));
 
-vi.mock("./machine", () => ({ COMPILED: true }));
+vi.mock("./config", () => ({ COMPILED: true }));
 vi.mock("./version", () => ({ CLI_VERSION: "1.2.3" }));
 
 vi.mock("node:child_process", async () => {

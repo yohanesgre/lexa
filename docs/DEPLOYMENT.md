@@ -124,14 +124,14 @@ default columns appear when the first project is created.
 
 | Variable | Written by | Required |
 |---|---|---|
-| `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lx login` device flow) | only for machines (CLI/daemons/scripts) |
+| `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lx login` device flow) | only for non-browser clients (CLI/scripts) |
 | `LXK_ENV` | install script / setup wizard | yes (`production` on deployed targets) |
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; preserved across re-runs | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
-| `LXK_RUNTIME_DAEMON_TOKEN` | hand-set (Settings alternative) | only for runtime daemons |
+| `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
 
@@ -148,7 +148,8 @@ default columns appear when the first project is created.
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. |
-| `LXK_RUNTIME_DAEMON_TOKEN` | shared secret for runtime daemons (alternative to a Settings API key) |
+| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
+| `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -207,6 +208,37 @@ no email transport anywhere.
   Keys). Failed logins on `/api/auth/*` are throttled in-process (Better Auth
   rate-limit plugin; ~5 attempts/60s per email, 15 min lockout).
 
+## Upgrading across the agent-runtime removal (2026-09-26)
+
+The coding-agent ("agent-runtime") tier was deleted end to end — migration
+`0008_remove_agent_runtimes.sql` drops `machines`, `runtimes`,
+`runtime_events`, `runtime_sessions`, `runtime_task_logs`, renames
+`runtime_tasks` → `assistant_tasks`, and drops the daemon token. The only AI
+tier left is the in-process Assistant. See `docs/ARCHITECTURE.md` §Assistant →
+removal record.
+
+1. **Upgrade the server.** Boot applies `0008` (Bun standalone: re-run
+   `install.sh` from the new release tag; Workers:
+   `wrangler d1 migrations apply`). **Back up first** (`docs/BACKUPS.md`) —
+   this is a hard drop of operational state.
+2. **Stop and remove the machine listener on every host.** It has no server
+   endpoint any more and will only log errors:
+   ```bash
+   systemctl --user disable --now lexa-machine-listener.service
+   rm -rf ~/.local/share/lexa-runtimes ~/.lexa
+   ```
+   (Adjust the systemctl scope/root if you installed the unit system-wide.)
+3. **No runtime reinstall exists.** `lx machine …` is gone; there is no
+   `lx machine install` step, and the web UI has no "Setup runtime" flow.
+4. **Daemon env keys are inert.** `RUNTIME_*` (and the older `HEARTH_*`) keys
+   in host env files and per-runtime env files are no longer read by anything.
+   Delete them; no error appears if you leave them.
+5. **Preserved:** assistant chat threads, `assistant_tasks` history, memory,
+   provider registry and keys, project settings, call logs, prices, provider
+   health, agents/skills catalog (slimmed to the builtin `assistant` agent).
+6. **Browsers need nothing** — session cookies, logins, and the web app are
+   unaffected; no rebuild, no re-login.
+
 ## Upgrading across the Forge→Hearth rename (2026-08-24)
 
 > Pre-release history: migrations `0001`–`0024` were squashed into a single
@@ -215,55 +247,16 @@ no email transport anywhere.
 > baseline already contains; fresh installs get it directly.
 
 The baseline carries the renamed DB tables and activity types (`hearth_*`);
-the server image applies it at boot. Machines running the old listener/daemon
-must be reinstalled — the systemd unit (`lexa-hearth-listen`), state dir
-(`~/.local/share/lexa-hearth`), env vars (`HEARTH_*`,
-`LXK_HEARTH_DAEMON_TOKEN`) and auth header (`x-hearth-token`) all changed:
-
-```bash
-lx machine uninstall && lx machine install
-```
-
-Old daemons sending `x-forge-token` or polling `/api/forge/*` get 401/404
-after the server upgrade — upgrade the server first, then reinstall machines.
+the server image applies it at boot. This rename is history only — the
+listener/daemon it described was removed in 2026-09-26 (see above); no
+`lx machine` command exists to reinstall.
 
 ## Upgrading across the Hearth→Runtimes rename (2026-09-24)
 
-Hard cutover, migration `0005_runtime_rename.sql`: the server applies it at
-boot (renames the `hearth_*` tables/indexes plus the activity/settings values,
-and rebinds the builtin agent ids) with **no aliases** for the old routes, env
-keys, or header. Data is migrated, never dropped. Old daemons get 401/404 until
-reinstalled — upgrade the server first, then reinstall machines.
-
-1. **Upgrade the server.** Boot applies `0005_runtime_rename.sql`
-   (Bun standalone: re-run `install.sh` from the new release tag; Workers:
-   `wrangler d1 migrations apply`).
-2. **Rename `.env` keys.** `LXK_HEARTH_DAEMON_TOKEN`→`LXK_RUNTIME_DAEMON_TOKEN`
-   (**required** — the daemon token) and
-   `LXK_HEARTH_REPO_CAP`→`LXK_RUNTIME_REPO_CAP`. The daemon-side keys change
-   `HEARTH_*`→`RUNTIME_*` (e.g. `RUNTIME_AGENT`, `RUNTIME_MODEL`,
-   `RUNTIME_STALE_RUN_MIN`, `RUNTIME_SERVE_PORT`). A boot with a legacy key set
-   and its new counterpart unset logs a loud warning but never fails — the old
-   keys are ignored, so update them.
-3. **Upgrade the CLI:** `lx upgrade`.
-4. **Reinstall the listener + daemon:**
-   ```bash
-   lx machine uninstall && lx machine install
-   ```
-   The systemd unit is `lexa-machine-listener`; `~/.local/share/lexa-runtimes`
-   is the listener install dir (host state lives under `~/.lexa/<host>/`), and
-   each runtime's persistent sandbox moved from `runtimes/<id>/hearth-home` to
-   `runtimes/<id>/runtime-home`.
-5. **Re-run "Setup runtime" for each agent in the web UI.** The old
-   per-runtime env files carry `HEARTH_*` keys and are not discovered by the
-   new listener (it mints fresh runtimeIds); without this no daemons spawn.
-6. **Optional cleanup:** remove the old `~/.local/share/lexa-hearth` state dir
-   once the new listener is heartbeating.
-7. **Browsers need nothing** — session cookies and the web app are unaffected;
-   no rebuild is required.
-
-The auth header also changed `x-hearth-token`→`x-runtime-token`; old daemons
-sending the old header get 401/404.
+History only — superseded by the removal above. Hard cutover via migration
+`0005_runtime_rename.sql`, applied at boot with no aliases for the old routes,
+env keys, or header. Data was migrated, never dropped. The `HEARTH_*` →
+`RUNTIME_*` env renames it required are now moot: those keys are inert.
 
 ## Upgrading across the Herald→Assistant rename (2026-09-24)
 
@@ -271,7 +264,7 @@ Hard cutover, migration `0006_assistant_rename.sql`: the server applies it at
 boot, renaming the `herald_*` tables/indexes, rebuilding `assistant_settings` and
 `via_herald` columns, remapping `engine`/`kind`/`source` values, and rebinding
 builtin agent id `herald`→`assistant`, with no aliases for old routes, codes, or
-JSON fields. Data is migrated, never dropped. No env keys, CLI, or daemon changes;
+JSON fields. Data is migrated, never dropped. No env keys or CLI changes;
 this rename is server-side only.
 
 1. **Upgrade the server.** Boot applies `0006_assistant_rename.sql` (Bun standalone:
@@ -283,6 +276,6 @@ this rename is server-side only.
    unaffected, with no rebuild or re-login.
 4. **Preserved:** chat threads, memory, provider registry and keys, project settings,
    call logs, prices, and provider health.
-5. **Warm opencode sessions** minted under the old `lexa-herald-` prefix are
-   orphaned; transcripts replay from `assistant_threads`, so no data is lost.
-6. **Nothing to reinstall:** machines and daemons are not part of this rename.
+5. **Nothing to reinstall** — the agent-runtime tier was already gone by this
+   date's end state (2026-09-26); nothing machine- or daemon-related is part of
+   this rename.

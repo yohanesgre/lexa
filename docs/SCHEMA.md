@@ -25,7 +25,7 @@ CREATE UNIQUE INDEX idx_projects_key ON projects(key);
 -- ============================================================
 -- Replaces the dropped projects.github_repo column. A project links N repos,
 -- each with independent role flags (a repo can be source, workspace, or both):
---   source_role    → Runtimes agent context (claim-time repo-content) + project label
+--   source_role    → Assistant repo-content grounding (per-run Context: Read) + project label
 --   workspace_role → issue linking/creation/sync for that repo
 -- Removing a role gates NEW links only — existing task↔issue links keep syncing.
 -- Migrated at boot: legacy projects.github_repo → both roles; repos seen in
@@ -34,7 +34,7 @@ CREATE TABLE project_repos (
   id              TEXT PRIMARY KEY,                          -- UUID
   project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   repo            TEXT NOT NULL,                             -- "owner/name"
-  source_role     INTEGER NOT NULL DEFAULT 0,                -- Runtimes context + project label
+  source_role     INTEGER NOT NULL DEFAULT 0,                -- Assistant grounding + project label
   workspace_role  INTEGER NOT NULL DEFAULT 0,                -- issue link/create/sync
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -591,110 +591,20 @@ CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
 CREATE INDEX idx_swimlanes_milestone ON swimlanes(project_id, milestone_id, position);
 CREATE INDEX idx_wiki_project    ON wiki_pages(project_id);
 CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT NULL;
-CREATE INDEX idx_runtimes_machine ON runtimes(machine_id);
-CREATE INDEX idx_runtimes_team ON runtimes(team_id);
 CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
 CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- api_keys.key_hash is indexed by its UNIQUE constraint.
 
 -- ============================================================
--- Runtimes: runtime agents + persisted document sources
+-- Assistant task queue (document Generate)
 -- ============================================================
--- runtimes: daemons that run agent CLIs (opencode/hermes/command-code) and poll
---   for tasks. team_id scopes ownership: NULL = superadmin-owned GLOBAL runtime
---   (claims any team's project tasks); non-NULL = that team's runtime (claims
---   only that team's project tasks). Team admin manages own team's runtimes;
---   superadmin all (any team + global).
---   model is the agent model id reported by the daemon (RUNTIME_MODEL);
---   extra_args is server-authoritative injected CLI tokens (JSON array), applied
---   by the daemon at spawn time (Settings → Edit runtime).
---   models_catalog is the live provider/model list the daemon reports with its
---   machine listener heartbeat after each refresh (boot + every ~10 min); []
---   when offline or the agent has no scriptable model list (hermes). Powers
---   the Settings picker. agents_catalog follows the same rule for personas.
--- runtime_tasks: the writing-assist queue (created from editors, claimed by a
---   runtime, streamed/completed by the daemon).
--- document_sources: persisted per-document sources (wiki page or external URL)
---   that Runtimes grounds its output in.
-CREATE TABLE runtimes (
-  id             TEXT PRIMARY KEY,
-  name           TEXT NOT NULL,
-  provider       TEXT NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
-  model          TEXT NOT NULL DEFAULT '',
-  extra_args     TEXT NOT NULL DEFAULT '[]',
-  models_catalog TEXT NOT NULL DEFAULT '[]',
-  agent          TEXT NOT NULL DEFAULT '',     -- bound agent (rule bundle) id
-  print_logs     INTEGER NOT NULL DEFAULT 0,   -- print run logs toggle
-  log_level      TEXT NOT NULL DEFAULT '',     -- daemon log verbosity
-  agents_catalog TEXT NOT NULL DEFAULT '[]',
-  machine_id     TEXT REFERENCES machines(id) ON DELETE SET NULL,
-  team_id        TEXT REFERENCES organization(id) ON DELETE RESTRICT,
-                                                              -- owning team; NULL = global runtime
-                                                              -- (superadmin-owned, claims any team's tasks).
-                                                              -- RESTRICT: deleting a team with bound runtimes
-                                                              -- fails (TEAM_HAS_RUNTIMES) — reassign or detach
-                                                              -- via PATCH /api/runtimes/:id { teamId } first.
-  status         TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
-  hostname       TEXT NOT NULL DEFAULT '',
-  last_seen      TEXT,
-  last_error     TEXT,                          -- last daemon
-                                                 -- failure relayed by the
-                                                 -- machine listener (e.g.
-                                                 -- "API key revoked", exit 3)
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- Invariant: a machine hosts at most one runtime per provider (the listener
--- reuses the env on install; remove events are provider-scoped).
-
--- ============================================================
--- Runtimes: machine registry + setup events
--- ============================================================
-CREATE TABLE machines (
-  id          TEXT PRIMARY KEY,
-  hostname    TEXT NOT NULL DEFAULT '',
-  secret      TEXT NOT NULL DEFAULT '',        -- per-machine binding (baseline):
-                                              -- minted ONCE at register, returned
-                                              -- a single time, required on event
-                                              -- claim (x-machine-secret); '' =
-                                              -- legacy machine, must re-register
-  clis        TEXT NOT NULL DEFAULT '[]',   -- installed agent
-                                            -- CLIs reported by the listener
-                                            -- heartbeat ([{ provider, version }])
-  last_seen   TEXT,                         -- NULL = "bound, not listening"
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_machines_last_seen ON machines(last_seen);
--- Machine lifecycle: lx login registers (last_seen NULL = bound);
--- machine listen/start heartbeats every 3s (listening); last_seen goes NULL
--- after 2 min without a heartbeat (offline). Machine ids are
--- `hostname-<unique>` for new machines; legacy UUID ids keep working.
--- Delete removes runtimes + pending events (queued remove events first);
--- a still-listening machine reappears on its next heartbeat.
-
--- Setup events are machine-scoped. Runtime execution settings stay on the
--- runtimes row and are edited from Settings after installation.
-CREATE TABLE runtime_events (
-  id          TEXT PRIMARY KEY,
-  machine_id  TEXT NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
-  action      TEXT NOT NULL DEFAULT 'install'
-                CHECK (action IN ('install', 'update', 'remove')),
-  agent_cli   TEXT NOT NULL CHECK (agent_cli IN ('opencode','hermes','command-code')),
-  api_key_id  TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
-  team_id     TEXT REFERENCES organization(id) ON DELETE SET NULL,  -- team the installed runtime binds to; NULL = no team binding (global on first install)
-  status      TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending','claimed','completed','failed')),
-  error       TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  claimed_at  TEXT,
-  finished_at TEXT
-);
-CREATE INDEX idx_runtime_events_machine ON runtime_events(machine_id, status);
-CREATE INDEX idx_runtime_events_status ON runtime_events(status, created_at);
-
-CREATE TABLE runtime_tasks (
+-- assistant_tasks: the document-Generate queue. Rows are created from the
+-- editor popover, claimed by the in-process assistant stream handler, and
+-- streamed/completed over SSE. No daemon/machine columns — the assistant runs
+-- in-process (renamed from runtime_tasks by 0008_remove_agent_runtimes.sql).
+CREATE TABLE assistant_tasks (
   id            TEXT PRIMARY KEY,
-  runtime_id    TEXT REFERENCES runtimes(id) ON DELETE SET NULL,
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id   TEXT NOT NULL,
@@ -702,7 +612,6 @@ CREATE TABLE runtime_tasks (
   skill_id      TEXT NOT NULL REFERENCES lexa_skills(id),
   extra_prompt  TEXT NOT NULL DEFAULT '',
   selection     TEXT NOT NULL DEFAULT '',
-  doc_context   TEXT NOT NULL DEFAULT '',
   status        TEXT NOT NULL DEFAULT 'queued'
                   CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
   result        TEXT,
@@ -711,40 +620,11 @@ CREATE TABLE runtime_tasks (
   started_at    TEXT,
   finished_at   TEXT
 );
-CREATE INDEX idx_runtime_tasks_created ON runtime_tasks(created_at DESC, id DESC);
-CREATE INDEX idx_runtime_tasks_status ON runtime_tasks(status, created_at);
-
--- Task tier discriminator (baseline): 'blacksmith' (daemon runtime lane) vs the
--- server-side assistant tier. Existing rows default to 'blacksmith'.
-ALTER TABLE runtime_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
-
-CREATE INDEX idx_runtime_tasks_kind_status ON runtime_tasks(kind, status);
-
--- Runtime warm sessions: maps one (document, runtime) pair to the agent-side
--- conversation (opencode serve session id) the next task on that document
--- should continue. Written pre-spawn by the daemon (spec §8 step 3); dropped
--- on cancel/timeout (daemon-side) or via the user-facing reset endpoint.
--- runtime_session_id is deliberately agent-agnostic — the runtime session is
--- the agent-side conversation on the machine, never a Lexa session; provider
--- records which CLI owns it so the id stays interpretable without a join to
--- the (deletable) runtimes row. Only opencode writes rows in v1.
--- Agent/skill change → the daemon mints a new session and updates the row
--- (reset semantics, no history rows).
-CREATE TABLE runtime_sessions (
-  document_type   TEXT    NOT NULL CHECK (document_type IN ('task', 'wiki')),
-  document_id     TEXT    NOT NULL,
-  runtime_id      TEXT    NOT NULL,
-  runtime_session_id TEXT NOT NULL,
-  provider        TEXT    NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
-  agent_id        TEXT    NOT NULL,
-  skill_id        TEXT    NOT NULL,
-  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (document_type, document_id, runtime_id)
-);
+CREATE INDEX idx_assistant_tasks_created ON assistant_tasks(created_at DESC, id DESC);
+CREATE INDEX idx_assistant_tasks_status ON assistant_tasks(status, created_at);
 
 -- ============================================================
--- Runtimes agents + skills — global rule bundles
+-- Assistant agents + skills — global rule bundles
 -- ============================================================
 -- Agents are named rule bundles: their instructions become AGENTS.md in the
 -- run dir at claim time (claim-carried, no host store). Skills are named
@@ -753,11 +633,12 @@ CREATE TABLE runtime_sessions (
 -- original assistant actions (continue/rewrite/summarize/expand/grammar)
 -- are seeded builtins; builtins are editable + resettable but not deletable.
 -- Renamed from forge_* in the squashed 0001_init.sql baseline — column
--- definitions unchanged; both tiers share these catalogs.
--- Exactly TWO builtin agents — 'assistant' ("Assistant Agent", PM-assistant
--- persona) and 'blacksmith' ("Blacksmith Agent"). The generic 'lexa' entry is
--- retired. The assistant id was seeded as 'hearth-herald' in the 0001 baseline,
--- rebound to 'herald' by 0005_runtime_rename.sql, and rebound to 'assistant' by
+-- definitions unchanged.
+-- Exactly ONE builtin agent — 'assistant' ("Assistant Agent", PM-assistant
+-- persona). The generic 'lexa' entry and the blacksmith coding agent are
+-- retired (blacksmith removed by 0008_remove_agent_runtimes.sql). The
+-- assistant id was seeded as 'hearth-herald' in the 0001 baseline, rebound to
+-- 'herald' by 0005_runtime_rename.sql, and rebound to 'assistant' by
 -- 0006_assistant_rename.sql. Skill
 -- availability per agent = lexa_agent_skills junction rows ONLY (no JSON
 -- columns); builtins are editable + resettable but not deletable.
@@ -791,8 +672,9 @@ CREATE TABLE lexa_agent_skills (
 -- Assistant assistant tier + Gateway (baked into the 0001_init.sql baseline)
 -- ============================================================
 -- Per-project Assistant settings. The baseline hard-recreated this table
--- dropping legacy provider columns (kind, base_url, api_key, model, vision_model).
--- Remaining columns: search + engine + reasoning + write_tools, plus
+-- dropping legacy provider columns (kind, base_url, api_key, model, vision_model);
+-- 0008_remove_agent_runtimes.sql dropped engine + engine_switcher_enabled.
+-- Remaining columns: search + reasoning + write_tools, plus
 -- fallback_model_ids (JSON array of assistant_models ids, ordered, ≤3) and
 -- provider_id + primary_model_id (primary binding to assistant_providers/models).
 CREATE TABLE assistant_settings (
@@ -800,8 +682,6 @@ CREATE TABLE assistant_settings (
   search_provider TEXT,
   search_api_key TEXT,
   url_allowlist TEXT,
-  engine TEXT NOT NULL DEFAULT 'assistant' CHECK (engine IN ('assistant','blacksmith')),
-  engine_switcher_enabled INTEGER NOT NULL DEFAULT 0,
   primary_supports_images INTEGER NOT NULL DEFAULT 0,
   reasoning_effort TEXT CHECK (reasoning_effort IN ('minimal','low','medium','high')),
   write_tools TEXT NOT NULL DEFAULT '',
@@ -873,22 +753,18 @@ CREATE TABLE assistant_provider_health (
 );
 
 -- Agent catalog (baked into the 0001_init.sql baseline; the ids are rebound
--- once more by 0005_runtime_rename.sql). Exactly two builtins — 'assistant'
--- ("Assistant Agent", PM-assistant persona) and 'blacksmith' ("Blacksmith
--- Agent"). The generic 'lexa' entry is retired; its id is NOT reused. The
--- pre-squash rebind was atomic (agent-id FKs + junction rows in one tx); its
+-- once more by 0005_runtime_rename.sql). Exactly one builtin — 'assistant'
+-- ("Assistant Agent", PM-assistant persona). The generic 'lexa' entry and the
+-- blacksmith coding agent are retired; blacksmith's row + junction rows are
+-- deleted by 0008_remove_agent_runtimes.sql.
+-- The pre-squash rebind was atomic (agent-id FKs + junction rows in one tx); its
 -- one-time consequence was that existing threads keyed on the old agentId saw
 -- an unknown agent and started fresh.
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
 VALUES ('assistant', 'Assistant Agent', <companion-persona description>, <companion-persona instructions>, 1);
-INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
-VALUES ('blacksmith', 'Blacksmith Agent', '', <coding-agent instructions>, 1);
--- Junction seeding: Assistant Agent gets every builtin skill; Blacksmith Agent
--- starts with the coding-appropriate subset.
+-- Junction seeding: Assistant Agent gets every builtin skill.
 INSERT INTO lexa_agent_skills (agent_id, skill_id)
 SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
-INSERT INTO lexa_agent_skills (agent_id, skill_id)
-SELECT 'blacksmith', id FROM lexa_skills WHERE id IN (<coding subset>);
 
 -- Assistant thread transcripts: one persisted conversation per document
 -- (ModelMessage[] JSON in `messages`). Long threads roll into `summary`
@@ -996,27 +872,6 @@ CREATE TABLE document_sources (
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
 -- ============================================================
--- Runtime task activity log
--- ============================================================
--- Append-only live status feed per task: the daemon streams lines
--- (claimed by <runtime>, model <id>, agent started, generating,
--- done/failed) so the UI can show what a task is doing right now.
-CREATE TABLE runtime_task_logs (
-  id         TEXT PRIMARY KEY,
-  task_id    TEXT NOT NULL REFERENCES runtime_tasks(id) ON DELETE CASCADE,
-  message    TEXT NOT NULL,
-  stream     TEXT NOT NULL DEFAULT 'out',  -- no CHECK in DDL
-  level      TEXT NOT NULL DEFAULT 'info', -- no CHECK in DDL
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_runtime_task_logs_task ON runtime_task_logs(task_id, created_at);
--- Levels are classified ONCE by the daemon at write time (shared/runtime-log.ts
--- — stderr ≠ error; retries/rate-limits → warn) and stored; the UI renders
--- the stored level, never re-classifies. Legacy rows default out/info; the UI
--- falls back to the shared classifier for rows still carrying the old
--- [stderr] marker.
-
--- ============================================================
 -- Task links: subtask_of / blocked_by / related_to
 -- ============================================================
 -- Directed links between tasks. Semantics:
@@ -1073,9 +928,12 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- _migrations (name TEXT PRIMARY KEY, applied_at TEXT) — applied migration files.
 -- The pre-release chain (0001-0024) was squashed into the single 0001_init.sql
 -- baseline for 2026.1.0. Migrations after the baseline are additive:
--- 0002_device_login.sql, 0003_assistant_prices_1m_cached.sql, 0004_ui_gaps_w4.sql,
--- then 0005_runtime_rename.sql (the Hearth→Runtimes rename). Future migrations
--- continue at 0006_*.sql.
+-- 0002_device_login.sql, 0003_herald_prices_1m_cached.sql, 0004_ui_gaps_w4.sql,
+-- 0005_runtime_rename.sql (Hearth→Runtimes), 0006_assistant_rename.sql
+-- (Herald→Assistant), 0007_runtimes_team_restrict.sql (runtimes.team_id →
+-- RESTRICT), 0008_remove_agent_runtimes.sql (drops the runtime tier; rebuilds
+-- runtime_tasks → assistant_tasks and assistant_settings without the engine
+-- columns). Future migrations continue at 0009_*.sql.
 ```
 
 ## Design Notes
@@ -1120,55 +978,40 @@ existing hard delete).
   `deleted_at` (hidden from timeline). No revision history — edit overwrites
   `body`.
 
-### Runtimes (AI execution runtime)
-Runtimes powers the AI writing button in the task/wiki editors. A **CLI listener** on a
-machine registers the machine, claims setup events, owns one daemon child per
-installed agent CLI, and reports the machine's available agents/models. Each
-daemon registers as a `runtimes` row, polls `runtime_tasks`, runs the configured
-CLI (warm `opencode serve` for opencode runtimes, one-shot spawn per task for
-hermes/command-code), and reports the result.
+### Assistant (in-process) + removed agent-runtime tier
+The document **Generate** button in the task/wiki editors and freeform chat both
+run through the in-process Assistant. There is no external daemon, machine
+registry, or warm-session state anymore — the former "Runtimes"/Blacksmith tier
+was deleted by `0008_remove_agent_runtimes.sql` (tables `runtimes`, `machines`,
+`runtime_events`, `runtime_sessions`, `runtime_task_logs` dropped; `runtime_tasks`
+rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
+`engine_switcher_enabled` dropped).
 
-- **Task lifecycle:** `queued` → (daemon claims) `running` → `completed`/`failed`.
-  FIFO claim: the daemon updates the row conditionally (`WHERE status='queued'`);
-  a lost race returns null and the daemon polls again.
-- **Agents + skills (baked into the 0001 baseline):** every task carries `agent_id` + `skill_id` (global
-  rule bundles, M2M bindings). The server resolves them **at claim time** and
-  sends the instructions back as `agentMarkdown`/`skillMarkdown`; the daemon
-  writes them into the run dir as `AGENTS.md` + `.agents/<skill>/SKILL.md` —
-  files-only delivery, no host store, so edits apply to the very next run.
-  The prompt itself carries only task context + the output contract (+ the
-  per-task `extra_prompt`).
-- **Machine state root:** everything the host stores lives in `~/.lexa/`
-  (`LEXA_DIR` override): `config.json`, `machine-id`, `env`, `runtimes/<id>/env`,
-  the persistent opencode sandbox at `runtimes/<id>/runtime-home/`, persistent
-  project workspaces under `projects/`, and legacy per-run workdirs under
-  `runs/<taskId>/` (ephemeral — removed after every run; opencode runtimes
-  don't use it). The listener migrates the legacy `~/.config/lexa-cli` +
-  `~/.config/lexa-forge` dirs into it on boot — migrate-and-delete, no fallback.
-- **`runtime_task_logs`** is the append-only live status feed per task. The daemon
-  streams a line per step (claimed, model, agent started, generating, done/failed);
-  the UI polls `GET /api/runtimes/tasks/:id/logs` while a task is active to show
-  what it's doing right now.
+- **Task lifecycle:** `queued` → (assistant stream claims) `running` →
+  `completed`/`failed`/`cancelled`. Claim is a conditional UPDATE
+  (`WHERE id=? AND status='queued'`); a lost race surfaces `ASSISTANT_TASK_ACTIVE`.
+- **Agents + skills:** every task carries `agent_id` + `skill_id` (global rule
+  bundles, M2M bindings). There is exactly one builtin agent (`assistant`); the
+  per-agent skill availability is the `lexa_agent_skills` junction only. The
+  assistant stream loads the agent/skill instructions directly (no claim-carried
+  files).
 - **`document_sources`** persist per document (task or wiki page). `kind=wiki`
   stores the wiki page **slug** in `ref`; `kind=external` stores the URL. The server
   resolves wiki sources to page content; external URLs are fetched
   with an **SSRF guard** (DNS resolve → reject private/loopback/link-local/CGNAT).
-- **Setup:** the web wizard sends only machine + agent CLI + a fresh one-time key.
-  Provider/model, agent persona, logging, and extra args are edited after setup
-  from Settings. The listener discovers catalogs by invoking the installed CLI
-  and sends them with the machine heartbeat.
-- **Auth:** browser calls use the normal Bearer API key; daemon endpoints
-  (`/api/runtimes/daemon/*`, `/api/runtimes/register`, `/api/runtimes/sessions`)
-  accept `x-runtime-token` (`LXK_RUNTIME_DAEMON_TOKEN`) or a Bearer key.
-
-### Runtimes — two agents, per-project engine, vision chain
-Umbrella renamed **Runtimes**. History: the namespace was renamed Forge→Hearth on 2026-08-24 (baked into the squashed `0001_init.sql` baseline), then Hearth→Runtimes on 2026-09-24 via `0005_runtime_rename.sql` — tables `runtime_tasks`/`runtime_task_logs`/`runtime_sessions`, routes `/api/runtimes/*`, header `x-runtime-token`, env `RUNTIME_*`, CLI state dir/unit — breaking reinstall.
-
-- **Exactly two builtin agents** (`lexa_agents`, in the 0001 baseline): `assistant` ("Assistant Agent") and `blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
-- **Skill availability = junction rows only.** Which skills an agent offers is whatever `lexa_agent_skills` says — admin-editable, no JSON columns on the agent rows.
-- **Engine switching:** `assistant_settings.engine` ∈ `'assistant'|'blacksmith'` applies to document threads + Generate. Freeform chat ALWAYS runs the assistant lane; under `engine='blacksmith'` chat requests fail with `ENGINE_NOT_SUPPORTED_FOR_CHAT` (409). `engine_switcher_enabled=1` merely shows the member toggle, which is a personal overlay (client-side session preference) — it never writes `assistant_settings.engine`; that column is the project default, admin-written.
-- **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `VISION_NOT_CONFIGURED` (409) — `vision_model` delegation was removed in the squashed baseline (columns `kind`/`base_url`/`api_key`/`model`/`vision_model` dropped; legacy code retains a compat check that never fires).
-- **Id rebind consequence (one-time, history):** threads keyed on the pre-squash agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
+- **Repo-content grounding:** the linked GitHub repo content (Contents: Read) is
+  assembled per run from the project's `source_role` repos, capped by the
+  `assistant_repo_cap` setting (env bootstrap `LXK_ASSISTANT_REPO_CAP`, default 3).
+- **Auth:** every assistant endpoint is a normal Bearer/session-authenticated API
+  call. The `x-runtime-token` daemon credential and the `/api/runtimes/*` routes
+  no longer exist.
+- **Stale-run safety:** a crash mid-stream leaves rows `running`; the server marks
+  `running` rows older than 30 min as `failed` ("server restarted") at boot.
+- **Vision resolution order** (per request): `primary_supports_images=1` → inline
+  image parts; else `VISION_NOT_CONFIGURED` (409). The legacy `vision_model`
+  delegation was removed in the squashed baseline.
+- **Id rebind consequence (one-time, history):** threads keyed on the pre-squash
+  agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 
 ### Task field options (custom priority/type)
 Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. `tasks.priority` / `tasks.type` are plain TEXT columns (DEFAULT `'medium'` / `'task'`) with **no FK** — SQLite enforces nothing; the service validates the value against the project's option rows (`InvalidOption` 422) and resolves an empty value to the first option.

@@ -126,8 +126,6 @@ describe("AssistantSettingsRepo getByProject/maskedView", () => {
           searchProvider: "exa",
           hasSearchKey: true,
           urlAllowlist: "docs.example.com,api.example.com",
-          engine: "assistant",
-          engineSwitcherEnabled: false,
           primarySupportsImages: false,
           reasoningEffort: null,
           writeTools: [],
@@ -166,40 +164,18 @@ describe("AssistantSettingsRepo getByProject/maskedView", () => {
   });
 });
 
-describe("AssistantSettingsRepo runtime columns (0013)", () => {
-  const base = {} as const;
-
-  it("round-trips engine columns", async () => {
+describe("AssistantSettingsRepo image columns", () => {
+  it("round-trips primarySupportsImages", async () => {
     seed(db);
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
         const row = yield* repo.upsert("p1", {
-          engine: "blacksmith",
-          engineSwitcherEnabled: true,
           primarySupportsImages: true,
         });
-        expect(row.engine).toBe("blacksmith");
-        expect(row.engine_switcher_enabled).toBe(1);
         expect(row.primary_supports_images).toBe(1);
         const masked = yield* repo.maskedView("p1");
-        expect(masked.engine).toBe("blacksmith");
-        expect(masked.engineSwitcherEnabled).toBe(true);
         expect(masked.primarySupportsImages).toBe(true);
-      })
-    );
-  });
-
-  it("engine resets to default on update without explicit value", async () => {
-    seed(db);
-    const repo = makeRepo(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* repo.upsert("p1", {
-          engine: "blacksmith",
-        });
-        const row = yield* repo.upsert("p1", {});
-        expect(row.engine).toBe("assistant");
       })
     );
   });
@@ -251,6 +227,65 @@ describe("AssistantSettingsRepo reasoning_effort (0014)", () => {
         yield* repo.upsert("p1", { reasoningEffort: "minimal" });
         const masked = yield* repo.maskedView("p1");
         expect(masked.reasoningEffort).toBe("minimal");
+      })
+    );
+  });
+});
+
+describe("AssistantSettingsRepo listBindingsOverview", () => {
+  function seedBindings(db: Database) {
+    db.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p1','Alpha','alpha'), ('p2','Beta','beta'), ('p3','Gamma','gamma');
+      INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','Opencode Go','https://x','sk');
+      INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('mdl1','pr1','gpt-5.1','openai_compatible',0,1);
+      INSERT INTO assistant_settings (project_id, provider_id, primary_model_id, fallback_model_ids, write_tools, search_api_key, reasoning_effort)
+        VALUES ('p1','pr1','mdl1','["mdl2","mdl3"]','create_task,update_task','exa-key','high');
+      INSERT INTO assistant_settings (project_id) VALUES ('p3');
+      INSERT INTO project_memory (id, project_id, content, source) VALUES ('m1','p1','a','assistant'), ('m2','p1','b','assistant');
+    `);
+  }
+
+  it("returns one row per project including unconfigured ones", async () => {
+    seedBindings(db);
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const rows = yield* repo.listBindingsOverview();
+        expect(rows.map((r) => r.projectId)).toEqual(["p1", "p2", "p3"]);
+
+        const configured = rows[0]!;
+        expect(configured.providerLabel).toBe("Opencode Go");
+        expect(configured.modelLabel).toBe("gpt-5.1");
+        expect(configured.fallbackCount).toBe(2);
+        expect(configured.writeToolsCount).toBe(2);
+        expect(configured.memoryCount).toBe(2);
+        expect(configured.hasSearchKey).toBe(true);
+        expect(configured.reasoningEffort).toBe("high");
+        expect(configured.updatedAt).not.toBeNull();
+
+        const unconfigured = rows[1]!;
+        expect(unconfigured.providerId).toBeNull();
+        expect(unconfigured.modelLabel).toBeNull();
+        expect(unconfigured.fallbackCount).toBe(0);
+        expect(unconfigured.writeToolsCount).toBe(0);
+        expect(unconfigured.memoryCount).toBe(0);
+        expect(unconfigured.hasSearchKey).toBe(false);
+        expect(unconfigured.updatedAt).toBeNull();
+
+        const empty = rows[2]!;
+        expect(empty.writeToolsCount).toBe(0);
+        expect(empty.hasSearchKey).toBe(false);
+        expect(empty.updatedAt).not.toBeNull();
+      })
+    );
+  });
+
+  it("empty workspace returns no rows", async () => {
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const rows = yield* repo.listBindingsOverview();
+        expect(rows).toEqual([]);
       })
     );
   });

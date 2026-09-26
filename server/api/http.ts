@@ -10,7 +10,7 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
 import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -22,7 +22,6 @@ import { auth } from "../auth";
 import { createApiMiddleware, type MiddlewareSession } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDbAsync } from "./rate-limit";
 import { syncGitHubConfigFromDbAsync, resetGithubCaches } from "../github/client";
-import { loadTaskRepoContent } from "../services/runtime-repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -47,7 +46,7 @@ import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, bodyCapFor, type StorageConfigShape } from "../storage/config";
 import { adminEmailsFrom, currentEnv, storageEnvFrom, RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
 import { getEnv, resolvePublicUrl, resolveTrustedProxyCidrs } from "../env";
-import { resolveApiKeyIdentityAsync, constantTimeTokenEqual } from "./auth-key";
+import { resolveApiKeyIdentityAsync } from "./auth-key";
 import { resolveMaxApiBody, X_LEXA_REMOTE_IP } from "./limits";
 import { apiRateLimiter, shareRateLimiter, resolveClientIp, isRateLimitExemptPath } from "./rate-limit";
 import { ApiKeyService } from "../services/api-key.service";
@@ -66,10 +65,12 @@ import { WorkspaceInvitesService } from "../services/workspace-invites.service";
 import { PasswordLinksService } from "../services/password-links.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { RuntimeService } from "../services/runtime.service";
 import { AssistantService } from "../services/assistant.service";
 import { AssistantChatService } from "../services/assistant-chat.service";
 import { AssistantTaskService } from "../services/assistant-task.service";
+import { AssistantCatalogService } from "../services/assistant-catalog.service";
+import { AssistantTaskRepo } from "../repos/assistant-task.repo";
+import { AssistantCatalogRepo } from "../repos/assistant-catalog.repo";
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { buildChatExport } from "../services/assistant.service";
@@ -83,11 +84,6 @@ import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
-import { RuntimeEventService } from "../services/runtime-event.service";
-import { RuntimeRepo } from "../repos/runtime.repo";
-import { RuntimeEventRepo } from "../repos/runtime-event.repo";
-import { RuntimeMachineRepo } from "../repos/runtime-machine.repo";
-import { RuntimeMachineService } from "../services/runtime-machine.service";
 import { SourceService } from "../services/source.service";
 import { SourceRepo } from "../repos/source.repo";
 import { TaskLinkService } from "../services/task-link.service";
@@ -102,7 +98,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
-import type { ActivityEvent, RuntimeTask, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
+import type { ActivityEvent, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary, AssistantTaskStatus } from "../../shared/types";
 import type { StreamFrame } from "../../shared/assistant";
 
 const ApiKeySchema = Schema.Struct({
@@ -413,44 +409,11 @@ const fieldConfigGroup = HttpApiGroup.make("field-config")
   .add(HttpApiEndpoint.put("putFieldConfig", "/projects/:slug/field-config")
     .setPath(SlugPath).setPayload(FieldConfigPayload).addSuccess(FieldConfigSchema));
 
-// ── Runtime (runtime agent writing assistant) ──
+// ── Assistant task queue (document Generate, assistant lane) ──
 
-const RuntimeModelSchema = Schema.Struct({
-  id: Schema.String,
-  provider: Schema.String,
-  name: Schema.String,
-});
-
-const RuntimeAgentSchema = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-});
-
-const RuntimeSchema = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  provider: Schema.Literal("opencode", "hermes", "command-code"),
-  machineId: Schema.NullOr(Schema.String),
-  // owning team; null = global runtime (claims any team's tasks)
-  teamId: Schema.NullOr(Schema.String),
-  agent: Schema.String,
-  model: Schema.String,
-  printLogs: Schema.Boolean,
-  logLevel: Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR"),
-  extraArgs: Schema.Array(Schema.String),
-  modelsCatalog: Schema.Array(RuntimeModelSchema),
-  agentsCatalog: Schema.Array(RuntimeAgentSchema),
-  status: Schema.Literal("online", "offline"),
-  lastError: Schema.NullOr(Schema.String),
-  hostname: Schema.String,
-  lastSeen: Schema.NullOr(Schema.String),
-  createdAt: Schema.String,
-});
-
-const RuntimeTaskSchema = Schema.Struct({
+const AssistantTaskSchema = Schema.Struct({
   id: Schema.String,
   key: Schema.String,
-  runtimeId: Schema.NullOr(Schema.String),
   projectId: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
@@ -461,57 +424,12 @@ const RuntimeTaskSchema = Schema.Struct({
   skillName: Schema.String,
   extraPrompt: Schema.String,
   selection: Schema.String,
-  docContext: Schema.String,
   status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
-  kind: Schema.Literal("blacksmith", "assistant"),
   result: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   startedAt: Schema.NullOr(Schema.String),
   finishedAt: Schema.NullOr(Schema.String),
-});
-
-// Claim response carries the runtime's server-authoritative config so the
-// daemon spawns with the latest provider + model + injected args + opencode
-// logging flags without restarting, plus the server-built prompt (sources
-// resolved, output rules enforced) and the task's agent/skill rules as
-// Markdown — the daemon writes those into the run dir as AGENTS.md +
-// .agents/<skill>/SKILL.md (files-only delivery, no host store). `skillIds`
-// is the full current skill-id set: the daemon prunes stale skill dirs from
-// the workspace so obsolete bundles never pollute opencode's discovery.
-// `repoContent` (when present) is best-effort linked-repo context the daemon
-// writes into repo-content/ (owner = owner part, repo = full "owner/repo").
-const RepoContentEntrySchema = Schema.Struct({
-  owner: Schema.String,
-  repo: Schema.String,
-  path: Schema.String,
-  content: Schema.String,
-});
-
-// `repoContent` is the best-effort linked-repo context the daemon writes into
-// repo-content/ (owner = owner part, repo = full "owner/repo"). Always an
-// array — [] when nothing shipped (the daemon writes files only when
-// non-empty).
-const ClaimResponseSchema = Schema.Struct({
-  task: Schema.NullOr(RuntimeTaskSchema),
-  provider: Schema.Literal("opencode", "hermes", "command-code"),
-  agent: Schema.String,
-  model: Schema.String,
-  printLogs: Schema.Boolean,
-  logLevel: Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR"),
-  extraArgs: Schema.Array(Schema.String),
-  prompt: Schema.String,
-  agentMarkdown: Schema.String,
-  skillMarkdown: Schema.String,
-  skillIds: Schema.Array(Schema.String),
-  repoContent: Schema.Array(RepoContentEntrySchema),
-  // Warm-session verdict: the runtime session id to continue, or null when
-  // there is no mapping or the mapped agent/skill no longer match the task
-  // (daemon then mints a fresh session). agentId/skillId are the task's own
-  // — for logging, they tell the daemon what the mapping must match.
-  runtimeSessionId: Schema.NullOr(Schema.String),
-  agentId: Schema.String,
-  skillId: Schema.String,
 });
 
 const LexaAgentSchema = Schema.Struct({
@@ -533,39 +451,6 @@ const LexaSkillSchema = Schema.Struct({
   isBuiltin: Schema.Boolean,
   createdAt: Schema.String,
   updatedAt: Schema.String,
-});
-
-// ── Runtime warm sessions (document ↔ runtime agent conversation mapping) ──
-// Sessions are document-agnostic metadata: any document_id is valid, no 404s.
-const RuntimeSessionSchema = Schema.Struct({
-  documentType: Schema.Literal("task", "wiki"),
-  documentId: Schema.String,
-  runtimeId: Schema.String,
-  runtimeSessionId: Schema.String,
-  provider: Schema.Literal("opencode", "hermes", "command-code"),
-  agentId: Schema.String,
-  skillId: Schema.String,
-  createdAt: Schema.String,
-  updatedAt: Schema.String,
-});
-
-const RuntimeSessionListResponse = Schema.Struct({ data: Schema.Array(RuntimeSessionSchema) });
-
-const RuntimeSessionUpsertInput = Schema.Struct({
-  documentType: Schema.Literal("task", "wiki"),
-  documentId: Schema.String,
-  runtimeId: Schema.String,
-  runtimeSessionId: Schema.String,
-  provider: Schema.Literal("opencode", "hermes", "command-code"),
-  agentId: Schema.String,
-  skillId: Schema.String,
-});
-
-// DELETE (daemon-side drop) and POST reset share the document+runtime ref.
-const RuntimeSessionRefInput = Schema.Struct({
-  documentType: Schema.Literal("task", "wiki"),
-  documentId: Schema.String,
-  runtimeId: Schema.String,
 });
 
 const CreateAgentInput = Schema.Struct({
@@ -608,174 +493,7 @@ const SourceSchema = Schema.Struct({
   createdAt: Schema.String,
 });
 
-const RegisterRuntimeInput = Schema.Struct({
-  id: Schema.optional(Schema.String),
-  name: Schema.String,
-  provider: Schema.Literal("opencode", "hermes", "command-code"),
-  machineId: Schema.String,
-  teamId: Schema.optional(Schema.NullOr(Schema.String)),
-  agent: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
-  hostname: Schema.optional(Schema.String),
-});
-
-// ── Runtime setup events (web wizard → machine CLI listener) ──
-const RuntimeEventSchema = Schema.Struct({
-  id: Schema.String,
-  machineId: Schema.String,
-  action: Schema.Literal("install", "update", "remove"),
-  agentCli: Schema.Literal("opencode", "hermes", "command-code"),
-  teamId: Schema.NullOr(Schema.String),
-  apiKeyId: Schema.NullOr(Schema.String),
-  status: Schema.Literal("pending", "claimed", "completed", "failed"),
-  error: Schema.NullOr(Schema.String),
-  createdAt: Schema.String,
-  claimedAt: Schema.NullOr(Schema.String),
-  finishedAt: Schema.NullOr(Schema.String),
-});
-
-const CreateRuntimeEventInput = Schema.Struct({
-  machineId: Schema.String,
-  action: Schema.Literal("install", "update"),
-  agentCli: Schema.Literal("opencode", "hermes", "command-code"),
-  teamId: Schema.optional(Schema.NullOr(Schema.String)),
-  apiKeyId: Schema.optional(Schema.String),
-  rawKey: Schema.optional(Schema.String),
-});
-
-const RuntimeEventListResponse = Schema.Struct({ data: Schema.Array(RuntimeEventSchema) });
-const RuntimeEventPath = Schema.Struct({ id: Schema.String });
-const FailRuntimeEventInput = Schema.Struct({ error: Schema.String });
-
-// ── Machine presence and CLI-reported runtime catalogs ──
-const MachineSchema = Schema.Struct({
-  id: Schema.String,
-  hostname: Schema.String,
-  clis: Schema.Array(Schema.Struct({
-    provider: Schema.Literal("opencode", "hermes", "command-code"),
-    version: Schema.String,
-  })),
-  lastSeen: Schema.NullOr(Schema.String),
-  createdAt: Schema.String,
-});
-const MachineListResponse = Schema.Struct({ data: Schema.Array(MachineSchema) });
-// Heartbeat response extends the machine with the project index — the
-// listener provisions one workspace dir per project under ~/.lexa/projects/
-// and keeps its local project-name lookup fresh without extra requests.
-const MachineHeartbeatResponse = Schema.Struct({
-  ...MachineSchema.fields,
-  projects: Schema.Array(Schema.Struct({
-    id: Schema.String,
-    name: Schema.String,
-    slug: Schema.String,
-    description: Schema.String,
-  })),
-});
-const MachineRegisterInput = Schema.Struct({
-  id: Schema.String,
-  hostname: Schema.String,
-  secret: Schema.optionalWith(Schema.String, { default: () => "" }),
-});
-// Register returns the minted secret exactly once (first registration only);
-// re-registration no-ops without a secret.
-const MachineRegisterResponse = Schema.Struct({
-  machine: MachineSchema,
-  secret: Schema.NullOr(Schema.String),
-});
-const MachineIdPath = Schema.Struct({ id: Schema.String });
-const DaemonErrorInput = Schema.Struct({
-  runtimeId: Schema.String,
-  error: Schema.String,
-});
-const RuntimeCatalogInput = Schema.Struct({
-  runtimeId: Schema.String,
-  agentCli: Schema.Literal("opencode", "hermes", "command-code"),
-  models: Schema.Array(RuntimeModelSchema),
-  agents: Schema.Array(RuntimeAgentSchema),
-});
-const MachineHeartbeatInput = Schema.Struct({
-  id: Schema.String,
-  hostname: Schema.optional(Schema.String),
-  runtimes: Schema.optional(Schema.Array(RuntimeCatalogInput)),
-  clis: Schema.optional(Schema.Array(Schema.Struct({
-    provider: Schema.Literal("opencode", "hermes", "command-code"),
-    version: Schema.String,
-  }))),
-  daemonErrors: Schema.optional(Schema.Array(DaemonErrorInput)),
-});
-
-const UpdateRuntimeInput = Schema.Struct({
-  name: Schema.optional(Schema.String),
-  provider: Schema.optional(Schema.Literal("opencode", "hermes", "command-code")),
-  agent: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
-  printLogs: Schema.optional(Schema.Boolean),
-  logLevel: Schema.optional(Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR")),
-  extraArgs: Schema.optional(Schema.Array(Schema.String)),
-  // Owning-team reassignment/detach; null = explicit global. Superadmin-only.
-  teamId: Schema.optional(Schema.NullOr(Schema.String)),
-});
-
-const HeartbeatInput = Schema.Struct({
-  runtimeId: Schema.String,
-});
-const ClaimInput = Schema.Struct({ runtimeId: Schema.String });
-const ClaimRuntimeEventInput = Schema.Struct({ machineId: Schema.String });
-const CompleteTaskInput = Schema.Struct({ result: Schema.String });
-const FailTaskInput = Schema.Struct({ error: Schema.String });
-
-const CreateRuntimeTaskInput = Schema.Struct({
-  slug: Schema.String,
-  documentType: Schema.Literal("task", "wiki"),
-  documentId: Schema.String,
-  agentId: Schema.String,
-  skillId: Schema.String,
-  extraPrompt: Schema.optional(Schema.String),   // per-run additional instructions
-  selection: Schema.optional(Schema.String),
-  runtimeId: Schema.optional(Schema.String),   // pick a specific runtime; omitted = any
-});
-
-const RuntimeTaskPath = Schema.Struct({ id: Schema.String });
-const RuntimeIdPath = Schema.Struct({ id: Schema.String });
-
-const RuntimeTaskListResponse = Schema.Struct({ data: Schema.Array(RuntimeTaskSchema) });
-
-const RecentRuntimeTaskSchema = Schema.extend(
-  RuntimeTaskSchema,
-  Schema.Struct({ projectName: Schema.String })
-);
-const RecentRuntimeTaskListResponse = Schema.Struct({ data: Schema.Array(RecentRuntimeTaskSchema) });
-
-// History rows carry the project name (control panel lists across projects).
-// summary = per-status totals, global (not filter-scoped).
-const RuntimeTaskHistoryResponse = Schema.Struct({
-  data: Schema.Array(RecentRuntimeTaskSchema),
-  nextCursor: Schema.NullOr(Schema.String),
-  summary: Schema.Struct({
-    queued: Schema.Number,
-    running: Schema.Number,
-    completed: Schema.Number,
-    failed: Schema.Number,
-    cancelled: Schema.Number,
-  }),
-});
-
-const RuntimeTaskLogSchema = Schema.Struct({
-  id: Schema.String,
-  taskId: Schema.String,
-  message: Schema.String,
-  stream: Schema.Literal("out", "err"),
-  level: Schema.Literal("info", "warn", "error"),
-  createdAt: Schema.String,
-});
-const RuntimeTaskLogListResponse = Schema.Struct({ data: Schema.Array(RuntimeTaskLogSchema) });
-// stream/level are classified ONCE by the daemon at write time; defaults keep
-// older daemons (and any non-daemon writer) working.
-const AppendLogInput = Schema.Struct({
-  message: Schema.String,
-  stream: Schema.optional(Schema.Literal("out", "err")),
-  level: Schema.optional(Schema.Literal("info", "warn", "error")),
-});
+const AssistantTaskPath = Schema.Struct({ id: Schema.String });
 
 const DocumentPath = Schema.Struct({
   slug: Schema.String,
@@ -830,6 +548,7 @@ const ActivityEventSchema = Schema.Struct({
   type: Schema.Literal("created", "moved", "field_changed", "archived", "restored", "deleted",
     "link_added", "link_removed", "source_added", "source_removed",
     "github_linked", "github_unlinked", "github_synced",
+    "assistant_completed", "assistant_failed", "assistant_cancelled",
     "runtime_completed", "runtime_failed", "runtime_cancelled",
     "commented", "comment_deleted",
     "attachment_added", "attachment_removed"),
@@ -879,74 +598,9 @@ const taskLinksGroup = HttpApiGroup.make("task-links")  .add(HttpApiEndpoint.get
   .add(HttpApiEndpoint.get("searchMentions", "/projects/:slug/mentions")
     .setPath(SlugPath).addSuccess(MentionsResponse));
 
-const runtimesGroup = HttpApiGroup.make("runtimes")
-  .add(HttpApiEndpoint.post("registerRuntime", "/runtimes/register")
-    .setPayload(RegisterRuntimeInput).addSuccess(RuntimeSchema, { status: 201 }))
-  .add(HttpApiEndpoint.patch("updateRuntime", "/runtimes/:id")
-    .setPath(RuntimeIdPath).setPayload(UpdateRuntimeInput).addSuccess(RuntimeSchema))
-  .add(HttpApiEndpoint.del("removeRuntime", "/runtimes/:id")
-    .setPath(RuntimeIdPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("heartbeat", "/runtimes/daemon/heartbeat")
-    .setPayload(HeartbeatInput).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
-  .add(HttpApiEndpoint.post("claimTask", "/runtimes/daemon/claim")
-    .setPayload(ClaimInput).addSuccess(ClaimResponseSchema))
-  // Runtime setup events — web wizard creates, CLI listener claims/completes.
-  .add(HttpApiEndpoint.post("createRuntimeEvent", "/runtimes/events")
-    .setPayload(CreateRuntimeEventInput).addSuccess(RuntimeEventSchema, { status: 201 }))
-  .add(HttpApiEndpoint.post("claimRuntimeEvent", "/runtimes/events/claim")
-    .setPayload(ClaimRuntimeEventInput)
-    .addSuccess(Schema.NullOr(Schema.Struct({ event: RuntimeEventSchema, rawKey: Schema.NullOr(Schema.String) }))))
-  .add(HttpApiEndpoint.post("completeRuntimeEvent", "/runtimes/events/:id/complete")
-    .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.post("failRuntimeEvent", "/runtimes/events/:id/fail")
-    .setPath(RuntimeEventPath).setPayload(FailRuntimeEventInput).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.get("getRuntimeEvent", "/runtimes/events/:id")
-    .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.get("listRuntimeEvents", "/runtimes/events")
-    .addSuccess(RuntimeEventListResponse))
-  .add(HttpApiEndpoint.post("machineHeartbeat", "/runtimes/machines/heartbeat")
-    .setPayload(MachineHeartbeatInput).addSuccess(MachineHeartbeatResponse))
-  .add(HttpApiEndpoint.post("registerMachine", "/runtimes/machines/register")
-    .setPayload(MachineRegisterInput).addSuccess(MachineRegisterResponse))
-  .add(HttpApiEndpoint.get("listMachines", "/runtimes/machines")
-    .addSuccess(MachineListResponse))
-  .add(HttpApiEndpoint.del("removeMachine", "/runtimes/machines/:id")
-    .setPath(MachineIdPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.get("listRuntimes", "/runtimes")
-    .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
-  .add(HttpApiEndpoint.post("createRuntimeTask", "/runtimes/tasks")
-    .setPayload(CreateRuntimeTaskInput).addSuccess(RuntimeTaskSchema, { status: 201 }))
-  .add(HttpApiEndpoint.get("getRuntimeTask", "/runtimes/tasks/:id")
-    .setPath(RuntimeTaskPath).addSuccess(RuntimeTaskSchema))
-  .add(HttpApiEndpoint.get("listRuntimeTasks", "/runtimes/tasks")
-    .addSuccess(RuntimeTaskListResponse))
-  .add(HttpApiEndpoint.get("listRecentRuntimeTasks", "/runtimes/tasks/recent")
-    .addSuccess(RecentRuntimeTaskListResponse))
-  .add(HttpApiEndpoint.get("listRuntimeTaskHistory", "/runtimes/tasks/history")
-    .addSuccess(RuntimeTaskHistoryResponse))
-  .add(HttpApiEndpoint.post("completeRuntimeTask", "/runtimes/daemon/tasks/:id/complete")
-    .setPath(RuntimeTaskPath).setPayload(CompleteTaskInput).addSuccess(RuntimeTaskSchema))
-  .add(HttpApiEndpoint.post("failRuntimeTask", "/runtimes/daemon/tasks/:id/fail")
-    .setPath(RuntimeTaskPath).setPayload(FailTaskInput).addSuccess(RuntimeTaskSchema))
-  .add(HttpApiEndpoint.get("getDaemonTaskStatus", "/runtimes/daemon/tasks/:id/status")
-    .setPath(RuntimeTaskPath).addSuccess(Schema.Struct({ status: Schema.String })))
-  .add(HttpApiEndpoint.post("cancelRuntimeTask", "/runtimes/tasks/:id/cancel")
-    .setPath(RuntimeTaskPath).addSuccess(RuntimeTaskSchema))
-  .add(HttpApiEndpoint.get("listRuntimeTaskLogs", "/runtimes/tasks/:id/logs")
-    .setPath(RuntimeTaskPath).addSuccess(RuntimeTaskLogListResponse))
-  .add(HttpApiEndpoint.post("appendRuntimeTaskLog", "/runtimes/daemon/tasks/:id/log")
-    .setPath(RuntimeTaskPath).setPayload(AppendLogInput).addSuccess(RuntimeTaskLogSchema))
-  // Warm sessions: the daemon PUTs the pre-spawn mapping and DELETEs it on
-  // cancel/timeout; the browser GETs (popover line) and POSTs reset.
-  .add(HttpApiEndpoint.get("listRuntimeSessions", "/runtimes/sessions")
-    .addSuccess(RuntimeSessionListResponse))
-  .add(HttpApiEndpoint.put("upsertRuntimeSession", "/runtimes/sessions")
-    .setPayload(RuntimeSessionUpsertInput).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.del("removeRuntimeSession", "/runtimes/sessions")
-    .setPayload(RuntimeSessionRefInput).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("resetRuntimeSession", "/runtimes/sessions/reset")
-    .setPayload(RuntimeSessionRefInput).addSuccess(Schema.Void, { status: 204 })
-    .addError(Schema.Struct({ _tag: Schema.Literal("RuntimeSessionActive") })))
+// Document sources — project/document-scoped (assistant grounding). These
+// lived inside the removed runtimes group; the paths are unchanged.
+const sourcesGroup = HttpApiGroup.make("sources")
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
     .setPath(DocumentPath).addSuccess(SourceListResponse))
   .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
@@ -1001,8 +655,6 @@ const AssistantSettingsInputPayload = Schema.Struct({
   searchProvider: Schema.optional(Schema.NullOr(Schema.Literal("exa"))),
   searchApiKey: Schema.optional(Schema.NullOr(Schema.String)),
   urlAllowlist: Schema.optional(Schema.NullOr(Schema.String)),
-  engine: Schema.optional(Schema.Literal("assistant", "blacksmith")),
-  engineSwitcherEnabled: Schema.optional(Schema.Boolean),
   primarySupportsImages: Schema.optional(Schema.Boolean),
   visionModel: Schema.optional(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
@@ -1022,8 +674,6 @@ const AssistantSettingsMaskedSchema = Schema.Struct({
   searchProvider: Schema.NullOr(Schema.Literal("exa")),
   hasSearchKey: Schema.Boolean,
   urlAllowlist: Schema.NullOr(Schema.String),
-  engine: Schema.Literal("assistant", "blacksmith"),
-  engineSwitcherEnabled: Schema.Boolean,
   primarySupportsImages: Schema.Boolean,
   visionModel: Schema.optional(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.NullOr(AssistantReasoningEffortSchema),
@@ -1124,11 +774,13 @@ const assistantGroup = HttpApiGroup.make("assistant")
   .add(HttpApiEndpoint.post("listAssistantModels", "/assistant/settings/:projectId/models")
     .setPath(AssistantSettingsPath).setPayload(AssistantSettingsTestPayload).addSuccess(ModelListResponse))
   .add(HttpApiEndpoint.post("createAssistantTask", "/assistant/tasks")
-    .setPayload(CreateAssistantTaskInput).addSuccess(RuntimeTaskSchema, { status: 201 }))
+    .setPayload(CreateAssistantTaskInput).addSuccess(AssistantTaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("getAssistantTask", "/assistant/tasks/:id")
+    .setPath(AssistantTaskPath).addSuccess(AssistantTaskSchema))
   .add(HttpApiEndpoint.post("streamAssistantTask", "/assistant/tasks/:id/stream")
-    .setPath(RuntimeTaskPath).addSuccess(Schema.Void))
+    .setPath(AssistantTaskPath).addSuccess(Schema.Void))
   .add(HttpApiEndpoint.post("cancelAssistantTask", "/assistant/tasks/:id/cancel")
-    .setPath(RuntimeTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
+    .setPath(AssistantTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
   .add(HttpApiEndpoint.del("resetAssistantThread", "/assistant/threads/:documentType/:documentId")
     .setPath(AssistantThreadPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("streamAssistantChat", "/assistant/chat/stream")
@@ -1786,13 +1438,75 @@ const AssistantPriceResponseSchema = Schema.Struct({
   updated_at: Schema.String,
 });
 
+const AssistantRunRowSchema = Schema.Struct({
+  id: Schema.String,
+  key: Schema.String,
+  projectId: Schema.String,
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  documentTitle: Schema.String,
+  agentId: Schema.String,
+  skillId: Schema.String,
+  agentName: Schema.String,
+  skillName: Schema.String,
+  status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
+  error: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  startedAt: Schema.NullOr(Schema.String),
+  finishedAt: Schema.NullOr(Schema.String),
+});
+const AssistantRunsResponseSchema = Schema.Struct({
+  data: Schema.Array(AssistantRunRowSchema),
+  nextCursor: Schema.NullOr(Schema.String),
+  counts: Schema.Struct({
+    queued: Schema.Number,
+    running: Schema.Number,
+    completed: Schema.Number,
+    failed: Schema.Number,
+    cancelled: Schema.Number,
+  }),
+});
+
+const AssistantBindingRowSchema = Schema.Struct({
+  projectId: Schema.String,
+  projectName: Schema.String,
+  projectSlug: Schema.String,
+  providerId: Schema.NullOr(Schema.String),
+  providerLabel: Schema.NullOr(Schema.String),
+  modelId: Schema.NullOr(Schema.String),
+  modelLabel: Schema.NullOr(Schema.String),
+  fallbackCount: Schema.Number,
+  writeToolsCount: Schema.Number,
+  memoryCount: Schema.Number,
+  hasSearchKey: Schema.Boolean,
+  reasoningEffort: Schema.NullOr(Schema.Literal("minimal", "low", "medium", "high")),
+  updatedAt: Schema.NullOr(Schema.String),
+});
+const AssistantBindingsResponseSchema = Schema.Struct({ data: Schema.Array(AssistantBindingRowSchema) });
+
+const AssistantHealthResponseSchema = Schema.Struct({
+  providerId: Schema.String,
+  circuitState: Schema.Literal("open", "closed", "half-open"),
+  failureCount: Schema.Number,
+  openedAt: Schema.NullOr(Schema.String),
+  lastProbeAt: Schema.NullOr(Schema.String),
+  consecutiveFailures: Schema.Number,
+  latencyMs: Schema.NullOr(Schema.Number),
+  retryAfterSeconds: Schema.NullOr(Schema.Number),
+  lastFailureCode: Schema.NullOr(Schema.String),
+  lastFailureAt: Schema.NullOr(Schema.String),
+  lastCheckedAt: Schema.NullOr(Schema.String),
+});
+
 const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
   .add(HttpApiEndpoint.get("adminAssistantUsage", "/admin/assistant/usage").addSuccess(AssistantUsageResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantUsageCsv", "/admin/assistant/usage.csv").addSuccess(Schema.Void, { status: 200 }))
   .add(HttpApiEndpoint.get("adminAssistantPrices", "/admin/assistant/prices").addSuccess(Schema.Struct({ data: Schema.Array(AssistantPriceResponseSchema) })))
   .add(HttpApiEndpoint.put("adminAssistantPutPrices", "/admin/assistant/prices").setPayload(AssistantPriceInputSchema).addSuccess(AssistantPriceResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantCalls", "/admin/assistant/calls").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.post("adminAssistantPriceSync", "/admin/assistant/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number })))
+  .add(HttpApiEndpoint.post("adminAssistantPriceSync", "/admin/assistant/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number, data: Schema.Array(AssistantPriceResponseSchema) })))
+  .add(HttpApiEndpoint.get("adminAssistantRuns", "/admin/assistant/runs").addSuccess(AssistantRunsResponseSchema))
+  .add(HttpApiEndpoint.get("adminAssistantBindings", "/admin/assistant/bindings").addSuccess(AssistantBindingsResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantProviders", "/admin/assistant/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
   .add(HttpApiEndpoint.post("adminAssistantCreateProvider", "/admin/assistant/providers").setPayload(Schema.Struct({ label: Schema.String, baseUrl: Schema.String, apiKey: Schema.String })).addSuccess(Schema.Any))
   .add(HttpApiEndpoint.patch("adminAssistantUpdateProvider", "/admin/assistant/providers/:id").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ label: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String), apiKey: Schema.optional(Schema.String) })).addSuccess(Schema.Any))
@@ -1801,8 +1515,8 @@ const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
   .add(HttpApiEndpoint.post("adminAssistantProviderModels", "/admin/assistant/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
   .add(HttpApiEndpoint.patch("adminAssistantUpdateModel", "/admin/assistant/providers/:id/models/:modelId").setPath(Schema.Struct({ id: Schema.String, modelId: Schema.String })).setPayload(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), priority: Schema.optional(Schema.Number) })).addSuccess(Schema.Any))
   .add(HttpApiEndpoint.post("adminAssistantReorderModels", "/admin/assistant/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.get("adminAssistantHealth", "/admin/assistant/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })))
-  .add(HttpApiEndpoint.post("adminAssistantProbeProvider", "/admin/assistant/providers/:id/probe").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
+  .add(HttpApiEndpoint.get("adminAssistantHealth", "/admin/assistant/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(AssistantHealthResponseSchema))
+  .add(HttpApiEndpoint.post("adminAssistantProbeProvider", "/admin/assistant/providers/:id/probe").setPath(Schema.Struct({ id: Schema.String })).addSuccess(AssistantHealthResponseSchema));
 
 const projectAssistantUsageGroup = HttpApiGroup.make("projectAssistantUsage")
   .add(HttpApiEndpoint.get("projectAssistantUsage", "/projects/:slug/assistant/usage").setPath(SlugPath).addSuccess(AssistantUsageResponseSchema));
@@ -1815,7 +1529,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(swimlanesGroup)
   .add(milestonesGroup)
   .add(fieldConfigGroup)
-  .add(runtimesGroup)
+  .add(sourcesGroup)
   .add(agentsGroup)
   .add(skillsGroup)
   .add(assistantGroup)
@@ -2526,369 +2240,8 @@ const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers)
     )
 );
 
-const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
+const sourcesLive = HttpApiBuilder.group(LexaApi, "sources", (handlers) =>
   handlers
-    .handle("registerRuntime", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const runtime = yield* service.registerRuntime({
-          ...(req.payload.id !== undefined ? { id: req.payload.id } : {}),
-          name: req.payload.name,
-          provider: req.payload.provider,
-          machineId: req.payload.machineId,
-          teamId: req.payload.teamId ?? null,
-          agent: req.payload.agent?.trim() || "build",
-          model: req.payload.model?.trim() || "",
-          hostname: req.payload.hostname ?? "",
-        });
-        // Successful registration proves the daemon's credential works —
-        // clear any previously reported failure.
-        yield* service.clearRuntimeLastError(runtime.id);
-        return runtime;
-      }))
-    )
-    .handle("updateRuntime", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        // Reassigning/detaching a runtime changes its claim scope (a NULL
-        // team_id claims any team's tasks) — superadmin-only, even though the
-        // other config fields stay available to any authenticated caller.
-        if (req.payload.teamId !== undefined) {
-          const identity = yield* AuthIdentity;
-          if (identity.role !== "admin") return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
-          if (req.payload.teamId !== null) {
-            const teams = yield* TeamsService;
-            const team = yield* teams.findById(req.payload.teamId);
-            if (!team) return yield* Effect.fail(new TeamNotFound({ teamId: req.payload.teamId }));
-          }
-        }
-        return yield* service.updateRuntime(req.path.id, {
-          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
-          ...(req.payload.provider !== undefined ? { provider: req.payload.provider } : {}),
-          ...(req.payload.agent !== undefined ? { agent: req.payload.agent } : {}),
-          ...(req.payload.model !== undefined ? { model: req.payload.model } : {}),
-          ...(req.payload.printLogs !== undefined ? { printLogs: req.payload.printLogs } : {}),
-          ...(req.payload.logLevel !== undefined ? { logLevel: req.payload.logLevel } : {}),
-          ...(req.payload.extraArgs !== undefined ? { extraArgs: [...req.payload.extraArgs] } : {}),
-          ...(req.payload.teamId !== undefined ? { teamId: req.payload.teamId } : {}),
-        });
-      }))
-    )
-    .handle("removeRuntime", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const eventService = yield* RuntimeEventService;
-        const runtime = yield* service.getRuntimeConfig(req.path.id);
-        // Never blocks on machine state: the remove event is delivered
-        // whenever the machine's listener next heartbeats. Runtimes without
-        // a machine have nothing to notify — delete directly.
-        if (runtime.machineId) {
-          yield* eventService.createRemove({ machineId: runtime.machineId, agentCli: runtime.provider });
-          // Remove events are provider-scoped; a machine hosts at most one
-          // runtime per agent CLI — remove the whole pair.
-          yield* service.removeRuntimePair(runtime.machineId, runtime.provider);
-        } else {
-          yield* service.removeRuntime(req.path.id);
-        }
-        return undefined;
-      }))
-    )
-    .handle("heartbeat", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        yield* service.heartbeat(req.payload.runtimeId);
-        // A live heartbeat proves the credential works — clear any
-        // previously reported auth failure.
-        yield* service.clearRuntimeLastError(req.payload.runtimeId);
-        return { ok: true as const };
-      }))
-    )
-    .handle("claimTask", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const task = yield* service.claimNext(req.payload.runtimeId);
-        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [], repoContent: [], runtimeSessionId: null, agentId: "", skillId: "" };
-        const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
-        // Warm-session verdict: continue the mapped runtime session only when
-        // its agent/skill match the task's — otherwise null (daemon mints).
-        const runtimeSessionId = yield* service.resolveSessionForTask(task, req.payload.runtimeId);
-        // Best-effort linked-repo content (Contents: Read) — assembled BEFORE
-        // the prompt so the prompt can point the agent at repo-content/.
-        const repoContent = yield* loadTaskRepoContent(task);
-        // Server-authoritative prompt (resolves linked sources, enforces
-        // output rules). If source resolution fails, fall back to the
-        // daemon's local minimal build rather than blocking the claim.
-        const prompt = yield* service.buildPromptForTask(task, repoContent.length > 0).pipe(
-          Effect.catchAll(() => Effect.succeed(""))
-        );
-        // Claim-carried rule files: the daemon writes these into the run dir
-        // as AGENTS.md + .agents/<skill>/SKILL.md before spawning the CLI.
-        const { rules, skillIds } = yield* Effect.all({
-          rules: service.resolveRules(task).pipe(
-            Effect.map((r) => ({ agentMarkdown: r.agent.instructions, skillMarkdown: r.skill.instructions })),
-            Effect.catchAll(() => Effect.succeed({ agentMarkdown: "", skillMarkdown: "" }))
-          ),
-          skillIds: service.listSkills().pipe(
-            Effect.map((s) => s.map((x) => x.id)),
-            Effect.catchAll(() => Effect.succeed([] as string[]))
-          ),
-        });
-        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown: rules.agentMarkdown, skillMarkdown: rules.skillMarkdown, skillIds, repoContent, runtimeSessionId, agentId: task.agentId, skillId: task.skillId };
-      }))
-    )
-    // Runtime setup events — the CLI listener claims these over the same
-    // poll pattern the daemon uses for tasks.
-    .handle("createRuntimeEvent", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeEventService;
-        const identity = yield* AuthIdentity;
-        const authz = yield* AuthorizationService;
-        const teamId = req.payload.teamId ?? null;
-        // R13: superadmin may bind any team or Global (null); a team admin may
-        // only bind a team they administer. Global is superadmin-only.
-        if (identity.role !== "admin") {
-          const userId = identity.userId;
-          const allowed = teamId !== null && userId !== null && (yield* authz.isTeamAdmin(userId, teamId));
-          if (!allowed) {
-            return yield* new Forbidden({ message: "Team admin role required for that team" });
-          }
-        }
-        return yield* service.create({
-          machineId: req.payload.machineId,
-          action: req.payload.action,
-          agentCli: req.payload.agentCli,
-          teamId,
-          ...(req.payload.apiKeyId !== undefined ? { apiKeyId: req.payload.apiKeyId } : {}),
-          ...(req.payload.rawKey !== undefined ? { rawKey: req.payload.rawKey } : {}),
-        });
-      }))
-    )
-    .handle("claimRuntimeEvent", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeEventService;
-        return yield* service.claimForMachine(req.payload.machineId, req.request.headers["x-machine-secret"] ?? "");
-      }))
-    )
-    .handle("completeRuntimeEvent", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeEventService;
-        return yield* service.complete(req.path.id);
-      }))
-    )
-    .handle("failRuntimeEvent", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeEventService;
-        return yield* service.fail(req.path.id, req.payload.error);
-      }))
-    )
-    .handle("getRuntimeEvent", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeEventService;
-        return yield* service.getById(req.path.id);
-      }))
-    )
-    .handle("listRuntimeEvents", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeEventService;
-        const q = searchParams(req);
-        const events = yield* service.list(q.get("machineId") ?? undefined);
-        return { data: events };
-      }))
-    )
-    .handle("machineHeartbeat", (req) =>
-      respond(Effect.gen(function* () {
-        const machineService = yield* RuntimeMachineService;
-        const runtimeService = yield* RuntimeService;
-        const projectService = yield* ProjectService;
-        const machine = yield* machineService.heartbeat({
-          id: req.payload.id,
-          hostname: req.payload.hostname ?? "",
-          ...(req.payload.clis !== undefined ? { clis: req.payload.clis.map((c) => ({ provider: c.provider, version: c.version })) } : {}),
-        });
-        if (req.payload.runtimes) {
-          yield* runtimeService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
-            runtimeId: catalog.runtimeId,
-            agentCli: catalog.agentCli,
-            models: [...catalog.models],
-            agents: [...catalog.agents],
-          })));
-        }
-        if (req.payload.daemonErrors) {
-          // The daemon died with a reportable failure (e.g. revoked API key,
-          // exit code 3). The listener has valid auth, so it relays on the
-          // machine's behalf — the runtime row surfaces it as lastError.
-          yield* runtimeService.reportDaemonErrors([...req.payload.daemonErrors]);
-        }
-        // Stuck-task sweep: runs while any machine listens (3s cadence) —
-        // the only case where a re-claim is possible. Re-queues 'running'
-        // tasks whose runtime has been offline > 10 min, and hard-deletes
-        // stale 'running' runs (started > RUNTIME_STALE_RUN_MIN, runtime
-        // offline/gone — the runner is dead and will never complete).
-        const swept = yield* runtimeService.sweepStalledTasks();
-        if (swept > 0) {
-          console.log(`[runtime-sweep] ${swept} stale task(s) re-queued or removed`);
-        }
-        const projects = yield* projectService.list();
-        return { ...machine, projects: projects.map((p) => ({ id: p.id, name: p.name, slug: p.slug, description: p.description })) };
-      }))
-    )
-    .handle("registerMachine", (req) =>
-      respond(Effect.gen(function* () {
-        const machineService = yield* RuntimeMachineService;
-        return yield* machineService.register({
-          id: req.payload.id,
-          hostname: req.payload.hostname,
-          secret: req.payload.secret,
-        });
-      }))
-    )
-    .handle("removeMachine", (req) =>
-      respond(Effect.gen(function* () {
-        const machineService = yield* RuntimeMachineService;
-        yield* machineService.delete(req.path.id);
-        return undefined;
-      }))
-    )
-    .handle("listMachines", () =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeMachineService;
-        const machines = yield* service.list();
-        return { data: machines };
-      }))
-    )
-    .handle("listRuntimes", (req) =>
-      respond(Effect.gen(function* () {
-        const identity = yield* AuthIdentity;
-        const service = yield* RuntimeService;
-        let runtimes = yield* service.listRuntimes();
-        // Team gating: team admin sees own-team + global runtimes; keys and
-        // superadmin sessions see all. ?teamId= narrows the result.
-        const teamFilter = searchParams(req).get("teamId");
-        if (identity.role !== "admin") {
-          if (!identity.userId) return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
-          const authz = yield* AuthorizationService;
-          const visible: (typeof runtimes)[number][] = [];
-          for (const r of runtimes) {
-            if (r.teamId === null || (yield* authz.isTeamAdmin(identity.userId, r.teamId))) visible.push(r);
-          }
-          runtimes = visible;
-        }
-        if (teamFilter) {
-          runtimes = runtimes.filter((r) => r.teamId === teamFilter);
-        }
-        return { data: runtimes };
-      }))
-    )
-    .handle("createRuntimeTask", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const project = yield* requireProjectRead(req.payload.slug);
-        const task = yield* service.create({
-          projectId: project.id,
-          documentType: req.payload.documentType,
-          documentId: req.payload.documentId,
-          agentId: req.payload.agentId,
-          skillId: req.payload.skillId,
-          extraPrompt: req.payload.extraPrompt ?? "",
-          selection: req.payload.selection ?? "",
-          ...(req.payload.runtimeId !== undefined ? { runtimeId: req.payload.runtimeId } : {}),
-        });
-        return task;
-      }))
-    )
-    .handle("getRuntimeTask", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        return yield* service.getById(req.path.id);
-      }))
-    )
-    .handle("listRuntimeTasks", (req) =>
-      respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
-        const service = yield* RuntimeService;
-        const q = searchParams(req);
-        const slug = q.get("slug");
-        if (!slug) return yield* Effect.fail(ProjectNotFound);
-        const project = yield* projectService.findBySlug(slug);
-        const documentType = (q.get("documentType") ?? "task") as "task" | "wiki";
-        const documentId = q.get("documentId") ?? "";
-        const tasks = yield* service.listForDocument(project.id, documentType, documentId);
-        return { data: tasks };
-      }))
-    )
-    .handle("listRecentRuntimeTasks", () =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const tasks = yield* service.listRecent(10);
-        return { data: tasks };
-      }))
-    )
-    .handle("listRuntimeTaskHistory", (req) =>
-      respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
-        const service = yield* RuntimeService;
-        const q = searchParams(req);
-        const slug = q.get("slug") ?? undefined;
-        const project = slug ? yield* projectService.findBySlug(slug) : null;
-        const status = q.get("status");
-        const skillId = q.get("skillId") ?? undefined;
-        const teamId = q.get("teamId") ?? undefined;
-        const documentType = q.get("documentType");
-        const statuses = new Set(["queued", "running", "completed", "failed", "cancelled"]);
-        const limitRaw = Number(q.get("limit") ?? 50);
-        const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200) : 50;
-        const result = yield* service.listHistory(
-          {
-            ...(project?.id !== undefined ? { projectId: project.id } : {}),
-            ...(status && statuses.has(status) ? { status: status as "queued" | "running" | "completed" | "failed" | "cancelled" } : {}),
-            ...(skillId !== undefined ? { skillId } : {}),
-            ...(teamId !== undefined ? { teamId } : {}),
-            ...(documentType === "task" || documentType === "wiki" ? { documentType } : {}),
-          },
-          limit,
-          q.get("cursor") ?? undefined
-        );
-        return { data: result.tasks, nextCursor: result.nextCursor, summary: result.summary };
-      }))
-    )
-    .handle("completeRuntimeTask", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        return yield* service.complete(req.path.id, req.payload.result);
-      }))
-    )
-    .handle("getDaemonTaskStatus", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const task = yield* service.getById(req.path.id);
-        return { status: task.status };
-      }))
-    )
-    .handle("failRuntimeTask", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        return yield* service.fail(req.path.id, req.payload.error);
-      }))
-    )
-    .handle("cancelRuntimeTask", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        return yield* service.cancel(req.path.id);
-      }))
-    )
-    .handle("listRuntimeTaskLogs", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const logs = yield* service.listLogs(req.path.id);
-        return { data: logs };
-      }))
-    )
-    .handle("appendRuntimeTaskLog", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        return yield* service.appendLog(req.path.id, req.payload.message, req.payload.stream ?? "out", req.payload.level ?? "info");
-      }))
-    )
     .handle("listSources", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* SourceService;
@@ -2922,53 +2275,13 @@ const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
         return undefined;
       }))
     )
-    .handle("listRuntimeSessions", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const q = searchParams(req);
-        const documentType = q.get("documentType");
-        const documentId = q.get("documentId");
-        // Sessions are document-agnostic metadata; missing refs are just an
-        // empty list (never 404).
-        if (documentType !== "task" && documentType !== "wiki") return { data: [] };
-        if (!documentId) return { data: [] };
-        const resolvedId = documentType === "task" ? yield* resolveTaskId(documentId) : documentId;
-        return { data: yield* service.runtimeSessionList(documentType, resolvedId) };
-      }))
-    )
-    .handle("upsertRuntimeSession", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const payload = req.payload.documentType === "task"
-          ? { ...req.payload, documentId: yield* resolveTaskId(req.payload.documentId) }
-          : req.payload;
-        yield* service.runtimeSessionUpsert(payload);
-        return undefined;
-      }))
-    )
-    .handle("removeRuntimeSession", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const documentId = req.payload.documentType === "task" ? yield* resolveTaskId(req.payload.documentId) : req.payload.documentId;
-        yield* service.runtimeSessionRemove(req.payload.documentType, documentId, req.payload.runtimeId);
-        return undefined;
-      }))
-    )
-    .handle("resetRuntimeSession", (req) =>
-      respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
-        const documentId = req.payload.documentType === "task" ? yield* resolveTaskId(req.payload.documentId) : req.payload.documentId;
-        yield* service.runtimeSessionReset(req.payload.documentType, documentId, req.payload.runtimeId);
-        return undefined;
-      }))
-    )
 );
 
 const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
   handlers
     .handle("listAgents", () =>
       respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         const agents = yield* service.listAgents();
         return { data: agents };
       }))
@@ -2976,14 +2289,14 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("createAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.createAgent(req.payload);
       }))
     )
     .handle("updateAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.updateAgent(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
@@ -2994,7 +2307,7 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("deleteAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         yield* service.deleteAgent(req.path.id);
         return undefined;
       }))
@@ -3002,14 +2315,14 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("replaceAgentSkills", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
       }))
     )
     .handle("resetAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.resetAgentToDefault(req.path.id);
       }))
     )
@@ -3019,7 +2332,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
   handlers
     .handle("listSkills", () =>
       respond(Effect.gen(function* () {
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         const skills = yield* service.listSkills();
         return { data: skills };
       }))
@@ -3027,14 +2340,14 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("createSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.createSkill(req.payload);
       }))
     )
     .handle("updateSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.updateSkill(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
@@ -3045,7 +2358,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("deleteSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         yield* service.deleteSkill(req.path.id);
         return undefined;
       }))
@@ -3053,7 +2366,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("resetSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* RuntimeService;
+        const service = yield* AssistantCatalogService;
         return yield* service.resetSkillToDefault(req.path.id);
       }))
     )
@@ -3168,11 +2481,17 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         });
       }))
     )
+    .handle("getAssistantTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* AssistantTaskService;
+        return yield* service.getById(req.path.id);
+      }))
+    )
     .handle("streamAssistantTask", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
-        const runtimeService = yield* RuntimeService;
-        const task = yield* runtimeService.getById(req.path.id);
+        const taskService = yield* AssistantTaskService;
+        const task = yield* taskService.getById(req.path.id);
         if (identity.role !== "admin" && identity.userId) {
           const authz = yield* AuthorizationService;
           const access = yield* authz.projectAccess(identity.userId, task.projectId);
@@ -3187,9 +2506,9 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
     .handle("cancelAssistantTask", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* AssistantService;
-        const runtimeService = yield* RuntimeService;
+        const taskService = yield* AssistantTaskService;
         if (!service.abortStream(req.path.id)) {
-          yield* runtimeService.cancel(req.path.id);
+          yield* taskService.cancel(req.path.id);
         }
         return { ok: true as const };
       }))
@@ -4462,7 +3781,78 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const n = yield* syncModelPrices().pipe(Effect.catchAll(() => Effect.succeed(0)));
-        return { synced: n };
+        const repo = yield* AssistantModelPricesRepo;
+        const rows = yield* repo.list();
+        return {
+          synced: n,
+          data: rows.map((r) => ({ model: r.model, prompt_price: r.promptPrice, completion_price: r.completionPrice, cached_read_price: r.cachedReadPrice, cached_write_price: r.cachedWritePrice, updated_at: r.updatedAt })),
+        };
+      }))
+    )
+    .handle("adminAssistantRuns", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* AssistantTaskRepo;
+        const sp = searchParams(req);
+        const statusRaw = sp.get("status");
+        const statuses: ReadonlyArray<AssistantTaskStatus> = ["queued", "running", "completed", "failed", "cancelled"];
+        let status: AssistantTaskStatus | null = null;
+        if (statusRaw) {
+          if (!statuses.includes(statusRaw as AssistantTaskStatus)) {
+            return yield* new InvalidArgs({ reason: "status must be one of queued, running, completed, failed, cancelled" });
+          }
+          status = statusRaw as AssistantTaskStatus;
+        }
+        let limit = 50;
+        const limitRaw = sp.get("limit");
+        if (limitRaw !== null) {
+          const parsed = Number(limitRaw);
+          if (!Number.isInteger(parsed) || parsed < 1) {
+            return yield* new InvalidArgs({ reason: "limit must be a positive integer" });
+          }
+          limit = Math.min(parsed, 200);
+        }
+        let cursor: { createdAt: string; id: string } | null = null;
+        const cursorRaw = sp.get("cursor");
+        if (cursorRaw) {
+          const sep = cursorRaw.indexOf("|");
+          if (sep <= 0 || sep === cursorRaw.length - 1) {
+            return yield* new InvalidArgs({ reason: "cursor is malformed" });
+          }
+          cursor = { createdAt: cursorRaw.slice(0, sep), id: cursorRaw.slice(sep + 1) };
+        }
+        const projectId = sp.get("projectId");
+        const { tasks, nextCursor } = yield* repo.listRecent({ status, projectId: projectId || null, limit, cursor });
+        const counts = yield* repo.countByStatus();
+        return {
+          data: tasks.map((t) => ({
+            id: t.id,
+            key: t.key,
+            projectId: t.projectId,
+            documentType: t.documentType,
+            documentId: t.documentId,
+            documentTitle: t.documentTitle,
+            agentId: t.agentId,
+            skillId: t.skillId,
+            agentName: t.agentName,
+            skillName: t.skillName,
+            status: t.status,
+            error: t.error,
+            createdAt: t.createdAt,
+            startedAt: t.startedAt,
+            finishedAt: t.finishedAt,
+          })),
+          nextCursor: nextCursor ? `${nextCursor.createdAt}|${nextCursor.id}` : null,
+          counts,
+        };
+      }))
+    )
+    .handle("adminAssistantBindings", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* AssistantSettingsRepo;
+        const rows = yield* repo.listBindingsOverview();
+        return { data: rows };
       }))
     )
     .handle("adminAssistantProviders", () =>
@@ -4737,7 +4127,7 @@ function formatWikiPageRevision<T>(r: T): T {
 
 function routeGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, runtimesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }
@@ -4748,16 +4138,8 @@ export function createApiHandler(dbPath: string, env?: RuntimeEnv) {
     const start = Date.now();
     const url = new URL(req.url);
     try {
-      const { handler, driver } = await ready;
+      const { handler } = await ready;
       const res = await handler(req);
-      if (url.pathname === "/api/runtimes/tasks/recent" && req.method === "GET" && res.status < 400) {
-        const row = await Effect.runPromise(
-          queryFirst<{ v: number }>(driver, "SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").pipe(
-            Effect.catchAll(() => Effect.succeed(null))
-          )
-        );
-        if (!row) return res;
-      }
       const level = res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO";
       console.log(JSON.stringify({ level, service: "http", method: req.method, path: url.pathname, status: res.status, duration: Date.now() - start, timestamp: new Date().toISOString() }));
       return res;
@@ -4782,8 +4164,8 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     MilestoneRepo.Default, MilestoneService.Default,
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
-    RuntimeRepo.Default, RuntimeService.Default,
     AssistantSettingsRepo.Default, AssistantThreadRepo.Default, ProjectMemoryRepo.Default,
+    AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantCatalogService.Default,
     AssistantChatService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
     ),
@@ -4793,8 +4175,6 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     AssistantService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
     ),
-    RuntimeEventRepo.Default, RuntimeEventService.Default,
-    RuntimeMachineRepo.Default, RuntimeMachineService.Default,
     SourceRepo.Default, SourceService.Default,
     TaskLinkRepo.Default, TaskLinkService.Default,
     MentionService.Default,
@@ -4948,10 +4328,6 @@ function createWorkersApiMiddleware(
       const isSetup = path === "/api/setup" || path.startsWith("/api/setup/");
       const isHealth = path === "/api/health";
       const isPublicShare = path.startsWith("/api/share/");
-      const isRuntimeDaemon =
-        path.startsWith("/api/runtimes/daemon/") ||
-        path === "/api/runtimes/register" ||
-        path === "/api/runtimes/sessions";
       // Device-login pairing: create + poll are API-key exempt (still
       // rate-limited); approve/deny run through normal session auth.
       const isDeviceLogin = request.method === "POST" && path === "/api/device-login/requests"
@@ -4982,11 +4358,8 @@ function createWorkersApiMiddleware(
         );
       }
 
-      const daemonTokenOk = isRuntimeDaemon && runtimeEnv.LXK_RUNTIME_DAEMON_TOKEN
-        ? constantTimeTokenEqual(request.headers["x-runtime-token"] ?? "", runtimeEnv.LXK_RUNTIME_DAEMON_TOKEN)
-        : false;
       let identity: AuthIdentityShape;
-      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare && !isDeviceLogin) {
+      if (!isHealth && !isSetup && !isPublicShare && !isDeviceLogin) {
         const session = yield* workersSessionIdentity(new Headers(request.headers), deps.getSession);
         if (session) {
           identity = session;

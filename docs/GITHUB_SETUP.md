@@ -19,10 +19,11 @@ suppression and delivery dedup make the loop safe.
 3. **Repository permissions**:
    - **Issues**: `Read and write`
    - **Metadata**: `Read-only`
-   - **Contents**: `Read-only` — enables the Runtimes repo-content context
-     (the daemon gets the project's source-role repo files as grounding; see
-     ARCHITECTURE.md → Runtimes repo-content). Optional: without it, AI runs
-     just don't receive repo files.
+   - **Contents**: `Read-only` — enables the Assistant repo-content grounding
+     (assistant runs get the project's source-role repo files as context; see
+     ARCHITECTURE.md → Assistant repo-content). Optional: without it, assistant
+     runs just don't receive repo files. There is no daemon/agent-runtime
+     consumer any more — the in-process Assistant is the only reader.
    **No permission changes needed for repo linking** — the same scopes cover
    linking, issue creation, content sync, and the autocomplete.
 4. **Subscribe to events**: **Issues** only

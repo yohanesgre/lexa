@@ -7,10 +7,10 @@ import type { ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
 import { DescriptionEditor } from "./DescriptionEditor";
 
-const reviewMock = vi.hoisted(() => ({ value: null as null | { action: unknown; runtime: unknown; diff: unknown } }));
+const reviewMock = vi.hoisted(() => ({ value: null as null | { skillName: unknown; agentName: unknown; diff: unknown } }));
 
-vi.mock("./runtimes/useRuntimeReview", () => ({
-  useRuntimeReview: () => ({
+vi.mock("../lib/useAssistantReview", () => ({
+  useAssistantReview: () => ({
     review: reviewMock.value,
     appliedTaskId: null,
     rejectedTaskId: null,
@@ -20,8 +20,8 @@ vi.mock("./runtimes/useRuntimeReview", () => ({
   }),
 }));
 
-vi.mock("./runtimes/RuntimeReviewSurface", () => ({
-  RuntimeReviewSurface: () => <div className="runtime-review-panel" />,
+vi.mock("./assistant/AssistantReviewSurface", () => ({
+  AssistantReviewSurface: () => <div className="runtime-review-panel" />,
 }));
 
 const fetchMock = vi.fn();
@@ -78,8 +78,8 @@ describe("DescriptionEditor", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the Runtime review surface inside the card while reviewing", async () => {
-    reviewMock.value = { action: {}, runtime: {}, diff: {} };
+  it("renders the Assistant review surface inside the card while reviewing", async () => {
+    reviewMock.value = { skillName: {}, agentName: {}, diff: {} };
     const { container } = render(
       <DescriptionEditor initialContent={DOC} onDone={vi.fn()} onCancel={vi.fn()} />,
       { wrapper }

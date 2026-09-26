@@ -78,8 +78,7 @@ export interface WorkersEnv {
   LXK_MAX_UPLOAD_MB?: string;
   LXK_RATE_LIMIT_MAX?: string;
   LXK_RATE_LIMIT_WINDOW_MS?: string;
-  LXK_RUNTIME_DAEMON_TOKEN?: string;
-  LXK_RUNTIME_REPO_CAP?: string;
+  LXK_ASSISTANT_REPO_CAP?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
 }
@@ -393,10 +392,6 @@ export async function runScheduledCore(
   await Effect.runPromise(
     batchStmts(driver, [
       { sql: "DELETE FROM webhook_events WHERE received_at < datetime('now', '-7 days')", params: [] },
-      {
-        sql: "DELETE FROM runtime_events WHERE status IN ('completed', 'failed') AND finished_at < datetime('now', '-7 days')",
-        params: [],
-      },
     ]).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] scheduled prune failed:", String(e)))))
   );
   if (runtimeEnv.LXK_BACKUP_ENABLED === "1" && blob) {

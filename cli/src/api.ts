@@ -7,8 +7,8 @@
 import { Effect, Data } from "effect";
 import type { CliConfig } from "./config";
 
-// Per-request deadline — mirrors machine.ts COMMAND_TIMEOUT_MS. Without it a
-// hung server leaves `lx` waiting forever on a bare fetch.
+// Per-request deadline. Without it a hung server leaves `lx` waiting forever
+// on a bare fetch.
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Data.TaggedError("ApiError")<{
@@ -83,26 +83,6 @@ export interface WikiPageMetaInfo {
   slug: string;
   position: number;
   hasChildren: boolean;
-}
-
-export interface RuntimeInfo {
-  id: string;
-  name: string;
-  provider: string;
-  machineId: string | null;
-  agent: string;
-  model: string;
-  status: "online" | "offline";
-  lastError: string | null;
-  hostname: string;
-  lastSeen: string | null;
-}
-
-export interface RuntimeCatalogInfo {
-  runtimeId: string;
-  agentCli: "opencode" | "hermes" | "command-code";
-  models: Array<{ id: string; provider: string; name: string }>;
-  agents: Array<{ id: string; name: string }>;
 }
 
 export class LexaClient {
@@ -225,56 +205,6 @@ export class LexaClient {
     return this.request<{ id: string; title: string; slug: string; content: unknown }>(`/api/projects/${slug}/wiki/${pageSlug}`);
   }
 
-  // ── Runtimes ──
-  listRuntimes(): Effect.Effect<RuntimeInfo[], ApiError, never> {
-    return Effect.map(this.request<{ data: RuntimeInfo[] }>("/api/runtimes"), (r) => r.data);
-  }
-
-  deleteRuntime(id: string): Effect.Effect<void, ApiError, never> {
-    return this.request<void>(`/api/runtimes/${encodeURIComponent(id)}`, { method: "DELETE" });
-  }
-
-  listMachines(): Effect.Effect<MachineInfo[], ApiError, never> {
-    return Effect.map(this.request<{ data: MachineInfo[] }>("/api/runtimes/machines"), (r) => r.data);
-  }
-
-  registerMachine(input: { id: string; hostname: string; secret: string }): Effect.Effect<{ machine: MachineInfo; secret: string | null }, ApiError, never> {
-    return this.request<{ machine: MachineInfo; secret: string | null }>("/api/runtimes/machines/register", { method: "POST", body: JSON.stringify(input) });
-  }
-
-  deleteMachine(id: string): Effect.Effect<void, ApiError, never> {
-    return this.request<void>(`/api/runtimes/machines/${encodeURIComponent(id)}`, { method: "DELETE" });
-  }
-
-  // ── Runtime setup events (web wizard → listener) ──
-  claimRuntimeEvent(machineId: string, secret: string): Effect.Effect<{ event: RuntimeEventInfo; rawKey: string | null } | null, ApiError, never> {
-    return this.request<{ event: RuntimeEventInfo; rawKey: string | null } | null>("/api/runtimes/events/claim", {
-      method: "POST",
-      headers: { "x-machine-secret": secret },
-      body: JSON.stringify({ machineId }),
-    });
-  }
-
-  completeRuntimeEvent(id: string): Effect.Effect<RuntimeEventInfo, ApiError, never> {
-    return this.request<RuntimeEventInfo>(`/api/runtimes/events/${id}/complete`, { method: "POST" });
-  }
-
-  failRuntimeEvent(id: string, error: string): Effect.Effect<RuntimeEventInfo, ApiError, never> {
-    return this.request<RuntimeEventInfo>(`/api/runtimes/events/${id}/fail`, { method: "POST", body: JSON.stringify({ error }) });
-  }
-
-  // Presence heartbeat and runtime catalogs — machine identity is stable across
-  // listener restarts and catalog discovery stays in this CLI process.
-  machineHeartbeat(input: {
-    id: string;
-    hostname: string;
-    runtimes?: RuntimeCatalogInfo[];
-    clis?: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
-    daemonErrors?: Array<{ runtimeId: string; error: string }>;
-  }): Effect.Effect<MachineHeartbeatInfo, ApiError, never> {
-    return this.request<MachineHeartbeatInfo>("/api/runtimes/machines/heartbeat", { method: "POST", body: JSON.stringify(input) });
-  }
-
   // ── Device login (CLI pairing) ──
   // No API key exists yet — create + poll are API-key exempt; the poll
   // credential is the pairing token (x-device-token), the same 256-bit hex
@@ -306,31 +236,3 @@ export interface DeviceLoginRequestInfo {
 export type DeviceLoginPollResult =
   | { status: "pending"; clientName: string; code: string; expiresAt: string }
   | { status: "approved"; rawKey: string; keyName: string; approverName: string | null };
-
-export interface MachineInfo {
-  id: string;
-  hostname: string;
-  clis: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
-  lastSeen: string | null;
-  createdAt: string;
-}
-
-// Heartbeat response extends the machine with the project index (id, name,
-// slug, description) — the listener provisions one workspace dir per project
-// under ~/.lexa/<host>/projects/ (the group dir of the server URL) from it.
-export interface MachineHeartbeatInfo extends MachineInfo {
-  projects: Array<{ id: string; name: string; slug: string; description: string }>;
-}
-
-export interface RuntimeEventInfo {
-  id: string;
-  machineId: string;
-  action: "install" | "update" | "remove";
-  agentCli: "opencode" | "hermes" | "command-code";
-  apiKeyId: string | null;
-  status: "pending" | "claimed" | "completed" | "failed";
-  error: string | null;
-  createdAt: string;
-  claimedAt: string | null;
-  finishedAt: string | null;
-}

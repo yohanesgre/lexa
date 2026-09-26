@@ -51,7 +51,7 @@ function assistantTaskBody(overrides: Record<string, unknown> = {}) {
     documentType: "task",
     documentId: "t1",
     prompt: "describe the screenshot",
-    agentId: "agent-t1",
+    agentId: "assistant",
     skillId: "skill-t1",
     ...overrides,
   };
@@ -70,7 +70,6 @@ INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'T1', 'a0', '2026-01-01 10:00:00', 'HG-1', 1);
-INSERT INTO lexa_agents (id, name, description, instructions) VALUES ('agent-t1', 'Test Agent', '', 'be helpful');
 INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('skill-t1', 'Describe image', '', 'look at the image');
 INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('assistant', 'skill-t1');
 `);
@@ -133,7 +132,7 @@ describe("POST /api/assistant/tasks attachments", () => {
     );
     expect(res.status).toBe(201);
     const task = await res.json();
-    expect(task.kind).toBe("assistant");
+    expect(task.status).toBe("queued");
 
     const thread = db
       .prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'")

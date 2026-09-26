@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
-import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, VisionNotConfigured, EngineNotSupportedForChat, errorToStatus, errorResponse, errorMessage, errorDetails } from "./errors";
+import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, VisionNotConfigured, AssistantTaskNotFound, errorToStatus, errorResponse, errorMessage, errorDetails } from "./errors";
 import { CommentNotFound, CommentInvalid } from "./errors";
 import { InvalidParent } from "./errors";
 import { ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed } from "./errors";
@@ -39,9 +39,13 @@ describe("errorToStatus", () => {
     expect(response.error.details).toEqual({ reason: "cross-project" });
   });
 
-  it("maps VisionNotConfigured and EngineNotSupportedForChat → 409", () => {
+  it("maps VisionNotConfigured → 409", () => {
     expect(errorToStatus(new VisionNotConfigured())).toBe(409);
-    expect(errorToStatus(new EngineNotSupportedForChat({ engine: "blacksmith" }))).toBe(409);
+  });
+
+  it("maps AssistantTaskNotFound → 404 with ASSISTANT_TASK_NOT_FOUND", () => {
+    expect(errorToStatus(new AssistantTaskNotFound({ id: "t1" }))).toBe(404);
+    expect(errorResponse(asCatalogError(new AssistantTaskNotFound({ id: "t1" }))).error.code).toBe("ASSISTANT_TASK_NOT_FOUND");
   });
 });
 

@@ -31,7 +31,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; `RuntimeMachineService → RuntimeEventService`; `RuntimeService → SourceService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync.
+**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync. The removed runtime tier's `RuntimeMachineService → RuntimeEventService` / `RuntimeService → SourceService` edges are gone with their services.
 
 ## Infrastructure
 
@@ -164,8 +164,6 @@ export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("Webhoo
 - **`delete*` are idempotent** — 0 rows matched is not an error, they resolve
   `void`. Two exceptions fail `RowNotFound`:
   - Owner/pair-scoped deletes that must not leak existence: `ApiKeyRepo.deleteOwn`,
-    `RuntimeRepo.deleteRuntime`, `RuntimeRepo.deleteAgent`,
-    `RuntimeRepo.deleteSkill`, `RuntimeMachineRepo.delete`,
     `AssistantThreadRepo.resetThread`, `ProjectMemoryRepo.remove`.
   - `CommentRepo.softDelete` — a second delete of an already-deleted row matches
     0 rows and raises `RowNotFound` (`server/repos/comment.repo.ts:47-55`).
@@ -183,14 +181,6 @@ export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("Webhoo
 - **Audited exceptions** (keep `void`; caller must pre-check before
   strictifying):
   - `ApiKeyRepo.touchIfStale` — conditional stale-only touch; 0 rows is normal.
-  - `RuntimeRepo.updateRuntimeHeartbeat` / `setRuntimeLastError` /
-    `clearRuntimeLastError` / `updateRuntimeCatalogs` — daemon-driven writes;
-    callers hold no pre-check and a missing runtime is a benign no-op.
-  - `RuntimeRepo.markRuntimesOffline` and `RuntimeMachineRepo.markOffline`
-    (`server/repos/runtime-machine.repo.ts:109`) — bulk void sweeps; 0 rows is
-    normal.
-  - `RuntimeRepo.updateRuntimeModels` / `updateRuntimeAgents` — unused helpers;
-    strict-safe but left `void` (no caller).
   - `AssistantPendingWritesRepo.markExecutionError` — best-effort flag; caller
     must pre-check.
   - `AssistantPendingWritesRepo.decide` / `expireIfDue` / `sweepExpired` —
@@ -200,8 +190,6 @@ export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("Webhoo
     normal guard, not an error.
   - `WebhookEventRepo.recordDelivery` (INSERT OR IGNORE) / `prune` — 0 rows is
     normal.
-- **Count-returning sweeps** (not `void`): `RuntimeRepo.sweepStuckTasks` /
-  `RuntimeRepo.deleteStaleRuns` return the affected row count; 0 is normal.
 
 ## Services
 
@@ -613,8 +601,7 @@ Rules:
 - The minted key binds to the approver (`api_keys.user_id`), name =
   `client_name` (CLI sends `cli-<hostname>`), so it appears in the owner's
   Settings → Me → API keys.
-- Raw key transits an in-memory store with TTL (same idiom as
-  `runtime-event.repo.ts` rawKeyStore 30 min). Poll returns it once; the row
+- Raw key transits an in-memory store with TTL (30 min). Poll returns it once; the row
   is consumed (deleted) — replay is impossible; a later poll is 404.
 - Terminal states: denied (403 DEVICE_LOGIN_DENIED), expired (410 —
   `expires_at` = 10 min; expired rows purged at boot with the webhook prune).
@@ -662,7 +649,7 @@ deny) and the team/settings gates live in `server/services/authorization.service
 // isTeamAdmin(userId, teamId): member.role ∈ {owner, admin} on that org, or superadmin
 // isSuperadmin(userId): users.role === 'superadmin'
 // Settings gate: superadmin only (R14) — API keys, rate limits, GitHub
-// config, Runtimes agents/skills, security are no longer 'admin'-gated;
+// config, Assistant agents/skills, security are no longer 'admin'-gated;
 // team admins get 403 on every server-settings route.
 ```
 
@@ -768,8 +755,8 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
 Better Auth session user (`actorFromIdentity` maps it to kind 'user'); API
 keys → kind 'agent' with the key's NAME as label and the key owner's
 user id (unbound keys → NULL); webhook moves → kind 'system', label
-'github'; Runtime terminal events → kind 'agent', label = runtime agent name
-(agent_id fallback). The legacy `x-lxk-user` header is gone — attribution
+'github'; Assistant terminal events → kind 'agent', label = resolved assistant
+agent name (agent_id fallback). The legacy `x-lxk-user` header is gone — attribution
 comes from the authenticated channel, never from a spoofable header; role
 never comes from the browser either (authz stays server-side).
 
@@ -865,13 +852,13 @@ const moveHandler = (req) =>
 
 The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days).
 
-### Runtime claim — repoContent delivery
+### Assistant run — repoContent delivery
 
-On `POST /api/runtimes/daemon/claim` the handler assembles the claim: task, runtime config, server-built prompt, agent/skill rule files, and — best-effort — the task's linked GitHub repo content (`repoContent: [{ owner, repo, path, content }]`, `[]` when none). The daemon writes those files into `repo-content/` (+ `MANIFEST.md`) and the prompt points the agent there ("Linked GitHub repo content is in the repo-content/ directory…").
+On an Assistant document run the stream handler assembles the per-run context: document title/context, resolved linked sources, memory hits, and — best-effort — the task's linked GitHub repo content (`repoContent: [{ owner, repo, path, content }]`, `[]` when none). The prompt points the agent at the content ("Linked GitHub repo content is in the repo-content/ directory…" concept, now assembled server-side into the prompt).
 
-- **Sources:** the project's `project_repos` rows with `source_role = 1` → repo values ("owner/repo"), capped at the `runtime_repo_cap` setting (env bootstrap `LXK_RUNTIME_REPO_CAP`, default 3), only when `documentType === "task"`. Task-linked issue repos no longer feed context.
+- **Sources:** the project's `project_repos` rows with `source_role = 1` → repo values ("owner/repo"), capped at the `assistant_repo_cap` setting (env bootstrap `LXK_ASSISTANT_REPO_CAP`, default 3), only when `documentType === "task"`. Task-linked issue repos no longer feed context.
 - **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
-- **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
+- **Never fails the run:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the run still proceeds. The prompt's repo-content line is added only when `repoContent` is non-empty.
 
 ### Lexa/Assistant Gateway — provider registry + cross-kind fallback
 
@@ -911,8 +898,9 @@ export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPrice
   // assistant_model_prices(model PK,prompt_price,completion_price,cached_read_price,cached_write_price,updated_at) — OpenRouter cache, USD per 1M, price-sync upserts
   // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,cached_read_price,cached_write_price,updated_at=datetime('now')
 }) {}
-// AssistantSettingsRepo after the squashed baseline: assistant_settings dropped kind/base_url/api_key/model/vision_model —
-// now only search_provider, search_api_key, url_allowlist, engine, engine_switcher_enabled,
+// AssistantSettingsRepo after the squashed baseline + 0008: assistant_settings dropped kind/base_url/api_key/model/vision_model
+// (baseline) and engine/engine_switcher_enabled (0008) — now only
+// search_provider, search_api_key, url_allowlist,
 // primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
 // price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
 ```
@@ -921,29 +909,26 @@ export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPrice
 
 ```typescript
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
-  dependencies: [RuntimeRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default,
-                 AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, RuntimeService.Default,
-                 Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default,
-                 TaskService.Default, CommentService.Default, WikiService.Default,
-                 MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default,
+                 AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default,
+                 ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default,
+                 AssistantGateway.Default, TaskService.Default, CommentService.Default,
+                 WikiService.Default, MilestoneService.Default, SwimlaneService.Default,
+                 AuthorizationService.Default],
   effect: Effect.gen(function* () {
     return {
+      // Queue lifecycle: create/getById/listForDocument/hasRunning/complete/
+      //   fail/cancel. Terminal transitions emit assistant_completed|failed|
+      //   cancelled inside the SAME withTx as the status write (invariant #12).
       // enqueue: guard provider configured (ProviderNotConfigured), validate
-      //   agent/skill/document/attachments, then runtimeRepo.createTask (queued).
-      //   Engine routing: resolve the project's assistant_settings.engine ONCE
-      //   per request (single settings read — the engine resolution seam).
-      //   engine='assistant' → kind='assistant' row, runtime-online guard skipped
-      //   (unchanged). engine='blacksmith' → kind='blacksmith' row +
-      //   NoRuntimeOnline guard; claim payload carries .agents/ bundles.
-      //   skillId must be junction-bound to the resolved engine's agent —
-      //   else SkillNotFound.
+      //   agent/skill/document/attachments, then queueRepo.createTask (queued).
+      //   The assistant lane is the only lane; agentId is always the builtin
+      //   `assistant` agent, skillId must be junction-bound — else SkillNotFound.
       // runStream(taskId) → ReadableStream<StreamFrame>: claimAssistantTask
-      //   (conditional UPDATE queued→running, kind-scoped), assemble prompt,
-      //   stream chat(), persist at terminal points.
-      // runChatStream(chatId, userId, req): same engine, no queue row; one
+      //   (conditional UPDATE queued→running), assemble prompt, stream chat(),
+      //   persist at terminal points; cancel emits no log row.
+      // runChatStream(chatId, userId, req): no queue row; one
       //   thread per (project, user); second concurrent stream → AssistantTaskActive.
-      //   ALWAYS the assistant lane — project engine='blacksmith' →
-      //   EngineNotSupportedForChat (409), checked before any provider work.
       // resetThread / testConnection / abortStream / abortChat.
     };
   }),
@@ -1016,7 +1001,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   (bypasses the JSON encoder) with a 15s `: ping` heartbeat comment. Exactly
   one terminal frame (`error`|`done`|`suspended`). Disconnect→abort: the request signal
   is wired into the service's `Map<taskId|chatId, AbortController>`; abort
-  discards the partial message and cancels/fails via `RuntimeService`.
+  discards the partial message and cancels/fails via `AssistantTaskService`.
 - **Reasoning frames:** `REASONING_MESSAGE_CONTENT` chunks from reasoning
   models stream as `{ type: "reasoning", delta }` frames, live and in order,
   interleaved with `delta`/`tool` frames. Ephemeral — never persisted into
@@ -1027,7 +1012,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   through `translateRunError` — recognizable upstream failures map to catalog
   codes (`PROVIDER_AUTH_FAILED`, `PROVIDER_UNREACHABLE`), everything else to
   `ASSISTANT_GENERATION_FAILED`; the frame carries the mapped code, the task is
-  failed via `RuntimeService.fail`. Upstream bodies never echoed raw.
+  failed via `AssistantTaskService.fail`. Upstream bodies never echoed raw.
 - **Stall watchdog:** every chunk race in `buildStream`'s consume loop runs
   against a fresh timer (`STREAM_STALL_TIMEOUT_MS = 90_000`, reset on ANY
   chunk). If no chunk arrives for 90s, the provider request is aborted and
@@ -1081,26 +1066,18 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   by silent truncation, never errors. Resolved context rides an ephemeral
   system-prompt segment — never persisted to the thread, so transcripts stay
   byte-stable across turns.
-- **Engine resolution seam:** every Assistant request reads the project's
-  settings row exactly once; `engine` ∈ `'assistant'|'blacksmith'` routes the
-  enqueue branch (kind discriminator + runtime-online guard) and gates chat
-  (always assistant lane; blacksmith → `EngineNotSupportedForChat`). The
-  member-facing engine toggle is a personal overlay (client-side session
-  preference) — it never writes `assistant_settings.engine`; that column is the
-  admin-written project default. The toggle renders only when
-  `engine_switcher_enabled=1`.
 - **Vision resolution chain** (two outcomes; `vision_model` delegation
   removed in the squashed baseline — columns kind/base_url/api_key/model/vision_model
   dropped, legacy compat check remains but never fires):
   1. `primary_supports_images=1` → inline image parts on the primary model.
   2. else attachments are rejected up front with `VisionNotConfigured`
      (409) — never a mid-stream failure.
-- **Two-agent seed constants:** the single `DEFAULT_AGENT` ('lexa') is
-  replaced by two builtin seed constants — `assistant` ("Assistant Agent",
-  companion-persona instructions) and `blacksmith` ("Blacksmith
-  Agent") — mirrored by `0005_runtime_rename.sql`'s rebinding SQL. Skill availability
-  per agent = `lexa_agent_skills` junction rows only (admin-editable); no
-  JSON columns.
+- **One builtin agent:** the single builtin seed constant is `assistant`
+  ("Assistant Agent", companion-persona instructions), mirrored by the rebinding
+  SQL in `0005_runtime_rename.sql`/`0006_assistant_rename.sql`. The former
+  `blacksmith` coding agent is deleted by `0008_remove_agent_runtimes.sql`.
+  Skill availability per agent = `lexa_agent_skills` junction rows only
+  (admin-editable); no JSON columns.
 
 ### API middleware
 
@@ -1109,7 +1086,7 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the caller ONCE — session cookie first (`SessionService.userFrom`, try/catch), Bearer key fallback (`resolveApiKeyIdentity(authHeader, db)`) — on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireSuperadmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each). `/api/auth/*` is mounted BEFORE this middleware (Better Auth handler owns that path).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request. Middleware resolves the limiter key with `resolveClientIp(peer, cf-connecting-ip, trustedProxyCidrs)` (`server/api/rate-limit.ts`): `cf-connecting-ip` is honored **only** when the peer is loopback (`127.0.0.0/8`, `::1`, v4-mapped) or matches `LXK_TRUSTED_PROXY_CIDRS` (comma-separated IPv4/IPv6 CIDRs or bare IPs; unset/empty = loopback only, resolved by `resolveTrustedProxyCidrs` in `server/env.ts`). Otherwise the peer/socket IP wins — a private non-loopback client cannot pick a fresh bucket with a spoofed header. On Workers there is no socket address: `workersClientIp` deletes any inbound `x-lexa-remote-ip` before resolving, so a leaked/forged stamp cannot be mistaken for a peer and `cf-connecting-ip` (set by Cloudflare's edge) is the source. The Bun entry's `/api/auth/*` throttle (`server/entry.ts`) uses the same helper.
-- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/share/*` skips AUTH only too (public wiki-share capability URLs — still rate-limited with a dedicated stricter bucket, security headers kept; handlers must not consume `AuthIdentity`, since exempt paths receive a synthetic identity); `/api/runtimes/daemon/*` + `/api/runtimes/register` + `/api/runtimes/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
+- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/share/*` skips AUTH only too (public wiki-share capability URLs — still rate-limited with a dedicated stricter bucket, security headers kept; handlers must not consume `AuthIdentity`, since exempt paths receive a synthetic identity). `isRateLimitExemptPath` now returns `false` for every path — the removed runtime daemon surfaces were the only exemption.
 - **Rate limiting shares one bucket** (`apiRateLimiter` singleton; `/api/share/*` excepted — it applies a dedicated stricter per-IP bucket so the public unauthenticated surface cannot exhaust the shared one) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
@@ -1142,17 +1119,12 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `SourceNotFound` | 404 | delete a source that doesn't exist |
 | `SourceFetchError` | 422 | bad URL / SSRF-guard block / unreadable page |
 | `SourceUnreachable` | 422 | fetch failed (timeout, DNS, network) |
-| `RuntimeTaskNotFound` | 404 | |
-| `AgentNotFound` | 404 | unknown runtime agent (task create / claim resolve) |
-| `SkillNotFound` | 404 | unknown runtime skill (task create / bindings) |
+| `AssistantTaskNotFound` | 404 | |
+| `AgentNotFound` | 404 | unknown assistant agent (task create) |
+| `SkillNotFound` | 404 | unknown assistant skill (task create / bindings) |
 | `AgentBuiltinDelete` | 422 | delete/reset-guard on a builtin agent/skill |
-| `AgentEntityInUse` | 409 | delete agent/skill still referenced by runtime tasks |
-| `NoRuntimeOnline` | 409 | create runtime task with no daemon up |
-| `MachineNotFound` | 404 | unknown machine target |
-| `MachineIdTaken` | 409 | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
-| `MachineSecretMismatch` | 403 | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
+| `AgentEntityInUse` | 409 | delete agent/skill still referenced by assistant tasks |
 | `TeamHasProjects` | 409 | delete team while it owns projects — reassign first (payload `{ count }`) |
-| `TeamHasRuntimes` | 409 | delete team while team-scoped runtimes are bound (FK `RESTRICT`) — reassign or detach them first (payload `{ teamId, count }`) |
 | `SoleOwner` | 403 | demoting/removing the last owner of a team — transfer ownership first (payload `{ message }`) |
 | `CannotDeleteSelf` | 403 | removing the last superadmin / self-removal via the workspace member routes |
 | `TaskLinkNotFound` | 404 | delete a link that doesn't exist |
@@ -1167,14 +1139,11 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `NoUserContext` | 400 | `PATCH /api/me` called with a bare API key (no session) — agents have no profile |
 | `MilestoneNotFound` | 404 | incl. cross-project refs (swimlane sprint fields) |
 | `InvalidArgs` | 422 | swimlane sprint validation: `startAt > dueAt` |
-| `RuntimeNotFound` | 404 | unknown runtime target |
-| `RuntimeEventNotFound` | 404 | unknown runtime setup event |
 | `ApiKeyNotFound` | 404 | settings — key id that doesn't exist |
 | `ApiKeyNameEmpty` | 422 | create key with no name (`server/services/api-key.service.ts`) |
-| `Forbidden` | 403 | admin/settings gates — also the code for `ProjectAccessDenied` / `MachineSecretMismatch` |
+| `Forbidden` | 403 | admin/settings gates — also the code for `ProjectAccessDenied` |
 | `SetupLocked` | 403 | wizard on an already-configured install |
 | `SearchError` | 422 | invalid search query |
-| `RuntimeSessionActive` | 409 | document already has an active runtime task |
 | `TeamNotFound` | 404 | |
 | `TeamMemberNotFound` | 404 | unknown user on team membership routes |
 | `MemberNotInWorkspace` | 422 | add a non-member to a team |
@@ -1204,7 +1173,6 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `AssistantTaskActive` | 409 | thread reset or second chat stream while an Assistant stream is running |
 | `AssistantThreadNotFound` | 404 | missing thread row (`assistant_threads`) |
 | `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
-| `EngineNotSupportedForChat` | 409 | freeform chat while the project engine is `blacksmith` |
 | `ApprovalNotFound` | 404 | unknown approval id, or not the pending row's owner (owner mismatch hidden as NotFound) |
 | `ApprovalExpired` | 409 | decide on a row past its 24h TTL — lazily flipped to `expired` first |
 | `ApprovalAlreadyDecided` | 409 | second decision on a decided/expired row — payload `{ id, status }` |
@@ -1222,8 +1190,8 @@ Defined in the error map but never raised by any REST handler — do not match o
 ```
 TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo, ActivityService
 FieldConfigService → FieldConfigRepo, ProjectRepo
-RuntimeService       → RuntimeRepo, RuntimeSessionRepo, RuntimeEventRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo, ActivityService
-AssistantTaskService  → RuntimeRepo, AssistantSettingsRepo, AssistantThreadRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, RuntimeService, Storage, TaskRepo, WikiRepo, AssistantGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
+AssistantCatalogService → AssistantCatalogRepo, AssistantTaskRepo
+AssistantTaskService  → AssistantTaskRepo, AssistantCatalogRepo, AssistantSettingsRepo, AssistantThreadRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, ActivityService, Storage, TaskRepo, WikiRepo, AssistantGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
 AssistantService      → AssistantChatService, AssistantTaskService (thin facade — delegates; see §Lexa/Assistant)
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
@@ -1245,9 +1213,6 @@ Routes            → all services (orchestration layer — the only place
                      called from REST updateTask)
 ```
 
-**Runtime team inference.** `RuntimeService.registerRuntime` infers a team only
-when the payload team is absent: latest provider setup event with a non-null
-team → the existing runtime row's team (re-registration) → global. A NULL team
-on the latest event is "no binding for inference", never an explicit global
-override of an existing scoped row. Explicit global is a first install or
-`PATCH /api/runtimes/:id { teamId: null }`.
+**Runtime team inference (removed).** `RuntimeService.registerRuntime`'s team
+inference was deleted with the runtime tier. Teams still gate project access,
+but there are no team-scoped runtimes and no `TEAM_HAS_RUNTIMES` delete guard.

@@ -38,18 +38,12 @@ export class SearchError extends Data.TaggedError("SearchError")<{}> {}
 export class SourceNotFound extends Data.TaggedError("SourceNotFound")<{ id: string }> {}
 export class SourceFetchError extends Data.TaggedError("SourceFetchError")<{ message: string }> {}
 export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{ url: string }> {}
-export class RuntimeTaskNotFound extends Data.TaggedError("RuntimeTaskNotFound")<{ id: string }> {}
+export class AssistantTaskNotFound extends Data.TaggedError("AssistantTaskNotFound")<{ id: string }> {}
 export class AgentNotFound extends Data.TaggedError("AgentNotFound")<{ id: string }> {}
 export class SkillNotFound extends Data.TaggedError("SkillNotFound")<{ id: string }> {}
 export class AgentBuiltinDelete extends Data.TaggedError("AgentBuiltinDelete")<{ kind: "agent" | "skill"; name: string }> {}
 export class AgentEntityInUse extends Data.TaggedError("AgentEntityInUse")<{ kind: "agent" | "skill"; name: string; count: number }> {}
-export class RuntimeNotFound extends Data.TaggedError("RuntimeNotFound")<{ id: string }> {}
-export class RuntimeEventNotFound extends Data.TaggedError("RuntimeEventNotFound")<{ id: string }> {}
-export class MachineNotFound extends Data.TaggedError("MachineNotFound")<{ id: string }> {}
-export class MachineIdTaken extends Data.TaggedError("MachineIdTaken")<{ id: string; reason: "hostname" | "legacy" | "secret_mismatch" }> {}
-export class MachineSecretMismatch extends Data.TaggedError("MachineSecretMismatch")<{}> {}
 export class ApiKeyNotFound extends Data.TaggedError("ApiKeyNotFound")<{ id: string }> {}
-export class NoRuntimeOnline extends Data.TaggedError("NoRuntimeOnline")<{}> {}
 export class TaskLinkNotFound extends Data.TaggedError("TaskLinkNotFound")<{ id: string }> {}
 export class TaskLinkCycle extends Data.TaggedError("TaskLinkCycle")<{ message: string }> {}
 export class InvalidTaskLink extends Data.TaggedError("InvalidTaskLink")<{ message: string }> {}
@@ -68,7 +62,6 @@ export class NoUserContextForbidden extends Data.TaggedError("NoUserContextForbi
 export class DeviceLoginNotFound extends Data.TaggedError("DeviceLoginNotFound")<{}> {}
 export class DeviceLoginExpired extends Data.TaggedError("DeviceLoginExpired")<{}> {}
 export class DeviceLoginDenied extends Data.TaggedError("DeviceLoginDenied")<{}> {}
-export class RuntimeSessionActive extends Data.TaggedError("RuntimeSessionActive")<{}> {}
 export class ProviderNotConfigured extends Data.TaggedError("ProviderNotConfigured")<{ projectId: string }> {}
 export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{
   message?: string;
@@ -107,7 +100,6 @@ export class AssistantToolBudgetExceeded extends Data.TaggedError("AssistantTool
 export class AssistantTaskActive extends Data.TaggedError("AssistantTaskActive")<{}> {}
 export class AssistantThreadNotFound extends Data.TaggedError("AssistantThreadNotFound")<{ documentType: string; documentId: string }> {}
 export class VisionNotConfigured extends Data.TaggedError("VisionNotConfigured")<{}> {}
-export class EngineNotSupportedForChat extends Data.TaggedError("EngineNotSupportedForChat")<{ engine: string }> {}
 export class ApprovalNotFound extends Data.TaggedError("ApprovalNotFound")<{ id: string }> {}
 export class ApprovalExpired extends Data.TaggedError("ApprovalExpired")<{ id: string }> {}
 export class ApprovalAlreadyDecided extends Data.TaggedError("ApprovalAlreadyDecided")<{ id: string; status: string }> {}
@@ -143,18 +135,12 @@ export const errorCodeMap: Record<string, string> = {
   SourceNotFound: "SOURCE_NOT_FOUND",
   SourceFetchError: "SOURCE_FETCH_ERROR",
   SourceUnreachable: "SOURCE_UNREACHABLE",
-  RuntimeTaskNotFound: "RUNTIME_TASK_NOT_FOUND",
+  AssistantTaskNotFound: "ASSISTANT_TASK_NOT_FOUND",
   AgentNotFound: "AGENT_NOT_FOUND",
   SkillNotFound: "SKILL_NOT_FOUND",
   AgentBuiltinDelete: "AGENT_BUILTIN_DELETE",
   AgentEntityInUse: "AGENT_ENTITY_IN_USE",
-  RuntimeNotFound: "RUNTIME_NOT_FOUND",
-  RuntimeEventNotFound: "RUNTIME_EVENT_NOT_FOUND",
-  MachineNotFound: "MACHINE_NOT_FOUND",
-  MachineIdTaken: "MACHINE_ID_TAKEN",
-  MachineSecretMismatch: "FORBIDDEN",
   ApiKeyNotFound: "API_KEY_NOT_FOUND",
-  NoRuntimeOnline: "NO_RUNTIME_ONLINE",
   TaskLinkNotFound: "TASK_LINK_NOT_FOUND",
   TaskLinkCycle: "TASK_LINK_CYCLE",
   InvalidTaskLink: "INVALID_TASK_LINK",
@@ -180,7 +166,6 @@ export const errorCodeMap: Record<string, string> = {
   Forbidden: "FORBIDDEN",
   SetupLocked: "SETUP_LOCKED",
   SearchError: "SEARCH_ERROR",
-  RuntimeSessionActive: "RUNTIME_SESSION_ACTIVE",
   ProviderNotConfigured: "PROVIDER_NOT_CONFIGURED",
   ProviderAuthFailed: "PROVIDER_AUTH_FAILED",
   ProviderUnreachable: "PROVIDER_UNREACHABLE",
@@ -189,7 +174,6 @@ export const errorCodeMap: Record<string, string> = {
   AssistantTaskActive: "ASSISTANT_TASK_ACTIVE",
   AssistantThreadNotFound: "ASSISTANT_THREAD_NOT_FOUND",
   VisionNotConfigured: "VISION_NOT_CONFIGURED",
-  EngineNotSupportedForChat: "ENGINE_NOT_SUPPORTED_FOR_CHAT",
   ApprovalNotFound: "APPROVAL_NOT_FOUND",
   ApprovalExpired: "APPROVAL_EXPIRED",
   ApprovalAlreadyDecided: "APPROVAL_ALREADY_DECIDED",
@@ -200,7 +184,6 @@ export const errorCodeMap: Record<string, string> = {
   DbError: "DATABASE_ERROR",
   TeamNotFound: "TEAM_NOT_FOUND",
   TeamHasProjects: "TEAM_HAS_PROJECTS",
-  TeamHasRuntimes: "TEAM_HAS_RUNTIMES",
   SoleOwner: "SOLE_OWNER",
   TeamMemberNotFound: "USER_NOT_FOUND",
   MemberNotInWorkspace: "NOT_WORKSPACE_MEMBER",
@@ -220,7 +203,6 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ProjectAccessDenied":
     case "Forbidden":
     case "SetupLocked":
-    case "MachineSecretMismatch":
     case "CommentEditForbidden":
     case "CommentDeleteForbidden":
     case "AttachmentDeleteForbidden":
@@ -236,12 +218,9 @@ export function errorToStatus(error: { _tag: string }): number {
     case "WikiPageNotFound":
     case "ShareLinkNotFound":
     case "SourceNotFound":
-    case "RuntimeTaskNotFound":
+    case "AssistantTaskNotFound":
     case "AgentNotFound":
     case "SkillNotFound":
-    case "RuntimeNotFound":
-    case "RuntimeEventNotFound":
-    case "MachineNotFound":
     case "ApiKeyNotFound":
     case "TaskLinkNotFound":
     case "CommentNotFound":
@@ -264,21 +243,16 @@ export function errorToStatus(error: { _tag: string }): number {
     case "TaskHasChildren":
     case "GithubIssueAlreadyLinked":
     case "OptionInUse":
-    case "NoRuntimeOnline":
     case "TaskLinkCycle":
     case "AgentEntityInUse":
-    case "RuntimeSessionActive":
     case "ProviderNotConfigured":
     case "AssistantTaskActive":
     case "VisionNotConfigured":
-    case "EngineNotSupportedForChat":
     case "ApprovalExpired":
     case "ApprovalAlreadyDecided":
     case "ApprovalsPending":
     case "ConstraintViolation":
-    case "MachineIdTaken":
     case "TeamHasProjects":
-    case "TeamHasRuntimes":
     case "InviteAlreadyPending":
       return 409;
     case "RequiredFieldMissing":
@@ -382,7 +356,7 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return typeof error.message === "string" && error.message ? error.message : "Failed to fetch source";
     case "SourceUnreachable":
       return `Cannot reach '${error.url}'`;
-    case "RuntimeTaskNotFound":
+    case "AssistantTaskNotFound":
       return `AI task not found`;
     case "AgentNotFound":
       return `AI agent not found`;
@@ -392,24 +366,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Builtin ${error.kind} '${error.name}' cannot be deleted — edit it or reset it to default instead`;
     case "AgentEntityInUse":
       return `${error.kind === "agent" ? "Agent" : "Skill"} '${error.name}' is still used by ${error.count} AI task${error.count === 1 ? "" : "s"} — reassign those tasks first`;
-    case "RuntimeNotFound":
-      return `Runtime not found`;
-    case "RuntimeEventNotFound":
-      return `Runtime setup event not found`;
-    case "MachineNotFound":
-      return `Machine not found`;
-    case "MachineIdTaken":
-      return error.reason === "hostname"
-        ? `Machine id '${error.id}' is already registered to another host`
-        : `Machine id '${error.id}' has no matching secret — remove it and re-register`;
-    case "MachineSecretMismatch":
-      return "machine secret mismatch";
     case "ApiKeyNotFound":
       return `API key not found`;
-    case "NoRuntimeOnline":
-      return `No AI runtime is online. Start the daemon and try again.`;
-    case "RuntimeSessionActive":
-      return `An AI task is still running for this document — start a new session once it finishes`;
     case "TaskLinkNotFound":
       return `Task link not found`;
     case "TaskLinkCycle":
@@ -466,8 +424,6 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `No Assistant thread exists for ${error.documentType} '${error.documentId}'`;
     case "VisionNotConfigured":
       return `Image attachments need vision — enable primary image support or configure a vision model in Settings`;
-    case "EngineNotSupportedForChat":
-      return `Freeform chat runs on the Assistant engine — this project's engine is '${error.engine}'`;
     case "ApprovalNotFound":
       return "Approval not found";
     case "ApprovalExpired":
@@ -492,8 +448,6 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.message ?? "Cannot modify the last owner — transfer ownership first");
     case "TeamHasProjects":
       return `Team still owns ${error.count} project(s) — reassign them first`;
-    case "TeamHasRuntimes":
-      return `Team still has ${error.count} AI runtime(s) bound — detach or reassign them first`;
     case "TeamNotFound":
       return "Team not found";
     case "MemberNotInWorkspace":

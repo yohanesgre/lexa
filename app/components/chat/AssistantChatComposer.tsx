@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { Send, Square } from "lucide-react";
 import { acceptImageFiles, type AssistantImage } from "../../lib/assistant-image";
 import { useMentionTokens } from "../../lib/useMentionTokens";
-import { AssistantImageAttach } from "../runtimes/assistant/AssistantImageAttach";
+import { AssistantImageAttach } from "../assistant/panel/AssistantImageAttach";
 
 const CHAT_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 1024 * 1024) };
 const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Assistant.";

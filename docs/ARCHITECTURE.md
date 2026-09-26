@@ -11,7 +11,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
 | Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
-| Machine auth | API keys (`lxk_` + base62(43B)) | Hermes/CLI/webhooks: Bearer key → SHA-256 lookup |
+| Machine auth | API keys (`lxk_` + base62(43B)) | CLI/webhooks/scripts: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
 | Styling      | Tailwind                      | Fast, tree-shaken |
 | Rich Text    | TipTap (ProseMirror)          | Structured JSON, React integration |
@@ -29,7 +29,7 @@ projects
 │
 project_repos (N repos per project, each with roles)
 ├── id, project_id, repo ("owner/name", UNIQUE per project)
-├── source_role (Runtimes context + project label), workspace_role (issue link/create/sync)
+├── source_role (assistant grounding + project label), workspace_role (issue link/create/sync)
 └── created_at — at least one role per row
 │
 columns (per project, ordered)
@@ -97,12 +97,10 @@ clients, no callback URIs, no SMTP anywhere.
 - **Roles** — `users.role` ∈ {superadmin, member}; superadmin is **env-only**
   (`LXK_ADMIN_EMAILS`, applied at provisioning), never edited at runtime.
   Team-admin authority comes from the org `member.role` (owner/admin) on the
-  team. Teams = Better Auth organizations; projects carry `team_id`;
-  runtimes are team-scoped (`team_id` NULL = superadmin-owned global). A
-  team-scoped runtime is never silently widened: deleting its team is blocked
-  by the `runtimes.team_id ON DELETE RESTRICT` backstop (all paths, incl. raw
-  SQL), and widening requires an explicit superadmin reassign/detach via
-  `PATCH /api/runtimes/:id { teamId }`.
+  team. Teams = Better Auth organizations; projects carry `team_id`. A
+  team-scoped project is never silently re-teamed: moving a project into or
+  out of a team is always an explicit superadmin reassign/detach via
+  `PATCH /api/projects/:slug/team { teamId }`.
 - **Authorization order (project access):** superadmin > explicit
   `user_project_roles` grant > team membership > deny (see LAYERS.md →
   AuthorizationService).
@@ -193,20 +191,20 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP; `cf-connecting-ip` is trusted only from a loopback peer or one matching `LXK_TRUSTED_PROXY_CIDRS` (`resolveClientIp`, `server/api/rate-limit.ts`); `/api/setup` + `/api/health` ARE limited; key/token-gated Runtimes machine surfaces exempt (`/api/runtimes/daemon/*` + `/api/runtimes/register` + `/api/runtimes/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by a small in-process memory limiter around `POST /api/auth/sign-in/email` (~5 attempts/60s per email, 15 min lockout, success resets) — Better Auth 1.6.27 has no bundled rate-limit plugin (declared deviation, `server/auth.ts`); the per-IP limiter above is untouched.
+1. **Rate limit** — per-IP; `cf-connecting-ip` is trusted only from a loopback peer or one matching `LXK_TRUSTED_PROXY_CIDRS` (`resolveClientIp`, `server/api/rate-limit.ts`); `/api/setup` + `/api/health` ARE limited; no machine/daemon surfaces are exempt (the agent-runtime tier is removed); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by a small in-process memory limiter around `POST /api/auth/sign-in/email` (~5 attempts/60s per email, 15 min lockout, success resets) — Better Auth 1.6.27 has no bundled rate-limit plugin (declared deviation, `server/auth.ts`); the per-IP limiter above is untouched.
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
-3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), then daemon token (`x-runtime-token`, constant-time) for `/api/runtimes/daemon/*` + `/api/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
+3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
 
 ## GitHub Integration
 
 ### GitHub App (pinned scope)
-- **Permissions:** Issues: Read & Write; Metadata: Read; **Contents: Read** (Runtimes repo-content context). Nothing else.
+- **Permissions:** Issues: Read & Write; Metadata: Read; **Contents: Read** (Assistant repo-content grounding). Nothing else.
 - **Subscribed events:** `issues.closed`, `issues.reopened`, `issues.edited`. (`issues.opened` dropped — auto-creating Lexa tasks from GitHub issues is out of scope; `issues.labeled` dropped — no label feature.)
 - Installation tokens cached ~50 min (1h TTL minus margin), never minted per call.
 - **Config model — the settings DB is the single source of truth at runtime** (`GET`/`PUT /api/settings/github`, admin-only): `settings.github_app_id` / `github_private_key` / `github_webhook_secret`. Env (`GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` / `GITHUB_WEBHOOK_SECRET`) is a **first-boot bootstrap only**: `mirrorSettingsFromEnv` copies it into the DB once at boot when keys are empty (inline PEM wins over the file; the file is read at mirror time), and the runtime never reads env again. **Upgrade note:** existing env-only deployments import their env config into the DB on the first boot after this change — no manual migration. `GitHubConfigLive` serves a mutable holder — `syncGitHubConfigFromDb` (boot + on save) applies DB values live, `resetGithubCaches()` drops stale installation/token caches, and the webhook verifier reads the secret per request. Secrets are write-only over the API (booleans only); GET `source` is `"settings"` (any github_* row) or `"none"` — there is no env state.
-- **Runtimes repo-content (best-effort):** on daemon claim, the project's **source-role repos** (≤ `settings.runtime_repo_cap`, default 3, env bootstrap `LXK_RUNTIME_REPO_CAP` — same pattern as rate limits) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content. Delivered in the claim as `repoContent` (the daemon writes it into repo-content/ + MANIFEST.md; the prompt points the agent there). Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a claim NEVER fails for missing context (`selectRepoFiles` in `server/github/repo-content.ts`, assembly in the claim handler).
+- **Assistant repo-content (best-effort):** when an assistant run is enqueued, the project's **source-role repos** (≤ `settings.assistant_repo_cap`, default 3, env bootstrap `LXK_ASSISTANT_REPO_CAP` — same pattern as rate limits) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content, passed to the prompt as grounding context. Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a run NEVER fails for missing context (`selectRepoFiles` in `server/github/assistant-repo-content.ts`, assembly in the assistant task service).
 
 ### Sync matrix — what syncs, which direction, who wins
 
@@ -219,7 +217,7 @@ applied at build time, before route matching and before body decode:
 
 The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. State flows both ways (echo-suppressed); content flows both ways but **asymmetrically** — Lexa pushes on save (TipTap → Markdown), GitHub edits pull back via `edited` (Markdown → TipTap), and the webhook skips our own pushes by comparing fetched title **and** body against `pushed_*` after trim + CRLF→LF normalization.
 
-**Repo roles:** a project links N repos via `project_repos`, each with independent `source_role` (Runtimes context + project label) and `workspace_role` (issue link/create/sync) booleans — at least one per row. Workspace-role repos gate NEW issue links; removing a role never freezes existing links. Runtimes context sources from the project's source-role repos (cap `settings.runtime_repo_cap`, default 3).
+**Repo roles:** a project links N repos via `project_repos`, each with independent `source_role` (Assistant grounding + project label) and `workspace_role` (issue link/create/sync) booleans — at least one per row. Workspace-role repos gate NEW issue links; removing a role never freezes existing links. Assistant grounding sources from the project's source-role repos (cap `settings.assistant_repo_cap`, default 3).
 
 ### Echo suppression & idempotency (the loop-killer)
 
@@ -244,106 +242,106 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 7. One task ↔ many issues (junction table), one per repo: duplicate repo links rejected (already-linked guard). Per-issue `UNIQUE(task_id, issue_id)`.
 8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
 9. **Content sync is asymmetric + echo-safe.** Lexa pushes title+body on task save (only when changed, after the mutation commits; diffed against `pushed_title`/`pushed_body`; the push itself emits no activity). The webhook `edited` handler GETs the issue, skips when fetched title+body both match `pushed_*` (trim + CRLF→LF via `normalizeMarkdownForEcho`; GET failure → title-only compare fallback), else applies title + description (Markdown → TipTap) emitting `field_changed` (actor system/'github') in the same transaction. `push_failed` drives the "edit not pushed" divergence reason.
-10. **Repo roles gate new links only.** `source_role` (Runtimes context + label) and `workspace_role` (issue link/create/sync) are independent; removing a role never freezes existing task↔issue links — they keep syncing.
+10. **Repo roles gate new links only.** `source_role` (Assistant grounding + label) and `workspace_role` (issue link/create/sync) are independent; removing a role never freezes existing task↔issue links — they keep syncing.
 
 ### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
 
-## Runtimes — two active AI tiers
+## Assistant — one in-process AI tier (the agent-runtime tier is removed)
 
-Runtimes is the umbrella for both AI execution tiers. History: the
-namespace was renamed Forge→Hearth on 2026-08-24 (baked into the squashed
-`0001_init.sql` baseline) and Hearth→Runtimes on 2026-09-24 via
-`0005_runtime_rename.sql` — tables
-`runtime_tasks`/`runtime_task_logs`/`runtime_sessions`, routes `/api/runtimes/*`,
-header `x-runtime-token`, env `RUNTIME_*`/`LXK_RUNTIME_DAEMON_TOKEN`, activity
-`runtime_*`, CLI state `~/.local/share/lexa-runtimes` — breaking reinstall
-`lx machine uninstall && lx machine install`. Both tiers are
-ACTIVE and co-exist; the run popover picks per-run. Design rationale:
-`docs/ARCHITECTURE.md` §Runtimes — two active AI tiers (formerly ADR-0001, now merged here); runtime details: `docs/RUNTIMES.md`.
+Lexa has exactly **one** AI execution tier: the in-process **Assistant**. It
+runs in the server process — server-side TanStack AI `chat()`
+(`server/assistant/provider.ts`), per-project provider settings
+(`assistant_settings`, custom OpenAI-/Anthropic-compatible endpoints),
+server-side tools v1 (Exa web search, SSRF-guarded `fetch_url`, `read_s3_file`,
+PM reads), curated `project_memory` FTS5 facts, repo-content grounding from
+source-role repos, and a freeform chat surface on the same engine. Queue table
+`assistant_tasks` (`queued → running → completed|failed|cancelled`); thread
+state in `assistant_threads` (ModelMessage[] JSON, rolling summary). The
+queue's only consumer is the in-process HTTP stream handler — there is no
+external worker, no claim loop, and no heartbeat.
 
-| | Assistant | Blacksmith |
-|---|---|---|
-| Role | Writing + PM assistant | Coding agent |
-| Engine | Server-side TanStack AI `chat()` (`server/assistant/provider.ts`) | listener/daemon/warm `opencode serve` |
-| Queue consumer | HTTP stream handler, in-process | daemons via `claimNextTask` |
-| Thread state | `assistant_threads` (ModelMessage[] JSON, rolling summary) | `runtime_sessions` |
-| Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
-| Engine switching | default lane; freeform chat always assistant | per-project `engine='blacksmith'`: document threads + Generate route here (runtime-online guard, `.agents/` claim bundles); chat → 409 `ENGINE_NOT_SUPPORTED_FOR_CHAT` |
+**Product statement:** Lexa is self-hosted project management, not a software
+factory.
 
-**Amendments (accepted 2026-08-23/24, merged from ADR-0001):**
+### Removal record — the agent-runtime (Blacksmith) tier
 
-- **Two-agent catalog with id rebind (history):** exactly two builtin agents —
-  `assistant` ("Assistant Agent") and `blacksmith` ("Blacksmith Agent") — seeded in
-  the squashed `0001_init.sql` baseline as `hearth-assistant`/`hearth-blacksmith`,
-  with the generic `lexa` entry retired. Migration `0005_runtime_rename.sql`
-  atomically rebinds `runtime_tasks.agent_id`, `runtime_sessions.agent_id`,
-  `assistant_threads.agent_id`, and `lexa_agent_skills` junction rows from
-  `hearth-assistant`/`hearth-blacksmith` to `assistant`/`blacksmith`; because
-  `assistant_threads.agent_id` is rebound too, thread continuity is preserved. The
-  one-time thread reset belonged to the earlier pre-squash `lexa` →
-  `hearth-assistant` rebind — threads keyed on the retired `lexa` agent id saw an
-  unknown agent and started fresh.
-- **Per-project engine switching:** `assistant_settings.engine` ∈
-  `assistant|blacksmith` applies to document threads + Generate; enqueue branches
-  on it (kind row + runtime-online guard for blacksmith). Freeform Assistant Chat
-  always runs the assistant lane — under `engine='blacksmith'` chat returns 409
-  `ENGINE_NOT_SUPPORTED_FOR_CHAT`.
-- **Personal-overlay toggle:** member engine toggle is a client-side session
-  preference — never writes the project default; `engine` is admin-written
-  only. Toggle renders only when `engine_switcher_enabled=1`.
-- **Skills via junction:** per-agent skill availability =
-  `lexa_agent_skills` junction rows, admin-editable — no JSON columns.
-- **Vision chain:** `primarySupportsImages` checkbox drives two outcomes:
-  primary supports images → inline image parts; else attachments rejected
-  up front with 409 `VISION_NOT_CONFIGURED` (`vision_model` delegation
-  removed in the squashed baseline — columns kind/base_url/api_key/model/vision_model
-  dropped; legacy compat check remains but never fires).
-- **Full identifier rename (history):** Forge→Hearth (2026-08-24, in the
-  squashed `0001_init.sql` baseline), then Hearth→Runtimes (2026-09-24, migration
-  `0005_runtime_rename.sql`) — tables, routes, headers, env, activity types,
-  service/file names, CLI state, see intro paragraph. Breaking change gated by
-  atomic migration + mandatory repo/service test suites.
+The second tier, a coding-agent tier ("Blacksmith"), was removed end to end in
+the same change that produced this section. Deleted: `machines`, `runtimes`,
+`runtime_events`, `runtime_sessions`, `runtime_task_logs`; the
+`/api/runtimes/*` non-assistant route group (daemon heartbeat/claim, machine
+registry, warm sessions, run history, log feed, task create/cancel); the CLI
+machine/runtime commands and the CLI's daemon embed; the machine listener, its
+`systemd` unit provisioning, the per-runtime daemon protocol, sandbox/workspace
+provisioning, engine switching, and the `/runtimes` web shell. Renamed or
+slimmed rather than dropped: `runtime_tasks` → `assistant_tasks` (trimmed),
+`settings.runtime_repo_cap` → `assistant_repo_cap`, the agents/skills catalog
+slimmed to the single builtin `assistant` agent, `assistant_settings` rebuilt
+without `engine` / `engine_switcher_enabled`.
 
-Engine switching rationale: one project may want the zero-infrastructure
-assistant lane while another routes generation through daemon runtimes —
-`assistant_settings.engine` is the admin-written project default; the member
-toggle is a personal overlay (client-side session preference) shown only when
-`engine_switcher_enabled=1`. Skill availability per agent = junction rows only.
-Vision: `primary_supports_images=1` → inline image parts; else
-`VISION_NOT_CONFIGURED` (`vision_model` delegation removed in the squashed baseline).
+`docs/RUNTIMES.md` was deleted with it; every surviving assistant fact lives in
+this section plus LAYERS.md.
 
-- **Shared queue with a discriminator:** both tiers ride `runtime_tasks`;
-  `kind` ∈ `'assistant' | 'blacksmith'`. `claimNextTask` carries
-  `AND kind='blacksmith'` — daemons can never claim Assistant tasks; Assistant
-  streams claim via a kind-scoped conditional UPDATE.
-- **Catalog renamed Lexa Agents/Skills** (`lexa_agents` / `lexa_skills` /
-  `lexa_agent_skills`, in the squashed baseline): it is the behavioral spec for BOTH
-  renderers — prompt injection renders it for Assistant, `.agents/` file writing
-  renders it for Blacksmith. Routes `/api/agents` + `/api/skills` (hard
-  cutover from the pre-baseline agent/skill paths); claim-payload field names
-  (`agentMarkdown`/`skillMarkdown`) frozen for daemon wire compatibility.
-- **Assistant** runs per-project provider settings (`assistant_settings`, custom
-  OpenAI-/Anthropic-compatible endpoints), server-side tools v1 (Exa web
-  search, SSRF-guarded `fetch_url`, `read_s3_file`, PM reads), curated
-  `project_memory` FTS5 facts, and a freeform chat surface on the same engine.
-- **Blacksmith** is unchanged: machine/listener/daemon infrastructure remains
-  deliberately for coding work (shell, file edits, sandboxes).
+**Naming history (kept for archaeology only, all of it gone):** Forge→Hearth
+on 2026-08-24 (baked into the squashed `0001_init.sql` baseline),
+Hearth→Runtimes on 2026-09-24 via `0005_runtime_rename.sql`, tier removal on
+2026-09-26 via `0008_remove_agent_runtimes.sql`. Historical `runtime_*` activity
+type names are retained only so pre-0008 timeline rows still render; new
+emissions are `assistant_completed` / `assistant_failed` /
+`assistant_cancelled` (invariant #12 — terminal emission stays inside the same
+transaction as the status write).
+
+### Reintroduction rule
+
+Any future agent-runtime tier — a hosted coding agent, a per-machine daemon, a
+warm session pool, an external queue consumer — requires:
+
+1. a **new architecture decision recorded in this file** (not a config toggle,
+   not a follow-up doc), and
+2. a **security review** covering how the runner authenticates, what it can
+   reach, and what it can do to a workspace.
+
+Specifically, it must not casually resurrect the removed auth model: no
+`x-runtime-token` header, no `LXK_RUNTIME_DAEMON_TOKEN`, no per-daemon shared
+secret minted outside the `lxk_` API-key system. And it must not create a
+service dependency cycle of the kind invariant #1 forbids — a
+`TaskService → GitHubService`-style cycle, or an AI-tier service reaching into
+GitHub/task services in a way that makes the DAG untestable. Route
+orchestration stays in handlers.
+
+Rationale for the removal: the coding-agent tier was a software-factory
+capability bolted onto a project-management product. It owned a large
+operational surface (machine/deployment ops, an HTTP daemon protocol, sandbox
+provisioning, engine switching) that had to be maintained, secured, and
+documented, for a product whose job is the board and the wiki.
 
 **Consequences:** assistant features ship with the web app (deploy = image +
 one settings row); token streaming, tools, memory, multimodal become direct API
 surface; provider/vendor swap is a settings edit; Worker-portable by
-construction (no child processes in the Assistant path); feature velocity — most
-changes touch prompt/tool rows, not plumbing.
+construction (no child processes anywhere in the AI path); feature velocity —
+most changes touch prompt/tool rows, not plumbing. A crash mid-stream can
+leave an `assistant_tasks` row `running`; a boot-time sweep in
+`server/entry.ts` marks rows older than 30 minutes `failed` ("server
+restarted") so reset/resume never stays blocked.
 
 **Accepted risks:** TanStack AI is 0.x — pinned exact versions, `chat()`
 imported in exactly one service (`server/assistant/provider.ts`); upgrades are
-deliberate acts. Catalog becomes load-bearing — prompt quality depends on
-curated Lexa Agents/Skills rows (size discipline required). Two tiers must be
-labeled distinctly in UI — users will expect Blacksmith-grade results from
-Assistant runs otherwise. API keys held server-side plaintext (accepted for
-self-hosted threat model). Table renames fail at runtime, not compile time —
-gated by atomic migration plus mandatory repo/service test suites.
+deliberate acts. The catalog is load-bearing — prompt quality depends on
+curated Lexa Agents/Skills rows (size discipline required). API keys held
+server-side plaintext (accepted for the self-hosted threat model). Table
+renames fail at runtime, not compile time — gated by atomic migration plus
+mandatory repo/service test suites.
+
+**Catalog (kept, slimmed):** `lexa_agents` / `lexa_skills` /
+`lexa_agent_skills` with routes `/api/agents` + `/api/skills`; per-agent skill
+availability is the junction rows only (admin-editable, no JSON columns); the
+single builtin `assistant` agent renders the catalog into the system prompt.
+`AGENT_ENTITY_IN_USE` delete guard survives and now counts `assistant_tasks`.
+
+**Vision chain:** `primarySupportsImages` checkbox drives two outcomes:
+primary supports images → inline image parts; else attachments rejected up
+front with 409 `VISION_NOT_CONFIGURED` (`vision_model` delegation was removed
+in the squashed baseline).
 
 **Assistant service concern split (accepted 2026-08-27; formerly a standalone
 ADR, merged here):**
@@ -381,7 +379,7 @@ indistinguishable. Split into two Effect services behind a thin facade:
 Alternatives rejected: single service with internal branching (caps/registries
 stay coupled); full `buildStream` duplication per service (hotfix drift);
 moving `decideApproval` entirely to one side (`pendingWrites` serves both
-docTypes). Frontend cache keys were already separate
+docTypes). Frontend cache keys are already separate
 (`["assistant-chats",projectId]` vs
 `["assistant-thread",projectId,docType,docId]`) — no change. No DB migration, no
 new service cycle (`Assistant*` → repos/gateway only; the `TaskService` →
@@ -414,10 +412,15 @@ hits via class/tag name and the write executor — not a `TaskService` →
 /:slug/settings            → Project settings (columns, swimlanes, GitHub link, team assignment)
 /settings                  → role-redirect landing
 /settings/me               → profile, password change, sessions
-/settings/team             → team profile, members, projects, runtimes (team admin)
-/settings/project/:projectId → project settings hub (admin)
-/settings/workspace        → members, invites, teams, API keys, machines, rate limits, GitHub, Runtimes (superadmin)
-/runtimes                   → Runtimes run history (all projects)
+/settings/team             → team profile, members, projects (team admin)
+/settings/project/:projectId → project settings hub (admin; Assistant provider, write tools, memory, skill availability)
+/settings/workspace        → members, invites, teams, API keys, rate limits, GitHub, Assistant (superadmin)
+/admin/assistant            → Assistant control panel (superadmin) — tabbed shell + Overview (KPI, gateway health, recent runs, bindings summary)
+/admin/assistant/providers  → Assistant provider + model registry CRUD (superadmin)
+/admin/assistant/agents     → Assistant agents + skills (superadmin)
+/admin/assistant/usage      → Assistant usage + cost reporting (superadmin)
+/admin/assistant/runs       → Recent assistant runs (superadmin)
+/admin/assistant/bindings   → Per-project assistant bindings overview (superadmin)
 ```
 
 Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
@@ -467,8 +470,8 @@ now merged there); deploy flows: `docs/DEPLOYMENT.md`.
 ```
 lexa/
 ├── app/                      # TanStack Start routes + components
-│   ├── routes/               # dashboard, kanban, tasks, milestones, swimlanes, wiki, settings, runtimes
-│   ├── components/           # activity/, auth/, runtimes/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
+│   ├── routes/               # dashboard, kanban, tasks, milestones, swimlanes, wiki, settings, admin
+│   ├── components/           # activity/, assistant/, auth/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
 │   ├── entry.ts              # Bun.serve — boot, webhook, static/SPA fallback, /api stream cap + IP stamp
@@ -480,8 +483,7 @@ lexa/
 │   └── github/               # GitHub App client + webhook
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
-├── cli/                      # lx (operator CLI incl. deploy)
-├── daemon/                   # Runtimes daemon
+├── cli/                      # lx (operator CLI; task/wiki/project/github/keys — no deploy, no daemon)
 ├── scripts/                  # compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes
 └── package.json

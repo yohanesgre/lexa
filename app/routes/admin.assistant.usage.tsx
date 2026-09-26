@@ -1,21 +1,84 @@
-import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { useAssistantUsage, exportAssistantUsageCsv } from "../lib/assistant-usage.query";
+import { UsageKpiCards } from "../components/assistant/UsageKpiCards";
+import { UsageChart } from "../components/assistant/UsageChart";
+import { UsageByModelTable } from "../components/assistant/UsageByModelTable";
+import { PriceEditor } from "../components/assistant/PriceEditor";
+import { AssistantCallsTable } from "../components/assistant/admin/AssistantCallsTable";
 
+// /admin/assistant/usage — Usage & Costs tab, kept canonical (no redirect).
+// The /admin/assistant shell owns the header, tab bar, and superadmin gate;
+// this route renders the usage body only. Body = the previous usage page
+// verbatim, with Recent calls + Sync prices surfaced (D3).
 export const Route = createFileRoute("/admin/assistant/usage")({
   validateSearch: (search: Record<string, unknown>): { from?: string | undefined; to?: string | undefined } => ({
     from: typeof search.from === "string" && search.from ? search.from : undefined,
     to: typeof search.to === "string" && search.to ? search.to : undefined,
   }),
   ssr:false,
-  beforeLoad: ({ search }) => {
-    throw redirect({
-      to: "/runtimes/usage",
-      search: search as never,
-    } as never);
-  },
-  component: LegacyRedirect,
+  component: AssistantUsageRoute,
 });
 
-function LegacyRedirect() {
+export function AssistantUsageRoute() {
   const search = Route.useSearch() as { from?: string | undefined; to?: string | undefined };
-  return <Navigate to="/runtimes/usage" search={search as never} replace />;
+  const [from, setFrom] = useState(search.from ?? "");
+  const [to, setTo] = useState(search.to ?? "");
+  const [filters, setFilters] = useState<{ from?: string | null; to?: string | null }>({ from: search.from ?? null, to: search.to ?? null });
+
+  const { data, isLoading: usageLoading, error, refetch } = useAssistantUsage(filters);
+
+  useEffect(() => {
+    setFrom(search.from ?? "");
+    setTo(search.to ?? "");
+    setFilters({ from: search.from ?? null, to: search.to ?? null });
+  }, [search.from, search.to]);
+
+  const handleApply = () => setFilters({ from: from || null, to: to || null });
+  const handleExport = async () => {
+    await exportAssistantUsageCsv({ from: from || null, to: to || null });
+  };
+
+  return (
+    <>
+      {error ? (
+        <div className="card-panel" style={{ borderColor: "var(--lx-text-danger)", background: "var(--lx-bg-danger-subtle)" }}>
+          <div className="text-sm" style={{ color: "var(--lx-text-danger)" }}>{(error as Error).message}</div>
+        </div>
+      ) : null}
+
+      <UsageKpiCards summary={data?.summary} />
+
+      <section className="card-panel mt-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-display text-base weight-500 color-primary">Filters</h2>
+        </div>
+        <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="assistant-usage-from" className="field-label" style={{ marginBottom: 4 }}>From</label>
+            <input id="assistant-usage-from" aria-label="From date" className="prop-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="assistant-usage-to" className="field-label" style={{ marginBottom: 4 }}>To</label>
+            <input id="assistant-usage-to" aria-label="To date" className="prop-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
+          </div>
+          <button className="btn btn-primary btn-sm" style={{ alignSelf: "flex-end" }} onClick={handleApply}>Apply</button>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, alignSelf: "flex-end" }}>
+            <button className="btn btn-ghost btn-sm" onClick={handleExport}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1={12} y1={15} x2={12} y2={3} /></svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <UsageChart byDay={data?.byDay ?? []} isLoading={usageLoading} isError={!!error} onRetry={() => refetch()} />
+
+      <UsageByModelTable byModel={data?.byModel ?? []} isLoading={usageLoading} isError={!!error} onRetry={() => refetch()} summary={data?.summary ?? null} filters={filters} />
+
+      <AssistantCallsTable />
+
+      <PriceEditor byModel={data?.byModel ?? []} isLoadingUsage={usageLoading} isErrorUsage={!!error} />
+    </>
+  );
 }

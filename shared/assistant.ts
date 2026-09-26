@@ -2,8 +2,6 @@ import type { ID, ISODate } from "./types";
 
 export type ProviderKind = "openai_compatible" | "anthropic_compatible" | "openai_responses";
 
-export type RuntimeEngine = "assistant" | "blacksmith";
-
 export type AssistantReasoningEffort = "minimal" | "low" | "medium" | "high";
 
 export const ASSISTANT_PRE_INGRESS_TIMEOUT_MS = 30_000;
@@ -15,8 +13,6 @@ export interface AssistantSettingsMasked {
   searchProvider: "exa" | null;
   hasSearchKey: boolean;
   urlAllowlist: string | null;
-  engine: RuntimeEngine;
-  engineSwitcherEnabled: boolean;
   primarySupportsImages: boolean;
   reasoningEffort: AssistantReasoningEffort | null;
   writeTools: string[];
@@ -37,8 +33,6 @@ export interface AssistantSettingsInput {
   searchProvider?: "exa" | null | undefined;
   searchApiKey?: string | null | undefined;
   urlAllowlist?: string | null | undefined;
-  engine?: RuntimeEngine | undefined;
-  engineSwitcherEnabled?: boolean | undefined;
   primarySupportsImages?: boolean | undefined;
   reasoningEffort?: AssistantReasoningEffort | null | undefined;
   writeTools?: readonly string[] | string[] | undefined;
@@ -304,8 +298,6 @@ export interface AssistantProjectSettings {
   searchProvider: "exa" | null;
   hasSearchKey: boolean;
   urlAllowlist: string | null;
-  engine: RuntimeEngine;
-  engineSwitcherEnabled: boolean;
   reasoningEffort: AssistantReasoningEffort | null;
   writeTools: string[];
 }

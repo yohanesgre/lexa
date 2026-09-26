@@ -4,9 +4,9 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
-import { RuntimePopover } from "./runtimes/RuntimePopover";
-import { RuntimeReviewSurface } from "./runtimes/RuntimeReviewSurface";
-import { useRuntimeReview, type RuntimeReviewIdentity } from "./runtimes/useRuntimeReview";
+import { AssistantPopover } from "./assistant/panel/AssistantPopover";
+import { AssistantReviewSurface } from "./assistant/AssistantReviewSurface";
+import { useAssistantReview, type AssistantReviewIdentity } from "../lib/useAssistantReview";
 import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -116,7 +116,7 @@ export function Toolbar({
   reviewActive: boolean;
   appliedTaskId: string | null;
   rejectedTaskId: string | null;
-  onReview?: (text: string, identity: RuntimeReviewIdentity) => void;
+  onReview?: (text: string, identity: AssistantReviewIdentity) => void;
 }) {
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeAnchor, setRuntimeAnchor] = useState<DOMRect | null>(null);
@@ -214,7 +214,7 @@ export function Toolbar({
       </div>
       </div>
       {runtime && runtimeOpen && (
-        <RuntimePopover
+        <AssistantPopover
           editor={editor}
           slug={runtime.slug}
           documentType={runtime.documentType}
@@ -261,7 +261,7 @@ export function TextEditor({
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       lastPointerDownInside.current =
-        wrapperRef.current?.contains(target) === true || target?.closest("[data-runtime-popover]") !== null;
+        wrapperRef.current?.contains(target) === true || target?.closest("[data-assistant-popover]") !== null;
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
@@ -307,7 +307,7 @@ export function TextEditor({
         blur: (_view, event) => {
           const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
           if (related !== null) {
-            return wrapperRef.current?.contains(related) === true || related?.closest("[data-runtime-popover]") !== null;
+            return wrapperRef.current?.contains(related) === true || related?.closest("[data-assistant-popover]") !== null;
           }
           return lastPointerDownInside.current;
         },
@@ -321,7 +321,7 @@ export function TextEditor({
     },
   });
 
-  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useRuntimeReview(editor, onReviewStateChange);
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useAssistantReview(editor, onReviewStateChange);
 
   if (!editor) return null;
 
@@ -331,7 +331,7 @@ export function TextEditor({
     <div className={cn("editor-wrapper", className, review && "is-reviewing")} ref={wrapperRef}>
       <Toolbar editor={editor} headingLevel={headingLevel} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
       {review && (
-        <RuntimeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+        <AssistantReviewSurface skillName={review.skillName} agentName={review.agentName} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
       )}
       <EditorContent editor={editor} className="editor-content" />
     </div>

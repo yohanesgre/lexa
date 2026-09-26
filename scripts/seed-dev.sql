@@ -374,5 +374,5 @@ VALUES
     'Draft access notes — work in progress.',
     'autosave', datetime('now', '-1 day'));
 
--- Assistant Gateway: no seed provider — registry is superadmin-managed (see /runtimes/providers).
+-- Assistant Gateway: no seed provider — registry is superadmin-managed (workspace settings → Integrations).
 -- Projects start with no assistant_settings row; user creates provider via POST /api/admin/assistant/providers.

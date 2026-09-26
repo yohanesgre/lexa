@@ -9,7 +9,7 @@ import {
   useCancelAssistantTask,
   useTaskAttachments,
   useWikiAttachments,
-  useRuntimeTask,
+  useAssistantTask,
 } from "./queries";
 import { useAssistantStream } from "./use-assistant-stream";
 import {
@@ -20,7 +20,7 @@ import {
   buildRunRequest,
   resolveRunSelection,
   getSelection,
-} from "../components/runtimes/assistant/assistant-panel-utils";
+} from "../components/assistant/panel/assistant-panel-utils";
 
 // Assistant panel session logic (assistant-popover.html). Split from the panel
 // component: data/skill selection here, run lifecycle here, markup in the
@@ -77,7 +77,7 @@ function useAssistantRun(args: PanelArgs & { prompt: string; effectiveSkillId: s
   const running = stream.status === "connecting" || stream.status === "streaming";
   const done = stream.status === "done";
   const failed = stream.status === "error";
-  const { data: assistantTaskData } = useRuntimeTask(taskId, !!taskId && done);
+  const { data: assistantTaskData } = useAssistantTask(taskId, !!taskId && done);
 
   const selection = getSelection(editor);
 

@@ -52,7 +52,7 @@ vi.mock("./useWikiEditor", () => ({
 }));
 
 vi.mock("./WikiEditSplit", () => ({ WikiEditSplit: () => null }));
-vi.mock("../runtimes/SourcesSection", () => ({ SourcesSection: () => null }));
+vi.mock("../document/SourcesSection", () => ({ SourcesSection: () => null }));
 vi.mock("./ShareDialog", () => ({ ShareDialog: () => null }));
 vi.mock("../../lib/queries", () => ({
   useRevisions: () => ({ data: [], isLoading: false, error: null }),

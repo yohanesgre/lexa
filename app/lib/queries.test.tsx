@@ -9,9 +9,9 @@ import type { Board, Task, Project, Swimlane, Column, FieldConfig } from "../../
 import {
   useProjects, useDashboard, useBoard, useTasks, useFieldConfig, useWikiPages, useWikiPage,
   useSearchWikiPages, useRevisions, useColumns, useSwimlanes, useApiKeys, useUsers,
-  useProjectMembers, useRuntimes, useMachines, useAgents, useSkills,
-  useRecentRuntimeTasks, useRuntimeTaskHistory, useSources, useTaskLinks, useTaskSearch,
-  useTaskActivity, useRuntimeTask, useRuntimeTaskLogs, useRecentRuntimeTask,
+  useProjectMembers, useAgents, useSkills,
+  useSources, useTaskLinks, useTaskSearch,
+  useTaskActivity, useAssistantTask,
   useRateLimit, useGithubSettings,
   deriveTaskList, selectProjectHealth, prependActivity,
 } from "./queries";
@@ -109,6 +109,19 @@ describe("query hooks — keys + URLs", () => {
     expect(data[1]).toMatchObject({ ownerEmail: "maria@example.com", ownerName: "Maria" });
     expect(data[0]).not.toHaveProperty("ownerEmail");
     expect(queryClient.getQueryCache().findAll({ queryKey: ["api-keys"], exact: true })).toHaveLength(1);
+  });
+
+  it("useAssistantTask fetches /api/assistant/tasks/:id and keys on the id", async () => {
+    routes.set("GET /api/assistant/tasks/at1", { id: "at1", projectId: "p1", status: "completed", documentTitle: "Doc" });
+    const { result } = renderHook(() => useAssistantTask("at1", true), { wrapper });
+    const data = await awaitData(result);
+    expect(data).toMatchObject({ id: "at1", status: "completed" });
+    expect(queryClient.getQueryCache().findAll({ queryKey: ["assistant-task", "at1"], exact: true })).toHaveLength(1);
+  });
+
+  it("useAssistantTask stays idle without an id", () => {
+    const { result } = renderHook(() => useAssistantTask(null, true), { wrapper });
+    expect(result.current.fetchStatus).toBe("idle");
   });
 });
 describe("deriveTaskList", () => {

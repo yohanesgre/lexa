@@ -199,8 +199,8 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it; the
   old `lexa-cli deploy` compose flow is gone (removed in cli-v2026.2.0).
-- Runtime daemons unaffected — already external machines reached over HTTP; outbound
-  subrequest budget 50/request free, 1000 paid.
+- The AI path is fully in-process (the agent-runtime tier is removed) — no
+  external runner to host; outbound subrequest budget 50/request free, 1000 paid.
 
 ## Object storage (R2)
 
@@ -229,15 +229,16 @@ months; one wire-format break already shipped). Core is web-standard JS — work
 clean. Official `@cloudflare/tanstack-ai` 0.2.1 exists (Workers AI binding + AI
 Gateway routing; published from `cloudflare/ai`, not the TanStack monorepo).
 
-Decision (2026-08-22): the chat() path IS the assistant tier — **Assistant** (writing
-assistant and PM assistant). The daemon/opencode runtime remains for coding tasks —
-**Blacksmith**; both tiers are active and co-exist under the Runtimes umbrella (the
-shared queue/catalog: `runtime_*` tables feed both tiers). See `docs/ARCHITECTURE.md` §Runtimes — two active AI tiers.
+Decision (2026-08-22, amended 2026-09-26): the `chat()` path IS the only AI tier —
+**Assistant** (writing assistant + PM assistant), in-process. The daemon/opencode
+coding tier was removed end to end on 2026-09-26 (see `docs/ARCHITECTURE.md`
+§Assistant → removal record); there is no external runner, no claim loop, and
+nothing Workers-hostile left in the AI path. See `docs/ARCHITECTURE.md` §Assistant.
 
 Shape:
 
 ```
-POST /api/runtimes/tasks → queue → server-side chat():
+POST /api/assistant/tasks → queue → server-side chat():
   adapter       = openaiCompatible | anthropic — custom baseUrl + apiKey from
                   settings (both verified custom-endpoint-capable; OpenRouter is
                   only an example endpoint)
@@ -254,9 +255,9 @@ POST /api/runtimes/tasks → queue → server-side chat():
   (TipTap→markdown). Middleware hooks mutate prompts/model per request;
   `ctx.defer()` for post-stream DB writes; AbortController cancels on client
   disconnect.
-- Rules/skills need no migration: `lexa_agents`/`lexa_skills` schema feeds BOTH
-  renderers — prompt injection on this path, `.agents/` file writing on the daemon
-  path. Skills may additionally declare tool bundles bound per call.
+- Rules/skills: `lexa_agents`/`lexa_skills` schema feeds prompt injection on this
+  path (the only renderer — the `.agents/` file-writing renderer is gone with the
+  daemon tier). Skills may additionally declare tool bundles bound per call.
 - Memory = three layers: Lexa DB via read tools (live truth, never memorized);
   thread transcripts (`withPersistence`, driver-agnostic store — bun:sqlite now,
   D1 later); curated `project_memory` FTS5 table for judgment-type facts only.
@@ -266,15 +267,16 @@ POST /api/runtimes/tasks → queue → server-side chat():
   throw — the SSE bridge must translate it. Every loop iteration (provider call +
   tool subrequests) draws from the Worker subrequest budget (50 free / 1000 paid
   per request) — `maxIterations` + repo caps double as budget guards.
-- Capability vs daemon+opencode path: repo/source reads covered (pre-fetch today,
-  agentic `read_repo_file`-style tools when wanted); PM reads via injected memory
-  block + task tools (PM writes deferred). Genuinely lost: shell/file-edit/exec,
-  sandbox filesystem work — coding territory, which is what the Blacksmith
-  runtime lane is for.
-- **Verdict: replace for assistants, keep daemon for coding.** Both behind the same
-  `Lexa/RuntimeService` service interface; UI labels modes distinctly.
-- Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/RuntimeService` service
-  so SDK swaps stay contained.
+- Capability: repo/source reads covered (pre-fetch today, agentic
+  `read_repo_file`-style tools when wanted); PM reads via injected memory
+  block + task tools. Not covered, and deliberately so: shell/file-edit/exec and
+  sandbox filesystem work — coding territory, removed with the agent-runtime tier
+  (reintroducing it needs a new architecture decision + security review).
+- **Verdict: one in-process Assistant tier**, no daemon path. Services
+  `Lexa/AssistantChatService` / `Lexa/AssistantTaskService` behind the
+  `Lexa/Assistant` facade.
+- Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/Assistant`
+  service boundary so SDK swaps stay contained.
 
 ## Top risks
 
@@ -289,8 +291,9 @@ POST /api/runtimes/tasks → queue → server-side chat():
    under concurrency; kanban drag storms could hit overload errors. Load test before
    committing.
 4. **TanStack AI 0.x churn** — pin versions, contain behind own service.
-5. **Assistant-vs-coding capability cliff** — users may expect daemon-grade results
-   from assistant runs; label the two modes distinctly in UI.
+5. **Assistant capability scope** — the coding tier (shell, file edits, sandboxes)
+   is gone by design; users expecting a coding agent get an explicit explanation
+   rather than a degraded mode.
 
 ## Bottom line
 

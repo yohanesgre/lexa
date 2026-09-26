@@ -34,20 +34,18 @@ All non-2xx responses share one shape:
 | 400 | — | Payload schema validation failures are rejected by the platform before handlers run; the body is the platform's response, not the envelope above. No domain code maps to 400. |
 | 401 | `UNAUTHORIZED` | Missing or invalid API key or session cookie (auth middleware in `server/api/middleware.ts`; see Auth) |
 | 401 | `GITHUB_WEBHOOK_ERROR` | Webhook signature mismatch (before body parsing) |
-| 403 | `FORBIDDEN` | Superadmin- or team-admin-gated endpoint called without authority, project access denied (details: `{ message }`), or machine-secret mismatch on runtime-event claim |
+| 403 | `FORBIDDEN` | Superadmin- or team-admin-gated endpoint called without authority, or project access denied (details: `{ message }`) |
 | 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
 | 403 | `SOLE_OWNER` | Demoting or removing the last owner of a team (details: `{ message }` — transfer ownership first) |
 | 403 | `CANNOT_DELETE_SELF` | Removing the last superadmin / self-removal via the workspace member routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin/workspace/team-member endpoints |
 | 404 | `TEAM_NOT_FOUND` `INVITE_NOT_FOUND` `SESSION_NOT_FOUND` | Unknown team / invite / own-session id |
-| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `RUNTIME_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
+| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `ASSISTANT_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 404 | `SHARE_LINK_NOT_FOUND` | Wiki share link unknown, expired, or revoked — all three return this identical envelope (no existence oracle) |
 | 404 | `ATTACHMENT_NOT_FOUND` | Unknown attachment id, blob missing, or attachment outside the shared subtree on the share route |
 | 409 | `SLUG_TAKEN` | Duplicate project slug, wiki slug, or team slug (details: `{ slug }`); also the constraint fallback on project update/delete |
 | 409 | `INVITE_PENDING` | An invite is already pending for that email (details: `{ email }`) |
-| 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
 | 409 | `TASK_HAS_CHILDREN` | Task delete hits a constraint (defensive — subtask links cascade on delete) |
-| 409 | `NO_RUNTIME_ONLINE` | Create runtime task with no daemon online |
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children / milestone with sprints (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
@@ -55,9 +53,8 @@ All non-2xx responses share one shape:
 | 409 | `DEADLINE_AFTER_LANE` | Task deadline later than its lane's due date (details: `{ date }`) |
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
-| 409 | `AGENT_ENTITY_IN_USE` | Delete agent/skill still used by runtime tasks (details: `{ kind, name, count }`) |
+| 409 | `AGENT_ENTITY_IN_USE` | Delete agent/skill still used by assistant tasks (details: `{ kind, name, count }`) |
 | 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
-| 409 | `TEAM_HAS_RUNTIMES` | Delete team while team-scoped runtimes are bound (details: `{ teamId, count }` — reassign or detach first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
 | 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`) |
@@ -73,7 +70,7 @@ All non-2xx responses share one shape:
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
 | 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant provider settings first save without an apiKey (`apiKey required on first save`); Assistant attachment scope/cap violations |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/runtimes/daemon/*`, `/api/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware, otherwise one shared bucket |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (one shared bucket; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
@@ -86,7 +83,6 @@ All non-2xx responses share one shape:
 | 409 | `ASSISTANT_TASK_ACTIVE` | Thread reset or second chat stream while an Assistant stream is running |
 | 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row |
 | 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
-| 409 | `ENGINE_NOT_SUPPORTED_FOR_CHAT` | Freeform chat while the project engine is `blacksmith` (chat always runs the assistant lane) |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
@@ -124,7 +120,7 @@ injection is removed — browsers authenticate `/api/*` via the session cookie.
   never edited at runtime (no role-editing endpoint; legacy `admin` → `superadmin`).
   A `requireSuperadmin` gate (403 `FORBIDDEN`) protects project
   create/update/delete, column and swimlane mutations, `PUT field-config`, all
-  `/api/settings/*`, all `/api/admin/*`, Runtimes agent/skill CRUD + reset + skill
+  `/api/settings/*`, all `/api/admin/*`, Assistant agent/skill CRUD + reset + skill
   binding, and the teams/workspace lifecycle endpoints (see Teams & Workspace).
   Team-admin authority comes from the org `member.role` (owner/admin) on the
   team, never from `users.role`.
@@ -145,11 +141,6 @@ injection is removed — browsers authenticate `/api/*` via the session cookie.
     /api/share/:token/attachments/:id` joins this exemption — same bucket,
     token validated per request.
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
-  - `/api/runtimes/daemon/*`, `/api/runtimes/register`, and
-    `/api/runtimes/sessions` — also accept the
-    daemon token (`x-runtime-token: <LXK_RUNTIME_DAEMON_TOKEN>` header) in place of a key
-    (`/api/runtimes/sessions` joins the daemon's PUT/DELETE and the browser's
-    GET/reset)
 - **Login rate limit (R17):** failed logins on `/api/auth/sign-in/email` are
   throttled by an in-process limiter (5 attempts/60s per email, 15 min
   lockout; success resets — better-auth 1.6.27 has NO rate-limit plugin, so
@@ -168,7 +159,7 @@ type TipTapDoc = { type: "doc"; content: unknown[] };
 
 interface ProjectRepo {
   repo: string;                   // "owner/name"
-  sourceRole: boolean;            // Runtimes context + project label
+  sourceRole: boolean;            // Assistant grounding + project label
   workspaceRole: boolean;         // issue link/create/sync
 }
 
@@ -341,57 +332,9 @@ interface ApiKey {
   lastUsedAt: ISODate | null;
 }
 
-interface RuntimeModel {
-  id: string;        // full "provider/model" id, e.g. "opencode/deepseek-v4-flash"
-  provider: string;  // e.g. "opencode", "deepseek", "anthropic"
-  name: string;      // human-readable description from the agent's model list
-}
-
-interface Runtime {
+interface AssistantTask {
   id: ID;
-  name: string;
-  provider: "opencode" | "hermes" | "command-code";
-  machineId: ID | null;
-  teamId: ID | null;           // owning team; null = global runtime (superadmin-owned, claims any team's tasks)
-  agent: string;           // CLI persona flag (opencode --agent); "" = default
-  model: string;           // full "provider/model" id — passed verbatim to --model
-  printLogs: boolean;
-  logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR";
-  extraArgs: string[];
-  modelsCatalog: RuntimeModel[];  // live list from lx; [] = offline/hermes/failure
-  agentsCatalog: Array<{ id: string; name: string }>; // reported by lx
-  status: "online" | "offline";
-  lastError: string | null;   // last daemon failure (e.g. revoked key); cleared on live heartbeat/register
-  hostname: string;
-  lastSeen: ISODate | null;
-  createdAt: ISODate;
-}
-
-interface Machine {
-  id: string;              // "hostname-<unique>" (legacy UUID ids keep working)
-  hostname: string;
-  clis: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
-  lastSeen: ISODate | null;  // null = bound, not listening
-  createdAt: ISODate;
-}
-
-interface RuntimeEvent {
-  id: ID;
-  machineId: ID;
-  action: "install" | "update" | "remove";
-  agentCli: "opencode" | "hermes" | "command-code";
-  teamId: ID | null;            // team the installed runtime binds to; null = global
-  apiKeyId: ID | null;
-  status: "pending" | "claimed" | "completed" | "failed";
-  error: string | null;
-  createdAt: ISODate;
-  claimedAt: ISODate | null;
-  finishedAt: ISODate | null;
-}
-
-interface RuntimeTask {
-  id: ID;
-  runtimeId: ID | null;
+  key: string;             // ticket key of the document task ("" for wiki) — display only
   projectId: ID;
   documentType: "task" | "wiki";
   documentId: string;
@@ -402,11 +345,9 @@ interface RuntimeTask {
   skillName: string;
   extraPrompt: string;
   selection: string;
-  docContext: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   result: string | null;
   error: string | null;
-  kind: "blacksmith" | "assistant";  // queue discriminator — daemons claim only blacksmith
   createdAt: ISODate;
   startedAt: ISODate | null;
   finishedAt: ISODate | null;
@@ -730,9 +671,8 @@ GET    /api/projects/:slug/tasks/:id
   The same alias is accepted for task ids carried in payloads/query on the
   endpoints that resolve them: `parentId` on POST /tasks, `toTaskId` on
   POST /tasks/:id/links, `beforeTaskId`/`afterTaskId` on POST /tasks/:id/move,
-  `exclude` on GET /tasks/search, the `:id` of `/documents/task/:id/sources`
-  (`:type=task`), and `documentId` on `/runtimes/sessions*`
-  (`documentType=task`). A resolvable key becomes the task UUID; a UUID is
+  `exclude` on GET /tasks/search, and the `:id` of `/documents/task/:id/sources`
+  (`:type=task`). A resolvable key becomes the task UUID; a UUID is
   passed through unchanged. On `exclude` (a filter, not a lookup) an
   unresolvable key is ignored — no exclusions, never a 404.
 
@@ -861,7 +801,8 @@ DELETE /api/projects/:slug/tasks/:id/comments/:commentId
   (title/description/priority/type/assignees — no diffs) · `archived` ·
   `restored` · `deleted` · `link_added` · `link_removed` · `source_added` ·
   `source_removed` · `github_linked` · `github_unlinked` · `github_synced`
-  (webhook-driven) · `runtime_completed` · `runtime_failed` · `runtime_cancelled` ·
+  (webhook-driven) · `assistant_completed` · `assistant_failed` · `assistant_cancelled` ·
+  `runtime_completed` · `runtime_failed` · `runtime_cancelled` (legacy/historical only) ·
   `commented` · `comment_deleted`.
 - Messages frozen at write time (e.g. `"Maria moved from In Progress to Done"`).
   Column renamed later → old messages keep the old name (by design).
@@ -1273,11 +1214,7 @@ body { name*, slug? }
 DELETE /api/teams/:teamId  (superadmin only)
 → 204 | 403 FORBIDDEN | 404
   | 409 TEAM_HAS_PROJECTS { count }   (blocked while the team owns projects — reassign first)
-  | 409 TEAM_HAS_RUNTIMES { teamId, count }  (FK backstop: blocked while
-    team-scoped runtimes are bound — reassign or PATCH /api/runtimes/:id
-    { teamId: null } first)
-  Cascades: memberships. Runtimes block (ON DELETE RESTRICT); projects block
-  at the service guard.
+  Cascades: memberships. Projects block at the service guard.
 
 GET    /api/teams/:teamId/members     (team admin own team / superadmin)
 → 200 { data: TeamMember[] }
@@ -1378,267 +1315,29 @@ Handled: event "issues" with payload.action closed | reopened | edited
   (GitHub sends the transition in the payload, not in the header)
 ```
 
-### Runtimes (AI execution runtime)
+
+### Document sources + Agents & Skills catalog
 
 ```
-POST   /api/runtimes/register        (daemon child; x-runtime-token or Bearer)
-body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, model?, hostname?, teamId? }
-→ 201 Runtime
-  teamId omitted/NULL = no explicit payload team; the server infers a binding.
-  A non-null teamId scopes the runtime to that team's tasks; global
-  (superadmin-owned) claims any team's project tasks.
-  (R13: team admin registers for own team; superadmin any team + global.)
-  Team resolution order: explicit payload team → the machine's latest setup
-  event (runtime_events.team_id) for this provider with a non-null
-  team (the web wizard's team picker binds the runtime without the daemon
-  sending it) → the existing runtime row's team on re-registration → global
-  (no team binding; the first-install default). A NULL team in that latest
-  event means "no team binding for inference", NOT explicit Global — it never
-  overrides an existing scoped row. Explicit global is a first install or
-  PATCH teamId: null.
+# ── Document sources (assistant grounding; browser, Bearer) ──
+GET    /api/projects/:slug/documents/:type/:id/sources
+→ 200 { data: DocumentSource[] }
 
-PATCH  /api/runtimes/:id              (browser)
-body { name?, provider?, agent?, model?, printLogs?, logLevel?,
-       extraArgs?: string[], teamId?: string | null }
-→ 200 Runtime
-  | 403 FORBIDDEN (a teamId field requires superadmin)
-  | 404 RUNTIME_NOT_FOUND | 404 TEAM_NOT_FOUND (unknown teamId)
-  (team admin: own team's runtimes only; superadmin: all + global)
-teamId scopes the runtime to that team; explicit null detaches it to a global runtime
-(a later register re-infers from the latest non-null event team, if any)
-(superadmin-owned, claims any team's tasks). The other fields are
-server-authoritative config. Edits apply to the daemon's next claim — no
-restart needed. provider switches
-which CLI the daemon spawns (the daemon machine must have it installed);
-agent is the CLI's internal persona flag (opencode --agent build/plan; empty =
-default) — labelled "Persona" in the UI to distinguish it from Lexa's own
-agents (rule bundles). extraArgs are appended verbatim to the agent CLI spawn
-(no shell). model stores the full "provider/model" id (e.g. "opencode/deepseek-v4-flash") —
-passed verbatim
-to --model. hostname/status are daemon-reported and not editable.
+POST   /api/projects/:slug/documents/:type/:id/sources
+body { kind*: "wiki"|"external", ref* }   (wiki = page slug; external = URL)
+→ 201 DocumentSource
+  | 404 PAGE_NOT_FOUND                     (wiki slug unknown)
+  | 502 SOURCE_FETCH_ERROR                 (bad URL / private-IP block / fetch failed upstream)
+  | 422 SOURCE_UNREACHABLE                 (DNS or connection failure after the SSRF guard)
 
-GET    /api/runtimes?teamId=
-→ 200 { data: Runtime[] }                  (offline if last_seen > 2 min ago)
-  ?teamId= filter: team admin — own team only; superadmin — any team, plus
-  global (team_id NULL) runtimes. Claim rule: a runtime claims a task
-  only when team_id IS NULL (global) OR team_id = the task's project.team_id.
-
-DELETE /api/runtimes/:id              (browser)
-→ 204 | 404 RUNTIME_NOT_FOUND
-  (team admin: own team's runtimes only; superadmin: all + global)
-Removal never blocks: it queues a machine-scoped `remove` event (delivered
-whenever the machine's listener next heartbeats — the listener kills the
-matching child + env directory) and deletes the runtime row. A machine hosts
-at most one runtime per agent CLI, so the whole (machine, provider) pair is
-removed — keeping host state consistent with the provider-scoped event.
-Runtimes without a machine are deleted directly.
-
-POST   /api/runtimes/daemon/heartbeat         (daemon child)
-body { runtimeId* }
-→ 200 { ok: true }
-The daemon reports liveness. `lx machine listen` discovers
-agent/model catalogs and sends them through the machine heartbeat. A live
-heartbeat clears the runtime's last_error. A revoked runtime key makes every
-daemon call return 401 — the daemon exits with code 3 and the listener does
-NOT respawn it; the listener relays the failure on its next machine heartbeat
-(daemonErrors) so the runtime row shows last_error = "API key revoked".
-Recovery: re-run Setup runtime (install event delivers a fresh key).
-
-POST   /api/runtimes/daemon/claim             (daemon)
-body { runtimeId* }
-→ 200 { task: RuntimeTask | null, provider, agent, model: string, printLogs: boolean,
-        logLevel: ""|"DEBUG"|"INFO"|"WARN"|"ERROR", extraArgs: string[], prompt: string,
-        agentMarkdown: string, skillMarkdown: string, skillIds: string[],
-        repoContent: [{ owner, repo, path, content }],
-        runtimeSessionId: string | null, agentId: string, skillId: string }
-        skillIds = full current skill-id set; the daemon prunes stale
-        .agents/skills/<id> dirs not in this list (opencode auto-discovers
-        every bundle in that dir)
-  (oldest queued, FIFO; marks running. provider + agent + model + printLogs +
-  logLevel + extraArgs are the runtime's server-side config so the daemon
-  spawns the configured CLI with the latest settings. prompt is the
-  server-built task prompt (context + output contract; empty = the daemon
-  falls back to its local minimal build).
-  agentMarkdown/skillMarkdown are the task's agent + skill instructions — the
-  daemon writes them into the run dir as AGENTS.md + .agents/<skill>/SKILL.md
-  (files-only delivery, no host store).
-  repoContent: best-effort linked-repo files for grounding (Contents: Read) —
-  [] when the task links no GitHub repo, GitHub is unconfigured, or any fetch
-  failed (a claim never fails for missing context). The daemon writes them
-  into repo-content/ (+ MANIFEST.md) and the prompt points the agent there.
-  owner = the GitHub owner, repo = full "owner/repo", path = repo-relative
-  path, content = UTF-8 text (≤ 256 KB per file, ≤ 512 KB total, ≤ 50 files,
-  ≤ 3 repos).
-  runtimeSessionId: the warm-session continue-vs-mint verdict — the mapped
-  runtime session id when a runtime_sessions row exists for (documentType,
-  documentId, runtimeId) AND its agent/skill match the task's, else null
-  (the daemon then mints a fresh session on its serve server). agentId/skillId
-  are the task's own — what a future mapping must match. Only meaningful for
-  provider "opencode"; hermes/command-code ignore it.)
-
-# ── Runtime warm sessions (document ↔ runtime agent conversation mapping) ──
-GET    /api/runtimes/sessions?documentType=&documentId=   (browser)
-→ 200 { data: Array<RuntimeSession> }
-RuntimeSession = { documentType, documentId, runtimeId, runtimeSessionId,
-  provider, agentId, skillId, createdAt, updatedAt } (camelCase)
-The mapping tells which agent-side conversation (opencode serve session id)
-the next runtime task on this document should continue. Missing/invalid query
-params → { data: [] } (sessions are document-agnostic metadata — never 404).
-
-PUT    /api/runtimes/sessions                   (daemon)
-body { documentType*, documentId*, runtimeId*, runtimeSessionId*, provider*,
-       agentId*, skillId* }
-→ 204
-Upsert called by the daemon BEFORE the run starts (pre-spawn mapping write,
-spec §8 step 3) and to rewrite the row on stale-session retry. provider is
-"opencode"|"hermes"|"command-code"; only opencode writes rows in v1.
-
-DELETE /api/runtimes/sessions                   (daemon)
-body { documentType*, documentId*, runtimeId* }
-→ 204
-Daemon-side drop on cancel/timeout. Always allowed — NEVER 409: the in-flight
-run is gone, nothing will re-write the row.
-
-POST   /api/runtimes/sessions/reset             (browser)
-body { documentType*, documentId*, runtimeId* }
-→ 204 | 409 RUNTIME_SESSION_ACTIVE
-User-facing reset: deletes the mapping row so the next run mints a new
-session. 409 while a task on this document+runtime is queued or running —
-otherwise the run's completion would re-write the row the user just deleted
-and silently undo the reset. Deleting a missing mapping is 204, never 404.
-
-# ── Runtime setup events (web wizard → machine CLI listener) ──
-POST   /api/runtimes/events           (browser)
-body { machineId*, action*: "install"|"update", agentCli*, teamId?, apiKeyId?, rawKey? }
-→ 201 RuntimeEvent
-  | 404 MACHINE_NOT_FOUND / API_KEY_NOT_FOUND
-The wizard sends machine + agent CLI + team (superadmin picks any team or
-Global). Provider/model, agent persona,
-logging, and extra args are configured after setup. Install creates a FRESH API
-key; rawKey is verified against the stored SHA-256 hash and held ONLY in memory.
-The event's team_id is applied to the runtime when the daemon registers it.
-
-POST   /api/runtimes/events/claim     (listener; Bearer + x-machine-secret)
-body { machineId* }   header: x-machine-secret
-→ 200 { event: RuntimeEvent | null, rawKey: string | null }   (null = none pending)
-  | 403 FORBIDDEN ("machine secret mismatch" — identical for missing machine,
-    legacy '' secret, missing header, wrong secret; no existence oracle)
-Oldest pending event for that machine, marked claimed. rawKey is delivered ONCE
-here (removed from the in-memory store); null if the claim TTL (5 min) expired.
-A claimed event is reclaimed after 2 min if never completed.
-The secret binds machine identity: it is minted once at register, returned a
-single time, and required on every claim — a key holder without the machine's
-secret cannot hijack another machine's pending install event.
-
-POST   /api/runtimes/events/:id/complete   (listener)  → 200 RuntimeEvent
-POST   /api/runtimes/events/:id/fail       (listener)  body { error* } → 200 RuntimeEvent
-  (complete/fail only transition from 'claimed')
-
-GET    /api/runtimes/events/:id       (browser)  → 200 RuntimeEvent
-GET    /api/runtimes/events           (browser)  → 200 { data: RuntimeEvent[] }
-  ?machineId=<id> filters by machine
-
-# ── Machine registry and CLI catalogs ──
-POST   /api/runtimes/machines/register             (cli login)
-body { id*, hostname*, secret? }
-→ 200 { machine, secret: string | null }
-  | 409 MACHINE_ID_TAKEN { id, reason: "hostname" | "legacy" | "secret_mismatch" }
-Binds a machine: registers WITHOUT touching last_seen — a logged-in machine is
-"bound, not listening" (last_seen stays NULL until its listener heartbeats).
-Unknown id → minted a fresh 43-char secret, returned EXACTLY ONCE. Known id +
-hostname + secret match → idempotent no-op, secret never re-returned. Known id
-with mismatched/wrong secret or a legacy '' secret → 409 (remove the machine
-and re-register). Machine ids are `hostname-<unique>` (new machines; legacy
-UUID ids keep working). The listener persists the secret at
-`~/.lexa/<host>/machine-secret` (chmod 600).
-
-POST   /api/runtimes/machines/heartbeat          (listener)
-body { id*, hostname?, clis?: [{ provider, version }],
-       runtimes?: [{ runtimeId, agentCli, models, agents }],
-       daemonErrors?: [{ runtimeId, error }] }
-→ 200 Machine & { projects: [{ id, name, slug, description }] }
-  projects = full project index; the listener provisions one workspace dir
-  per project under ~/.lexa/<host>/projects/ and keeps its local lookup fresh.
-Upserts a machine row (marks it listening). The CLI persists id in
-~/.lexa/<host>/machine-id. clis = installed agent CLIs probed at listener start
-(opencode/cmd --version; hermes skipped). daemonErrors relay daemon failures
-the daemon itself can't report (revoked key → exit code 3) — stored on the
-matching runtime row as last_error. Also runs the stuck-task sweep: 'running'
-runtime tasks whose runtime has been offline > 10 min are re-queued, and stale
-'running' runs (started > RUNTIME_STALE_RUN_MIN, default 30m, runtime offline
-or gone) are hard-deleted — task + log — since the runner is dead and will
-never post a result.
-Catalogs are stored on matching runtime rows and power Settings pickers.
-
-GET    /api/runtimes/machines                     (browser)
-→ 200 { data: Machine[] }
-Machines with last_seen > 2 min ago are marked offline. Offline machines stay
-visible but cannot be targeted for runtime setup.
-
-DELETE /api/runtimes/machines/:id                  (browser)
-→ 204 | 404 MACHINE_NOT_FOUND
-Removes the host: queues machine-scoped `remove` events for each of its
-runtimes (deduped per provider, delivered on the listener's next heartbeat),
-deletes the runtime rows, its pending setup events (FK cascade), and the
-machine row. Never blocks — a still-listening machine reappears on its next
-heartbeat (upsert) until `lx machine stop` is run on it.
-
-POST   /api/runtimes/tasks                    (browser)
-body { slug*, documentType*: "task"|"wiki", documentId*, agentId*, skillId*,
-       extraPrompt?, selection?, runtimeId? }
-  agentId/skillId reference the global rule bundles (Settings → Agents/Skills);
-  extraPrompt is a per-run free-text addition to the prompt.
-→ 201 RuntimeTask
-  | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
-  | 409 NO_RUNTIME_ONLINE                 (no daemon is up)
-
-GET    /api/runtimes/tasks/:id
-→ 200 RuntimeTask
-
-GET    /api/runtimes/tasks?slug*&documentType&documentId
-→ 200 { data: RuntimeTask[] }   (for one document, per doc — the Runtimes panel's
-  per-document run list; status newest-first)
-  | 404 PROJECT_NOT_FOUND  (slug missing or unknown)
-
-GET    /api/runtimes/tasks/recent
-→ 200 { data: Array<RuntimeTask & { projectName }> }   (10 newest, cross-project)
-
-GET    /api/runtimes/daemon/tasks/:id/status    (daemon)
-→ 200 { status: "queued"|"running"|"completed"|"failed"|"cancelled" }
-  Polling fallback for daemons that cannot stream logs.
-
-POST   /api/runtimes/tasks/:id/cancel             (browser)
-→ 200 RuntimeTask  (status → "cancelled"; daemon discards the run)
-
-GET    /api/runtimes/tasks/:id/logs               (browser)
-→ 200 { data: RuntimeTaskLog[] }   (ascending; live activity feed while running)
-Each log row carries stream ("out"|"err") + level ("info"|"warn"|"error") —
-classified ONCE by the daemon at write time (shared/runtime-log.ts) and stored;
-the UI renders the stored level. Legacy rows default to out/info.
-
-GET    /api/runtimes/tasks/history                (browser)
-query { slug?, status?, skillId?, documentType?, teamId?, limit?, cursor? }
-  status: queued | running | completed | failed | cancelled
-  skillId: a skill's id (filter by operation bundle)
-  teamId: runtime's owning team (superadmin filter; join runtimes.team_id)
-  limit: 1–200 (default 50) · cursor: opaque keyset cursor
-→ 200 {
-  data: Array<RuntimeTask & { projectName }>,
-  nextCursor: string | null,
-  summary: { queued, running, completed, failed, cancelled }   (global, not filter-scoped)
-}
-Cross-project task history for the Runtimes control panel, newest first.
-Keyset-paginated on (created_at, id) DESC; nextCursor is null on the last
-page. summary carries per-status totals and is NOT scoped by the filters —
-the strip describes the system, the table is the view. The frontend polls
-this endpoint every 1.5s while any row on the page is queued/running, else
-on a 15s idle heartbeat.
+DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
+→ 204 | 404 SOURCE_NOT_FOUND
 
 # ── Lexa Agents & Skills catalog (global rule bundles; browser, Bearer) ──
 # Hard cutover from the pre-baseline agent/skill paths — no aliases (sole
-# consumer is the bundled web app). The catalog is the behavioral spec for
-# BOTH Runtimes tiers: prompt injection renders it for Assistant, .agents/ file
-# writing renders it for Blacksmith. All mutations are admin-only
+# consumer is the bundled web app). The catalog is the behavioral spec for the
+# in-process Assistant (prompt injection); the removed Blacksmith/daemon
+# file-writing consumer no longer exists. All mutations are admin-only
 # (403 FORBIDDEN for members).
 GET    /api/agents
 → 200 { data: LexaAgent[] }   (agent = { id, name, description, instructions,
@@ -1652,11 +1351,11 @@ PATCH  /api/agents/:id    (admin)  body { name?, description?, instructions? }
 
 DELETE /api/agents/:id    (admin)
 → 204 | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 AGENT_BUILTIN_DELETE | 409 AGENT_ENTITY_IN_USE
-  (builtins can't be deleted; an agent still used by runtime tasks can't either)
+  (builtins can't be deleted; an agent still used by assistant tasks can't either)
 
 PUT    /api/agents/:id/skills  (admin)  body { skillIds*: string[] }  (full replace)
 → 200 LexaAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND / SKILL_NOT_FOUND
-  (M2M bindings; the Runtimes popover only offers the attached skills)
+  (M2M bindings; the assistant skill picker only offers the attached skills)
 
 POST   /api/agents/:id/reset  (admin; builtin only)
 → 200 LexaAgent  (restores the seeded instructions + full builtin skill set)
@@ -1676,60 +1375,31 @@ DELETE /api/skills/:id    (admin)
 
 POST   /api/skills/:id/reset  (admin; builtin only)
 → 200 LexaSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 AGENT_BUILTIN_DELETE
-
-POST   /api/runtimes/daemon/tasks/:id/log         (daemon)  body { message*, stream? ("out"|"err"), level? ("info"|"warn"|"error") } → 200 RuntimeTaskLog
-(appends one activity line — claim, model, agent start, generating, done/failed;
-stream/level are classified once by the daemon and stored; defaults out/info
-keep older daemons working)
-
-POST   /api/runtimes/daemon/tasks/:id/complete   (daemon)  body { result* } → 200 RuntimeTask
-POST   /api/runtimes/daemon/tasks/:id/fail       (daemon)  body { error* }  → 200 RuntimeTask
-
-GET    /api/projects/:slug/documents/:type/:id/sources
-→ 200 { data: DocumentSource[] }
-
-POST   /api/projects/:slug/documents/:type/:id/sources
-body { kind*: "wiki"|"external", ref* }   (wiki = page slug; external = URL)
-→ 201 DocumentSource
-  | 404 PAGE_NOT_FOUND                     (wiki slug unknown)
-  | 502 SOURCE_FETCH_ERROR                 (bad URL / private-IP block / fetch failed upstream)
-  | 422 SOURCE_UNREACHABLE                 (DNS or connection failure after the SSRF guard)
-
-DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
-→ 204 | 404 SOURCE_NOT_FOUND
 ```
 
 Notes:
-- **Daemon auth:** `/api/runtimes/daemon/*`, `/api/runtimes/register`, and
-  `/api/runtimes/sessions` accept
-  the shared secret `LXK_RUNTIME_DAEMON_TOKEN` via `x-runtime-token`, or a normal
-  Bearer API key; the other runtime routes require the Bearer key. Browser
-  endpoints use the Bearer key. The CLI listener (`machine listen`) uses the
-  Bearer key from its saved login for `/api/runtimes/events/*` and
-  `/api/runtimes/machines/*`.
 - **SSRF guard:** external sources resolve DNS and reject private/loopback/
   link-local/CGNAT addresses before fetching.
-- **Runtime loop:** the spawned agent CLI receives a server-built prompt; the
-  one-shot result is returned to the editor for accept/reject.
+- **Assistant grounding:** repo content (Contents: Read) is fetched server-side
+  per assistant run from the project's `source_role` repos, capped by
+  `assistant_repo_cap` (env bootstrap `LXK_ASSISTANT_REPO_CAP`, default 3).
 
 ### Assistant (AI assistant tier)
 
-Server-side TanStack AI `chat()` assistant beside Blacksmith under the Runtimes
-umbrella (see docs/ARCHITECTURE.md §Runtimes — two active AI tiers). Per-project provider settings;
+Server-side TanStack AI `chat()` assistant (in-process; the external
+Blacksmith/daemon tier was removed). Per-project provider settings;
 keys are server-side only and never serialized (masked view). Settings
 mutations + test/models are superadmin (`403 FORBIDDEN` otherwise); reads,
 tasks, chat, and memory follow normal project access; chat additionally
 requires a session user (bare API key → `400 NO_USER_CONTEXT`).
 
-Visibility: Runtime task brief info (status, timestamps) is member-visible;
-detail/log internals (result text, `runtime_task_logs` streams) are
-admin-gated.
+Visibility: Assistant task brief info (status, timestamps) is member-visible;
+the result text is admin-gated on the status endpoint.
 
 ```
 GET    /api/assistant/settings/:projectId
 → 200 { projectId, searchProvider: "exa"|null, hasSearchKey: boolean,
         urlAllowlist: string|null,
-        engine: "assistant"|"blacksmith", engineSwitcherEnabled: boolean,
         reasoningEffort: "minimal"|"low"|"medium"|"high"|null,
         primarySupportsImages: boolean,
         writeTools: string[],
@@ -1745,10 +1415,10 @@ PUT    /api/assistant/settings/:projectId   (superadmin — requireSuperadmin, 4
 body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: string[],
        searchProvider?: "exa"|null, searchApiKey?: string|null,
        urlAllowlist?: string|null,
-       engine?: "assistant"|"blacksmith", engineSwitcherEnabled?: boolean,
        reasoningEffort?: "minimal"|"low"|"medium"|"high"|null,
        writeTools?: string[] }
-  Payload is the project-level Assistant binding + retained engine/search/writeTools.
+  Payload is the project-level Assistant binding + search/writeTools.
+  (engine/engineSwitcherEnabled were removed with the runtime tier.)
   providerId/modelId = primary model (must be an enabled assistant_models row);
   fallbackModelIds = ordered cross-kind fallback list (≤3, deduped, provider
   registry supplies kind per model). Omitted searchApiKey keeps the stored value.
@@ -1759,7 +1429,7 @@ body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: strin
 
 POST   /api/assistant/settings/:projectId/test   (admin — requireAdmin)
 body { kind?, baseUrl?, model?, apiKey?, searchProvider?, searchApiKey?,
-       urlAllowlist?, engine?, engineSwitcherEnabled?, primarySupportsImages?,
+       urlAllowlist?, primarySupportsImages?,
        visionModel?, reasoningEffort?, writeTools? }
   UNSAVED submitted values (never persists); an omitted apiKey falls back to the
   stored one so testing a saved config doesn't require re-entering the key.
@@ -1841,18 +1511,93 @@ GET    /api/admin/assistant/calls   (superadmin)
 → 200 { data: AssistantCallLogRow[] }   // last 100, created_at DESC
   | 403 FORBIDDEN
 
-POST   /api/admin/assistant/prices/sync   (superadmin)
-→ 200 { synced: number }   // rows upserted from OpenRouter fetch into assistant_model_prices
+GET    /api/admin/assistant/runs?status=&projectId=&limit=&cursor=   (superadmin)
+→ 200 { data: AssistantRunRow[], nextCursor: string|null,
+        counts: { queued, running, completed, failed, cancelled } }
+  AssistantRunRow = { id, key, projectId,
+                      documentType: "task"|"wiki", documentId, documentTitle,
+                      agentId, skillId, agentName, skillName,
+                      status: "queued"|"running"|"completed"|"failed"|"cancelled",
+                      error: string|null, createdAt, startedAt, finishedAt }
+  Recent assistant runs (assistant_tasks), metadata only — `result`,
+  `extraPrompt` and `selection` are never serialized; `error` is included.
+  `error` is null unless status = failed.
+  createdAt/startedAt/finishedAt are the raw assistant_tasks columns — SQLite
+  UTC text ("YYYY-MM-DD HH:MM:SS" from datetime('now')), NOT JS ISO. Parse the
+  space form as UTC, exactly like the assistant_calls timestamps.
+  | 403 FORBIDDEN | 422 INVALID_ARGS
+  Filters (all optional): `status` (one of the five statuses; unknown value →
+  422), `projectId` (exact match, unfiltered when empty/omitted), `limit`
+  (positive integer, default 50, capped at 200), `cursor` (opaque keyset token
+  from the previous page's nextCursor; malformed token → 422).
+  Keyset pagination on (created_at DESC, id DESC) — matches
+  idx_assistant_tasks_created. `nextCursor` is "<createdAt>|<id>" of the last
+  row, or null on the last page. The page is fetched with one extra row to
+  decide nextCursor, so `data.length` may be `limit` on a full page.
+  `counts` is the unfiltered GROUP BY over all statuses (assistant-task repo
+  countByStatus) — always all five keys, zero-filled. It is a status tab total,
+  not a total for the current filter or page.
+
+GET    /api/admin/assistant/bindings   (superadmin)
+→ 200 { data: [{ projectId, projectName, projectSlug,
+                providerId: string|null, providerLabel: string|null,
+                modelId: string|null, modelLabel: string|null,
+                fallbackCount, writeToolsCount, memoryCount,
+                hasSearchKey: boolean,
+                reasoningEffort: "minimal"|"low"|"medium"|"high"|null,
+                updatedAt: string|null }] }
   | 403 FORBIDDEN
-  Errors inside the price fetch are caught — sync returns 0 rather than 5xx.
+  One row per project — the admin binding overview. Single query: projects
+  LEFT JOIN assistant_settings / assistant_providers / assistant_models, so
+  projects with no assistant_settings row are still listed (provider/model null
+  = "not configured"). Labels are resolved server-side (no N+1).
+  fallbackCount = json_array_length(fallback_model_ids) (0 when NULL);
+  writeToolsCount = comma-separated entries in assistant_settings.write_tools
+  (0 when NULL/empty); memoryCount = COUNT of project_memory rows for the
+  project; hasSearchKey = search_api_key present (masked value never
+  serialized); updatedAt = assistant_settings.updated_at, null when
+  unconfigured. Ordered by project name (NOCASE) then projectId.
+
+POST   /api/admin/assistant/prices/sync   (superadmin)
+→ 200 { synced: number, data: [{ model, prompt_price, completion_price, cached_read_price, cached_write_price, updated_at }] }
+  `synced` = rows upserted from the OpenRouter fetch into assistant_model_prices;
+  `data` = the full refreshed price table (same row shape as GET .../prices) read
+  after the upsert. The client applies `data` with setQueryData — no refetch
+  needed (invariant #6).
+  | 403 FORBIDDEN
+  Errors inside the price fetch are caught — sync returns { synced: 0, data: <current rows> } rather than 5xx.
 
 GET    /api/admin/assistant/providers/:id/health   (superadmin)
-→ 200 { providerId: string, circuitState: "open"|"closed"|"half-open", failureCount: number, openedAt: string|null, lastProbeAt: string|null, consecutiveFailures: number }
+→ 200 { providerId: string, circuitState: "open"|"closed"|"half-open", failureCount: number, openedAt: string|null, lastProbeAt: string|null, consecutiveFailures: number,
+        latencyMs: number|null, retryAfterSeconds: number|null, lastFailureCode: string|null, lastFailureAt: string|null, lastCheckedAt: string|null }
   | 403 FORBIDDEN | 404 (provider unknown → 404, missing health row → 200 default closed)
   Circuit breaker (pla-1): 3 consecutive fails in 5m → open 5m → half-open allow 1 probe (lazy, isAllowed handles transition).
+  The breaker fields are persisted state; the four enriched fields are derived on
+  every read from assistant_call_logs (the health row stores counts only) and are
+  null when no signal exists:
+    latencyMs          — latency of the most recent call with a recorded latency;
+                         drives the "Slow" health state.
+    retryAfterSeconds   — non-null only while circuitState = "open": whole seconds
+                         until the 5m open window expires (max(0, …)); null for
+                         closed/half-open. Drives the retry countdown.
+    lastFailureCode     — error_code of the most recent error call (e.g.
+                         PROVIDER_UNREACHABLE); null if the provider never failed.
+    lastFailureAt       — created_at of that most recent error call; null if none.
+                         NOTE the timestamp shape: breaker fields (openedAt,
+                         lastProbeAt) and lastCheckedAt are JS ISO strings, but
+                         lastFailureAt is the raw SQLite `created_at` value
+                         ("YYYY-MM-DD HH:MM:SS" UTC) read straight from the call
+                         log — parse it the same way lastCheckedAt's inputs are
+                         parsed (treat the space form as UTC), do not assume ISO.
+    lastCheckedAt       — the later of lastProbeAt (breaker probe) and the most
+                         recent call-log time, normalized to ISO — i.e. when the
+                         provider was last actually observed, not when a breaker
+                         event happened. null when neither exists.
+  A read that finds an open window already expired promotes the row to
+  half-open (and stamps lastProbeAt) before responding.
 
 POST   /api/admin/assistant/providers/:id/probe   (superadmin)
-→ 200 same health row shape as GET .../health (always 200 — upstream outcome is carried by the row, not the status)
+→ 200 same enriched health row shape as GET .../health (always 200 — upstream outcome is carried by the row, not the status)
   | 403 FORBIDDEN | 404 (provider unknown)
   Live probe: listModels against the stored provider row (same config as POST .../test), then recordSuccess (breaker closed, counts reset) or recordFailure (counts bumped, may re-open) before returning the row. Bypasses isAllowed — use after fixing the upstream.
 ```
@@ -1861,24 +1606,24 @@ POST   /api/assistant/tasks
 body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
        skillId*, selection?,
        attachments?: [{ storageKey*, mimeType*, name* }] }
-  Engine routing: the project's `assistant_settings.engine` is resolved once per
-  request. engine='assistant' → runtime_tasks row kind='assistant' (queued), no
-  runtime-online guard (unchanged). engine='blacksmith' → runtime_tasks row
-  kind='blacksmith' + runtime-online guard (`NO_RUNTIME_ONLINE` 409); the
-  claim payload carries `.agents/` bundles (agentMarkdown/skillMarkdown) as
-  for any Blacksmith task. skillId must be bound to the resolved engine's
-  agent via lexa_agent_skills — else SKILL_NOT_FOUND.
+  The assistant lane is the only lane; agentId is always the builtin `assistant`
+  agent and skillId must be bound to it via lexa_agent_skills — else
+  SKILL_NOT_FOUND. The task is appended to assistant_tasks as `queued`.
   attachments are image refs into the project's attachment storage
   (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
   png/jpeg/gif/webp only. Attachments require vision capability:
   primary_supports_images=1 → inline parts; else 409
   VISION_NOT_CONFIGURED (`vision_model` delegation removed in the squashed baseline).
-→ 201 RuntimeTask
+→ 201 AssistantTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
-  | 409 NO_RUNTIME_ONLINE                (engine=blacksmith, no daemon online)
   | 409 VISION_NOT_CONFIGURED            (attachments, no vision chain — vision_model removed in the squashed baseline)
   | 422 INVALID_ARGS                     (attachment scope/caps)
+
+GET    /api/assistant/tasks/:id
+→ 200 AssistantTask   (status/result/error + document title/agent/skill names)
+  Poll for done/failed after a stream (the result text is included).
+  | 404 ASSISTANT_TASK_NOT_FOUND
 
 POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
 → 200 text/event-stream
@@ -1904,7 +1649,7 @@ POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not Ev
   Heartbeat comment ": ping" every 15s (proxy buffering). Client disconnect
   aborts the run (task → cancelled, "aborted" log). Stop button = client
   abort + cancel below.
-  | 404 RUNTIME_TASK_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE (already claimed/running)
+  | 404 ASSISTANT_TASK_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE (already claimed/running)
 
 POST   /api/assistant/tasks/:id/cancel
 → 200 { ok: true }
@@ -1918,8 +1663,7 @@ POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?, skillId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
        fromIndex?: number }
-  ALWAYS runs the assistant lane regardless of project engine — under
-  engine='blacksmith' → 409 ENGINE_NOT_SUPPORTED_FOR_CHAT.
+  Freeform chat ALWAYS runs the assistant lane (in-process).
   One persistent thread per (project, user), ownership enforced (another
   user's chatId → 404). Direct synchronous SSE — same frames as the task
   stream minus taskId (frames carry chatId). Second concurrent stream on the
@@ -1928,7 +1672,7 @@ body { projectId*, chatId*, message*, agentId?, skillId?,
   task create (inline parts / 409 VISION_NOT_CONFIGURED — vision_model
   delegation removed in the squashed baseline).
   | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / ASSISTANT_TASK_ACTIVE
-  | 409 ENGINE_NOT_SUPPORTED_FOR_CHAT / VISION_NOT_CONFIGURED
+  | 409 VISION_NOT_CONFIGURED
   | 422 INVALID_ARGS
 
   Edit/regenerate/retry semantics (fromIndex):

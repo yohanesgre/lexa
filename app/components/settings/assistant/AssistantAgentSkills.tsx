@@ -1,5 +1,5 @@
 import { useAgents, useSkills, useReplaceAgentSkills } from "../../../lib/queries";
-import { ENGINE_AGENT_IDS } from "../../../lib/use-runtime-engine";
+import { ASSISTANT_AGENT_ID } from "../../../lib/assistant-agent";
 
 // ── Agent skill availability (settings-project-assistant.html) ──
 
@@ -56,16 +56,15 @@ export function AgentSkillAvailabilitySection({ projectId }: { projectId: string
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Agent skill availability</h2>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Which skills each builtin agent offers. Availability is junction rows only — no JSON columns on the agent rows. Popover and chat skill chips filter to the active engine agent&apos;s list.
+        Which skills the builtin assistant agent offers. Availability is junction rows only — no JSON columns on the agent rows. Popover and chat skill chips filter to the assistant agent&apos;s list.
       </p>
 
       <div className="card-panel card-panel--elevated">
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          <AgentSkillColumn agentId={ENGINE_AGENT_IDS.assistant} agents={agents} skills={skills} onToggle={handleToggle} />
-          <AgentSkillColumn agentId={ENGINE_AGENT_IDS.blacksmith} agents={agents} skills={skills} onToggle={handleToggle} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 24, maxWidth: 640 }}>
+          <AgentSkillColumn agentId={ASSISTANT_AGENT_ID} agents={agents} skills={skills} onToggle={handleToggle} />
         </div>
         <div className="field-hint" style={{ marginTop: 10 }}>
-          Checkbox writes apply immediately. An agent with zero attached skills can&apos;t generate — the popover shows its empty-skills state with Generate disabled. Both agents are editable + Reset-to-default in Settings → Agents &amp; Skills; never deletable.
+          Checkbox writes apply immediately. The assistant agent can&apos;t generate with zero attached skills — the popover shows its empty-skills state with Generate disabled. The builtin agent is editable + Reset-to-default in Settings → Agents &amp; Skills; never deletable.
         </div>
       </div>
     </section>

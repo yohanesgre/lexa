@@ -13,7 +13,6 @@ import {
   useDeleteAssistantChat,
   useUpdateAssistantChatMeta,
 } from "../../lib/queries";
-import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-runtime-engine";
 import { useToast } from "../ui/Toast";
 import { assistantSendForKey, useAssistantStream } from "../../lib/use-assistant-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -21,8 +20,8 @@ import { resendIndex } from "../../lib/resendIndex";
 import { isNarrowViewport, hasMatchMedia, matchMedia } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { ThreadsSidebar } from "./ThreadsSidebar";
-import { SkillPicker } from "../runtimes/assistant/SkillPicker";
-import { AssistantFlameIcon } from "../runtimes/assistant/AssistantFlameIcon";
+import { SkillPicker } from "../assistant/panel/SkillPicker";
+import { AssistantFlameIcon } from "../assistant/panel/AssistantFlameIcon";
 import { AssistantActivity } from "./AssistantActivity";
 import { deriveChatTitle, type AssistantReasoningEffort } from "../../../shared/assistant";
 import type { AssistantChatThreadSummary } from "../../lib/api";
@@ -208,7 +207,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     recoverStaleThread({ qc, projectId, chatId, listData: listQuery.data, applyChatId, setChatId, clearThreadParam, clearParam: true });
   }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, qc, applyChatId, setChatId, clearThreadParam, knownChatIdsRef, initialLastRef]);
 
-  const { engineGate, busy409, attachDisabled, suspendedLock, suspendTally } = chatPageFlags({
+  const { busy409, attachDisabled, suspendedLock, suspendTally } = chatPageFlags({
     settings,
     settingsLoading,
     turns,
@@ -350,7 +349,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             skills={assistantSkills}
             skillId={effectiveSkillId}
             onSkillChange={setSkillId}
-            engineGate={engineGate}
             busy409={busy409}
             slug={slug}
             streaming={streaming}

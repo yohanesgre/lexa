@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-runtime-engine";
+import { ASSISTANT_AGENT_ID, hasVisionCapability } from "../../lib/assistant-agent";
 import type { LexaSkill } from "../../../shared/types";
 import { deriveChatTitle } from "../../../shared/assistant";
 import type { AssistantChatThreadSummary } from "../../lib/api";
@@ -334,7 +334,7 @@ export function chatSkillsOf(
   skills: LexaSkill[],
   skillId: string
 ): { skills: LexaSkill[]; effectiveSkillId: string; skillName: string | undefined } {
-  const assistantSkillIds = new Set(agents.find((a) => a.id === ENGINE_AGENT_IDS.assistant)?.skillIds ?? []);
+  const assistantSkillIds = new Set(agents.find((a) => a.id === ASSISTANT_AGENT_ID)?.skillIds ?? []);
   const filtered = skills.filter((s) => assistantSkillIds.has(s.id));
   const effectiveSkillId = assistantSkillIds.has(skillId) ? skillId : "";
   return { skills: filtered, effectiveSkillId, skillName: filtered.find((s) => s.id === effectiveSkillId)?.name };
@@ -351,10 +351,6 @@ export function chatPageFlags(args: {
   streamPendingCount: number;
 }) {
   const { settings, settingsLoading, turns, streamStatus, streamErrorCode, streamPendingCount } = args;
-  // Engine gate (assistant-chat.html): chat ALWAYS runs the assistant lane — under
-  // a blacksmith project default every stream fails up front, so the banner
-  // renders before any attempt.
-  const engineGate = settings?.engine === "blacksmith";
   // Vision resolution mirrors task create: primary inline parts or a
   // configured vision model; without either, attach is disabled with a
   // tooltip pointing at Project Settings → Assistant vision.
@@ -367,7 +363,6 @@ export function chatPageFlags(args: {
   const hasSuspendedMarker = (turns ?? []).some((t) => !!t.suspendedBatchId);
   const suspendedLock = pendingCount > 0 || hasSuspendedMarker || streamStatus === "suspended";
   return {
-    engineGate,
     busy409,
     attachDisabled,
     suspendedLock,

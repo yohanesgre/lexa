@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAssistantPrices, usePutAssistantPrice, type AssistantPriceRow } from "../../lib/assistant-usage.query";
 import type { AssistantByModelRow } from "../../lib/assistant-usage.query";
+import { PriceSyncButton } from "./admin/PriceSyncButton";
 
 interface PriceEdit {
   prompt_price: string;
@@ -85,6 +86,7 @@ export function PriceEditor({
       <section className="card-panel card-panel--elevated mt-4">
         <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>
           <h2 className="font-display text-base weight-500 color-primary">Model prices</h2>
+          <PriceSyncButton />
         </div>
         <div className="text-sm" style={{ color: "var(--lx-text-danger)" }}>Failed to load prices</div>
       </section>
@@ -95,6 +97,7 @@ export function PriceEditor({
     <section className="card-panel card-panel--elevated mt-4">
       <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>
         <h2 className="font-display text-base weight-500 color-primary">Model prices</h2>
+        <PriceSyncButton />
       </div>
       <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>
         Per-model per-token prices used to derive cost in the summary and by_model table. Prices are stored as USD per 1M tokens (input / output / cached read / cached write). Editing writes immediately; cost is recomputed on the next usage fetch.

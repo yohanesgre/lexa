@@ -1,8 +1,8 @@
 import type { Editor } from "@tiptap/core";
 import { EditorContent } from "@tiptap/react";
 import { Toolbar } from "../TextEditor";
-import { RuntimeReviewSurface } from "../runtimes/RuntimeReviewSurface";
-import { useRuntimeReview } from "../runtimes/useRuntimeReview";
+import { AssistantReviewSurface } from "../assistant/AssistantReviewSurface";
+import { useAssistantReview } from "../../lib/useAssistantReview";
 import { cn } from "../ui/cn";
 
 interface WikiEditorProps {
@@ -12,12 +12,12 @@ interface WikiEditorProps {
 }
 
 export function WikiEditor({ editor, runtime, onReviewStateChange }: WikiEditorProps) {
-  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useRuntimeReview(editor, onReviewStateChange);
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useAssistantReview(editor, onReviewStateChange);
   return (
     <div className={cn("editor-wrapper flex flex-col flex-1 min-h-0", review && "is-reviewing")}>
       <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
       {review && (
-        <RuntimeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+        <AssistantReviewSurface skillName={review.skillName} agentName={review.agentName} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
       )}
       <EditorContent editor={editor} className="editor-content flex-1 p-4 px-5" />
     </div>

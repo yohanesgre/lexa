@@ -30,7 +30,6 @@ vi.mock("../../lib/queries", async (importOriginal) => {
     useTeams: () => ({ data: [{ id: "team-1", name: "Core", slug: "core", createdAt: "2026-01-01T00:00:00Z" }], isLoading: false }),
     useTeamMembers: () => ({ data: [], isLoading: false }),
     useWorkspaceMembers: () => ({ data: [] }),
-    useTeamRuntimes: () => ({ data: [], isLoading: false, isError: false }),
     useDashboard: () => ({ data: h.state.dashboard }),
   };
 });

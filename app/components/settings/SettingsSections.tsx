@@ -1,26 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, Copy, Key, Plus, Trash2, Upload } from "lucide-react";
-import { RuntimeRowActions } from "./RuntimeRowActions";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey, useRuntimes, useMachines, useTeams, useRemoveRuntime, useRemoveMachine, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings } from "../../lib/queries";
-import { RuntimeSetupModal } from "../runtimes/RuntimeSetupModal";
-import { RuntimeEditModal } from "../runtimes/RuntimeEditModal";
-import { RuntimeRestartModal } from "../runtimes/RuntimeRestartModal";
+import { AlertTriangle, Check, Copy, Key, Plus, Trash2 } from "lucide-react";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings } from "../../lib/queries";
 import { copyToClipboard } from "../../lib/clipboard";
 import { formatRelative } from "../../lib/relative-time";
-import { parseApiDate } from "../../lib/date";
 import { Field } from "../ui/Field";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { GithubSyncCredentialsCard } from "./GithubSyncCredentialsCard";
-import type { Runtime, Machine } from "../../../shared/types";
 
 // Workspace-scope settings sections, extracted from the old monolithic
 // SettingsPage. All superadmin-gated server-side.
-
-// team_id is a BE-side runtime column; the contract commit didn't widen the
-// shared Runtime type — read it defensively.
-function teamIdOf(r: Runtime): string | null {
-  return (r as Runtime & { teamId?: string | null }).teamId ?? null;
-}
 
 export function InlineDropdown({ items, onSelect, onClose }: { items: { name: string; email: string }[]; onSelect: (email: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -143,69 +131,6 @@ function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; 
               GITHUB_*
             </span>
             {" "}environment variables are set on the server, they are re-imported on the next restart.
-          </p>
-
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Remove
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
-  );
-}
-
-export function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { name: string; hostname: string; onCancel: () => void; onConfirm: () => void }) {
-  return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove runtime?</h2>
-
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Remove{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              {name}
-            </span>
-            {hostname ? ` (${hostname})` : ""} from the runtimes list? The server queues a remove event — the machine's listener stops the daemon and cleans up its runtime files on its next heartbeat.
-          </p>
-
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Remove
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
-  );
-}
-
-function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { id: string; runtimeCount: number; onCancel: () => void; onConfirm: () => void }) {
-  return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove machine?</h2>
-
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Remove{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              {id}
-            </span>
-            {runtimeCount > 0 ? ` and its ${runtimeCount} runtime${runtimeCount === 1 ? "" : "s"}` : ""}?
-            Their daemons are stopped by the machine listener on its next heartbeat.
-          </p>
-          <p className="text-sm mt-2 leading-5" style={{ color: "var(--lx-text-warning)" }}>
-            If the listener is still running on that machine, it will reappear within seconds — run{" "}
-            <span className="font-mono text-xs">lx machine stop</span> there first for permanent removal.
           </p>
 
           <div className="flex items-center gap-2 mt-4 justify-end">
@@ -503,143 +428,5 @@ export function GithubSyncSection() {
         />
       )}
     </section>
-  );
-}
-
-// Machines + Agent Runtimes (workspace scope — all runtimes incl. Global).
-// showTeamColumn: workspace page shows the Team column (team_id NULL = Global).
-export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamColumn?: boolean }) {
-  const { data: runtimes = [], isLoading: runtimesLoading, isError: runtimesError } = useRuntimes();
-  const { data: machines = [] } = useMachines();
-  const { data: teams = [] } = useTeams();
-  const removeRuntime = useRemoveRuntime();
-  const removeMachine = useRemoveMachine();
-  const [setupOpen, setSetupOpen] = useState(false);
-  const [editing, setEditing] = useState<Runtime | null>(null);
-  const [restarting, setRestarting] = useState<Runtime | null>(null);
-  const [removing, setRemoving] = useState<Runtime | null>(null);
-  const [removingMachine, setRemovingMachine] = useState<Machine | null>(null);
-  // One "now" per render so every machine row shares the same last-seen cutoff.
-  const nowMs = Date.now();
-
-  return (
-    <>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Machines</h2>
-        <span className="text-xs text-lx-text-muted">Workspace scope</span>
-      </div>
-      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machines running the AI daemon (AI project assistant). The listener owns daemon children and reports installed agent/model catalogs.
-      </p>
-
-      <div className="mb-4 card-panel" style={{ overflow: "hidden" }}>
-        <div className="flex items-center justify-between" style={{ padding: "10px 12px 0" }}>
-          <h3 className="font-display text-sm font-medium text-lx-text-primary">Machines</h3>
-          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Hosts</span>
-        </div>
-        <table className="settings-table">
-          <thead><tr><th>Machine</th><th>State</th><th>Runtimes</th><th>CLIs</th><th>Last seen</th><th /></tr></thead>
-          <tbody>
-            {machines.length === 0 ? (
-              <tr><td colSpan={6} className="text-xs text-lx-text-muted text-center py-6">No machines registered yet. Connect one with <span className="font-mono">lx login</span>.</td></tr>
-            ) : machines.map((m) => {
-              const listening = !!m.lastSeen && nowMs - parseApiDate(m.lastSeen).getTime() < 2 * 60 * 1000;
-              const runtimeCount = runtimes.filter((r) => r.machineId === m.id).length;
-              return (
-                <tr key={m.id}>
-                  <td className="text-sm font-medium">{m.id}</td>
-                  <td><span className="flex items-center gap-2"><span className={listening ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${listening ? "text-lx-text-success" : "text-lx-text-muted"}`}>{listening ? "Listening" : m.lastSeen ? "Offline" : "Bound, not listening"}</span></span></td>
-                  <td className="text-xs text-lx-text-secondary">{runtimeCount ? `${runtimeCount} runtime${runtimeCount === 1 ? "" : "s"}` : "—"}</td>
-                  <td className="font-mono text-xs text-lx-text-secondary">{m.clis?.length ? m.clis.map((c) => `${c.provider} ${c.version}`).join(" · ") : "—"}</td>
-                  <td className="text-xs text-lx-text-secondary">{m.lastSeen ? formatRelative(m.lastSeen) : <span className="text-lx-text-muted">Never</span>}</td>
-                  <td style={{ textAlign: "right" }}><button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRemovingMachine(m)} aria-label={`Remove machine ${m.id}`} title="Remove machine"><Trash2 size={14} strokeWidth={1.5} /></button></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Agent Runtimes</h2>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-lx-text-muted">Workspace scope</span>
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setSetupOpen(true)}>
-            <Plus size={14} strokeWidth={1.5} />
-            Setup runtime
-          </button>
-        </div>
-      </div>
-      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Daemon runtimes bound to machines. Every runtime carries a team (or "Global"). Claiming an AI task requires the runtime's team to match the task's project team.
-      </p>
-
-      {runtimesLoading ? (
-        <div className="text-sm text-lx-text-muted py-8 text-center">Loading runtimes…</div>
-      ) : runtimesError ? (
-        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load runtimes.</div>
-      ) : runtimes.length === 0 ? (
-        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
-          <div className="text-sm font-medium text-lx-text-primary">No runtimes yet</div>
-          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Connect a machine with opencode, hermes, or command-code installed, then set up a runtime.</p>
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setSetupOpen(true)}><Plus size={14} strokeWidth={1.5} />Setup runtime</button>
-        </div>
-      ) : (
-        <div className="card-panel" style={{ overflow: "hidden" }}>
-          <table className="settings-table">
-            <thead><tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th>{showTeamColumn && <th>Team</th>}<th>Status</th><th /></tr></thead>
-            <tbody>
-              {runtimes.map((r) => {
-                const teamId = teamIdOf(r);
-                const teamName = teamId ? teams.find((t) => t.id === teamId)?.name ?? teamId : null;
-                return (
-                  <tr key={r.id}>
-                    <td className="text-sm font-medium">{r.name}</td>
-                    <td className="text-xs text-lx-text-secondary">{r.provider}</td>
-                    <td className="font-mono text-xs text-lx-text-secondary">{r.model || "—"}</td>
-                    <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
-                    {showTeamColumn && (
-                      <td>
-                        {teamName ? (
-                          <span style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{teamName}</span>
-                        ) : (
-                          <span style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-subtle)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>Global</span>
-                        )}
-                      </td>
-                    )}
-                    <td><span className="flex items-center gap-2"><span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.status === "online" ? "Online" : "Offline"}</span></span>{r.lastError && <span className="block text-xs mt-1" style={{ color: "var(--lx-text-warning)" }}>{r.lastError.toLowerCase().includes("api key") ? "API key revoked — re-run Setup runtime" : r.lastError}</span>}</td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}><RuntimeRowActions name={r.name} offline={r.status === "offline"} onRestart={() => setRestarting(r)} onEdit={() => setEditing(r)} onRemove={() => setRemoving(r)} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {setupOpen && <RuntimeSetupModal onClose={() => setSetupOpen(false)} />}
-      {editing && <RuntimeEditModal runtime={editing} onClose={() => setEditing(null)} />}
-      {restarting && <RuntimeRestartModal runtime={restarting} onClose={() => setRestarting(null)} />}
-      {removing && (
-        <RemoveRuntimeModal
-          name={removing.name}
-          hostname={removing.hostname}
-          onCancel={() => setRemoving(null)}
-          onConfirm={() => {
-            removeRuntime.mutate(removing.id, { onSuccess: () => setRemoving(null) });
-          }}
-        />
-      )}
-      {removingMachine && (
-        <RemoveMachineModal
-          id={removingMachine.id}
-          runtimeCount={runtimes.filter((r) => r.machineId === removingMachine.id).length}
-          onCancel={() => setRemovingMachine(null)}
-          onConfirm={() => {
-            removeMachine.mutate(removingMachine.id, { onSuccess: () => setRemovingMachine(null) });
-          }}
-        />
-      )}
-    </>
   );
 }

@@ -248,7 +248,7 @@ deploy_workers() {
   else
     echo "  deployed to your workers.dev subdomain — URL printed above."
     echo "  NEXT → create the first admin (superadmin): open <worker-url>/setup"
-    echo "  Machine keys (CLI/daemons) are minted post-setup: login → Settings → API Keys"
+    echo "  API keys (CLI) are minted post-setup: login → Settings → API Keys"
   fi
 }
 

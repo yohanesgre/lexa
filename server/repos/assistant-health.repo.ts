@@ -52,6 +52,32 @@ export class AssistantHealthRepo extends Effect.Service<AssistantHealthRepo>()("
           return row;
         }),
 
+      // Last observable signals for a provider, read from the call log (the
+      // health row stores counts only). Feeds the enriched health response:
+      // latency for the "Slow" state, the last failure code/time, and the
+      // last call time (combined with last_probe_at into lastCheckedAt).
+      lastProviderSignals: (providerId: string): Effect.Effect<{ latencyMs: number | null; lastFailureCode: string | null; lastFailureAt: string | null; lastCallAt: string | null }, DbError> =>
+        queryFirst<{ latency_ms: number | null; last_failure_code: string | null; last_failure_at: string | null; last_call_at: string | null }>(
+          db,
+          `SELECT
+             (SELECT latency_ms FROM assistant_call_logs WHERE provider_id = ? AND latency_ms IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1) AS latency_ms,
+             (SELECT error_code FROM assistant_call_logs WHERE provider_id = ? AND status = 'error' AND error_code IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_failure_code,
+             (SELECT created_at FROM assistant_call_logs WHERE provider_id = ? AND status = 'error' ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_failure_at,
+             (SELECT created_at FROM assistant_call_logs WHERE provider_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1) AS last_call_at`,
+          providerId,
+          providerId,
+          providerId,
+          providerId
+        ).pipe(
+          Effect.map((r) => ({
+            latencyMs: r.latency_ms ?? null,
+            lastFailureCode: r.last_failure_code ?? null,
+            lastFailureAt: r.last_failure_at ?? null,
+            lastCallAt: r.last_call_at ?? null,
+          })),
+          Effect.catchTag("RowNotFound", () => Effect.succeed({ latencyMs: null, lastFailureCode: null, lastFailureAt: null, lastCallAt: null }))
+        ),
+
       upsert: (row: { providerId: string; failureCount?: number; circuitState?: AssistantHealthRow["circuit_state"]; openedAt?: string | null; lastProbeAt?: string | null; consecutiveFailures?: number }): Effect.Effect<AssistantHealthRow, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const existing = yield* queryFirst<AssistantHealthRow>(db, `SELECT * FROM assistant_provider_health WHERE provider_id = ?`, row.providerId).pipe(

@@ -57,6 +57,17 @@ function stagePre0007(): string {
   return dir;
 }
 
+// Copy every migration up to and including `prefix` (lexical compare) so a
+// test can assert an intermediate migration's end state without later files
+// (0008 drops the runtime tables) interfering.
+function stageThrough(prefix: string): string {
+  const dir = tmpDir();
+  for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f.slice(0, 4) <= prefix)) {
+    copyFileSync(join(MIGRATIONS, f), join(dir, f));
+  }
+  return dir;
+}
+
 // A team-scoped runtime (r1), a queued runtime task linked to it (rt1), and a
 // team-less project whose task is queued but unlinked. Used by 0007's rebuild
 // tests to prove the parent FK flips to RESTRICT and the child link survives.
@@ -165,7 +176,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -176,7 +187,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -203,12 +214,12 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
     const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
+    runMigrations(dbPath, stageThrough("0007"));
     const db = new Database(dbPath);
     db.exec("PRAGMA foreign_keys = ON");
     const fks = db.prepare("PRAGMA foreign_key_list(runtime_events)").all() as Array<{ from: string; table: string; on_delete: string }>;
@@ -252,33 +263,29 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     db.close();
   });
 
-  it("baseline seeds exactly two builtin agents on a fresh database", () => {
+  it("baseline seeds exactly one builtin agent on a fresh database", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     const db = new Database(dbPath);
     const cols = (db.prepare("PRAGMA table_info(assistant_settings)").all() as { name: string }[]).map((c) => c.name);
     expect(cols).toEqual(
-      expect.arrayContaining(["engine", "engine_switcher_enabled", "primary_supports_images", "reasoning_effort", "write_tools", "fallback_model_ids"])
+      expect.arrayContaining(["primary_supports_images", "reasoning_effort", "write_tools", "fallback_model_ids"])
     );
+    expect(cols).not.toContain("engine");
+    expect(cols).not.toContain("engine_switcher_enabled");
     expect(cols).not.toContain("vision_model");
     expect(cols).not.toContain("kind");
-    expect(cols).not.toContain("base_url");
-    expect(cols).not.toContain("api_key");
-    expect(cols).not.toContain("model");
     const agents = db.prepare("SELECT id, name FROM lexa_agents WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string; name: string }>;
-    expect(agents).toEqual([
-      { id: "assistant", name: "Assistant Agent" },
-      { id: "blacksmith", name: "Blacksmith Agent" },
-    ]);
+    expect(agents).toEqual([{ id: "assistant", name: "Assistant Agent" }]);
+    const builtins = (db.prepare("SELECT id FROM lexa_skills WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string }>).map((r) => r.id);
     const assistantSkills = db
       .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'assistant' ORDER BY skill_id")
       .all() as Array<{ skill_id: string }>;
-    const builtins = (db.prepare("SELECT id FROM lexa_skills WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string }>).map((r) => r.id);
     expect(assistantSkills.map((r) => r.skill_id)).toEqual(builtins);
     const bsSkills = db
-      .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'blacksmith' ORDER BY skill_id")
+      .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'blacksmith'")
       .all() as Array<{ skill_id: string }>;
-    expect(bsSkills).toEqual([{ skill_id: "definition-of-done" }, { skill_id: "requirements" }, { skill_id: "review" }]);
+    expect(bsSkills).toEqual([]);
     db.close();
   });
 
@@ -288,12 +295,11 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     const db = new Database(dbPath);
     const colNames = (table: string) =>
       (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
-    // 0001 baseline creates hearth_*; 0005 renames them to runtime_*.
-    // forge_* never existed (folded into the 0001 baseline).
-    for (const t of ["runtime_tasks", "runtime_task_logs", "runtime_sessions"]) expect(tableExists(db, t)).toBe(true);
-    for (const t of ["hearth_tasks", "hearth_task_logs", "hearth_sessions", "forge_tasks", "forge_task_logs", "forge_sessions"]) expect(tableExists(db, t)).toBe(false);
+    // 0001 baseline creates hearth_*; 0005 renames them to runtime_*; 0008
+    // drops the runtime tier and leaves assistant_tasks. forge_* never existed.
+    expect(tableExists(db, "assistant_tasks")).toBe(true);
+    for (const t of ["runtime_tasks", "runtime_task_logs", "runtime_sessions", "hearth_tasks", "hearth_task_logs", "hearth_sessions", "forge_tasks", "forge_task_logs", "forge_sessions"]) expect(tableExists(db, t)).toBe(false);
     // Dropped MCP-link column and legacy github_repo column never created.
-    expect(colNames("runtimes")).not.toContain("mcp_connected");
     expect(colNames("projects")).not.toContain("github_repo");
     expect(tableExists(db, "project_repos")).toBe(true);
     // Chat threads carry title + pinned with fresh-row defaults.
@@ -311,7 +317,7 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
 
   it("0005 fresh database: runtime_* tables + indexes, no hearth_*", () => {
     const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
+    runMigrations(dbPath, stageThrough("0005"));
     const db = new Database(dbPath);
     for (const t of ["runtime_tasks", "runtime_task_logs", "runtime_sessions"]) expect(tableExists(db, t)).toBe(true);
     for (const t of ["hearth_tasks", "hearth_task_logs", "hearth_sessions"]) expect(tableExists(db, t)).toBe(false);
@@ -335,11 +341,11 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     seed.exec(SEED_PRE_RENAME);
     seed.close();
 
-    // Full real dir → only 0005 is new, so it applies on top of the seeded rows.
-    runMigrations(dbPath, MIGRATIONS);
+    // Full dir → only 0005 is new, so it applies on top of the seeded rows.
+    runMigrations(dbPath, stageThrough("0005"));
 
     const after = new Database(dbPath);
-    assertPostRename(after, "assistant_threads", "assistant", "Assistant Agent");
+    assertPostRename(after, "herald_threads", "herald", "Herald Agent");
     // Activity values + settings key rebind.
     expect(after.prepare("SELECT type FROM task_activity WHERE task_id = 't1'").get()).toEqual({ type: "runtime_completed" });
     expect(after.prepare("SELECT value FROM settings WHERE key = 'runtime_repo_cap'").get()).toEqual({ value: "5" });
@@ -423,7 +429,7 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
 
   it("0006 fresh database: assistant_* tables, via_assistant columns, no herald_*", () => {
     const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
+    runMigrations(dbPath, stageThrough("0006"));
     const db = new Database(dbPath);
 
     for (const t of ["assistant_threads", "assistant_pending_writes", "assistant_settings", "assistant_providers", "assistant_model_prices", "assistant_provider_health", "assistant_models", "assistant_call_logs"]) {
@@ -495,8 +501,8 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     `);
     seed.close();
 
-    // Full real dir → only 0006 is new, so it applies on top of the seeded rows.
-    runMigrations(dbPath, MIGRATIONS);
+    // Only 0006 is new, so it applies on top of the seeded rows.
+    runMigrations(dbPath, stageThrough("0006"));
 
     const after = new Database(dbPath);
     // Value remaps (engine, kind, source).
@@ -578,7 +584,7 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
 
   it("0007 flips runtimes.team_id to ON DELETE RESTRICT (raw org delete fails) and keeps indexes", () => {
     const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
+    runMigrations(dbPath, stageThrough("0007"));
     const db = new Database(dbPath);
     db.exec("PRAGMA foreign_keys = ON");
     const fks = db.prepare("PRAGMA foreign_key_list(runtimes)").all() as Array<{ from: string; table: string; on_delete: string }>;
@@ -627,6 +633,139 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     db.prepare("INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id) VALUES ('rt2', 'p1', 'task', 't1', 'a1', 'sk1', 'queued', 'r2')").run();
     db.prepare("DELETE FROM runtimes WHERE id = 'r2'").run();
     expect(db.prepare("SELECT runtime_id FROM runtime_tasks WHERE id = 'rt2'").get()).toEqual({ runtime_id: null });
+    db.close();
+  });
+
+  // ── 0008 remove agent runtimes ──────────────────────────────────────────
+  const SEED_PRE_0008 = `
+    INSERT INTO organization (id, name, slug, createdAt) VALUES ('org1', 'Team', 'team', '2026-01-01');
+    INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+    INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
+    INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1', 'p1', 'Main', 0, 'backlog');
+    INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position) VALUES ('t1', 'p1', 'c1', 's1', 'T', 'a0');
+    INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
+    INSERT INTO runtimes (id, name, provider, team_id, status) VALUES ('r1', 'R', 'opencode', 'org1', 'online');
+    INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, kind, doc_context)
+      VALUES ('rt1', 'p1', 'task', 't1', 'blacksmith', 'sk1', 'completed', 'r1', 'blacksmith', 'ctx'),
+             ('rt2', 'p1', 'task', 't1', 'assistant', 'sk1', 'queued', NULL, 'assistant', 'ctx');
+    INSERT INTO assistant_threads (document_type, document_id, project_id, agent_id, messages)
+      VALUES ('chat', 'c1', 'p1', 'blacksmith', '[]');
+    INSERT INTO assistant_settings (project_id, engine) VALUES ('p1', 'blacksmith');
+    INSERT INTO settings (key, value) VALUES ('runtime_repo_cap', '5');
+  `;
+
+  it("0008 fresh database: assistant_tasks present, runtime_* absent, settings rebuilt", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    for (const t of ["assistant_tasks", "assistant_settings"]) expect(tableExists(db, t)).toBe(true);
+    for (const t of ["runtime_tasks", "runtime_task_logs", "runtime_sessions", "runtime_events", "runtimes", "machines"]) {
+      expect(tableExists(db, t)).toBe(false);
+    }
+    const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toContain("idx_assistant_tasks_created");
+    expect(idx).toContain("idx_assistant_tasks_status");
+    expect(idx.some((n) => n.startsWith("idx_runtime"))).toBe(false);
+    const cols = (db.prepare("PRAGMA table_info(assistant_settings)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).not.toContain("engine");
+    expect(cols).not.toContain("engine_switcher_enabled");
+    expect(cols).toEqual(expect.arrayContaining(["project_id", "search_provider", "primary_supports_images", "reasoning_effort", "write_tools", "fallback_model_ids", "provider_id", "primary_model_id"]));
+    db.close();
+  });
+
+  it("0008 upgrades a seeded pre-0008 database: rows preserved + rebound, registry dropped", () => {
+    const dir = stageThrough("0007");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0008_remove_agent_runtimes.sql");
+
+    const seed = new Database(dbPath);
+    seed.exec("PRAGMA foreign_keys = OFF");
+    seed.exec(SEED_PRE_0008);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    // Queue rebuilt + renamed; both rows preserved, blacksmith rebound.
+    expect(after.prepare("SELECT id, agent_id, status, document_id FROM assistant_tasks ORDER BY id").all()).toEqual([
+      { id: "rt1", agent_id: "assistant", status: "completed", document_id: "t1" },
+      { id: "rt2", agent_id: "assistant", status: "queued", document_id: "t1" },
+    ]);
+    // Threads rebound (no FK, transcripts kept).
+    expect(after.prepare("SELECT agent_id FROM assistant_threads WHERE document_id = 'c1'").get()).toEqual({ agent_id: "assistant" });
+    // Settings key renamed.
+    expect(after.prepare("SELECT value FROM settings WHERE key = 'assistant_repo_cap'").get()).toEqual({ value: "5" });
+    expect(after.prepare("SELECT COUNT(*) AS n FROM settings WHERE key = 'runtime_repo_cap'").get()).toEqual({ n: 0 });
+    // Catalog slimmed to the single builtin agent.
+    expect(after.prepare("SELECT id FROM lexa_agents ORDER BY id").all()).toEqual([{ id: "assistant" }]);
+    expect(after.prepare("SELECT COUNT(*) AS n FROM lexa_agent_skills WHERE agent_id = 'blacksmith'").get()).toEqual({ n: 0 });
+    // Registry gone.
+    for (const t of ["runtime_tasks", "runtime_task_logs", "runtime_sessions", "runtime_events", "runtimes", "machines"]) {
+      expect(tableExists(after, t)).toBe(false);
+    }
+    expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
+
+  it("0008 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
+    const dir = stageThrough("0007");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0008);
+
+    const sql = readFileSync(join(MIGRATIONS, "0008_remove_agent_runtimes.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0008_remove_agent_runtimes.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    expect(tableExists(db, "assistant_tasks")).toBe(true);
+    expect(tableExists(db, "runtime_tasks")).toBe(false);
+    expect(db.prepare("SELECT agent_id FROM assistant_tasks WHERE id = 'rt1'").get()).toEqual({ agent_id: "assistant" });
+    expect(db.prepare("SELECT agent_id FROM assistant_threads WHERE document_id = 'c1'").get()).toEqual({ agent_id: "assistant" });
+    expect(db.prepare("SELECT id FROM lexa_agents ORDER BY id").all()).toEqual([{ id: "assistant" }]);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.close();
+  });
+
+  it("0008 rolls back atomically with foreign_keys=ON (no partial rebuild)", () => {
+    const dir = stageThrough("0007");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0008);
+
+    const sql = readFileSync(join(MIGRATIONS, "0008_remove_agent_runtimes.sql"), "utf-8");
+    // FK-violating statement after the rebuild: no such agent row exists.
+    const broken = `${sql}\nUPDATE assistant_tasks SET agent_id = 'ghost' WHERE id = 'rt1';\n`;
+    db.exec("BEGIN");
+    let threw = false;
+    try {
+      db.exec(broken);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0008_remove_agent_runtimes.sql");
+      db.exec("COMMIT");
+    } catch {
+      threw = true;
+      db.exec("ROLLBACK");
+    }
+    expect(threw).toBe(true);
+
+    // Pre-0008 state untouched.
+    expect(tableExists(db, "runtime_tasks")).toBe(true);
+    expect(tableExists(db, "assistant_tasks")).toBe(false);
+    expect(db.prepare("SELECT engine FROM assistant_settings WHERE project_id = 'p1'").get()).toEqual({ engine: "blacksmith" });
+    expect(appliedMigrations(dbPath)).not.toContain("0008_remove_agent_runtimes.sql");
     db.close();
   });
 });
