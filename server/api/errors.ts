@@ -105,6 +105,11 @@ export class ApprovalExpired extends Data.TaggedError("ApprovalExpired")<{ id: s
 export class ApprovalAlreadyDecided extends Data.TaggedError("ApprovalAlreadyDecided")<{ id: string; status: string }> {}
 export class ApprovalsPending extends Data.TaggedError("ApprovalsPending")<{ batchId: string; remaining: number }> {}
 export class ToolDenied extends Data.TaggedError("ToolDenied")<{ message: string }> {}
+export class McpServerNotFound extends Data.TaggedError("McpServerNotFound")<{ id: string }> {}
+export class McpInvalidTransportConfig extends Data.TaggedError("McpInvalidTransportConfig")<{ reason: string }> {}
+export class McpStdioUnavailable extends Data.TaggedError("McpStdioUnavailable")<{}> {}
+export class McpConnectFailed extends Data.TaggedError("McpConnectFailed")<{ message?: string }> {}
+export class McpToolCallFailed extends Data.TaggedError("McpToolCallFailed")<{ message?: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -179,6 +184,11 @@ export const errorCodeMap: Record<string, string> = {
   ApprovalAlreadyDecided: "APPROVAL_ALREADY_DECIDED",
   ApprovalsPending: "APPROVALS_PENDING",
   ToolDenied: "TOOL_DENIED",
+  McpServerNotFound: "MCP_SERVER_NOT_FOUND",
+  McpInvalidTransportConfig: "MCP_INVALID_TRANSPORT_CONFIG",
+  McpStdioUnavailable: "MCP_STDIO_UNAVAILABLE",
+  McpConnectFailed: "MCP_CONNECT_FAILED",
+  McpToolCallFailed: "MCP_TOOL_CALL_FAILED",
   RowNotFound: "NOT_FOUND",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
@@ -232,6 +242,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SessionNotFound":
     case "AssistantThreadNotFound":
     case "ApprovalNotFound":
+    case "McpServerNotFound":
     case "RowNotFound":
       return 404;
     case "WipLimitExceeded":
@@ -273,6 +284,9 @@ export function errorToStatus(error: { _tag: string }): number {
       return 422;
     case "ToolDenied":
       return 403;
+    case "McpInvalidTransportConfig":
+    case "McpStdioUnavailable":
+      return 400;
     case "InvalidKey":
     case "MissingAuth":
       return 401;
@@ -292,6 +306,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ProviderUnreachable":
     case "AssistantGenerationFailed":
     case "AssistantToolBudgetExceeded":
+    case "McpConnectFailed":
+    case "McpToolCallFailed":
       return 502;
     case "DbError":
       return 500;
@@ -434,6 +450,16 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `${error.remaining} approval(s) still pending in batch '${error.batchId}' — decide them before resuming`;
     case "ToolDenied":
       return String(error.message ?? "Write denied: insufficient permissions.");
+    case "McpServerNotFound":
+      return "MCP server not found";
+    case "McpInvalidTransportConfig":
+      return String(error.reason ?? "Invalid MCP transport configuration");
+    case "McpStdioUnavailable":
+      return "stdio MCP servers run only when the Lexa server runs on this host (self-hosted Bun) — not available on Cloudflare Workers";
+    case "McpConnectFailed":
+      return typeof error.message === "string" && error.message ? error.message : "Could not connect to the MCP server";
+    case "McpToolCallFailed":
+      return typeof error.message === "string" && error.message ? error.message : "MCP tool call failed";
     case "RowNotFound":
       return "Resource not found";
     case "CannotDeleteSelf":

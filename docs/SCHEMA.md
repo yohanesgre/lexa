@@ -843,6 +843,46 @@ ALTER TABLE task_activity ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE task_comments ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
 -- write_tools is baked into the 0001_init.sql baseline (assistant_settings rebuild).
 
+-- Assistant MCP server registry (0009_assistant_mcp.sql). Global registry
+-- (superadmin-managed) + per-project availability junction; a project's absent
+-- row means the server is unavailable there. `transport_type` pins exactly one
+-- transport shape (CHECK): http/sse carry a url and no command; stdio carries a
+-- command and no url. `secret_ref` stores only a reference — 'env:NAME' or
+-- 'file:/abs/path' — never a plaintext credential; the repo's public mapper
+-- drops it and exposes `hasSecret` instead.
+CREATE TABLE assistant_mcp_servers (
+  id TEXT PRIMARY KEY,                                  -- stable slug, e.g. 'jev'
+  label TEXT NOT NULL,
+  transport_type TEXT NOT NULL CHECK (transport_type IN ('http','sse','stdio')),
+  url TEXT,
+  command TEXT,
+  args TEXT NOT NULL DEFAULT '[]',                      -- JSON array of strings
+  secret_ref TEXT,                                      -- 'env:NAME' | 'file:/abs/path', never plaintext
+  enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (
+    (transport_type IN ('http','sse') AND url IS NOT NULL AND command IS NULL)
+    OR (transport_type = 'stdio' AND command IS NOT NULL AND url IS NULL)
+  )
+);
+
+CREATE TABLE assistant_mcp_project_servers (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  server_id TEXT NOT NULL REFERENCES assistant_mcp_servers(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (project_id, server_id)
+);
+
+-- Seeded by 0009: the maintainer's local Jev MCP server (stdio, disabled).
+-- Never auto-enabled: stdio requires the `jev-mcp` binary on the Lexa host and
+-- is impossible on Cloudflare Workers. The row is protected — the service
+-- refuses to create/delete an id of 'jev'.
+INSERT OR IGNORE INTO assistant_mcp_servers (id, label, transport_type, command, args, enabled)
+VALUES ('jev', 'Jev', 'stdio', 'jev-mcp', '[]', 0);
+
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/assistant (no CHECK in DDL).
 -- FTS5 external-content index below; kept in sync by the repo on

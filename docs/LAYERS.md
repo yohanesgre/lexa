@@ -898,12 +898,102 @@ export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPrice
   // assistant_model_prices(model PK,prompt_price,completion_price,cached_read_price,cached_write_price,updated_at) — OpenRouter cache, USD per 1M, price-sync upserts
   // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,cached_read_price,cached_write_price,updated_at=datetime('now')
 }) {}
+export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/AssistantMcpRepo", {
+  // assistant_mcp_servers(id slug PK,label,transport_type CHECK http|sse|stdio,url,command,args JSON,secret_ref,enabled,created_at,updated_at)
+  //   CHECK: (http|sse → url NOT NULL, command NULL) | (stdio → command NOT NULL, url NULL)
+  // + assistant_mcp_project_servers(project_id→projects ON DELETE CASCADE,server_id→assistant_mcp_servers ON DELETE CASCADE,enabled,PK(project_id,server_id))
+  // thin: list/getById/create/update/remove/listForProject/setProjectServers (withTx replace-set); update sets updated_at = datetime('now')
+  // toPublic/projectToPublic drop secret_ref → hasSecret (never serialized)
+}) {}
 // AssistantSettingsRepo after the squashed baseline + 0008: assistant_settings dropped kind/base_url/api_key/model/vision_model
 // (baseline) and engine/engine_switcher_enabled (0008) — now only
 // search_provider, search_api_key, url_allowlist,
 // primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
 // price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
 ```
+
+### Lexa/AssistantMcpService — MCP server registry
+
+```typescript
+export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("Lexa/AssistantMcpService", {
+  dependencies: [AssistantMcpRepo.Default],
+  effect: Effect.gen(function* () {
+    // Also requires McpConnector (injectable seam @Context.Tag). The live connector
+    // (stdio spawn / HTTP+SSE JSON-RPC tools/list) is server/assistant/mcp.ts
+    // `LiveMcpConnector`, wired as the default in the API layer; tests inject a fake.
+    return {
+      // list/create/update/remove — id is slugified from the label, 'jev' reserved;
+      // listForProject/setProjectServers — replace-set availability (validates ids);
+      // testConnection — always resolves: a failed connect folds into
+      //   { ok:false, error:{code,message} }, never a thrown error.
+      // Validation (pure validateTransportConfig): transport shape, http/https url
+      //   with no userinfo, secretRef 'env:[A-Z0-9_]+' | 'file:/abs/path', command
+      //   non-empty for stdio, Workers stdio → McpStdioUnavailable.
+      // SSRF: validateUrl at save time; the connector revalidates at connect time.
+      // No cycles: repo + connector only — never GitHubService or chat services.
+    };
+  }),
+}) {}
+```
+
+### Assistant MCP tool bridge — `server/assistant/mcp.ts`
+
+Read-only MCP tools reach the model through the same `tools` array as the
+in-repo registry; there is no second execution path.
+
+```typescript
+// server/assistant/mcp.ts — plain module in the assistant tier (no service cycle).
+export async function buildMcpTools(opts: {
+  servers: McpServerRow[]; projectId: string; env: RuntimeEnv; allowlist: string | null;
+  connector?: McpClientFactory;   // injectable fake for tests; default = live
+  onToolCall?: McpToolCallSink; discoveryTimeoutMs?: number; toolCallTimeoutMs?: number;
+}): Promise<{ tools: unknown[]; close: () => Promise<void> }>
+
+// ENABLED_MCP_SERVERS_SQL: global `enabled = 1` AND project row `enabled = 1`.
+// LiveMcpConnector: Layer for the McpConnector tag (registry test endpoint).
+```
+
+- **Names:** `mcp__<serverId>__<tool>`; the id is sanitized to `[a-z0-9_]`
+  (segment capped 24) and the tool segment truncated so the joined name never
+  exceeds the provider limit (`MCP_TOOL_NAME_MAX = 64`). Collisions across
+  servers are skipped (logged), never fused.
+- **Filtering is manual and default-deny:** `isReadOnlyMcpTool` reads
+  `tool.metadata.mcp.annotations.readOnlyHint === true` (ai-mcp 0.4.6 has no
+  `toolFilter`). Tools without the annotation are listed nowhere and never
+  handed to the model — v1 exposes only provably read-only tools.
+- **Lifecycle:** one `createMCPClient` per server, discovery under
+  `Promise.allSettled` with a 5s per-server timeout; a failed/timed-out server
+  is skipped (fail-open, logged). `close()` is idempotent (double-close guarded)
+  and is passed to `buildStream` as `onDispose`.
+- **Dispose:** `StreamRunContext.onDispose` runs in `buildStream`'s existing
+  `finally`, so the done / fail / cancel paths each close the MCP clients
+  exactly once (tests cover all three).
+- **Caps:** 30s per tool call (`MCP_TOOL_CALL_TIMEOUT_MS`, abort + race) and
+  100 000 chars per result (`MCP_TOOL_RESULT_CAP`).
+- **SSRF:** http/sse URLs re-run `validateUrl(url, allowlist)` at connect time
+  (`validateMcpTransportUrl`) — the save-time pass is fast feedback only.
+- **stdio:** `server/assistant/mcp-stdio.ts`, imported lazily
+  (`await import("@tanstack/ai-mcp/stdio")`), guarded by `isWorkers()`; command
+  + args array (never a shell string); child env = `STDIO_ENV_ALLOWLIST` host
+  vars + the resolved `secret_ref` (`env:NAME` → that name, `file:/abs/path` →
+  `MCP_SECRET`). Stdio is skipped on Workers with `McpStdioUnavailable`.
+- **Workers output-schema validation:** the SDK's AJV validator compiles with
+  `new Function`, forbidden on workerd; on Workers a permissive
+  `jsonSchemaValidator` is supplied and wrapped tools drop `outputSchema`.
+- **Audit (deviation):** each call logs a structured call-log line
+  (`service: "assistant-mcp"`: serverId, toolName, ok/error, durationMs;
+  injectable `onToolCall`). `assistant_call_logs.kind` is CHECK-pinned to
+  provider kinds, so a real DB row needs a rebuild migration — deferred, not
+  smuggled into this change. No `task_activity` rows (MCP calls are not task
+  mutations).
+- **No cycle:** `mcp.ts` imports the repo type, env, errors, ssrf, the
+  `McpConnector` tag, and `@tanstack/ai-mcp` — never a chat/task service.
+
+Wiring: `AssistantChatService` (stream + resume) and `AssistantTaskService`
+(stream + resume) load `ENABLED_MCP_SERVERS_SQL` for the project, call
+`buildMcpTools`, append `.tools` after the registry/write tools (and the vision
+tool), and pass `onDispose: toolset.close`. The live connector is the API-layer
+default (`createApiHandler(..., { mcpConnector })` still overrides for tests).
 
 ### Lexa/Assistant — assistant tier (server-side TanStack AI)
 
@@ -1178,6 +1268,11 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ApprovalAlreadyDecided` | 409 | second decision on a decided/expired row — payload `{ id, status }` |
 | `ApprovalsPending` | 409 | resume while rows in the batch are still undecided — payload `{ batchId, remaining }` |
 | `ToolDenied` | 403 | write-tool execution refused by authorization at resume time |
+| `McpServerNotFound` | 404 | MCP registry: unknown server id (update/delete/test/project availability) |
+| `McpInvalidTransportConfig` | 400 | reserved slug id (`jev`), transport shape mismatch, bad url/secretRef, or deleting the protected `jev` row |
+| `McpStdioUnavailable` | 400 | stdio registered or tested on Cloudflare Workers (no process spawn) |
+| `McpConnectFailed` | 502 | MCP connector could not connect or `tools/list` failed (folded into the test report) |
+| `McpToolCallFailed` | 502 | MCP tool invocation failed (tool-loop phase) |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
 `errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
@@ -1193,6 +1288,7 @@ FieldConfigService → FieldConfigRepo, ProjectRepo
 AssistantCatalogService → AssistantCatalogRepo, AssistantTaskRepo
 AssistantTaskService  → AssistantTaskRepo, AssistantCatalogRepo, AssistantSettingsRepo, AssistantThreadRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, ActivityService, Storage, TaskRepo, WikiRepo, AssistantGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
 AssistantService      → AssistantChatService, AssistantTaskService (thin facade — delegates; see §Lexa/Assistant)
+AssistantMcpService   → AssistantMcpRepo, McpConnector (no service/repo cycles; never GitHubService or chat services)
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo

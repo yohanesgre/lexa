@@ -1,5 +1,8 @@
 import { Effect } from "effect";
 import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS } from "../assistant/tools";
+import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
+import type { McpServerRow } from "../repos/assistant-mcp.repo";
+import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, CHAT_IDENTITY } from "../assistant/prompt";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
@@ -52,6 +55,19 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     const milestoneService = yield* MilestoneService;
     const swimlaneService = yield* SwimlaneService;
     const authz = yield* AuthorizationService;
+
+    // Read-only MCP tools for this project: globally + project enabled servers,
+    // discovered fail-open. Undefined when the project has none.
+    const loadAssistantMcp = (projectId: string, allowlist: string | null): Effect.Effect<McpToolset | undefined> =>
+      Effect.gen(function* () {
+        const env = yield* currentEnv;
+        const servers = yield* Effect.tryPromise({
+          try: () => dbAll<McpServerRow>(ENABLED_MCP_SERVERS_SQL, projectId),
+          catch: () => new DbError({ message: "failed to load enabled MCP servers" }),
+        }).pipe(Effect.catchAll(() => Effect.succeed([] as McpServerRow[])));
+        if (servers.length === 0) return undefined;
+        return yield* Effect.promise(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined));
+      });
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
     const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
@@ -219,15 +235,18 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           )
         );
         const modelOptions = modelOptionsWithWriteIntent(baseModelOptions, req.message, enabledWriteTools);
+        const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
+        const mcp = yield* loadAssistantMcp(req.projectId, allowlist);
         return buildStream({
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
-            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key), onCitation: (c) => { citations = collectCitation(citations, c); } });
+            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key), onCitation: (c) => { citations = collectCitation(citations, c); } });
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
             chatWriteDrain = writeSet.drain;
-            return imageMode === "delegate" && attachments.length > 0 ? [...base, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: chatId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools] : [...base, ...writeSet.tools];
-          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode: attachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount,
+            const mcpTools = mcp?.tools ?? [];
+            return imageMode === "delegate" && attachments.length > 0 ? [...base, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: chatId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
+          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode: attachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: req.skillId ?? null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
@@ -269,13 +288,15 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
         const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, writeTools: enabledWriteTools });
         const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
+        const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
+        const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
         let citations: import("../../shared/assistant").Citation[] = [];
         return buildStream({
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
-          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools],
-          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount,
+          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });

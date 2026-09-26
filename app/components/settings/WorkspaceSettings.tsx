@@ -4,6 +4,7 @@ import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects } from "../../lib/queries";
 import { ApiKeysSection, GithubSyncSection, RateLimitSection } from "./SettingsSections";
 import { AssistantProvidersSection } from "./AssistantProvidersSection";
+import { AssistantMcpSection } from "./AssistantMcpSection";
 import { formatRelative } from "../../lib/relative-time";
 import { AgentsSettingsSection, SkillsSettingsSection } from "./assistant/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -382,6 +383,7 @@ export function WorkspaceSettings() {
         <>
           <GithubSyncSection />
           {isSuperadmin && <AssistantProvidersSection />}
+          {isSuperadmin && <AssistantMcpSection />}
           <AgentsSkillsSections />
         </>
       )}

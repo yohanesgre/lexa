@@ -694,6 +694,76 @@ export function reorderAssistantProviderModels(id: string, orderedIds: string[])
   return request(`${BASE}/admin/assistant/providers/${id}/models/reorder`, { method: "POST", body: JSON.stringify({ orderedIds }) });
 }
 
+// ── MCP server registry (assistant MCP servers) ──
+export type McpTransportType = "http" | "sse" | "stdio";
+
+export interface McpServer {
+  id: string;
+  label: string;
+  transportType: McpTransportType;
+  url: string | null;
+  command: string | null;
+  args: string[];
+  hasSecret: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpServerInput {
+  label: string;
+  transportType: McpTransportType;
+  url?: string | null;
+  command?: string | null;
+  args?: string[];
+  secretRef?: string | null;
+  enabled?: boolean;
+}
+
+export interface McpTestResult {
+  ok: boolean;
+  toolCount: number;
+  readOnlyToolCount: number;
+  latencyMs: number;
+  error: { code: string; message: string } | null;
+}
+
+export interface McpProjectServer {
+  projectId: string;
+  serverId: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listMcpServers(): Promise<{ data: McpServer[] }> {
+  return request(`${BASE}/assistant/mcp-servers`);
+}
+
+export function createMcpServer(input: McpServerInput): Promise<McpServer> {
+  return request(`${BASE}/assistant/mcp-servers`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateMcpServer(id: string, input: Partial<McpServerInput>): Promise<McpServer> {
+  return request(`${BASE}/assistant/mcp-servers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function deleteMcpServer(id: string): Promise<void> {
+  return request(`${BASE}/assistant/mcp-servers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function testMcpServer(id: string): Promise<McpTestResult> {
+  return request(`${BASE}/assistant/mcp-servers/${encodeURIComponent(id)}/test`, { method: "POST" });
+}
+
+export function listProjectMcpServers(projectId: string): Promise<{ data: McpProjectServer[] }> {
+  return request(`${BASE}/projects/${encodeURIComponent(projectId)}/assistant/mcp-servers`);
+}
+
+export function putProjectMcpServers(projectId: string, entries: Array<{ serverId: string; enabled: boolean }>): Promise<{ data: McpProjectServer[] }> {
+  return request(`${BASE}/projects/${encodeURIComponent(projectId)}/assistant/mcp-servers`, { method: "PUT", body: JSON.stringify({ entries }) });
+}
+
 export function getAssistantUsage(): Promise<AssistantUsage> {
   return request(`${BASE}/admin/assistant/usage`);
 }

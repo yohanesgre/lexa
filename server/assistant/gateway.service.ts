@@ -7,6 +7,7 @@
 import { Effect, Option } from "effect";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { buildAdapter, normalizeBaseUrl, normalizeProviderKind, streamChat as providerStreamChat, testConnection as providerTestConnection, translateRunError, getProviderDiagnostics, extractStatusCode, extractProviderMessage, extractRetryAfter, isTransientUpstream, type ProviderConfig } from "./provider";
+import { normalizeRunUsage } from "./build-stream";
 import type { CacheablePrompt } from "./prompt";
 import { AssistantProvidersRepo } from "../repos/assistant-providers.repo";
 import { AssistantModelsRepo } from "../repos/assistant-models.repo";
@@ -416,7 +417,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                 modelOptions: input.modelOptions,
                 ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
               });
-              let usageIn = 0; let usageOut = 0; let cachedIn = 0;
+              let usageIn = 0; let usageOut = 0; let cachedIn = 0; let cacheWriteIn = 0;
               let generatedText = "";
               let inToolCallLeak = false;
               for await (const chunk of iterable) {
@@ -460,14 +461,11 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                   }
                 }
                 if ((chunk as { type?: string }).type === "RUN_FINISHED") {
-                  const u = (chunk as { usage?: { input?: number; output?: number; promptTokens?: number; completionTokens?: number } }).usage;
-                  usageIn = Number(u?.input ?? u?.promptTokens ?? 0);
-                  usageOut = Number(u?.output ?? u?.completionTokens ?? 0);
-                  const uu = (u ?? {}) as unknown as Record<string, unknown>;
-                  const details = (uu.promptTokensDetails ?? uu.prompt_tokens_details ?? {}) as Record<string, unknown>;
-                  const cachedRaw = uu.cached ?? uu.cachedTokens ?? uu.cached_tokens ?? uu.cache_read_input_tokens ?? details.cached_tokens ?? 0;
-                  cachedIn = Number(cachedRaw ?? 0);
-                  if (!Number.isFinite(cachedIn) || cachedIn < 0) cachedIn = 0;
+                  const u = normalizeRunUsage((chunk as { usage?: unknown }).usage, { input: usageIn, output: usageOut, cached: cachedIn, cacheWrite: cacheWriteIn });
+                  usageIn = u.input;
+                  usageOut = u.output;
+                  cachedIn = Number.isFinite(u.cached) && u.cached >= 0 ? u.cached : 0;
+                  cacheWriteIn = Number.isFinite(u.cacheWrite) && u.cacheWrite >= 0 ? u.cacheWrite : 0;
                 }
                 yield chunk;
               }
@@ -491,9 +489,10 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                   }
                 }
                 try {
-                  const price = await Effect.runPromise(priceRepo.getByModel(cfg.model).pipe(Effect.catchAll(() => Effect.succeed(null as never as { promptPrice: number; completionPrice: number; cachedReadPrice: number }))));
+                  const price = await Effect.runPromise(priceRepo.getByModel(cfg.model).pipe(Effect.catchAll(() => Effect.succeed(null as never as { promptPrice: number; completionPrice: number; cachedReadPrice: number; cachedWritePrice: number }))));
                   if (price) {
-                    costCents = Math.round(((usageIn - cachedIn) * price.promptPrice + cachedIn * price.cachedReadPrice + usageOut * price.completionPrice) / 1e6 * 100);
+                    const freshIn = Math.max(0, usageIn - cachedIn - cacheWriteIn);
+                    costCents = Math.round((freshIn * price.promptPrice + cachedIn * price.cachedReadPrice + cacheWriteIn * price.cachedWritePrice + usageOut * price.completionPrice) / 1e6 * 100);
                   } else {
                     costCents = 0;
                     if (!estimated) estimated = usageIn === 0 && usageOut === 0;

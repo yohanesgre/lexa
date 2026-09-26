@@ -9,6 +9,7 @@
 // Workers path (which has a per-request `env` binding) on the same shape so
 // the HTTP layer can construct its per-request runtime from either input.
 
+import { readFileSync } from "node:fs";
 import type { D1Database, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 
 export interface RuntimeEnv {
@@ -166,6 +167,30 @@ export function resolvePublicUrl(env: RuntimeEnv): string {
 
 export function resolveDatabasePath(env: RuntimeEnv): string {
   return env.DATABASE_PATH ?? DEFAULT_DATABASE_PATH;
+}
+
+// MCP credential resolution. A `secret_ref` names where a credential lives,
+// never the credential itself: `env:NAME` reads the RuntimeEnv slot (the same
+// snapshot threaded through every request), `file:/abs/path` reads a host file
+// (Bun only — Workers has no filesystem; the node:fs shim throws, so the
+// branch is guarded and returns null). Missing/unresolvable refs resolve to
+// null (fail closed); the caller decides whether a credential was required.
+export function resolveSecretRef(ref: string | null | undefined, env: RuntimeEnv): string | null {
+  if (!ref) return null;
+  if (ref.startsWith("env:")) {
+    const name = ref.slice(4);
+    const value = (env as unknown as Record<string, unknown>)[name];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
+  if (ref.startsWith("file:")) {
+    if (isWorkers()) return null;
+    try {
+      return readFileSync(ref.slice(5), "utf8").trim();
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export function resolveTrustedOrigins(env: RuntimeEnv, publicUrl: string = resolvePublicUrl(env)): string[] {

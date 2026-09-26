@@ -670,7 +670,7 @@ describe("tool frame detail", () => {
   it("call and result frames carry the detail built from the streamed args", async () => {
     providerMock.script = [
       { type: "TOOL_CALL_START", toolCallId: "t1", toolCallName: "search_wiki" },
-      { type: "TOOL_CALL_ARGS", toolCallId: "t1", args: '{"query":"auth flow"}' },
+      { type: "TOOL_CALL_ARGS", toolCallId: "t1", delta: '{"query":"auth flow"}' },
       { type: "TOOL_CALL_END", toolCallId: "t1" },
       { type: "RUN_FINISHED" },
     ];
@@ -693,7 +693,7 @@ describe("tool frame detail", () => {
   it("unparseable args yield no detail", async () => {
     providerMock.script = [
       { type: "TOOL_CALL_START", toolCallId: "t1", toolCallName: "get_task" },
-      { type: "TOOL_CALL_ARGS", toolCallId: "t1", args: "{not json" },
+      { type: "TOOL_CALL_ARGS", toolCallId: "t1", delta: "{not json" },
       { type: "TOOL_CALL_END", toolCallId: "t1" },
       { type: "RUN_FINISHED" },
     ];

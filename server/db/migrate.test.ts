@@ -176,7 +176,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -187,7 +187,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -214,7 +214,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -766,6 +766,70 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     expect(tableExists(db, "assistant_tasks")).toBe(false);
     expect(db.prepare("SELECT engine FROM assistant_settings WHERE project_id = 'p1'").get()).toEqual({ engine: "blacksmith" });
     expect(appliedMigrations(dbPath)).not.toContain("0008_remove_agent_runtimes.sql");
+    db.close();
+  });
+
+  it("0009 fresh database: MCP registry tables + the disabled jev seed", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const t of ["assistant_mcp_servers", "assistant_mcp_project_servers"]) {
+      expect(tableExists(db, t)).toBe(true);
+    }
+    const cols = (db.prepare("PRAGMA table_info(assistant_mcp_servers)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining([
+      "id", "label", "transport_type", "url", "command", "args", "secret_ref", "enabled", "created_at", "updated_at",
+    ]));
+
+    // Seeded Jev row: stdio, no url/secret, never auto-enabled.
+    expect(db.prepare("SELECT id, label, transport_type, url, command, args, secret_ref, enabled FROM assistant_mcp_servers").all()).toEqual([
+      { id: "jev", label: "Jev", transport_type: "stdio", url: null, command: "jev-mcp", args: "[]", secret_ref: null, enabled: 0 },
+    ]);
+
+    // Transport CHECK: http needs a url, stdio needs a command.
+    expect(() => db.exec(`INSERT INTO assistant_mcp_servers (id, label, transport_type, command) VALUES ('h1','H','http','c')`)).toThrow();
+    expect(() => db.exec(`INSERT INTO assistant_mcp_servers (id, label, transport_type) VALUES ('s1','S','stdio')`)).toThrow();
+
+    // Junction cascades on both parents.
+    db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1')`);
+    db.exec(`INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES ('p1', 'jev', 1)`);
+    const fks = db.prepare("PRAGMA foreign_key_list(assistant_mcp_project_servers)").all() as Array<{ from: string; table: string; on_delete: string }>;
+    expect(fks.find((f) => f.from === "server_id")?.on_delete).toBe("CASCADE");
+    expect(fks.find((f) => f.from === "project_id")?.on_delete).toBe("CASCADE");
+    db.exec(`DELETE FROM assistant_mcp_servers WHERE id = 'jev'`);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_project_servers").get()).toEqual({ n: 0 });
+    db.close();
+  });
+
+  it("0009 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
+    const dir = stageThrough("0008");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0009_assistant_mcp.sql");
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1')`);
+
+    const sql = readFileSync(join(MIGRATIONS, "0009_assistant_mcp.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0009_assistant_mcp.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    expect(tableExists(db, "assistant_mcp_servers")).toBe(true);
+    expect(tableExists(db, "assistant_mcp_project_servers")).toBe(true);
+    expect(db.prepare("SELECT id, transport_type, command, enabled FROM assistant_mcp_servers").all()).toEqual([
+      { id: "jev", transport_type: "stdio", command: "jev-mcp", enabled: 0 },
+    ]);
+    db.exec(`INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES ('p1', 'jev', 1)`);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
   });
 });

@@ -119,6 +119,100 @@ export function useFetchModels() {
   });
 }
 
+// ── MCP servers ──
+
+export function useMcpServers() {
+  return useQuery({
+    queryKey: ["assistant-mcp-servers"],
+    queryFn: () => api.listMcpServers().then((r) => r.data),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateMcpServer() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: api.McpServerInput) => api.createMcpServer(input),
+    onSuccess: (server) => {
+      qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ? [...old, server] : [server]));
+      toast.push("success", "MCP server created");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create MCP server", toastMessage(err));
+    },
+  });
+}
+
+export function useUpdateMcpServer() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string } & Partial<api.McpServerInput>) => api.updateMcpServer(id, input),
+    onSuccess: (server) => {
+      qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ?? []).map((s) => (s.id === server.id ? server : s)));
+      toast.push("success", "MCP server updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update MCP server", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteMcpServer() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteMcpServer(id),
+    onSuccess: (_v, id) => {
+      qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ?? []).filter((s) => s.id !== id));
+      toast.push("success", "MCP server deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete MCP server", toastMessage(err));
+    },
+  });
+}
+
+// Test result is a report body (HTTP 200 even on a failed connect) — only an
+// unknown id / transport failure reaches onError. Never persists counts.
+export function useTestMcpServer() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.testMcpServer(id),
+    onError: (err) => {
+      const code = (err as { code?: string }).code;
+      if (code === "MCP_SERVER_NOT_FOUND") return;
+      toast.push("error", "Test failed", toastMessage(err));
+    },
+  });
+}
+
+export function useProjectMcpServers(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["project-mcp-servers", projectId],
+    queryFn: () => api.listProjectMcpServers(projectId!).then((r) => r.data),
+    enabled: !!projectId,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useSetProjectMcpServers(projectId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (entries: Array<{ serverId: string; enabled: boolean }>) => api.putProjectMcpServers(projectId, entries),
+    onSuccess: (res) => {
+      qc.setQueryData<api.McpProjectServer[]>(["project-mcp-servers", projectId], res.data);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update project MCP servers", toastMessage(err));
+    },
+  });
+}
+
 export { useAssistantUsage } from "../assistant-usage.query";
 
 export function useAssistantCalls(params?: { projectId?: string | undefined; limit?: number }) {

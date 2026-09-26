@@ -264,6 +264,28 @@ external worker, no claim loop, and no heartbeat.
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.
 
+### MCP tool bridge (`server/assistant/mcp.ts`)
+
+The Assistant consumes external MCP servers as **read-only** tools. A new SQLite
+registry (`assistant_mcp_servers` + per-project `assistant_mcp_project_servers`,
+superadmin-managed) holds transports; per stream run `buildMcpTools` connects
+one `@tanstack/ai-mcp` client per globally+project-enabled server, discovers
+tools, keeps only those annotated `readOnlyHint === true` (default-deny),
+prefixes them `mcp__<serverId>__<tool>`, and appends them to the same `tools`
+array the in-repo registry produces. Discovery is fail-open (`Promise.allSettled`
++ 5s per-server timeout); the toolset closes exactly once via
+`StreamRunContext.onDispose` in `buildStream`'s `finally`. stdio runs only on
+the same-host Bun process (`server/assistant/mcp-stdio.ts`, lazily imported,
+`isWorkers()`-guarded); http/sse URLs are SSRF-validated at connect.
+
+**No cycle (invariant #1).** The bridge is a plain assistant-tier module:
+it imports the registry repo type, env/errors, the SSRF guard, the
+`McpConnector` tag, and `@tanstack/ai-mcp` — never `GitHubService` or a
+chat/task service. Chat/task services consume it, not the reverse. MCP tool
+calls are not task mutations, so they emit no `task_activity` rows; v1 exposes
+no write tools, and routing MCP writes through `assistant_pending_writes` is a
+deliberate follow-up (it needs a rebuild migration).
+
 ### Removal record — the agent-runtime (Blacksmith) tier
 
 The second tier, a coding-agent tier ("Blacksmith"), was removed end to end in
