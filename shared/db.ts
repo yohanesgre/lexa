@@ -1,14 +1,8 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject, Runtime } from "./types";
+import type { TipTapDoc, ISODate, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject } from "./types";
 import { parseTipTapDoc } from "./types";
-
-// Runtime with the owning team exposed (wire-only — the shared Runtime type
-// stays team-free per the contract; the FE reads teamId off the wire).
-export interface RuntimeWithTeam extends Runtime {
-  teamId: string | null;
-}
 
 export interface PriorityOptionRow {
   id: string;
@@ -393,117 +387,33 @@ function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null |
   };
 }
 
-export interface RuntimeRow {
+export interface AssistantTaskRow {
   id: string;
-  name: string;
-  provider: "opencode" | "hermes" | "command-code";
-  machine_id: string | null;
-  team_id: string | null;
-  agent: string;
-  model: string;
-  print_logs: number;
-  log_level: string;
-  extra_args: string;
-  models_catalog: string;
-  agents_catalog: string;
-  status: "online" | "offline";
-  last_error: string | null;
-  hostname: string;
-  last_seen: string | null;
-  created_at: string;
-}
-
-function parseArgs(raw: string | null): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((a): a is string => typeof a === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseModelsCatalog(raw: string | null): { id: string; provider: string; name: string }[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((m): m is { id: string; provider: string; name: string } =>
-          typeof m?.id === "string" && typeof m?.provider === "string" && typeof m?.name === "string"
-        )
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseAgentsCatalog(raw: string | null): RuntimeAgent[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((agent): agent is RuntimeAgent =>
-          typeof agent?.id === "string" && typeof agent?.name === "string"
-        )
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-export function rowToRuntime(row: RuntimeRow): RuntimeWithTeam {
-  return {
-    id: row.id,
-    name: row.name,
-    provider: row.provider,
-    machineId: row.machine_id ?? null,
-    teamId: row.team_id ?? null,
-    agent: row.agent ?? "",
-    model: row.model,
-    printLogs: (row.print_logs ?? 0) === 1,
-    logLevel: (row.log_level as "" | "DEBUG" | "INFO" | "WARN" | "ERROR") ?? "",
-    extraArgs: parseArgs(row.extra_args),
-    modelsCatalog: parseModelsCatalog(row.models_catalog),
-    agentsCatalog: parseAgentsCatalog(row.agents_catalog),
-    status: row.status,
-    lastError: row.last_error ?? null,
-    hostname: row.hostname,
-    lastSeen: row.last_seen,
-    createdAt: row.created_at,
-  };
-}
-
-export interface RuntimeTaskRow {
-  id: string;
-  key: string;
-  runtime_id: string | null;
   project_id: string;
   document_type: "task" | "wiki";
   document_id: string;
   document_title?: string | null;
+  key?: string | null;
   agent_id: string;
   skill_id: string;
   agent_name?: string | null;
   skill_name?: string | null;
   extra_prompt: string;
   selection: string;
-  doc_context: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   result: string | null;
   error: string | null;
-  kind: "blacksmith" | "assistant";
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
 }
 
-export function rowToRuntimeTask(row: RuntimeTaskRow): {
-  id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; kind: "blacksmith" | "assistant"; createdAt: string; startedAt: string | null; finishedAt: string | null;
+export function rowToAssistantTask(row: AssistantTaskRow): {
+  id: string; key: string; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
     id: row.id,
-    key: row.key,
-    runtimeId: row.runtime_id,
+    key: row.key ?? "",
     projectId: row.project_id,
     documentType: row.document_type,
     documentId: row.document_id,
@@ -514,16 +424,15 @@ export function rowToRuntimeTask(row: RuntimeTaskRow): {
     skillName: row.skill_name ?? "",
     extraPrompt: row.extra_prompt,
     selection: row.selection,
-    docContext: row.doc_context,
     status: row.status,
     result: row.result,
     error: row.error,
-    kind: row.kind,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
 }
+
 
 export interface LexaAgentRow {
   id: string;
@@ -571,69 +480,6 @@ export function rowToLexaSkill(row: LexaSkillRow): {
     isBuiltin: row.is_builtin === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  };
-}
-
-export interface RuntimeSessionRow {
-  document_type: "task" | "wiki";
-  document_id: string;
-  runtime_id: string;
-  runtime_session_id: string;
-  provider: "opencode" | "hermes" | "command-code";
-  agent_id: string;
-  skill_id: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export function rowToRuntimeSession(row: RuntimeSessionRow): {
-  documentType: "task" | "wiki";
-  documentId: string;
-  runtimeId: string;
-  runtimeSessionId: string;
-  provider: "opencode" | "hermes" | "command-code";
-  agentId: string;
-  skillId: string;
-  createdAt: string;
-  updatedAt: string;
-} {
-  return {
-    documentType: row.document_type,
-    documentId: row.document_id,
-    runtimeId: row.runtime_id,
-    runtimeSessionId: row.runtime_session_id,
-    provider: row.provider,
-    agentId: row.agent_id,
-    skillId: row.skill_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-export interface RuntimeTaskLogRow {
-  id: string;
-  task_id: string;
-  message: string;
-  stream: "out" | "err";
-  level: "info" | "warn" | "error";
-  created_at: string;
-}
-
-export function rowToRuntimeTaskLog(row: RuntimeTaskLogRow): {
-  id: string;
-  taskId: string;
-  message: string;
-  stream: "out" | "err";
-  level: "info" | "warn" | "error";
-  createdAt: string;
-} {
-  return {
-    id: row.id,
-    taskId: row.task_id,
-    message: row.message,
-    stream: row.stream,
-    level: row.level,
-    createdAt: row.created_at,
   };
 }
 

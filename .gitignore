@@ -44,3 +44,8 @@ lexa-deploy/
 
 # Review artifacts (HTML reports from review lanes) — never commit
 .reviews/
+# Lane reports + scratch logs (plan status lives in status/, already ignored) — never commit
+.tmp/
+
+# brainstorm-studio working specs (local, uncommitted)
+/.agents/brainstorm-studio/specs/

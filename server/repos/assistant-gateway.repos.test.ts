@@ -30,7 +30,7 @@ describe("assistant gateway phase 1", () => {
       expect(cols).not.toContain("api_key");
       expect(cols).not.toContain("model");
       expect(cols).not.toContain("vision_model");
-      expect(cols).toEqual(expect.arrayContaining(["search_provider","search_api_key","url_allowlist","engine","engine_switcher_enabled","primary_supports_images","write_tools","reasoning_effort","created_at","updated_at","project_id"]));
+      expect(cols).toEqual(expect.arrayContaining(["search_provider","search_api_key","url_allowlist","primary_supports_images","write_tools","reasoning_effort","created_at","updated_at","project_id"]));
       for (const tbl of ["assistant_providers","assistant_models","assistant_call_logs","assistant_model_prices"]) {
         const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tbl) as { name: string } | undefined;
         expect(row?.name).toBe(tbl);

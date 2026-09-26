@@ -9,7 +9,7 @@
  *
  * Prompts for the admin email (LXK_ADMIN_EMAILS) + the superadmin password,
  * runs migrations, creates the superadmin account (Better Auth
- * credential), and offers sample data. Machine keys are minted
+ * credential), and offers sample data. API keys are minted
  * post-setup (login → Settings → API Keys).
  *
  * LXK_ENV is written explicitly so the server knows its environment.
@@ -115,7 +115,7 @@ async function main() {
 
   // 3. Persist env file — LXK_ENV is always explicit so the seed gate works.
   // Drop legacy provisioned keys: the server no longer reads LXK_API_KEY
-  // (machine keys are minted post-setup).
+  // (API keys are minted post-setup).
   delete env.LXK_API_KEY;
   if (!env.DATABASE_PATH) env.DATABASE_PATH = "./data/lexa.db";
   if (!env.PORT) env.PORT = "3000";

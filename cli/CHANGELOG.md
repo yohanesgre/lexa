@@ -12,6 +12,23 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+### Removed
+
+- **machine/runtime commands** — `lx machine *` (install/listen/start/stop/
+  restart/status/logs/delete/workspace) and `lx runtime *` are gone with the
+  removed AI-runtime (Blacksmith) tier. `lx login` no longer registers a
+  machine. The CLI is operator-only: `login|logout|status|upgrade|project|
+  task|wiki|github`.
+
+### Changed
+
+- `lx upgrade` installs the new binary only (no listener restart hint).
+  `compile:cli` is a plain `bun build --compile` — no embedded daemon or
+  daemon bundle.
+- External harness contract documented: read/write work items through
+  `lx task …` / `lx wiki …` only; `--json`, TipTap→Markdown, `PREFIX-N`
+  aliases.
+
 ## [2026.4.0] - 2026-09-11
 
 ### Changed

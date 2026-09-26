@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
-import { getEnv, legacyRuntimeEnvWarning, resolveTrustedProxyCidrs } from "./env";
+import { getEnv, resolveTrustedProxyCidrs } from "./env";
 import { resolveClientIp, syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
@@ -49,9 +49,6 @@ if (PORT !== rawPort) console.warn(`Invalid PORT (${process.env.PORT}) — falli
 const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 const STORAGE_CFG = resolveStorageConfig(process.env, dirname(DATABASE_PATH));
 
-const legacyEnvWarning = legacyRuntimeEnvWarning(process.env);
-if (legacyEnvWarning) console.warn(`[lexa] ${legacyEnvWarning}`);
-
 const TRUSTED_PROXY_CIDRS = resolveTrustedProxyCidrs(getEnv());
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
@@ -73,6 +70,19 @@ runMigrations(DATABASE_PATH);
     db.close();
   }
 }
+// Boot-time stale-run sweep: a crash mid-stream leaves `running` assistant
+// rows that never finish, blocking reset/resume. Mark them failed.
+{
+  const db = new Database(DATABASE_PATH);
+  try {
+    const swept = db.prepare(
+      "UPDATE assistant_tasks SET status = 'failed', error = 'server restarted', finished_at = datetime('now') WHERE status = 'running' AND started_at < datetime('now', '-30 minutes')"
+    ).run().changes;
+    if (swept > 0) console.log(`[Assistant] swept ${swept} stale running task(s) to failed`);
+  } finally {
+    db.close();
+  }
+}
 // FTS5 optimize merges deleted-row b-trees; table may be absent on a pre-0001 DB.
 try {
   const db = new Database(DATABASE_PATH);
@@ -80,13 +90,11 @@ try {
   db.close();
 } catch {}
 pruneWebhookEvents(DATABASE_PATH);
-pruneRuntimeEvents(DATABASE_PATH);
 pruneDeviceLoginRequests(DATABASE_PATH);
 autoLockSetupIfConfigured(DATABASE_PATH);
 setInterval(() => {
   try {
     pruneWebhookEvents(DATABASE_PATH);
-    pruneRuntimeEvents(DATABASE_PATH);
     pruneDeviceLoginRequests(DATABASE_PATH);
   } catch {}
 }, 3600_000).unref();
@@ -329,17 +337,6 @@ function pruneWebhookEvents(dbPath: string) {
   const db = new Database(dbPath);
   try {
     db.exec("DELETE FROM webhook_events WHERE received_at < datetime('now', '-7 days')");
-  } finally {
-    db.close();
-  }
-}
-
-function pruneRuntimeEvents(dbPath: string) {
-  const db = new Database(dbPath);
-  try {
-    // Terminal-state setup events older than 7 days. Pending/claimed events
-    // stay: a claimed event is reclaimable for 2 minutes after a crash.
-    db.exec("DELETE FROM runtime_events WHERE status IN ('completed', 'failed') AND finished_at < datetime('now', '-7 days')");
   } finally {
     db.close();
   }

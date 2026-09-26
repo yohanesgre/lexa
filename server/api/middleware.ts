@@ -4,7 +4,7 @@ import { Cause, Effect } from "effect";
 import type { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { AuthIdentity, AuthIdentityShape } from "./auth";
-import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
+import { resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
 import { bodyCapFor, resolveStorageConfig } from "../storage/config";
 import { apiRateLimiter, isRateLimitExemptPath, resolveClientIp, shareRateLimiter } from "./rate-limit";
@@ -74,12 +74,6 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       // AUTH below but still rate-limited — with the dedicated stricter
       // shareRateLimiter bucket instead of the general API bucket.
       const isPublicShare = path.startsWith("/api/share/");
-      // Runtime daemon endpoints accept the daemon token (LXK_RUNTIME_DAEMON_TOKEN)
-      // in place of the API key — the daemon may hold its own credential.
-      // /api/runtimes/sessions joins them: the daemon PUTs the pre-spawn mapping
-      // and DELETEs it on cancel/timeout with x-runtime-token; the browser
-      // GET/reset keep using the Bearer key.
-      const isRuntimeDaemon = path.startsWith("/api/runtimes/daemon/") || path === "/api/runtimes/register" || path === "/api/runtimes/sessions";
       // Device-login pairing: the CLI has no credential yet. Create + poll
       // are API-key exempt (still rate-limited); approve/deny go through
       // normal session auth — never exempt.
@@ -87,12 +81,10 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
         || request.method === "GET" && /^\/api\/device-login\/requests\/[^/]+$/.test(path);
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
-      // The key/token-gated runtime machine surfaces are exempt (isRateLimitExemptPath:
-      // daemon log POSTs, runtime registration, the listener's 3s heartbeat — a
-      // chatty agent's traffic must not share the IP bucket); setup and health are
-      // rate-limited again. IP is resolved in entry (socket only visible there) and
-      // stamped on the reconstructed Request — any inbound x-lexa-remote-ip is
-      // deleted first.
+      // Setup and health are exempt (isRateLimitExemptPath returns false for
+      // all paths now that the runtime daemon surfaces are gone). IP is
+      // resolved in entry (socket only visible there) and stamped on the
+      // reconstructed Request — any inbound x-lexa-remote-ip is deleted first.
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
       const ip = resolveClientIp(stampedIp, request.headers["cf-connecting-ip"], trustedProxyCidrs);
       const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
@@ -119,11 +111,8 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
         );
       }
 
-      const daemonTokenOk = isRuntimeDaemon && env.LXK_RUNTIME_DAEMON_TOKEN
-        ? constantTimeTokenEqual(request.headers["x-runtime-token"] ?? "", env.LXK_RUNTIME_DAEMON_TOKEN)
-        : false;
       let identity: AuthIdentityShape;
-      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare && !isDeviceLogin) {
+      if (!isHealth && !isSetup && !isPublicShare && !isDeviceLogin) {
         // Dual-channel (R4): session cookie first (browsers), Bearer key
         // second (machines). The x-lxk-user header is removed — never read.
         const session = yield* sessionIdentity(new Headers(request.headers), deps.getSession);

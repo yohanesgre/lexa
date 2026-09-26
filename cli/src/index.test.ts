@@ -93,15 +93,6 @@ describe("entry point (bun subprocess)", () => {
     expect(r.stderr).toContain("Not logged in. Run: lx login");
   });
 
-  it("machine install --no-systemd prints the supervisor instructions", async () => {
-    const r = await runCli(["machine", "install", "--no-systemd"], {
-      LEXA_URL: "http://127.0.0.1:1",
-      LEXA_API_KEY: "lxk_key_1234567890123456789012345678901234567890",
-    });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("Start the machine listener under your supervisor:");
-  });
-
   it("github status --local without login is now gated (NotLoggedIn + exit 1)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lexa-index-"));
     const pem = join(dir, "app-key.pem");
@@ -133,13 +124,11 @@ describe("entry point (bun subprocess)", () => {
     expect(r.stderr).toContain("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]");
   });
 
-  it("newly-gated machine commands fail NotLoggedIn without credentials", async () => {
-    // machine install|uninstall|start|stop|restart|status|logs and
-    // machine workspace list require resolvable credentials (spec 4.7).
-    for (const args of [["machine", "uninstall"], ["machine", "start"], ["machine", "stop"], ["machine", "restart"], ["machine", "status"], ["machine", "logs"], ["machine", "workspace", "list"]]) {
+  it("removed machine/runtime commands are unknown", async () => {
+    for (const args of [["machine", "list"], ["machine", "install"], ["runtime", "list"], ["runtime", "delete", "x"]]) {
       const r = await runCli(args, { LEXA_URL: "", LEXA_API_KEY: "" });
       expect(r.status, args.join(" ")).toBe(1);
-      expect(r.stderr, args.join(" ")).toContain("Not logged in. Run: lx login");
+      expect(r.stderr, args.join(" ")).toContain(`Unknown command: ${args[0]}`);
     }
   });
 });
@@ -202,7 +191,6 @@ describe("login (legacy key + device flow)", () => {
   let server: Server;
   let base = "";
   let pollQueue: Array<{ status: number; body: unknown }> = [];
-  let registerCalls = 0;
   const DEVICE_TOKEN = "ab".repeat(32);
   const pendingBody = { status: "pending", clientName: "cli-testhost", code: "ABCDEFGH", expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() };
   const approvedKey = "lxk_" + "d".repeat(43);
@@ -237,20 +225,6 @@ describe("login (legacy key + device flow)", () => {
       }
       if (url.pathname === "/api/health") { res.writeHead(200); res.end(JSON.stringify({ ok: true })); return; }
       if (url.pathname === "/api/projects") { res.writeHead(200); res.end(JSON.stringify({ data: [] })); return; }
-      if (req.method === "POST" && url.pathname === "/api/runtimes/machines/register") {
-        registerCalls++;
-        // Device flow must authenticate machine registration with the minted
-        // key — an empty Bearer would 401 against a real server.
-        const auth = req.headers.authorization ?? "";
-        if (!auth.startsWith("Bearer lxk_")) {
-          res.writeHead(401);
-          res.end(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }));
-          return;
-        }
-        res.writeHead(200);
-        res.end(JSON.stringify({ machine: { id: "m1", hostname: "testhost", clis: [], lastSeen: null, createdAt: new Date().toISOString() }, secret: null }));
-        return;
-      }
       res.writeHead(404);
       res.end(JSON.stringify({ error: { code: "NOT_FOUND", message: "not found" } }));
     });
@@ -267,31 +241,25 @@ describe("login (legacy key + device flow)", () => {
     return JSON.parse(readFileSync(join(group, "config.json"), "utf-8")) as { url: string; apiKey: string };
   }
 
-  it("legacy --url --key login: validates, saves config, runs machine registration", async () => {
+  it("legacy --url --key login: validates, saves config", async () => {
     const lexaDir = freshLexaDir();
-    registerCalls = 0;
     const r = await runCli(["login", "--url", base, "--key", legacyKey], { LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`Logged in to ${base}`);
-    expect(r.stdout).toContain("Registered machine");
-    expect(registerCalls).toBe(1);
     expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
   });
 
   it("legacy env login (LEXA_URL/LEXA_API_KEY) still works", async () => {
     const lexaDir = freshLexaDir();
-    registerCalls = 0;
     const r = await runCli(["login"], { LEXA_URL: base, LEXA_API_KEY: legacyKey, LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`Logged in to ${base}`);
-    expect(registerCalls).toBe(1);
     expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
   });
 
-  it("device flow happy path: verify URL printed, pending → approved, config saved, machine registered", async () => {
+  it("device flow happy path: verify URL printed, pending → approved, config saved", async () => {
     const lexaDir = freshLexaDir();
     pollQueue = [{ status: 200, body: pendingBody }, { status: 200, body: { status: "approved", rawKey: approvedKey, keyName: "cli-testhost", approverName: "Maria" } }];
-    registerCalls = 0;
     const r = await runCli(["login", base], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`${base}/device-login?token=${DEVICE_TOKEN}`);
@@ -300,8 +268,6 @@ describe("login (legacy key + device flow)", () => {
     expect(r.stdout).toContain(`New API key: cli-testhost`);
     expect(r.stdout).toContain("Logged in as Maria");
     expect(r.stdout).toContain(`Logged in to ${base}`);
-    expect(r.stdout).toContain("Registered machine");
-    expect(registerCalls).toBe(1);
     expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: approvedKey });
   });
 

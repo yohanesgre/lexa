@@ -1,12 +1,8 @@
 // lx config — state is host-keyed: one root ~/.lexa/ (LEXA_DIR env
 // override wins, used by tests), grouped per server host:
-//   ~/.lexa/<host>/config.json      { url, apiKey } + deploy creds (chmod 600)
-//   ~/.lexa/<host>/machine-id       machine identity for THAT server
-//   ~/.lexa/<host>/machine-secret   server-minted listener secret
-//   ~/.lexa/<host>/runtimes/, projects/, projects.json, runs/, deploy/
+//   ~/.lexa/<host>/config.json      { url, apiKey } (chmod 600)
 // The host is normalizeHost()'d so the same server always lands in the same
-// group regardless of scheme/port/case. Deploy creds live under the group's
-// config.json `deploy` key.
+// group regardless of scheme/port/case.
 //
 // Effect service: reads/writes are best-effort by design (corrupt/missing
 // files yield null, never typed failures) — the CLI treats config as
@@ -22,6 +18,12 @@ export interface CliConfig {
 }
 
 export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");
+
+// Compiled (`bun build --compile`) binaries have no real source dir —
+// import.meta.dir points into the embedded bunfs. Running from source
+// (`bun run cli/src/index.ts`) keeps it on disk. Used by `lx upgrade` to
+// refuse self-updating a source run.
+export const COMPILED = (import.meta.dir ?? "").startsWith("/$bunfs");
 
 export type LexaFlavor = "dev" | "staging" | "prod";
 
@@ -73,9 +75,8 @@ export function groupDir(host: string): string {
 }
 
 // Derived flavor label — loopback servers are dev, everything else prod.
-// LEXA_FLAVOR env overrides (e.g. a non-loopback staging server). Used for
-// exactly one thing: the daemon serve-port base (flavorBaseFor in
-// daemon/daemon.ts). Never a state location, never a login default.
+// LEXA_FLAVOR env overrides (e.g. a non-loopback staging server). Never a
+// state location, never a login default.
 export function flavorFor(host: string): LexaFlavor {
   const override = process.env.LEXA_FLAVOR;
   if (override === "dev" || override === "staging" || override === "prod") return override;

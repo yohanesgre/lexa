@@ -35,17 +35,13 @@ function fakeR2(initial: string[]) {
 }
 
 describe("runScheduledCore", () => {
-  it("prunes old webhook/runtime events and keeps fresh ones", async () => {
+  it("prunes old webhook events and keeps fresh ones", async () => {
     const driver = memDriver();
     await Effect.runPromise(
       batch(driver, [
         { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
-        { sql: "CREATE TABLE runtime_events (id TEXT PRIMARY KEY, status TEXT, finished_at TEXT)", params: [] },
         { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('old', datetime('now', '-8 days'))", params: [] },
         { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('new', datetime('now'))", params: [] },
-        { sql: "INSERT INTO runtime_events (id, status, finished_at) VALUES ('done-old', 'completed', datetime('now', '-9 days'))", params: [] },
-        { sql: "INSERT INTO runtime_events (id, status, finished_at) VALUES ('run-new', 'completed', datetime('now'))", params: [] },
-        { sql: "INSERT INTO runtime_events (id, status, finished_at) VALUES ('pending', 'claimed', datetime('now', '-9 days'))", params: [] },
       ])
     );
     await runScheduledCore(driver, {}, undefined);
@@ -53,12 +49,10 @@ describe("runScheduledCore", () => {
       Effect.gen(function* () {
         const { queryAll } = yield* Effect.promise(() => import("./db/db"));
         const w = yield* queryAll<{ delivery_id: string }>(driver, "SELECT delivery_id FROM webhook_events");
-        const r = yield* queryAll<{ id: string }>(driver, "SELECT id FROM runtime_events");
-        return { w: w.map((x) => x.delivery_id).sort(), r: r.map((x) => x.id).sort() };
+        return w.map((x) => x.delivery_id).sort();
       })
     );
-    expect(remaining.w).toEqual(["new"]);
-    expect(remaining.r).toEqual(["pending", "run-new"]);
+    expect(remaining).toEqual(["new"]);
   });
 
   it("prunes R2 backups beyond retention (newest kept) when enabled", async () => {

@@ -10,7 +10,7 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
 import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
 import { AssistantGateway } from "../assistant/gateway.service";
-import { ProviderNotConfigured, EngineNotSupportedForChat, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
+import { ProviderNotConfigured, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
 import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
 import { executeAssistantWrite } from "../assistant/write-execution";
 import { TaskService } from "./task.service";
@@ -170,7 +170,6 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         if (!tryAcquireChat(chatId)) return yield* new AssistantTaskActive();
         return yield* Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(req.projectId);
-        if ((settingsRow as unknown as { engine: string }).engine === "blacksmith") return yield* new EngineNotSupportedForChat({ engine: (settingsRow as unknown as { engine: string }).engine });
         const config = configFromRow(settingsRow);
         if (req.skillId !== undefined) {
           const skillId = req.skillId;
@@ -252,7 +251,6 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const thread = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId })));
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
-        if ((settingsRow as unknown as { engine: string }).engine === "blacksmith") return yield* new EngineNotSupportedForChat({ engine: (settingsRow as unknown as { engine: string }).engine });
         const batchId = findPendingBatch(thread.messages);
         if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
         const rows = yield* pendingWritesRepo.listByBatch(batchId);

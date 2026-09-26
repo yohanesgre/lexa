@@ -306,15 +306,35 @@ export interface Dashboard {
   outOfSyncTasks: OutOfSyncTask[];
 }
 
-// ── Runtime (runtime agent writing assistant) ──
+// ── Assistant task queue (document Generate, assistant lane) ──
 
-export type AgentCli = "opencode" | "hermes" | "command-code";
-export type RuntimeTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type AssistantTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface AssistantTask {
+  id: ID;
+  projectId: ID;
+  documentType: "task" | "wiki";
+  documentId: string;
+  key: string;
+  documentTitle: string;
+  agentId: ID;
+  skillId: ID;
+  agentName: string;
+  skillName: string;
+  extraPrompt: string;
+  selection: string;
+  status: AssistantTaskStatus;
+  result: string | null;
+  error: string | null;
+  createdAt: ISODate;
+  startedAt: ISODate | null;
+  finishedAt: ISODate | null;
+}
+
 export type SourceKind = "wiki" | "external";
 
 // A named rule bundle defined in Lexa. Its instructions are written into the
-// run dir as AGENTS.md at claim time. Distinct from a runtime's CLI agent
-// (Runtime.agent — the CLI persona flag).
+// run dir as AGENTS.md at claim time.
 export interface LexaAgent {
   id: ID;
   name: string;
@@ -337,137 +357,6 @@ export interface LexaSkill {
   isBuiltin: boolean;
   createdAt: ISODate;
   updatedAt: ISODate;
-}
-
-// A model the runtime's agent CLI can spawn, as reported by lx
-// (opencode models --verbose / cmd --list-models). id is the full
-// provider/model id — stored verbatim as Runtime.model and passed to --model.
-export interface RuntimeModel {
-  id: string;
-  provider: string;
-  name: string;
-}
-
-export interface RuntimeAgent {
-  id: string;
-  name: string;
-}
-
-export interface Runtime {
-  id: ID;
-  name: string;
-  provider: AgentCli;
-  machineId: ID | null;
-  // The agent CLI's internal agent/persona flag (opencode --agent build/plan).
-  // Empty = the CLI's default agent.
-  agent: string;
-  model: string;
-  // opencode run flags: --print-logs (bool) + --log-level (DEBUG|INFO|WARN|ERROR).
-  // Empty logLevel = opencode's default. Only applied for the opencode provider.
-  printLogs: boolean;
-  logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR";
-  extraArgs: string[];
-  modelsCatalog: RuntimeModel[];
-  agentsCatalog: RuntimeAgent[];
-  status: "online" | "offline";
-  // Last daemon failure reported via the machine heartbeat — e.g.
-  // "API key revoked" after the daemon exited with code 3. Cleared on
-  // daemon register/heartbeat success. Null = no known failure.
-  lastError: string | null;
-  hostname: string;
-  lastSeen: ISODate | null;
-  createdAt: ISODate;
-}
-
-export type RuntimeEventAction = "install" | "update" | "remove";
-
-export interface RuntimeEvent {
-  id: ID;
-  machineId: ID;
-  action: RuntimeEventAction;
-  agentCli: AgentCli;
-  // Team the installed runtime binds to; null = global.
-  teamId: ID | null;
-  // Null for update/remove events; install delivers a fresh key once.
-  apiKeyId: ID | null;
-  status: "pending" | "claimed" | "completed" | "failed";
-  error: string | null;
-  createdAt: ISODate;
-  claimedAt: ISODate | null;
-  finishedAt: ISODate | null;
-}
-
-// A `lx machine listen` process heartbeating machine presence so the web
-// setup wizard can target a listening machine. A machine is a host: runtimes
-// are bound to it (Runtime.machineId), not the other way around.
-export interface Machine {
-  id: ID;
-  hostname: string;
-  // Installed agent CLIs probed by the listener (`opencode --version`,
-  // `cmd --version`; hermes skipped) and sent with every heartbeat.
-  clis: Array<{ provider: AgentCli; version: string }>;
-  // Null until the machine listens — a login-registered machine is
-  // "bound, not listening".
-  lastSeen: ISODate | null;
-  createdAt: ISODate;
-}
-
-export interface RuntimeTask {
-  id: ID;
-  runtimeId: ID | null;
-  projectId: ID;
-  documentType: "task" | "wiki";
-  documentId: string;
-  key: string;
-  documentTitle: string;
-  agentId: ID;
-  skillId: ID;
-  agentName: string;
-  skillName: string;
-  extraPrompt: string;
-  selection: string;
-  docContext: string;
-  status: RuntimeTaskStatus;
-  result: string | null;
-  error: string | null;
-  kind: "blacksmith" | "assistant";
-  createdAt: ISODate;
-  startedAt: ISODate | null;
-  finishedAt: ISODate | null;
-}
-
-// The warm-session mapping for one (document, runtime) pair: which
-// agent-side conversation (opencode serve session id) the next Runtime task on
-// this document should continue. Agent-agnostic — hermes/command-code may
-// reuse the table later; only opencode writes rows in v1. Runtime-scoped PK:
-// a different runtime starts its own session for the same document.
-export interface RuntimeSession {
-  documentType: "task" | "wiki";
-  documentId: string;
-  runtimeId: string;
-  // The runtime CLI's conversation id (opencode serve session id) — never a
-  // Lexa session id. Null verdict on claim = the daemon mints a new one.
-  runtimeSessionId: string;
-  provider: AgentCli;
-  // Agent/skill the mapping was created for: a changed agent/skill on the
-  // task resets continuity (claim returns runtimeSessionId: null).
-  agentId: ID;
-  skillId: ID;
-  createdAt: ISODate;
-  updatedAt: ISODate;
-}
-
-// One line of the live activity feed for a Runtime task (append-only).
-export interface RuntimeTaskLog {
-  id: ID;
-  taskId: ID;
-  message: string;
-  // Which agent stream produced the line (daemon tees both into the feed).
-  stream: "out" | "err";
-  // Severity assigned ONCE by the daemon at write time (shared/runtime-log.ts).
-  // The UI renders the stored level; legacy rows default to "info".
-  level: "info" | "warn" | "error";
-  createdAt: ISODate;
 }
 
 export interface DocumentSource {
@@ -510,6 +399,7 @@ export type ActivityType =
   | "created" | "moved" | "field_changed" | "archived" | "restored" | "deleted"
   | "link_added" | "link_removed" | "source_added" | "source_removed"
   | "github_linked" | "github_unlinked" | "github_synced"
+  | "assistant_completed" | "assistant_failed" | "assistant_cancelled"
   | "runtime_completed" | "runtime_failed" | "runtime_cancelled"
   | "commented" | "comment_deleted"
   | "attachment_added" | "attachment_removed";

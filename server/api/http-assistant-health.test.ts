@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,9 +37,13 @@ beforeAll(async () => {
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });
+beforeEach(() => {
+  db.prepare("DELETE FROM assistant_provider_health WHERE provider_id = 'pr1'").run();
+  db.prepare("DELETE FROM assistant_call_logs WHERE provider_id = 'pr1'").run();
+});
 
 describe("GET /api/admin/assistant/providers/:id/health", () => {
-  it("returns closed default when missing", async () => {
+  it("returns closed default when missing, with null enrichment fields", async () => {
     const res = await handler(authed("GET", "/api/admin/assistant/providers/pr1/health"));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -48,15 +52,36 @@ describe("GET /api/admin/assistant/providers/:id/health", () => {
     expect(body.failureCount).toBe(0);
     expect(body.consecutiveFailures).toBe(0);
     expect(body.openedAt).toBeNull();
+    expect(body.latencyMs).toBeNull();
+    expect(body.retryAfterSeconds).toBeNull();
+    expect(body.lastFailureCode).toBeNull();
+    expect(body.lastFailureAt).toBeNull();
+    expect(body.lastCheckedAt).toBeNull();
   });
 
-  it("reflects open state after failures", async () => {
+  it("reflects open state after failures with a retry countdown", async () => {
     db.prepare("INSERT INTO assistant_provider_health (provider_id, failure_count, circuit_state, opened_at, consecutive_failures) VALUES ('pr1',3,'open',?,3)").run(new Date().toISOString());
     const res = await handler(authed("GET", "/api/admin/assistant/providers/pr1/health"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.circuitState).toBe("open");
     expect(body.failureCount).toBe(3);
+    expect(body.retryAfterSeconds).toBeGreaterThan(0);
+    expect(body.retryAfterSeconds).toBeLessThanOrEqual(300);
+  });
+
+  it("surfaces latency, last failure, and last checked time from the call log", async () => {
+    db.prepare(
+      `INSERT INTO assistant_call_logs (id, project_id, provider_id, model, kind, status, error_code, latency_ms, created_at)
+       VALUES ('cl1', NULL, 'pr1', 'm1', 'openai_compatible', 'error', 'PROVIDER_UNREACHABLE', 1234, '2026-01-01 10:00:00')`
+    ).run();
+    const res = await handler(authed("GET", "/api/admin/assistant/providers/pr1/health"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.latencyMs).toBe(1234);
+    expect(body.lastFailureCode).toBe("PROVIDER_UNREACHABLE");
+    expect(body.lastFailureAt).toBe("2026-01-01 10:00:00");
+    expect(body.lastCheckedAt).not.toBeNull();
   });
 
   it("non-admin → 403", async () => {

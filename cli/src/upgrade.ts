@@ -10,7 +10,7 @@ import { Effect } from "effect";
 import { spawnSync } from "node:child_process";
 import { chmodSync, renameSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { COMPILED } from "./machine";
+import { COMPILED } from "./config";
 import { CLI_VERSION } from "./version";
 
 const GH_API = "https://api.github.com/repos/yohanesgre/lexa/releases?per_page=100";
@@ -110,6 +110,4 @@ export const cmdUpgradeCli = Effect.fn("LexaCli/cmdUpgradeCli")(function* () {
   if (renaming) {
     console.log(`  Renamed \`${basename(self)}\` → \`lx\` — use \`lx\` from now on.`);
   }
-  console.log("  Restart the listener to pick up the new binary:");
-  console.log("    lx machine restart   (if the systemd unit is installed)");
 });

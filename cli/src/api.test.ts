@@ -54,12 +54,8 @@ beforeAll(async () => {
     if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
     if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
     if (url === "/api/projects/demo/tasks/t2/github-link" && req.method === "POST") return json(res, 200, { data: linkedTask, activity: [] });
-    if (url === "/api/runtimes" && req.method === "GET") { res.writeHead(401, { "Content-Type": "text/plain" }); return res.end("nope"); }
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
-    if (url === "/api/runtimes/machines/heartbeat") { res.writeHead(500, { "Content-Type": "text/plain" }); return res.end("boom"); }
     if (url === "/api/projects/demo/wiki/p1") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end("not json {{{"); }
-    if (url === "/api/runtimes/r1" && req.method === "DELETE") return res.writeHead(204).end();
-    if (url === "/api/runtimes/events/claim") return json(res, 200, { event: null });
     if (url === "/api/settings/github" && req.method === "GET") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
     if (url === "/api/settings/github" && req.method === "PUT") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
     return json(res, 404, { error: { code: "NOT_FOUND", message: "no such route" } });
@@ -74,6 +70,20 @@ afterAll(async () => {
 
 function client(apiKey = "test-key"): LexaClient {
   return new LexaClient({ url: base, apiKey });
+}
+
+// One-off server answering every path with a fixed status/plain-text body —
+// for the non-JSON error-mapping cases.
+async function plainServer(status: number, body: string): Promise<{ url: string; close: () => Promise<void> }> {
+  const srv = createServer((_req, res) => {
+    res.writeHead(status, { "Content-Type": "text/plain" });
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}`,
+    close: () => new Promise<void>((resolve) => srv.close(() => resolve())),
+  };
 }
 
 // runPromise rejects with a FiberFailure wrapper for typed failures — unwrap
@@ -123,19 +133,6 @@ describe("LexaClient request building", () => {
     expect(JSON.parse(req?.body ?? "{}")).toEqual({ repo: "owner/repo" });
   });
 
-  it("claimRuntimeEvent sends x-machine-secret", async () => {
-    const out = await Effect.runPromise(client().claimRuntimeEvent("m1", "s3cret"));
-    expect(out).toEqual({ event: null });
-    const req = seen.find((r) => r.url === "/api/runtimes/events/claim");
-    expect(req?.headers["x-machine-secret"]).toBe("s3cret");
-    expect(JSON.parse(req?.body ?? "{}")).toEqual({ machineId: "m1" });
-  });
-
-  it("204 maps to undefined (deleteRuntime)", async () => {
-    const out = await Effect.runPromise(client().deleteRuntime("r1"));
-    expect(out).toBeUndefined();
-  });
-
   it("getGithubSettings GETs /api/settings/github and parses the state", async () => {
     const out = await Effect.runPromise(client().getGithubSettings());
     expect(out).toEqual({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
@@ -166,11 +163,16 @@ describe("LexaClient request building", () => {
 
 describe("LexaClient error mapping", () => {
   it("401 without JSON envelope → ApiError status 401, code undefined", async () => {
-    const err = await failureOf(client().listRuntimes());
-    expect(err).toBeInstanceOf(ApiError);
-    expect(err.status).toBe(401);
-    expect(err.code).toBeUndefined();
-    expect(err.message).toBe("HTTP 401");
+    const srv = await plainServer(401, "nope");
+    try {
+      const err = await failureOf(new LexaClient({ url: srv.url, apiKey: "k" }).listProjects());
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(401);
+      expect(err.code).toBeUndefined();
+      expect(err.message).toBe("HTTP 401");
+    } finally {
+      await srv.close();
+    }
   });
 
   it("409 with {error:{code,message,details}} → typed ApiError fields", async () => {
@@ -185,10 +187,15 @@ describe("LexaClient error mapping", () => {
   });
 
   it("500 with plain-text body → status 500, fallback message", async () => {
-    const err = await failureOf(client().machineHeartbeat({ id: "m1", hostname: "h" }));
-    expect(err.status).toBe(500);
-    expect(err.serverMessage).toBeUndefined();
-    expect(err.message).toBe("HTTP 500");
+    const srv = await plainServer(500, "boom");
+    try {
+      const err = await failureOf(new LexaClient({ url: srv.url, apiKey: "k" }).health());
+      expect(err.status).toBe(500);
+      expect(err.serverMessage).toBeUndefined();
+      expect(err.message).toBe("HTTP 500");
+    } finally {
+      await srv.close();
+    }
   });
 
   it("malformed JSON on 200 → normalized ApiError status 0", async () => {

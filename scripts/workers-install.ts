@@ -12,7 +12,7 @@
 //     [--dir <unpack dir>]            # default: cwd
 //
 // Superadmin provisioning is NOT done here — the web /setup wizard owns it
-// (owner decision: free-choice email + password at first install). Machine
+// (owner decision: free-choice email + password at first install). API
 // keys are minted post-setup (login → Settings → API Keys).
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -311,7 +311,7 @@ if (CUSTOM_DOMAIN && zone) {
   console.log(`  ✓ route ${pattern} → ${FLAVOR.workerName}`);
 }
 
-// ── Done: machine keys are minted post-setup (login → Settings → API Keys) ──
+// ── Done: API keys are minted post-setup (login → Settings → API Keys) ──
 console.log(`  ✓ deployed${CUSTOM_DOMAIN ? ` → https://${CUSTOM_DOMAIN}` : ""}`);
 
 // ── Tarball cleanup: keep the 2 newest downloads, drop older ones ──

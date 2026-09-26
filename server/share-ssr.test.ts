@@ -136,7 +136,10 @@ describe("share route model (server-render enabled)", () => {
   it("every route declares ssr:false except root (ssr:true) and /share/$token (inherits)", () => {
     const routeDir = fileURLToPath(new URL("../app/routes", import.meta.url));
     const files = walkRouteFiles(routeDir);
-    expect(files.length).toBeGreaterThan(30);
+    // Floor = the current route-file count. It catches walker breakage or an
+    // accidental route deletion; intentional deletions lower it, additions do
+    // not need a bump.
+    expect(files.length).toBeGreaterThanOrEqual(26);
     for (const file of files) {
       const code = stripComments(readFileSync(file, "utf8"));
       const base = basename(file);

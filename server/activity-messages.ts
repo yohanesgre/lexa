@@ -35,6 +35,11 @@ export function githubSynced(number: number, state: "open" | "closed", toCol: st
 export function runtimeCompleted(agent: string) { return `AI: ${agent} completed — result ready`; }
 export function runtimeFailed() { return "AI run failed"; }
 export function runtimeCancelled() { return "AI run cancelled"; }
+// Assistant-lane terminal messages (the runtime_* builders above stay for
+// historical rows only).
+export function assistantCompleted(agent: string) { return `AI: ${agent} completed — result ready`; }
+export function assistantFailed() { return "AI run failed"; }
+export function assistantCancelled() { return "AI run cancelled"; }
 export function commented(actor: string) { return `${actor} commented`; }
 export function commentDeleted(actor: string) { return `${actor} deleted a comment`; }
 export function attachmentAdded(actor: string, filename: string) { return `${actor} attached ${filename}`; }
@@ -101,6 +106,9 @@ export function formatActivityMessage(type: ActivityType, payload: ActivityMessa
     case "runtime_completed": return runtimeCompleted((payload as { agent: string }).agent);
     case "runtime_failed": return runtimeFailed();
     case "runtime_cancelled": return runtimeCancelled();
+    case "assistant_completed": return assistantCompleted((payload as { agent: string }).agent);
+    case "assistant_failed": return assistantFailed();
+    case "assistant_cancelled": return assistantCancelled();
     case "commented": return commented((payload as { actor: string }).actor);
     case "comment_deleted": return commentDeleted((payload as { actor: string }).actor);
     case "attachment_added": {

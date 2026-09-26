@@ -266,7 +266,7 @@ parse_flags() {
         shift 2
         ;;
       --key)
-        die "--key was removed: machine keys are minted post-setup (login → Settings → API Keys, or lx login device flow)"
+        die "--key was removed: API keys are minted post-setup (login → Settings → API Keys, or lx login device flow)"
         ;;
       --cf-token)
         [ $# -ge 2 ] || die "--cf-token requires a value"
@@ -556,7 +556,7 @@ final_banner() {
   echo "         open ${url}/setup"
   echo "         (email + password, min 8 chars)"
   echo ""
-  echo "  Machine keys (CLI/daemons) are minted post-setup:"
+  echo "  API keys (CLI) are minted post-setup:"
   echo "         login → Settings → API Keys (or lx login)"
   echo "═══════════════════════════════════════════════"
 }

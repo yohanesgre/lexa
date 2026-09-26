@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ci-local — local mirror of .github/workflows/ci.yml
-# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli|daemon]  |  CRITICAL=1 bash scripts/ci-local.sh
+# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli]  |  CRITICAL=1 bash scripts/ci-local.sh
 # Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only.
 # Missing optional tools (docker, gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
@@ -17,8 +17,8 @@ for arg in "$@"; do
   esac
 done
 case "$LANE" in
-  ""|shared|be|fe|cli|daemon) ;;
-  *) echo "unknown --lane=$LANE (want shared|be|fe|cli|daemon)"; exit 1 ;;
+  ""|shared|be|fe|cli) ;;
+  *) echo "unknown --lane=$LANE (want shared|be|fe|cli)"; exit 1 ;;
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -164,19 +164,11 @@ fi
 # ── CLI compile check ─────────────────────────────────────────────────
 section "CLI compile check"
 if bun run compile:cli 2>&1; then
-  if git diff --exit-code -- cli/src/packed.ts >/dev/null 2>&1; then
-    ok "CLI compile (no dirty packed files)"
-  else
-    warn "cli/src/packed.ts dirty after compile:cli - warn not hard (restoring stubs)"
-    git diff -- cli/src/packed.ts | head -n 100 || true
-  fi
-  git checkout -- cli/src/packed.ts 2>/dev/null || true
-  rm -rf bin/lx bin/daemon-bundle.js 2>/dev/null || true
+  ok "CLI compile (bin/lx)"
 else
   warn "bun run compile:cli failed - warn not hard"
-  git checkout -- cli/src/packed.ts 2>/dev/null || true
-  rm -rf bin/lx bin/daemon-bundle.js 2>/dev/null || true
 fi
+rm -rf bin/lx 2>/dev/null || true
 
 # ── Lint (warn) ───────────────────────────────────────────────────────
 section "lint (warn)"

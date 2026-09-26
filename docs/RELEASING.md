@@ -91,25 +91,29 @@ CLI asset.
 
 ## CLI build flow
 
-- `prod` = compiled binary. `bun run compile:cli` embeds the daemon source
-  into `cli/src/packed.ts` and the compose files into
-  `cli/src/packed-compose.ts` → `bin/lx`. The systemd listener unit
-  runs the binary directly.
+- `prod` = compiled binary. `bun run compile:cli` is a plain
+  `bun build --compile --minify cli/src/index.ts` → `bin/lx`. No daemon or
+  compose embed (the agent-runtime tier was removed 2026-09-26), and no
+  systemd listener unit is installed by the CLI.
 - `dev` = `bun run lx-dev` or `bun run install:cli-dev` →
   `~/.local/bin/lx-dev` (a pure "run repo source via bun" wrapper —
   no `LEXA_DIR` export or flavor logic, identical behavior and state paths
   to the compiled binary; never overwrites the prod name).
-- `cli/src/packed.ts` is a build-time embed — keep the committed stub empty
-  so dev copies daemon.ts fresh from disk.
 
 ## Deploy state + creds
 
-Deploy state lives at `~/.lexa/<domain>/deploy/` (one deploy per domain —
-subdomains are separate deploys) with creds in
-`~/.lexa/<domain>/config.json` (chmod 600). The web app keeps
-`LXK_API_KEY` / `LXK_ADMIN_EMAILS` from the env file when present;
-non-interactive flags on `deploy` are `--cf-token`, `--admin-email`,
-`--api-key`.
+**There is no CLI deploy state.** `lx deploy` / `lx undeploy` were removed in
+cli-v2026.2.0 — `lx` is operate-only. Self-hosting goes through
+`scripts/install.sh` (`curl -fsSL …/scripts/install.sh | bash -s -- <target>`,
+upgrade = re-run from a newer tag) plus the `/setup` wizard for the first
+superadmin.
+
+What the CLI still persists: the saved login (endpoint + `lxk_` key) under
+`~/.lexa/`, overridable per-shell with `LEXA_URL` + `LEXA_API_KEY`. Keys are
+minted in the web app (Settings → API Keys) or by `lx login`'s device flow.
+Release-relevant credentials: `GITHUB_*` (App id, private key, webhook secret —
+preserved across install-script re-runs) and `CF_API_TOKEN` (Workers target
+only) live in the env file, not in CLI state.
 
 ## Install without bun
 

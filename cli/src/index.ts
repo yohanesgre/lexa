@@ -1,13 +1,13 @@
 #!/usr/bin/env bun
 /**
- * lx — Lexa operator & daemon-management CLI.
+ * lx — Lexa operator CLI.
  *
  *   lx <command> [options]        (prod: compiled binary)
  *   lx-dev <command> [options]    (dev: bun run cli/index.ts)
  *
- * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app.
- * The runtime daemon stays a polling process; this CLI installs/starts/stops it
- * and gives humans/scripts a non-browser way to drive Lexa.
+ * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app, and
+ * gives humans/scripts (external agent harnesses included) a non-browser way
+ * to drive Lexa.
  *
  * Env fallbacks (overridden by --url/--key or saved login):
  *   LEXA_URL, LEXA_API_KEY
@@ -27,9 +27,7 @@ import { CliConfigService, groupDir, migrateFlavorRootsSync, type CliConfig } fr
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
-import { getOrCreateMachineId, getOrCreateMachineSecret, saveMachineSecret } from "./machine";
 import { hostname as osHostname } from "node:os";
-import { machineInstall, machineStart, machineStop, machineRestart, machineStatus, machineLogs, machineUninstall, listMachines, listRuntimes, machineListen, workspaceList, workspaceSync } from "./machine";
 
 const ENV_URL = process.env.LEXA_URL ?? "";
 const ENV_KEY = process.env.LEXA_API_KEY ?? "";
@@ -186,31 +184,6 @@ function promptRequired(question: string, requiredMessage: string): Effect.Effec
   });
 }
 
-// Bind the machine: registration creates the machines row (last_seen NULL
-// = "bound, not listening") so it shows up in Settings before the listener
-// ever runs. The server mints a per-machine secret on first registration
-// (returned once) — persisted for the listener's claims.
-// Non-fatal — login must succeed even if the server hiccups. Shared by the
-// key and device login paths.
-function registerMachineBlock(client: LexaClient, dir: string): Effect.Effect<void, unknown, never> {
-  return Effect.gen(function* () {
-    const machineId = yield* getOrCreateMachineId(dir);
-    const machineSecret = yield* getOrCreateMachineSecret(dir);
-    const registered = yield* client.registerMachine({ id: machineId, hostname: osHostname(), secret: machineSecret }).pipe(
-      Effect.catchAll((e) => {
-        if (e instanceof ApiError && e.code === "MACHINE_ID_TAKEN") {
-          console.log(`  ${e.message}`);
-        } else {
-          console.log("  (machine registration skipped — run `lx machine listen` to register)");
-        }
-        return Effect.succeed(null);
-      })
-    );
-    if (registered?.secret) yield* saveMachineSecret(registered.secret, dir);
-    console.log(`  Registered machine ${machineId} — run \`lx machine listen\` to go online`);
-  });
-}
-
 const DEVICE_POLL_INTERVAL_MS = 2000;
 const DEVICE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -260,9 +233,6 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
         console.log(`  New API key: ${result.keyName}`);
         console.log(`  Logged in as ${result.approverName ?? "unknown"}`);
         console.log(`  Logged in to ${url}`);
-        // Machine registration must authenticate with the minted key — the
-        // pre-login client has no credential.
-        yield* registerMachineBlock(new LexaClient({ url, apiKey: result.rawKey }), dir);
         return;
       }
       yield* Effect.sleep(DEVICE_POLL_INTERVAL_MS);
@@ -303,7 +273,6 @@ function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]
       const dir = groupDir(url);
       yield* svc.saveConfig({ url, apiKey: key }, dir);
       console.log(`  Logged in to ${url}`);
-      yield* registerMachineBlock(client, dir);
       return;
     }
     // No key → device login: browser-approval pairing on the same server.
@@ -518,49 +487,6 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
   });
 }
 
-// ── runtime commands ──
-
-function cmdRuntimeDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
-  return Effect.gen(function* () {
-    const { client } = yield* requireClient(flags);
-    const id = args[0]! || "";
-    if (!id) {
-      console.error("  Usage: lx runtime delete <id>");
-      console.error("  (ids from `lx runtime list`)");
-      process.exit(1);
-    }
-    yield* client.deleteRuntime(id);
-    console.log(`  Deleted runtime ${id}`);
-    console.log("  Its daemon + env are cleaned up by the machine listener on its next heartbeat.");
-  });
-}
-
-function cmdMachineDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
-  return Effect.gen(function* () {
-    const { client } = yield* requireClient(flags);
-    const id = args[0]! || "";
-    if (!id) {
-      console.error("  Usage: lx machine delete <id>");
-      console.error("  (ids from `lx machine list`)");
-      process.exit(1);
-    }
-    yield* client.deleteMachine(id);
-    console.log(`  Deleted machine ${id} (with its runtimes)`);
-    console.log("  Note: if its listener is still running, the machine will reappear — run `lx machine stop` on it to fully remove.");
-  });
-}
-
-function cmdMachineInstall(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
-  return Effect.gen(function* () {
-    const config = yield* resolveConfig(flags);
-    if (!config) {
-      console.error("  Not logged in. Run: lx login first.");
-      process.exit(1);
-    }
-    yield* machineInstall({ noSystemd: flags["no-systemd"] === true }, config);
-  });
-}
-
 // ── main ──
 
 const HELP = `lx — Lexa operator CLI
@@ -588,29 +514,6 @@ Wiki:
 
 Projects:
   project list [--json]
-
-Runtimes (AI daemon):
-  runtime list                                   server-side daemon view
-  runtime delete <id>                            remove a runtime (daemon + env
-                                                  cleaned up by its machine's
-                                                  listener on next heartbeat)
-
-Machine listener:
-  machine list                                   registered machine view
-  machine install                                ensure listener + start (systemd)
-                                                  --no-systemd: run listener yourself
-  machine uninstall                              stop + disable + remove the listener unit
-  machine listen                                 run the machine listener (foreground)
-  machine start | stop | restart                 systemctl --user lexa-machine-listener
-  machine status                                 systemd state
-  machine logs                                   journalctl --user -u lexa-machine-listener -f
-  machine delete <id>                            remove a machine + its runtimes
-                                                  (reappears if still listening — stop
-                                                  the listener first for permanent removal)
-
-AI workspaces (local machine view):
-  machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
-  machine workspace sync                         re-index projects from the server + provision
 
 GitHub sync (optional integration):
   github status [--local] [--env-file <path>]
@@ -651,28 +554,6 @@ const GROUP_HELP: Record<string, string> = {
   wiki: `Wiki:
   wiki list --project <slug> [--json]
   wiki get  <pageSlug> --project <slug> [--json]`,
-  runtime: `Runtimes (AI daemon):
-  runtime list                                   server-side daemon view
-  runtime delete <id>                            remove a runtime (daemon + env
-                                                  cleaned up by its machine's
-                                                  listener on next heartbeat)`,
-  machine: `Machine listener:
-  machine list                                   registered machine view
-  machine install                                ensure listener + start (systemd)
-                                                  --no-systemd: run listener yourself
-  machine uninstall                              stop + disable + remove the listener unit
-  machine listen                                 run the machine listener (foreground)
-  machine start | stop | restart                 systemctl --user lexa-machine-listener
-  machine status                                 systemd state
-  machine logs                                   journalctl --user -u lexa-machine-listener -f
-  machine delete <id>                            remove a machine + its runtimes
-                                                  (reappears if still listening — stop
-                                                  the listener first for permanent removal)
-
-AI workspaces (local machine view):
-  machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
-  machine workspace sync                         re-index projects from the server + provision`,
-
   github: `GitHub sync (optional integration):
   github status [--local] [--env-file <path>]
                                        read the LIVE server state (default —
@@ -780,37 +661,6 @@ async function main(): Promise<void> {
         case "list": program = cmdWikiList(flags); break;
         case "get": program = cmdWikiGet(flags, rest); break;
         default: usage("wiki", sub);
-      }
-      break;
-
-    case "runtime":
-      switch (sub) {
-        case "list": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* listRuntimes(config); }); break;
-        case "delete": program = cmdRuntimeDelete(flags, rest); break;
-        default: usage("runtime", sub);
-      }
-      break;
-
-    case "machine":
-      switch (sub) {
-        case "list": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* listMachines(config); }); break;
-        case "install": program = cmdMachineInstall(flags); break;
-        case "uninstall": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* machineUninstall(groupDir(config.url)); }); break;
-        case "listen": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* machineListen(config); }); break;
-        case "start": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* machineStart(config.url); }); break;
-        case "stop": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineStop(); }); break;
-        case "restart": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineRestart(); }); break;
-        case "status": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineStatus(); }); break;
-        case "logs": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineLogs(); }); break;
-        case "delete": program = cmdMachineDelete(flags, rest); break;
-        case "workspace":
-          switch (rest[0]!) {
-            case "list": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* workspaceList(config); }); break;
-            case "sync": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* workspaceSync(config); }); break;
-            default: usage("machine", rest[0]! === undefined ? "" : `workspace ${rest[0]!}`);
-          }
-          break;
-        default: usage("machine", sub);
       }
       break;
 

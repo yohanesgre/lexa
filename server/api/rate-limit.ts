@@ -68,15 +68,10 @@ export function syncRateLimitFromDbAsync(driver: DbDriver): Effect.Effect<void, 
   });
 }
 
-// Runtime machine surfaces are key/token-gated and chatty by design — the
-// daemon's log POSTs, runtime registration, and the listener's 3s heartbeat
-// must never 429. Same policy as before, now covering machines/heartbeat.
-export function isRateLimitExemptPath(path: string): boolean {
-  return (
-    path.startsWith("/api/runtimes/daemon/") ||
-    path === "/api/runtimes/register" ||
-    path === "/api/runtimes/machines/heartbeat"
-  );
+// Rate-limit exemptions. The runtime daemon surfaces are gone; nothing is
+// exempt from the general API bucket (setup/health were never exempt).
+export function isRateLimitExemptPath(_path: string): boolean {
+  return false;
 }
 
 export interface RateLimiter {
