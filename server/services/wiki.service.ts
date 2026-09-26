@@ -3,7 +3,7 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { UserRepo } from "../repos/user.repo";
 import { ConstraintViolation, DbError, RowNotFound, Db, withTx } from "../db/db";
-import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
+import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { TipTapDoc } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
@@ -29,6 +29,14 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
 
     const slugify = (title: string): string =>
       title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "page";
+
+    // wiki_pages has one UNIQUE(project_id, slug) and one parent FK
+    // (parent_id REFERENCES wiki_pages(id)) — narrow the two apart so an
+    // FK failure is not reported as a slug conflict.
+    const isSlugConflict = (e: ConstraintViolation): boolean =>
+      /UNIQUE constraint failed: wiki_pages\..*slug/.test(e.message);
+    const isForeignKeyFailure = (e: ConstraintViolation): boolean =>
+      /FOREIGN KEY constraint failed/i.test(e.message);
 
     const validateProject = (projectId: string) =>
       projectRepo.findById(projectId).pipe(
@@ -126,14 +134,35 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         },
         saveType: "autosave" | "manual" = "autosave",
         updatedBy: string | null = null
-      ): Effect.Effect<WikiPage, WikiPageNotFound | DbError | ConstraintViolation> =>
+      ): Effect.Effect<WikiPage, WikiPageNotFound | InvalidParent | SlugTaken | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
-          const current = yield* repo.findById(id).pipe(
-            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
-          );
+          // Validation and the update share one transaction (BEGIN IMMEDIATE)
+          // so a concurrent reciprocal reparent can't pass validation against
+          // stale state — reads and the write are serialized.
           const updated = yield* withTx(
             db,
             Effect.gen(function* () {
+              const current = yield* repo.findById(id).pipe(
+                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+              );
+              const nextParentId = input.parentId;
+              if (nextParentId !== undefined && nextParentId !== current.parentId) {
+                if (nextParentId === id) {
+                  return yield* new InvalidParent({ reason: "self" });
+                }
+                if (nextParentId !== null) {
+                  const parent = yield* repo.findById(nextParentId).pipe(
+                    Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: nextParentId }))
+                  );
+                  if (parent.projectId !== current.projectId) {
+                    return yield* new InvalidParent({ reason: "cross-project" });
+                  }
+                  const cycle = yield* repo.isDescendant(nextParentId, id);
+                  if (cycle) {
+                    return yield* new InvalidParent({ reason: "cycle" });
+                  }
+                }
+              }
               yield* repo.createRevision(
                 current.id,
                 current.title,
@@ -146,7 +175,15 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               // the insert — no unbounded revision growth).
               yield* repo.pruneRevisions(current.id);
               return yield* repo.update(id, { ...input, updatedBy }).pipe(
-                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id })),
+                Effect.catchIf(
+                  (e) => e instanceof ConstraintViolation && isSlugConflict(e),
+                  () => new SlugTaken({ slug: input.slug ?? current.slug })
+                ),
+                Effect.catchIf(
+                  (e) => e instanceof ConstraintViolation && isForeignKeyFailure(e),
+                  () => new WikiPageNotFound({ id })
+                )
               );
             })
           );

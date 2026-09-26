@@ -74,6 +74,23 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           parentId
         ).pipe(Effect.map((rows) => rows.map(rowToWikiPageMeta))),
 
+      isDescendant: (candidateId: string, ancestorId: string): Effect.Effect<boolean, DbError> =>
+        queryFirst<{ found: number }>(
+          db,
+          `WITH RECURSIVE ancestors(id) AS (
+             SELECT parent_id FROM wiki_pages WHERE id = ?
+             UNION
+             SELECT wp.parent_id FROM wiki_pages wp JOIN ancestors a ON wp.id = a.id
+             WHERE wp.parent_id IS NOT NULL
+           )
+           SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = ?) AS found`,
+          candidateId,
+          ancestorId
+        ).pipe(
+          Effect.map((r) => r.found === 1),
+          Effect.catchTag("RowNotFound", () => Effect.succeed(false))
+        ),
+
       search: (
         projectId: string,
         query: string,

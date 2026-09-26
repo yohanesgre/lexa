@@ -1109,6 +1109,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `BacklogProtected` | 409 | archive/delete/deadline on the system Backlog lane — payload `{ action }` |
 | `SlugTaken` | 409 | SQLITE_CONSTRAINT on projects.slug or wiki_pages(project_id, slug); also the constraint fallback on project update/delete |
 | `HasChildren` | 409 | column delete with tasks; wiki-page delete with children |
+| `InvalidParent` | 422 | wiki reparent: self, cross-project, or descendant cycle (details: `{ reason }`) |
 | `TaskHasChildren` | 409 | task delete hits a constraint (defensive — subtask links CASCADE) |
 | `NeighborNotInColumn` | 422 | beforeTaskId/afterTaskId not in target column |
 | `GithubIssueAlreadyLinked` | 409 | |

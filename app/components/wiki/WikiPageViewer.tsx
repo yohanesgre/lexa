@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Pencil, Share2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
+import { useSidebarState } from "../../lib/sidebar-state";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { WikiEditSplit } from "./WikiEditSplit";
 import { EditSidebar } from "./EditSidebar";
@@ -50,15 +51,16 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, headings, outlineVisible, onToggleOutline, onEdit, onShare, slug, pageSlug }: {
+function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, headings, outlineOpen, onToggleOutline, outlineOverlayActive, onEdit, onShare, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
   content: TipTapDoc | undefined;
   updatedAt: string;
   updatedByName: string | null;
   headings: { level: number; text: string; id: string }[];
-  outlineVisible: boolean;
+  outlineOpen: boolean;
   onToggleOutline: () => void;
+  outlineOverlayActive: boolean;
   onEdit: () => void;
   onShare: () => void;
   slug: string;
@@ -98,7 +100,12 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, he
           </div>
         </div>
       </div>
-      <OutlineSidebar headings={headings} collapsed={!outlineVisible} onToggle={onToggleOutline} />
+      <OutlineSidebar
+        headings={headings}
+        open={outlineOpen}
+        onToggle={onToggleOutline}
+        overlayActive={outlineOverlayActive}
+      />
     </>
   );
 }
@@ -171,8 +178,8 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     handleTitleChange,
   } = useWikiEditor({ slug, page });
 
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [outlineVisible, setOutlineVisible] = useState(true);
+  const outline = useSidebarState({ storageKey: "lexa.wiki.outline", defaultOpen: true });
+  const pageSettings = useSidebarState({ storageKey: "lexa.wiki.pageSettings", defaultOpen: true });
   const [shareOpen, setShareOpen] = useState(false);
 
   const breadcrumb = buildAncestors(pages, page)
@@ -194,8 +201,9 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           updatedAt={page.updatedAt}
           updatedByName={page.updatedByName}
           headings={headings}
-          outlineVisible={outlineVisible}
-          onToggleOutline={() => setOutlineVisible(!outlineVisible)}
+          outlineOpen={outline.open}
+          onToggleOutline={outline.toggle}
+          outlineOverlayActive={outline.overlayActive}
           onEdit={handleStartEditing}
           onShare={() => setShareOpen(true)}
           slug={slug}
@@ -240,8 +248,9 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         autosaveDelay={autosaveDelay}
         onAutosaveChange={setAutosaveEnabled}
         onDelayChange={setAutosaveDelay}
-        collapsed={!sidebarVisible}
-        onToggle={() => setSidebarVisible(!sidebarVisible)}
+        open={pageSettings.open}
+        onToggle={pageSettings.toggle}
+        overlayActive={pageSettings.overlayActive}
         selectedRevisionId={historyPreviewId}
         onSelectRevision={(id) => void handleSelectRevision(id)}
         onRestore={(id) => void handleRestore(id)}

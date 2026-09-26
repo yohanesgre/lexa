@@ -9,6 +9,7 @@ export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id:
 export class MilestoneNotFound extends Data.TaggedError("MilestoneNotFound")<{ id: string; availableMilestones?: string[] }> {}
 export class InvalidArgs extends Data.TaggedError("InvalidArgs")<{ reason: string }> {}
 export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id: string }> {}
+export class InvalidParent extends Data.TaggedError("InvalidParent")<{ reason: "self" | "cross-project" | "cycle" }> {}
 export class ShareLinkNotFound extends Data.TaggedError("ShareLinkNotFound")<{}> {}
 export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ columnName: string; limit: number; current: number }> {}
 export class DeadlineAfterLane extends Data.TaggedError("DeadlineAfterLane")<{
@@ -114,6 +115,7 @@ export const errorCodeMap: Record<string, string> = {
   MilestoneNotFound: "MILESTONE_NOT_FOUND",
   InvalidArgs: "INVALID_ARGS",
   WikiPageNotFound: "PAGE_NOT_FOUND",
+  InvalidParent: "INVALID_PARENT",
   ShareLinkNotFound: "SHARE_LINK_NOT_FOUND",
   WipLimitExceeded: "WIP_LIMIT",
   DeadlineAfterLane: "DEADLINE_AFTER_LANE",
@@ -256,6 +258,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
     case "InvalidOption":
+    case "InvalidParent":
     case "InvalidTaskLink":
     case "AgentBuiltinDelete":
     case "SearchError":
@@ -313,6 +316,12 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.reason ?? "Invalid arguments");
     case "WikiPageNotFound":
       return `Page not found`;
+    case "InvalidParent":
+      return error.reason === "self"
+        ? "A page cannot be its own parent"
+        : error.reason === "cross-project"
+          ? "Parent page belongs to another project"
+          : "Reparenting would create a cycle";
     case "ShareLinkNotFound":
       return `Share link not found`;
     case "WipLimitExceeded":

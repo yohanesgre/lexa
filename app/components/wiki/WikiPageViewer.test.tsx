@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { WikiPage } from "../../../shared/types";
+
+const editorState = vi.hoisted(() => ({ editing: false }));
 
 vi.mock("../tiptap-render", () => ({
   renderDoc: () => null,
@@ -13,9 +15,21 @@ vi.mock("../tiptap-render", () => ({
 vi.mock("./useWikiEditor", () => ({
   useWikiEditor: () => ({
     editor: null,
-    isEditing: false,
+    isEditing: editorState.editing,
     title: "Home",
-    lastSavedPage: undefined,
+    lastSavedPage: {
+      id: "w1",
+      projectId: "p1",
+      title: "Home",
+      slug: "home",
+      parentId: null,
+      position: 0,
+      updatedBy: "u1",
+      updatedByName: "Al",
+      updatedAt: "2026-08-20T10:00:00.000Z",
+      content: { type: "doc", content: [] },
+      createdAt: "2026-08-01T10:00:00.000Z",
+    },
     lastSavedAt: null,
     isDirty: false,
     isSaving: false,
@@ -38,10 +52,11 @@ vi.mock("./useWikiEditor", () => ({
 }));
 
 vi.mock("./WikiEditSplit", () => ({ WikiEditSplit: () => null }));
-vi.mock("./EditSidebar", () => ({ EditSidebar: () => null }));
-vi.mock("./OutlineSidebar", () => ({ OutlineSidebar: () => null }));
 vi.mock("../document/SourcesSection", () => ({ SourcesSection: () => null }));
 vi.mock("./ShareDialog", () => ({ ShareDialog: () => null }));
+vi.mock("../../lib/queries", () => ({
+  useRevisions: () => ({ data: [], isLoading: false, error: null }),
+}));
 
 import { WikiPageViewer } from "./WikiPageViewer";
 
@@ -59,6 +74,21 @@ const PAGE: WikiPage = {
   createdAt: "2026-08-01T10:00:00.000Z",
 };
 
+beforeEach(() => {
+  editorState.editing = false;
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    }
+  );
+});
+
 describe("WikiPageViewer last-edited author", () => {
   it("renders the author name when present", () => {
     render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
@@ -69,5 +99,20 @@ describe("WikiPageViewer last-edited author", () => {
     render(<WikiPageViewer slug="demo" page={{ ...PAGE, updatedByName: null }} pages={[PAGE]} />);
     expect(screen.queryByText(/ by /)).not.toBeInTheDocument();
     expect(screen.getByText(/Last edited/)).toBeInTheDocument();
+  });
+});
+
+describe("WikiPageViewer sidebar exclusivity", () => {
+  it("mounts only the Contents panel in read mode", () => {
+    render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
+    expect(document.querySelector(".outline-sidebar")).toBeInTheDocument();
+    expect(document.querySelector(".wiki-edit-sidebar")).toBeNull();
+  });
+
+  it("mounts only the Page settings panel in edit mode", () => {
+    editorState.editing = true;
+    render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
+    expect(document.querySelector(".wiki-edit-sidebar")).toBeInTheDocument();
+    expect(document.querySelector(".outline-sidebar")).toBeNull();
   });
 });
