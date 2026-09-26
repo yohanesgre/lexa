@@ -3,8 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
-vi.mock("./runtimes/SourcesSection", () => ({ SourcesSection: () => <div data-testid="sources" /> }));
-vi.mock("./runtimes/LinksSection", () => ({ LinksSection: () => <div data-testid="links" /> }));
+vi.mock("./document/SourcesSection", () => ({ SourcesSection: () => <div data-testid="sources" /> }));
+vi.mock("./document/LinksSection", () => ({ LinksSection: () => <div data-testid="links" /> }));
 vi.mock("./DescriptionEditor", () => ({ DescriptionEditor: () => null }));
 vi.mock("./tiptap-render", () => ({ renderDoc: () => null }));
 

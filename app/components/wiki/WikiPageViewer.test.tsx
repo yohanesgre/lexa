@@ -40,7 +40,7 @@ vi.mock("./useWikiEditor", () => ({
 vi.mock("./WikiEditSplit", () => ({ WikiEditSplit: () => null }));
 vi.mock("./EditSidebar", () => ({ EditSidebar: () => null }));
 vi.mock("./OutlineSidebar", () => ({ OutlineSidebar: () => null }));
-vi.mock("../runtimes/SourcesSection", () => ({ SourcesSection: () => null }));
+vi.mock("../document/SourcesSection", () => ({ SourcesSection: () => null }));
 vi.mock("./ShareDialog", () => ({ ShareDialog: () => null }));
 
 import { WikiPageViewer } from "./WikiPageViewer";

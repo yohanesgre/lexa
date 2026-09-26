@@ -1,8 +1,8 @@
 import type { TipTapDoc } from "../../shared/types";
 import { renderDoc } from "./tiptap-render";
 import { DescriptionEditor } from "./DescriptionEditor";
-import { LinksSection } from "./runtimes/LinksSection";
-import { SourcesSection } from "./runtimes/SourcesSection";
+import { LinksSection } from "./document/LinksSection";
+import { SourcesSection } from "./document/SourcesSection";
 
 interface TaskDescriptionSectionProps {
   isCreate: boolean;

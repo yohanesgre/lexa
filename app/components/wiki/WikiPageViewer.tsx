@@ -5,7 +5,7 @@ import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { WikiEditSplit } from "./WikiEditSplit";
 import { EditSidebar } from "./EditSidebar";
 import { OutlineSidebar } from "./OutlineSidebar";
-import { SourcesSection } from "../runtimes/SourcesSection";
+import { SourcesSection } from "../document/SourcesSection";
 import { useWikiEditor } from "./useWikiEditor";
 import { parseApiDate } from "../../lib/date";
 import { ShareDialog } from "./ShareDialog";

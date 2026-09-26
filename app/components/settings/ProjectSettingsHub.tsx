@@ -10,6 +10,10 @@ import { TextInput } from "../ui/TextInput";
 import { TextArea } from "../ui/TextArea";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { MembersTableHead } from "./TeamSettings";
+import { AssistantProjectProviderSection } from "./assistant-project";
+import { AssistantWriteToolsSection } from "./assistant/AssistantWriteToolsSection";
+import { AgentSkillAvailabilitySection } from "./assistant/AssistantAgentSkills";
+import { ProjectMemorySection } from "./assistant/AssistantProjectMemory";
 import type { Project } from "../../../shared/types";
 
 // /settings/project/$projectId — the project settings surface reached from
@@ -54,13 +58,13 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
         </Link>
       </div>
 
-      <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
-        <span className="text-sm text-lx-text-secondary">Assistant provider, engine, write tools, memory, and skill bindings are now managed in <span className="font-mono text-xs">/runtimes/bindings</span>.</span>
-        <Link to="/runtimes/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open in AI Runtimes · Bindings</Link>
-      </div>
       <TeamAssignmentSection project={project} />
       <ProjectBasicSection project={project} />
       <LinkedReposSection slug={project.slug} />
+      <AssistantProjectProviderSection key={project.id} project={project} />
+      <AssistantWriteToolsSection key={project.id} project={project} />
+      <AgentSkillAvailabilitySection projectId={project.id} />
+      <ProjectMemorySection projectId={project.id} />
       <ProjectMembersSection slug={project.slug} />
       <ProjectDangerSection project={project} />
     </main>
@@ -87,7 +91,7 @@ function TeamAssignmentSection({ project }: { project: Project }) {
       </div>
       <div className="card-panel card-panel--elevated mt-4">
         <p className="text-sm text-lx-text-secondary mb-3" style={{ marginTop: 0 }}>
-          The owning team scopes AI claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
+          The owning team scopes project access. Unassigned projects are Global.
           {!isSuperadmin && " As a team admin you can assign this project to your own team only."}
         </p>
         <div className="flex items-center gap-3 flex-wrap">

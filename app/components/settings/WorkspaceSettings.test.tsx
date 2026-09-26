@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // Wireframe settings-workspace.html: invite hint points at /set-password, and
-// the Teams table carries Projects + Runtimes count columns.
+// the Teams table carries Members + Projects count columns (Runtimes removed
+// with the agent-runtime tier).
 import "@testing-library/jest-dom/vitest";
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -9,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "../ui/Toast";
 import { TeamSelectionProvider } from "../../lib/team-selection";
-import type { Project, Runtime } from "../../../shared/types";
+import type { Project } from "../../../shared/types";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-router")>();
@@ -24,7 +25,6 @@ const h = vi.hoisted(() => ({
     teams: [] as unknown[],
     members: [] as unknown[],
     projects: [] as unknown[],
-    runtimes: [] as unknown[],
     invites: [] as unknown[],
   },
 }));
@@ -38,7 +38,6 @@ vi.mock("../../lib/queries", async (importOriginal) => {
     useWorkspaceInvites: () => ({ data: h.state.invites }),
     useTeams: () => ({ data: h.state.teams, isLoading: false }),
     useProjects: () => ({ data: h.state.projects }),
-    useRuntimes: () => ({ data: h.state.runtimes }),
   };
 });
 
@@ -59,7 +58,6 @@ beforeEach(() => {
   h.state.teams = [];
   h.state.members = [];
   h.state.projects = [];
-  h.state.runtimes = [];
   h.state.invites = [];
 });
 
@@ -69,7 +67,7 @@ describe("WorkspaceSettings", () => {
     expect(screen.getByText(/Accepting opens \/set-password/)).toBeInTheDocument();
   });
 
-  it("Teams table shows Members, Projects and Runtimes counts", async () => {
+  it("Teams table shows Members and Projects counts (no Runtimes column)", async () => {
     const user = userEvent.setup();
     h.state.teams = [{ id: "team-1", name: "Core", slug: "core", createdAt: "2026-07-10T00:00:00Z" }];
     h.state.members = [{
@@ -81,22 +79,21 @@ describe("WorkspaceSettings", () => {
       { id: "p1", name: "Emberfall", slug: "emberfall", key: "EMB", description: "", repos: [], createdAt: "", updatedAt: "", teamId: "team-1" },
       { id: "p2", name: "Pale Reach", slug: "pale-reach", key: "PR", description: "", repos: [], createdAt: "", updatedAt: "", teamId: "team-1" },
     ] as Array<Project & { teamId: string }>;
-    h.state.runtimes = [
-      { id: "r1", name: "a", provider: "opencode", machineId: "m1", agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], modelsCatalog: [], agentsCatalog: [], status: "online", lastError: null, hostname: "h1", lastSeen: null, createdAt: "", teamId: "team-1" },
-      { id: "r2", name: "b", provider: "opencode", machineId: "m1", agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], modelsCatalog: [], agentsCatalog: [], status: "online", lastError: null, hostname: "h1", lastSeen: null, createdAt: "", teamId: "team-1" },
-      { id: "r3", name: "c", provider: "opencode", machineId: "m1", agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], modelsCatalog: [], agentsCatalog: [], status: "online", lastError: null, hostname: "h1", lastSeen: null, createdAt: "", teamId: "team-1" },
-    ] as Array<Runtime & { teamId: string }>;
 
     render(<WorkspaceSettings />, { wrapper: wrapper() });
     await user.click(screen.getByRole("tab", { name: "Teams" }));
 
     expect(screen.getByRole("columnheader", { name: "Projects" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Runtimes" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Runtimes" })).not.toBeInTheDocument();
 
     const row = screen.getByRole("row", { name: /Core/ });
     const cells = within(row).getAllByRole("cell");
     expect(cells[1]).toHaveTextContent("1");
     expect(cells[2]).toHaveTextContent("2");
-    expect(cells[3]).toHaveTextContent("3");
+  });
+
+  it("workspace tabs no longer include a Compute tab", () => {
+    render(<WorkspaceSettings />, { wrapper: wrapper() });
+    expect(screen.queryByRole("tab", { name: "Compute" })).not.toBeInTheDocument();
   });
 });

@@ -13,8 +13,8 @@ import {
   useUpdateWikiPage, useDeleteWikiPage, useUpdateFieldConfig, useCreateColumn,
   useUpdateColumn, useDeleteColumn, useCreateSwimlane, useUpdateSwimlane, useArchiveSwimlane,
   useDeleteSwimlane, useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
-  useUpdateComment, useCancelRuntimeTask, useAddTaskLink, useRemoveTaskLink,
-  useAddSource, useRemoveSource, useCreateRuntimeTask, useCreateAgent,
+  useUpdateComment, useAddTaskLink, useRemoveTaskLink,
+  useAddSource, useRemoveSource, useCreateAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
   useCreateMyApiKey, useDeleteMyApiKey,
 } from "./queries";
@@ -435,28 +435,5 @@ describe("activity + link mutations", () => {
     expect(queryClient.getQueryData(["sources", "demo", "task", "t1"])).toHaveLength(1);
     const pages = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages;
     expect(pages[0]!.data).toHaveLength(2);
-  });
-});
-
-describe("runtime mutations", () => {
-  it("useCancelRuntimeTask updates recent + every cached history page in place", async () => {
-    routes.set("POST /api/runtimes/tasks/ft1/cancel", { id: "ft1", status: "cancelled" });
-    const recent = [{ id: "ft1", status: "queued", projectName: "Demo" }];
-    queryClient.setQueryData(["runtime-recent-tasks"], recent);
-    queryClient.setQueryData(["runtime-task-history", {}, null], { data: [{ id: "ft1", status: "queued" }], nextCursor: null, summary: { queued: 1, running: 0, completed: 0, failed: 0, cancelled: 0 } });
-    const { result } = renderHook(() => useCancelRuntimeTask(), { wrapper });
-    await act(async () => { await result.current.mutateAsync("ft1"); });
-    expect((queryClient.getQueryData<{ status: string }[]>(["runtime-recent-tasks"])![0] as { status: string }).status).toBe("cancelled");
-    const page = queryClient.getQueryData<{ data: { status: string }[] }>(["runtime-task-history", {}, null])!;
-    expect(page.data[0]!.status).toBe("cancelled");
-  });
-
-  it("useCreateRuntimeTask seeds the recent list with the project name", async () => {
-    routes.set("POST /api/runtimes/tasks", { id: "ft2", projectId: "p1", status: "queued" });
-    queryClient.setQueryData(["projects"], [PROJECT]);
-    queryClient.setQueryData(["runtime-recent-tasks"], []);
-    const { result } = renderHook(() => useCreateRuntimeTask(), { wrapper });
-    await act(async () => { await result.current.mutateAsync({ slug: "demo", documentType: "task", documentId: "t1", agentId: "a1", skillId: "s1" }); });
-    expect(queryClient.getQueryData<{ projectName: string }[]>(["runtime-recent-tasks"])![0]).toMatchObject({ id: "ft2", projectName: "Demo" });
   });
 });

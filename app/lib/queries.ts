@@ -1,13 +1,12 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, RuntimeTask, TaskLink, Runtime, LexaAgent, LexaSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, AssistantTask, TaskLink, LexaAgent, LexaSkill, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
 import type { AssistantSettingsMasked, AssistantSettingsInput } from "../../shared/assistant";
 import type { AssistantMemoryEntry } from "./api";
 import * as api from "./api";
 import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
-import type { RecentRuntimeTask, RuntimeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
 function toastMessage(err: unknown): string {
@@ -63,7 +62,6 @@ export function useDeleteProject() {
       qc.removeQueries({ queryKey: ["task-links", slug] });
       qc.removeQueries({ queryKey: ["task-search", slug] });
       qc.removeQueries({ queryKey: ["sources", slug] });
-      qc.removeQueries({ queryKey: ["runtime-recent", slug] });
       toast.push("success", "Project deleted");
     },
     onError: (err) => {
@@ -1456,16 +1454,6 @@ export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => api.listUsers().then((r) => r.data) });
 }
 
-export function useTeamRuntimes(teamId: string | undefined) {
-  return useQuery({
-    queryKey: ["runtimes", teamId],
-    queryFn: () => api.listRuntimes(teamId).then((r) => r.data),
-    enabled: !!teamId,
-    staleTime: 15_000,
-    refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
-  });
-}
-
 export function useUpdateMyName() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -1522,161 +1510,6 @@ export function useRemoveProjectMember(slug: string) {
     },
     onError: (err) => {
       toast.push("error", "Failed to remove member", toastMessage(err));
-    },
-  });
-}
-
-// ── Runtime (AI writing assistant) ──
-
-export function useRuntimes() {
-  // Runtime daemon runtimes (opencode/hermes machines). Polled so the
-  // settings page shows online/offline status — but only while runtimes
-  // exist; a fresh install has no machines and nothing can change.
-  return useQuery({
-    queryKey: ["runtimes"],
-    queryFn: () => api.listRuntimes().then((r) => r.data),
-    staleTime: 15_000,
-    refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
-  });
-}
-
-export function useMachines() {
-  // Machine hosts (bound via lx login, listening via machine listen).
-  return useQuery({
-    queryKey: ["machines"],
-    queryFn: () => api.listMachines().then((r) => r.data),
-    staleTime: 15_000,
-    refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
-  });
-}
-
-export function useUpdateRuntime() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string | undefined; provider?: "opencode" | "hermes" | "command-code"; agent?: string | undefined; model?: string | undefined; printLogs?: boolean | undefined; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] } }) => api.updateRuntime(id, patch),
-    onSuccess: (runtime) => {
-      qc.setQueryData<Runtime[]>(["runtimes"], (rows) => rows?.map((r) => (r.id === runtime.id ? runtime : r)));
-      toast.push("success", "Runtime updated — applies on the next AI task");
-    },
-    onError: (err) => {
-      toast.push("error", "Failed to update runtime", toastMessage(err));
-    },
-  });
-}
-
-export function useRemoveRuntime() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation({
-    mutationFn: (id: string) => api.removeRuntime(id),
-    onSuccess: (_, id) => {
-      qc.setQueryData<Runtime[]>(["runtimes"], (rows) => rows?.filter((r) => r.id !== id));
-      toast.push("success", "Runtime removed");
-    },
-    onError: (err) => {
-      toast.push("error", "Failed to remove runtime", toastMessage(err));
-    },
-  });
-}
-
-export function useRemoveMachine() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation({
-    mutationFn: (id: string) => api.removeMachine(id),
-    onSuccess: (_, id) => {
-      qc.setQueryData<Machine[]>(["machines"], (rows) => rows?.filter((m) => m.id !== id));
-      // The machine's runtimes are removed server-side (cascade) — drop them
-      // from the runtimes cache too so the table doesn't show stale rows.
-      qc.setQueryData<Runtime[]>(["runtimes"], (rows) => rows?.filter((r) => r.machineId !== id));
-      toast.push("success", "Machine removed");
-    },
-    onError: (err) => {
-      toast.push("error", "Failed to remove machine", toastMessage(err));
-    },
-  });
-}
-
-// Recent Runtime tasks across all projects — powers the navbar status pill.
-// Polls fast while a task runs, slow while idle, and not at all when no
-// tasks exist or no runtime is online (prevents 15s spam + http log
-// noise on installs without a blacksmith daemon).
-export function useRecentRuntimeTasks() {
-  const { data: runtimes } = useRuntimes();
-  const hasRuntime = runtimes?.some((r) => r.status === "online");
-  return useQuery({
-    queryKey: ["runtime-recent-tasks"],
-    queryFn: () => api.listRecentRuntimeTasks().then((r) => r.data),
-    refetchInterval: (query) => {
-      const rows = query.state.data ?? [];
-      const hasActive = rows.some((t) => t.status === "queued" || t.status === "running");
-      if (hasActive) return 1500;
-      if (!rows.length) return false;
-      if (runtimes !== undefined && !hasRuntime) return false;
-      return 15_000;
-    },
-  });
-}
-
-export function useCreateRuntimeTask() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation({
-    mutationFn: api.createRuntimeTask,
-    onSuccess: (task) => {
-      // Reflect the new task in the navbar pill immediately — the recent
-      // list polls every 15s when idle, which feels like a missing status.
-      const projects = qc.getQueryData<Project[]>(["projects"]);
-      const project = projects?.find((p) => p.id === task.projectId);
-      qc.setQueryData<RecentRuntimeTask[]>(["runtime-recent-tasks"], (rows) => [
-        { ...task, projectName: project?.name ?? "" },
-        ...(rows ?? []),
-      ]);
-    },
-    onError: (err) => {
-      toast.push("error", "AI unavailable", toastMessage(err));
-    },
-  });
-}
-
-// Cancel a queued/running Runtime task from the popover or the navbar panel.
-// Updates the recent-tasks list and every cached history page from the
-// authoritative mutation response (never invalidate on the mutation path).
-export function useCancelRuntimeTask() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation({
-    mutationFn: (id: string) => api.cancelRuntimeTask(id),
-    onSuccess: (task) => {
-      qc.setQueryData<RuntimeTask[]>(["runtime-recent-tasks"], (rows) =>
-        rows?.map((r) => (r.id === task.id ? { ...r, status: task.status } : r))
-      );
-      qc.setQueriesData<RuntimeHistoryPage>({ queryKey: ["runtime-task-history"] }, (page) =>
-        page ? { ...page, data: page.data.map((r) => (r.id === task.id ? { ...r, status: task.status } : r)) } : page
-      );
-      toast.push("success", "AI task cancelled");
-    },
-    onError: (err) => {
-      toast.push("error", "Failed to cancel AI task", toastMessage(err));
-    },
-  });
-}
-
-// Full Runtime task history for the control panel: filterable, cursor-paginated.
-// Polls while any row on the current page is queued/running so active runs
-// update in place; idle pages refresh on a slow heartbeat.
-export function useRuntimeTaskHistory(
-  filters: { slug?: string | undefined; status?: RuntimeTask["status"]; skillId?: string | undefined; documentType?: "task" | "wiki"; teamId?: string | undefined; limit?: number },
-  cursor: string | null
-) {
-  return useQuery({
-    queryKey: ["runtime-task-history", filters, cursor],
-    queryFn: () => api.listRuntimeTaskHistory({ ...filters, cursor: cursor ?? undefined }),
-    staleTime: 30_000,
-    refetchInterval: (query) => {
-      const hasActive = (query.state.data?.data ?? []).some((t) => t.status === "queued" || t.status === "running");
-      return hasActive ? 1500 : 15_000;
     },
   });
 }
@@ -1830,43 +1663,6 @@ export function useResetSkill() {
     },
     onError: (err) => {
       toast.push("error", "Failed to reset skill", toastMessage(err));
-    },
-  });
-}
-
-export function useRuntimeTask(id: string | null, enabled: boolean) {
-  return useQuery({
-    queryKey: ["runtime-task", id],
-    queryFn: () => api.getRuntimeTask(id!),
-    enabled: enabled && id !== null,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "queued" || status === "running" ? 1500 : false;
-    },
-  });
-}
-
-// Live activity feed for a Runtime task. Polls fast while the task is active
-// so the "what is it doing now" log stays current.
-export function useRuntimeTaskLogs(id: string | null, enabled: boolean) {
-  return useQuery({
-    queryKey: ["runtime-logs", id],
-    queryFn: () => api.listRuntimeTaskLogs(id!).then((r) => r.data),
-    enabled: enabled && id !== null,
-    refetchInterval: enabled ? 1500 : false,
-  });
-}
-
-// Most recent Runtime task for a document — used to resume a run that finished
-// after the popover was closed (background work keeps running server-side).
-export function useRecentRuntimeTask(slug: string, documentType: "task" | "wiki", documentId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: ["runtime-recent", slug, documentType, documentId],
-    queryFn: () => api.listRuntimeTasks(slug, documentType, documentId).then((r) => r.data[0] ?? null),
-    enabled: enabled && !!documentId,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "queued" || status === "running" ? 1500 : false;
     },
   });
 }
@@ -2256,16 +2052,9 @@ export function useSaveAssistantSettings(projectId: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: (input: AssistantSettingsInput) => api.putAssistantSettings(projectId, input),
-    onSuccess: (masked, input) => {
+    onSuccess: (masked) => {
       qc.setQueryData<AssistantSettingsMasked | null>(["assistant-settings", projectId], masked);
-      if (input.engine !== undefined) {
-        const label = input.engine === "blacksmith" ? "Blacksmith" : input.engine === "assistant" ? "Assistant" : String(input.engine);
-        toast.push("success", `Default engine updated to ${label}`);
-      } else if (input.engineSwitcherEnabled !== undefined) {
-        toast.push("success", input.engineSwitcherEnabled ? "Engine switcher enabled" : "Engine switcher disabled");
-      } else {
-        toast.push("success", "Assistant provider saved");
-      }
+      toast.push("success", "Assistant provider saved");
     },
     onError: (err) => {
       toast.push("error", "Failed to save Assistant provider", toastMessage(err));
@@ -2315,20 +2104,24 @@ export function useFetchAssistantModels(projectId: string) {
   });
 }
 
+// Terminal-state poll for a document Generate run (herald-popover.html Done /
+// Failed states). Enabled by the caller; polls fast while queued/running.
+export function useAssistantTask(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["assistant-task", id],
+    queryFn: () => api.getAssistantTask(id!),
+    enabled: enabled && id !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
+    },
+  });
+}
+
 export function useCreateAssistantTask() {
-  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: api.createAssistantTask,
-    onSuccess: (task) => {
-      const projects = qc.getQueryData<Project[]>(["projects"]);
-      const project = projects?.find((p) => p.id === task.projectId);
-      qc.setQueryData<RecentRuntimeTask[]>(["runtime-recent-tasks"], (rows) => [
-        { ...task, projectName: project?.name ?? "" },
-        ...(rows ?? []),
-      ]);
-      void qc.invalidateQueries({ queryKey: ["runtime-recent-tasks"] });
-    },
     onError: (err) => {
       toast.push("error", "Assistant unavailable", toastMessage(err));
     },
@@ -2336,12 +2129,10 @@ export function useCreateAssistantTask() {
 }
 
 export function useCancelAssistantTask() {
-  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: (id: string) => api.cancelAssistantTask(id),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["runtime-recent-tasks"] });
       toast.push("success", "Assistant run stopped");
     },
     onError: (err) => {

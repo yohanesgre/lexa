@@ -86,6 +86,18 @@ export function useAssistantUsage(filters: AssistantUsageFilters) {
   });
 }
 
+// Overview tab (Q3): own fetch of the same summary block, separate cache key so
+// it never reads the Usage tab's cache.
+export function useAssistantOverviewSummary() {
+  return useQuery({
+    queryKey: ["assistant-usage-overview"],
+    queryFn: () => requestJson<AssistantUsageResponse>(`/api/admin/assistant/usage`),
+    retry: false,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useProjectAssistantUsage(slug: string, filters: Omit<AssistantUsageFilters, "projectId">) {
   return useQuery({
     queryKey: ["assistant-usage-project", slug, filters.from ?? null, filters.to ?? null],

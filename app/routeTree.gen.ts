@@ -14,7 +14,6 @@ import { Route as ChatRouteImport } from './routes/chat'
 import { Route as DeviceLoginRouteImport } from './routes/device-login'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as RuntimesRouteImport } from './routes/runtimes'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -25,12 +24,7 @@ import { Route as SlugMilestonesRouteImport } from './routes/$slug/milestones'
 import { Route as SlugSettingsRouteImport } from './routes/$slug/settings'
 import { Route as SlugSwimlanesRouteImport } from './routes/$slug/swimlanes'
 import { Route as SlugTasksRouteImport } from './routes/$slug/tasks'
-import { Route as RuntimesAgentsRouteImport } from './routes/runtimes.agents'
-import { Route as RuntimesBindingsRouteImport } from './routes/runtimes.bindings'
-import { Route as RuntimesDaemonsRouteImport } from './routes/runtimes.daemons'
-import { Route as RuntimesProvidersRouteImport } from './routes/runtimes.providers'
-import { Route as RuntimesRunsRouteImport } from './routes/runtimes.runs'
-import { Route as RuntimesUsageRouteImport } from './routes/runtimes.usage'
+import { Route as AdminAssistantRouteImport } from './routes/admin.assistant'
 import { Route as SettingsMeRouteImport } from './routes/settings/me'
 import { Route as SettingsTeamRouteImport } from './routes/settings/team'
 import { Route as SettingsWorkspaceRouteImport } from './routes/settings/workspace'
@@ -38,9 +32,13 @@ import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SlugTasksTaskIdRouteImport } from './routes/$slug/tasks_.$taskId'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
+import { Route as AdminAssistantIndexRouteImport } from './routes/admin.assistant.index'
+import { Route as AdminAssistantAgentsRouteImport } from './routes/admin.assistant.agents'
+import { Route as AdminAssistantBindingsRouteImport } from './routes/admin.assistant.bindings'
+import { Route as AdminAssistantProvidersRouteImport } from './routes/admin.assistant.providers'
+import { Route as AdminAssistantRunsRouteImport } from './routes/admin.assistant.runs'
 import { Route as AdminAssistantUsageRouteImport } from './routes/admin.assistant.usage'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
-import { Route as RuntimesBindingsProjectIdRouteImport } from './routes/runtimes.bindings.$projectId'
 import { Route as SettingsProjectProjectIdRouteImport } from './routes/settings/project.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -66,11 +64,6 @@ const InviteRoute = InviteRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const RuntimesRoute = RuntimesRouteImport.update({
-  id: '/runtimes',
-  path: '/runtimes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SetPasswordRoute = SetPasswordRouteImport.update({
@@ -123,35 +116,10 @@ const SlugTasksRoute = SlugTasksRouteImport.update({
   path: '/$slug/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RuntimesAgentsRoute = RuntimesAgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
-  getParentRoute: () => RuntimesRoute,
-} as any)
-const RuntimesBindingsRoute = RuntimesBindingsRouteImport.update({
-  id: '/bindings',
-  path: '/bindings',
-  getParentRoute: () => RuntimesRoute,
-} as any)
-const RuntimesDaemonsRoute = RuntimesDaemonsRouteImport.update({
-  id: '/daemons',
-  path: '/daemons',
-  getParentRoute: () => RuntimesRoute,
-} as any)
-const RuntimesProvidersRoute = RuntimesProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
-  getParentRoute: () => RuntimesRoute,
-} as any)
-const RuntimesRunsRoute = RuntimesRunsRouteImport.update({
-  id: '/runs',
-  path: '/runs',
-  getParentRoute: () => RuntimesRoute,
-} as any)
-const RuntimesUsageRoute = RuntimesUsageRouteImport.update({
-  id: '/usage',
-  path: '/usage',
-  getParentRoute: () => RuntimesRoute,
+const AdminAssistantRoute = AdminAssistantRouteImport.update({
+  id: '/admin/assistant',
+  path: '/admin/assistant',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsMeRoute = SettingsMeRouteImport.update({
   id: '/me',
@@ -188,22 +156,41 @@ const SlugWikiPageSlugRoute = SlugWikiPageSlugRouteImport.update({
   path: '/$slug/wiki/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAssistantIndexRoute = AdminAssistantIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminAssistantRoute,
+} as any)
+const AdminAssistantAgentsRoute = AdminAssistantAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => AdminAssistantRoute,
+} as any)
+const AdminAssistantBindingsRoute = AdminAssistantBindingsRouteImport.update({
+  id: '/bindings',
+  path: '/bindings',
+  getParentRoute: () => AdminAssistantRoute,
+} as any)
+const AdminAssistantProvidersRoute = AdminAssistantProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => AdminAssistantRoute,
+} as any)
+const AdminAssistantRunsRoute = AdminAssistantRunsRouteImport.update({
+  id: '/runs',
+  path: '/runs',
+  getParentRoute: () => AdminAssistantRoute,
+} as any)
 const AdminAssistantUsageRoute = AdminAssistantUsageRouteImport.update({
-  id: '/admin/assistant/usage',
-  path: '/admin/assistant/usage',
-  getParentRoute: () => rootRouteImport,
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => AdminAssistantRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RuntimesBindingsProjectIdRoute =
-  RuntimesBindingsProjectIdRouteImport.update({
-    id: '/$projectId',
-    path: '/$projectId',
-    getParentRoute: () => RuntimesBindingsRoute,
-  } as any)
 const SettingsProjectProjectIdRoute =
   SettingsProjectProjectIdRouteImport.update({
     id: '/project/$projectId',
@@ -217,7 +204,6 @@ export interface FileRoutesByFullPath {
   '/device-login': typeof DeviceLoginRoute
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
-  '/runtimes': typeof RuntimesRouteWithChildren
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
@@ -227,12 +213,7 @@ export interface FileRoutesByFullPath {
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
   '/$slug/tasks': typeof SlugTasksRoute
-  '/runtimes/agents': typeof RuntimesAgentsRoute
-  '/runtimes/bindings': typeof RuntimesBindingsRouteWithChildren
-  '/runtimes/daemons': typeof RuntimesDaemonsRoute
-  '/runtimes/providers': typeof RuntimesProvidersRoute
-  '/runtimes/runs': typeof RuntimesRunsRoute
-  '/runtimes/usage': typeof RuntimesUsageRoute
+  '/admin/assistant': typeof AdminAssistantRouteWithChildren
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -240,11 +221,15 @@ export interface FileRoutesByFullPath {
   '/$slug/': typeof SlugIndexRoute
   '/$slug/tasks/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/admin/assistant/agents': typeof AdminAssistantAgentsRoute
+  '/admin/assistant/bindings': typeof AdminAssistantBindingsRoute
+  '/admin/assistant/providers': typeof AdminAssistantProvidersRoute
+  '/admin/assistant/runs': typeof AdminAssistantRunsRoute
   '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/runtimes/bindings/$projectId': typeof RuntimesBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
+  '/admin/assistant/': typeof AdminAssistantIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -252,7 +237,6 @@ export interface FileRoutesByTo {
   '/device-login': typeof DeviceLoginRoute
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
-  '/runtimes': typeof RuntimesRouteWithChildren
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
@@ -262,12 +246,6 @@ export interface FileRoutesByTo {
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
   '/$slug/tasks': typeof SlugTasksRoute
-  '/runtimes/agents': typeof RuntimesAgentsRoute
-  '/runtimes/bindings': typeof RuntimesBindingsRouteWithChildren
-  '/runtimes/daemons': typeof RuntimesDaemonsRoute
-  '/runtimes/providers': typeof RuntimesProvidersRoute
-  '/runtimes/runs': typeof RuntimesRunsRoute
-  '/runtimes/usage': typeof RuntimesUsageRoute
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -275,11 +253,15 @@ export interface FileRoutesByTo {
   '/$slug': typeof SlugIndexRoute
   '/$slug/tasks/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/admin/assistant/agents': typeof AdminAssistantAgentsRoute
+  '/admin/assistant/bindings': typeof AdminAssistantBindingsRoute
+  '/admin/assistant/providers': typeof AdminAssistantProvidersRoute
+  '/admin/assistant/runs': typeof AdminAssistantRunsRoute
   '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/runtimes/bindings/$projectId': typeof RuntimesBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki': typeof SlugWikiIndexRoute
+  '/admin/assistant': typeof AdminAssistantIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -288,7 +270,6 @@ export interface FileRoutesById {
   '/device-login': typeof DeviceLoginRoute
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
-  '/runtimes': typeof RuntimesRouteWithChildren
   '/set-password': typeof SetPasswordRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
@@ -298,12 +279,7 @@ export interface FileRoutesById {
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
   '/$slug/tasks': typeof SlugTasksRoute
-  '/runtimes/agents': typeof RuntimesAgentsRoute
-  '/runtimes/bindings': typeof RuntimesBindingsRouteWithChildren
-  '/runtimes/daemons': typeof RuntimesDaemonsRoute
-  '/runtimes/providers': typeof RuntimesProvidersRoute
-  '/runtimes/runs': typeof RuntimesRunsRoute
-  '/runtimes/usage': typeof RuntimesUsageRoute
+  '/admin/assistant': typeof AdminAssistantRouteWithChildren
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -311,11 +287,15 @@ export interface FileRoutesById {
   '/$slug/': typeof SlugIndexRoute
   '/$slug/tasks_/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/admin/assistant/agents': typeof AdminAssistantAgentsRoute
+  '/admin/assistant/bindings': typeof AdminAssistantBindingsRoute
+  '/admin/assistant/providers': typeof AdminAssistantProvidersRoute
+  '/admin/assistant/runs': typeof AdminAssistantRunsRoute
   '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/runtimes/bindings/$projectId': typeof RuntimesBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
+  '/admin/assistant/': typeof AdminAssistantIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -325,7 +305,6 @@ export interface FileRouteTypes {
     | '/device-login'
     | '/invite'
     | '/login'
-    | '/runtimes'
     | '/set-password'
     | '/settings'
     | '/setup'
@@ -335,12 +314,7 @@ export interface FileRouteTypes {
     | '/$slug/settings'
     | '/$slug/swimlanes'
     | '/$slug/tasks'
-    | '/runtimes/agents'
-    | '/runtimes/bindings'
-    | '/runtimes/daemons'
-    | '/runtimes/providers'
-    | '/runtimes/runs'
-    | '/runtimes/usage'
+    | '/admin/assistant'
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
@@ -348,11 +322,15 @@ export interface FileRouteTypes {
     | '/$slug/'
     | '/$slug/tasks/$taskId'
     | '/$slug/wiki/$pageSlug'
+    | '/admin/assistant/agents'
+    | '/admin/assistant/bindings'
+    | '/admin/assistant/providers'
+    | '/admin/assistant/runs'
     | '/admin/assistant/usage'
     | '/api/auth/$'
-    | '/runtimes/bindings/$projectId'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
+    | '/admin/assistant/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -360,7 +338,6 @@ export interface FileRouteTypes {
     | '/device-login'
     | '/invite'
     | '/login'
-    | '/runtimes'
     | '/set-password'
     | '/settings'
     | '/setup'
@@ -370,12 +347,6 @@ export interface FileRouteTypes {
     | '/$slug/settings'
     | '/$slug/swimlanes'
     | '/$slug/tasks'
-    | '/runtimes/agents'
-    | '/runtimes/bindings'
-    | '/runtimes/daemons'
-    | '/runtimes/providers'
-    | '/runtimes/runs'
-    | '/runtimes/usage'
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
@@ -383,11 +354,15 @@ export interface FileRouteTypes {
     | '/$slug'
     | '/$slug/tasks/$taskId'
     | '/$slug/wiki/$pageSlug'
+    | '/admin/assistant/agents'
+    | '/admin/assistant/bindings'
+    | '/admin/assistant/providers'
+    | '/admin/assistant/runs'
     | '/admin/assistant/usage'
     | '/api/auth/$'
-    | '/runtimes/bindings/$projectId'
     | '/settings/project/$projectId'
     | '/$slug/wiki'
+    | '/admin/assistant'
   id:
     | '__root__'
     | '/'
@@ -395,7 +370,6 @@ export interface FileRouteTypes {
     | '/device-login'
     | '/invite'
     | '/login'
-    | '/runtimes'
     | '/set-password'
     | '/settings'
     | '/setup'
@@ -405,12 +379,7 @@ export interface FileRouteTypes {
     | '/$slug/settings'
     | '/$slug/swimlanes'
     | '/$slug/tasks'
-    | '/runtimes/agents'
-    | '/runtimes/bindings'
-    | '/runtimes/daemons'
-    | '/runtimes/providers'
-    | '/runtimes/runs'
-    | '/runtimes/usage'
+    | '/admin/assistant'
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
@@ -418,11 +387,15 @@ export interface FileRouteTypes {
     | '/$slug/'
     | '/$slug/tasks_/$taskId'
     | '/$slug/wiki/$pageSlug'
+    | '/admin/assistant/agents'
+    | '/admin/assistant/bindings'
+    | '/admin/assistant/providers'
+    | '/admin/assistant/runs'
     | '/admin/assistant/usage'
     | '/api/auth/$'
-    | '/runtimes/bindings/$projectId'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
+    | '/admin/assistant/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -431,7 +404,6 @@ export interface RootRouteChildren {
   DeviceLoginRoute: typeof DeviceLoginRoute
   InviteRoute: typeof InviteRoute
   LoginRoute: typeof LoginRoute
-  RuntimesRoute: typeof RuntimesRouteWithChildren
   SetPasswordRoute: typeof SetPasswordRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   SetupRoute: typeof SetupRoute
@@ -441,11 +413,11 @@ export interface RootRouteChildren {
   SlugSettingsRoute: typeof SlugSettingsRoute
   SlugSwimlanesRoute: typeof SlugSwimlanesRoute
   SlugTasksRoute: typeof SlugTasksRoute
+  AdminAssistantRoute: typeof AdminAssistantRouteWithChildren
   ShareTokenRoute: typeof ShareTokenRoute
   SlugIndexRoute: typeof SlugIndexRoute
   SlugTasksTaskIdRoute: typeof SlugTasksTaskIdRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
-  AdminAssistantUsageRoute: typeof AdminAssistantUsageRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   SlugWikiIndexRoute: typeof SlugWikiIndexRoute
 }
@@ -485,13 +457,6 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/runtimes': {
-      id: '/runtimes'
-      path: '/runtimes'
-      fullPath: '/runtimes'
-      preLoaderRoute: typeof RuntimesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/set-password': {
@@ -564,47 +529,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugTasksRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/runtimes/agents': {
-      id: '/runtimes/agents'
-      path: '/agents'
-      fullPath: '/runtimes/agents'
-      preLoaderRoute: typeof RuntimesAgentsRouteImport
-      parentRoute: typeof RuntimesRoute
-    }
-    '/runtimes/bindings': {
-      id: '/runtimes/bindings'
-      path: '/bindings'
-      fullPath: '/runtimes/bindings'
-      preLoaderRoute: typeof RuntimesBindingsRouteImport
-      parentRoute: typeof RuntimesRoute
-    }
-    '/runtimes/daemons': {
-      id: '/runtimes/daemons'
-      path: '/daemons'
-      fullPath: '/runtimes/daemons'
-      preLoaderRoute: typeof RuntimesDaemonsRouteImport
-      parentRoute: typeof RuntimesRoute
-    }
-    '/runtimes/providers': {
-      id: '/runtimes/providers'
-      path: '/providers'
-      fullPath: '/runtimes/providers'
-      preLoaderRoute: typeof RuntimesProvidersRouteImport
-      parentRoute: typeof RuntimesRoute
-    }
-    '/runtimes/runs': {
-      id: '/runtimes/runs'
-      path: '/runs'
-      fullPath: '/runtimes/runs'
-      preLoaderRoute: typeof RuntimesRunsRouteImport
-      parentRoute: typeof RuntimesRoute
-    }
-    '/runtimes/usage': {
-      id: '/runtimes/usage'
-      path: '/usage'
-      fullPath: '/runtimes/usage'
-      preLoaderRoute: typeof RuntimesUsageRouteImport
-      parentRoute: typeof RuntimesRoute
+    '/admin/assistant': {
+      id: '/admin/assistant'
+      path: '/admin/assistant'
+      fullPath: '/admin/assistant'
+      preLoaderRoute: typeof AdminAssistantRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/settings/me': {
       id: '/settings/me'
@@ -655,12 +585,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugWikiPageSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/assistant/': {
+      id: '/admin/assistant/'
+      path: '/'
+      fullPath: '/admin/assistant/'
+      preLoaderRoute: typeof AdminAssistantIndexRouteImport
+      parentRoute: typeof AdminAssistantRoute
+    }
+    '/admin/assistant/agents': {
+      id: '/admin/assistant/agents'
+      path: '/agents'
+      fullPath: '/admin/assistant/agents'
+      preLoaderRoute: typeof AdminAssistantAgentsRouteImport
+      parentRoute: typeof AdminAssistantRoute
+    }
+    '/admin/assistant/bindings': {
+      id: '/admin/assistant/bindings'
+      path: '/bindings'
+      fullPath: '/admin/assistant/bindings'
+      preLoaderRoute: typeof AdminAssistantBindingsRouteImport
+      parentRoute: typeof AdminAssistantRoute
+    }
+    '/admin/assistant/providers': {
+      id: '/admin/assistant/providers'
+      path: '/providers'
+      fullPath: '/admin/assistant/providers'
+      preLoaderRoute: typeof AdminAssistantProvidersRouteImport
+      parentRoute: typeof AdminAssistantRoute
+    }
+    '/admin/assistant/runs': {
+      id: '/admin/assistant/runs'
+      path: '/runs'
+      fullPath: '/admin/assistant/runs'
+      preLoaderRoute: typeof AdminAssistantRunsRouteImport
+      parentRoute: typeof AdminAssistantRoute
+    }
     '/admin/assistant/usage': {
       id: '/admin/assistant/usage'
-      path: '/admin/assistant/usage'
+      path: '/usage'
       fullPath: '/admin/assistant/usage'
       preLoaderRoute: typeof AdminAssistantUsageRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof AdminAssistantRoute
     }
     '/api/auth/$': {
       id: '/api/auth/$'
@@ -668,13 +633,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/auth/$'
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/runtimes/bindings/$projectId': {
-      id: '/runtimes/bindings/$projectId'
-      path: '/$projectId'
-      fullPath: '/runtimes/bindings/$projectId'
-      preLoaderRoute: typeof RuntimesBindingsProjectIdRouteImport
-      parentRoute: typeof RuntimesBindingsRoute
     }
     '/settings/project/$projectId': {
       id: '/settings/project/$projectId'
@@ -685,39 +643,6 @@ declare module '@tanstack/react-router' {
     }
   }
 }
-
-interface RuntimesBindingsRouteChildren {
-  RuntimesBindingsProjectIdRoute: typeof RuntimesBindingsProjectIdRoute
-}
-
-const RuntimesBindingsRouteChildren: RuntimesBindingsRouteChildren = {
-  RuntimesBindingsProjectIdRoute: RuntimesBindingsProjectIdRoute,
-}
-
-const RuntimesBindingsRouteWithChildren =
-  RuntimesBindingsRoute._addFileChildren(RuntimesBindingsRouteChildren)
-
-interface RuntimesRouteChildren {
-  RuntimesAgentsRoute: typeof RuntimesAgentsRoute
-  RuntimesBindingsRoute: typeof RuntimesBindingsRouteWithChildren
-  RuntimesDaemonsRoute: typeof RuntimesDaemonsRoute
-  RuntimesProvidersRoute: typeof RuntimesProvidersRoute
-  RuntimesRunsRoute: typeof RuntimesRunsRoute
-  RuntimesUsageRoute: typeof RuntimesUsageRoute
-}
-
-const RuntimesRouteChildren: RuntimesRouteChildren = {
-  RuntimesAgentsRoute: RuntimesAgentsRoute,
-  RuntimesBindingsRoute: RuntimesBindingsRouteWithChildren,
-  RuntimesDaemonsRoute: RuntimesDaemonsRoute,
-  RuntimesProvidersRoute: RuntimesProvidersRoute,
-  RuntimesRunsRoute: RuntimesRunsRoute,
-  RuntimesUsageRoute: RuntimesUsageRoute,
-}
-
-const RuntimesRouteWithChildren = RuntimesRoute._addFileChildren(
-  RuntimesRouteChildren,
-)
 
 interface SettingsRouteChildren {
   SettingsMeRoute: typeof SettingsMeRoute
@@ -737,13 +662,34 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
   SettingsRouteChildren,
 )
 
+interface AdminAssistantRouteChildren {
+  AdminAssistantAgentsRoute: typeof AdminAssistantAgentsRoute
+  AdminAssistantBindingsRoute: typeof AdminAssistantBindingsRoute
+  AdminAssistantProvidersRoute: typeof AdminAssistantProvidersRoute
+  AdminAssistantRunsRoute: typeof AdminAssistantRunsRoute
+  AdminAssistantUsageRoute: typeof AdminAssistantUsageRoute
+  AdminAssistantIndexRoute: typeof AdminAssistantIndexRoute
+}
+
+const AdminAssistantRouteChildren: AdminAssistantRouteChildren = {
+  AdminAssistantAgentsRoute: AdminAssistantAgentsRoute,
+  AdminAssistantBindingsRoute: AdminAssistantBindingsRoute,
+  AdminAssistantProvidersRoute: AdminAssistantProvidersRoute,
+  AdminAssistantRunsRoute: AdminAssistantRunsRoute,
+  AdminAssistantUsageRoute: AdminAssistantUsageRoute,
+  AdminAssistantIndexRoute: AdminAssistantIndexRoute,
+}
+
+const AdminAssistantRouteWithChildren = AdminAssistantRoute._addFileChildren(
+  AdminAssistantRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
   DeviceLoginRoute: DeviceLoginRoute,
   InviteRoute: InviteRoute,
   LoginRoute: LoginRoute,
-  RuntimesRoute: RuntimesRouteWithChildren,
   SetPasswordRoute: SetPasswordRoute,
   SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,
@@ -753,11 +699,11 @@ const rootRouteChildren: RootRouteChildren = {
   SlugSettingsRoute: SlugSettingsRoute,
   SlugSwimlanesRoute: SlugSwimlanesRoute,
   SlugTasksRoute: SlugTasksRoute,
+  AdminAssistantRoute: AdminAssistantRouteWithChildren,
   ShareTokenRoute: ShareTokenRoute,
   SlugIndexRoute: SlugIndexRoute,
   SlugTasksTaskIdRoute: SlugTasksTaskIdRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
-  AdminAssistantUsageRoute: AdminAssistantUsageRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   SlugWikiIndexRoute: SlugWikiIndexRoute,
 }

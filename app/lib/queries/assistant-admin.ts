@@ -40,9 +40,6 @@ export function useProbeAssistantProvider() {
       if (row.circuitState === "closed") toast.push("success", "Probe succeeded — breaker closed");
       else toast.push("warning", `Probe finished — breaker ${row.circuitState}`);
     },
-    onError: (err) => {
-      toast.push("error", "Probe failed", toastMessage(err));
-    },
   });
 }
 
@@ -130,6 +127,50 @@ export function useAssistantCalls(params?: { projectId?: string | undefined; lim
     queryFn: () => api.listAssistantCalls(params).then((r) => r.data),
     retry: false,
     staleTime: 30_000,
+  });
+}
+
+export function useAssistantRuns(params: {
+  status?: string | null;
+  projectId?: string | null;
+  limit?: number;
+  cursor?: string | null;
+}) {
+  return useQuery({
+    queryKey: ["assistant-runs", params.status ?? null, params.projectId ?? null, params.limit ?? null, params.cursor ?? null],
+    queryFn: () =>
+      api.listAssistantRuns({
+        status: params.status ?? undefined,
+        projectId: params.projectId ?? undefined,
+        limit: params.limit,
+        cursor: params.cursor ?? undefined,
+      }),
+    retry: false,
+    staleTime: 15_000,
+  });
+}
+
+export function useAssistantBindings() {
+  return useQuery({
+    queryKey: ["assistant-bindings"],
+    queryFn: () => api.listAssistantBindings().then((r) => r.data),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useSyncPrices() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: () => api.syncAssistantPrices(),
+    onSuccess: (res) => {
+      qc.setQueryData<{ data: typeof res.data }>(["assistant-prices"], { data: res.data });
+      toast.push("success", res.synced > 0 ? `Synced ${res.synced} prices` : "Prices are up to date");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to sync prices", toastMessage(err));
+    },
   });
 }
 

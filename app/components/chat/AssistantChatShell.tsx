@@ -142,7 +142,6 @@ export function ChatComposerArea({
   skills,
   skillId,
   onSkillChange,
-  engineGate,
   busy409,
   slug,
   streaming,
@@ -162,7 +161,6 @@ export function ChatComposerArea({
   skills: LexaSkill[];
   skillId: string;
   onSkillChange: (id: string) => void;
-  engineGate: boolean;
   busy409: boolean;
   slug: string;
   streaming: boolean;
@@ -195,12 +193,6 @@ export function ChatComposerArea({
           onSkillChange={onSkillChange}
         />
 
-        {engineGate && (
-          <WarnBanner
-            code="ENGINE_NOT_SUPPORTED_FOR_CHAT"
-            message="this project's default engine is Blacksmith. Freeform chat needs the Assistant engine; ask an admin to switch it in Project Settings → Assistant."
-          />
-        )}
         {busy409 && (
           <WarnBanner
             code="ASSISTANT_TASK_ACTIVE"

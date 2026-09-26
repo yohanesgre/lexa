@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
-import { useSession, useTeams, useTeamMembers, useAddTeamMember, useUpdateTeamMemberRole, useRemoveTeamMember, useTeamRuntimes, useWorkspaceMembers, useDashboard } from "../../lib/queries";
+import { useSession, useTeams, useTeamMembers, useAddTeamMember, useUpdateTeamMemberRole, useRemoveTeamMember, useWorkspaceMembers, useDashboard } from "../../lib/queries";
 import { InlineDropdown } from "./SettingsSections";
 import { useTeamSelection } from "../../lib/team-selection";
-import { TeamSettingsRuntimesTable } from "./TeamRuntimesTable";
 import type { Team, TeamMember, TeamMemberRole, Project } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 import { Field } from "../ui/Field";
@@ -75,7 +74,6 @@ export function TeamSettings() {
       <TeamProfileSection team={team} />
       <TeamMembersSection teamId={team.id} isSuperadmin={isSuperadmin} />
       <TeamProjectsSection teamId={team.id} />
-      <TeamRuntimesSection teamId={team.id} />
     </main>
   );
 }
@@ -228,7 +226,7 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
         <span className="text-xs text-lx-text-muted">Team scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Team roles: owner (full control) · admin (manage members + runtimes) · member (uses the team's projects and runtimes). Only existing workspace members can be added — invites to new people happen at Workspace settings.
+        Team roles: owner (full control) · admin (manage members) · member (uses the team's projects). Only existing workspace members can be added — invites to new people happen at Workspace settings.
       </p>
 
       <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
@@ -362,9 +360,3 @@ function TeamProjectsSection({ teamId }: { teamId: string }) {
   );
 }
 
-// Runtimes: the team's own runtimes only; Global section is superadmin-only
-// (workspace page).
-function TeamRuntimesSection({ teamId }: { teamId: string }) {
-  const { data: runtimes = [], isLoading, isError } = useTeamRuntimes(teamId);
-  return <TeamSettingsRuntimesTable teamId={teamId} runtimes={runtimes} isLoading={isLoading} isError={isError} />;
-}

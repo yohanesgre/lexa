@@ -3402,7 +3402,7 @@
     left: 0;
   }
 
-  [data-runtime-popover] {
+  [data-assistant-popover] {
     max-height: calc(100vh - 16px);
     overflow-y: auto;
   }
@@ -8108,3 +8108,29 @@
   .health-open{ background:var(--lx-bg-danger-subtle); color:var(--lx-text-danger); border-color:rgba(255,68,68,0.18);}
   .health-closed{ background:var(--lx-bg-success-subtle); color:var(--lx-text-success); border-color:rgba(74,222,128,0.18);}
   .health-half{ background:var(--lx-bg-warning-subtle); color:var(--lx-text-warning); border-color:rgba(240,192,64,0.18);}
+
+  /* Gateway health — plain-language provider status (self-contained block) */
+  .health-summary { font-size:13px; line-height:18px; color:var(--lx-text-secondary); }
+  .health-status { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:500; line-height:16px; color:var(--lx-text-secondary); }
+  .health-status svg { width:14px; height:14px; flex-shrink:0; }
+  .health-status--ok { color:var(--lx-text-success); }
+  .health-status--warn { color:var(--lx-text-warning); }
+  .health-status--danger { color:var(--lx-text-danger); }
+  .health-status--muted { color:var(--lx-text-muted); }
+  .health-provider-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .health-provider-label { font-size:13px; font-weight:600; color:var(--lx-text-primary); }
+  .health-provider-meta { font-family:var(--lx-font-micro); font-size:11px; line-height:15px; letter-spacing:0.02em; color:var(--lx-text-muted); }
+  .health-provider-note { font-size:12px; line-height:16px; color:var(--lx-text-secondary); }
+  .health-provider-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+  .health-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:10px 12px; border:1px dashed var(--lx-border-strong); border-radius:8px; background:var(--lx-surface-elevated); }
+  .health-legend-item { display:flex; align-items:center; gap:6px; font-size:12px; line-height:16px; color:var(--lx-text-secondary); }
+  .health-details > summary { display:inline-flex; align-items:center; gap:6px; list-style:none; cursor:pointer; font-family:var(--lx-font-micro); font-size:10px; line-height:14px; text-transform:uppercase; letter-spacing:0.05em; color:var(--lx-text-muted); }
+  .health-details > summary::-webkit-details-marker { display:none; }
+  .health-details > summary:hover { color:var(--lx-text-secondary); }
+  .health-details-chevron { width:11px; height:11px; stroke:currentColor; stroke-width:2; fill:none; flex-shrink:0; transform:rotate(-90deg); transition:transform 0.15s var(--lx-ease-out); }
+  .health-details[open] .health-details-chevron { transform:rotate(0deg); }
+  .health-details-body { margin-top:8px; padding:10px 12px; background:var(--lx-surface-elevated); border:1px solid var(--lx-border-subtle); border-radius:6px; }
+  .health-details-kv { display:grid; grid-template-columns:minmax(120px,190px) 1fr; gap:3px 16px; margin:0; font-family:var(--lx-font-mono); font-size:11px; line-height:16px; }
+  .health-details-kv dt { color:var(--lx-text-muted); }
+  .health-details-kv dd { margin:0; color:var(--lx-text-secondary); word-break:break-all; }
+  @media (max-width:640px){ .health-details-kv { grid-template-columns:1fr; gap:0; } .health-details-kv dt { margin-top:6px; } }
