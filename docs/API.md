@@ -1511,6 +1511,71 @@ GET    /api/admin/assistant/calls   (superadmin)
 → 200 { data: AssistantCallLogRow[] }   // last 100, created_at DESC
   | 403 FORBIDDEN
 
+### Assistant MCP servers
+
+The assistant can consume external MCP (Model Context Protocol) servers. The
+registry mirrors the provider registry: `assistant_mcp_servers` is global
+(superadmin CRUD), `assistant_mcp_project_servers` is per-project availability
+(absence = unavailable). Only read-only-annotated tools are exposed to the
+model (tool-loop wiring lands in a later phase). `secret_ref` is never
+serialized — responses expose `hasSecret` only. On Cloudflare Workers any
+stdio write is rejected (`MCP_STDIO_UNAVAILABLE`) because there is no process
+spawn. `transportType` is `http` | `sse` | `stdio`.
+
+```
+McpServer = { id, label, transportType, url: string|null, command: string|null,
+              args: string[], hasSecret: boolean, enabled: boolean,
+              createdAt, updatedAt }
+
+GET    /api/assistant/mcp-servers   (superadmin)
+→ 200 { data: McpServer[] }   // seeded `jev` row present, enabled:false, hasSecret:false
+  | 403 FORBIDDEN
+
+POST   /api/assistant/mcp-servers   (superadmin)
+body { label*, transportType*, url?, command?, args?, secretRef?, enabled? }
+  id is derived from the label (slug). http/sse require `url` (http/https, no
+  userinfo) and forbid `command`; stdio requires `command` and forbids `url`.
+  `secretRef` must match 'env:[A-Z0-9_]+' or 'file:/abs/path'; the reserved id
+  'jev' is rejected.
+→ 201 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 404 MCP_SERVER_NOT_FOUND
+  | 403 FORBIDDEN | 400 MCP_STDIO_UNAVAILABLE
+
+PATCH  /api/assistant/mcp-servers/:id   (superadmin)
+body { label?, transportType?, url?, command?, args?, secretRef?, enabled? }
+  Omitted fields unchanged; the merged row is re-validated, so switching
+  transport requires the matching field in the same request.
+→ 200 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 403 FORBIDDEN
+  | 404 MCP_SERVER_NOT_FOUND | 400 MCP_STDIO_UNAVAILABLE
+
+DELETE /api/assistant/mcp-servers/:id   (superadmin)
+→ 204 | 400 MCP_INVALID_TRANSPORT_CONFIG (the seeded 'jev' row is protected)
+  | 403 FORBIDDEN | 404 MCP_SERVER_NOT_FOUND
+
+POST   /api/assistant/mcp-servers/:id/test   (superadmin)
+→ 200 { ok, toolCount, readOnlyToolCount, latencyMs, error: { code, message }|null }
+  Always 200 when the row exists — a failed connect is a result, not a server
+  error; 404 MCP_SERVER_NOT_FOUND only for an unknown id. `code` is
+  MCP_CONNECT_FAILED / MCP_STDIO_UNAVAILABLE on a failed connect.
+
+GET    /api/projects/:id/assistant/mcp-servers   (project member — requireProjectReadById)
+→ 200 { data: [{ projectId, serverId, enabled, createdAt, updatedAt }] }
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+
+PUT    /api/projects/:id/assistant/mcp-servers   (project admin — requireProjectAdminById)
+body { entries: [{ serverId*, enabled* }] }
+  Replace-set: the project's availability is exactly `entries`. An unknown
+  serverId → 404 MCP_SERVER_NOT_FOUND.
+→ 200 { data: [...] } (same shape as the GET) | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+```
+
+Notes:
+- **SSRF:** http/sse registrations pass the SSRF guard at save time and again
+  at connect time; the project `url_allowlist` applies at connect.
+- **stdio:** runs only when the Lexa server runs on the same host (self-hosted
+  Bun); never available on Cloudflare Workers.
+- **Secrets:** resolve only at connect time through `secret_ref`
+  (`server/env.ts` `resolveSecretRef`); never stored or echoed in plaintext.
+
 GET    /api/admin/assistant/runs?status=&projectId=&limit=&cursor=   (superadmin)
 → 200 { data: AssistantRunRow[], nextCursor: string|null,
         counts: { queued, running, completed, failed, cancelled } }

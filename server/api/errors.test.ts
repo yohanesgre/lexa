@@ -4,6 +4,7 @@ import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, VisionNo
 import { CommentNotFound, CommentInvalid } from "./errors";
 import { InvalidParent } from "./errors";
 import { ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed } from "./errors";
+import { McpServerNotFound, McpInvalidTransportConfig, McpStdioUnavailable, McpConnectFailed, McpToolCallFailed } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
 
@@ -46,6 +47,24 @@ describe("errorToStatus", () => {
   it("maps AssistantTaskNotFound → 404 with ASSISTANT_TASK_NOT_FOUND", () => {
     expect(errorToStatus(new AssistantTaskNotFound({ id: "t1" }))).toBe(404);
     expect(errorResponse(asCatalogError(new AssistantTaskNotFound({ id: "t1" }))).error.code).toBe("ASSISTANT_TASK_NOT_FOUND");
+  });
+
+  it("maps MCP registry errors to their statuses and codes", () => {
+    expect(errorToStatus(new McpServerNotFound({ id: "jev" }))).toBe(404);
+    expect(errorResponse(asCatalogError(new McpServerNotFound({ id: "jev" }))).error.code).toBe("MCP_SERVER_NOT_FOUND");
+
+    expect(errorToStatus(new McpInvalidTransportConfig({ reason: "url is required" }))).toBe(400);
+    expect(errorResponse(asCatalogError(new McpInvalidTransportConfig({ reason: "url is required" }))).error.code).toBe("MCP_INVALID_TRANSPORT_CONFIG");
+
+    expect(errorToStatus(new McpStdioUnavailable())).toBe(400);
+    expect(errorResponse(asCatalogError(new McpStdioUnavailable())).error.code).toBe("MCP_STDIO_UNAVAILABLE");
+
+    expect(errorToStatus(new McpConnectFailed({ message: "boom" }))).toBe(502);
+    expect(errorResponse(asCatalogError(new McpConnectFailed({ message: "boom" }))).error.code).toBe("MCP_CONNECT_FAILED");
+    expect(errorMessage(asCatalogError(new McpConnectFailed({})))).toBe("Could not connect to the MCP server");
+
+    expect(errorToStatus(new McpToolCallFailed({ message: "boom" }))).toBe(502);
+    expect(errorResponse(asCatalogError(new McpToolCallFailed({ message: "boom" }))).error.code).toBe("MCP_TOOL_CALL_FAILED");
   });
 });
 

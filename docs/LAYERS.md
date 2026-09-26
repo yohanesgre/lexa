@@ -898,11 +898,42 @@ export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPrice
   // assistant_model_prices(model PK,prompt_price,completion_price,cached_read_price,cached_write_price,updated_at) — OpenRouter cache, USD per 1M, price-sync upserts
   // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,cached_read_price,cached_write_price,updated_at=datetime('now')
 }) {}
+export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/AssistantMcpRepo", {
+  // assistant_mcp_servers(id slug PK,label,transport_type CHECK http|sse|stdio,url,command,args JSON,secret_ref,enabled,created_at,updated_at)
+  //   CHECK: (http|sse → url NOT NULL, command NULL) | (stdio → command NOT NULL, url NULL)
+  // + assistant_mcp_project_servers(project_id→projects ON DELETE CASCADE,server_id→assistant_mcp_servers ON DELETE CASCADE,enabled,PK(project_id,server_id))
+  // thin: list/getById/create/update/remove/listForProject/setProjectServers (withTx replace-set); update sets updated_at = datetime('now')
+  // toPublic/projectToPublic drop secret_ref → hasSecret (never serialized)
+}) {}
 // AssistantSettingsRepo after the squashed baseline + 0008: assistant_settings dropped kind/base_url/api_key/model/vision_model
 // (baseline) and engine/engine_switcher_enabled (0008) — now only
 // search_provider, search_api_key, url_allowlist,
 // primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
 // price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
+```
+
+### Lexa/AssistantMcpService — MCP server registry
+
+```typescript
+export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("Lexa/AssistantMcpService", {
+  dependencies: [AssistantMcpRepo.Default],
+  effect: Effect.gen(function* () {
+    // Also requires McpConnector (injectable seam @Context.Tag). The live connector
+    // (stdio spawn / HTTP+SSE JSON-RPC tools/list) lands in server/assistant/mcp.ts
+    // in the tool-loop phase; Phase 1 wires McpConnectorUnavailable.
+    return {
+      // list/create/update/remove — id is slugified from the label, 'jev' reserved;
+      // listForProject/setProjectServers — replace-set availability (validates ids);
+      // testConnection — always resolves: a failed connect folds into
+      //   { ok:false, error:{code,message} }, never a thrown error.
+      // Validation (pure validateTransportConfig): transport shape, http/https url
+      //   with no userinfo, secretRef 'env:[A-Z0-9_]+' | 'file:/abs/path', command
+      //   non-empty for stdio, Workers stdio → McpStdioUnavailable.
+      // SSRF: validateUrl at save time; the connector revalidates at connect time.
+      // No cycles: repo + connector only — never GitHubService or chat services.
+    };
+  }),
+}) {}
 ```
 
 ### Lexa/Assistant — assistant tier (server-side TanStack AI)
@@ -1178,6 +1209,11 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ApprovalAlreadyDecided` | 409 | second decision on a decided/expired row — payload `{ id, status }` |
 | `ApprovalsPending` | 409 | resume while rows in the batch are still undecided — payload `{ batchId, remaining }` |
 | `ToolDenied` | 403 | write-tool execution refused by authorization at resume time |
+| `McpServerNotFound` | 404 | MCP registry: unknown server id (update/delete/test/project availability) |
+| `McpInvalidTransportConfig` | 400 | reserved slug id (`jev`), transport shape mismatch, bad url/secretRef, or deleting the protected `jev` row |
+| `McpStdioUnavailable` | 400 | stdio registered or tested on Cloudflare Workers (no process spawn) |
+| `McpConnectFailed` | 502 | MCP connector could not connect or `tools/list` failed (folded into the test report) |
+| `McpToolCallFailed` | 502 | MCP tool invocation failed (tool-loop phase) |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
 `errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
@@ -1193,6 +1229,7 @@ FieldConfigService → FieldConfigRepo, ProjectRepo
 AssistantCatalogService → AssistantCatalogRepo, AssistantTaskRepo
 AssistantTaskService  → AssistantTaskRepo, AssistantCatalogRepo, AssistantSettingsRepo, AssistantThreadRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, ActivityService, Storage, TaskRepo, WikiRepo, AssistantGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
 AssistantService      → AssistantChatService, AssistantTaskService (thin facade — delegates; see §Lexa/Assistant)
+AssistantMcpService   → AssistantMcpRepo, McpConnector (no service/repo cycles; never GitHubService or chat services)
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo

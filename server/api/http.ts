@@ -82,6 +82,7 @@ import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
 import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
+import { AssistantMcpService, McpConnector, McpConnectorUnavailable, type McpUpdateInput } from "../services/assistant-mcp.service";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
 import { SourceService } from "../services/source.service";
@@ -1498,6 +1499,57 @@ const AssistantHealthResponseSchema = Schema.Struct({
   lastCheckedAt: Schema.NullOr(Schema.String),
 });
 
+const McpTransportTypeSchema = Schema.Literal("http", "sse", "stdio");
+const McpServerSchema = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  transportType: McpTransportTypeSchema,
+  url: Schema.NullOr(Schema.String),
+  command: Schema.NullOr(Schema.String),
+  args: Schema.Array(Schema.String),
+  hasSecret: Schema.Boolean,
+  enabled: Schema.Boolean,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+const McpServerListResponse = Schema.Struct({ data: Schema.Array(McpServerSchema) });
+const McpServerCreatePayload = Schema.Struct({
+  label: Schema.String,
+  transportType: McpTransportTypeSchema,
+  url: Schema.optional(Schema.NullOr(Schema.String)),
+  command: Schema.optional(Schema.NullOr(Schema.String)),
+  args: Schema.optional(Schema.Array(Schema.String)),
+  secretRef: Schema.optional(Schema.NullOr(Schema.String)),
+  enabled: Schema.optional(Schema.Boolean),
+});
+const McpServerUpdatePayload = Schema.Struct({
+  label: Schema.optional(Schema.String),
+  transportType: Schema.optional(McpTransportTypeSchema),
+  url: Schema.optional(Schema.NullOr(Schema.String)),
+  command: Schema.optional(Schema.NullOr(Schema.String)),
+  args: Schema.optional(Schema.Array(Schema.String)),
+  secretRef: Schema.optional(Schema.NullOr(Schema.String)),
+  enabled: Schema.optional(Schema.Boolean),
+});
+const McpTestResponse = Schema.Struct({
+  ok: Schema.Boolean,
+  toolCount: Schema.Number,
+  readOnlyToolCount: Schema.Number,
+  latencyMs: Schema.Number,
+  error: Schema.NullOr(Schema.Struct({ code: Schema.String, message: Schema.String })),
+});
+const ProjectMcpServerSchema = Schema.Struct({
+  projectId: Schema.String,
+  serverId: Schema.String,
+  enabled: Schema.Boolean,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+const ProjectMcpServerListResponse = Schema.Struct({ data: Schema.Array(ProjectMcpServerSchema) });
+const ProjectMcpServersPutPayload = Schema.Struct({
+  entries: Schema.Array(Schema.Struct({ serverId: Schema.String, enabled: Schema.Boolean })),
+});
+
 const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
   .add(HttpApiEndpoint.get("adminAssistantUsage", "/admin/assistant/usage").addSuccess(AssistantUsageResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantUsageCsv", "/admin/assistant/usage.csv").addSuccess(Schema.Void, { status: 200 }))
@@ -1521,6 +1573,19 @@ const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
 const projectAssistantUsageGroup = HttpApiGroup.make("projectAssistantUsage")
   .add(HttpApiEndpoint.get("projectAssistantUsage", "/projects/:slug/assistant/usage").setPath(SlugPath).addSuccess(AssistantUsageResponseSchema));
 
+// MCP server registry: superadmin CRUD + test at /assistant/mcp-servers, plus
+// per-project availability keyed by project id (mirrors the assistant-settings
+// id-keyed paths). Project reads are member-gated; the replace-set is admin-gated.
+const McpServerIdPath = Schema.Struct({ id: Schema.String });
+const assistantMcpGroup = HttpApiGroup.make("assistantMcp")
+  .add(HttpApiEndpoint.get("listMcpServers", "/assistant/mcp-servers").addSuccess(McpServerListResponse))
+  .add(HttpApiEndpoint.post("createMcpServer", "/assistant/mcp-servers").setPayload(McpServerCreatePayload).addSuccess(McpServerSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateMcpServer", "/assistant/mcp-servers/:id").setPath(McpServerIdPath).setPayload(McpServerUpdatePayload).addSuccess(McpServerSchema))
+  .add(HttpApiEndpoint.del("deleteMcpServer", "/assistant/mcp-servers/:id").setPath(McpServerIdPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("testMcpServer", "/assistant/mcp-servers/:id/test").setPath(McpServerIdPath).addSuccess(McpTestResponse))
+  .add(HttpApiEndpoint.get("listProjectMcpServers", "/projects/:id/assistant/mcp-servers").setPath(McpServerIdPath).addSuccess(ProjectMcpServerListResponse))
+  .add(HttpApiEndpoint.put("putProjectMcpServers", "/projects/:id/assistant/mcp-servers").setPath(McpServerIdPath).setPayload(ProjectMcpServersPutPayload).addSuccess(ProjectMcpServerListResponse));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(setupGroup)
@@ -1543,6 +1608,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(adminGroup)
   .add(adminAssistantGroup)
   .add(projectAssistantUsageGroup)
+  .add(assistantMcpGroup)
   .add(meGroup)
   .add(teamsGroup)
   .add(workspaceGroup)
@@ -1574,7 +1640,7 @@ export interface ApiAuthHooksShape {
 
 export class ApiAuthHooks extends Context.Tag("Lexa/ApiAuthHooks")<ApiAuthHooks, ApiAuthHooksShape>() {}
 
-async function buildBunApp(dbPath: string, env?: RuntimeEnv) {
+async function buildBunApp(dbPath: string, env?: RuntimeEnv, mcpConnector?: Layer.Layer<McpConnector>) {
   const { Database } = await import("bun:sqlite");
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
@@ -1588,7 +1654,7 @@ async function buildBunApp(dbPath: string, env?: RuntimeEnv) {
         auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
     } satisfies ApiAuthHooksShape),
   );
-  const serviceLayer = buildServiceLayer(dbPath, env);
+  const serviceLayer = buildServiceLayer(dbPath, env, mcpConnector);
   const handlerLayer = routeGroups().pipe(
     Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),
     Layer.provide(dbLayer)
@@ -1676,6 +1742,20 @@ const requireProjectReadById = (projectId: string): Effect.Effect<DomainProject,
     const authz = yield* AuthorizationService;
     const access = yield* authz.projectAccess(identity.userId, project.id);
     if (!access) return yield* Effect.fail(new ProjectAccessDenied({ project: project.slug, role: "member" }));
+    return project;
+  });
+
+// Admin-only variant of requireProjectReadById: superadmin, an explicit
+// project admin grant, or a team owner/admin passes; a plain member is denied.
+const requireProjectAdminById = (projectId: string): Effect.Effect<DomainProject, ProjectNotFound | DbError | ProjectAccessDenied, AuthIdentity | ProjectService | AuthorizationService> =>
+  Effect.gen(function* () {
+    const identity = yield* AuthIdentity;
+    const projectService = yield* ProjectService;
+    const project = yield* projectService.findById(projectId);
+    if (identity.role === "admin" || !identity.userId) return project;
+    const authz = yield* AuthorizationService;
+    const access = yield* authz.projectAccess(identity.userId, project.id);
+    if (access !== "admin") return yield* Effect.fail(new ProjectAccessDenied({ project: project.slug, role: "member" }));
     return project;
   });
 
@@ -4032,6 +4112,80 @@ const projectAssistantUsageLive = HttpApiBuilder.group(LexaApi, "projectAssistan
   )
 );
 
+const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers) =>
+  handlers
+    .handle("listMcpServers", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantMcpService;
+        return { data: yield* service.list() };
+      }))
+    )
+    .handle("createMcpServer", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantMcpService;
+        return yield* service.create({
+          label: req.payload.label,
+          transportType: req.payload.transportType,
+          url: req.payload.url ?? null,
+          command: req.payload.command ?? null,
+          args: req.payload.args !== undefined ? [...req.payload.args] : [],
+          secretRef: req.payload.secretRef ?? null,
+          ...(req.payload.enabled !== undefined ? { enabled: req.payload.enabled } : {}),
+        });
+      }))
+    )
+    .handle("updateMcpServer", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantMcpService;
+        const patch: McpUpdateInput = {};
+        if (req.payload.label !== undefined) patch.label = req.payload.label;
+        if (req.payload.transportType !== undefined) patch.transportType = req.payload.transportType;
+        if (req.payload.url !== undefined) patch.url = req.payload.url;
+        if (req.payload.command !== undefined) patch.command = req.payload.command;
+        if (req.payload.args !== undefined) patch.args = [...req.payload.args];
+        if (req.payload.secretRef !== undefined) patch.secretRef = req.payload.secretRef;
+        if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;
+        return yield* service.update(req.path.id, patch);
+      }))
+    )
+    .handle("deleteMcpServer", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantMcpService;
+        yield* service.remove(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("testMcpServer", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantMcpService;
+        return yield* service.testConnection(req.path.id);
+      }))
+    )
+    .handle("listProjectMcpServers", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.id);
+        const service = yield* AssistantMcpService;
+        return { data: yield* service.listForProject(req.path.id) };
+      }))
+    )
+    .handle("putProjectMcpServers", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.id);
+        const service = yield* AssistantMcpService;
+        yield* service.setProjectServers(
+          req.path.id,
+          req.payload.entries.map((e) => ({ serverId: e.serverId, enabled: e.enabled }))
+        );
+        return { data: yield* service.listForProject(req.path.id) };
+      }))
+    )
+);
+
 const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
   handlers
     .handle("updateMe", (req) =>
@@ -4127,13 +4281,13 @@ function formatWikiPageRevision<T>(r: T): T {
 
 function routeGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }
 
-export function createApiHandler(dbPath: string, env?: RuntimeEnv) {
-  const ready = bootOrCrash(buildBunApp(dbPath, env));
+export function createApiHandler(dbPath: string, env?: RuntimeEnv, opts?: { mcpConnector?: Layer.Layer<McpConnector> }) {
+  const ready = bootOrCrash(buildBunApp(dbPath, env, opts?.mcpConnector));
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
@@ -4151,12 +4305,12 @@ export function createApiHandler(dbPath: string, env?: RuntimeEnv) {
   };
 }
 
-function buildServiceLayer(dbPath: string, env?: RuntimeEnv) {
+function buildServiceLayer(dbPath: string, env?: RuntimeEnv, mcpConnector?: Layer.Layer<McpConnector>) {
   const storageCfg = resolveStorageConfig(storageEnvFrom(env ?? getEnv()), dirname(dbPath));
-  return buildServiceLayerWithStorage(storageCfg);
+  return buildServiceLayerWithStorage(storageCfg, mcpConnector);
 }
 
-function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
+function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnector?: Layer.Layer<McpConnector>) {
   return Layer.mergeAll(
     ProjectRepo.Default, ProjectService.Default, ProjectReposRepo.Default,
     ColumnRepo.Default, ColumnService.Default,
@@ -4193,6 +4347,9 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     WorkspaceInvitesService.Default, PasswordLinksService.Default,
     AssistantProvidersRepo.Default, AssistantModelsRepo.Default, AssistantCallLogsRepo.Default, AssistantModelPricesRepo.Default,
     AssistantHealthRepo.Default, AssistantHealthService.Default, AssistantGateway.Default,
+    // MCP connector seam: the live impl lands in the tool-loop phase; tests may
+    // inject a fake, otherwise the unavailable default reports a failed connect.
+    AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? McpConnectorUnavailable)),
   );
 }
 
