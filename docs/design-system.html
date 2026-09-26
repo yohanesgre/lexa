@@ -1713,37 +1713,265 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 .search-result:hover { background: var(--lx-surface-card-hover); }
 
-/* Right sidebar — read-mode Contents (.outline-sidebar). Mirrors the left
-   .wiki-sidebar surface/divider, flush right; its rail sits on the same edge
-   and its toggle glyph mirrors that edge (PanelRight, divider line M15 3v18). */
-.outline-sidebar {
-  width: 220px;
+/* =========================================================
+   Wiki outline — read-mode OutlinePill + OutlinePanel.
+   The right Contents column (and its 36px rail) is retired. Navigation is a
+   persistent pill floating at the viewport's right edge, vertically centred,
+   showing the scroll-spy current section; tapping it opens a popover
+   (desktop, .wiki-outline-panel) or the shared bottom sheet
+   (mobile, .wiki-sheet). Pill hidden when the page has no h2+ section.
+   ========================================================= */
+
+.wiki-read-area {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 32px 48px;
+}
+
+/* Pill lane — below the natural-gutter width the read area reserves the
+   pill's footprint so the 720px measure centres clear of it. Sized against
+   the spec's 760px measure ceiling: 760 + 2 × (pill 200 + edge 16 + gap 12)
+   ≈ 1476px viewport; below 768px the pill docks bottom-right and the lane is
+   dropped. Above the ceiling the natural gutters clear the pill on their own. */
+@media (min-width: 768px) and (max-width: 1479px) {
+  .wiki-read-area { padding-right: 236px; }
+}
+
+.wiki-outline-dock {
+  position: fixed;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 25;
+}
+
+.wiki-outline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  max-width: 200px;
+  padding: 0 12px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 9999px;
+  box-shadow: var(--lx-shadow-md);
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+
+.wiki-outline-pill:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+  color: var(--lx-text-primary);
+}
+
+.wiki-outline-pill svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
   flex-shrink: 0;
+}
+
+.wiki-outline-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Desktop popover: anchored to the pill, right edges aligned, opens downward.
+   z-index sits above the prose, below .slideover-overlay (40) / .slideover (50). */
+.wiki-outline-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 280px;
+  max-height: calc(50vh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--lx-surface-elevated);
-  border-left: 1px solid var(--lx-border-default);
   overflow: hidden;
 }
 
-.outline-sidebar-rail {
-  width: 36px;
-  min-width: 36px;
-  align-items: center;
-  padding-top: 8px;
+.wiki-outline-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  overflow-y: auto;
 }
+
+/* Shared OutlineList rows: 16px indent per heading level (h1 = level 0). */
+.wiki-outline-row {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  color: var(--lx-text-secondary);
+  text-decoration: none;
+  transition: background 100ms, color 100ms;
+}
+
+.wiki-outline-row:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+
+.wiki-outline-row.is-active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+  font-weight: 500;
+  border-left-color: var(--lx-border-focus);
+}
+
+/* Active row keeps its text aligned with the inactive rows (the 2px left
+   border is owned by CSS, mirroring .tree-item.active). */
+.wiki-outline-row.is-active { padding-left: 8px; }
+.wiki-outline-row.is-active.wiki-outline-row--l2 { padding-left: 24px; }
+.wiki-outline-row.is-active.wiki-outline-row--l3 { padding-left: 40px; }
+
+.wiki-outline-row--l1 { padding-left: 10px; }
+.wiki-outline-row--l2 { padding-left: 26px; }
+.wiki-outline-row--l3 { padding-left: 42px; }
+
+.wiki-outline-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Shared panel shell — the popover (desktop) and the settings panel. */
+.wiki-popover {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 26;
+}
+
+.wiki-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.wiki-panel-title {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-secondary);
+}
+
+/* Blocks inside a panel/sheet (autosave, version history). */
+.wiki-panel-block {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+
+.wiki-panel-block:last-child { border-bottom: none; }
+
+.wiki-panel-block-title {
+  display: block;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.wiki-panel-scroll { overflow-y: auto; }
+
+/* Mobile bottom sheet — the panel's form below 768px, over a scrim. */
+.wiki-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--lx-surface-overlay);
+  z-index: 25;
+}
+
+.wiki-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  background: var(--lx-surface-elevated);
+  border-top: 1px solid var(--lx-border-default);
+  border-radius: 12px 12px 0 0;
+  box-shadow: var(--lx-shadow-lg);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  overflow: hidden;
+}
+
+.wiki-sheet-grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--lx-border-strong);
+  margin: 8px auto 0;
+  flex-shrink: 0;
+}
+
+.wiki-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 12px 4px 16px;
+  flex-shrink: 0;
+}
+
+.wiki-sheet-body { overflow-y: auto; }
+
+/* Wireframe previews only — .mobile-frame is a fake 375px device shell, so the
+   fixed dock/sheet/scrim re-anchor to the frame instead of the browser edge. */
+.mobile-frame .wiki-outline-dock {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  top: auto;
+  transform: none;
+}
+.mobile-frame .wiki-sheet { position: absolute; }
+.mobile-frame .wiki-sheet-scrim { position: absolute; }
 
 /* Keyboard focus-visible ring — one shared pattern mirroring
    .card-tile:focus-visible: outline:none + --lx-focus-ring. Applies to the
-   wiki tree rows, Contents links, search results, context-menu items and the
-   sidebar collapse/expand toggle buttons. Mouse clicks never show the ring. */
+   wiki tree rows, the outline pill/rows, panel + sheet controls, search
+   results, context-menu items and the sidebar collapse/expand toggle
+   buttons. Mouse clicks never show the ring. */
 .tree-item:focus-visible,
-.outline-sidebar a:focus-visible,
+.wiki-outline-pill:focus-visible,
+.wiki-outline-row:focus-visible,
 .search-result:focus-visible,
 .menu .menu-item:focus-visible,
 .wiki-sidebar button:focus-visible,
-.outline-sidebar button:focus-visible,
-.wiki-edit-sidebar button:focus-visible,
+.wiki-popover button:focus-visible,
+.wiki-sheet button:focus-visible,
 .sidebar-toggle:focus-visible {
   outline: none;
   box-shadow: var(--lx-focus-ring);
@@ -3304,8 +3532,11 @@ textarea.prop-input {
 }
 
 /* =========================================================
-   Wiki Edit Settings Sidebar
-   Right-hand panel inside the wiki content area.
+   Wiki edit — Page settings (EditHeader button → PageSettingsPanel)
+   The right Page settings column (and its 36px rail) is retired. The
+   editor main area now spans the full content width. Settings live behind
+   the header button: a desktop popover (below) or the shared mobile
+   .wiki-sheet, both reusing the outline panel/sheet primitives.
    ========================================================= */
 
 .wiki-edit-workspace {
@@ -3321,55 +3552,38 @@ textarea.prop-input {
   min-width: 0;
 }
 
-.wiki-edit-sidebar {
-  width: 280px;
-  flex-shrink: 0;
+/* Positioned wrapper for the header button + its anchored popover. */
+.wiki-settings-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.wiki-settings-btn { flex-shrink: 0; }
+
+/* Hidden below 900px — the button keeps its glyph, drops the label. */
+@media (max-width: 900px) {
+  .wiki-settings-btn .wiki-settings-btn-label { display: none; }
+}
+
+.wiki-settings-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 320px;
+  max-height: calc(100vh - 220px);
   display: flex;
   flex-direction: column;
-  background: var(--lx-surface-elevated);
-  border-left: 1px solid var(--lx-border-default);
-  box-shadow: var(--lx-shadow-slideover);
   overflow: hidden;
 }
 
-.wiki-edit-sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 0 12px 0 16px;
-  border-bottom: 1px solid var(--lx-border-subtle);
-  flex-shrink: 0;
-}
-
-/* Collapsed Page settings rail: 36px constant, flush right, 32px labelled
-   toggle. Class hook so the mobile hide/overlay rule can target the rail
-   (the collapsed state previously carried no className at all). */
-.wiki-edit-sidebar-rail {
-  width: 36px;
-  min-width: 36px;
-  align-items: center;
-  padding: 8px 0;
-}
-
-.sidebar-section {
-  padding: 16px;
-  border-bottom: 1px solid var(--lx-border-subtle);
-}
-
-.sidebar-section:last-child {
-  border-bottom: none;
-}
-
-.sidebar-section-title {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
+/* History rows are real buttons so they take the shared focus ring. */
+button.history-item {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
   font-family: var(--lx-font-body);
-  color: var(--lx-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 12px;
+  text-align: left;
 }
 
 /* Toggle switch */
@@ -5662,16 +5876,17 @@ textarea.prop-input {
       <div class="block-shell">
         <div class="block-desc">
           <strong>Keyboard focus-visible rule set</strong> — one ring pattern for the wiki navigation surfaces, mirroring <span class="font-mono">.card-tile:focus-visible</span>.<br/>
-          <strong>Applies to</strong> — <span class="font-mono">.tree-item</span> · <span class="font-mono">.outline-sidebar a</span> · <span class="font-mono">.search-result</span> · <span class="font-mono">.menu .menu-item</span> · sidebar toggle buttons (<span class="font-mono">.wiki-sidebar button</span>, <span class="font-mono">.outline-sidebar button</span>, <span class="font-mono">.wiki-edit-sidebar button</span>, <span class="font-mono">.sidebar-toggle</span>).<br/>
-          <strong>Edge &amp; icon contract</strong> — a rail sits on the same edge as its panel and its glyph mirrors that edge: left = <span class="font-mono">M9 3v18 / PanelLeft</span> (rail flush left), right = <span class="font-mono">M15 3v18 / PanelRight</span> (rail flush right). Never reuse the left glyph on a right sidebar.
+          <strong>Applies to</strong> — <span class="font-mono">.tree-item</span> · <span class="font-mono">.wiki-outline-pill</span> · <span class="font-mono">.wiki-outline-row</span> · <span class="font-mono">.search-result</span> · <span class="font-mono">.menu .menu-item</span> · the left tree toggle (<span class="font-mono">.wiki-sidebar button</span>, <span class="font-mono">.sidebar-toggle</span>) · every panel + sheet control (<span class="font-mono">.wiki-popover button</span>, <span class="font-mono">.wiki-sheet button</span>).<br/>
+          <strong>Edge &amp; icon contract</strong> — the only collapsible chrome left is the left page tree: its rail sits flush left and its glyph has the divider on the left (<span class="font-mono">M9 3v18 / PanelLeft</span>). The right edge now carries the floating outline pill, not a rail.
         </div>
         <pre class="code-block" id="code-misc-focus-visible">.tree-item:focus-visible,
-.outline-sidebar a:focus-visible,
+.wiki-outline-pill:focus-visible,
+.wiki-outline-row:focus-visible,
 .search-result:focus-visible,
 .menu .menu-item:focus-visible,
 .wiki-sidebar button:focus-visible,
-.outline-sidebar button:focus-visible,
-.wiki-edit-sidebar button:focus-visible,
+.wiki-popover button:focus-visible,
+.wiki-sheet button:focus-visible,
 .sidebar-toggle:focus-visible {
   outline: none;
   box-shadow: var(--lx-focus-ring);
@@ -6454,6 +6669,126 @@ textarea.prop-input {
       </div>
     </section>
 
+    <section id="outline">
+      <h2 class="font-display text-xl weight-600 color-primary">Outline pill &amp; panel</h2>
+      <p class="text-sm color-secondary" style="max-width:680px;margin-bottom:16px;">Read-mode navigation for wiki pages. One persistent pill (scroll-spy current heading) replaces the retired right Contents column; it opens a desktop popover or a mobile bottom sheet. The same panel primitives carry the edit-mode Page settings panel. Copy these blocks verbatim.</p>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — <span class="font-mono">.wiki-outline-pill</span> while reading a page that has at least one h2+ section: it shows the current heading (truncated) and opens the panel.<br/>
+          <strong>Avoid</strong> — rendering the pill on a title-only page; letting the label wrap; a rail on the right edge.<br/>
+          <strong>Instead</strong> — hide the pill entirely when there is no h2+ (a page without sections has no read-navigation affordance).
+        </div>
+        <div class="state-row">
+          <span class="state-label">Outline pill · current section</span>
+          <div style="position:relative;padding:22px 0;">
+            <div class="wiki-outline-dock" style="position:relative;right:auto;top:auto;transform:none;">
+              <button type="button" class="wiki-outline-pill" aria-haspopup="dialog" aria-expanded="false">
+                <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                <span class="wiki-outline-pill-label">Rate Limits</span>
+              </button>
+            </div>
+          </div>
+          <div style="position:relative;padding:22px 0;">
+            <div class="wiki-outline-dock" style="position:relative;right:auto;top:auto;transform:none;">
+              <button type="button" class="wiki-outline-pill">
+                <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                <span class="wiki-outline-pill-label">Error Codes &amp; Idempotency</span>
+              </button>
+            </div>
+            <span class="annotation-inline">long title → ellipsis, never wraps</span>
+          </div>
+        </div>
+        <pre class="code-block" id="code-outline-pill">&lt;button type="button" class="wiki-outline-pill"
+        aria-haspopup="dialog" aria-expanded="false"
+        aria-controls="wiki-outline-panel"&gt;
+  &lt;svg viewBox="0 0 24 24"&gt;…list glyph…&lt;/svg&gt;
+  &lt;span class="wiki-outline-pill-label"&gt;Rate Limits&lt;/span&gt;
+&lt;/button&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-outline-pill">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated, --lx-border-default, --lx-shadow-md, --lx-text-secondary, --lx-focus-ring. Height 32px, max-width 200px, radius-full. Fixed right 16px, vertically centred; label is scroll-spy live.</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — <span class="font-mono">.wiki-outline-panel</span> (desktop popover anchored to the pill, right edges aligned) listing <span class="font-mono">.wiki-outline-row</span> per heading, indented 16px per level.<br/>
+          <strong>Avoid</strong> — a modal for read navigation; reordering rows (only the active highlight moves).<br/>
+          <strong>Instead</strong> — a bottom sheet (below 768px) with the same rows.
+        </div>
+        <div class="state-row" style="align-items:flex-start;">
+          <span class="state-label">Outline panel · desktop popover (open)</span>
+          <div class="wiki-popover wiki-outline-panel" style="position:relative;right:auto;top:auto;max-height:none;width:280px;">
+            <div class="wiki-panel-header">
+              <span class="wiki-panel-title">Contents</span>
+            </div>
+            <nav class="wiki-outline-list">
+              <a class="wiki-outline-row" href="#api-reference"><span class="wiki-outline-row-label">API Reference</span></a>
+              <a class="wiki-outline-row wiki-outline-row--l2 is-active" href="#rate-limits"><span class="wiki-outline-row-label">Rate Limits</span></a>
+              <a class="wiki-outline-row wiki-outline-row--l2" href="#error-codes"><span class="wiki-outline-row-label">Error Codes</span></a>
+              <a class="wiki-outline-row wiki-outline-row--l2" href="#idempotency"><span class="wiki-outline-row-label">Idempotency &amp; Retries</span></a>
+              <a class="wiki-outline-row wiki-outline-row--l3" href="#edge-cases"><span class="wiki-outline-row-label">Edge Cases</span></a>
+            </nav>
+          </div>
+          <div style="max-width:280px;display:flex;flex-direction:column;gap:6px;">
+            <span class="annotation-tag">Row height 32px · indent 16px per heading level (h1 = level 0) · hover --lx-surface-card-hover · active = --lx-surface-selected + 2px --lx-border-focus left border + 500 weight</span>
+            <span class="annotation-tag">Select → smooth scroll + close; Esc / outside click dismisses; focus returns to the pill. Reduced motion → instant jump, no transition.</span>
+          </div>
+        </div>
+        <pre class="code-block" id="code-outline-panel">&lt;div class="wiki-popover wiki-outline-panel" role="dialog" aria-label="Contents"&gt;
+  &lt;div class="wiki-panel-header"&gt;
+    &lt;span class="wiki-panel-title"&gt;Contents&lt;/span&gt;
+  &lt;/div&gt;
+  &lt;nav class="wiki-outline-list"&gt;
+    &lt;a class="wiki-outline-row" href="#api-reference"&gt;API Reference&lt;/a&gt;
+    &lt;a class="wiki-outline-row wiki-outline-row--l2 is-active" href="#rate-limits"&gt;Rate Limits&lt;/a&gt;
+  &lt;/nav&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-outline-panel">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated, --lx-border-default, --lx-shadow-lg, --lx-surface-selected, --lx-border-focus, --lx-text-secondary. Width 280px, radius 6px, z-index 26 (above prose, below slideover/dialog).</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — <span class="font-mono">.wiki-sheet</span> below 768px: the same panel content as a bottom sheet over <span class="font-mono">.wiki-sheet-scrim</span>, with a grip and a close control.<br/>
+          <strong>Avoid</strong> — a right-edge overlay (retired); a sheet without a scrim.<br/>
+          <strong>Instead</strong> — the desktop popover at ≥768px.
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Bottom sheet · mobile (open)</span>
+          <div style="position:relative;margin-top:12px;max-width:375px;">
+            <div class="wiki-sheet" style="position:relative;">
+              <div class="wiki-sheet-grip"></div>
+              <div class="wiki-sheet-header">
+                <span class="wiki-panel-title">Contents</span>
+                <button class="icon-btn" type="button" aria-label="Close" style="width:28px;height:28px;"><svg viewBox="0 0 24 24" style="width:14px;height:14px;"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+              </div>
+              <div class="wiki-sheet-body">
+                <nav class="wiki-outline-list">
+                  <a class="wiki-outline-row" href="#api-reference"><span class="wiki-outline-row-label">API Reference</span></a>
+                  <a class="wiki-outline-row wiki-outline-row--l2 is-active" href="#rate-limits"><span class="wiki-outline-row-label">Rate Limits</span></a>
+                  <a class="wiki-outline-row wiki-outline-row--l2" href="#error-codes"><span class="wiki-outline-row-label">Error Codes</span></a>
+                </nav>
+              </div>
+            </div>
+            <span class="annotation-tag" style="display:block;margin-top:8px;">Sheet max-height 70vh; padding-bottom env(safe-area-inset-bottom). Scrim tap / Esc dismisses; focus in + trap + return to the pill.</span>
+          </div>
+        </div>
+        <pre class="code-block" id="code-outline-sheet">&lt;div class="wiki-sheet-scrim"&gt;&lt;/div&gt;
+&lt;div class="wiki-sheet" role="dialog" aria-modal="true" aria-label="Contents"&gt;
+  &lt;div class="wiki-sheet-grip"&gt;&lt;/div&gt;
+  &lt;div class="wiki-sheet-header"&gt;
+    &lt;span class="wiki-panel-title"&gt;Contents&lt;/span&gt;
+    &lt;button class="icon-btn" aria-label="Close"&gt;✕&lt;/button&gt;
+  &lt;/div&gt;
+  &lt;div class="wiki-sheet-body"&gt;
+    &lt;nav class="wiki-outline-list"&gt;…rows…&lt;/nav&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-outline-sheet">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated, --lx-surface-overlay (scrim), --lx-border-default, --lx-border-strong (grip), --lx-shadow-lg. Radius 12px top, z-index 26 over the scrim (25).</div>
+      </div>
+    </section>
+
     <section id="prose">
       <h2 class="font-display text-xl weight-600 color-primary">Markdown / rich-text prose</h2>
       <p class="text-sm color-secondary" style="max-width:640px;margin-bottom:16px;">Canonical spec for rendered markdown (assistant replies, wiki pages, task descriptions). One heading scale, one code/pre treatment, one list rhythm — every prose surface copies these values; do not re-derive.</p>
@@ -6717,6 +7052,7 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
     <a href="#badges">badges</a>
     <a href="#feedback">feedback</a>
     <a href="#overlays">overlays</a>
+    <a href="#outline">outline</a>
     <a href="#prose">prose</a>
     <a href="#misc">misc</a>
   </nav>

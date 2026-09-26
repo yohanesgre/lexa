@@ -2563,37 +2563,235 @@
     cursor: pointer;
   }
 
-  /* Right sidebar — read-mode Contents (.outline-sidebar). Mirrors the left
-     .wiki-sidebar surface/divider, flush right; its rail sits on the same edge
-     and its toggle glyph mirrors that edge (PanelRight, divider line M15 3v18). */
-  .outline-sidebar {
-    width: 220px;
+  /* Read-mode navigation — OutlinePill + OutlinePanel (ported from
+     wireframes.css "Wiki outline"). A floating pill shows the scroll-spy
+     current section and opens a popover on desktop or the shared bottom sheet
+     on mobile. Pill hidden when the page has no h2+ section. */
+  .wiki-read-area {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 32px 48px;
+  }
+
+  /* Pill lane — below the natural-gutter width the read area reserves the
+     pill's footprint so the measure centres clear of it. Scoped to the
+     outline-rendering modifier so a title-only page keeps its natural
+     gutters (DESIGN_SYSTEM §5.8a). */
+  @media (min-width: 768px) and (max-width: 1479px) {
+    .wiki-read-area--outline { padding-right: 236px; }
+  }
+
+  .wiki-outline-dock {
+    position: fixed;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 25;
+  }
+
+  .wiki-outline-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    max-width: 200px;
+    padding: 0 12px;
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 9999px;
+    box-shadow: var(--lx-shadow-md);
+    color: var(--lx-text-secondary);
+    font-family: var(--lx-font-body);
+    font-size: 13px;
+    line-height: 18px;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms, color 100ms;
+  }
+
+  .wiki-outline-pill:hover {
+    background: var(--lx-surface-card-hover);
+    border-color: var(--lx-border-strong);
+    color: var(--lx-text-primary);
+  }
+
+  .wiki-outline-pill svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
     flex-shrink: 0;
+  }
+
+  .wiki-outline-pill-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Desktop popover: anchored to the pill, right edges aligned, opens downward.
+     z-index sits above the prose, below .slideover-overlay (40) / .slideover (50). */
+  .wiki-outline-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 280px;
+    max-height: calc(50vh - 48px);
     display: flex;
     flex-direction: column;
-    background: var(--lx-surface-elevated);
-    border-left: 1px solid var(--lx-border-default);
     overflow: hidden;
   }
 
-  .outline-sidebar-rail {
-    width: 36px;
-    min-width: 36px;
+  .wiki-outline-list {
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    overflow-y: auto;
+  }
+
+  /* Shared OutlineList rows: 16px indent per heading level (h1 = level 0). */
+  .wiki-outline-row {
+    display: flex;
     align-items: center;
-    padding-top: 8px;
+    height: 32px;
+    padding: 0 10px;
+    border-left: 2px solid transparent;
+    border-radius: 4px;
+    font-family: var(--lx-font-body);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 400;
+    color: var(--lx-text-secondary);
+    text-decoration: none;
+    transition: background 100ms, color 100ms;
+  }
+
+  .wiki-outline-row:hover {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-text-primary);
+  }
+
+  .wiki-outline-row.is-active {
+    background: var(--lx-surface-selected);
+    color: var(--lx-text-primary);
+    font-weight: 500;
+    border-left-color: var(--lx-border-focus);
+  }
+
+  /* Active row keeps its text aligned with the inactive rows (the 2px left
+     border is owned by CSS, mirroring .tree-item.active). */
+  .wiki-outline-row.is-active { padding-left: 8px; }
+  .wiki-outline-row.is-active.wiki-outline-row--l2 { padding-left: 24px; }
+  .wiki-outline-row.is-active.wiki-outline-row--l3 { padding-left: 40px; }
+
+  .wiki-outline-row--l2 { padding-left: 26px; }
+  .wiki-outline-row--l3 { padding-left: 42px; }
+
+  .wiki-outline-row-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Shared panel shell — the popover (desktop) and the settings panel. */
+  .wiki-popover {
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    box-shadow: var(--lx-shadow-lg);
+    z-index: 26;
+  }
+
+  .wiki-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 40px;
+    padding: 0 12px 0 14px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+    flex-shrink: 0;
+  }
+
+  .wiki-panel-title {
+    font-family: var(--lx-font-micro);
+    font-size: 10px;
+    line-height: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--lx-text-secondary);
+  }
+
+  /* Mobile bottom sheet — the panel's form below 768px, over a scrim. */
+  .wiki-sheet-scrim {
+    position: fixed;
+    inset: 0;
+    background: var(--lx-surface-overlay);
+    z-index: 25;
+  }
+
+  .wiki-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 26;
+    display: flex;
+    flex-direction: column;
+    max-height: 70vh;
+    background: var(--lx-surface-elevated);
+    border-top: 1px solid var(--lx-border-default);
+    border-radius: 12px 12px 0 0;
+    box-shadow: var(--lx-shadow-lg);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    overflow: hidden;
+  }
+
+  .wiki-sheet-grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--lx-border-strong);
+    margin: 8px auto 0;
+    flex-shrink: 0;
+  }
+
+  .wiki-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 44px;
+    padding: 4px 12px 4px 16px;
+    flex-shrink: 0;
+  }
+
+  .wiki-sheet-body { overflow-y: auto; }
+
+  /* Below 768px the pill docks bottom-right above the safe-area and the lane
+     is dropped; the sheet/scrim stay fixed to the viewport. */
+  @media (max-width: 767.98px) {
+    .wiki-outline-dock {
+      right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      top: auto;
+      transform: none;
+    }
   }
 
   /* Keyboard focus-visible ring — one shared pattern mirroring
      .card-tile:focus-visible: outline:none + --lx-focus-ring. Applies to the
-     wiki tree rows, Contents links, search results, context-menu items and the
-     sidebar collapse/expand toggle buttons. Mouse clicks never show the ring. */
+     wiki tree rows, outline pill/rows, panel + sheet controls, search results,
+     context-menu items and the sidebar collapse/expand toggle buttons. Mouse
+     clicks never show the ring. */
   .tree-item:focus-visible,
-  .outline-sidebar a:focus-visible,
+  .wiki-outline-pill:focus-visible,
+  .wiki-outline-row:focus-visible,
   .search-result:focus-visible,
   .menu .menu-item:focus-visible,
   .wiki-sidebar button:focus-visible,
-  .outline-sidebar button:focus-visible,
-  .wiki-edit-sidebar button:focus-visible,
+  .wiki-popover button:focus-visible,
+  .wiki-sheet button:focus-visible,
   .sidebar-toggle:focus-visible {
     outline: none;
     box-shadow: var(--lx-focus-ring);
@@ -4125,7 +4323,7 @@
   }
   .notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
 
-  /* ---- Wiki edit settings sidebar ---- */
+  /* ---- Wiki edit workspace ---- */
   .wiki-edit-workspace {
     display: flex;
     padding: 0;
@@ -4137,56 +4335,6 @@
     overflow-y: auto;
     padding: 32px 48px;
     min-width: 0;
-  }
-
-  .wiki-edit-sidebar {
-    width: 280px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--lx-surface-elevated);
-    border-left: 1px solid var(--lx-border-default);
-    box-shadow: var(--lx-shadow-slideover);
-    overflow: hidden;
-  }
-
-  /* Collapsed Page settings rail: 36px constant, flush right, 32px labelled
-     toggle. Class hook so the mobile hide/overlay rule can target the rail
-     (the collapsed state previously carried no className at all). */
-  .wiki-edit-sidebar-rail {
-    width: 36px;
-    min-width: 36px;
-    align-items: center;
-    padding: 8px 0;
-  }
-
-  .wiki-edit-sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 48px;
-    padding: 0 12px 0 16px;
-    border-bottom: 1px solid var(--lx-border-subtle);
-    flex-shrink: 0;
-  }
-
-  .sidebar-section {
-    padding: 16px;
-    border-bottom: 1px solid var(--lx-border-subtle);
-  }
-  .sidebar-section:last-child {
-    border-bottom: none;
-  }
-
-  .sidebar-section-title {
-    display: block;
-    font-size: 12px;
-    font-weight: 500;
-    font-family: var(--lx-font-body);
-    color: var(--lx-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 12px;
   }
 
   .toggle-switch {
@@ -4306,6 +4454,62 @@
     font-size: 12px;
     line-height: 18px;
     color: var(--lx-text-muted);
+    font-family: var(--lx-font-body);
+  }
+
+  /* Page settings (EditHeader button → PageSettingsPanel). Settings live behind
+     the header button as a desktop popover or the shared mobile .wiki-sheet.
+     Ported verbatim from wireframes.css. */
+  .wiki-settings-anchor {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .wiki-settings-btn { flex-shrink: 0; }
+
+  /* Hidden below 900px — the button keeps its glyph, drops the label. */
+  @media (max-width: 900px) {
+    .wiki-settings-btn .wiki-settings-btn-label { display: none; }
+  }
+
+  .wiki-settings-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 320px;
+    max-height: calc(100vh - 220px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* History rows are real buttons so they take the shared focus ring. */
+  button.history-item {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-left: 2px solid transparent;
+    font-family: var(--lx-font-body);
+    text-align: left;
+  }
+
+  /* Blocks inside a panel/sheet (autosave, version history). */
+  .wiki-panel-block {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+  }
+  .wiki-panel-block:last-child { border-bottom: none; }
+
+  .wiki-panel-block-title {
+    display: block;
+    font-family: var(--lx-font-micro);
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 500;
+    color: var(--lx-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
   }
 
   /* =========================================================
@@ -7580,27 +7784,6 @@
   }
 }
 
-/* ---- 19. Wiki right sidebars (Contents + Page settings) on mobile ----
-   Below 768px an OPEN right panel leaves the flow and becomes a right-edge
-   overlay over a scrim (same dialog semantics as the left tree overlay,
-   mirrored to the right edge). Its 36px rail stays IN FLOW as the open
-   trigger, so a collapsed rail never covers the reading column — only the
-   open panel overlays. */
-@media (max-width: 767.98px) {
-  .outline-sidebar:not(.outline-sidebar-rail),
-  .wiki-edit-sidebar:not(.wiki-edit-sidebar-rail) {
-    position: fixed !important;
-    top: 48px !important;
-    bottom: 0 !important;
-    right: 0 !important;
-    left: auto !important;
-    width: min(320px, 86vw) !important;
-    min-width: 0 !important;
-    z-index: 60;
-    box-shadow: var(--lx-shadow-lg);
-  }
-}
-
 /* ---- 20. Threads sidebar collapsed on mobile ----
    Collapsed rail stays visible at every viewport as the drawer trigger
    (mirrors the wiki rail). The earlier rule at 6492 keeps it as a 36px
@@ -7678,20 +7861,11 @@
 }
 
 /* ---- 22. Wiki edit page on mobile ----
-   The edit view is a 2-column split (preview | editor) plus a page-settings
-   sidebar on the right. On mobile:
-   - The 2-column split (WikiEditSplit) becomes a vertical stack.
-   - The page-settings sidebar (EditSidebar) leaves the flow and becomes a
-     right-edge overlay (section 19) opened from its own rail toggle; the
-     EditHeader's Cancel/Save buttons remain in the main flow. */
+   The edit view is a 2-column split (preview | editor). On mobile the split
+   (WikiEditSplit) becomes a vertical stack. */
 @media (max-width: 767.98px) {
   .wiki-edit-workspace {
     flex-direction: column;
-  }
-  /* Collapsed Page settings rail stays in flow below the main column; pin it
-     to the right edge so it mirrors its panel's edge (PanelRight glyph). */
-  .wiki-edit-workspace > .wiki-edit-sidebar-rail {
-    align-self: flex-end;
   }
   .wiki-edit-main {
     padding: 0;
