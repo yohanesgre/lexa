@@ -213,3 +213,63 @@
 2026-09-25 | runtime-events-team | PLAN | opened; branch omos/runtime-events-team @73cb148; fix (a) NULL-event inference + docs | status/runtime-events-team/plan.md
 2026-09-25 | runtime-events-team | PR | pushed; PR #108 open to main; full suite 201/1799; reviewer PASS | https://github.com/yohanesgre/lexa/pull/108
 2026-09-25 | runtime-events-team | DONE | PR #108 open (merge pending user); report written | status/runtime-events-team/report.md
+2026-09-26 | runtimes-removal | PLAN | architect plan persisted; 5 maintainer decisions pending | status/runtimes-removal/plan.md
+2026-09-26 | runtimes-removal | WORKING | wave 1 dispatched: wireframes + be; cli queued behind be | status/runtimes-removal/plan.md
+2026-09-26 | wiki-sidebars | PLAN | opened: a11y/backend fixes + unified collapse/expand (left+right); D1-D6 defaulted; gate pending | status/wiki-sidebars/plan.md
+2026-09-26 | wiki-sidebars | PLAN | plan-check GREEN; jev: scope+placeholders yes, tightened acceptance/graph; gate pending | status/wiki-sidebars/plan.md
+2026-09-26 | wiki-sidebars | WORKING | worktree .worktrees/wiki-sidebars (omos/wiki-sidebars @4002768, submodule 4c795ca); W1a designer + W1b be dispatched | status/wiki-sidebars/plan.md
+2026-09-26 | wiki-sidebars | WORKING | W1a wireframes DONE (build 0, 5 files+CSS); W1b be DONE (InvalidParent 422, isDescendant, SlugTaken, 1368 tests); W2 dispatched | status/wiki-sidebars/lanes/
+2026-09-26 | runtimes-removal | WORKING | wireframes lane DONE+verified (Phase 0); be in progress; cli queued | status/runtimes-removal/plan.md
+2026-09-26 | wiki-sidebars | WORKING | W2 DONE (useSidebarState + left adoption, typecheck 0, test:fe 419); W3 right adoption+overlays dispatched | status/wiki-sidebars/lanes/fe-unified-sidebars.md
+2026-09-26 | wiki-sidebars | WORKING | W3 DONE (right adoption+overlays, fe 429; deviation accepted); W4 dispatched | status/wiki-sidebars/lanes/fe-hygiene.md
+2026-09-26 | wiki-sidebars | WORKING | W4 recon WAIT mid-budget; resumed split (designer list-error state, swe dedup/keys/search); top-N cue dropped — not in wireframes/API | status/wiki-sidebars/lanes/fe-hygiene.md
+2026-09-26 | wiki-sidebars | WORKING | W4 core DONE (dedup/keys/search states, fe 441); designer added list-error state; W4b dispatched | status/wiki-sidebars/lanes/fe-hygiene.md
+2026-09-26 | runtimes-removal | WORKING | be lane DONE+verified (gates green); cli lane dispatched | status/runtimes-removal/plan.md
+2026-09-26 | wiki-sidebars | WORKING | W4b DONE (list-error+retry, fe 442); W5 reviewer + full gate dispatched | status/wiki-sidebars/lanes/fe-hygiene.md
+2026-09-26 | wiki-sidebars | WORKING | W5: reviewer APPROVE WITH NITS (hydration flash, focus return, TOCTOU); gate red 5 unrelated timeouts (rerun needed); W6 fixes dispatched | status/wiki-sidebars/lanes/w5-fixes-fe.md
+2026-09-26 | runtimes-removal | WORKING | wave 1 lanes DONE+verified; Phase 3 frontend dispatched | status/runtimes-removal/plan.md
+2026-09-26 | wiki-sidebars | WORKING | W6-be DONE (validation in tx, 1370); W6-fe findings implemented, verification resuming | status/wiki-sidebars/lanes/w5-fixes-fe.md
+2026-09-26 | wiki-sidebars | WORKING | W6 verified by reviewer (PASS WITH NOTES); W7 cleanup (2 LOW CSS + nits) dispatched; txDepth residual -> follow-up | status/wiki-sidebars/lanes/w5-fixes-fe.md
+2026-09-26 | wiki-sidebars | WORKING | W7 cleanup DONE (fe 451); final gate running alone | status/wiki-sidebars/status.md
+2026-09-26 | wiki-sidebars | DONE | gate GREEN (207 files / 1849 tests, invariants 14/14); reviewer PASS WITH NOTES; worktree omos/wiki-sidebars uncommitted; manual smoke + commit pending user | status/wiki-sidebars/report.md
+2026-09-26 | runtimes-removal | WORKING | fe lane DONE+verified; cleanup + docs lanes dispatched | status/runtimes-removal/plan.md
+2026-09-27 | runtimes-removal | WORKING | cleanup lane DONE+fix (test:be green); docs lane finishing | status/runtimes-removal/plan.md
+2026-09-27 | runtimes-removal | DONE | final gate GREEN (184f/1638 tests, invariants 14/14, verify-gate, wireframes build, plan-check); grep acceptance PASS; fresh-DB skipped (live stack) | status/runtimes-removal/report.md
+2026-09-27 | wiki-sidebars | WORKING | reopened D2: drop stale DS §5.8 drag-handle line per user | status/wiki-sidebars/status.md
+2026-09-27 | wiki-sidebars | DONE | D2 resolved: stale drag-handle spec dropped (DESIGN_SYSTEM §5.8:595 + §7.2:1125), doc-only; report addendum written | status/wiki-sidebars/report.md
+2026-09-27 | wiki-sidebars | WORKING | reopened: user reports right sidebar not visible on mobile; agent-browser reproduction dispatched | status/wiki-sidebars/lanes/mobile-check.md
+2026-09-27 | assistant-usage-menu | WORKING | opened; wireframes lane dispatched (user-menu Assistant usage entry, superadmin-only) | status/assistant-usage-menu/plan.md
+2026-09-27 | wiki-sidebars | DONE | mobile right-rail: not reproducible in worktree (rails visible + overlays OK at 390x844); report matched main-tree old CSS; stack left on :3100/:5174 | status/wiki-sidebars/report.md
+2026-09-27 | wiki-sidebars | WORKING | user authorized commit+push+PR+merge; release flow started (submodule first, then parent) | status/wiki-sidebars/lanes/release.md
+2026-09-27 | assistant-usage-menu | DONE | user-menu Assistant usage entry (superadmin-only); build+typecheck+test:fe green | status/assistant-usage-menu/report.md
+2026-09-27 | assistant-control-panel | PLAN | architect plan persisted (standalone /admin/assistant shell, 2 new read endpoints); Q1/Q2/Q4 pending; wireframe phase next | status/assistant-control-panel/plan.md
+2026-09-27 | wiki-sidebars | DONE | released: wireframes PR #7 merged (946b512) + parent PR #109 merged (4d75d668); CI green; gate 1849/1849 | status/wiki-sidebars/report.md
+2026-09-27 | assistant-control-panel | PLAN | Q1/Q2/Q4 answered (Assistant label; sync returns refreshed rows; runs include error only) | status/assistant-control-panel/plan.md
+2026-09-27 | assistant-control-panel | PLAN | gateway-health wireframe redesign DONE; D5 health enrichment added; Phase 0 wireframe lane dispatched | status/assistant-control-panel/plan.md
+2026-09-27 | wiki-sidebars | WORKING | reopened: user reports no right-sidebar toggle; background repro sweep + stale-main check dispatched | status/wiki-sidebars/lanes/mobile-check.md
+2026-09-27 | wiki-sidebars | WAIT | blocked: mobile right-panel trigger design fork (rail vs top-nav); background repro cancelled | status/wiki-sidebars/status.md
+2026-09-27 | wiki-sidebars | WORKING | jev: top_nav trigger (0.94) — mobile right panels get a top-bar button, rails desktop-only; designer pass dispatched | status/wiki-sidebars/lanes/designer-mobile-trigger.md
+2026-09-27 | assistant-control-panel | WORKING | Phase 0 wireframes DONE+verified; Phase 1 server endpoints dispatched | status/assistant-control-panel/plan.md
+2026-09-27 | wiki-sidebars | WORKING | mobile trigger: designer pass cancelled; navbar-right hamburger constraint; placement check (left pair vs right cluster vs page header) running | status/wiki-sidebars/lanes/designer-mobile-trigger.md
+2026-09-27 | wiki-right-redesign | PLAN | spec drafted (.agents/brainstorm-studio/specs/2026-09-27-wiki-right-sidebar-redesign-design.md); right sidebar removed → OutlinePill + PageSettingsPanel | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-sidebars | DONE | mobile-trigger follow-up superseded by wiki-right-redesign (redesign spec approved); no code change | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | spec approved; worktree isolation + W1 wireframes dispatch | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | worktree .worktrees/wiki-right-redesign (omos/wiki-right-redesign @4d75d66, submodule 946b512); W1 wireframes dispatched | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | W1 partial (CSS/wiki.html/DS/design-system done); resumed for wiki-edit+mobile+build; 720/760 measure divergence flagged | status/wiki-right-redesign/status.md
+2026-09-27 | assistant-control-panel | WORKING | Phase 2 FE shell+tabs done (typecheck + test:fe 407/407); Phase 3 docs/full-gate pending | .tmp/assistant-control-panel-fe.md
+2026-09-27 | assistant-control-panel | WORKING | Phase 1+2 DONE+verified; Phase 3 docs+full gate next | status/assistant-control-panel/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | W1 wireframes DONE (build 0, rails retired, pill/panel/sheet drawn); W2 read mode dispatched | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | W2 DONE (pill+panel+spy, fe 453, OutlineSidebar deleted); W3 edit mode dispatched | status/wiki-right-redesign/plan.md
+2026-09-27 | assistant-control-panel | DONE | /admin/assistant shell + 6 tabs, redesigned gateway health, runs+bindings endpoints; full gate GREEN | status/assistant-control-panel/report.md
+2026-09-27 | wiki-right-redesign | WORKING | W3 partial (panel+wiring+deletions done); resumed for phosphor CSS port, tests, typecheck/test:fe | status/wiki-right-redesign/status.md
+2026-09-27 | wiki-right-redesign | WORKING | W3 DONE (PageSettingsPanel, fe 456, EditSidebar/WikiSidebar deleted); W4 cleanup dispatched | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | W4 DONE (dead right-panel CSS removed; fe 456; wf build 0); W5 reviewer + agent-browser pass dispatched | status/wiki-right-redesign/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | W5: reviewer PASS WITH NOTES (4 MED); browser acceptance#4 PASS (4 flows, no rails); designer micro-fix + stack cleanup dispatched | status/wiki-right-redesign/status.md
+2026-09-27 | assistant-panel-polish | WORKING | opened; wireframe lane dispatched (Overview redundant nav + active-tab fix) | status/assistant-panel-polish/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | designer micro DONE (build 0); W5b app fixes (4 MED + NITs) dispatched; stale stacks stopped | status/wiki-right-redesign/status.md
+2026-09-27 | assistant-panel-polish | DONE | Overview quick-links + View-all-runs removed; active-tab normalized; build/typecheck/test:fe green | status/assistant-panel-polish/report.md
+2026-09-27 | assistant-gateway-overview | WORKING | opened; move full gateway health to Overview, remove Usage duplicate; wireframe lane dispatched | status/assistant-gateway-overview/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | W5b DONE (7 fixes, fe 463, typecheck 0); final verify-gate running alone | status/wiki-right-redesign/status.md
+2026-09-27 | assistant-gateway-overview | DONE | full gateway health moved to Overview; Usage duplicate + compact variant removed; gates green | status/assistant-gateway-overview/report.md
+2026-09-27 | wiki-right-redesign | DONE | gate GREEN (207 files/1861 tests) + invariants 14/14 + browser acceptance#4 PASS; right sidebar removed → pill + settings panel; worktree uncommitted | status/wiki-right-redesign/report.md
+2026-09-27 | assistant-mcp | WORKING | architect plan persisted (bump @tanstack/ai 0.61.0 + ai-mcp; MCP registry + Jev preset + read-only tool bridge); full-auto authorized | status/assistant-mcp/plan.md
