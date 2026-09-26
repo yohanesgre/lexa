@@ -275,3 +275,5 @@
 2026-09-27 | assistant-mcp | WORKING | architect plan persisted (bump @tanstack/ai 0.61.0 + ai-mcp; MCP registry + Jev preset + read-only tool bridge); full-auto authorized | status/assistant-mcp/plan.md
 2026-09-27 | wiki-right-redesign | WORKING | user authorized commit+push+PR+auto-merge; release flow started (submodule first) | status/wiki-right-redesign/status.md
 2026-09-27 | wiki-right-redesign | DONE | released: wireframes PR #8 (56c9a01) + parent PR #111 (eba7f77) merged; CI green; auto-merge beat ci (not a required check) flagged | status/wiki-right-redesign/report.md
+2026-09-27 | assistant-mcp | WORKING | PR #110 merged (79f3479); MCP Phase 0 bump dispatched on feat/assistant-mcp | status/assistant-mcp/plan.md
+2026-09-27 | assistant-mcp | DONE | MCP registry + Jev default + read-only tool bridge; final gate GREEN (test:full 209f/1817); PR #112 | status/assistant-mcp/report.md
