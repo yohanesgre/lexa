@@ -273,3 +273,5 @@
 2026-09-27 | assistant-gateway-overview | DONE | full gateway health moved to Overview; Usage duplicate + compact variant removed; gates green | status/assistant-gateway-overview/report.md
 2026-09-27 | wiki-right-redesign | DONE | gate GREEN (207 files/1861 tests) + invariants 14/14 + browser acceptance#4 PASS; right sidebar removed → pill + settings panel; worktree uncommitted | status/wiki-right-redesign/report.md
 2026-09-27 | assistant-mcp | WORKING | architect plan persisted (bump @tanstack/ai 0.61.0 + ai-mcp; MCP registry + Jev preset + read-only tool bridge); full-auto authorized | status/assistant-mcp/plan.md
+2026-09-27 | wiki-right-redesign | WORKING | user authorized commit+push+PR+auto-merge; release flow started (submodule first) | status/wiki-right-redesign/status.md
+2026-09-27 | wiki-right-redesign | DONE | released: wireframes PR #8 (56c9a01) + parent PR #111 (eba7f77) merged; CI green; auto-merge beat ci (not a required check) flagged | status/wiki-right-redesign/report.md
