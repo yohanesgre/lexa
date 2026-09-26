@@ -184,7 +184,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 if (startName) toolNamesById.set(id, startName);
               } else if (chunk.type === "TOOL_CALL_ARGS") {
                 const pending = pendingCalls.get(chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "");
-                if (pending) { const piece = typeof chunk.args === "string" ? chunk.args : typeof chunk.delta === "string" ? chunk.delta : ""; pending.args += piece; }
+                if (pending) { const piece = typeof chunk.delta === "string" ? chunk.delta : ""; pending.args += piece; }
               } else if (chunk.type === "TOOL_CALL_END") {
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const pending = pendingCalls.get(id);
