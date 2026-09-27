@@ -123,7 +123,7 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
           <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Preview</span>
         </div>
         <div
-          className="wiki-prose flex-1 overflow-y-auto"
+          className="wiki-prose wiki-edit-preview flex-1 overflow-y-auto"
           style={{ padding: "16px 20px", background: "var(--lx-bg-page)" }}
         >
           {renderDoc(previewContent, "wiki", slug)}
