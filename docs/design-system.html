@@ -929,6 +929,15 @@ a:hover { color: var(--lx-text-link-hover); }
   box-shadow: var(--lx-focus-glow);
 }
 
+.wiki-title-input {
+  background: transparent;
+  border-color: transparent;
+}
+.wiki-title-input:focus {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
 /* ---- Input with trailing affix (password visibility toggle) ---- */
 .input-affix {
   position: relative;
@@ -3550,6 +3559,14 @@ textarea.prop-input {
   overflow-y: auto;
   padding: 32px 48px;
   min-width: 0;
+}
+
+@media (max-width: 767.98px) {
+  .wiki-edit-preview {
+    max-width: none;
+    margin: 0;
+    text-align: left;
+  }
 }
 
 /* Positioned wrapper for the header button + its anchored popover. */
