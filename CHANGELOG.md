@@ -10,6 +10,18 @@ All notable changes to Lexa are documented here. Format based on
 ### Changed
 
 - Renamed Herald to Assistant across the server API, database namespace, and documentation. Migration `0006_assistant_rename.sql` migrates data without compatibility aliases; old `/api/herald/*` clients now receive 404.
+- **Structured env file (`.env.toml`)** — the flat `.env` is replaced by a
+  canonical `.env.toml` (TOML; sections are presentation only, every leaf key
+  is the env-var name verbatim). Precedence is **real environment →
+  `.env.toml` → legacy `.env` → defaults**, and the loader never overwrites an
+  already-set variable. `bun run setup` writes/merges `.env.toml` (0600) and
+  auto-migrates an existing `.env`, renaming the original to `.env.legacy`
+  (0600; rollback is `rm .env.toml && mv .env.legacy .env`). A flat `.env`
+  still boots for one release. Tracked template is `.env.toml.example`
+  (`.env.example` removed). The docker/systemd installer switch to `.env.toml`
+  lands in a follow-up; containers keep working because compose still
+  interpolates the flat `.env` into the container environment (bare uses
+  `bun --env-file=.env`).
 
 ### Fixed
 

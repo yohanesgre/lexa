@@ -122,15 +122,20 @@ lx wiki get getting-started --project my-project
 
 ## Environment variables
 
-`.env.example` is the tracked dev template (copy to `.env`). The
-self-hosting contract — per-target layout, env reference, security notes —
-lives in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Values are generated on
-the machine and never committed (`.env*` is gitignored):
+`.env.toml` is the canonical config file; `.env.toml.example` is the tracked
+template (copy it and edit). `bun run setup` writes `.env.toml` for you.
+Precedence is **real environment → `.env.toml` → legacy `.env` → defaults**:
+a flat `.env` from an earlier release is still read for one release, and
+migrating renames it to `.env.legacy`. The self-hosting contract — per-target
+layout, env reference, security notes, upgrade steps — lives in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Working env files are generated on
+the machine and never committed (`.env*` is gitignored; `.env.toml.example` is
+the one tracked exception):
 
 | Situation | What's needed |
 |---|---|
-| Local dev (`.env`) | `bun run setup` records `LXK_ADMIN_EMAILS`; API keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
-| Self-hosted (install script) | the script writes the env file (`LXK_ENV`, `LXK_PUBLIC_URL`); API keys minted post-setup (login → Settings → API Keys); `GITHUB_*` preserved across re-runs |
+| Local dev (`.env.toml`) | `bun run setup` writes it and records `LXK_ADMIN_EMAILS`; API keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
+| Self-hosted (install script) | the script still writes a legacy flat `.env` (the installer switch to `.env.toml` is a follow-up lane). Bare loads it via systemd's `bun --env-file=.env`, docker via compose interpolation into the container environment — the loader's legacy `.env` fallback is a separate mechanism. API keys minted post-setup (login → Settings → API Keys); **re-add `GITHUB_*` after a re-run** (the installer currently rewrites the flat `.env`; preservation lands with the `.env.toml` installer lane, P4) |
 | Optional | `LXK_ASSISTANT_REPO_CAP` (assistant repo-grounding cap, default 3), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation

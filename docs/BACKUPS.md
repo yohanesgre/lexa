@@ -45,7 +45,7 @@ recover them). See `docs/DEPLOYMENT.md` for the variable reference and rotation.
 
 ## 2. Enable
 
-Set in `.env` / `.env.prod`:
+Set in `.env.toml` (or a legacy flat `.env` for one release):
 
 ```bash
 LXK_BACKUP_ENABLED=1

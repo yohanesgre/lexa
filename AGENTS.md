@@ -173,9 +173,9 @@ Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them 
 
 ### Running the dev stack (Bun standalone, no Cloudflare)
 
-The `.env` file is **required** — it supplies `LXK_API_KEY` (server auth).
-`bun run setup` writes it (dev-only; self-hosters use the install script +
-`/setup` wizard).
+The `.env.toml` file is **required** — `bun run setup` writes it (dev-only;
+self-hosters use the install script + `/setup` wizard). `server/entry.ts`
+applies it at boot; a legacy flat `.env` is read as a one-release fallback.
 
 ```bash
 bun run setup          # first-time: admin email, API key, migrations, sample data
@@ -183,7 +183,8 @@ bun run dev:full       # API (:3000) + vite frontend (:5173) together, Ctrl-C st
 # open http://localhost:5173
 ```
 
-`scripts/dev.sh` (what `dev:full` runs) loads `.env` into the shell, boots
+`scripts/dev.sh` (what `dev:full` runs) loads `.env.toml` (or a legacy `.env`)
+into the shell via the loader's exports, boots
 `server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` → :3000),
 and sets `LXK_SEED_DEV=1` for sample data on every boot. Delete `data/lexa.db*`
 to start fresh. DB lives at `data/lexa.db` (SQLite WAL). Health check:
@@ -191,9 +192,10 @@ to start fresh. DB lives at `data/lexa.db` (SQLite WAL). Health check:
 
 Key facts:
 
-- **vite auto-loads `.env`** — `VITE_*` flags land in `import.meta.env`
-  automatically; no manual `set -a; . ./.env` needed for the frontend.
-  Browsers authenticate via the session cookie — no key in the bundle.
+- **dev.sh exports the resolved env file into the shell** — the API server and
+  vite both inherit `.env.toml` values from the process environment, since
+  vite is not TOML-aware (it still auto-loads a legacy flat `.env` if one
+  exists). Browsers authenticate via the session cookie — no key in the bundle.
 - **Key rotation is safe:** browsers authenticate via the session cookie, so
   re-running `bun run setup` (which may rotate the key) never breaks the
   browser — no rebuild required.

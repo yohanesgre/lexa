@@ -35,7 +35,9 @@ fi
 
 say "Gate: secrets / staged check"
 STAGED="$(git diff --cached --name-only || true)"
-if echo "$STAGED" | grep -qE '(\.env(\.|$)|private-key\.pem|\.private-key\.pem|config\.json)'; then
+# `(^|/)\.env` covers .env, .env.toml, .env.legacy, .env.staging/.prod; the
+# tracked .env.toml.example template is explicitly exempt.
+if echo "$STAGED" | grep -vE '\.env\.toml\.example$' | grep -qE '((^|/)\.env|private-key\.pem|\.private-key\.pem|config\.json)'; then
   bad "secrets staged: $STAGED"
 else
   ok "no secrets staged"

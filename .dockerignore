@@ -5,8 +5,7 @@ dist
 .wrangler
 data
 .env
-.env.staging
-.env.prod
+.env.*
 github-app.private-key.pem
 *.log
 cli

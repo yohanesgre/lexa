@@ -26,7 +26,9 @@ replaces the other; either or both can be live at any time.
 4. **Env access:** `server/env.ts` returns a `RuntimeEnv` — `process.env` on Bun,
    `env` from `cloudflare:workers` on Workers. Every module-scope `process.env.X`
    read goes through this helper. `server/auth.ts` becomes `createAuth(env)`, a
-   per-request factory.
+   per-request factory. Workers configures everything through bindings and
+   secrets (`wrangler secret put` / `wrangler.jsonc`); the Bun `.env.toml`
+   loader does not exist on this target.
 5. **Storage:** Workers uses the R2 native binding (driver kind `"r2"`); Bun keeps
    `fs` and `s3` (S3 covers R2's S3 endpoint for Bun-side users). The `StorageDriver`
    interface is unchanged.

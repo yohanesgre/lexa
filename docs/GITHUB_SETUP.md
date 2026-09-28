@@ -15,7 +15,7 @@ suppression and delivery dedup make the loop safe.
    - **Webhook URL**: `https://<host>/api/webhooks/github` — see §3 for which host
    - **Webhook secret**: click **Generate a secret** (or type one ≥ 16 chars,
       alphanumeric — the UI only accepts alphanumeric). **Save it** — it goes
-      in Settings → GitHub Sync or `.env` / `.env.prod` as `GITHUB_WEBHOOK_SECRET`
+      in Settings → GitHub Sync or the env-file bootstrap as `GITHUB_WEBHOOK_SECRET`
 3. **Repository permissions**:
    - **Issues**: `Read and write`
    - **Metadata**: `Read-only`
@@ -94,23 +94,30 @@ boot only while the DB keys are unset) and `github status --local` validates
 them. When not logged in, the remote default fails with a hint to log in or
 use `--local` — there is no silent env fallback.
 
-**Local dev** (`.env`):
-```
-GITHUB_APP_ID=1234567
-GITHUB_PRIVATE_KEY_FILE=/home/you/projects/lexa/github-app.private-key.pem
-GITHUB_WEBHOOK_SECRET=...
+**Local dev** (`.env.toml`):
+```toml
+[github]
+GITHUB_APP_ID = "1234567"
+GITHUB_PRIVATE_KEY_FILE = "/home/you/projects/lexa/github-app.private-key.pem"
+GITHUB_WEBHOOK_SECRET = "..."
 ```
 
-**Prod** (`.env.prod`): the PEM is volume-mounted read-only into the container
+**Prod** (legacy flat `.env` — the installer still writes that file and the
+switch to `.env.toml` is a deferred follow-up; see `docs/DEPLOYMENT.md`): the
+PEM is volume-mounted read-only into the container
 (`docker-compose.prod.yml` → `./github-app.private-key.pem:/app/github-app.private-key.pem:ro`),
 so use:
-```
+```bash
 GITHUB_APP_ID=1234567
 GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem
 GITHUB_WEBHOOK_SECRET=...
 ```
-The install script (`scripts/install.sh`) preserves the `GITHUB_*` block when
-it rewrites the env file. The key file is gitignored (`*.private-key.pem`) and excluded
+Compose interpolates these into the container's environment; a bare/systemd
+host loads the same flat `.env` via `bun --env-file=.env`. Do not move prod to
+`.env.toml` yet — nothing mounts it until the installer follow-up lands.
+The install script (`scripts/install.sh`) rewrites the flat `.env` on every
+run, so **re-add the `GITHUB_*` block after a re-run** — preservation lands
+with the `.env.toml` installer lane (P4). The key file is gitignored (`*.private-key.pem`) and excluded
 from the Docker build context (`.dockerignore`) — never commit it.
 
 ## 5. Map columns
@@ -138,7 +145,7 @@ renames can never break sync.
 - **Link fails with `GITHUB_API_ERROR: GitHub App is not configured`** — no
   credentials reach the server: set them in Settings → GitHub Sync (applies
   immediately) or check the env vars (container env / restart after editing
-  `.env`).
+  `.env.toml`).
 - **Webhook deliveries never arrive** — check the app's delivery log
   (App settings → **Advanced**): `failed to connect to host` = wrong webhook
   URL; `401` = secret mismatch.
