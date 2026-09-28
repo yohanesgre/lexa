@@ -87,8 +87,16 @@ else
   docker rm -f lexa-ci >/dev/null 2>&1 || true
   if docker build -t lexa:ci . 2>&1 | tee /tmp/docker-build.log; then
     ok "docker build"
-    # shellcheck disable=SC2046
-    if docker run -d --name lexa-ci -p 3001:3000 -e LXK_API_KEY=test-ci-key -e LXK_ADMIN_EMAILS=ci@example.com lexa:ci >/dev/null; then
+    ENV_DIR="$(mktemp -d)"
+    cat > "$ENV_DIR/.env.toml" <<'TOML'
+[core]
+DATABASE_PATH = "/app/data/lexa.db"
+PORT = "3000"
+
+[auth]
+LXK_ADMIN_EMAILS = "ci@example.com"
+TOML
+    if docker run -d --name lexa-ci -p 3001:3000 -v "$ENV_DIR/.env.toml:/app/.env.toml:ro" lexa:ci >/dev/null; then
       echo "waiting for /api/health..."
       HEALTH_OK=0
       for i in $(seq 1 30); do
@@ -103,6 +111,11 @@ else
         warn "docker health check failed - warn not hard"
         docker logs lexa-ci 2>&1 || true
         curl -v http://localhost:3001/api/health 2>&1 || true
+      elif docker logs lexa-ci 2>&1 | grep -q 'env-file: loaded'; then
+        ok "docker boot applied the mounted .env.toml"
+      else
+        warn "docker boot did not log 'env-file: loaded' - warn not hard"
+        docker logs lexa-ci 2>&1 || true
       fi
       docker rm -f lexa-ci >/dev/null 2>&1 || true
       trap - EXIT

@@ -135,7 +135,7 @@ the one tracked exception):
 | Situation | What's needed |
 |---|---|
 | Local dev (`.env.toml`) | `bun run setup` writes it and records `LXK_ADMIN_EMAILS`; API keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
-| Self-hosted (install script) | the script still writes a legacy flat `.env` (the installer switch to `.env.toml` is a follow-up lane). Bare loads it via systemd's `bun --env-file=.env`, docker via compose interpolation into the container environment — the loader's legacy `.env` fallback is a separate mechanism. API keys minted post-setup (login → Settings → API Keys); **re-add `GITHUB_*` after a re-run** (the installer currently rewrites the flat `.env`; preservation lands with the `.env.toml` installer lane, P4) |
+| Self-hosted (install script) | the script writes canonical `.env.toml` in the deploy/install dir (plus a tooling-only flat `.env` for compose). Docker bind-mounts `.env.toml` read-only (`create_host_path: false`); bare/systemd loads it from the install dir. API keys minted post-setup (login → Settings → API Keys); operator-added keys (`GITHUB_*`, `LXK_MCP_MASTER_KEY`) and a pinned `LXK_IMAGE_TAG` are preserved across re-runs |
 | Optional | `LXK_ASSISTANT_REPO_CAP` (assistant repo-grounding cap, default 3), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation

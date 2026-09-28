@@ -17,7 +17,9 @@
 #     path stays clean.
 #   - Boundary: parse_flags is the ONLY place argv is read. tty_read never
 #     reads stdin (script may be piped) — /dev/tty only, flag > env > default.
-#   - write_env_file / compose_render accept whitelisted keys/values only.
+#   - write_env_file / write_env_toml / compose_render accept whitelisted
+#     keys/values only. Env writes merge (never truncate) so operator-added
+#     keys (GITHUB_*) survive a re-run.
 #   - Dry-run (§9 test-swap): INSTALL_DRY_RUN=1 swaps R — mutating commands
 #     route through mutate() (docker/systemctl/curl -X/-f) and are logged,
 #     not executed; step() marks nodes with "#» DRY-RUN". Same graph.
@@ -200,28 +202,426 @@ verify_checksum() {
 }
 
 # ---------------------------------------------------------------------------
-# write_env_file <path> <key=value...>
-# Whitelisted keys only; file written chmod 600.
+# env-file writers
+#
+# Keys the installer may write (whitelist, never free-form). The app keys are
+# written to `.env.toml`; the compose-tooling keys to the flat `.env` that
+# compose itself interpolates.
+# Keys the app no longer reads — migration drops them, never carries them.
 # ---------------------------------------------------------------------------
-ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS GITHUB_APP_ID GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET CF_TUNNEL_TOKEN "
+ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
+ENV_FILE_DEAD_KEYS=" VITE_LXK_API_KEY LXK_API_KEY LXK_ACCESS_AUD LXK_ACCESS_TEAM LXK_RUNTIME_DAEMON_TOKEN LXK_RUNTIME_REPO_CAP RUNTIME_STALE_RUN_MIN "
+# Compose-tooling keys: compose itself interpolates these from the flat `.env`,
+# so migration must NOT move them into `.env.toml` (that would drop the compose
+# project name and orphan the `lexa-data` volume, or silently unpin the image).
+# They are preserved in the flat `.env` across a legacy migration.
+ENV_FILE_TOOLING_KEYS=" COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
 
+# _scan_basic_string <body> — mirror of `scanBasicString` in server/env-file.ts.
+# Single left-to-right pass (never a chain of ${v//} replacements: order would
+# mangle `\\n`). Sets _SCAN_CLOSED (1/0), _SCAN_TEXT, _SCAN_AFTER.
+_scan_basic_string() {
+  local s="$1"
+  local out="" escaped=0 i=0 n=${#1} c
+  while [ "$i" -lt "$n" ]; do
+    c="${s:$i:1}"
+    if [ "$escaped" = "1" ]; then
+      case "$c" in
+        n) out+=$'\n' ;;
+        r) out+=$'\r' ;;
+        t) out+=$'\t' ;;
+        '"') out+='"' ;;
+        '\') out+='\' ;;
+        "'") out+="'" ;;
+        *) out+="$c" ;;
+      esac
+      escaped=0
+    elif [ "$c" = '\' ]; then
+      escaped=1
+    elif [ "$c" = '"' ]; then
+      _SCAN_CLOSED=1
+      _SCAN_TEXT="$out"
+      _SCAN_AFTER="${s:$((i + 1))}"
+      return 0
+    else
+      out+="$c"
+    fi
+    i=$((i + 1))
+  done
+  [ "$escaped" = "1" ] && out+='\'
+  _SCAN_CLOSED=0
+  _SCAN_TEXT="$out"
+  _SCAN_AFTER=""
+}
+
+# _env_key_loader_valid <key> — the loader's leaf-key contract
+# (LEAF_KEY_RE in server/env-file.ts: ^[A-Z][A-Z0-9_]*$). Migration carries any
+# such key; the installer's own writes stay on the stricter whitelist.
+_env_key_loader_valid() {
+  case "$1" in
+    ''|[!A-Z]*|*[!A-Z0-9_]*) return 1 ;;
+  esac
+  return 0
+}
+
+# _env_key_allowed <key> — installer write whitelist membership.
+_env_key_allowed() {
+  case "$ENV_FILE_ALLOWED_KEYS" in
+    *" $1 "*) return 0 ;;
+  esac
+  return 1
+}
+
+# _kv_replace_line <file> <key> <replacement-line>
+# Replaces the first `KEY=`/`KEY =` line in place, or appends. Used by both
+# writers so an existing file is merged, never truncated.
+_kv_replace_line() {
+  local file="$1" key="$2" repl="$3"
+  local ln done=0 lhs
+  if grep -qE "^[[:space:]]*${key}[[:space:]]*=" "$file"; then
+    # Secret-bearing temp: create under umask 077 AND chmod 600 immediately,
+    # then re-assert 600 before the rename — `mv` carries the temp's mode to
+    # the destination, so an interrupted run must never leave a 0644 file.
+    ( umask 077; : > "${file}.next" )
+    chmod 600 "${file}.next"
+    while IFS= read -r ln || [ -n "$ln" ]; do
+      lhs="${ln#"${ln%%[![:space:]]*}"}"
+      lhs="${lhs%%=*}"
+      lhs="${lhs%"${lhs##*[![:space:]]}"}"
+      if [ "$done" -eq 0 ] && [ "$lhs" = "$key" ]; then
+        printf '%s\n' "$repl" >> "${file}.next"
+        done=1
+      else
+        printf '%s\n' "$ln" >> "${file}.next"
+      fi
+    done < "$file"
+    chmod 600 "${file}.next"
+    mv -f "${file}.next" "$file"
+  else
+    # Append: keep the new line on its own line even when the existing file
+    # lacks a trailing newline.
+    if [ -s "$file" ] && [ "$(tail -c1 "$file" | wc -l)" -eq 0 ]; then
+      printf '\n' >> "$file"
+    fi
+    printf '%s\n' "$repl" >> "$file"
+  fi
+}
+
+# toml_escape <value> — single-line TOML basic-string body (no surrounding
+# quotes). Escapes backslash, quote, the named controls, and every remaining
+# control char (< 0x20) as \uXXXX — mirrors escapeTomlString in
+# server/env-file.ts so a carried value round-trips byte-exact.
+toml_escape() {
+  local src="$1"
+  local out="" i=0 n=${#1} c hex
+  while [ "$i" -lt "$n" ]; do
+    c="${src:$i:1}"
+    case "$c" in
+      '\') out+='\\' ;;
+      '"') out+='\"' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      [[:cntrl:]])
+        printf -v hex '\\u%04x' "'$c"
+        out+="$hex"
+        ;;
+      *) out+="$c" ;;
+    esac
+    i=$((i + 1))
+  done
+  printf '%s' "$out"
+}
+
+# env_to_toml <key=value...> — sectioned TOML document on stdout. Sections are
+# presentation only (the loader keys off the leaf names); order mirrors
+# server/env-file.ts.
+env_to_toml() {
+  local core="" auth="" urls="" github="" other=""
+  local kv key line
+  for kv in "$@"; do
+    key="${kv%%=*}"
+    case "$key" in
+      ''|*[!A-Z0-9_]*|[0-9]*) die "env_to_toml: invalid key: ${key}" ;;
+    esac
+    line="${key} = \"$(toml_escape "${kv#*=}")\""
+    case "$key" in
+      DATABASE_PATH|PORT|COMPOSE_PROJECT_NAME|LXK_IMAGE_TAG|CF_TUNNEL_TOKEN) core+="${line}"$'\n' ;;
+      LXK_ADMIN_EMAILS) auth+="${line}"$'\n' ;;
+      LXK_ENV|LXK_PUBLIC_URL|LXK_TRUSTED_ORIGINS|LXK_TRUSTED_PROXY_CIDRS) urls+="${line}"$'\n' ;;
+      GITHUB_APP_ID|GITHUB_PRIVATE_KEY|GITHUB_PRIVATE_KEY_FILE|GITHUB_WEBHOOK_SECRET) github+="${line}"$'\n' ;;
+      *) other+="${line}"$'\n' ;;
+    esac
+  done
+  [ -n "$core" ] && printf '[core]\n%s\n' "$core"
+  [ -n "$auth" ] && printf '[auth]\n%s\n' "$auth"
+  [ -n "$urls" ] && printf '[urls]\n%s\n' "$urls"
+  [ -n "$github" ] && printf '[github]\n%s\n' "$github"
+  [ -n "$other" ] && printf '[other]\n%s\n' "$other"
+  return 0
+}
+
+# _env_toml_write <path> <validator> <key=value...>
+# Shared merge writer. `validator` is a function name receiving a key; it must
+# return non-zero to reject. Merge (never truncate): a key already in the file
+# is replaced in place, new keys are appended, operator keys survive. Fresh
+# files get the canonical section layout. Mode 0600, tmp written under umask 077.
+_env_toml_write() {
+  local path="$1" validator="$2"
+  shift 2
+  local kv key val tmp="${path}.tmp" dir
+  for kv in "$@"; do
+    key="${kv%%=*}"
+    if ! "$validator" "$key"; then
+      rm -f "$tmp"
+      die "write_env_toml: key not allowed: ${key}"
+    fi
+  done
+  dir="$(dirname "$path")"
+  [ "$dir" = "." ] || mkdir -p "$dir"
+  if [ -f "$path" ]; then
+    ( umask 077; cp -f "$path" "$tmp" )
+    chmod 600 "$tmp"
+    for kv in "$@"; do
+      key="${kv%%=*}"
+      val="${kv#*=}"
+      _kv_replace_line "$tmp" "$key" "${key} = \"$(toml_escape "$val")\""
+    done
+    mv -f "$tmp" "$path"
+  else
+    ( umask 077; env_to_toml "$@" > "$tmp" )
+    mv -f "$tmp" "$path"
+  fi
+  chmod 600 "$path"
+  return 0
+}
+
+# write_env_toml <path> <key=value...>
+# Installer-key write path: whitelist-validated (ENV_FILE_ALLOWED_KEYS).
+write_env_toml() {
+  local path="$1"
+  shift
+  _env_toml_write "$path" _env_key_allowed "$@"
+}
+
+# write_env_toml_loader <path> <key=value...>
+# Migration write path: accepts every key the loader can represent
+# (^[A-Z][A-Z0-9_]*$), not just the installer whitelist, so a legacy `.env`
+# carrying LXK_MCP_MASTER_KEY / LOG_LEVEL / TYPESAFE_* / storage keys survives.
+write_env_toml_loader() {
+  local path="$1"
+  shift
+  _env_toml_write "$path" _env_key_loader_valid "$@"
+}
+
+# write_env_file <path> <key=value...>
+# Flat dotenv writer for compose-tooling vars. Whitelisted keys only; merge
+# semantics (existing keys preserved, passed keys replaced/appended), 0600.
 write_env_file() {
   local path="$1"
   shift
-  local kv key val
-  local tmp="${path}.tmp"
-  : > "$tmp"
-  chmod 600 "$tmp"
+  local kv key val tmp="${path}.tmp" dir
   for kv in "$@"; do
     key="${kv%%=*}"
-    val="${kv#*=}"
     case "$ENV_FILE_ALLOWED_KEYS" in
       *" $key "*) ;;
       *) rm -f "$tmp"; die "write_env_file: key not allowed: ${key}" ;;
     esac
-    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+  done
+  dir="$(dirname "$path")"
+  [ "$dir" = "." ] || mkdir -p "$dir"
+  if [ -f "$path" ]; then ( umask 077; cp -f "$path" "$tmp" ); else ( umask 077; : > "$tmp" ); fi
+  chmod 600 "$tmp"
+  for kv in "$@"; do
+    key="${kv%%=*}"
+    val="${kv#*=}"
+    _kv_replace_line "$tmp" "$key" "${key}=${val}"
   done
   mv -f "$tmp" "$path"
+  chmod 600 "$path"
+  return 0
+}
+
+# dotenv_raw_value <value> — strip flat-dotenv quoting and unescape so the value
+# can be re-encoded as a TOML basic string. Mirrors parseDotenv in
+# server/env-file.ts: single-pass unescape for double quotes, no escapes inside
+# single quotes, inline `#` comments stripped for unquoted values.
+dotenv_raw_value() {
+  local v="$1"
+  case "$v" in
+    \"*)
+      v="${v#\"}"
+      _scan_basic_string "$v"
+      printf '%s' "$_SCAN_TEXT"
+      ;;
+    \'*\')
+      v="${v#\'}"
+      printf '%s' "${v%%\'*}"
+      ;;
+    *)
+      v="${v%%#*}"
+      printf '%s' "${v%"${v##*[![:space:]]}"}"
+      ;;
+  esac
+}
+
+# env_file_value <file> <key> — first flat-dotenv value for KEY, or empty.
+# Used to read back operator-pinned tooling vars (e.g. LXK_IMAGE_TAG).
+env_file_value() {
+  local file="$1" key="$2" line=""
+  [ -f "$file" ] || return 0
+  line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null | head -1 || true)"
+  [ -n "$line" ] || return 0
+  line="${line#*=}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  dotenv_raw_value "$line"
+}
+
+# migrate_legacy_deploy_env <dir>
+# Pre-P4 deploy dirs keep app keys in a flat `.env`. When no `.env.toml` exists
+# yet, carry every live, loader-representable key into `.env.toml` and keep the
+# original as `.env.legacy` (0600) so the tooling-only `.env` can be written
+# after. Compose-tooling keys (ENV_FILE_TOOLING_KEYS) stay in the flat `.env`.
+# Parser mirrors server/env-file.ts parseDotenv: multi-line double-quoted
+# values, inline `#` comments, single-pass escapes.
+migrate_legacy_deploy_env() {
+  local dir="$1"
+  local toml="${dir}/.env.toml" legacy="${dir}/.env" dest="${dir}/.env.legacy"
+  [ -f "$legacy" ] || return 0
+  [ -f "$toml" ] && return 0
+  if [ -e "$dest" ]; then
+    echo "  (${dest} exists — leaving ${legacy} in place)"
+    return 0
+  fi
+  local -a lines=() app_entries=() tooling_entries=() skipped=()
+  local line=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    lines+=("$line")
+  done < "$legacy"
+
+  local total=${#lines[@]} idx=0
+  local key raw body acc value unterminated
+  while [ "$idx" -lt "$total" ]; do
+    line="${lines[$idx]}"
+    idx=$((idx + 1))
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -z "$line" ] && continue
+    case "$line" in '#'*) continue ;; esac
+    case "$line" in
+      export[[:space:]]*)
+        line="${line#export}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        ;;
+    esac
+    case "$line" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    key="${line%%=*}"
+    key="${key%"${key##*[![:space:]]}"}"
+    case "$key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+    case "$ENV_FILE_DEAD_KEYS" in *" $key "*) continue ;; esac
+    raw="${line#*=}"
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    case "$raw" in
+      '"'*)
+        body="${raw#\"}"
+        acc=""
+        value=""
+        unterminated=0
+        while :; do
+          _scan_basic_string "$body"
+          acc+="$_SCAN_TEXT"
+          if [ "$_SCAN_CLOSED" = "1" ]; then
+            value="$acc"
+            break
+          fi
+          acc+=$'\n'
+          if [ "$idx" -ge "$total" ]; then
+            unterminated=1
+            break
+          fi
+          body="${lines[$idx]}"
+          idx=$((idx + 1))
+        done
+        if [ "$unterminated" = "1" ]; then
+          skipped+=("$key")
+          continue
+        fi
+        ;;
+      "'"*)
+        body="${raw#\'}"
+        value="${body%%\'*}"
+        if [ "$body" = "$value" ]; then
+          skipped+=("$key")
+          continue
+        fi
+        ;;
+      *)
+        raw="${raw%%#*}"
+        value="${raw%"${raw##*[![:space:]]}"}"
+        ;;
+    esac
+    case "$ENV_FILE_TOOLING_KEYS" in
+      *" $key "*)
+        tooling_entries+=("${key}=${value}")
+        continue
+        ;;
+    esac
+    if ! _env_key_loader_valid "$key"; then
+      skipped+=("$key")
+      continue
+    fi
+    app_entries+=("${key}=${value}")
+  done
+
+  # No app keys: leave the flat `.env` in place — the later tooling write merges
+  # into it and preserves any operator tooling keys untouched.
+  if [ "${#app_entries[@]}" -eq 0 ]; then
+    return 0
+  fi
+  write_env_toml_loader "$toml" "${app_entries[@]}"
+  mv -f "$legacy" "$dest"
+  chmod 600 "$dest"
+  # Re-emit surviving tooling keys into a fresh flat `.env` (compose reads it).
+  if [ "${#tooling_entries[@]}" -gt 0 ]; then
+    write_env_file "${dir}/.env" "${tooling_entries[@]}"
+  fi
+  echo "  migrated ${legacy} → ${toml} (legacy kept at ${dest})"
+  if [ "${#skipped[@]}" -gt 0 ]; then
+    printf '  (skipped %d key(s) the loader cannot represent: %s)\n' "${#skipped[@]}" "${skipped[*]}" >&2
+  fi
+  return 0
+}
+
+# grant_container_read <path> <image>
+# The runtime image runs as uid 1000 (Dockerfile `USER bun`); when the installer
+# runs as a different uid, a 0600 host file is unreadable in the container and
+# the app crash-loops. Re-own the file to the installing user, group 1000, mode
+# 0640 — the host user keeps read/write, the container reads via the group. A
+# one-shot root container does the chown (works unprivileged); when the
+# installer is already root, chown directly. Falls back to 0644 only if the
+# chown container cannot run. Dry-run: logs the intent, changes nothing.
+grant_container_read() {
+  local path="$1" image="$2"
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    printf '[dry-run] chmod 640 %s && chown %s:1000 %s\n' "$path" "$(id -u)" "$path"
+    return 0
+  fi
+  local claimed=0
+  if [ "$(id -u)" = "0" ]; then
+    chown "$(id -u):1000" "$path" && claimed=1
+  elif docker run --rm --user 0 -v "${path}:/lexa-env.toml" "$image" \
+    chown "$(id -u):1000" /lexa-env.toml >/dev/null 2>&1; then
+    claimed=1
+  fi
+  if [ "$claimed" = "1" ]; then
+    chmod 640 "$path" || true
+    return 0
+  fi
+  echo "  (could not re-own ${path} for uid 1000 — making it world-readable; keep the deploy dir private)"
+  chmod 644 "$path" || true
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -333,15 +733,18 @@ resolve_deploy_name() {
 # compose_render <mode> <port> <bind>
 # Emits docker-compose.yml into ${DEPLOY_DIR} (default: .). Modeled on the
 # repo's docker-compose.yml; mode != direct adds the cloudflared tunnel
-# service. Values validated before interpolation. Image defaults to latest;
-# pass --image to pin (e.g. a version tag or staging to track main).
+# service. Values validated before interpolation.
+#
+# The app reads its config from the mounted `./.env.toml` (loader applies it
+# at boot); the compose `environment:` interpolation block is gone. The flat
+# `.env` is compose-tooling only: COMPOSE_PROJECT_NAME (compose itself),
+# LXK_IMAGE_TAG (image tag interpolation), CF_TUNNEL_TOKEN (tunnel command).
 # ---------------------------------------------------------------------------
 compose_render() {
   local flavor="$1"
   local port="$2"
   local bind="$3"
   local deploy_dir="${DEPLOY_DIR:-.}"
-  local image_tag="${IMAGE_TAG:-latest}"
   case "$flavor" in
     direct) ;;
     *) die "compose_render: invalid mode: ${flavor}" ;;
@@ -360,23 +763,17 @@ compose_render() {
     cat > "${deploy_dir}/docker-compose.yml" <<EOF
 services:
   app:
-    image: ghcr.io/yohanesgre/lexa:${image_tag}
+    image: ghcr.io/yohanesgre/lexa:\${LXK_IMAGE_TAG:-latest}
     ports:
       - "${bind}:${port}:3000"
     volumes:
       - lexa-data:/app/data
-    environment:
-      - DATABASE_PATH=/app/data/lexa.db
-      - PORT=3000
-      - LXK_ENV=\${LXK_ENV:-}
-      - LXK_PUBLIC_URL=\${LXK_PUBLIC_URL:-}
-      - LXK_TRUSTED_ORIGINS=\${LXK_TRUSTED_ORIGINS:-}
-      - LXK_TRUSTED_PROXY_CIDRS=\${LXK_TRUSTED_PROXY_CIDRS:-}
-      - LXK_ADMIN_EMAILS=\${LXK_ADMIN_EMAILS:-}
-      - GITHUB_APP_ID=\${GITHUB_APP_ID:-}
-      - GITHUB_PRIVATE_KEY_FILE=\${GITHUB_PRIVATE_KEY_FILE:-}
-      - GITHUB_WEBHOOK_SECRET=\${GITHUB_WEBHOOK_SECRET:-}
-      - LOG_LEVEL=\${LOG_LEVEL:-}
+      - type: bind
+        source: ./.env.toml
+        target: /app/.env.toml
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').catch(() => process.exit(1))"]
@@ -391,21 +788,15 @@ EOF
     cat > "${deploy_dir}/docker-compose.yml" <<EOF
 services:
   app:
-    image: ghcr.io/yohanesgre/lexa:${image_tag}
+    image: ghcr.io/yohanesgre/lexa:\${LXK_IMAGE_TAG:-latest}
     volumes:
       - lexa-data:/app/data
-    environment:
-      - DATABASE_PATH=/app/data/lexa.db
-      - PORT=3000
-      - LXK_ENV=\${LXK_ENV:-}
-      - LXK_PUBLIC_URL=\${LXK_PUBLIC_URL:-}
-      - LXK_TRUSTED_ORIGINS=\${LXK_TRUSTED_ORIGINS:-}
-      - LXK_TRUSTED_PROXY_CIDRS=\${LXK_TRUSTED_PROXY_CIDRS:-}
-      - LXK_ADMIN_EMAILS=\${LXK_ADMIN_EMAILS:-}
-      - GITHUB_APP_ID=\${GITHUB_APP_ID:-}
-      - GITHUB_PRIVATE_KEY_FILE=\${GITHUB_PRIVATE_KEY_FILE:-}
-      - GITHUB_WEBHOOK_SECRET=\${GITHUB_WEBHOOK_SECRET:-}
-      - LOG_LEVEL=\${LOG_LEVEL:-}
+      - type: bind
+        source: ./.env.toml
+        target: /app/.env.toml
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').catch(() => process.exit(1))"]
@@ -515,7 +906,7 @@ write_start_script() {
   cat > "${dir}/lexa-start.sh" <<START
 #!/usr/bin/env bash
 cd "${dir}"
-exec bun --env-file=.env server/entry.ts
+exec bun server/entry.ts
 START
   chmod +x "${dir}/lexa-start.sh"
   return 0
@@ -532,7 +923,7 @@ After=network.target
 [Service]
 User=bun
 WorkingDirectory=${dir}
-ExecStart=$(command -v bun) --env-file=.env server/entry.ts
+ExecStart=$(command -v bun) server/entry.ts
 Restart=on-failure
 RestartSec=5
 

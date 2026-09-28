@@ -100,7 +100,7 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
           cd "$(dirname "$0")"
-          exec bun --env-file="${ENV_FILE:-.env}" server/entry.ts "$@"
+          exec bun server/entry.ts "$@"
           EOF
           chmod +x lexa-start.sh
 

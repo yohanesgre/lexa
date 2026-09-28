@@ -323,3 +323,4 @@
 2026-09-28 | mcp-secrets-managed-only | DONE | reference mode removed end to end, gate green, report written; uncommitted awaiting review | status/mcp-secrets-managed-only/report.md
 2026-09-29 | env-toml | PLAN | .env to .env.toml migration designed (Bun TOML, identity keys, loader); implementation not started | status/env-toml/plan.md
 2026-09-29 | env-toml | DONE | .env.toml core shipped on branch, review findings fixed, local env migrated; P4 installer lane remains | status/env-toml/report.md
+2026-09-29 | env-toml | DONE | P4 installer lane complete — install-lib/install.sh/test-install/ci-local/CI/publish/docs, both review MEDs closed, gates green; uncommitted | status/env-toml/report.md

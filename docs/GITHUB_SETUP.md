@@ -102,23 +102,24 @@ GITHUB_PRIVATE_KEY_FILE = "/home/you/projects/lexa/github-app.private-key.pem"
 GITHUB_WEBHOOK_SECRET = "..."
 ```
 
-**Prod** (legacy flat `.env` — the installer still writes that file and the
-switch to `.env.toml` is a deferred follow-up; see `docs/DEPLOYMENT.md`): the
-PEM is volume-mounted read-only into the container
+**Prod** (`.env.toml`): the installer writes it in the deploy directory and the
+container bind-mounts it read-only (`create_host_path: false`), so the loader
+applies it at boot. The PEM is volume-mounted read-only into the container
 (`docker-compose.prod.yml` → `./github-app.private-key.pem:/app/github-app.private-key.pem:ro`),
 so use:
-```bash
-GITHUB_APP_ID=1234567
-GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem
-GITHUB_WEBHOOK_SECRET=...
+```toml
+[github]
+GITHUB_APP_ID = "1234567"
+GITHUB_PRIVATE_KEY_FILE = "/app/github-app.private-key.pem"
+GITHUB_WEBHOOK_SECRET = "..."
 ```
-Compose interpolates these into the container's environment; a bare/systemd
-host loads the same flat `.env` via `bun --env-file=.env`. Do not move prod to
-`.env.toml` yet — nothing mounts it until the installer follow-up lands.
-The install script (`scripts/install.sh`) rewrites the flat `.env` on every
-run, so **re-add the `GITHUB_*` block after a re-run** — preservation lands
-with the `.env.toml` installer lane (P4). The key file is gitignored (`*.private-key.pem`) and excluded
-from the Docker build context (`.dockerignore`) — never commit it.
+A bare/systemd host loads the same `.env.toml` from the install directory
+(`systemd` runs `bun server/entry.ts` with the install dir as WorkingDirectory;
+no `--env-file`). Re-running the install script **merges**: it rewrites the
+installer-owned keys and preserves operator-added ones (`GITHUB_*`,
+`LXK_MCP_MASTER_KEY`, …), so there is nothing to re-add. The key file is
+gitignored (`*.private-key.pem`) and excluded from the Docker build context
+(`.dockerignore`) — never commit it.
 
 ## 5. Map columns
 
