@@ -46,11 +46,12 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "TYPESAFE_API_KEY",
   "TYPESAFE_BASE_URL",
   "TYPESAFE_DEFAULT_MODEL",
-  // Managed MCP secrets — the envelope key pair. Both are RuntimeEnv slots so
-  // they reach the keyring on both runtimes; the master keys themselves are
-  // never a client credential.
-  "LXK_MCP_MASTER_KEY",
-  "LXK_MCP_MASTER_KEY_PREV",
+  // Managed secrets — the envelope key pair shared by MCP tokens, provider API
+  // keys, and the Jev API key. Both are RuntimeEnv slots so they reach the
+  // keyring on both runtimes; the master keys themselves are never a client
+  // credential.
+  "LXK_SECRETS_MASTER_KEY",
+  "LXK_SECRETS_MASTER_KEY_PREV",
   // Logging
   "LOG_LEVEL",
   "TANSTACK_AI_DEBUG",
@@ -120,8 +121,8 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     TYPESAFE_API_KEY: source.TYPESAFE_API_KEY,
     TYPESAFE_BASE_URL: source.TYPESAFE_BASE_URL,
     TYPESAFE_DEFAULT_MODEL: source.TYPESAFE_DEFAULT_MODEL,
-    LXK_MCP_MASTER_KEY: source.LXK_MCP_MASTER_KEY,
-    LXK_MCP_MASTER_KEY_PREV: source.LXK_MCP_MASTER_KEY_PREV,
+    LXK_SECRETS_MASTER_KEY: source.LXK_SECRETS_MASTER_KEY,
+    LXK_SECRETS_MASTER_KEY_PREV: source.LXK_SECRETS_MASTER_KEY_PREV,
     LOG_LEVEL: source.LOG_LEVEL,
     TANSTACK_AI_DEBUG: source.TANSTACK_AI_DEBUG ?? source.LXK_TANSTACK_AI_DEBUG,
     TANSTACK_AI_JSON: source.TANSTACK_AI_JSON ?? source.LXK_TANSTACK_AI_JSON,
@@ -168,8 +169,8 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     TYPESAFE_API_KEY: s("TYPESAFE_API_KEY"),
     TYPESAFE_BASE_URL: s("TYPESAFE_BASE_URL"),
     TYPESAFE_DEFAULT_MODEL: s("TYPESAFE_DEFAULT_MODEL"),
-    LXK_MCP_MASTER_KEY: s("LXK_MCP_MASTER_KEY"),
-    LXK_MCP_MASTER_KEY_PREV: s("LXK_MCP_MASTER_KEY_PREV"),
+    LXK_SECRETS_MASTER_KEY: s("LXK_SECRETS_MASTER_KEY"),
+    LXK_SECRETS_MASTER_KEY_PREV: s("LXK_SECRETS_MASTER_KEY_PREV"),
     LOG_LEVEL: s("LOG_LEVEL"),
     TANSTACK_AI_DEBUG: s("TANSTACK_AI_DEBUG") ?? s("LXK_TANSTACK_AI_DEBUG"),
     TANSTACK_AI_JSON: s("TANSTACK_AI_JSON") ?? s("LXK_TANSTACK_AI_JSON"),

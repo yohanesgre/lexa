@@ -476,7 +476,7 @@ describe("env-file CLI", () => {
       "LXK_API_KEY=dead2",
       "RUNTIME_STALE_RUN_MIN=45",
       "LOG_LEVEL=debug",
-      `LXK_MCP_MASTER_KEY="${pem.replace(/\n/g, "\\n")}"`,
+      `LXK_SECRETS_MASTER_KEY="${pem.replace(/\n/g, "\\n")}"`,
       "",
     ].join("\n");
     writeFileSync(legacyPath, legacyText);
@@ -490,7 +490,7 @@ describe("env-file CLI", () => {
     expect(readFileSync(legacyDest, "utf8")).toBe(legacyText);
     expect(statSync(legacyDest).mode & 0o777).toBe(0o600);
     const migrated = readEnvFile(join(dir, ".env.toml"));
-    expect(migrated.LXK_MCP_MASTER_KEY).toBe(pem);
+    expect(migrated.LXK_SECRETS_MASTER_KEY).toBe(pem);
     expect(migrated.DATABASE_PATH).toBe("./data/lexa.db");
     expect(migrated.LXK_ADMIN_EMAILS).toBe("ops@example.com");
     expect(migrated.LOG_LEVEL).toBe("debug");

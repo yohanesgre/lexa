@@ -20,13 +20,13 @@ import {
 } from "../repos/assistant-mcp.repo";
 import { McpConnector, type McpConnectorShape } from "../services/assistant-mcp.service";
 import {
-  decryptMcpSecret,
-  mcpKeyringFromEnv,
-  MCP_SECRET_DECRYPT_FAILED as SECRET_DECRYPT_FAILED,
-  MCP_SECRET_KEY_ID_ACTIVE,
-  MCP_SECRET_KEY_ID_PREV,
-  type McpSecretKeyId,
-} from "./mcp-secret";
+  decryptSecret,
+  secretsKeyringFromEnv,
+  SECRET_DECRYPT_FAILED,
+  SECRET_KEY_ID_ACTIVE,
+  SECRET_KEY_ID_PREV,
+  type SecretKeyId,
+} from "./secrets";
 import { validateUrl } from "./ssrf";
 
 export const MCP_DISCOVERY_TIMEOUT_MS = 5000;
@@ -369,20 +369,20 @@ const SECRET_REF_UNSUPPORTED = "MCP secret references are no longer supported �
 // a working one, and the operator has no way to tell the two apart. Wrong key,
 // tampered ciphertext, an unknown `key_id`, a row whose key has been retired —
 // one fixed message for every class, carrying no ciphertext and no plaintext.
-// Imported as SECRET_DECRYPT_FAILED from ./mcp-secret (the module that owns the
+// Imported as SECRET_DECRYPT_FAILED from ./secrets (the module that owns the
 // wording) so the two surfaces cannot drift apart.
 
 // Managed secret present, no master key configured: the disable switch refuses
 // the save, so this is a rotated-away or misconfigured deployment. Still a hard
 // failure — the same silent-anonymous trap.
-const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_MCP_MASTER_KEY, which is not configured";
+const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_SECRETS_MASTER_KEY, which is not configured";
 
 // The managed blob is decrypted exactly here, at connect — never in the repo,
 // the service, or a public shape. A keyring is built from the same RuntimeEnv
 // snapshot the save path reads, so a Workers per-request binding and the Bun
 // process env behave identically.
 async function resolveManagedSecret(row: McpServerRowWithSecret, secret: ManagedSecretCellsOk, env: RuntimeEnv): Promise<string> {
-  const keyring = await mcpKeyringFromEnv(env).catch(() => {
+  const keyring = await secretsKeyringFromEnv(env).catch(() => {
     // A configured-but-malformed key throws the fixed shape message; it is a
     // deployment fault, so it is reported as the same hard refusal rather than
     // a stack trace from the crypto module.
@@ -390,9 +390,9 @@ async function resolveManagedSecret(row: McpServerRowWithSecret, secret: Managed
   });
   if (keyring === null) throw new McpConnectFailed({ message: SECRET_KEY_UNAVAILABLE });
   try {
-    return await decryptMcpSecret({ serverId: row.id, ...secret }, keyring);
+    return await decryptSecret({ scope: "mcp", ownerId: row.id, ...secret }, keyring);
   } catch {
-    // mcp-secret.ts already reduced every class to one fixed message; this
+    // secrets.ts already reduced every class to one fixed message; this
     // catch exists so no future error shape (a DOMException, a driver error)
     // can reach a log line or a report body with material in it.
     throw new McpConnectFailed({ message: SECRET_DECRYPT_FAILED });
@@ -412,14 +412,14 @@ type ManagedSecretCells =
 interface ManagedSecretCellsOk {
   ciphertextB64: string;
   ivB64: string;
-  keyId: McpSecretKeyId;
+  keyId: SecretKeyId;
 }
 
 function managedSecretCells(row: McpServerRowWithSecret): ManagedSecretCells {
   const { secret_ciphertext, secret_iv, secret_key_id } = row;
   if (secret_ciphertext === null && secret_iv === null && secret_key_id === null) return { present: false };
   if (secret_ciphertext === null || secret_iv === null || secret_key_id === null) return { present: true, cells: null };
-  if (secret_key_id !== MCP_SECRET_KEY_ID_ACTIVE && secret_key_id !== MCP_SECRET_KEY_ID_PREV) return { present: true, cells: null };
+  if (secret_key_id !== SECRET_KEY_ID_ACTIVE && secret_key_id !== SECRET_KEY_ID_PREV) return { present: true, cells: null };
   return { present: true, cells: { ciphertextB64: secret_ciphertext, ivB64: secret_iv, keyId: secret_key_id } };
 }
 

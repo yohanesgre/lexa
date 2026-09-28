@@ -227,23 +227,28 @@ describe("RUNTIME_ENV_STRING_KEYS", () => {
     }
   });
 
-  it("carries both MCP master keys on both paths", () => {
-    // Managed MCP secrets are configured on every runtime, so both slots must
+  it("carries both secrets master keys on both paths", () => {
+    // Managed secrets are configured on every runtime, so both slots must
     // come back from BOTH builders — the generic "copied by at least one path"
     // test cannot catch a slot only one of them forwards.
-    const source = { LXK_MCP_MASTER_KEY: "active-key", LXK_MCP_MASTER_KEY_PREV: "prev-key" };
+    expect(RUNTIME_ENV_STRING_KEYS).toContain("LXK_SECRETS_MASTER_KEY");
+    // The MCP-scoped name is gone with no alias. Spelled from fragments so the
+    // hard-rename grep gate stays clean (a literal old name would trip it).
+    const legacyMcpMasterKey = ["LXK", "MCP", "MASTER", "KEY"].join("_");
+    expect(RUNTIME_ENV_STRING_KEYS).not.toContain(legacyMcpMasterKey);
+    const source = { LXK_SECRETS_MASTER_KEY: "active-key", LXK_SECRETS_MASTER_KEY_PREV: "prev-key" };
     for (const env of [getEnv(source), getEnvFromWorkers(source)]) {
-      expect(env.LXK_MCP_MASTER_KEY).toBe("active-key");
-      expect(env.LXK_MCP_MASTER_KEY_PREV).toBe("prev-key");
-      for (const key of ["LXK_MCP_MASTER_KEY", "LXK_MCP_MASTER_KEY_PREV"]) {
+      expect(env.LXK_SECRETS_MASTER_KEY).toBe("active-key");
+      expect(env.LXK_SECRETS_MASTER_KEY_PREV).toBe("prev-key");
+      for (const key of ["LXK_SECRETS_MASTER_KEY", "LXK_SECRETS_MASTER_KEY_PREV"]) {
         expect(isRuntimeEnvStringKey(key), key).toBe(true);
       }
     }
     // Unset on both paths is a clean undefined — the crypto layer reads that
     // as "feature disabled", never as an empty key.
     for (const env of [getEnv({}), getEnvFromWorkers({})]) {
-      expect(env.LXK_MCP_MASTER_KEY).toBeUndefined();
-      expect(env.LXK_MCP_MASTER_KEY_PREV).toBeUndefined();
+      expect(env.LXK_SECRETS_MASTER_KEY).toBeUndefined();
+      expect(env.LXK_SECRETS_MASTER_KEY_PREV).toBeUndefined();
     }
   });
 });

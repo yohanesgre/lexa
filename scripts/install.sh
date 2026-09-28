@@ -105,7 +105,8 @@ deploy_docker() {
     "LXK_PUBLIC_URL=${public_url}" \
     "LXK_TRUSTED_ORIGINS=${trusted}" \
     "DATABASE_PATH=/app/data/lexa.db" \
-    "PORT=3000"
+    "PORT=3000" \
+    "$(secrets_master_key_entry "${PWD}/.env.toml")"
   # Flat `.env` = compose tooling only. COMPOSE_PROJECT_NAME (if already set by
   # the operator) is preserved by the merge; setting it here would rename the
   # compose project and orphan the existing `lexa-data` volume. A pinned
@@ -162,7 +163,8 @@ deploy_bare() {
       "PORT=${BARE_PORT}" \
       "DATABASE_PATH=${INSTALL_DIR}/data/lexa.db" \
       "LXK_PUBLIC_URL=${bare_public}" \
-      "LXK_TRUSTED_ORIGINS=${bare_public},http://127.0.0.1:${BARE_PORT}"
+      "LXK_TRUSTED_ORIGINS=${bare_public},http://127.0.0.1:${BARE_PORT}" \
+      "$(secrets_master_key_entry "${INSTALL_DIR}/.env.toml")"
     step "data dir" mkdir -p "${INSTALL_DIR}/data"
   fi
   step "write start script" write_start_script "${INSTALL_DIR}"

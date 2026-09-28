@@ -23,10 +23,10 @@ import {
   type McpTransportConfig,
 } from "./assistant-mcp.service";
 import {
-  MCP_MASTER_KEY_INVALID,
-  MCP_SECRET_DECRYPT_FAILED,
-  MCP_SECRET_KEY_ID_ACTIVE,
-} from "../assistant/mcp-secret";
+  SECRETS_MASTER_KEY_INVALID,
+  SECRET_DECRYPT_FAILED,
+  SECRET_KEY_ID_ACTIVE,
+} from "../assistant/secrets";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -433,7 +433,7 @@ describe("AssistantMcpService", () => {
   // unguarded seam between them.
   it("live connector + planted multiline secret: report body and stderr carry no secret", async () => {
     const secret = "-----BEGIN PRIVATE KEY-----\nplanted-live-secret-body\n-----END PRIVATE KEY-----";
-    const env = { LXK_MCP_MASTER_KEY: KEY_A } as unknown as RuntimeEnv;
+    const env = { LXK_SECRETS_MASTER_KEY: KEY_A } as unknown as RuntimeEnv;
     dir = mkdtempSync(join(tmpdir(), "lexa-assistant-mcp-live-"));
     const path = join(dir, "test.db");
     runMigrations(path, MIGRATIONS);
@@ -503,18 +503,18 @@ describe("AssistantMcpService", () => {
 
 // Managed secrets (envelope encryption). Each test drives the REAL service and,
 // where a connect is involved, the REAL LiveMcpConnector — the crypto path
-// (remoteTransportFor -> decryptMcpSecret) is the thing under test, so a stub
+// (remoteTransportFor -> decryptSecret) is the thing under test, so a stub
 // would prove nothing. `sdkMock` is the only seam: it records exactly what the
 // SDK was handed, and `ok` stays false on every refusal path, so a secret that
 // reached the SDK is a visible failure rather than a silent pass.
 describe("managed MCP client secrets", () => {
   const managedEnv = (over: Partial<RuntimeEnv> = {}): RuntimeEnv =>
-    envWith({ LXK_MCP_MASTER_KEY: KEY_A, ...over });
+    envWith({ LXK_SECRETS_MASTER_KEY: KEY_A, ...over });
   // The rotation env: a NEW active key with the one that wrote the rows demoted
   // to PREV. Exactly what an operator sets to rotate without an outage. `null`
   // prev is the "PREV retired" state — a rotation completed, PREV emptied.
   const rotatedEnv = (prev: string | null = KEY_A, active: string = KEY_B): RuntimeEnv =>
-    envWith({ LXK_MCP_MASTER_KEY: active, ...(prev === null ? {} : { LXK_MCP_MASTER_KEY_PREV: prev }) });
+    envWith({ LXK_SECRETS_MASTER_KEY: active, ...(prev === null ? {} : { LXK_SECRETS_MASTER_KEY_PREV: prev }) });
   const noKeyEnv = (): RuntimeEnv => envWith({});
 
   const createInput = (over: Partial<Parameters<typeof service.create>[0]> = {}) => ({
@@ -534,7 +534,7 @@ describe("managed MCP client secrets", () => {
     expect(refOf("managed")).toBeNull();
     const stored = secretRow("managed");
     expect(stored).toBeDefined();
-    expect(stored!.key_id).toBe(MCP_SECRET_KEY_ID_ACTIVE);
+    expect(stored!.key_id).toBe(SECRET_KEY_ID_ACTIVE);
     expect(stored!.ciphertext).not.toContain(MARKER);
     expect(stored!.iv).not.toContain(MARKER);
 
@@ -581,12 +581,12 @@ describe("managed MCP client secrets", () => {
 
     // A configured-but-wrong key is told, not silently treated as disabled.
     const malformed = await withKeyEither(
-      envWith({ LXK_MCP_MASTER_KEY: "too-short" }),
+      envWith({ LXK_SECRETS_MASTER_KEY: "too-short" }),
       service.create(createInput({ secret: MARKER }))
     );
     expect(malformed).toMatchObject({
       _tag: "Left",
-      left: { _tag: "McpInvalidTransportConfig", reason: MCP_MASTER_KEY_INVALID },
+      left: { _tag: "McpInvalidTransportConfig", reason: SECRETS_MASTER_KEY_INVALID },
     });
     expect(await run(service.list())).toEqual([]);
     expect(secretCount()).toBe(0);
@@ -652,7 +652,7 @@ describe("managed MCP client secrets", () => {
       ok: false,
       toolCount: 0,
       readOnlyToolCount: 0,
-      error: { code: "MCP_CONNECT_FAILED", message: MCP_SECRET_DECRYPT_FAILED },
+      error: { code: "MCP_CONNECT_FAILED", message: SECRET_DECRYPT_FAILED },
     });
     const wrongBody = JSON.stringify(wrongKey);
     expect(wrongBody).not.toContain(MARKER);
@@ -678,7 +678,7 @@ describe("managed MCP client secrets", () => {
     }
     expect(tamperedReport).toMatchObject({
       ok: false,
-      error: { code: "MCP_CONNECT_FAILED", message: MCP_SECRET_DECRYPT_FAILED },
+      error: { code: "MCP_CONNECT_FAILED", message: SECRET_DECRYPT_FAILED },
     });
     const tamperedBody = JSON.stringify(tamperedReport);
     expect(tamperedBody).not.toContain(MARKER);
@@ -686,7 +686,7 @@ describe("managed MCP client secrets", () => {
     const stderr = logged.join("\n");
     expect(stderr).not.toContain(MARKER);
     expect(stderr).not.toContain(tampered);
-    expect(stderr).not.toContain(MCP_SECRET_DECRYPT_FAILED.split(" ")[0]!);
+    expect(stderr).not.toContain(SECRET_DECRYPT_FAILED.split(" ")[0]!);
     expect(sdkMock.calls).toEqual([]);
 
     // The raw database file, not a SELECT: a plaintext leak would live in a
@@ -705,7 +705,7 @@ describe("managed MCP client secrets", () => {
     // Written while KEY_A is active; the row records the slot, not the key.
     await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
     const stored = secretRow("managed")!;
-    expect(stored.key_id).toBe(MCP_SECRET_KEY_ID_ACTIVE);
+    expect(stored.key_id).toBe(SECRET_KEY_ID_ACTIVE);
 
     // Rotation: KEY_B becomes active, KEY_A is demoted to PREV. The row still
     // says `active`, so only a fallback can open it — and the decrypted token
@@ -727,7 +727,7 @@ describe("managed MCP client secrets", () => {
     expect(retired).toMatchObject({
       ok: false,
       toolCount: 0,
-      error: { code: "MCP_CONNECT_FAILED", message: MCP_SECRET_DECRYPT_FAILED },
+      error: { code: "MCP_CONNECT_FAILED", message: SECRET_DECRYPT_FAILED },
     });
     expect(JSON.stringify(retired)).not.toContain(MARKER);
     expect(sdkMock.calls).toEqual([]);
@@ -872,7 +872,7 @@ describe("managed MCP client secrets", () => {
       const refused = await withKeyEither(managedEnv(), service.create(createInput({ secret: MARKER })));
       expect(refused).toMatchObject({
         _tag: "Left",
-        left: { _tag: "McpInvalidTransportConfig", reason: MCP_MASTER_KEY_INVALID },
+        left: { _tag: "McpInvalidTransportConfig", reason: SECRETS_MASTER_KEY_INVALID },
       });
       const body = JSON.stringify(refused);
       expect(body).not.toContain(canary);

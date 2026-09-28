@@ -1,9 +1,9 @@
 // Workers parity: the sealed-blob wire format must mean the same thing on
-// workerd as on Bun. `mcp-secret.ts` picks AES-256-GCM with a 12-byte IV, a
-// 128-bit tag and an AAD of `<prefix>:<server_id>`; a drift in any of those on
-// one runtime would surface as a hard `McpConnectFailed` in production only, on
-// whichever runtime nobody tested. So both directions are asserted against a
-// real workerd (miniflare), not a stub.
+// workerd as on Bun. `secrets.ts` picks AES-256-GCM with a 12-byte IV, a
+// 128-bit tag and an AAD of `<prefix>:<owner_id>`; a drift in any of those on
+// one runtime would surface as a hard refusal in production only, on whichever
+// runtime nobody tested. So both directions are asserted against a real workerd
+// (miniflare), not a stub.
 //
 // The worker receives the blob over fetch and re-derives the same AES-GCM
 // parameters itself — it does NOT import the module, so a change on either side
@@ -12,14 +12,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
-  MCP_MASTER_KEY_BYTES,
-  MCP_SECRET_AAD_PREFIX,
-  MCP_SECRET_IV_BYTES,
-  decryptMcpSecret,
-  encryptMcpSecret,
-  mcpKeyringFromKeys,
+  SECRETS_MASTER_KEY_BYTES,
+  SECRET_AAD_PREFIXES,
+  SECRET_IV_BYTES,
+  decryptSecret,
+  encryptSecret,
+  keyringFromKeys,
   parseMasterKey,
-} from "./mcp-secret";
+} from "./secrets";
 
 const TOKEN = "ghp_workerdparitytoken0123456789";
 const SERVER_ID = "parity-mcp";
@@ -46,7 +46,7 @@ export default {
     const body = await request.json();
     try {
       const key = await importKey(body.keyB64);
-      const aad = new TextEncoder().encode("${MCP_SECRET_AAD_PREFIX}:" + body.serverId);
+      const aad = new TextEncoder().encode("${SECRET_AAD_PREFIXES.mcp}:" + body.serverId);
       if (body.mode === "decrypt") {
         const plain = await crypto.subtle.decrypt(
           { name: "AES-GCM", iv: b64d(body.ivB64), additionalData: aad, tagLength: 128 },
@@ -79,14 +79,14 @@ async function call(payload: Record<string, unknown>): Promise<Record<string, un
 }
 
 function keyB64(seed: number): string {
-  const bytes = Uint8Array.from({ length: MCP_MASTER_KEY_BYTES }, (_, i) => (seed * 31 + i * 7) % 256);
+  const bytes = Uint8Array.from({ length: SECRETS_MASTER_KEY_BYTES }, (_, i) => (seed * 31 + i * 7) % 256);
   return btoa(String.fromCharCode(...bytes));
 }
 
 describe("workerd parity for the managed-secret blob format", () => {
   beforeAll(async () => {
     mf = new Miniflare(
-      await convertV4MiniflareOptions({ workers: [{ name: "mcp-secret-parity", modules: true, script: WORKER }] })
+      await convertV4MiniflareOptions({ workers: [{ name: "secrets-parity", modules: true, script: WORKER }] })
     );
   }, 60_000);
 
@@ -96,8 +96,8 @@ describe("workerd parity for the managed-secret blob format", () => {
 
   it("opens a Bun-sealed blob inside workerd (Bun writes, workerd reads)", async () => {
     const raw = keyB64(3);
-    const keyring = mcpKeyringFromKeys(await parseMasterKey(raw));
-    const row = await encryptMcpSecret(TOKEN, SERVER_ID, keyring.active, keyring);
+    const keyring = keyringFromKeys(await parseMasterKey(raw));
+    const row = await encryptSecret(TOKEN, "mcp", SERVER_ID, keyring.active, keyring);
     expect(row.ivB64).toHaveLength(16);
 
     const result = await call({
@@ -112,7 +112,7 @@ describe("workerd parity for the managed-secret blob format", () => {
 
   it("reads a workerd-sealed blob on Bun (workerd writes, Bun reads)", async () => {
     const raw = keyB64(11);
-    const keyring = mcpKeyringFromKeys(await parseMasterKey(raw));
+    const keyring = keyringFromKeys(await parseMasterKey(raw));
 
     const result = await call({ mode: "encrypt", keyB64: raw, serverId: SERVER_ID, plaintext: TOKEN });
     expect(result.ok).toBe(true);
@@ -120,8 +120,14 @@ describe("workerd parity for the managed-secret blob format", () => {
     expect(result.ivB64).toBeTypeOf("string");
 
     await expect(
-      decryptMcpSecret(
-        { serverId: SERVER_ID, ciphertextB64: result.ciphertextB64 as string, ivB64: result.ivB64 as string, keyId: "active" },
+      decryptSecret(
+        {
+          scope: "mcp",
+          ownerId: SERVER_ID,
+          ciphertextB64: result.ciphertextB64 as string,
+          ivB64: result.ivB64 as string,
+          keyId: "active",
+        },
         keyring
       )
     ).resolves.toBe(TOKEN);
@@ -129,11 +135,11 @@ describe("workerd parity for the managed-secret blob format", () => {
 
   it("uses a 12-byte IV and rejects a wrong key the same way on workerd", async () => {
     const raw = keyB64(3);
-    const keyring = mcpKeyringFromKeys(await parseMasterKey(raw));
-    const row = await encryptMcpSecret(TOKEN, SERVER_ID, keyring.active, keyring);
+    const keyring = keyringFromKeys(await parseMasterKey(raw));
+    const row = await encryptSecret(TOKEN, "mcp", SERVER_ID, keyring.active, keyring);
     // The IV length is the wire contract, not a Bun-side detail.
-    expect(MCP_SECRET_IV_BYTES).toBe(12);
-    expect(atob(row.ivB64).length).toBe(MCP_SECRET_IV_BYTES);
+    expect(SECRET_IV_BYTES).toBe(12);
+    expect(atob(row.ivB64).length).toBe(SECRET_IV_BYTES);
 
     const wrongKey = await call({
       mode: "decrypt",
@@ -151,8 +157,8 @@ describe("workerd parity for the managed-secret blob format", () => {
 
   it("refuses a blob replayed against a different server id", async () => {
     const raw = keyB64(3);
-    const keyring = mcpKeyringFromKeys(await parseMasterKey(raw));
-    const row = await encryptMcpSecret(TOKEN, SERVER_ID, keyring.active, keyring);
+    const keyring = keyringFromKeys(await parseMasterKey(raw));
+    const row = await encryptSecret(TOKEN, "mcp", SERVER_ID, keyring.active, keyring);
 
     const replayed = await call({
       mode: "decrypt",
