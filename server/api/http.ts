@@ -83,6 +83,7 @@ import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
 import { AssistantMcpService, McpConnector, type McpUpdateInput } from "../services/assistant-mcp.service";
+import { AssistantProvidersService, type ProviderUpdateInput } from "../services/assistant-providers.service";
 import { AssistantJevService, type JevConfigInput } from "../services/assistant-jev.service";
 import { AssistantJevRepo } from "../repos/assistant-jev.repo";
 import { LiveMcpConnector } from "../assistant/mcp";
@@ -1638,9 +1639,9 @@ const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
   .add(HttpApiEndpoint.post("adminAssistantPriceSync", "/admin/assistant/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number, data: Schema.Array(AssistantPriceResponseSchema) })))
   .add(HttpApiEndpoint.get("adminAssistantRuns", "/admin/assistant/runs").addSuccess(AssistantRunsResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantBindings", "/admin/assistant/bindings").addSuccess(AssistantBindingsResponseSchema))
-  .add(HttpApiEndpoint.get("adminAssistantProviders", "/admin/assistant/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.get("adminAssistantProviders", "/admin/assistant/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any), secretsEnabled: Schema.Boolean })))
   .add(HttpApiEndpoint.post("adminAssistantCreateProvider", "/admin/assistant/providers").setPayload(Schema.Struct({ label: Schema.String, baseUrl: Schema.String, apiKey: Schema.String })).addSuccess(Schema.Any))
-  .add(HttpApiEndpoint.patch("adminAssistantUpdateProvider", "/admin/assistant/providers/:id").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ label: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String), apiKey: Schema.optional(Schema.String) })).addSuccess(Schema.Any))
+  .add(HttpApiEndpoint.patch("adminAssistantUpdateProvider", "/admin/assistant/providers/:id").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ label: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String), apiKey: Schema.optional(Schema.String), clearKey: Schema.optional(Schema.Boolean) })).addSuccess(Schema.Any))
   .add(HttpApiEndpoint.del("adminAssistantDeleteProvider", "/admin/assistant/providers/:id").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("adminAssistantTestProvider", "/admin/assistant/providers/:id/test").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
   .add(HttpApiEndpoint.post("adminAssistantProviderModels", "/admin/assistant/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
@@ -3532,19 +3533,19 @@ function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): 
 const resolveProviderConfig = (
   projectId: string,
   payload: { providerId?: string | null | undefined; modelId?: string | null | undefined; kind?: string | undefined; baseUrl?: string | undefined; model?: string | undefined; apiKey?: string | undefined }
-): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError, AssistantGateway | AssistantProvidersRepo | AssistantModelsRepo> =>
+): Effect.Effect<ProviderConfig, ProviderNotConfigured | ProviderAuthFailed | DbError, AssistantGateway | AssistantProvidersService | AssistantModelsRepo> =>
   Effect.gen(function* () {
     if (payload.providerId && payload.modelId) {
-      const providerRepo = yield* AssistantProvidersRepo;
+      const providersService = yield* AssistantProvidersService;
       const modelRepo = yield* AssistantModelsRepo;
-      const provider = (yield* providerRepo.getById(payload.providerId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))))) as unknown as { base_url: string; api_key: string };
+      const provider = yield* providersService.view(payload.providerId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))));
       const model = yield* modelRepo.findByProviderAndModelId(payload.providerId, payload.modelId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))));
       if (!model.enabled) return yield* Effect.fail(new ProviderNotConfigured({ projectId }));
       return {
         kind: normalizeProviderKind(model.kind),
-        baseUrl: (provider as unknown as { base_url: string }).base_url ?? "",
+        baseUrl: provider.baseUrl ?? "",
         model: model.modelId,
-        apiKey: (provider as unknown as { api_key: string }).api_key ?? "",
+        apiKey: yield* providersService.resolveApiKey(payload.providerId),
         providerId: payload.providerId,
       };
     }
@@ -4018,27 +4019,31 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
     .handle("adminAssistantProviders", () =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* AssistantProvidersRepo;
-        const rows = yield* repo.maskedList();
-        return { data: rows };
+        const service = yield* AssistantProvidersService;
+        // One request, both reads: the rows and the managed-secrets capability
+        // the form needs to decide whether a key can be stored at all.
+        const [data, secretsEnabled] = yield* Effect.all([service.list(), service.secretsEnabled()], { concurrency: 2 });
+        return { data, secretsEnabled };
       }))
     )
     .handle("adminAssistantCreateProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* AssistantProvidersRepo;
-        const id = crypto.randomUUID();
-        const row = yield* repo.create({ id, label: req.payload.label!, baseUrl: req.payload.baseUrl!, apiKey: req.payload.apiKey ?? "" });
-        const masked = yield* repo.maskedView(row.id);
-        return masked;
+        const service = yield* AssistantProvidersService;
+        return yield* service.create({ label: req.payload.label!, baseUrl: req.payload.baseUrl!, apiKey: req.payload.apiKey ?? "" });
       }))
     )
     .handle("adminAssistantUpdateProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* AssistantProvidersRepo;
-        yield* repo.update(req.path.id, { ...(req.payload.label !== undefined ? { label: req.payload.label } : {}), ...(req.payload.baseUrl !== undefined ? { baseUrl: req.payload.baseUrl } : {}), ...(req.payload.apiKey !== undefined ? { apiKey: req.payload.apiKey } : {}) });
-        return yield* repo.maskedView(req.path.id);
+        const service = yield* AssistantProvidersService;
+        const patch: ProviderUpdateInput = {};
+        if (req.payload.label !== undefined) patch.label = req.payload.label;
+        if (req.payload.baseUrl !== undefined) patch.baseUrl = req.payload.baseUrl;
+        // Carried only when present: an omitted/blank `apiKey` is "keep".
+        if (req.payload.apiKey !== undefined) patch.apiKey = req.payload.apiKey;
+        if (req.payload.clearKey !== undefined) patch.clearKey = req.payload.clearKey;
+        return yield* service.update(req.path.id, patch);
       }))
     )
     .handle("adminAssistantDeleteProvider", (req) =>
@@ -4059,22 +4064,22 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           }
           if (refs > 0) return yield* new HasChildren({ count: refs });
         }
-        const repo = yield* AssistantProvidersRepo;
-        yield* repo.delete(req.path.id);
+        const service = yield* AssistantProvidersService;
+        yield* service.remove(req.path.id);
         return undefined;
       }))
     )
     .handle("adminAssistantTestProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* AssistantProvidersRepo;
+        const service = yield* AssistantProvidersService;
         const mRepo = yield* AssistantModelsRepo;
-        const prov = yield* pRepo.getById(req.path.id);
+        const prov = yield* service.view(req.path.id);
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean; modelId: string }>)));
         const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
         const kind: ProviderConfig["kind"] = normalizeProviderKind(firstEnabled?.kind ?? (models[0] as { kind?: string } | undefined)?.kind ?? "openai_compatible");
         const model = firstEnabled?.modelId ?? (models[0] as { modelId?: string } | undefined)?.modelId ?? "test";
-        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model, sessionId: `provider-test-${req.path.id}` };
+        const cfg: ProviderConfig = { kind, baseUrl: prov.baseUrl, apiKey: yield* service.resolveApiKey(req.path.id), model, sessionId: `provider-test-${req.path.id}` };
         const start = Date.now();
         yield* Effect.tryPromise({ try: () => listModels(cfg), catch: (e) => e as ProviderAuthFailed | ProviderUnreachable });
         return { ok: true, latencyMs: Date.now() - start };
@@ -4083,16 +4088,16 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
     .handle("adminAssistantProviderModels", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* AssistantProvidersRepo;
+        const service = yield* AssistantProvidersService;
         const mRepo = yield* AssistantModelsRepo;
-        const prov = yield* pRepo.getById(req.path.id);
+        const prov = yield* service.view(req.path.id);
         const existing = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean }>)));
         const enabledKind = (existing as Array<{ kind: string; enabled: boolean }>).find((m) => m.enabled)?.kind;
         const kind: ProviderConfig["kind"] = normalizeProviderKind(enabledKind ?? "openai_compatible");
         const existingModels = existing as Array<{ modelId: string; enabled: boolean }>;
         const firstEnabledModel = existingModels.find((m) => m.enabled)?.modelId;
         const model = firstEnabledModel ?? existingModels[0]?.modelId ?? "test";
-        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model, sessionId: `provider-models-${req.path.id}` };
+        const cfg: ProviderConfig = { kind, baseUrl: prov.baseUrl, apiKey: yield* service.resolveApiKey(req.path.id), model, sessionId: `provider-models-${req.path.id}` };
         const catalog = yield* Effect.tryPromise({
           try: () => listModels(cfg),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
@@ -4155,15 +4160,15 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
     .handle("adminAssistantProbeProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const pRepo = yield* AssistantProvidersRepo;
+        const service = yield* AssistantProvidersService;
         const mRepo = yield* AssistantModelsRepo;
         const healthSvc = yield* AssistantHealthService;
-        const prov = yield* pRepo.getById(req.path.id);
+        const prov = yield* service.view(req.path.id);
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean; modelId: string }>)));
         const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
         const kind: ProviderConfig["kind"] = normalizeProviderKind(firstEnabled?.kind ?? (models[0] as { kind?: string } | undefined)?.kind ?? "openai_compatible");
         const model = firstEnabled?.modelId ?? (models[0] as { modelId?: string } | undefined)?.modelId ?? "test";
-        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model, sessionId: `provider-probe-${req.path.id}` };
+        const cfg: ProviderConfig = { kind, baseUrl: prov.baseUrl, apiKey: yield* service.resolveApiKey(req.path.id), model, sessionId: `provider-probe-${req.path.id}` };
         const probed = yield* Effect.tryPromise({
           try: () => listModels(cfg),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
@@ -4509,6 +4514,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnect
     TeamsService.Default, WorkspaceService.Default, AuthorizationService.Default,
     WorkspaceInvitesService.Default, PasswordLinksService.Default,
     AssistantProvidersRepo.Default, AssistantModelsRepo.Default, AssistantCallLogsRepo.Default, AssistantModelPricesRepo.Default,
+    AssistantProvidersService.Default,
     AssistantHealthRepo.Default, AssistantHealthService.Default, AssistantGateway.Default,
     // MCP connector seam: tests may inject a fake, otherwise the live
     // HTTP/SSE connector backs the registry test endpoint.

@@ -8,8 +8,10 @@ import type { AddressInfo } from "node:net";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createApiHandler } from "./http";
+import { seedProviderSecret } from "../assistant/test-secrets";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
+const MASTER_KEY = Buffer.from("r".repeat(32)).toString("base64");
 
 const ADMIN_KEY = "lxk_" + "a".repeat(43);
 const SECOND_ADMIN_KEY = "lxk_" + "b".repeat(43);
@@ -99,6 +101,7 @@ async function readSseFrames(res: Response, until?: string): Promise<Array<Recor
 }
 
 beforeAll(async () => {
+  process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
   const hold = await startServer("hold");
   holdServer = hold.server;
   holdPort = hold.port;
@@ -143,6 +146,7 @@ VALUES ('chat', 'chat-u2', 'p1', 'u2', 'Anna private', '[]');
 });
 
 afterAll(() => {
+  delete process.env.LXK_SECRETS_MASTER_KEY;
   holdServer.closeAllConnections?.();
   holdServer.close();
   doneServer.closeAllConnections?.();
@@ -250,7 +254,8 @@ describe("POST /api/assistant/chat/stream (fromIndex)", () => {
       })
     );
     expect(put.status).toBe(200);
-    db.exec(`INSERT OR IGNORE INTO assistant_providers (id, label, base_url, api_key) VALUES ('prov-p2', 'MockDone', 'http://127.0.0.1:${donePort}', 'sk-test')`);
+    db.exec(`INSERT OR IGNORE INTO assistant_providers (id, label, base_url, api_key) VALUES ('prov-p2', 'MockDone', 'http://127.0.0.1:${donePort}', '')`);
+    await seedProviderSecret(db, "prov-p2", "sk-test", MASTER_KEY);
     db.exec(`INSERT OR IGNORE INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m-p2', 'prov-p2', 'test-model', 'openai_compatible', 1, 1)`);
 
     const res = await handler(
@@ -321,7 +326,8 @@ describe("POST /api/assistant/chat/stream (fromIndex)", () => {
       })
     );
     expect(put.status).toBe(200);
-    db.exec(`INSERT OR IGNORE INTO assistant_providers (id, label, base_url, api_key) VALUES ('prov-p1', 'MockHold', 'http://127.0.0.1:${holdPort}', 'sk-test')`);
+    db.exec(`INSERT OR IGNORE INTO assistant_providers (id, label, base_url, api_key) VALUES ('prov-p1', 'MockHold', 'http://127.0.0.1:${holdPort}', '')`);
+    await seedProviderSecret(db, "prov-p1", "sk-test", MASTER_KEY);
     db.exec(`INSERT OR IGNORE INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m-p1', 'prov-p1', 'test-model', 'openai_compatible', 1, 1)`);
 
     const ac = new AbortController();

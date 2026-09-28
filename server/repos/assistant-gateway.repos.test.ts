@@ -81,8 +81,9 @@ describe("assistant gateway phase 1", () => {
       const layer = Layer.mergeAll(AssistantProvidersRepo.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const repo = yield* AssistantProvidersRepo;
-        const row = yield* repo.create({ id: "pr1", label: "OpenAI", baseUrl: "https://api.openai.com/v1", apiKey: "sk-abc123XYZ" });
-        expect(row.api_key).toBe("sk-abc123XYZ");
+        const row = yield* repo.create({ id: "pr1", label: "OpenAI", baseUrl: "https://api.openai.com/v1" });
+        expect((row as { api_key?: unknown }).api_key).toBeUndefined();
+        yield* repo.putSecret("pr1", { ciphertext: "Y2lwaGVy", iv: "aXZpdml2aXZpdg", keyId: "active", keyHint: "3XYZ" });
         const masked = yield* repo.maskedView("pr1");
         expect(masked.hasKey).toBe(true);
         expect(masked.keyMask).toBe("sk-…3XYZ");
@@ -110,7 +111,7 @@ describe("assistant gateway phase 1", () => {
         const modelRepo = yield* AssistantModelsRepo;
         const logRepo = yield* AssistantCallLogsRepo;
         const priceRepo = yield* AssistantModelPricesRepo;
-        yield* provRepo.create({ id: "pr1", label: "P1", baseUrl: "https://x", apiKey: "sk-1" });
+        yield* provRepo.create({ id: "pr1", label: "P1", baseUrl: "https://x" });
         const m = yield* modelRepo.create({ id: "m1", providerId: "pr1", modelId: "gpt-4o", kind: "openai_compatible", priority: 1, enabled: true });
         expect(m.modelId).toBe("gpt-4o");
         const byProv = yield* modelRepo.listByProvider("pr1");

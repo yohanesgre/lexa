@@ -34,6 +34,9 @@ vi.mock("../assistant/provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../assistant/provider")>();
   return {
     ...actual,
+    // See assistant-chat.service.test.ts: the adapter snapshot is stubbed so a
+    // keyless test provider never rejects provider construction.
+    buildAdapter: () => ({}) as never,
     streamChat: (input: { systemPrompts: unknown; tools?: unknown }) => {
       providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [] });
       return (async function* () {
@@ -117,7 +120,7 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, p
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'Test Agent', '', 'Be precise.', 0);
 INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'Test Polish', '', 'Polish the text.', 0);
 INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('a1', 'sk1');
-INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pv1', 'Test', 'https://model.test/v1', 'mk');
+INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pv1', 'Test', 'https://model.test/v1', '');
 INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled)
   VALUES ('m1', 'pv1', 'test-model', 'openai_compatible', 0, 1);
 INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_model_id)

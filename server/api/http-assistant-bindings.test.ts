@@ -34,7 +34,7 @@ beforeAll(async () => {
     INSERT INTO users (id, email, name, role) VALUES ('u1','a@lexa.test','A','superadmin'), ('u2','m@lexa.test','M','member');
     INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1','test','${adminHash}','u1'), ('k2','mem','${memberHash}','u2');
     INSERT INTO projects (id, name, slug) VALUES ('p1','Alpha','alpha'), ('p2','Beta','beta'), ('p3','Gamma','gamma');
-    INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','Opencode Go','https://x','sk');
+    INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','Opencode Go','https://x', '');
     INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('mdl1','pr1','gpt-5.1','openai_compatible',0,1);
     INSERT INTO assistant_settings (project_id, provider_id, primary_model_id, fallback_model_ids, write_tools, search_api_key, reasoning_effort)
       VALUES ('p1','pr1','mdl1','["mdl2","mdl3"]','create_task,update_task','exa-key','high');

@@ -4,6 +4,7 @@
 import "./env-boot";
 import { runMigrations } from "./db/migrate";
 import { backfillTaskKeys } from "./db/task-keys-backfill";
+import { runBootBackfill } from "./db/provider-secrets-boot";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -74,6 +75,12 @@ runMigrations(DATABASE_PATH);
     db.close();
   }
 }
+// One-way provider-key backfill: encrypt every legacy plaintext api_key into
+// assistant_provider_secrets and clear the column (it stays NOT NULL, dead).
+// Idempotent; a missing keyring leaves rows untouched and logs the blocked
+// count. Runs after the env mirror so the settings are DB-authoritative first.
+// Awaited (not runSync): the effect suspends on WebCrypto promises.
+await runBootBackfill(DATABASE_PATH, getEnv());
 // Boot-time stale-run sweep: a crash mid-stream leaves `running` assistant
 // rows that never finish, blocking reset/resume. Mark them failed.
 {

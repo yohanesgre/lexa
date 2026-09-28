@@ -24,7 +24,7 @@ describe("assistant-health.service", () => {
     try {
       runMigrations(dbPath);
       const db = new Database(dbPath);
-      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
+      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x', '')").run();
       const layer = Layer.mergeAll(AssistantHealthRepo.Default, AssistantHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* AssistantHealthService;
@@ -44,7 +44,7 @@ describe("assistant-health.service", () => {
     try {
       runMigrations(dbPath);
       const db = new Database(dbPath);
-      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
+      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x', '')").run();
       const layer = Layer.mergeAll(AssistantHealthRepo.Default, AssistantHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* AssistantHealthService;
@@ -67,7 +67,7 @@ describe("assistant-health.service", () => {
     try {
       runMigrations(dbPath);
       const db = new Database(dbPath);
-      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
+      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x', '')").run();
       const layer = Layer.mergeAll(AssistantHealthRepo.Default, AssistantHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* AssistantHealthService;
@@ -95,7 +95,7 @@ describe("assistant-health.service", () => {
     try {
       runMigrations(dbPath);
       const db = new Database(dbPath);
-      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
+      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x', '')").run();
       const layer = Layer.mergeAll(AssistantHealthRepo.Default, AssistantHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* AssistantHealthService;
