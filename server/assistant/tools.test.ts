@@ -14,7 +14,7 @@ import {
   type WikiPageContent,
   type WikiSearchHit,
 } from "./tools";
-import type { JevQuestions, JevPreflightEnv } from "./jev";
+import type { JevQuestions, JevRuntimeConfig } from "./jev";
 import type { TipTapDoc } from "../../shared/types";
 
 function deps(overrides: Partial<AssistantToolDeps> = {}): AssistantToolDeps {
@@ -284,7 +284,7 @@ describe("toolCallDetail", () => {
 
 // ── jev_assess ─────────────────────────────────────────────────────────────
 
-const JEV_ENV: JevPreflightEnv = { TYPESAFE_API_KEY: "tk-secret" };
+const JEV_CONFIG: JevRuntimeConfig = { apiKey: "tk-secret", baseUrl: "", model: "" };
 const ASK_QUESTIONS: JevQuestions = {
   next_step: { type: "choice", instructions: "What next?", criteria: { act: null, ask: null } },
 };
@@ -299,7 +299,7 @@ function jevFetch(payload: unknown, status = 200) {
 }
 
 const jevDeps = (overrides: Partial<AssistantToolDeps> = {}): AssistantToolDeps =>
-  deps({ jevEnv: JEV_ENV, ...overrides });
+  deps({ jevConfig: JEV_CONFIG, ...overrides });
 
 // jevLog writes one JSON line to stderr; the suite captures it so an assertion
 // can read the meta a real call emitted.
@@ -327,10 +327,12 @@ function jevTool(overrides: Partial<AssistantToolDeps> = {}): { exec: Exec; call
 }
 
 describe("jev_assess presence", () => {
-  it("is absent without a configured key and present with one", () => {
+  it("is absent without a resolved config and present with one", () => {
+    // Presence is the whole gate: the service already encoded configured +
+    // per-project opt-in + a stored, decryptable key.
     expect(buildAssistantTools(deps()).map((t) => t.name)).not.toContain("jev_assess");
-    expect(buildAssistantTools(deps({ jevEnv: null })).map((t) => t.name)).not.toContain("jev_assess");
-    expect(buildAssistantTools(deps({ jevEnv: { TYPESAFE_API_KEY: "   " } })).map((t) => t.name)).not.toContain("jev_assess");
+    expect(buildAssistantTools(deps({ jevConfig: null })).map((t) => t.name)).not.toContain("jev_assess");
+    expect(buildAssistantTools(deps({ jevConfig: undefined })).map((t) => t.name)).not.toContain("jev_assess");
     expect(buildAssistantTools(jevDeps()).map((t) => t.name)).toContain("jev_assess");
   });
 

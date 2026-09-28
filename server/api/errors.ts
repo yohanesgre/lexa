@@ -115,6 +115,16 @@ export class McpInvalidTransportConfig extends Data.TaggedError("McpInvalidTrans
 export class McpStdioUnavailable extends Data.TaggedError("McpStdioUnavailable")<{}> {}
 export class McpConnectFailed extends Data.TaggedError("McpConnectFailed")<{ message?: string }> {}
 export class McpToolCallFailed extends Data.TaggedError("McpToolCallFailed")<{ message?: string }> {}
+// Jev registry: the managed key cannot be stored because the secrets keyring is
+// unavailable or malformed (mirrors the MCP managed-secret refusal).
+export class SecretKeyUnavailable extends Data.TaggedError("SecretKeyUnavailable")<{ reason: string }> {}
+// A Jev config payload the contract refuses (invalid base URL, model length,
+// or a clear/secret conflict).
+export class JevInvalidConfig extends Data.TaggedError("JevInvalidConfig")<{ reason: string }> {}
+// Jev rejected the stored API key (401/403 upstream).
+export class JevAuthFailed extends Data.TaggedError("JevAuthFailed")<{ message?: string }> {}
+// Jev could not be reached or answered unreadably (transport/5xx).
+export class JevUnreachable extends Data.TaggedError("JevUnreachable")<{ message?: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -194,6 +204,10 @@ export const errorCodeMap: Record<string, string> = {
   McpStdioUnavailable: "MCP_STDIO_UNAVAILABLE",
   McpConnectFailed: "MCP_CONNECT_FAILED",
   McpToolCallFailed: "MCP_TOOL_CALL_FAILED",
+  SecretKeyUnavailable: "SECRET_KEY_UNAVAILABLE",
+  JevInvalidConfig: "JEV_INVALID_CONFIG",
+  JevAuthFailed: "JEV_AUTH_FAILED",
+  JevUnreachable: "JEV_UNREACHABLE",
   RowNotFound: "NOT_FOUND",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
@@ -291,6 +305,8 @@ export function errorToStatus(error: { _tag: string }): number {
       return 403;
     case "McpInvalidTransportConfig":
     case "McpStdioUnavailable":
+    case "SecretKeyUnavailable":
+    case "JevInvalidConfig":
       return 400;
     case "InvalidKey":
     case "MissingAuth":
@@ -313,6 +329,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "AssistantToolBudgetExceeded":
     case "McpConnectFailed":
     case "McpToolCallFailed":
+    case "JevAuthFailed":
+    case "JevUnreachable":
       return 502;
     case "DbError":
       return 500;
@@ -465,6 +483,14 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return typeof error.message === "string" && error.message ? error.message : "Could not connect to the MCP server";
     case "McpToolCallFailed":
       return typeof error.message === "string" && error.message ? error.message : "MCP tool call failed";
+    case "SecretKeyUnavailable":
+      return String(error.reason ?? "Managed secrets are not configured on this server");
+    case "JevInvalidConfig":
+      return String(error.reason ?? "Invalid Jev configuration");
+    case "JevAuthFailed":
+      return typeof error.message === "string" && error.message ? error.message : "Jev rejected the API key";
+    case "JevUnreachable":
+      return typeof error.message === "string" && error.message ? error.message : "Jev could not be reached";
     case "RowNotFound":
       return "Resource not found";
     case "CannotDeleteSelf":

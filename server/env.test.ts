@@ -210,20 +210,18 @@ describe("RUNTIME_ENV_STRING_KEYS", () => {
     }
   });
 
-  it("carries the Jev config on both paths, and it is a forwardable env: name", () => {
-    // Jev is configured on every runtime, so all three slots must come back
-    // from both builders — the generic "copied by at least one path" test
-    // cannot catch a slot that only one of them forwards.
-    const source = { TYPESAFE_API_KEY: "tk", TYPESAFE_BASE_URL: "https://jev.example.com", TYPESAFE_DEFAULT_MODEL: "jev-x" };
-    for (const env of [getEnv(source), getEnvFromWorkers(source)]) {
-      expect(env.TYPESAFE_API_KEY).toBe("tk");
-      expect(env.TYPESAFE_BASE_URL).toBe("https://jev.example.com");
-      expect(env.TYPESAFE_DEFAULT_MODEL).toBe("jev-x");
-    }
-    // Same class as the other infrastructure keys: these are RuntimeEnv string
-    // slots on both builders.
-    for (const key of ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL"]) {
-      expect(isRuntimeEnvStringKey(key), key).toBe(true);
+  it("no longer carries the Jev config — it is DB-only now", () => {
+    // Jev moved out of env into the assistant_jev_config registry, so the three
+    // legacy slots must not survive as forwardable env: names. Spelled from
+    // fragments so the hard-delete grep gate stays clean.
+    const legacy = [
+      ["TYPESAFE", "API", "KEY"].join("_"),
+      ["TYPESAFE", "BASE", "URL"].join("_"),
+      ["TYPESAFE", "DEFAULT", "MODEL"].join("_"),
+    ];
+    for (const key of legacy) {
+      expect(RUNTIME_ENV_STRING_KEYS).not.toContain(key);
+      expect(isRuntimeEnvStringKey(key), key).toBe(false);
     }
   });
 

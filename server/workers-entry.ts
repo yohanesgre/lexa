@@ -79,9 +79,6 @@ export interface WorkersEnv {
   LXK_RATE_LIMIT_MAX?: string;
   LXK_RATE_LIMIT_WINDOW_MS?: string;
   LXK_ASSISTANT_REPO_CAP?: string;
-  TYPESAFE_API_KEY?: string;
-  TYPESAFE_BASE_URL?: string;
-  TYPESAFE_DEFAULT_MODEL?: string;
   // Managed secrets: the AES-GCM envelope key pair shared by MCP tokens,
   // provider keys, and Jev. Optional — an unset active key disables managed
   // secrets and leaves env:/file: refs as-is.

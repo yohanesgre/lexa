@@ -42,10 +42,6 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "LXK_RATE_LIMIT_WINDOW_MS",
   // Assistant
   "LXK_ASSISTANT_REPO_CAP",
-  // Jev (Typesafe System 1 advisory layer)
-  "TYPESAFE_API_KEY",
-  "TYPESAFE_BASE_URL",
-  "TYPESAFE_DEFAULT_MODEL",
   // Managed secrets — the envelope key pair shared by MCP tokens, provider API
   // keys, and the Jev API key. Both are RuntimeEnv slots so they reach the
   // keyring on both runtimes; the master keys themselves are never a client
@@ -118,9 +114,6 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_RATE_LIMIT_MAX: source.LXK_RATE_LIMIT_MAX,
     LXK_RATE_LIMIT_WINDOW_MS: source.LXK_RATE_LIMIT_WINDOW_MS,
     LXK_ASSISTANT_REPO_CAP: source.LXK_ASSISTANT_REPO_CAP,
-    TYPESAFE_API_KEY: source.TYPESAFE_API_KEY,
-    TYPESAFE_BASE_URL: source.TYPESAFE_BASE_URL,
-    TYPESAFE_DEFAULT_MODEL: source.TYPESAFE_DEFAULT_MODEL,
     LXK_SECRETS_MASTER_KEY: source.LXK_SECRETS_MASTER_KEY,
     LXK_SECRETS_MASTER_KEY_PREV: source.LXK_SECRETS_MASTER_KEY_PREV,
     LOG_LEVEL: source.LOG_LEVEL,
@@ -166,9 +159,6 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_RATE_LIMIT_MAX: s("LXK_RATE_LIMIT_MAX"),
     LXK_RATE_LIMIT_WINDOW_MS: s("LXK_RATE_LIMIT_WINDOW_MS"),
     LXK_ASSISTANT_REPO_CAP: s("LXK_ASSISTANT_REPO_CAP"),
-    TYPESAFE_API_KEY: s("TYPESAFE_API_KEY"),
-    TYPESAFE_BASE_URL: s("TYPESAFE_BASE_URL"),
-    TYPESAFE_DEFAULT_MODEL: s("TYPESAFE_DEFAULT_MODEL"),
     LXK_SECRETS_MASTER_KEY: s("LXK_SECRETS_MASTER_KEY"),
     LXK_SECRETS_MASTER_KEY_PREV: s("LXK_SECRETS_MASTER_KEY_PREV"),
     LOG_LEVEL: s("LOG_LEVEL"),

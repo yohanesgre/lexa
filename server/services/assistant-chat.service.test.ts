@@ -13,6 +13,7 @@ import { resolveStorageConfig } from "../storage/config";
 import { RuntimeEnvLive } from "../runtime-env";
 import { AssistantChatService } from "./assistant-chat.service";
 import { activeChats } from "../assistant/active-chats";
+import { encryptSecret, parseMasterKey } from "../assistant/secrets";
 import type { StreamFrame } from "../../shared/assistant";
 import type { RuntimeEnv } from "../env";
 
@@ -46,7 +47,16 @@ let service: AssistantChatService;
 let env: RuntimeEnv;
 const jevCalls: FetchCall[] = [];
 
-const JEV_ENV = { TYPESAFE_API_KEY: "tk-test", TYPESAFE_BASE_URL: "https://typesafe.test" } as const;
+// Jev is DB-only now: the config, the envelope-encrypted key, and the project
+// opt-in all live in the registry, and the master key comes from RuntimeEnv.
+const JEV_MASTER_KEY = Buffer.from("j".repeat(32)).toString("base64");
+const JEV_PLAINTEXT = "tk-test";
+const JEV_BASE_URL = "https://typesafe.test";
+const jevSeed = await (async () => {
+  const key = await parseMasterKey(JEV_MASTER_KEY);
+  const sealed = await encryptSecret(JEV_PLAINTEXT, "jev", "default", key);
+  return { ciphertext: sealed.ciphertextB64, iv: sealed.ivB64, keyId: sealed.keyId, hint: JEV_PLAINTEXT.slice(-4) };
+})();
 
 const ADVISORY_ANSWERS = {
   write_intent: { type: "choice", choice: "write", probabilities: { none: 0.05, read: 0.1, write: 0.85 }, confidence: 0.85 },
@@ -77,7 +87,11 @@ function stubUnreachable(): void {
   stubFetch(() => Promise.reject(new Error("Jev must not be reachable without a key")));
 }
 
-function setup(opts: { env?: RuntimeEnv } = {}) {
+// `full` = config enabled + stored key + project opt-in; the two partial modes
+// drop one gate so a test can prove each one disables Jev on its own.
+type JevSeedMode = "full" | "no-project" | "no-secret";
+
+function setup(opts: { env?: RuntimeEnv; jev?: JevSeedMode } = {}) {
   dir = mkdtempSync(join(tmpdir(), "lexa-assistant-chat-svc-"));
   const dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
@@ -98,7 +112,18 @@ INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled
 INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_model_id)
   VALUES ('p1', '[]', 'pv1', 'm1');
 `);
-  env = opts.env ?? ({ ...JEV_ENV } as unknown as RuntimeEnv);
+  const jev = opts.jev ?? "full";
+  db.exec(`UPDATE assistant_jev_config SET base_url = '${JEV_BASE_URL}', model = 'jev-latest', enabled = 1 WHERE id = 'default'`);
+  if (jev !== "no-secret") {
+    db.exec(
+      `INSERT INTO assistant_jev_secrets (config_id, ciphertext, iv, key_id, key_hint)
+       VALUES ('default', '${jevSeed.ciphertext}', '${jevSeed.iv}', '${jevSeed.keyId}', '${jevSeed.hint}')`
+    );
+  }
+  if (jev !== "no-project") {
+    db.exec(`INSERT INTO assistant_jev_projects (project_id, enabled) VALUES ('p1', 1)`);
+  }
+  env = opts.env ?? ({ LXK_SECRETS_MASTER_KEY: JEV_MASTER_KEY } as RuntimeEnv);
   const cfg = resolveStorageConfig({}, dir);
   const layer = AssistantChatService.Default.pipe(
     Layer.provide(
@@ -272,8 +297,8 @@ describe("chat preflight — fail-open and disable", () => {
     expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
   });
 
-  it("a missing API key disables the preflight and omits jev_assess entirely", async () => {
-    setup({ env: {} as unknown as RuntimeEnv });
+  it("no stored key disables the preflight and omits jev_assess entirely", async () => {
+    setup({ jev: "no-secret" });
     stubUnreachable();
 
     const frames = await drain(await runStream("c1", "hello"));
@@ -283,8 +308,17 @@ describe("chat preflight — fail-open and disable", () => {
     expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
   });
 
-  it("a blank API key is treated as absent", async () => {
-    setup({ env: { TYPESAFE_API_KEY: "   " } as unknown as RuntimeEnv });
+  it("an absent project opt-in disables Jev", async () => {
+    setup({ jev: "no-project" });
+    stubUnreachable();
+
+    await drain(await runStream("c1", "hello"));
+    expect(jevCalls).toHaveLength(0);
+    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
+  });
+
+  it("no master key leaves the stored ciphertext unopenable, disabling Jev", async () => {
+    setup({ env: {} as unknown as RuntimeEnv });
     stubUnreachable();
 
     await drain(await runStream("c1", "hello"));

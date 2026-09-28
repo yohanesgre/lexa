@@ -235,6 +235,31 @@ export interface ModelListResult {
   models: { id: string }[];
 }
 
+export interface AssistantJevMasked {
+  id: "default";
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+  hasKey: boolean;
+  keyMask: string | null;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export interface AssistantJevProjectPublic {
+  projectId: ID;
+  enabled: boolean;
+  /**
+   * Whether Jev is usable for projects at all — global config enabled AND a
+   * stored, decryptable key. Ignores this project's own row, so a member can
+   * render the disabled toggle + "configure Jev" notice without superadmin read
+   * access. Never key material.
+   */
+  available: boolean;
+  createdAt: ISODate | null;
+  updatedAt: ISODate | null;
+}
+
 export interface AssistantProviderModel {
   id: string;
   providerId: string;

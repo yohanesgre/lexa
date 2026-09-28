@@ -13,7 +13,17 @@
 // no wiring. The assistant services (lane B) call `runJevPreflight` once per
 // new run and drop the returned segment into the system prompt.
 
-import type { RuntimeEnv } from "../env";
+import { TypeSafeClient } from "@typesafe-ai/sdk";
+import type { EntryType, Questions as SdkQuestions } from "@typesafe-ai/sdk";
+
+// The plain runtime shape the AssistantJevService resolves from the DB registry
+// (global enabled + per-project opt-in + a stored, decryptable key). `jev.ts`
+// stays non-Effect: it consumes this value and knows nothing about the DB.
+export interface JevRuntimeConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
 
 export const JEV_DEFAULT_BASE_URL = "https://api.typesafe.ai";
 export const JEV_DEFAULT_MODEL = "jev-latest";
@@ -89,6 +99,10 @@ export type JevFailureCode =
 
 export type JevResult =
   | { ok: true; model: string; answers: Record<string, JevAnswer>; usage: JevUsage }
+  | { ok: false; code: JevFailureCode; message: string };
+
+export type JevModelsResult =
+  | { ok: true; models: string[] }
   | { ok: false; code: JevFailureCode; message: string };
 
 export interface SystemOneParams {
@@ -235,8 +249,133 @@ async function readCapped(res: Response): Promise<string | null> {
   return raw + decoder.decode();
 }
 
-function endpoint(baseUrl: string | undefined): string {
-  return `${((baseUrl ?? "").trim() || JEV_DEFAULT_BASE_URL).replace(/\/+$/, "")}/v1/systemone`;
+// The SDK owns the request/response cycle; the transport is the official
+// `@typesafe-ai/sdk` client, configured with our capping fetch. What stays ours
+// is the byte cap and the failure vocabulary: every SDK/transport error is
+// reduced to a fixed `{ ok: false, code }` and no upstream text survives.
+
+// A response that breached the byte cap. Thrown out of the capping fetch so the
+// SDK's own error wrapping cannot turn it into a generic connection error; the
+// capping closure records the breach and the mapper reads it first.
+class JevResponseTooLarge extends Error {
+  constructor() {
+    super("Jev response exceeded the size cap");
+    this.name = "JevResponseTooLarge";
+  }
+}
+
+interface Capping {
+  fetch: typeof fetch;
+  /** The status of the last response the transport saw, or null. */
+  lastStatus: () => number | null;
+  /** Whether the byte cap was breached on this attempt. */
+  tooLarge: () => boolean;
+}
+
+// Owns the 64 KB cap and the last-status record. A declared `content-length`
+// short-circuits the body read; otherwise `readCapped` stops a lying or endless
+// stream at the cap in its own reader. On a 2xx the oversized case throws before
+// any response is handed back, so the SDK never buffers past the cap. On a
+// non-ok response the SDK still needs a body to build its `APIError`, so the
+// body is capped and returned WITHOUT throwing — an oversized error body is not
+// a failure of its own; the recorded status is.
+function cappingFetch(inner: typeof fetch): Capping {
+  let last: number | null = null;
+  let breached = false;
+  const wrapped = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const res = await inner(input as RequestInfo, init);
+    if (!res.ok) {
+      last = res.status;
+      // The old transport discarded non-ok bodies outright; the SDK reads one
+      // for its message, so it is bounded here under the same cap rather than
+      // materialized whole.
+      const raw = await readCapped(res);
+      if (raw === null) return new Response("", { status: res.status });
+      const headers = new Headers(res.headers);
+      // The reconstructed body is not the encoded/measured one any more.
+      headers.delete("content-encoding");
+      headers.delete("content-length");
+      return new Response(raw, { status: res.status, headers });
+    }
+    const raw = await readCapped(res);
+    if (raw === null) {
+      breached = true;
+      throw new JevResponseTooLarge();
+    }
+    return new Response(raw, { status: res.status, headers: res.headers });
+  }) as typeof fetch;
+  return { fetch: wrapped, lastStatus: () => last, tooLarge: () => breached };
+}
+
+interface ClientBundle {
+  client: TypeSafeClient;
+  cap: Capping;
+}
+
+// The SDK client is built per call: the config (base URL, model, key) is a
+// request-time DB value, never a process constant. `retry: { maxRetries: 0 }`
+// and a per-attempt `timeout` mirror the old single-attempt, hard-budget
+// contract; `logLevel: "off"` keeps the SDK from ever writing to stderr.
+// (v0.6.0 names: `retry.maxRetries`, `logLevel: "off"` — not `retry: 0` /
+// `"silent"` as the design sketch assumed.)
+function buildClient(opts: {
+  apiKey: string;
+  baseUrl?: string | undefined;
+  model?: string | undefined;
+  fetchImpl?: typeof fetch | undefined;
+  timeoutMs: number;
+}): ClientBundle {
+  const cap = cappingFetch(typeof opts.fetchImpl === "function" ? opts.fetchImpl : globalThis.fetch);
+  const client = new TypeSafeClient({
+    apiKey: opts.apiKey,
+    baseURL: (opts.baseUrl ?? "").trim() || JEV_DEFAULT_BASE_URL,
+    defaultModel: (opts.model ?? "").trim() || JEV_DEFAULT_MODEL,
+    fetch: cap.fetch,
+    timeout: opts.timeoutMs,
+    retry: { maxRetries: 0 },
+    logLevel: "off",
+  });
+  return { client, cap };
+}
+
+// Reduce any thrown SDK/transport error to the typed failure vocabulary. The
+// capping breach is checked first because the SDK wraps the thrown error into
+// its own connection error. Timeouts and caller aborts are separate from a
+// connection failure; a status seen by the transport decides the rest, and no
+// branch reads the error's own message (it can quote the key or the body).
+function failureCode(e: unknown, cap: Capping | undefined): JevFailureCode {
+  if (cap?.tooLarge()) return "INVALID_RESPONSE";
+  const name = e instanceof Error ? e.name : "";
+  if (name === "APITimeoutError" || name === "APIUserAbortError" || name === "TimeoutError" || name === "AbortError") {
+    return "TIMEOUT";
+  }
+  const status = cap?.lastStatus() ?? null;
+  if (status !== null) return statusCode(status);
+  // A client-side validation/shape error raised before or without a response
+  // (empty questions, an unexpected `/v1/models` body) is unreadable input.
+  if (name === "TypeSafeError") return "INVALID_RESPONSE";
+  return "NETWORK";
+}
+
+function modelsFailure(code: JevFailureCode): JevModelsResult {
+  return { ok: false, code, message: FAILURE_MESSAGES[code] ?? `Jev request failed (HTTP ${code.slice("HTTP_".length)})` };
+}
+
+function toJevResult(payload: unknown, questions: JevQuestions): JevResult | null {
+  if (!isRecord(payload) || typeof payload.model !== "string" || !isRecord(payload.answers)) return null;
+  const answers: Record<string, JevAnswer> = {};
+  for (const [id, value] of Object.entries(payload.answers)) {
+    const answer = toAnswer(value);
+    if (answer === null) return null;
+    answers[id] = answer;
+  }
+  // Every question asked must come back answered; an extra id is tolerated.
+  for (const id of Object.keys(questions)) {
+    if (!Object.hasOwn(answers, id)) return null;
+  }
+  const usage = toUsage(payload.usage);
+  if (usage === null) return null;
+  return { ok: true, model: payload.model, answers, usage };
 }
 
 export async function systemOne(params: SystemOneParams): Promise<JevResult> {
@@ -248,57 +387,51 @@ export async function systemOne(params: SystemOneParams): Promise<JevResult> {
   if (key === "") return fail("MISSING_KEY");
   if (!hasValidQuestions(questions)) return fail("INVALID_RESPONSE");
 
-  const fetchImpl = params.fetchImpl ?? globalThis.fetch;
-  const signal = AbortSignal.timeout(params.timeoutMs ?? JEV_TOOL_TIMEOUT_MS);
-  let res: Response;
+  // Construction is inside the try: a bad config throws a `TypeSafeError`
+  // before any request, and the typed `{ ok: false }` contract holds there too.
+  let bundle: ClientBundle | undefined;
   try {
-    res = await fetchImpl(endpoint(params.baseUrl), {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-      body: JSON.stringify({ state, model: (params.model ?? "").trim() || JEV_DEFAULT_MODEL, questions }),
-      signal,
+    bundle = buildClient({
+      apiKey: key,
+      baseUrl: params.baseUrl,
+      model: params.model,
+      fetchImpl: params.fetchImpl,
+      timeoutMs: params.timeoutMs ?? JEV_TOOL_TIMEOUT_MS,
     });
+    const payload: unknown = await bundle.client.systemOne({
+      state: state as unknown as EntryType,
+      questions: questions as unknown as SdkQuestions,
+    });
+    const result = toJevResult(payload, questions);
+    return result ?? fail("INVALID_RESPONSE");
   } catch (e) {
-    // Third-party transport text can quote the Authorization header or the
-    // request body, so only the abort class is distinguished.
-    const name = e instanceof Error ? e.name : "";
-    return fail(name === "TimeoutError" || name === "AbortError" ? "TIMEOUT" : "NETWORK");
+    return fail(failureCode(e, bundle?.cap));
   }
+}
 
-  if (!res.ok) return fail(statusCode(res.status));
-
-  let raw: string | null;
+export async function listJevModels(params: {
+  config: JevRuntimeConfig;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<JevModelsResult> {
+  // Construction is inside the try for the same reason as `systemOne`.
+  let bundle: ClientBundle | undefined;
   try {
-    raw = await readCapped(res);
-  } catch {
-    // The budget keeps running while the body streams, so a body that stalls
-    // out is a timeout, not a transport failure.
-    return fail(signal.aborted ? "TIMEOUT" : "NETWORK");
+    bundle = buildClient({
+      apiKey: params.config.apiKey,
+      baseUrl: params.config.baseUrl,
+      model: params.config.model,
+      fetchImpl: params.fetchImpl,
+      timeoutMs: params.timeoutMs ?? JEV_TOOL_TIMEOUT_MS,
+    });
+    const models = await bundle.client.models.list();
+    const names = (Array.isArray(models) ? models : [])
+      .map((m) => (isRecord(m) && typeof m.name === "string" ? m.name : null))
+      .filter((n): n is string => n !== null);
+    return { ok: true, models: names };
+  } catch (e) {
+    return modelsFailure(failureCode(e, bundle?.cap));
   }
-  if (raw === null) return fail("INVALID_RESPONSE");
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw) as unknown;
-  } catch {
-    return fail("INVALID_RESPONSE");
-  }
-  if (!isRecord(payload) || typeof payload.model !== "string" || !isRecord(payload.answers)) return fail("INVALID_RESPONSE");
-
-  const answers: Record<string, JevAnswer> = {};
-  for (const [id, value] of Object.entries(payload.answers)) {
-    const answer = toAnswer(value);
-    if (answer === null) return fail("INVALID_RESPONSE");
-    answers[id] = answer;
-  }
-  // Every question asked must come back answered; an extra id is tolerated.
-  for (const id of Object.keys(questions)) {
-    if (!Object.hasOwn(answers, id)) return fail("INVALID_RESPONSE");
-  }
-  const usage = toUsage(payload.usage);
-  if (usage === null) return fail("INVALID_RESPONSE");
-
-  return { ok: true, model: payload.model, answers, usage };
 }
 
 // ── Preflight state ────────────────────────────────────────────────────────
@@ -522,34 +655,31 @@ export interface JevPreflightResult {
   usage?: JevUsage;
 }
 
-export type JevPreflightEnv = Pick<RuntimeEnv, "TYPESAFE_API_KEY" | "TYPESAFE_BASE_URL" | "TYPESAFE_DEFAULT_MODEL">;
-
 export interface JevPreflightParams {
   state: JevContent;
-  env: JevPreflightEnv | null | undefined;
+  config: JevRuntimeConfig | null | undefined;
   fetchImpl?: typeof fetch | undefined;
   timeoutMs?: number | undefined;
 }
 
 // Fail-open by contract: every outcome other than a rendered segment leaves the
-// assistant run untouched, and nothing throws into the caller. A hostile or
-// absent env is read defensively — a wrong-typed key is treated as absent, so
-// Jev disables itself instead of sending a malformed header.
+// assistant run untouched, and nothing throws into the caller. A null config is
+// the documented disable switch (no stored key, or the project opted out) — no
+// request is attempted at all.
 export async function runJevPreflight(params: JevPreflightParams): Promise<JevPreflightResult> {
   const started = Date.now();
   const done = (result: Omit<JevPreflightResult, "latencyMs">): JevPreflightResult => ({ ...result, latencyMs: Date.now() - started });
+  const config = params.config;
+  if (config === null || config === undefined || config.apiKey.trim() === "") {
+    return { segment: null, outcome: "skipped", code: "MISSING_KEY", latencyMs: 0 };
+  }
   try {
-    const env = params.env;
-    const apiKey = typeof env?.TYPESAFE_API_KEY === "string" ? env.TYPESAFE_API_KEY : "";
-    // `SystemOneParams` is exact-optional, so a blank/absent override is left
-    // out rather than passed as undefined — the client then applies its own
-    // default, which is the same value `env` would have carried.
     const res = await systemOne({
       state: params.state,
       questions: PREFLIGHT_QUESTIONS,
-      apiKey,
-      ...(typeof env?.TYPESAFE_BASE_URL === "string" ? { baseUrl: env.TYPESAFE_BASE_URL } : {}),
-      ...(typeof env?.TYPESAFE_DEFAULT_MODEL === "string" ? { model: env.TYPESAFE_DEFAULT_MODEL } : {}),
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl,
+      model: config.model,
       ...(typeof params.fetchImpl === "function" ? { fetchImpl: params.fetchImpl } : {}),
       timeoutMs: params.timeoutMs ?? JEV_PREFLIGHT_TIMEOUT_MS,
     });

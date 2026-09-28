@@ -11,12 +11,14 @@ import {
   buildAdvisorySegment,
   buildPreflightState,
   jevLog,
+  listJevModels,
   runJevPreflight,
   systemOne,
   type JevAnswer,
   type JevPreflightResult,
   type JevQuestion,
   type JevQuestions,
+  type JevRuntimeConfig,
   type PreflightStateInput,
 } from "./jev";
 
@@ -254,6 +256,92 @@ describe("systemOne failure mapping", () => {
     expect(await fail(422)).toMatchObject({ ok: false, code: "HTTP_422" });
     expect(await fail(500)).toMatchObject({ ok: false, code: "HTTP_500" });
     expect(await fail(404)).toMatchObject({ ok: false, code: "HTTP_404" });
+  });
+
+  it("does not retry: a 429 is exactly one fetch call and one RATE_LIMITED result", async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response("slow down", { status: 429 });
+    }) as unknown as typeof fetch;
+    expect(await systemOne({ state, questions: noulQuestions, apiKey: "k", fetchImpl })).toMatchObject({ ok: false, code: "RATE_LIMITED" });
+    expect(calls).toBe(1);
+  });
+
+  it("rejects an out-of-range noul verdict as INVALID_RESPONSE", async () => {
+    for (const noul of [5, -1, 1.5]) {
+      const { fetchImpl } = okFetch({ model: "jev-latest", answers: { write_intent: { type: "noul", noul } }, usage });
+      expect(await systemOne({ state, questions: noulQuestions, apiKey: "k", fetchImpl }), String(noul)).toMatchObject({
+        ok: false,
+        code: "INVALID_RESPONSE",
+      });
+    }
+  });
+
+  it("caps a large non-ok body instead of buffering it, and still maps the status", async () => {
+    const chunk = new Uint8Array(4096).fill(120);
+    let pulled = 0;
+    let cancelled = false;
+    const endless = (async () =>
+      ({
+        ok: false,
+        status: 500,
+        headers: new Headers(),
+        body: {
+          getReader: () => ({
+            read: async () => {
+              pulled += chunk.byteLength;
+              return { done: false, value: chunk };
+            },
+            cancel: async () => {
+              cancelled = true;
+            },
+          }),
+        },
+      }) as unknown as Response) as unknown as typeof fetch;
+    const res = await systemOne({ state, questions: noulQuestions, apiKey: "k", fetchImpl: endless });
+    expect(res).toMatchObject({ ok: false, code: "HTTP_500" });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeGreaterThan(JEV_MAX_RESPONSE_BYTES);
+    expect(pulled).toBeLessThanOrEqual(JEV_MAX_RESPONSE_BYTES + chunk.byteLength);
+  });
+
+  it("caps a declared oversized non-ok body before reading it at all", async () => {
+    let read = 0;
+    const declared = (async () =>
+      ({
+        ok: false,
+        status: 502,
+        headers: new Headers({ "content-length": String(JEV_MAX_RESPONSE_BYTES + 1) }),
+        body: {
+          getReader: () => ({
+            read: async () => {
+              read += 1;
+              return { done: true, value: undefined };
+            },
+            cancel: async () => {},
+          }),
+        },
+      }) as unknown as Response) as unknown as typeof fetch;
+    expect(await systemOne({ state, questions: noulQuestions, apiKey: "k", fetchImpl: declared })).toMatchObject({
+      ok: false,
+      code: "HTTP_502",
+    });
+    expect(read).toBe(0);
+  });
+
+  it("maps a small non-ok body correctly", async () => {
+    const small = (async () => new Response("upstream detail", { status: 503 })) as unknown as typeof fetch;
+    expect(await systemOne({ state, questions: noulQuestions, apiKey: "k", fetchImpl: small })).toMatchObject({
+      ok: false,
+      code: "HTTP_503",
+    });
+  });
+
+  it("maps a client construction failure to a typed failure, never a throw", async () => {
+    // A non-positive timeout fails the SDK constructor before any request.
+    const res = await systemOne({ state, questions: noulQuestions, apiKey: "k", timeoutMs: 0 });
+    expect(res).toMatchObject({ ok: false, code: "INVALID_RESPONSE" });
   });
 
   it("rejects non-JSON bodies as INVALID_RESPONSE", async () => {
@@ -732,11 +820,11 @@ describe("buildAdvisorySegment", () => {
 });
 
 describe("runJevPreflight", () => {
-  const env = { TYPESAFE_API_KEY: "tk-secret" };
+  const config: JevRuntimeConfig = { apiKey: "tk-secret", baseUrl: "", model: "" };
 
   it("sends the state with the fixed questions and returns the advisory segment", async () => {
     const { fetchImpl, calls } = okFetch(preflightPayload({ write_intent: "write" }));
-    const res = await runJevPreflight({ state, env, fetchImpl });
+    const res = await runJevPreflight({ state, config, fetchImpl });
     expect(res.outcome).toBe("advisory");
     expect(res.segment).toContain("Jev advisory (non-authoritative)");
     expect(res.usage).toEqual(usage);
@@ -746,9 +834,9 @@ describe("runJevPreflight", () => {
     expect(Object.keys(body.questions)).toEqual(["write_intent", "ambiguity", "memory_conflict"]);
   });
 
-  it("resolves api key, base URL, and model from RuntimeEnv, with the documented defaults", async () => {
+  it("resolves base URL and model from the config, with the documented defaults", async () => {
     const { fetchImpl, calls } = okFetch(preflightPayload({ write_intent: "none" }));
-    const res = await runJevPreflight({ state, env: { TYPESAFE_API_KEY: "tk-secret" }, fetchImpl });
+    const res = await runJevPreflight({ state, config, fetchImpl });
     expect(res.outcome).toBe("advisory");
     expect(calls[0]!.url).toBe(`${JEV_DEFAULT_BASE_URL}/v1/systemone`);
     const body = JSON.parse(String(calls[0]!.init.body)) as { model: string };
@@ -757,22 +845,28 @@ describe("runJevPreflight", () => {
     const custom = okFetch(preflightPayload({ write_intent: "none" }));
     await runJevPreflight({
       state,
-      env: { TYPESAFE_API_KEY: "tk-secret", TYPESAFE_BASE_URL: "https://jev.internal/", TYPESAFE_DEFAULT_MODEL: "jev-2026-09" },
+      config: { apiKey: "tk-secret", baseUrl: "https://jev.internal/", model: "jev-2026-09" },
       fetchImpl: custom.fetchImpl,
     });
     expect(custom.calls[0]!.url).toBe("https://jev.internal/v1/systemone");
     expect(JSON.parse(String(custom.calls[0]!.init.body)).model).toBe("jev-2026-09");
   });
 
-  it("is disabled without an API key — no request is made and the run proceeds", async () => {
+  it("is disabled without a config or key — no request is made and the run proceeds", async () => {
     let called = 0;
     const fetchImpl = (async () => {
       called += 1;
       return new Response("{}", { status: 200 });
     }) as unknown as typeof fetch;
-    for (const key of [undefined, "", "   "]) {
-      const res = await runJevPreflight({ state, env: { TYPESAFE_API_KEY: key }, fetchImpl });
-      expect(res).toMatchObject({ segment: null, outcome: "skipped", code: "MISSING_KEY" });
+    const configs: Array<JevRuntimeConfig | null | undefined> = [
+      null,
+      undefined,
+      { apiKey: "", baseUrl: "", model: "" },
+      { apiKey: "   ", baseUrl: "", model: "" },
+    ];
+    for (const c of configs) {
+      const res = await runJevPreflight({ state, config: c, fetchImpl });
+      expect(res).toEqual({ segment: null, outcome: "skipped", code: "MISSING_KEY", latencyMs: 0 });
     }
     expect(called).toBe(0);
   });
@@ -793,17 +887,17 @@ describe("runJevPreflight", () => {
       },
     ];
     for (const { fetchImpl, code } of cases) {
-      const res = await runJevPreflight({ state, env, fetchImpl });
+      const res = await runJevPreflight({ state, config, fetchImpl });
       expect(res, code).toMatchObject({ segment: null, outcome: "failed", code });
       expect(res.segment).toBeNull();
       expect(typeof res.latencyMs).toBe("number");
     }
   });
 
-  it("treats an absent key as a skip, not a failure", async () => {
-    // The preflight key is the documented disable switch: no key means Jev is
-    // off, which is not an error worth a WARN log line.
-    const res = await runJevPreflight({ state, env: {}, fetchImpl: (async () => new Response("{}")) as unknown as typeof fetch });
+  it("treats an absent config as a skip, not a failure", async () => {
+    // A null config is the documented disable switch: no key means Jev is off,
+    // which is not an error worth a WARN log line.
+    const res = await runJevPreflight({ state, config: null, fetchImpl: (async () => new Response("{}")) as unknown as typeof fetch });
     expect(res).toMatchObject({ segment: null, outcome: "skipped", code: "MISSING_KEY" });
   });
 
@@ -813,21 +907,20 @@ describe("runJevPreflight", () => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "TimeoutError")));
       })) as unknown as typeof fetch;
     expect(JEV_PREFLIGHT_TIMEOUT_MS).toBe(3_000);
-    expect(await runJevPreflight({ state, env, fetchImpl: stalling, timeoutMs: 5 })).toMatchObject({
+    expect(await runJevPreflight({ state, config, fetchImpl: stalling, timeoutMs: 5 })).toMatchObject({
       segment: null,
       outcome: "failed",
       code: "TIMEOUT",
     });
   });
 
-  it("survives a hostile or absent env and a fetch implementation that is not callable", async () => {
+  it("survives an absent config and a fetch implementation that is not callable", async () => {
     const notAFunction = { call: () => new Response("{}") } as unknown as typeof fetch;
-    const hostileEnv = { TYPESAFE_API_KEY: 42 } as unknown as { TYPESAFE_API_KEY?: string };
     for (const params of [
-      { state, env: undefined },
-      { state, env: null },
-      { state, env: hostileEnv, fetchImpl: notAFunction },
-      { state, env, fetchImpl: 7 as unknown as typeof fetch },
+      { state, config: undefined },
+      { state, config: null },
+      { state, config, fetchImpl: notAFunction },
+      { state, config, fetchImpl: 7 as unknown as typeof fetch },
     ]) {
       const res = await runJevPreflight(params as Parameters<typeof runJevPreflight>[0]);
       expect(res.segment).toBeNull();
@@ -839,7 +932,7 @@ describe("runJevPreflight", () => {
     // All three answers arrive, but none matches the question it answers — the
     // API is free to return a mistyped shape, and systemOne accepts it.
     const { fetchImpl } = okFetch(preflightPayload({ write_intent: "reorganize" }, { ambiguity: "score", memory_conflict: "score" }));
-    const res = await runJevPreflight({ state, env, fetchImpl });
+    const res = await runJevPreflight({ state, config, fetchImpl });
     expect(res.segment).toBeNull();
     expect(res.outcome).toBe("skipped");
     expect(res.code).toBeUndefined();
@@ -849,10 +942,35 @@ describe("runJevPreflight", () => {
     const leaky = (async () => {
       throw new TypeError("fetch failed: Bearer tk-secret / rename the sprint");
     }) as unknown as typeof fetch;
-    const res = await runJevPreflight({ state, env, fetchImpl: leaky });
+    const res = await runJevPreflight({ state, config, fetchImpl: leaky });
     const text = JSON.stringify(res);
     expect(text).not.toContain("tk-secret");
     expect(text).not.toContain("rename the sprint");
+  });
+});
+
+describe("listJevModels", () => {
+  const config: JevRuntimeConfig = { apiKey: "tk-secret", baseUrl: "", model: "" };
+
+  it("GETs /v1/models and returns the model names", async () => {
+    const { fetchImpl, calls } = okFetch({ models: [{ name: "jev-latest", description: "d", release_date: "2026-01-01" }, { name: "jev-mini", description: "d", release_date: "2026-01-02" }] });
+    const res = await listJevModels({ config, fetchImpl });
+    expect(res).toEqual({ ok: true, models: ["jev-latest", "jev-mini"] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe(`${JEV_DEFAULT_BASE_URL}/v1/models`);
+    expect(calls[0]!.init.method).toBe("GET");
+  });
+
+  it("maps 401 to AUTH and never echoes the upstream body", async () => {
+    const leaky = (async () => new Response("Bearer tk-secret rejected", { status: 401 })) as unknown as typeof fetch;
+    const res = await listJevModels({ config, fetchImpl: leaky });
+    expect(res).toMatchObject({ ok: false, code: "AUTH" });
+    expect(JSON.stringify(res)).not.toContain("tk-secret");
+  });
+
+  it("rejects an unexpected body shape as INVALID_RESPONSE", async () => {
+    const { fetchImpl } = okFetch({ data: [] });
+    expect(await listJevModels({ config, fetchImpl })).toMatchObject({ ok: false, code: "INVALID_RESPONSE" });
   });
 });
 
