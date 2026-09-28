@@ -103,9 +103,10 @@ describe("AssistantProjectMcpSection", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("explains that global enablement is the master switch", () => {
-    render(<AssistantProjectMcpSection project={PROJECT} />);
-    expect(screen.getByText(/Which registered Remote MCP clients this project's Assistant may call/)).toBeInTheDocument();
-    expect(screen.getByText(/Workspace → Assistant Providers → MCP Clients/)).toBeInTheDocument();
+  it("carries no verbose helper paragraph under the table", () => {
+    const { container } = render(<AssistantProjectMcpSection project={PROJECT} />);
+    expect(screen.queryByText(/Which registered Remote MCP clients/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/A client must be enabled globally first/)).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".field-hint")).toHaveLength(0);
   });
 });

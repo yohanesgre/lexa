@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Settings, Trash2 } from "lucide-react";
 import { useMcpServers, useCreateMcpServer, useUpdateMcpServer, useDeleteMcpServer, useTestMcpServer } from "../../lib/queries/assistant-admin";
 import type { McpServer } from "../../lib/api";
-import { WarningNotice } from "../ui/NoticeWarning";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
   MCP_TRANSPORTS,
@@ -68,10 +67,6 @@ export function AssistantMcpSection() {
         </div>
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
-      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Lexa MCP clients connect to remote MCP servers over HTTP or SSE. v1 exposes only read-only-annotated tools to the model; the rest are listed but not callable. An optional secret reference supplies a Bearer token; credentials are referenced, never stored.
-      </p>
-
       <div className="card-panel" style={{ overflow: "hidden" }}>
         <table className="settings-table">
           <thead>
@@ -119,10 +114,6 @@ export function AssistantMcpSection() {
       )}
 
       <McpClientForm key={editingId ?? "new"} editing={editing} onCancel={() => setEditingId(null)} />
-
-      <WarningNotice className="mt-4" title="Only read-only tools are exposed">
-        v1 hands the model only tools the server annotates as read-only (<span className="font-mono">readOnlyHint === true</span>); a tool with no annotation is denied by default. Non-read-only tools are listed in the counts but never callable — a server that exposes none still shows its total, so a fully-gated server is explainable rather than mysterious.
-      </WarningNotice>
 
       {deleteConfirm && (
         <ConfirmDialog
@@ -244,7 +235,6 @@ function McpClientForm({ editing, onCancel }: { editing: McpServer | null; onCan
         >
           {MCP_TRANSPORTS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
-        <div className="field-hint">Connects Lexa&apos;s MCP client to a remote MCP server over HTTP or SSE. The URL is checked against the allowlist at save and connect.</div>
       </div>
 
       <div className="card-panel" style={{ padding: 12, background: "var(--lx-surface-input)", marginTop: 12 }}>
@@ -254,7 +244,7 @@ function McpClientForm({ editing, onCancel }: { editing: McpServer | null; onCan
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="mcp-url">URL</label>
           <input id="mcp-url" className="prop-input w-full font-mono" placeholder="https://mcp.linear.example/mcp" value={state.url} onChange={(e) => set("url", e.target.value)} />
-          <div className="field-hint">http(s) only · no userinfo. SSRF-checked against the URL allowlist at save and again at connect.</div>
+          <div className="field-hint">http(s) only · no userinfo · SSRF-checked against the URL allowlist at save and connect.</div>
         </div>
       </div>
 
@@ -268,7 +258,7 @@ function McpClientForm({ editing, onCancel }: { editing: McpServer | null; onCan
           )}
         </div>
         <input id="mcp-secret" className="prop-input w-full font-mono" placeholder="env:NAME or file:/abs/path" value={state.secretRef} onChange={(e) => set("secretRef", e.target.value)} style={{ maxWidth: 480 }} />
-        <div className="field-hint">Bearer token reference, never stored as a secret value. <span className="font-mono">env:NAME</span> resolves only when NAME is already a key in the server <span className="font-mono">RuntimeEnv</span> snapshot (Bun or Workers) — an unknown name is rejected on save, and a stored one that cannot resolve fails closed at connect with no Authorization header. For a dedicated token on a host with file access use <span className="font-mono">file:/absolute/path</span>. Resolved at connect time and sent as an Authorization Bearer token; read back as <span className="font-mono">hasSecret</span> only. Empty keeps the stored reference.</div>
+        <div className="field-hint">Bearer token reference, never stored as a secret value — resolved at connect time. <span className="font-mono">env:NAME</span> must be a key in the server <span className="font-mono">RuntimeEnv</span> snapshot; <span className="font-mono">file:/absolute/path</span> for a dedicated token. Empty keeps the stored reference.</div>
       </div>
 
       <div className="flex items-center gap-2 mt-3">

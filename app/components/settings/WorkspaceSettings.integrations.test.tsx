@@ -70,7 +70,7 @@ describe("Workspace settings integrations tab", () => {
     render(<WorkspaceSettings />);
     await user.click(screen.getByRole("tab", { name: "Integrations" }));
     expect(screen.getByText("No MCP clients yet")).toBeInTheDocument();
-    expect(screen.getByText(/An optional secret reference supplies a Bearer token/)).toBeInTheDocument();
+    expect(screen.queryByText(/An optional secret reference supplies a Bearer token/)).not.toBeInTheDocument();
     const transport = screen.getByLabelText("Transport") as HTMLSelectElement;
     expect(Array.from(transport.options).map((o) => o.value)).toEqual(["http", "sse"]);
     expect(screen.queryByText(/stdio/i)).not.toBeInTheDocument();
