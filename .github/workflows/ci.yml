@@ -369,20 +369,27 @@ jobs:
         run: |
           WORKDIR="$(mktemp -d)"
           cd "$WORKDIR"
-          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191
+          # The e2e must run an image that actually applies the mounted
+          # .env.toml. The published `:latest` release tag can predate the
+          # loader (the loader landed on main after the last release), so the
+          # e2e tracks `staging` (rebuilt from main on every push). Once a
+          # release ships the loader, `:latest` is equivalent.
+          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191 --image staging
           curl -sf http://127.0.0.1:9191/api/health | grep -q '"ok":true'
           cd lexa-deploy
           test -f .env.toml || { echo "::error::installer did not write .env.toml"; exit 1; }
           grep -q 'LXK_PUBLIC_URL' .env.toml || { echo "::error::.env.toml missing app keys"; exit 1; }
           grep -q 'target: /app/.env.toml' docker-compose.yml || { echo "::error::compose does not bind .env.toml"; exit 1; }
           grep -q 'create_host_path: false' docker-compose.yml || { echo "::error::compose bind must not auto-create the host path"; exit 1; }
-          # SEV2: the installer may run as uid != 1000 (image USER bun is 1000);
-          # assert the fixture ownership that makes the mount readable, then the
-          # container boot below is the end-to-end proof.
+          # SEV2: the installer derives the mounted file's group from the image's
+          # own gid (never a hardcode); assert that exact ownership + mode, then
+          # the container boot below is the end-to-end proof.
+          APP_IMAGE="$(docker compose config --images app | head -1)"
           ENV_GID="$(stat -c %g .env.toml)"
           ENV_MODE="$(stat -c %a .env.toml)"
-          echo ".env.toml owner $(id -u):${ENV_GID} mode ${ENV_MODE}"
-          [ "$ENV_GID" = "1000" ] || { echo "::error::.env.toml group is $ENV_GID, expected 1000"; exit 1; }
+          IMAGE_GID="$(docker run --rm --entrypoint sh "$APP_IMAGE" -c 'id -g')"
+          echo ".env.toml owner $(id -u):${ENV_GID} mode ${ENV_MODE} (image gid ${IMAGE_GID})"
+          [ "$ENV_GID" = "$IMAGE_GID" ] || { echo "::error::.env.toml group is $ENV_GID, expected the image gid $IMAGE_GID"; exit 1; }
           [ "$ENV_MODE" = "640" ] || { echo "::error::.env.toml mode is $ENV_MODE, expected 640"; exit 1; }
           if docker compose logs app 2>&1 | grep -q 'env-file: loaded'; then
             echo "boot log: env-file: loaded"
@@ -391,9 +398,8 @@ jobs:
             docker compose logs app || true
             exit 1
           fi
-          # Values must be APPLIED, not just written: run the pulled image with a
+          # Values must be APPLIED, not just written: run the image with a
           # non-default PORT from a fixture .env.toml and health-check that port.
-          APP_IMAGE="$(docker compose config --images app | head -1)"
           PORT_DIR="$(mktemp -d)"
           cat > "$PORT_DIR/.env.toml" <<'TOML'
           [core]

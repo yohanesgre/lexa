@@ -286,10 +286,12 @@ assert_rc "compose_render invalid mode dies" 1 "$rc"
 
 echo "== grant_container_read =="
 
-# Non-root installer (uid 1001 != image uid 1000): the chown rounds-trips through
-# a one-shot root container. Hermetic: `id` and `docker` are PATH shims — the
-# shim records the chown argv and fakes the container exit, so the host file's
-# mode is the only real side effect (640 on claimed, 644 on failure).
+# Non-root installer (uid 1001 != image uid 1000): the image's own uid:gid is
+# probed from the image, then the chown round-trips through a one-shot root
+# container. Hermetic: `id` and `docker` are PATH shims — the shim answers the
+# `--entrypoint sh` probe with the configured uid/gid and logs the chown argv,
+# so the host file's mode is the only real side effect (640 on claimed, 644 on
+# failure).
 gtroot="$(mktemp -d)"
 mkdir -p "${gtroot}/bin"
 cat > "${gtroot}/bin/id" <<'SHIM'
@@ -304,6 +306,13 @@ chmod +x "${gtroot}/bin/id"
 cat > "${gtroot}/bin/docker" <<'SHIM'
 #!/usr/bin/env bash
 [ -n "${DOCKER_SHIM_LOG:-}" ] && printf 'docker %s\n' "$*" >> "${DOCKER_SHIM_LOG}"
+case "$*" in
+  *"--entrypoint sh"*)
+    printf '%s\n' "${DOCKER_SHIM_UID:-1000}"
+    printf '%s\n' "${DOCKER_SHIM_GID:-1000}"
+    exit 0
+    ;;
+esac
 exit "${DOCKER_SHIM_RC:-0}"
 SHIM
 chmod +x "${gtroot}/bin/docker"
@@ -314,10 +323,23 @@ chmod 600 "${gtfile}"
 ( export PATH="${gtroot}/bin:${PATH}" DOCKER_SHIM_LOG="${gtroot}/docker.log" DOCKER_SHIM_RC=0
   lib_call grant_container_read "${gtfile}" myimg >/dev/null 2>&1 ) || true
 gtlog="$(cat "${gtroot}/docker.log" 2>/dev/null || true)"
+assert_grep "grant_container_read probes the image for uid/gid" 'entrypoint sh' "$gtlog"
 assert_grep "grant_container_read chowns to group 1000 via docker" 'chown 1001:1000 /lexa-env\.toml' "$gtlog"
 assert_grep "grant_container_read runs the chown container as root" 'user 0' "$gtlog"
 assert_grep "grant_container_read mounts the env file" ':/lexa-env\.toml' "$gtlog"
 assert_eq "grant_container_read mode 640 after docker chown" "640" "$(stat -c %a "${gtfile}")"
+
+# An image whose gid is not 1000 (e.g. a rebuilt base image): the chown target
+# group must follow the image, not a hardcoded 1000.
+gtalt="${gtroot}/.env.alt"
+: > "${gtalt}"
+chmod 600 "${gtalt}"
+( export PATH="${gtroot}/bin:${PATH}" DOCKER_SHIM_LOG="${gtroot}/docker-alt.log" DOCKER_SHIM_RC=0 \
+    DOCKER_SHIM_UID=1000 DOCKER_SHIM_GID=2000
+  lib_call grant_container_read "${gtalt}" altimg >/dev/null 2>&1 ) || true
+gtaltlog="$(cat "${gtroot}/docker-alt.log" 2>/dev/null || true)"
+assert_grep "grant_container_read derives the group from the image (gid 2000)" 'chown 1001:2000 /lexa-env\.toml' "$gtaltlog"
+assert_eq "grant_container_read alt-image mode 640" "640" "$(stat -c %a "${gtalt}")"
 
 gtfail="${gtroot}/.env.fail"
 : > "${gtfail}"

@@ -41,9 +41,13 @@ converts it to `.env.toml` and renames the original to `.env.legacy` (0600).
 > the installer never writes it (setting it would rename the compose project and
 > orphan the `lexa-data` volume). Re-runs **merge** — operator-added keys such as
 > `GITHUB_*`, `LXK_MCP_MASTER_KEY`, and a pinned `LXK_IMAGE_TAG` are preserved
-> (previously the flat `.env` was truncated). When the installer runs as uid ≠
-> 1000 it re-owns `.env.toml` to `host-uid:1000` mode 0640 so the container's
-> `bun` uid (1000) can read the mount.
+> (previously the flat `.env` was truncated). The installer reads the image's
+> own uid:gid (never a hardcode) and re-owns `.env.toml` to
+> `host-uid:<image-gid>` mode 0640 (a root installer uses
+> `<image-uid>:<image-gid>`) so the container process can read the mount. A
+> resolved `.env.toml` that exists but cannot be read or parsed fails the boot
+> (exit non-zero, path named) instead of silently starting on defaults; only a
+> genuinely absent file warns and falls back.
 
 ## Targets
 
@@ -300,8 +304,9 @@ defaults — so existing installs keep booting unchanged.
    to `.env`, remove `.env.toml`, then re-run so the tooling `.env` and compose
    file are regenerated.
 4. **Permissions** — `.env.toml` is written 0600 on bare/systemd and 0640
-   (`host-uid:1000`) on docker so the container's `bun` uid can read it; it stays
-   gitignored (`.env.toml.example` is the only tracked env file).
+   (`host-uid:<image-gid>`, derived from the image; a root installer uses
+   `<image-uid>:<image-gid>`) on docker so the container process can read it; it
+   stays gitignored (`.env.toml.example` is the only tracked env file).
 
 ## Upgrading across managed-only MCP client secrets (2026-09-28)
 

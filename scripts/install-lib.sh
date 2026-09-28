@@ -594,32 +594,62 @@ migrate_legacy_deploy_env() {
   return 0
 }
 
+# _container_ids <image> — the uid:gid the runtime image actually runs as,
+# quoted from the image itself (never hardcoded: a base-image change must not
+# silently make the env mount unreadable). Cached per image for the run. Falls
+# back to 1000:1000 when the probe cannot run (no shell in the image, offline).
+_container_ids() {
+  local image="$1"
+  if [ "${_GRANT_IDS_IMAGE:-}" = "$image" ] && [ -n "${_GRANT_IDS_VALUE:-}" ]; then
+    printf '%s\n' "$_GRANT_IDS_VALUE"
+    return 0
+  fi
+  local probe="" uid="" gid=""
+  probe="$(docker run --rm --entrypoint sh "$image" -c 'id -u; id -g' 2>/dev/null || true)"
+  uid="$(printf '%s\n' "$probe" | sed -n '1p' | tr -cd '0-9')"
+  gid="$(printf '%s\n' "$probe" | sed -n '2p' | tr -cd '0-9')"
+  [ -n "$uid" ] || uid=1000
+  [ -n "$gid" ] || gid=1000
+  _GRANT_IDS_IMAGE="$image"
+  _GRANT_IDS_VALUE="${uid}:${gid}"
+  printf '%s\n' "$_GRANT_IDS_VALUE"
+}
+
 # grant_container_read <path> <image>
-# The runtime image runs as uid 1000 (Dockerfile `USER bun`); when the installer
-# runs as a different uid, a 0600 host file is unreadable in the container and
-# the app crash-loops. Re-own the file to the installing user, group 1000, mode
-# 0640 — the host user keeps read/write, the container reads via the group. A
-# one-shot root container does the chown (works unprivileged); when the
-# installer is already root, chown directly. Falls back to 0644 only if the
-# chown container cannot run. Dry-run: logs the intent, changes nothing.
+# The runtime image runs as an unprivileged uid (Dockerfile `USER bun`); when
+# the installer runs as a different uid, a 0600 host file is unreadable in the
+# container and the app crash-loops. Resolve the image's own uid:gid (never a
+# hardcode), then re-own the file so the container reads it:
+#   - non-root installer: host-uid:<image-gid> mode 0640 — the host keeps
+#     read/write, the container reads via its group. The chown round-trips
+#     through a one-shot root container (works unprivileged).
+#   - root installer: <image-uid>:<image-gid> mode 0640.
+# Falls back to 0644 only if the chown cannot run (keeps the mount readable).
+# Dry-run: logs the intent, changes nothing.
 grant_container_read() {
   local path="$1" image="$2"
   if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf '[dry-run] chmod 640 %s && chown %s:1000 %s\n' "$path" "$(id -u)" "$path"
+    printf '[dry-run] chmod 640 %s && chown %s:<image-gid> %s\n' "$path" "$(id -u)" "$path"
     return 0
   fi
+  local ids uid gid
+  ids="$(_container_ids "$image")"
+  uid="${ids%%:*}"
+  gid="${ids##*:}"
+  [ -n "$uid" ] || uid=1000
+  [ -n "$gid" ] || gid=1000
   local claimed=0
   if [ "$(id -u)" = "0" ]; then
-    chown "$(id -u):1000" "$path" && claimed=1
+    chown "${uid}:${gid}" "$path" && claimed=1
   elif docker run --rm --user 0 -v "${path}:/lexa-env.toml" "$image" \
-    chown "$(id -u):1000" /lexa-env.toml >/dev/null 2>&1; then
+    chown "$(id -u):${gid}" /lexa-env.toml >/dev/null 2>&1; then
     claimed=1
   fi
   if [ "$claimed" = "1" ]; then
     chmod 640 "$path" || true
     return 0
   fi
-  echo "  (could not re-own ${path} for uid 1000 — making it world-readable; keep the deploy dir private)"
+  echo "  (could not re-own ${path} for uid ${uid}:${gid} — making it world-readable; keep the deploy dir private)"
   chmod 644 "$path" || true
   return 0
 }
