@@ -58,6 +58,7 @@ import { syncRateLimitFromDbAsync } from "./api/rate-limit";
 import { DEFAULT_MAX_UPLOAD_MB } from "./storage/config";
 import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "./storage/config";
 import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
+import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
 
 export interface WorkersEnv {
@@ -118,6 +119,9 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
           if (mirrored.length > 0) console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
           yield* syncRateLimitFromDbAsync(driver);
           yield* syncGitHubConfigFromDbAsync(driver);
+          // Per-isolate first request is the Workers "boot": the one-way
+          // provider-key backfill runs here, after the DB config sync.
+          yield* backfillProviderSecrets(driver, runtimeEnv);
         }).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] boot sync failed:", String(e)))))
       );
     })().catch((e) => {

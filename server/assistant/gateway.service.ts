@@ -4,19 +4,22 @@
  *         INFO (attempt start/success), WARN (retry/backoff), ERROR (attempt failure), FATAL (all-models-failed terminal).
  * Enable DEBUG: LOG_LEVEL=debug or trace. TANSTACK_AI_JSON=1 also enables structured tanstack-ai logs (service tanstack-ai) — complementary, not duplicate.
  */
-import { Effect, Option } from "effect";
+import { Effect, Either, Option } from "effect";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { buildAdapter, normalizeBaseUrl, normalizeProviderKind, streamChat as providerStreamChat, testConnection as providerTestConnection, translateRunError, getProviderDiagnostics, extractStatusCode, extractProviderMessage, extractRetryAfter, isTransientUpstream, type ProviderConfig } from "./provider";
 import { normalizeRunUsage } from "./build-stream";
 import type { CacheablePrompt } from "./prompt";
 import { AssistantProvidersRepo } from "../repos/assistant-providers.repo";
+import type { AssistantProviderRowWithSecret } from "../repos/assistant-providers.repo";
+import { AssistantProvidersService, PROVIDER_KEY_UNDECRYPTABLE } from "../services/assistant-providers.service";
 import { AssistantModelsRepo } from "../repos/assistant-models.repo";
 import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
 import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
 import { estimateTokens } from "./tiktoken";
-import { ProviderNotConfigured, AssistantGenerationFailed } from "../api/errors";
+import { ProviderNotConfigured, ProviderAuthFailed, AssistantGenerationFailed } from "../api/errors";
+import type { DbError } from "../db/db";
 import { getEnv } from "../env";
 
 function maskApiKeyShort(key: string): string {
@@ -130,6 +133,7 @@ export function stripToolCallXml(text: string): string {
 export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/AssistantGateway", {
   dependencies: [
     AssistantProvidersRepo.Default,
+    AssistantProvidersService.Default,
     AssistantModelsRepo.Default,
     AssistantCallLogsRepo.Default,
     AssistantModelPricesRepo.Default,
@@ -137,6 +141,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
   ],
   effect: Effect.gen(function* () {
     const providerRepo = yield* AssistantProvidersRepo;
+    const providersService = yield* AssistantProvidersService;
     const modelRepo = yield* AssistantModelsRepo;
     const callLogRepo = yield* AssistantCallLogsRepo;
     const priceRepo = yield* AssistantModelPricesRepo;
@@ -149,12 +154,32 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
     } as never as InstanceType<typeof AssistantHealthService>);
     const settingsRepo = yield* AssistantSettingsRepo;
 
-    const resolveFallback = (projectId: string): Effect.Effect<ProviderConfig[], ProviderNotConfigured> =>
-      (Effect.gen(function* () {
+    const resolveCandidateKeys = (
+      rows: Map<string, AssistantProviderRowWithSecret>,
+      ids: Iterable<string>
+    ): Effect.Effect<{ keys: Map<string, string>; broken: Set<string> }> =>
+      Effect.gen(function* () {
+        const keys = new Map<string, string>();
+        const broken = new Set<string>();
+        const seen = new Set<string>();
+        for (const pid of ids) {
+          if (seen.has(pid)) continue;
+          seen.add(pid);
+          const row = rows.get(pid);
+          if (!row) continue;
+          const outcome = yield* Effect.either(providersService.resolveApiKeyForRow(row));
+          if (Either.isRight(outcome)) keys.set(pid, outcome.right);
+          else broken.add(pid);
+        }
+        return { keys, broken };
+      });
+
+    const resolveFallback = (projectId: string): Effect.Effect<ProviderConfig[], ProviderNotConfigured | ProviderAuthFailed | DbError> =>
+      Effect.gen(function* () {
         yield* Effect.sync(() => gatewayLog("DEBUG", "assistant resolveFallback start", { projectId }));
         const models = (yield* modelRepo.listAll().pipe(Effect.catchAll((e: unknown) => (e as { _tag?: string })?._tag === "RowNotFound" ? Effect.succeed([] as Array<never>) : Effect.fail(e as never)))) as Array<{ provider_id?: string; providerId?: string; kind: ProviderConfig["kind"]; model_id?: string; modelId?: string; enabled?: boolean; priority?: number; id?: string }>;
-        const providers = (yield* providerRepo.list().pipe(Effect.catchAll((e: unknown) => (e as { _tag?: string })?._tag === "RowNotFound" ? Effect.succeed([] as Array<{ id: string }>) : Effect.fail(e as never)))) as Array<{ id: string; base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string }>;
-        const byId = new Map((providers as Array<{ id: string }>).map((p: { id: string }) => [p.id, p] as const));
+        const providers = (yield* providerRepo.list().pipe(Effect.catchAll((e: unknown) => (e as { _tag?: string })?._tag === "RowNotFound" ? Effect.succeed([] as Array<never>) : Effect.fail(e as never)))) as AssistantProviderRowWithSecret[];
+        const byId = new Map<string, AssistantProviderRowWithSecret>(providers.map((p) => [p.id, p] as const));
         const enabledModels = (models as Array<{ enabled?: boolean }>).filter((m) => (m as { enabled?: boolean }).enabled !== false);
         const byProviderModel = new Map<string, typeof enabledModels[number]>();
         for (const m of enabledModels) {
@@ -167,16 +192,32 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
           const mid = (m as { model_id?: string; modelId?: string }).model_id ?? (m as { modelId?: string }).modelId ?? "";
           if (mid && !byModelId.has(mid)) byModelId.set(mid, m);
         }
+        // Keys are opened ONLY for providers that contribute a candidate model,
+        // from the rows already listed (no per-provider getById). A provider
+        // whose stored key cannot be opened is DROPPED from the chain, so one
+        // unopenable row cannot fail resolution for unrelated providers; an
+        // all-dropped chain becomes PROVIDER_KEY_UNDECRYPTABLE at the exit.
+        const candidateIds = new Set<string>();
+        for (const m of enabledModels) {
+          const pid = (m as { provider_id?: string; providerId?: string }).provider_id ?? (m as { providerId?: string }).providerId;
+          if (pid) candidateIds.add(pid);
+        }
+        const { keys: keyById, broken: brokenProviderIds } = yield* resolveCandidateKeys(byId, candidateIds);
         const toConfig = (m: typeof enabledModels[number]): ProviderConfig | null => {
           const pid = (m as { provider_id?: string; providerId?: string }).provider_id ?? (m as { providerId?: string }).providerId;
           if (!pid) return null;
-          const p = byId.get(pid) as { base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string } | undefined;
+          if (brokenProviderIds.has(pid)) return null;
+          const p = byId.get(pid);
           if (!p) return null;
-          const baseUrl = p.base_url ?? p.baseUrl ?? "";
-          const apiKey = p.api_key ?? p.apiKey ?? "";
+          const baseUrl = p.base_url ?? "";
+          const apiKey = keyById.get(pid) ?? "";
           const modelId = (m as { model_id?: string; modelId?: string }).model_id ?? (m as { modelId?: string }).modelId ?? "";
           return { kind: normalizeProviderKind((m as { kind: unknown }).kind), baseUrl, apiKey, model: modelId, providerId: pid };
         };
+        const notConfigured = (): ProviderAuthFailed | ProviderNotConfigured =>
+          brokenProviderIds.size > 0
+            ? new ProviderAuthFailed({ message: PROVIDER_KEY_UNDECRYPTABLE })
+            : new ProviderNotConfigured({ projectId });
 
         const settingsRow = (yield* settingsRepo.getByProject(projectId).pipe(
           Effect.map((r) => r as unknown as { provider_id: string | null; primary_model_id: string | null; fallback_model_ids: string }),
@@ -300,7 +341,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
             gatewayLog("DEBUG", "assistant resolveFallback done", { projectId, count: out.length, models: out.map((c) => ({ providerId: c.providerId ?? null, model: c.model, kind: c.kind, baseUrl: safeBaseUrl(c.baseUrl, c.kind) })) });
             return out;
           }
-          return yield* Effect.fail(new ProviderNotConfigured({ projectId }));
+          return yield* Effect.fail(notConfigured());
         }
 
         const configs: ProviderConfig[] = [];
@@ -308,10 +349,11 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
           if (configs.length >= 3) break;
           const pid = (m as { provider_id?: string; providerId?: string }).provider_id ?? (m as { providerId?: string }).providerId;
           if (!pid) continue;
-          const p = byId.get(pid) as { base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string } | undefined;
+          if (brokenProviderIds.has(pid)) continue;
+          const p = byId.get(pid);
           if (!p) continue;
-          const baseUrl = p.base_url ?? p.baseUrl ?? "";
-          const apiKey = p.api_key ?? p.apiKey ?? "";
+          const baseUrl = p.base_url ?? "";
+          const apiKey = keyById.get(pid) ?? "";
           const modelId = (m as { model_id?: string; modelId?: string }).model_id ?? (m as { modelId?: string }).modelId ?? "";
           configs.push({ kind: normalizeProviderKind((m as { kind: unknown }).kind), baseUrl, apiKey, model: modelId, providerId: pid });
         }
@@ -320,8 +362,8 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
           gatewayLog("DEBUG", "assistant resolveFallback done", { projectId, count: out.length, models: out.map((c) => ({ providerId: c.providerId ?? null, model: c.model, kind: c.kind, baseUrl: safeBaseUrl(c.baseUrl, c.kind) })) });
           return out;
         }
-        return yield* Effect.fail(new ProviderNotConfigured({ projectId }));
-      }) as Effect.Effect<ProviderConfig[], ProviderNotConfigured>);
+        return yield* Effect.fail(notConfigured());
+      });
 
     const streamChat = (input: GatewayStreamInput): AsyncIterable<StreamChunk> => {
       let filteredMessages = input.messages.filter(
@@ -562,7 +604,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
       projectId: string,
       override?: { providerId?: string | null; modelId?: string | null; fallbackModelIds?: string[]; kind?: string; baseUrl?: string; model?: string; apiKey?: string },
       opts?: { signal?: AbortSignal; sessionId?: string }
-    ): Effect.Effect<{ ok: true; latencyMs: number }, ProviderNotConfigured | AssistantGenerationFailed | import("../api/errors").ProviderAuthFailed | import("../api/errors").ProviderUnreachable> =>
+    ): Effect.Effect<{ ok: true; latencyMs: number }, ProviderNotConfigured | AssistantGenerationFailed | import("../api/errors").ProviderAuthFailed | import("../api/errors").ProviderUnreachable | import("../db/db").DbError> =>
       Effect.gen(function* () {
         if (override?.kind && override?.baseUrl && override?.model) {
           const cfg: ProviderConfig = {
@@ -589,8 +631,8 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
 
         if (override?.providerId && override?.modelId) {
           const models = (yield* modelRepo.listAll().pipe(Effect.catchAll((e: unknown) => (e as { _tag?: string })?._tag === "RowNotFound" ? Effect.succeed([] as Array<never>) : Effect.fail(e as never)))) as Array<{ provider_id?: string; providerId?: string; kind: ProviderConfig["kind"]; model_id?: string; modelId?: string; enabled?: boolean; priority?: number; id?: string }>;
-          const providers = (yield* providerRepo.list().pipe(Effect.catchAll((e: unknown) => (e as { _tag?: string })?._tag === "RowNotFound" ? Effect.succeed([] as Array<{ id: string }>) : Effect.fail(e as never)))) as Array<{ id: string; base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string }>;
-          const byId = new Map((providers as Array<{ id: string }>).map((p: { id: string }) => [p.id, p] as const));
+          const providers = (yield* providerRepo.list().pipe(Effect.catchAll((e: unknown) => (e as { _tag?: string })?._tag === "RowNotFound" ? Effect.succeed([] as Array<never>) : Effect.fail(e as never)))) as AssistantProviderRowWithSecret[];
+          const byId = new Map<string, AssistantProviderRowWithSecret>(providers.map((p) => [p.id, p] as const));
           const byProviderModel = new Map<string, typeof models[number]>();
           for (const m of models) {
             const pid = (m as { provider_id?: string; providerId?: string }).provider_id ?? (m as { providerId?: string }).providerId ?? "";
@@ -602,18 +644,26 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
             const mid = (m as { model_id?: string; modelId?: string }).model_id ?? (m as { modelId?: string }).modelId ?? "";
             if (mid && !byModelId.has(mid)) byModelId.set(mid, m);
           }
-          const toConfig = (m: typeof models[number]): ProviderConfig | null => {
-            const pid = (m as { provider_id?: string; providerId?: string }).provider_id ?? (m as { providerId?: string }).providerId;
-            if (!pid) return null;
-            const p = byId.get(pid) as { base_url?: string; baseUrl?: string; api_key?: string; apiKey?: string } | undefined;
-            if (!p) return null;
-            const baseUrl = p.base_url ?? p.baseUrl ?? "";
-            const apiKey = p.api_key ?? p.apiKey ?? "";
-            const modelId = (m as { model_id?: string; modelId?: string }).model_id ?? (m as { modelId?: string }).modelId ?? "";
-            return { kind: normalizeProviderKind((m as { kind: unknown }).kind), baseUrl, apiKey, model: modelId, providerId: pid };
-          };
           const pid = override.providerId!;
           const mid = override.modelId!;
+          // Only the overriding provider can contribute configs here, so only
+          // its key is opened — from the row already listed, never a getById.
+          const targetRow = byId.get(pid);
+          let resolvedApiKey = "";
+          if (targetRow !== undefined) {
+            const keyOutcome = yield* Effect.either(providersService.resolveApiKeyForRow(targetRow));
+            if (Either.isLeft(keyOutcome)) return yield* Effect.fail(keyOutcome.left);
+            resolvedApiKey = keyOutcome.right;
+          }
+          const toConfig = (m: typeof models[number]): ProviderConfig | null => {
+            const mpid = (m as { provider_id?: string; providerId?: string }).provider_id ?? (m as { providerId?: string }).providerId;
+            if (!mpid) return null;
+            const p = byId.get(mpid);
+            if (!p) return null;
+            const baseUrl = p.base_url ?? "";
+            const modelId = (m as { model_id?: string; modelId?: string }).model_id ?? (m as { modelId?: string }).modelId ?? "";
+            return { kind: normalizeProviderKind((m as { kind: unknown }).kind), baseUrl, apiKey: resolvedApiKey, model: modelId, providerId: mpid };
+          };
           const key = `${pid}:${mid}`;
           let primaryModel = byProviderModel.get(key) ?? null;
           if (!primaryModel) {

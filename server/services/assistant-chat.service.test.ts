@@ -29,6 +29,10 @@ vi.mock("../assistant/provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../assistant/provider")>();
   return {
     ...actual,
+    // The adapter construction is real in production and rejects an empty key;
+    // these suites exercise Jev preflight/gateway resolution, not adapter
+    // wiring, so the snapshot build is stubbed (streamChat is stubbed too).
+    buildAdapter: () => ({}) as never,
     streamChat: (input: { systemPrompts: unknown; tools?: unknown }) => {
       providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [] });
       return (async function* () {
@@ -106,7 +110,7 @@ INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo',
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number)
   VALUES ('t1', 'p1', 'c1', 's-backlog', 'Fix login', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
-INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pv1', 'Test', 'https://model.test/v1', 'mk');
+INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pv1', 'Test', 'https://model.test/v1', '');
 INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled)
   VALUES ('m1', 'pv1', 'test-model', 'openai_compatible', 0, 1);
 INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_model_id)

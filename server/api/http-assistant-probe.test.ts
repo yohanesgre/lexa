@@ -33,7 +33,7 @@ beforeAll(async () => {
   db.exec(`
     INSERT INTO users (id, email, name, role) VALUES ('u1','a@lexa.test','A','superadmin');
     INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1','test','${adminHash}','u1');
-    INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk');
+    INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x', '');
   `);
   handler = createApiHandler(dbPath);
 });
