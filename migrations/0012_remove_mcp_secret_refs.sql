@@ -1,0 +1,17 @@
+-- 0012_remove_mcp_secret_refs.sql
+--
+-- Managed-only MCP client secrets (maintainer decision 2026-09-28): the
+-- `env:`/`file:` reference source is removed end to end. Managed envelope-
+-- encrypted tokens are the ONLY credential source; secret-less clients remain
+-- legal. Every stored `secret_ref` value is therefore dead and cleared here.
+--
+-- The `secret_ref` column is NOT dropped: D1 cannot drop or rebuild a column
+-- safely, so it stays as a legacy column that is never written again (the
+-- assistant-mcp repo nulls it on every write). This file is a single value
+-- UPDATE — no DDL, no table rebuild, no FK interaction — so it applies
+-- identically under the Bun runner (foreign_keys=OFF) and the Workers/D1
+-- runner (foreign_keys=ON). Ciphertext rows in `assistant_mcp_secrets` are
+-- untouched: a managed token stays usable across this migration.
+--
+-- Idempotent by construction: the WHERE gate makes a second apply a no-op.
+UPDATE assistant_mcp_servers SET secret_ref = NULL WHERE secret_ref IS NOT NULL;

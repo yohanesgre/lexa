@@ -40,7 +40,7 @@ const SENTRY: McpServer = {
 };
 const LINEAR: McpServer = {
   id: "linear", label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp", command: null,
-  args: [], hasSecret: true, secretSource: "reference", enabled: true, createdAt: "t", updatedAt: "t",
+  args: [], hasSecret: true, secretSource: "managed", enabled: true, createdAt: "t", updatedAt: "t",
 };
 const PROJECT_ROW: McpProjectServer = { projectId: "p1", serverId: "linear", enabled: true, createdAt: "t", updatedAt: "t" };
 
@@ -215,12 +215,12 @@ describe("MCP managed secret — write-only on the wire", () => {
     routes.set("PATCH /api/assistant/mcp-servers/linear", LINEAR);
     seedCache([LINEAR]);
     const { result } = renderHook(() => useUpdateMcpServer(), { wrapper });
-    await act(async () => { await result.current.mutateAsync({ id: "linear", secret: "", secretRef: "" }); });
+    await act(async () => { await result.current.mutateAsync({ id: "linear", secret: "" }); });
 
-    // Blank values mean KEEP server-side (blankSecret/blankReference → null),
-    // so the one thing that must never appear here is `clearSecret`.
+    // A blank value means KEEP server-side (blankSecret → null), so the one
+    // thing that must never appear here is `clearSecret`.
     const body = bodyOf("/api/assistant/mcp-servers/linear") as Record<string, unknown>;
     expect(body).not.toHaveProperty("clearSecret");
-    expect(cachedList().data[0]).toMatchObject({ hasSecret: true, secretSource: "reference" });
+    expect(cachedList().data[0]).toMatchObject({ hasSecret: true, secretSource: "managed" });
   });
 });

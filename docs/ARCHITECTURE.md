@@ -414,6 +414,13 @@ are retained.
 with Jev — worth_cost 0.71, master_key_risk 0.32, security_sound closed at
 level 2).
 
+> **Amended 2026-09-28 — superseded in part.** The reference half of this
+> decision (`env:`/`file:` `secret_ref`, the fixed-`RuntimeEnv` allowlist, the
+> master-key denylist, the exactly-one-source XOR rule) was removed later the
+> same day; the managed half stands unchanged. See "Managed-only MCP client
+> secrets (2026-09-28)" below. The text that follows is the original accepted
+> record, kept as history.
+
 MCP Bearer tokens could only be **referenced** — `env:NAME` over the fixed
 `RuntimeEnv` snapshot, `file:/abs/path` on the Bun host. They could not be
 entered or managed from the webapp, and Cloudflare Workers had no usable
@@ -491,6 +498,47 @@ pre-existing plaintext `assistant_providers.api_key` /
 decision); and a dedicated `LXK_MCP_SECRET_*` namespace for referenced secrets
 (the fixed `RuntimeEnv` snapshot plus a denylist for the master keys was
 approved instead, keeping the existing `secret_ref` contract intact).
+
+### Managed-only MCP client secrets (2026-09-28)
+
+**Status:** Accepted · **Date:** 2026-09-28 · **Decider:** maintainer ·
+supersedes the reference half of "Managed MCP client secrets (envelope
+encryption)" above; the managed half is unchanged.
+
+The two-source design (managed token XOR `secret_ref`) confused users and
+forced XOR / allowlist / denylist machinery. **Decision:** the managed
+envelope-encrypted token is the **only** credential source. `env:NAME` /
+`file:/abs/path` references, `resolveSecretRef`, the fixed-`RuntimeEnv`
+allowlist check, and the master-key denylist are removed end to end;
+`LXK_MCP_MASTER_KEY` is now **required to store a token** (a secret-less client
+remains legal).
+
+- **No reference source, and no anonymous fallback.** Connect deleted the
+  reference branch. A row that still holds a legacy `secret_ref` and no managed
+  blob **hard-fails `McpConnectFailed`** instead of connecting with no
+  `Authorization` header — an anonymous connect is indistinguishable from a
+  working one, so the hard failure is the only safe reading. A genuinely
+  secret-less client still connects header-less, by design.
+- **Migration `0012_remove_mcp_secret_refs.sql`** clears every stored
+  `secret_ref` with one value `UPDATE` (D1-safe, idempotent). The column is not
+  dropped (D1 cannot), so it stays legacy and is never written again — every
+  repo write nulls it.
+- **`secretRef` is deprecated, accepted-and-ignored.** It stays on the wire
+  POST/PATCH payloads so an older typed client still decodes instead of 400ing;
+  a non-empty value emits one structured `WARN` and has no effect on the stored
+  row.
+- **`secretSource` narrows to `"managed" | "none"`** — a breaking response
+  value (`"reference"` is gone). `hasSecret` is true exactly when a managed
+  token is stored.
+- **Deploy order:** run migration `0012` with, or before, the managed-only
+  build. An old build on an un-migrated database would still resolve stored
+  refs; after the migration every stored ref is null, and the connect path
+  refuses any that somehow remain.
+- **Unchanged from the original decision:** envelope encryption (AES-256-GCM,
+  fresh IV, AAD-bound), the `active`/`prev` keyring slot and rewrap-free
+  `LXK_MCP_MASTER_KEY_PREV` rotation, `clearSecret: true` as the only removal
+  route (able to clear with no master key), write-only `secret`, ciphertext out
+  of the registry, and the redaction rules.
 
 ### Removal record — the agent-runtime (Blacksmith) tier
 

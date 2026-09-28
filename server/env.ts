@@ -9,13 +9,10 @@
 // Workers path (which has a per-request `env` binding) on the same shape so
 // the HTTP layer can construct its per-request runtime from either input.
 
-import { readFileSync } from "node:fs";
 import type { D1Database, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 
 // Every string slot of RuntimeEnv, in one place. `RuntimeEnv` is DERIVED from
-// this list, so adding a slot here is the only way to add one — and the MCP
-// `env:NAME` save-time allowlist is this very list, so it can never drift from
-// the shape the two builders copy.
+// this list, so adding a slot here is the only way to add one.
 export const RUNTIME_ENV_STRING_KEYS = [
   // Storage / runtime
   "DATABASE_PATH",
@@ -49,10 +46,9 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "TYPESAFE_API_KEY",
   "TYPESAFE_BASE_URL",
   "TYPESAFE_DEFAULT_MODEL",
-  // Managed MCP secrets — the envelope key pair. Both are RuntimeEnv slots, so
-  // the MCP `env:NAME` allowlist would accept them, which is exactly why
-  // MCP_SECRET_REF_DENYLIST (server/assistant/mcp-secret.ts) refuses them as a
-  // credential reference at save and at connect.
+  // Managed MCP secrets — the envelope key pair. Both are RuntimeEnv slots so
+  // they reach the keyring on both runtimes; the master keys themselves are
+  // never a client credential.
   "LXK_MCP_MASTER_KEY",
   "LXK_MCP_MASTER_KEY_PREV",
   // Logging
@@ -80,10 +76,10 @@ export interface RuntimeEnv extends Partial<Record<RuntimeEnvStringKey, string |
 const RUNTIME_ENV_STRING_KEY_SET: ReadonlySet<string> = new Set(RUNTIME_ENV_STRING_KEYS);
 
 // True when `name` is a string slot of the RuntimeEnv snapshot — i.e. copied by
-// at least one of getEnv()/getEnvFromWorkers(). The MCP `env:NAME` save-time
-// allowlist is exactly this: an arbitrary process var or Workers binding is not
-// a runtime key, so it can never resolve and is refused at save time rather than
-// stored as a dead reference.
+// at least one of getEnv()/getEnvFromWorkers(). The MCP `env:NAME` reference
+// feature is gone (0012 cleared every stored ref), so nothing in production
+// calls this any more; the helper and the key list stay as the snapshot
+// contract that the two builders and their tests continue to pin.
 export function isRuntimeEnvStringKey(name: string): name is RuntimeEnvStringKey {
   return RUNTIME_ENV_STRING_KEY_SET.has(name);
 }
@@ -209,39 +205,6 @@ export function resolvePublicUrl(env: RuntimeEnv): string {
 
 export function resolveDatabasePath(env: RuntimeEnv): string {
   return env.DATABASE_PATH ?? DEFAULT_DATABASE_PATH;
-}
-
-// MCP credential resolution. A `secret_ref` names where a credential lives,
-// never the credential itself: `env:NAME` reads the RuntimeEnv slot (the same
-// snapshot threaded through every request), `file:/abs/path` reads a host file
-// (Bun only — Workers has no filesystem; the node:fs shim throws, so the
-// branch is guarded and returns null). Missing/unresolvable refs resolve to
-// null (fail closed); the caller decides whether a credential was required.
-// `env:` never falls back to process.env — an arbitrary host var or Workers
-// binding is not a snapshot slot, so it resolves to null (no header). The save
-// -time allowlist is `isRuntimeEnvStringKey`; this resolver stays permissive so
-// an older stored row still connects (without a header) rather than throwing.
-export function resolveSecretRef(ref: string | null | undefined, env: RuntimeEnv): string | null {
-  if (!ref) return null;
-  if (ref.startsWith("env:")) {
-    const name = ref.slice(4);
-    const value = (env as unknown as Record<string, unknown>)[name];
-    return typeof value === "string" && value.length > 0 ? value : null;
-  }
-  if (ref.startsWith("file:")) {
-    if (isWorkers()) return null;
-    try {
-      const value = readFileSync(ref.slice(5), "utf8").trim();
-      // Same fail-closed rule as the `env:` branch: a zero-byte or
-      // whitespace-only file is no credential, and returning "" would send
-      // `Authorization: "Bearer "` — an empty bearer a server may read as an
-      // anonymous request rather than as "no credential sent".
-      return value === "" ? null : value;
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 export function resolveTrustedOrigins(env: RuntimeEnv, publicUrl: string = resolvePublicUrl(env)): string[] {

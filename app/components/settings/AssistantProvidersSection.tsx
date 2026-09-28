@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useAssistantProviders, useTestProvider, useFetchModels } from "../../lib/queries/assistant-admin";
 import type { AssistantProvider } from "../../../shared/assistant";
-import { WarningNotice } from "../ui/NoticeWarning";
 import { AssistantProviderRow } from "./AssistantProviderRow";
 import type { ProviderTestState } from "./AssistantProviderRow";
 import { AssistantProviderForm } from "./AssistantProviderForm";
@@ -43,9 +42,6 @@ export function AssistantProvidersSection() {
         </div>
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
-      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Central registry of LLM providers Assistant can use. Projects pick a primary provider + model from this list; the registry owns base URLs, keys, and the enabled model catalog. Keys are write-only (masked on read, never serialized).
-      </p>
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
@@ -79,12 +75,6 @@ export function AssistantProvidersSection() {
       )}
 
       <AssistantProviderForm key={editingId ?? "new"} editing={editing} onCancel={() => setEditingId(null)} />
-
-      {providers.length === 0 && (
-        <WarningNotice className="mt-4" title="No providers yet">
-          Add a provider above to enable Assistant. Projects cannot select a model until at least one provider has enabled models.
-        </WarningNotice>
-      )}
 
       {deleteConfirm && (
         <AssistantProviderDeleteDialog providerId={deleteConfirm} onClose={() => setDeleteConfirm(null)} />

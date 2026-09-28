@@ -134,7 +134,7 @@ default columns appear when the first project is created.
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_MCP_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across re-runs like `GITHUB_*` | no — unset simply disables managed MCP tokens |
+| `LXK_MCP_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across re-runs like `GITHUB_*` | no — but **required to store an MCP token**; unset allows only secret-less MCP clients |
 
 ## Full variable reference
 
@@ -152,7 +152,7 @@ default columns appear when the first project is created.
 | `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
-| `LXK_MCP_MASTER_KEY` | **optional** — master key for managed MCP client tokens (Bearer tokens entered in the webapp instead of referenced). Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → managed secrets are disabled**: a save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, while `env:`/`file:` references keep working unchanged and a client with an already-stored token keeps its stored value. Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_MCP_MASTER_KEY_PREV` to the **old** value, `LXK_MCP_MASTER_KEY` to the **new** one, restart, then re-enter tokens in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
+| `LXK_MCP_MASTER_KEY` | **required to store an MCP client token** — the token is the only credential source since 2026-09-28 (`env:`/`file:` references were removed). Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → token storage is disabled**: a save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, a secret-less client is still legal, and a client with an already-stored token keeps its stored value (never silently dropped). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_MCP_MASTER_KEY_PREV` to the **old** value, `LXK_MCP_MASTER_KEY` to the **new** one, restart, then re-enter tokens in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
 | `LXK_MCP_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_MCP_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any token entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -218,22 +218,42 @@ no email transport anywhere.
   committed, never logged. The Jev client logs nothing itself and returns only
   a typed outcome — a request's state text and the key are absent from every
   failure message, and the stderr log line carries only `mode`, `outcome`,
-  `code`, `latencyMs`, and returned `usage` — never state text. It is also a
-  slot of the fixed `RuntimeEnv` snapshot, so an MCP client `secret_ref` of
-  `env:TYPESAFE_API_KEY` deliberately forwards it as a Bearer token to that
-  client's URL — superadmin-only, and only sensible for a trusted server.
+  `code`, `latencyMs`, and returned `usage` — never state text.
 - `LXK_MCP_MASTER_KEY` (and its read-only `LXK_MCP_MASTER_KEY_PREV`) is the
-  envelope key for managed MCP client tokens. It is set by hand in the server
-  environment (or `wrangler secret put` on Workers — see
-  `docs/CLOUDFLARE_WORKERS.md`), **never committed, never written into `.env`
-  that gets committed or into a log line**, and it is the one value that must
-  not travel with a backup: the DB stores ciphertext, so a backup without the
-  key is inert. Keeping them apart is what makes the ciphertext worth storing —
-  see `docs/BACKUPS.md`. The two master-key env names are on the MCP secret-ref
-  denylist, so a client credential can never forward the envelope key itself.
-  That denylist covers `env:` references only — never point a `file:` ref at the
-  master-key file, because a `file:` ref is a deliberate file egress and would
-  hand those bytes to the client's remote endpoint.
+  envelope key for managed MCP client tokens — the only credential source since
+  2026-09-28, so the key is **required to store a token** (secret-less clients
+  stay legal). It is set by hand in the server environment (or
+  `wrangler secret put` on Workers — see `docs/CLOUDFLARE_WORKERS.md`), **never
+  committed, never written into `.env` that gets committed or into a log line**,
+  and it is the one value that must not travel with a backup: the DB stores
+  ciphertext, so a backup without the key is inert. Keeping them apart is what
+  makes the ciphertext worth storing — see `docs/BACKUPS.md`.
+
+## Upgrading across managed-only MCP client secrets (2026-09-28)
+
+MCP client credentials became managed-only: the `env:NAME` / `file:/abs/path`
+reference source and its allowlist/denylist were removed, and
+`LXK_MCP_MASTER_KEY` is now required to store a token (secret-less clients stay
+legal). See `docs/ARCHITECTURE.md` §Managed-only MCP client secrets.
+
+1. **Migration ordering matters.** Boot applies
+   `0012_remove_mcp_secret_refs.sql`, which clears every stored `secret_ref`
+   with a single value `UPDATE` (no DDL, no FK interaction; idempotent).
+   Upgrade the build and run migrations together, or run
+   `wrangler d1 migrations apply` before the new Worker starts. An **old build
+   on an un-migrated database** can still resolve a stored ref; the **new build
+   refuses a stored ref** at connect (`MCP_CONNECT_FAILED`) until a write
+   clears it — never an anonymous connect.
+2. **Stored references stop authenticating.** Any client that used `env:` /
+   `file:` must have a Bearer token **entered** in the webapp instead (Settings
+   → Assistant → MCP Clients), which needs `LXK_MCP_MASTER_KEY` set. The token
+   is stored encrypted and the legacy ref is cleared on that write.
+3. **Secret-less clients are unaffected** — they connect with no
+   `Authorization` header exactly as before.
+4. **Managed tokens survive** the migration untouched (ciphertext rows are not
+   modified); nothing else changes for them.
+5. **`LXK_MCP_MASTER_KEY` is preserved across re-runs** like `GITHUB_*`, so
+   upgrades do not clobber the key.
 
 ## Upgrading across the agent-runtime removal (2026-09-26)
 

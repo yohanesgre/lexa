@@ -1509,7 +1509,7 @@ const McpServerSchema = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   args: Schema.Array(Schema.String),
   hasSecret: Schema.Boolean,
-  secretSource: Schema.Literal("managed", "reference", "none"),
+  secretSource: Schema.Literal("managed", "none"),
   enabled: Schema.Boolean,
   createdAt: Schema.String,
   updatedAt: Schema.String,
@@ -1529,13 +1529,21 @@ const McpServerListResponse = Schema.Struct({
 // 4096 chars bounds a bearer token at schema decode (400 before the service),
 // so an oversized body field never reaches the crypto module.
 const McpManagedSecretSchema = Schema.NullOr(Schema.String.pipe(Schema.maxLength(4096)));
+// DEPRECATED: `secretRef` is accepted-and-ignored for typed-client compatibility
+// (managed-only since 2026-09-28 — migration 0012 cleared every stored ref). It
+// stays on the payloads so an older client's request decodes instead of 400ing;
+// the handler logs one structured WARN and drops it. Never map it into a service
+// call, and never return it. The 4096 cap mirrors `secret`: an ignored field is
+// still a request body field, so it is bounded at schema decode like the managed
+// one rather than accepting an unbounded string.
+const DeprecatedMcpSecretRefSchema = Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(4096))));
 const McpServerCreatePayload = Schema.Struct({
   label: Schema.String,
   transportType: McpTransportTypeSchema,
   url: Schema.optional(Schema.NullOr(Schema.String)),
   command: Schema.optional(Schema.NullOr(Schema.String)),
   args: Schema.optional(Schema.Array(Schema.String)),
-  secretRef: Schema.optional(Schema.NullOr(Schema.String)),
+  secretRef: DeprecatedMcpSecretRefSchema,
   secret: Schema.optional(McpManagedSecretSchema),
   enabled: Schema.optional(Schema.Boolean),
 });
@@ -1545,7 +1553,7 @@ const McpServerUpdatePayload = Schema.Struct({
   url: Schema.optional(Schema.NullOr(Schema.String)),
   command: Schema.optional(Schema.NullOr(Schema.String)),
   args: Schema.optional(Schema.Array(Schema.String)),
-  secretRef: Schema.optional(Schema.NullOr(Schema.String)),
+  secretRef: DeprecatedMcpSecretRefSchema,
   secret: Schema.optional(McpManagedSecretSchema),
   clearSecret: Schema.optional(Schema.Boolean),
   enabled: Schema.optional(Schema.Boolean),
@@ -4131,6 +4139,27 @@ const projectAssistantUsageLive = HttpApiBuilder.group(LexaApi, "projectAssistan
   )
 );
 
+// Managed-only (2026-09-28): a `secretRef` in a create/update payload is
+// accepted for typed-client compatibility and ignored. One structured WARN per
+// request records it, in the same stderr JSON shape as the assistant log lines;
+// the offending ref is never echoed. Never touches the registry or the service.
+function warnIgnoredMcpSecretRef(operation: "create" | "update", ref: string | null | undefined, serverId?: string): void {
+  if (typeof ref !== "string" || ref.trim() === "") return;
+  try {
+    process.stderr.write(
+      `${JSON.stringify({
+        level: "WARN",
+        service: "assistant-mcp",
+        message: `MCP secretRef ignored — references are no longer supported (${operation})`,
+        meta: { operation, ...(serverId !== undefined ? { serverId } : {}) },
+        timestamp: new Date().toISOString(),
+      })}\n`
+    );
+  } catch {
+    // logging must never fail the request
+  }
+}
+
 const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers) =>
   handlers
     .handle("listMcpServers", () =>
@@ -4138,7 +4167,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         yield* requireSuperadmin;
         const service = yield* AssistantMcpService;
         // One request, both reads: the rows and the managed-secrets capability
-        // the form needs to decide between the reference and managed branches.
+        // the form needs to decide whether a token can be stored at all.
         const [data, managedSecretsEnabled] = yield* Effect.all([service.list(), service.managedSecretsEnabled()], {
           concurrency: 2,
         });
@@ -4148,6 +4177,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
     .handle("createMcpServer", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
+        warnIgnoredMcpSecretRef("create", req.payload.secretRef);
         const service = yield* AssistantMcpService;
         return yield* service.create({
           label: req.payload.label,
@@ -4155,7 +4185,6 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
           url: req.payload.url ?? null,
           command: req.payload.command ?? null,
           args: req.payload.args !== undefined ? [...req.payload.args] : [],
-          secretRef: req.payload.secretRef ?? null,
           // Carried only when present: an omitted `secret` is "no managed
           // token", which the service needs to tell apart from a keep.
           ...(req.payload.secret !== undefined && req.payload.secret !== null ? { secret: req.payload.secret } : {}),
@@ -4166,6 +4195,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
     .handle("updateMcpServer", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
+        warnIgnoredMcpSecretRef("update", req.payload.secretRef, req.path.id);
         const service = yield* AssistantMcpService;
         const patch: McpUpdateInput = {};
         if (req.payload.label !== undefined) patch.label = req.payload.label;
@@ -4173,7 +4203,6 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         if (req.payload.url !== undefined) patch.url = req.payload.url;
         if (req.payload.command !== undefined) patch.command = req.payload.command;
         if (req.payload.args !== undefined) patch.args = [...req.payload.args];
-        if (req.payload.secretRef !== undefined) patch.secretRef = req.payload.secretRef;
         if (req.payload.secret !== undefined && req.payload.secret !== null) patch.secret = req.payload.secret;
         if (req.payload.clearSecret !== undefined) patch.clearSecret = req.payload.clearSecret;
         if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;

@@ -701,10 +701,9 @@ export function reorderAssistantProviderModels(id: string, orderedIds: string[])
 // migration 0010 removed every stored stdio row.
 export type McpTransportType = "http" | "sse" | "stdio";
 
-// Which write-only source a stored client authenticates with. Exactly-one
-// source is enforced on every write, so a client is managed XOR reference;
-// "none" is a legal, deliberately secret-less client.
-export type McpSecretSource = "managed" | "reference" | "none";
+// A stored client authenticates with an envelope-encrypted managed token or
+// with nothing at all; "none" is a legal, deliberately secret-less client.
+export type McpSecretSource = "managed" | "none";
 
 export interface McpServer {
   id: string;
@@ -729,15 +728,14 @@ export interface McpServerInput {
   // Compat with the legacy stdio columns — never sent by the MCP form.
   command?: string | null;
   args?: string[];
-  // Write-only. Omitted or empty means "keep the stored source" — a blank
-  // value is NEVER a removal, so there is no null-both form here.
-  secretRef?: string | null;
+  // Write-only. Omitted or empty means "keep the stored token" — a blank
+  // value is NEVER a removal, so there is no null form here.
   secret?: string | null;
   enabled?: boolean;
 }
 
-// Update carries the one explicit removal route; it nulls both the stored
-// reference and the ciphertext row server-side.
+// Update carries the one explicit removal route; it deletes the stored
+// ciphertext row server-side.
 export type McpServerPatch = Partial<McpServerInput> & { clearSecret?: boolean };
 
 export interface McpTestResult {

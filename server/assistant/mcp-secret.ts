@@ -1,5 +1,6 @@
 // Managed MCP client secrets — envelope encryption for a credential entered
-// in the webapp instead of referenced from the environment or a host file.
+// in the webapp. Managed-only since 2026-09-28: this is the ONLY credential
+// source for a remote MCP client (secret-less clients remain legal).
 //
 // The master key lives ONLY in the environment (LXK_MCP_MASTER_KEY, with
 // LXK_MCP_MASTER_KEY_PREV as the rotation read path); the DB stores AES-256-GCM
@@ -18,12 +19,6 @@ import type { RuntimeEnv } from "../env";
 
 export const MCP_MASTER_KEY_ENV_KEY = "LXK_MCP_MASTER_KEY";
 export const MCP_MASTER_KEY_PREV_ENV_KEY = "LXK_MCP_MASTER_KEY_PREV";
-
-// A `secret_ref` may never name a master key. `env:LXK_MCP_MASTER_KEY` would
-// otherwise forward the envelope key itself as a `Bearer` token to a remote
-// server — the one reference that escalates a read of RuntimeEnv into a key
-// leak. Enforced by the caller at save time and again at connect time.
-export const MCP_SECRET_REF_DENYLIST: readonly string[] = [MCP_MASTER_KEY_ENV_KEY, MCP_MASTER_KEY_PREV_ENV_KEY];
 
 // The keyring slot names, which are also the stored `key_id`. Frozen
 // convention: `key_id` is the SLOT a blob was encrypted under, never a key
@@ -220,10 +215,10 @@ export async function decryptMcpSecret(row: McpSecretRow, keyring: McpKeyring): 
 
 /**
  * Build the keyring from a RuntimeEnv snapshot. Returns null when no active
- * key is configured — the documented disable switch, so managed secrets are
- * refused at save time and `env:`/`file:` refs behave exactly as before. A
- * configured-but-malformed key is an error, never a silent disable: an
- * operator who set the key and got it wrong must be told.
+ * key is configured — the documented disable switch, so a managed save is
+ * refused and secret-less clients keep working. A configured-but-malformed key
+ * is an error, never a silent disable: an operator who set the key and got it
+ * wrong must be told.
  */
 export async function mcpKeyringFromEnv(
   env: Pick<RuntimeEnv, "LXK_MCP_MASTER_KEY" | "LXK_MCP_MASTER_KEY_PREV"> | null | undefined

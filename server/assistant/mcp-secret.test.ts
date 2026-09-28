@@ -3,15 +3,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   MCP_MASTER_KEY_BYTES,
-  MCP_MASTER_KEY_ENV_KEY,
   MCP_MASTER_KEY_INVALID,
-  MCP_MASTER_KEY_PREV_ENV_KEY,
   MCP_SECRET_AAD_PREFIX,
   MCP_SECRET_DECRYPT_FAILED,
   MCP_SECRET_IV_BYTES,
   MCP_SECRET_KEY_ID_ACTIVE,
   MCP_SECRET_KEY_ID_PREV,
-  MCP_SECRET_REF_DENYLIST,
   decryptMcpSecret,
   encryptMcpSecret,
   keyIdFor,
@@ -289,17 +286,6 @@ describe("key id convention", () => {
     expect(keyIdFor(k.prev!)).toBe(MCP_SECRET_KEY_ID_PREV);
     const foreign = await parseMasterKey(b64(keyBytes(97)));
     expect(keyIdFor(foreign)).toBeNull();
-  });
-});
-
-describe("denylist", () => {
-  it("names exactly the two master-key env slots", () => {
-    expect([...MCP_SECRET_REF_DENYLIST]).toEqual([MCP_MASTER_KEY_ENV_KEY, MCP_MASTER_KEY_PREV_ENV_KEY]);
-    expect([...MCP_SECRET_REF_DENYLIST]).toEqual(["LXK_MCP_MASTER_KEY", "LXK_MCP_MASTER_KEY_PREV"]);
-  });
-
-  it("is a copy, so a caller cannot widen it for the next caller", () => {
-    expect(MCP_SECRET_REF_DENYLIST).not.toBe(["LXK_MCP_MASTER_KEY", "LXK_MCP_MASTER_KEY_PREV"]);
   });
 });
 

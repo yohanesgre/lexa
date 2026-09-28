@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,16 +8,13 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { DbBunLive } from "../db/db";
 import { McpConnectFailed } from "../api/errors";
-import { RUNTIME_ENV_STRING_KEYS, type RuntimeEnv } from "../env";
+import { type RuntimeEnv } from "../env";
 import { RuntimeEnvLive } from "../runtime-env";
 import { LiveMcpConnector } from "../assistant/mcp";
 import {
   AssistantMcpService,
-  denylistedSecretRefReason,
-  envSecretRefReason,
   McpConnector,
   PROCESS_FIELDS_REJECTED,
-  SECRET_BOTH_SOURCES_REJECTED,
   SECRET_CLEAR_CONFLICT_REJECTED,
   SECRET_REQUIRES_MASTER_KEY,
   slugifyMcpId,
@@ -29,17 +26,16 @@ import {
   MCP_MASTER_KEY_INVALID,
   MCP_SECRET_DECRYPT_FAILED,
   MCP_SECRET_KEY_ID_ACTIVE,
-  MCP_SECRET_REF_DENYLIST,
 } from "../assistant/mcp-secret";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 const STDIO_REASON = "transportType 'stdio' is not supported — MCP clients connect to remote http/sse servers";
 const SECRET_NOT_SINGLE_LINE = "resolved MCP secret cannot be sent in an HTTP header; use a single-line token";
-// The connect-time denylist refusal is a private const in server/assistant/mcp.ts
-// (same convention as SECRET_NOT_SINGLE_LINE above): pinned here so a drift in
+// The stored-ref hard failure is a private const in server/assistant/mcp.ts
+// (same convention as SECRET_NOT_SINGLE_LINE above) — pinned here so a drift in
 // the copy is a failing test, not a silently different message in a 502 body.
-const SECRET_REF_DENIED_REASON = "MCP secret reference names a master key and is refused as a client credential";
+const SECRET_REF_UNSUPPORTED = "MCP secret references are no longer supported — store a managed token or clear the reference";
 
 // The live connector is the only caller of `createMCPClient` on this path, so
 // stubbing it observes exactly what a real connect would receive — no dial, no
@@ -186,7 +182,6 @@ const http = (over: Partial<McpTransportConfig> = {}): McpTransportConfig => ({
   url: "https://mcp.test/x",
   command: null,
   args: [],
-  secretRef: null,
   ...over,
 });
 
@@ -200,16 +195,6 @@ function insertLegacyStdioRow(id = "legacy") {
   );
 }
 
-// A row stored before the `env:NAME` allowlist existed (or written by a build
-// that allowed the name): the stored reference is now unresolvable, so the
-// connect path fails closed — but an unrelated patch must not be frozen by it.
-function insertLegacyBadRefRow(id = "legacy-bad-ref") {
-  db.exec(
-    `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
-     VALUES ('${id}', 'Legacy Ref', 'http', 'https://mcp.test/legacy', NULL, '[]', 'env:LINEAR_TOKEN', 0)`
-  );
-}
-
 describe("validateTransportConfig", () => {
   it("accepts remote http and sse and hands back the narrowed transport", () => {
     expect(validateTransportConfig(http({ url: "https://mcp.test/x" })))
@@ -219,7 +204,7 @@ describe("validateTransportConfig", () => {
   });
 
   it("rejects stdio on every runtime — no local process spawn", () => {
-    const stdio: McpTransportConfig = { transportType: "stdio", url: null, command: "jev-mcp", args: [], secretRef: null };
+    const stdio: McpTransportConfig = { transportType: "stdio", url: null, command: "jev-mcp", args: [] };
     expect(validateTransportConfig(stdio)).toEqual({ ok: false, reason: STDIO_REASON });
     // The transport itself is refused, whatever else the payload carries.
     expect(validateTransportConfig({ ...stdio, url: "https://mcp.test/x" })).toEqual({ ok: false, reason: STDIO_REASON });
@@ -260,70 +245,20 @@ describe("validateTransportConfig", () => {
     expect(validateTransportConfig(http({ command: "   " })))
       .toEqual({ ok: true, transportType: "http", url: "https://mcp.test/x" });
   });
-
-  it("accepts only env:NAME or file:/ refs", () => {
-    expect(validateTransportConfig(http({ secretRef: "env:GITHUB_WEBHOOK_SECRET" }))?.ok).toBe(true);
-    expect(validateTransportConfig(http({ secretRef: "file:/run/secrets/token" }))?.ok).toBe(true);
-    expect(validateTransportConfig(http({ secretRef: "env:lower" })))
-      .toEqual({ ok: false, reason: "secretRef must be 'env:NAME' or 'file:/absolute/path'" });
-    expect(validateTransportConfig(http({ secretRef: "plaintext-secret" })))
-      .toEqual({ ok: false, reason: "secretRef must be 'env:NAME' or 'file:/absolute/path'" });
-    expect(validateTransportConfig(http({ secretRef: "file:relative" })))
-      .toEqual({ ok: false, reason: "secretRef must be 'env:NAME' or 'file:/absolute/path'" });
-  });
-
-  // Maintainer decision 2026-09-28: `env:NAME` resolves only a fixed RuntimeEnv
-  // slot (the snapshot getEnv()/getEnvFromWorkers() build). A name outside it
-  // could never resolve, so it is refused at save time rather than stored as a
-  // reference that silently fails at connect.
-  it("rejects an env: name outside the fixed RuntimeEnv snapshot", () => {
-    expect(validateTransportConfig(http({ secretRef: "env:LINEAR_TOKEN" })))
-      .toEqual({ ok: false, reason: envSecretRefReason("LINEAR_TOKEN") });
-    // A process/Workers binding outside the snapshot is not a runtime key.
-    expect(validateTransportConfig(http({ secretRef: "env:MCP_REMOTE_TOKEN" })))
-      .toEqual({ ok: false, reason: envSecretRefReason("MCP_REMOTE_TOKEN") });
-    // A non-string binding name is not a runtime key either.
-    expect(validateTransportConfig(http({ secretRef: "env:DB" })))
-      .toEqual({ ok: false, reason: envSecretRefReason("DB") });
-  });
-
-  it("accepts every fixed RuntimeEnv key and still requires the transport shape", () => {
-    for (const key of RUNTIME_ENV_STRING_KEYS) {
-      // The two master keys are RuntimeEnv slots but are never a client
-      // credential — the denylist is the one deliberate exclusion, so the
-      // allowlist loop states it instead of skipping it silently.
-      if ((MCP_SECRET_REF_DENYLIST as readonly string[]).includes(key)) {
-        expect(validateTransportConfig(http({ secretRef: `env:${key}` })), key).toEqual({
-          ok: false,
-          reason: denylistedSecretRefReason(key),
-        });
-        continue;
-      }
-      expect(validateTransportConfig(http({ secretRef: `env:${key}` })), key).toEqual({
-        ok: true,
-        transportType: "http",
-        url: "https://mcp.test/x",
-      });
-    }
-    // The allowlist is a ref check, not a bypass of the other refusals.
-    expect(validateTransportConfig(http({ secretRef: "env:GITHUB_WEBHOOK_SECRET", command: "npx" })))
-      .toEqual({ ok: false, reason: PROCESS_FIELDS_REJECTED });
-    expect(validateTransportConfig(http({ secretRef: "env:GITHUB_WEBHOOK_SECRET", url: null })))
-      .toEqual({ ok: false, reason: "url is required for http/sse transport" });
-  });
 });
 
 describe("AssistantMcpService", () => {
-  it("create derives a slug id, seeds nothing, and never exposes the secret ref", async () => {
+  it("create derives a slug id, seeds nothing, and stores a secret-less client", async () => {
     setup();
-    const created = await run(service.create({ label: "My Client", transportType: "http", url: "https://mcp.test/x", secretRef: "env:GITHUB_WEBHOOK_SECRET" }));
+    const created = await run(service.create({ label: "My Client", transportType: "http", url: "https://mcp.test/x" }));
     expect(created.id).toBe("my-client");
     expect(created.transportType).toBe("http");
     expect(created.url).toBe("https://mcp.test/x");
     expect(created.command).toBeNull();
     expect(created.args).toEqual([]);
-    expect(created.hasSecret).toBe(true);
-    expect(JSON.stringify(created)).not.toContain("GITHUB_WEBHOOK_SECRET");
+    expect(created.hasSecret).toBe(false);
+    expect(created.secretSource).toBe("none");
+    expect(JSON.stringify(created)).not.toContain("secretRef");
 
     // 0010 removed the seeded `jev` row: the registry starts empty.
     expect((await run(service.list())).map((s) => s.id)).toEqual(["my-client"]);
@@ -362,82 +297,6 @@ describe("AssistantMcpService", () => {
     expect(await run(service.list())).toEqual([]);
   });
 
-  it("create rejects an env: secret name outside the RuntimeEnv snapshot and stores nothing", async () => {
-    setup();
-    const unknown = await runEither(service.create({ label: "Linear", transportType: "http", url: "https://mcp.test/x", secretRef: "env:LINEAR_TOKEN" }));
-    expect(unknown).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: envSecretRefReason("LINEAR_TOKEN") } });
-    expect(await run(service.list())).toEqual([]);
-
-    // A fixed runtime key is accepted, and the resolved value is never echoed.
-    const known = await run(service.create({ label: "Linear", transportType: "sse", url: "https://mcp.test/s", secretRef: "env:CRON_SECRET" }));
-    expect(known).toMatchObject({ id: "linear", transportType: "sse", hasSecret: true });
-    expect(JSON.stringify(known)).not.toContain("CRON_SECRET");
-
-    const unknownAgain = await runEither(service.create({ label: "Linear", transportType: "sse", url: "https://mcp.test/s", secretRef: "env:MCP_REMOTE_TOKEN" }));
-    expect(unknownAgain).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: envSecretRefReason("MCP_REMOTE_TOKEN") } });
-  });
-
-  it("update rejects an env: secret name outside the RuntimeEnv snapshot and keeps the stored ref", async () => {
-    setup();
-    await run(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x", secretRef: "env:GITHUB_WEBHOOK_SECRET" }));
-
-    const refused = await runEither(service.update("remote", { secretRef: "env:LINEAR_TOKEN" }));
-    expect(refused).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: envSecretRefReason("LINEAR_TOKEN") } });
-    expect((await run(service.list()))[0]).toMatchObject({ id: "remote", hasSecret: true });
-
-    // Removal is the explicit `clearSecret` affordance now. `secretRef: null`
-    // is an EMPTY field, which means "keep" — a UI that always posts its form
-    // must not be able to wipe a credential by saving a blank input.
-    const keptOnBlank = await run(service.update("remote", { secretRef: null }));
-    expect(keptOnBlank.hasSecret).toBe(true);
-    const cleared = await run(service.update("remote", { clearSecret: true }));
-    expect(cleared.hasSecret).toBe(false);
-    expect(cleared.secretSource).toBe("none");
-
-    const accepted = await run(service.update("remote", { secretRef: "env:LXK_S3_SECRET_ACCESS_KEY" }));
-    expect(accepted.hasSecret).toBe(true);
-  });
-
-  // A process env var is not a runtime key: the allowlist is the snapshot, not
-  // the host environment, so the same name stays refused on the Bun host.
-  it("refuses an env: name that exists only in process.env", async () => {
-    setup();
-    process.env.LINEAR_TOKEN = "process-secret";
-    try {
-      const res = await runEither(service.create({ label: "Linear", transportType: "http", url: "https://mcp.test/x", secretRef: "env:LINEAR_TOKEN" }));
-      expect(res).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: envSecretRefReason("LINEAR_TOKEN") } });
-      expect(await run(service.list())).toEqual([]);
-    } finally {
-      delete process.env.LINEAR_TOKEN;
-    }
-  });
-
-  // A pre-existing stored ref that is no longer an allowlisted name must not
-  // freeze the row: only a SUPPLIED secretRef is allowlist-validated, exactly
-  // like the legacy process fields. The stored value is passed through, so the
-  // row stays editable until a valid ref (or null) replaces it.
-  it("update patches other fields on a legacy row whose stored ref is not allowlisted", async () => {
-    setup();
-    insertLegacyBadRefRow();
-
-    const renamed = await run(service.update("legacy-bad-ref", { label: "Legacy Renamed" }));
-    expect(renamed).toMatchObject({ id: "legacy-bad-ref", label: "Legacy Renamed", transportType: "http", hasSecret: true });
-
-    const moved = await run(service.update("legacy-bad-ref", { url: "https://mcp.test/moved" }));
-    expect(moved.url).toBe("https://mcp.test/moved");
-
-    const enabled = await run(service.update("legacy-bad-ref", { enabled: true }));
-    expect(enabled).toMatchObject({ enabled: true, hasSecret: true });
-
-    const stored = db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = 'legacy-bad-ref'").get() as { secret_ref: string | null };
-    expect(stored.secret_ref).toBe("env:LINEAR_TOKEN");
-
-    // Supplying the same now-unknown name is still refused.
-    const refused = await runEither(service.update("legacy-bad-ref", { secretRef: "env:LINEAR_TOKEN" }));
-    expect(refused).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: envSecretRefReason("LINEAR_TOKEN") } });
-    expect((await run(service.list()))[0]).toMatchObject({ id: "legacy-bad-ref", label: "Legacy Renamed" });
-  });
-
   it("slug `jev` is an ordinary user-owned client", async () => {
     setup();
     const created = await run(service.create({ label: "Jev", transportType: "http", url: "https://mcp.test/jev" }));
@@ -448,13 +307,10 @@ describe("AssistantMcpService", () => {
     expect(await run(service.list())).toEqual([]);
   });
 
-  it("rejects invalid transport shapes and secret refs", async () => {
+  it("rejects an invalid transport shape", async () => {
     setup();
     const noUrl = await runEither(service.create({ label: "Remote", transportType: "http", url: null }));
     expect(noUrl).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpInvalidTransportConfig", reason: "url is required for http/sse transport" }) });
-
-    const badSecret = await runEither(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x", secretRef: "plaintext" }));
-    expect(badSecret).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpInvalidTransportConfig" }) });
     expect(await run(service.list())).toEqual([]);
   });
 
@@ -577,7 +433,7 @@ describe("AssistantMcpService", () => {
   // unguarded seam between them.
   it("live connector + planted multiline secret: report body and stderr carry no secret", async () => {
     const secret = "-----BEGIN PRIVATE KEY-----\nplanted-live-secret-body\n-----END PRIVATE KEY-----";
-    const env = { GITHUB_WEBHOOK_SECRET: secret } as unknown as RuntimeEnv;
+    const env = { LXK_MCP_MASTER_KEY: KEY_A } as unknown as RuntimeEnv;
     dir = mkdtempSync(join(tmpdir(), "lexa-assistant-mcp-live-"));
     const path = join(dir, "test.db");
     runMigrations(path, MIGRATIONS);
@@ -597,7 +453,7 @@ describe("AssistantMcpService", () => {
       label: "Live",
       transportType: "http",
       url: "https://mcp.test/live",
-      secretRef: "env:GITHUB_WEBHOOK_SECRET",
+      secret,
     }));
 
     const logged: string[] = [];
@@ -668,11 +524,11 @@ describe("managed MCP client secrets", () => {
     ...over,
   });
 
-  it("1. stores exactly one source on create and update — the other is removed, both is refused", async () => {
+  it("1. stores a managed token on create, allows a secret-less client, and refuses clearSecret with a token", async () => {
     setup();
 
-    // Managed only: ciphertext row written, registry ref stays null, the public
-    // shape says `managed` and never carries the value.
+    // Managed: ciphertext row written, registry ref stays null, the public shape
+    // says `managed` and never carries the value.
     const managed = await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
     expect(managed).toMatchObject({ id: "managed", hasSecret: true, secretSource: "managed" });
     expect(refOf("managed")).toBeNull();
@@ -682,62 +538,24 @@ describe("managed MCP client secrets", () => {
     expect(stored!.ciphertext).not.toContain(MARKER);
     expect(stored!.iv).not.toContain(MARKER);
 
-    // Reference only: no ciphertext row at all.
-    const referenced = await withKey(managedEnv(), service.create(createInput({
-      label: "Referenced",
-      secretRef: "env:CRON_SECRET",
-    })));
-    expect(referenced).toMatchObject({ id: "referenced", hasSecret: true, secretSource: "reference" });
-    expect(secretRow("referenced")).toBeNull();
-    expect(refOf("referenced")).toBe("env:CRON_SECRET");
-
-    // Neither: a secret-less client stays legal.
+    // A secret-less client stays legal.
     const bare = await withKey(managedEnv(), service.create(createInput({ label: "Bare" })));
     expect(bare).toMatchObject({ id: "bare", hasSecret: false, secretSource: "none" });
     expect(secretRow("bare")).toBeNull();
     expect(refOf("bare")).toBeNull();
-
-    // Both on create: refused, and nothing at all is written for that label.
-    const both = await withKeyEither(managedEnv(), service.create(createInput({
-      label: "Both",
-      secret: MARKER,
-      secretRef: "env:CRON_SECRET",
-    })));
-    expect(both).toMatchObject({
-      _tag: "Left",
-      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_BOTH_SOURCES_REJECTED },
-    });
-    expect((await run(service.list())).map((s) => s.id)).toEqual(["bare", "managed", "referenced"]);
-    expect(secretRow("both")).toBeNull();
+    expect((await run(service.list())).map((s) => s.id)).toEqual(["bare", "managed"]);
     expect(secretCount()).toBe(1);
 
-    // Choosing a reference on update DELETES the ciphertext row.
-    const toRef = await withKey(managedEnv(), service.update("managed", { secretRef: "env:CRON_SECRET" }));
-    expect(toRef).toMatchObject({ hasSecret: true, secretSource: "reference" });
-    expect(secretRow("managed")).toBeNull();
-    expect(refOf("managed")).toBe("env:CRON_SECRET");
+    // Re-saving rotates the blob (a fresh IV per write), staying `managed`.
+    const before = secretRow("managed")!;
+    const rotated = await withKey(managedEnv(), service.update("managed", { secret: `${MARKER}-2` }));
+    expect(rotated).toMatchObject({ hasSecret: true, secretSource: "managed" });
+    expect(secretRow("managed")).not.toEqual(before);
+    expect(refOf("managed")).toBeNull();
 
-    // Choosing a managed token on update NULLS the stored ref.
-    const toManaged = await withKey(managedEnv(), service.update("referenced", { secret: MARKER }));
-    expect(toManaged).toMatchObject({ hasSecret: true, secretSource: "managed" });
-    expect(refOf("referenced")).toBeNull();
-    expect(secretRow("referenced")).toBeDefined();
-
-    // Both on update: refused, and the stored source survives untouched.
-    const before = secretRow("referenced")!;
-    const bothUpdate = await withKeyEither(managedEnv(), service.update("referenced", {
-      secret: MARKER,
-      secretRef: "env:CRON_SECRET",
-    }));
-    expect(bothUpdate).toMatchObject({
-      _tag: "Left",
-      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_BOTH_SOURCES_REJECTED },
-    });
-    expect(secretRow("referenced")).toEqual(before);
-
-    // clearSecret + a value is refused rather than silently resolved, so a UI
-    // bug can never erase one source and store the other in one request.
-    const clearConflict = await withKeyEither(managedEnv(), service.update("referenced", {
+    // clearSecret + a token is refused rather than silently resolved, so a UI
+    // bug can never erase a token while storing another in one request.
+    const clearConflict = await withKeyEither(managedEnv(), service.update("managed", {
       clearSecret: true,
       secret: MARKER,
     }));
@@ -745,7 +563,7 @@ describe("managed MCP client secrets", () => {
       _tag: "Left",
       left: { _tag: "McpInvalidTransportConfig", reason: SECRET_CLEAR_CONFLICT_REJECTED },
     });
-    expect(secretRow("referenced")).toEqual(before);
+    expect(secretRow("managed")).not.toBeNull();
   });
 
   it("2. refuses a managed write with no master key, and a malformed key, without half-applying anything", async () => {
@@ -773,66 +591,45 @@ describe("managed MCP client secrets", () => {
     expect(await run(service.list())).toEqual([]);
     expect(secretCount()).toBe(0);
 
-    // `env:`/`file:` references are untouched by the switch: they keep saving
-    // and keep reporting `reference` with no key configured at all.
-    const ref = await withKey(noKeyEnv(), service.create(createInput({
-      label: "Ref Only",
-      secretRef: "env:CRON_SECRET",
-    })));
-    expect(ref).toMatchObject({ id: "ref-only", hasSecret: true, secretSource: "reference" });
-    expect(secretCount()).toBe(0);
-
-    // An update that would store a token is refused the same way, and the
-    // stored row keeps whatever it had.
-    const refusedUpdate = await withKeyEither(noKeyEnv(), service.update("ref-only", { secret: MARKER }));
+    // A secret-less client saves fine with no key, and an update that would
+    // store a token is refused the same way.
+    const bare = await withKey(noKeyEnv(), service.create(createInput({ label: "Bare" })));
+    expect(bare).toMatchObject({ id: "bare", hasSecret: false, secretSource: "none" });
+    const refusedUpdate = await withKeyEither(noKeyEnv(), service.update("bare", { secret: MARKER }));
     expect(refusedUpdate).toMatchObject({
       _tag: "Left",
       left: { _tag: "McpInvalidTransportConfig", reason: SECRET_REQUIRES_MASTER_KEY },
     });
-    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
+    expect(refOf("bare")).toBeNull();
     expect(secretCount()).toBe(0);
   });
 
-  it("3. refuses a denylisted ref at save and again at connect, including a legacy stored one", async () => {
+  // Managed-only: a row stored before references were removed (`secret_ref`
+  // set, no managed ciphertext) must hard-fail at connect rather than connect
+  // anonymously — an unauthenticated client looks identical to a working one.
+  it("3. hard-fails a stored legacy secret_ref at connect, never connecting anonymously", async () => {
     setupLive();
-    // A legal stored ref, so each refused update below has something to protect.
-    await withKey(managedEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
-    for (const name of MCP_SECRET_REF_DENYLIST) {
-      const refused = await withKeyEither(managedEnv(), service.create(createInput({
-        label: `Denied ${name}`,
-        secretRef: `env:${name}`,
-      })));
-      expect(refused, name).toMatchObject({
-        _tag: "Left",
-        left: { _tag: "McpInvalidTransportConfig", reason: denylistedSecretRefReason(name) },
-      });
-      const refusedUpdate = await withKeyEither(managedEnv(), service.update("ref-only", { secretRef: `env:${name}` }));
-      expect(refusedUpdate, name).toMatchObject({
-        _tag: "Left",
-        left: { _tag: "McpInvalidTransportConfig", reason: denylistedSecretRefReason(name) },
-      });
-    }
-    // Nothing was created or overwritten by the refused writes.
-    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
-    expect(await run(service.list())).toHaveLength(1);
-    expect(secretCount()).toBe(0);
-
-    // A row written before the denylist existed: the stored ref names the master
-    // key, and the env really carries it, so without the connect-time guard the
-    // envelope key itself would be forwarded as a Bearer token.
     db.exec(
       `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
-       VALUES ('legacy-key-ref', 'Legacy Key Ref', 'http', 'https://mcp.test/legacy', NULL, '[]', 'env:LXK_MCP_MASTER_KEY', 0)`
+       VALUES ('legacy-ref', 'Legacy Ref', 'http', 'https://mcp.test/legacy', NULL, '[]', 'env:LINEAR_TOKEN', 0)`
     );
-    const report = await withKey(managedEnv({ LXK_MCP_MASTER_KEY: KEY_A }), service.testConnection("legacy-key-ref"));
+
+    const report = await withKey(managedEnv(), service.testConnection("legacy-ref"));
     expect(report).toMatchObject({
       ok: false,
       toolCount: 0,
-      error: { code: "MCP_CONNECT_FAILED", message: SECRET_REF_DENIED_REASON },
+      readOnlyToolCount: 0,
+      error: { code: "MCP_CONNECT_FAILED", message: SECRET_REF_UNSUPPORTED },
     });
-    // The key never reached the SDK, and never reached the report body either.
+    // Neither the ref nor the SDK was reached.
+    expect(JSON.stringify(report)).not.toContain("LINEAR_TOKEN");
     expect(sdkMock.calls).toEqual([]);
-    expect(JSON.stringify(report)).not.toContain(KEY_A);
+
+    // An unrelated patch clears the legacy ref (repo.update nulls it) and the
+    // row becomes an ordinary secret-less client.
+    const renamed = await withKey(managedEnv(), service.update("legacy-ref", { label: "Legacy Renamed" }));
+    expect(renamed).toMatchObject({ label: "Legacy Renamed", hasSecret: false, secretSource: "none" });
+    expect(refOf("legacy-ref")).toBeNull();
   });
 
   it("4. an undecryptable blob is a hard error that leaks neither secret nor ciphertext", async () => {
@@ -948,11 +745,7 @@ describe("managed MCP client secrets", () => {
     expect(secretCount()).toBe(0);
     expect(refOf("managed")).toBeNull();
 
-    // Same for a stored reference, and for a client that never had a secret.
-    await withKey(noKeyEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
-    const refCleared = await withKey(noKeyEnv(), service.update("ref-only", { clearSecret: true }));
-    expect(refCleared).toMatchObject({ hasSecret: false, secretSource: "none" });
-    expect(refOf("ref-only")).toBeNull();
+    // Same for a client that never had a secret.
     const bareCleared = await withKey(noKeyEnv(), service.update("managed", { clearSecret: true, label: "Managed" }));
     expect(bareCleared).toMatchObject({ label: "Managed", hasSecret: false, secretSource: "none" });
 
@@ -998,10 +791,9 @@ describe("managed MCP client secrets", () => {
     expect(JSON.stringify(report)).not.toContain(stored.ciphertext);
   });
 
-  it("8. an unrelated patch passes the stored ref and ciphertext through untouched, with or without a key", async () => {
+  it("8. an unrelated patch passes the stored ciphertext through untouched, with or without a key", async () => {
     setup();
     await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
-    await withKey(managedEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
     const managedBefore = secretRow("managed")!;
 
     // Renaming a managed client must not re-encrypt (a fresh IV per write would
@@ -1017,30 +809,18 @@ describe("managed MCP client secrets", () => {
 
     // An empty secret field means "keep" — a UI that always posts its form can
     // never blank a stored credential by saving a blank input.
-    const blank = await withKey(managedEnv(), service.update("managed", { secret: "", secretRef: null }));
+    const blank = await withKey(managedEnv(), service.update("managed", { secret: "" }));
     expect(blank).toMatchObject({ hasSecret: true, secretSource: "managed" });
     expect(secretRow("managed")).toEqual(managedBefore);
-
-    // The legacy-freeze lesson for a stored reference: an unrelated patch keeps
-    // it, with no key configured and no secret fields supplied.
-    const refKept = await withKey(noKeyEnv(), service.update("ref-only", { label: "Ref Renamed" }));
-    expect(refKept).toMatchObject({ label: "Ref Renamed", hasSecret: true, secretSource: "reference" });
-    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
   });
 
-  // The write ORDER is the safety property: the ciphertext is stored BEFORE the
-  // registry write that clears `secret_ref`. A fault in between must leave the
-  // client with the credential it already had, never with none — an
-  // unauthenticated connect is indistinguishable from a working one.
-  it("9. a fault between the ciphertext upsert and the ref clear keeps the stored ref", async () => {
+  // The write ORDER is the safety property: the token is sealed and the
+  // ciphertext upsert runs BEFORE the registry write, so a fault between them
+  // leaves the previous credential in place rather than a credential-less row.
+  it("9. a fault at the ciphertext upsert leaves the previous blob in place", async () => {
     setup();
-    // Both clients with a live credential to protect are created BEFORE the
-    // fault is armed: the trigger refuses every ciphertext INSERT, so a managed
-    // client created under it would fail for a reason this test is not about.
-    await withKey(managedEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
-    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
-    expect(secretRow("ref-only")).toBeNull();
     await withKey(managedEnv(), service.create(createInput({ label: "Managed", secret: MARKER })));
+    const before = secretRow("managed")!;
 
     // Fault injection at the storage boundary: a trigger that makes the
     // ciphertext upsert fail exactly as a disk/constraint fault would. RAISE
@@ -1048,32 +828,16 @@ describe("managed MCP client secrets", () => {
     db.exec(`CREATE TRIGGER fail_secret_upsert BEFORE INSERT ON assistant_mcp_secrets
              BEGIN SELECT RAISE(FAIL, 'injected upsert fault'); END;`);
 
-    const faulted = await withKeyEither(managedEnv(), service.update("ref-only", { secret: MARKER }));
-    expect(faulted).toMatchObject({ _tag: "Left", left: { _tag: "DbError" } });
-    // The registry write that nulls the ref never ran: the client still
-    // authenticates with its old reference instead of connecting anonymously.
-    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
-    expect(secretRow("ref-only")).toBeNull();
-    expect(await run(service.list())).toMatchObject([
-      { id: "managed", hasSecret: true, secretSource: "managed" },
-      { id: "ref-only", hasSecret: true, secretSource: "reference" },
-    ]);
-
-    // The same fault on a managed re-save leaves the PREVIOUS ciphertext in
-    // place (the upsert is atomic), so a client is never left credential-less.
-    const before = secretRow("managed")!;
     const refaulted = await withKeyEither(managedEnv(), service.update("managed", { secret: `${MARKER}-2` }));
     expect(refaulted).toMatchObject({ _tag: "Left", left: { _tag: "DbError" } });
     expect(secretRow("managed")).toEqual(before);
+    expect(await run(service.list())).toMatchObject([{ id: "managed", hasSecret: true, secretSource: "managed" }]);
 
-    // With the fault removed, the success path stores exactly ONE source: the
-    // new ciphertext, and no stale reference beside it.
+    // With the fault removed the re-save succeeds with a fresh blob.
     db.exec("DROP TRIGGER fail_secret_upsert");
-    const retried = await withKey(managedEnv(), service.update("ref-only", { secret: MARKER }));
-    expect(retried).toMatchObject({ id: "ref-only", hasSecret: true, secretSource: "managed" });
-    expect(refOf("ref-only")).toBeNull();
-    expect(secretRow("ref-only")).toBeDefined();
-    expect(secretCount()).toBe(2);
+    const retried = await withKey(managedEnv(), service.update("managed", { secret: `${MARKER}-2` }));
+    expect(retried).toMatchObject({ id: "managed", hasSecret: true, secretSource: "managed" });
+    expect(secretRow("managed")).not.toEqual(before);
 
     // A managed CREATE has no prior credential to protect, but the same
     // ordering means an encryption fault leaves NO registration at all: the
@@ -1088,7 +852,7 @@ describe("managed MCP client secrets", () => {
     } finally {
       sealFault.mockRestore();
     }
-    expect(await run(service.list())).toMatchObject([{ id: "managed" }, { id: "ref-only" }]);
+    expect(await run(service.list())).toMatchObject([{ id: "managed" }]);
     // No registration and no ciphertext row for the failed label: the whole row
     // is absent, not a row with an empty credential.
     expect(db.prepare("SELECT id FROM assistant_mcp_servers WHERE id = ?").get("never")).toBeNull();

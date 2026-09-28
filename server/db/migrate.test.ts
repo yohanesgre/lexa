@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1205,6 +1205,88 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
 
     expect(tableExists(db, "assistant_mcp_secrets")).toBe(false);
     expect(appliedMigrations(dbPath)).not.toContain("0011_mcp_managed_secrets.sql");
+    db.close();
+  });
+
+  // ── 0012 remove MCP secret refs ──────────────────────────────────────────
+  // Pre-0012 registry state: two clients with a legacy `secret_ref` and one
+  // secret-less client, plus a managed ciphertext row that 0012 must NOT touch.
+  const SEED_PRE_0012 = `
+    INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled) VALUES
+      ('ref-env',  'Env Ref',  'http', 'https://mcp.test/env',   NULL, '[]', 'env:CREDENTIAL_MARKER',   1),
+      ('ref-file', 'File Ref', 'sse',  'https://mcp.test/file',  NULL, '[]', 'file:/run/secrets/token', 0),
+      ('plain-mcp','Plain',    'http', 'https://mcp.test/plain', NULL, '[]', NULL,                      0);
+    INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id)
+      VALUES ('ref-env', 'CIPHERTEXT-BLOB', 'IV-BLOB', 'active');
+  `;
+
+  function apply0012(db: Database): void {
+    const sql = readFileSync(join(MIGRATIONS, "0012_remove_mcp_secret_refs.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0012_remove_mcp_secret_refs.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
+  function assertPost0012(db: Database): void {
+    // Every legacy ref is cleared; the column stays (D1 cannot drop it).
+    expect(db.prepare("SELECT id, secret_ref FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
+      { id: "plain-mcp", secret_ref: null },
+      { id: "ref-env", secret_ref: null },
+      { id: "ref-file", secret_ref: null },
+    ]);
+    const cols = (db.prepare("PRAGMA table_info(assistant_mcp_servers)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain("secret_ref");
+    // The managed ciphertext row is untouched: the token stays usable.
+    expect(db.prepare("SELECT server_id, ciphertext, iv, key_id FROM assistant_mcp_secrets").get()).toEqual({
+      server_id: "ref-env",
+      ciphertext: "CIPHERTEXT-BLOB",
+      iv: "IV-BLOB",
+      key_id: "active",
+    });
+  }
+
+  it("0012 clears every stored secret_ref (Bun runner, foreign_keys=OFF), leaving ciphertext untouched", () => {
+    const dir = stageThrough("0011");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0012_remove_mcp_secret_refs.sql");
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = OFF");
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 0 });
+    db.exec(SEED_PRE_0012);
+    expect(db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = 'ref-env'").get()).toEqual({
+      secret_ref: "env:CREDENTIAL_MARKER",
+    });
+
+    apply0012(db);
+    assertPost0012(db);
+    expect(appliedMigrations(dbPath)).toContain("0012_remove_mcp_secret_refs.sql");
+
+    // Idempotent by construction: a second apply of the same UPDATE is a no-op.
+    db.exec(readFileSync(join(MIGRATIONS, "0012_remove_mcp_secret_refs.sql"), "utf-8"));
+    assertPost0012(db);
+    db.close();
+  });
+
+  it("0012 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
+    const dir = stageThrough("0011");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0012);
+
+    apply0012(db);
+    assertPost0012(db);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
   });
 });

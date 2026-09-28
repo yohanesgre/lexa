@@ -849,11 +849,14 @@ ALTER TABLE task_comments ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
 -- clients only — http/sse, which carry a url and no command. `command`/`args`
 -- and the stdio arm of the CHECK are the retained 0009 shape: D1 supports
 -- neither DROP COLUMN nor a CHECK rewrite, and 0010 empties the stdio rows
--- instead of rebuilding the table (see below). `secret_ref` stores only a
--- reference — 'env:NAME' or 'file:/abs/path' — never a plaintext credential;
--- the repo's public mapper drops it and exposes `hasSecret` + `secretSource`
--- instead. A managed token is never stored here at all: it lives encrypted in
--- `assistant_mcp_secrets` (0011).
+-- instead of rebuilding the table (see below). `secret_ref` is a **legacy**
+-- column: it once held an 'env:NAME' | 'file:/abs/path' reference, but managed
+-- envelope-encrypted tokens became the only credential source (2026-09-28),
+-- migration `0012_remove_mcp_secret_refs.sql` clears every stored value, and
+-- the repo never writes it again (any write nulls it). The repo's public mapper
+-- ignores it and exposes `hasSecret` + `secretSource` instead. A managed token
+-- is never stored here at all: it lives encrypted in `assistant_mcp_secrets`
+-- (0011).
 CREATE TABLE assistant_mcp_servers (
   id TEXT PRIMARY KEY,                                  -- stable slug, e.g. 'jev'
   label TEXT NOT NULL,
@@ -861,7 +864,7 @@ CREATE TABLE assistant_mcp_servers (
   url TEXT,
   command TEXT,
   args TEXT NOT NULL DEFAULT '[]',                      -- JSON array of strings
-  secret_ref TEXT,                                      -- 'env:NAME' | 'file:/abs/path', never plaintext
+  secret_ref TEXT,                                      -- legacy; cleared by 0012, never written again
   enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -913,6 +916,16 @@ CREATE TABLE assistant_mcp_secrets (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 0012_remove_mcp_secret_refs.sql — managed-only MCP client secrets
+-- (maintainer decision 2026-09-28). The `env:`/`file:` reference source is
+-- removed end to end; managed tokens are the ONLY credential source and
+-- secret-less clients remain legal. Every stored `secret_ref` value is dead and
+-- cleared by this single UPDATE (verbatim). The column is NOT dropped — D1
+-- cannot drop/rebuild a column safely — so it stays legacy and is never written
+-- again (the repo nulls it on every write). Ciphertext rows are untouched, so a
+-- managed token stays usable across the migration.
+UPDATE assistant_mcp_servers SET secret_ref = NULL WHERE secret_ref IS NOT NULL;
 
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/assistant (no CHECK in DDL).
@@ -1010,8 +1023,11 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- keys OFF and ON DELETE CASCADE would not fire; http/sse rows untouched, and
 -- the tables are not rebuilt so the legacy command/args columns and the 0009
 -- CHECK survive), 0011_mcp_managed_secrets.sql (managed MCP client secrets —
--- new `assistant_mcp_secrets` table, CREATE TABLE only, ciphertext only). Future
--- migrations continue at 0012_*.sql.
+-- new `assistant_mcp_secrets` table, CREATE TABLE only, ciphertext only),
+-- 0012_remove_mcp_secret_refs.sql (managed-only MCP client secrets — clears
+-- every legacy `secret_ref` with one UPDATE, no DDL; the column stays legacy and
+-- is never written again). Future
+-- migrations continue at 0013_*.sql.
 ```
 
 ## Design Notes
@@ -1092,9 +1108,12 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
   agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 
 ### Managed MCP client secrets (`assistant_mcp_secrets`)
-`assistant_mcp_servers.secret_ref` is a **reference** only. A credential entered
-in the webapp is envelope-encrypted and stored in its own table,
-`assistant_mcp_secrets` (0011), keyed by `server_id`.
+`assistant_mcp_secrets` is the **only** credential store. A credential entered
+in the webapp is envelope-encrypted and stored here (0011), keyed by
+`server_id`. The legacy `assistant_mcp_servers.secret_ref` **reference** column
+is no longer a credential source: it is legacy, cleared by
+`0012_remove_mcp_secret_refs.sql`, and never written again (any repo write nulls
+it); a stale value is ignored by the public mapper.
 
 - **One row per client.** `server_id` is the PRIMARY KEY, so a client has at
   most one stored blob. Upsert (`ON CONFLICT(server_id) DO UPDATE`) is the write,
@@ -1105,7 +1124,11 @@ in the webapp is envelope-encrypted and stored in its own table,
   registry (and the assistant tool bridge) reads it through a `LEFT JOIN`
   aliased to `secret_ciphertext` / `secret_iv` / `secret_key_id`; **absence of a
   row means no managed token**, which is how a secret-less client is
-  represented.
+  represented. A stored legacy `secret_ref` with no blob is **not** a secret —
+  it hard-fails at connect until a write clears it.
+- **Legacy ref clearance (0012).** A single `UPDATE` nulls every non-null
+  `secret_ref`; it is D1-safe (no DDL, no FK interaction) and idempotent. Rows
+  in this table are untouched, so managed tokens survive the migration.
 - **FK cascade + explicit delete.** `ON DELETE CASCADE` fires under the
   Workers/D1 runner, but the Bun runner runs with `PRAGMA foreign_keys = OFF`
   (`server/db/migrate.ts`), where it does not. `repo.remove` therefore deletes

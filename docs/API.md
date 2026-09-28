@@ -1520,11 +1520,13 @@ never a server hosted by Lexa. The registry mirrors the provider registry:
 `assistant_mcp_project_servers` is per-project availability (absence =
 unavailable). Only read-only-annotated tools are exposed to the model
 (`buildMcpTools` per stream; `mcp__<serverId>__<tool>`, default-deny,
-fail-open discovery). A client authenticates with **exactly one** source: a
-**reference** (`secretRef` — `env:NAME` | `file:/abs/path`) or a **managed**
-token (`secret` — entered here, stored AES-256-GCM encrypted in
-`assistant_mcp_secrets`). Neither source is ever serialized: responses expose
-`hasSecret` plus `secretSource` and never a value.
+fail-open discovery). The **managed token** is the only credential source:
+`secret` (entered here, stored AES-256-GCM encrypted in
+`assistant_mcp_secrets`) when a master key is configured, or no credential at
+all (a deliberately secret-less client). A credential is never serialized:
+responses expose `hasSecret` plus `secretSource` and never a value. The
+historical `env:NAME` / `file:/abs/path` reference source was removed
+(2026-09-28) — see the Legacy notes below.
 
 Writes accept **HTTP and SSE only**: Lexa spawns no local process, so `stdio` is
 rejected on every runtime (Bun host included) with
@@ -1541,8 +1543,10 @@ shape, not supported input.
 ```
 McpServer = { id, label, transportType, url: string|null, command: string|null,
               args: string[], hasSecret: boolean,
-              secretSource: "managed"|"reference"|"none", enabled: boolean,
+              secretSource: "managed"|"none", enabled: boolean,
               createdAt, updatedAt }
+  // breaking: the historical `"reference"` value is gone; a stored ref now
+  // reads as `"none"` (value cleared by migration 0012).
 
 GET    /api/assistant/mcp-servers   (superadmin)
 → 200 { data: McpServer[], managedSecretsEnabled: boolean }   // every registered remote client; empty until one is created
@@ -1559,12 +1563,14 @@ body { label*, transportType*, url?, command?, args?, secretRef?, secret?, enabl
   reserved. http/sse require `url` (http/https, no userinfo);
   `transportType: "stdio"` → 400 MCP_INVALID_TRANSPORT_CONFIG. A `command` or a
   non-empty `args` in an http/sse payload is REJECTED (400
-  MCP_INVALID_TRANSPORT_CONFIG) — never silently dropped. `secretRef` must be
-  `file:/abs/path` or `env:NAME`, and `NAME` must be a fixed `RuntimeEnv` key
-  (the snapshot `getEnv()`/`getEnvFromWorkers()` build); any other name → 400
-  MCP_INVALID_TRANSPORT_CONFIG. `secret` is a managed Bearer token: write-only,
-  non-empty, at most 4096 characters, and mutually exclusive with `secretRef`
-  (both at once → 400, neither is also legal and stores a secret-less client).
+  MCP_INVALID_TRANSPORT_CONFIG) — never silently dropped. `secret` is the
+  managed Bearer token: write-only, non-empty, at most 4096 characters; omitted
+  (or empty) stores a secret-less client. `secretRef` is deprecated and
+  accepted-and-ignored — a non-empty value emits one structured `WARN` on stderr
+  and has no effect on the created row (an older client's payload still decodes
+  rather than 400ing). Storing a token requires `LXK_MCP_MASTER_KEY`; without it
+  the save is refused with 400 MCP_INVALID_TRANSPORT_CONFIG and nothing is
+  stored, while a secret-less client is still legal.
 → 201 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 404 MCP_SERVER_NOT_FOUND
   | 403 FORBIDDEN
 
@@ -1573,15 +1579,14 @@ body { label?, transportType?, url?, command?, args?, secretRef?, secret?,
        clearSecret?, enabled? }
   Omitted fields unchanged; the merged row is re-validated, so switching
   transport requires the matching field in the same request. `stdio` → 400
-  MCP_INVALID_TRANSPORT_CONFIG, as are a supplied `command`/`args` and an
-  unknown `env:` name (only a `secretRef` **in the request** is checked). An
-  omitted `secretRef` keeps the stored reference, whatever it is. Secret intent
-  is read from the REQUEST only: an omitted or empty `secret`/`secretRef` means
-  **keep** the stored source (an empty string never clears anything), and
-  `clearSecret: true` is the only removal route — it nulls the stored reference
-  AND deletes the ciphertext row, and it works even with no master key
-  configured. `clearSecret: true` combined with a `secret` or `secretRef` in the
-  same body → 400.
+  MCP_INVALID_TRANSPORT_CONFIG, as are a supplied `command`/`args`. Secret intent
+  is read from the REQUEST only: an omitted or empty `secret` means **keep** the
+  stored token (an empty string never clears anything), and `clearSecret: true`
+  is the only removal route — it deletes the ciphertext row, works even with no
+  master key configured, and is refused (400 MCP_INVALID_TRANSPORT_CONFIG) when
+  combined with a `secret`. `secretRef` here is deprecated and
+  accepted-and-ignored exactly as on create (one `WARN`, no effect). Every write
+  also nulls the legacy `secret_ref` column.
 → 200 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 403 FORBIDDEN
   | 404 MCP_SERVER_NOT_FOUND
 
@@ -1613,96 +1618,66 @@ body { entries: [{ serverId*, enabled* }] }
 Notes:
 - **SSRF:** http/sse registrations pass the SSRF guard at save time and again
   at connect time; the project `url_allowlist` applies at connect.
-- **Secrets:** there are two mutually exclusive sources and both are
-  superadmin-only (every route here is). Neither is ever serialized, echoed, or
-  logged — responses expose `hasSecret` and `secretSource` only, and `secret` is
-  **write-only by construction** (it exists on the request schema and not on the
-  response schema, so no response can carry a value).
-  - `secretRef` names a credential, never one. It resolves only at connect time
-    through (`server/env.ts` `resolveSecretRef`) and is sent as the single
-    header `Authorization: Bearer <secret>`; with no reference, or one that
-    resolves to nothing, no authorization header is sent at all.
+- **Secrets:** the managed token is the only credential source, and every route
+  here is superadmin-only. It is never serialized, echoed, or logged — responses
+  expose `hasSecret` and `secretSource` only, and `secret` is **write-only by
+  construction** (it exists on the request schema and not on the response schema,
+  so no response can carry a value).
   - `secret` is a managed Bearer token, stored AES-256-GCM encrypted in
     `assistant_mcp_secrets` (migration `0011_mcp_managed_secrets.sql`); the
     master key lives only in the environment (`LXK_MCP_MASTER_KEY`, with
     `LXK_MCP_MASTER_KEY_PREV` as the rotation read path). Plaintext exists only
     in the request and in the encrypt call — never in a registry row, a log line,
-    or a response.
-  - **Exactly one source per client.** A stored ciphertext row is
-    authoritative on read and short-circuits the reference branch, so a client
-    can never send two credentials. Storing one source deletes the other;
-    `secretSource` says which one is stored (`"none"` = no secret at all, a
-    legal, deliberately secret-less client). `hasSecret` is true for either
-    source.
+    or a response. At connect it becomes the single header
+    `Authorization: Bearer <secret>`; a genuinely secret-less client sends no
+    authorization header at all.
+  - **`secretSource` is `"managed"` or `"none"`** — `hasSecret` is true exactly
+    when a managed token is stored. The historical `"reference"` value is gone:
+    this is a **breaking response-value change**, so a client still decoding
+    `"reference"` must accept `"none"` instead (older rows that carried a ref are
+    cleared by migration `0012`).
+  - **No reference source.** The `env:NAME` / `file:/abs/path` resolution path
+    (`server/env.ts` `resolveSecretRef`), the fixed-`RuntimeEnv` allowlist check,
+    and the master-key denylist were removed on 2026-09-28. `secretRef` survives
+    only as a deprecated accepted-and-ignored field (see the POST/PATCH bodies
+    above); a legacy stored `secret_ref` is dead and hard-fails at connect until
+    a write clears it (see Legacy below).
   - **Clear:** `clearSecret: true` on the PATCH is the **only** removal route —
     there is no null-both form, no sentinel string, and no empty-value overload
     ("empty means keep" is exactly why clear needs its own flag). It is a pure
     row delete, so it works with **no master key configured** — a credential can
     always be revoked, including on a deployment whose key is gone.
-  - **Disabled without a master key:** when `LXK_MCP_MASTER_KEY` is unset, a
-    save carrying `secret` is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`
-    and stores nothing; `secretRef` clients keep working exactly as before, and
-    a client that already has a stored token keeps `hasSecret: true` — a missing
-    key never silently drops a secret.
-  - **Master-key denylist:** a `secretRef` naming `LXK_MCP_MASTER_KEY` or
-    `LXK_MCP_MASTER_KEY_PREV` is refused (400 `MCP_INVALID_TRANSPORT_CONFIG`) at
-    save **and again at connect** — those env names are legitimate `RuntimeEnv`
-    slots, so the allowlist alone would accept them, and `env:LXK_MCP_MASTER_KEY`
-    would forward the envelope key itself as a `Bearer` token to a remote
-    server. An older row holding one is refused at connect rather than
-    forwarded.
-  - `env:NAME` resolves **only fixed `RuntimeEnv` keys** — the snapshot built by
-    `getEnv()` (Bun) / `getEnvFromWorkers()` (Workers), enumerated by
-    `RUNTIME_ENV_STRING_KEYS` in `server/env.ts`. An arbitrary process env var or
-    Workers binding is not a snapshot key, so it is rejected at save time with
-    `MCP_INVALID_TRANSPORT_CONFIG` and, if an older row holds one anyway,
-    resolves to `null` at connect (fail closed, no header) until it is replaced.
-    There is no `process.env` fallback and no dedicated `LXK_MCP_SECRET_*`
-    namespace.
-    - The allowlist is the **union of both builders**, so a listed name can still
-      be dead on the runtime serving the request: `CRON_SECRET` is Workers-only
-      (`getEnv()` never copies it), and `DATABASE_PATH`, `PORT`,
-      `LXK_STORAGE_FS_ROOT` and the `LXK_S3_*` names are Bun-side slots
-      `getEnvFromWorkers()` forces to `undefined`. Such a reference resolves to
-      `null` and the client connects **with no `Authorization` header at all** —
-      an endpoint that allows anonymous access can therefore still report a
-      successful test with no credential sent.
-  - A stored reference that is no longer an allowlisted name (a pre-existing row)
-  is **not re-validated by an unrelated PATCH** — only a `secretRef` present in
-  the request body is checked, so the row stays editable; the stored value is
-  passed through unchanged and fails closed at connect until replaced or cleared.
-  - `file:/abs/path` reads a host file on the Bun host only; Workers has no
-    filesystem and resolves it to `null`.
-  - Referencing an infrastructure key is a deliberate forward: the value is sent
-    as Bearer to the configured remote URL, so only reference credential keys
-    intended for that endpoint. `file:` is a deliberate **file egress**: the
-    bytes of any host file the process can read are read at connect and sent as
-    the Bearer token to the configured URL (Bun-only), so a `file:` ref is an
-    explicit instruction to hand that file's contents to that endpoint.
-  - A resolved value containing CR, LF or NUL (a multiline PEM) cannot become a
-    header value; the connect is refused with `MCP_CONNECT_FAILED` and a fixed
-    message that never echoes the value. A failed connect reports a fixed generic
-    message — remote error text (SDK, transport, or MCP server response) is never
-    echoed into `error.message` or the server logs.
-  - **Decrypt failures are a hard 502 `MCP_CONNECT_FAILED`**, never a silent
-    anonymous connect: a wrong key, a tampered blob, a `key_id` Lexa does not
-    recognize, or a managed row on a deployment with no key all report
-    `MCP_CONNECT_FAILED` with one fixed message. (An *unresolvable reference* is
-    the opposite case — no header, fail-closed, unchanged.) That hard failure is
-    the **test route**; on the **assistant run** the same refusal is
-    fail-open bridge behavior — the server is skipped with a `WARN` line on
-    stderr and its tools are simply unavailable for that run, while the rest of
-    the session continues. Rotation is
+  - **Required to store, disabled without it:** when `LXK_MCP_MASTER_KEY` is
+    unset, a save carrying `secret` is refused with 400
+    `MCP_INVALID_TRANSPORT_CONFIG` and stores nothing; a secret-less client is
+    still legal, and a client that already has a stored token keeps
+    `hasSecret: true` — a missing key never silently drops a secret.
+  - A managed token containing CR, LF or NUL cannot become a header value; the
+    connect is refused with `MCP_CONNECT_FAILED` and a fixed message that never
+    echoes the value. A failed connect reports a fixed generic message — remote
+    error text (SDK, transport, or MCP server response) is never echoed into
+    `error.message` or the server logs.
+  - **Every credential failure is a hard 502 `MCP_CONNECT_FAILED`**, never a
+    silent anonymous connect: a legacy stored `secret_ref`, a wrong key, a
+    tampered blob, a `key_id` Lexa does not recognize, or a managed row on a
+    deployment with no key all report `MCP_CONNECT_FAILED` with one fixed message
+    (the ref itself is never echoed). That hard failure is the **test route**; on
+    the **assistant run** the same refusal is fail-open bridge behavior — the
+    server is skipped with a `WARN` line on stderr and its tools are simply
+    unavailable for that run, while the rest of the session continues. Rotation is
     rewrap-free: `LXK_MCP_MASTER_KEY_PREV` keeps old rows readable, and
     re-encrypting a row means re-entering the token in the webapp.
-- **Legacy compatibility:** a stored `secret_ref` from before managed secrets
-  keeps working untouched, and an **omitted or empty `secret`/`secretRef` means
-  keep**, so an older client that PATCHes `{ label }` never disturbs its
-  credential. `secretRef: null` is *not* a clear — it is an absent field, i.e.
-  keep (clearing is `clearSecret: true`). The `stdio` literal stays on the wire
-  schema so a legacy payload still fails with the exact domain error, and
-  `command: ""` (or whitespace) means "no command" — it normalizes to `null`
-  rather than being refused; a **non-blank** `command` is still rejected.
+- **Legacy compatibility:** a stored `secret_ref` is **dead** — a connect
+  refuses it with `MCP_CONNECT_FAILED` (never an anonymous connect) until any
+  write clears it; migration `0012_remove_mcp_secret_refs.sql` clears every
+  stored ref at boot, and every repo write nulls the column. An **omitted or
+  empty `secret` means keep**, so an older client that PATCHes `{ label }` never
+  disturbs a managed token (the write also clears the legacy ref).
+  `secretRef: null` is *not* a clear — it is an absent, ignored field (clearing
+  is `clearSecret: true`). The `stdio` literal stays on the wire schema so a
+  legacy payload still fails with the exact domain error, and `command: ""` (or
+  whitespace) means "no command" — it normalizes to `null` rather than being
+  refused; a **non-blank** `command` is still rejected.
 - **Legacy columns:** `command` and `args` stay in the table and in the response
   shape for compatibility; clients created through the API always store
   `command = null` and `args = []`, and a payload that supplies either is
