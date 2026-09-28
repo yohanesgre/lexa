@@ -1,7 +1,18 @@
 import { Effect } from "effect";
 import { Db, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 
+// Stored column domain — mirrors the 0009 CHECK, which still names 'stdio'
+// because D1 cannot DROP COLUMN / rebuild the table safely. Migration 0010
+// deletes every stored stdio row, so only 'http'/'sse' rows exist after it.
+// Read types only: nothing writes 'stdio'.
 export type McpTransportType = "http" | "sse" | "stdio";
+
+// Application support: Lexa connects to REMOTE MCP servers only. The stdio
+// branch is dead in storage (0010) and unreachable from the public surface —
+// service validation rejects it with MCP_INVALID_TRANSPORT_CONFIG.
+export type McpClientTransportType = "http" | "sse";
+
+export const MCP_CLIENT_TRANSPORTS: readonly McpClientTransportType[] = ["http", "sse"];
 
 export interface McpServerRow {
   id: string;
@@ -45,10 +56,13 @@ export interface ProjectMcpServerPublic {
   updatedAt: string;
 }
 
+// Write inputs are remote-only: the type is the last gate before a row lands in
+// the table, so 'stdio' cannot be persisted even if a caller skips validation.
+// `command` stays on the input for the historical column but is always null.
 export interface CreateMcpServerInput {
   id: string;
   label: string;
-  transportType: McpTransportType;
+  transportType: McpClientTransportType;
   url: string | null;
   command: string | null;
   args: string[];
@@ -58,7 +72,7 @@ export interface CreateMcpServerInput {
 
 export interface UpdateMcpServerInput {
   label?: string;
-  transportType?: McpTransportType;
+  transportType?: McpClientTransportType;
   url?: string | null;
   command?: string | null;
   args?: string[];

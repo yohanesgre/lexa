@@ -112,6 +112,36 @@ describe("runMigrationsD1", () => {
     expect(second.alreadyApplied).toEqual(first.applied);
   });
 
+  // The stub does not execute DML (see makeStubRunner), so this asserts the
+  // shape and ordering of the SQL the D1 runner hands to the binding — real
+  // row-level effects are proven by the Bun-runner tests in migrate.test.ts.
+  it("0010 sends junction-first stdio cleanup, never a rebuild", async () => {
+    const captured: { sql: string; params?: unknown[] }[][] = [];
+    const originalBatch = stub.batch.bind(stub);
+    stub.batch = (async (stmts) => {
+      captured.push(stmts);
+      return originalBatch(stmts);
+    }) as D1MigrationRunner["batch"];
+
+    const result = await runMigrationsD1(stub);
+    expect(result.applied).toContain("0010_remove_stdio_mcp_clients.sql");
+
+    const index = result.applied.indexOf("0010_remove_stdio_mcp_clients.sql");
+    const migrationSql = captured[index + 1]![0]!.sql;
+    const statements = migrationSql.replace(/--[^\n]*/g, "");
+    expect(statements).toMatch(/DELETE\s+FROM\s+assistant_mcp_project_servers/i);
+    expect(statements).toMatch(/DELETE\s+FROM\s+assistant_mcp_servers\s+WHERE\s+transport_type\s*=\s*'stdio'/i);
+    // Junction rows go first: the D1 runner enforces foreign keys, so the
+    // parent DELETE must not be the only cleanup statement.
+    expect(statements.indexOf("assistant_mcp_project_servers")).toBeGreaterThanOrEqual(0);
+    expect(statements.indexOf("assistant_mcp_project_servers")).toBeLessThan(
+      statements.search(/DELETE\s+FROM\s+assistant_mcp_servers\s+WHERE\s+transport_type/i)
+    );
+    // No table rebuild: D1 supports neither ALTER/DROP COLUMN nor a CHECK rewrite.
+    expect(statements).not.toMatch(/\b(ALTER|DROP|RENAME)\b/i);
+    expect(statements).not.toMatch(/CREATE\s+TABLE/i);
+  });
+
   it("passes the migration SQL + the registry INSERT as one batch per file", async () => {
     const captured: { sql: string; params?: unknown[] }[][] = [];
     const originalBatch = stub.batch.bind(stub);

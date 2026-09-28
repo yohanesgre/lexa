@@ -1,14 +1,12 @@
 import type { McpServerInput, McpTransportType } from "../../lib/api";
 
-// Pure logic for the MCP Servers registry section (wireframe
-// admin-assistant-providers.html §MCP Servers; shared with settings-workspace).
-
-export const MCP_SEEDED_ID = "jev";
+// Pure logic for the MCP Clients registry section (wireframe
+// admin-assistant-providers.html §MCP Clients; shared with settings-workspace).
+// Remote HTTP/SSE only — stdio was removed with migration 0010.
 
 export const MCP_TRANSPORTS: { value: McpTransportType; label: string }[] = [
   { value: "http", label: "http (Streamable HTTP)" },
   { value: "sse", label: "sse (legacy)" },
-  { value: "stdio", label: "stdio (same host only)" },
 ];
 
 // Mirrors server slugifyMcpId — the id is derived from the label on create.
@@ -22,13 +20,9 @@ export function slugifyMcpId(label: string): string {
   );
 }
 
-export function isSeededMcpServer(server: { id: string }): boolean {
-  return server.id === MCP_SEEDED_ID;
-}
-
-export function endpointOf(server: { transportType: McpTransportType; url: string | null; command: string | null } | null): string {
+export function endpointOf(server: { url: string | null } | null): string {
   if (!server) return "";
-  return (server.transportType === "stdio" ? server.command : server.url) ?? "";
+  return server.url ?? "";
 }
 
 export type McpTestState = {
@@ -51,25 +45,11 @@ export type McpFormState = {
   label: string;
   transportType: McpTransportType;
   url: string;
-  command: string;
-  args: string;
   secretRef: string;
 };
 
-// JSON array of argv tokens; empty input means no args. Returns null on
-// non-array / non-string entries so the form can flag the field invalid.
-export function parseArgs(input: string): string[] | null {
-  const trimmed = input.trim();
-  if (!trimmed) return [];
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (!Array.isArray(parsed) || !parsed.every((a) => typeof a === "string")) return null;
-    return parsed as string[];
-  } catch {
-    return null;
-  }
-}
-
+// Shape check only: env: names are allowlisted at save against the server's
+// RuntimeEnv snapshot keys, which the browser cannot know.
 export function isValidSecretRef(value: string): boolean {
   return /^env:[A-Z0-9_]+$/.test(value) || /^file:\//.test(value);
 }
@@ -84,22 +64,13 @@ export function mcpFormPayload(state: McpFormState): McpServerInput | null {
   const label = state.label.trim();
   if (!label) return null;
 
-  const args = parseArgs(state.args);
-  if (args === null) return null;
+  const url = state.url.trim();
+  if (!url) return null;
 
   const secret = state.secretRef.trim();
   if (secret && !isValidSecretRef(secret)) return null;
 
-  const payload: McpServerInput = { label, transportType: state.transportType, args };
-  if (state.transportType === "stdio") {
-    const command = state.command.trim();
-    if (!command) return null;
-    payload.command = command;
-  } else {
-    const url = state.url.trim();
-    if (!url) return null;
-    payload.url = url;
-  }
+  const payload: McpServerInput = { label, transportType: state.transportType, url };
   if (secret) payload.secretRef = secret;
   return payload;
 }
@@ -108,16 +79,12 @@ export function mcpFormStateFrom(server: {
   label: string;
   transportType: McpTransportType;
   url: string | null;
-  command: string | null;
-  args: string[];
 } | null): McpFormState {
-  if (!server) return { label: "", transportType: "stdio", url: "", command: "", args: "", secretRef: "" };
+  if (!server) return { label: "", transportType: "http", url: "", secretRef: "" };
   return {
     label: server.label,
     transportType: server.transportType,
     url: server.url ?? "",
-    command: server.command ?? "",
-    args: server.args.length > 0 ? JSON.stringify(server.args) : "",
     secretRef: "",
   };
 }

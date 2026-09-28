@@ -67,6 +67,11 @@ export interface SystemPromptInput {
   // persisted into the user message.
   mentionContext?: string;
   writeTools?: string[];
+  // Jev preflight verdict block, already labeled non-authoritative by its
+  // producer. Empty or absent means no preflight ran (Jev unconfigured, or the
+  // call failed open) and nothing is emitted — the cached slots and the other
+  // context blocks are then byte-identical to a run without it.
+  advisory?: string | null | undefined;
 }
 
 // Order is cache-friendly: [0] identity+style+memory changes rarely,
@@ -94,6 +99,7 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
     repoContentBlock(input.repoContent ?? []),
     docContextBlock(input.docContext ?? ""),
     input.mentionContext && input.mentionContext.trim() !== "" ? input.mentionContext : null,
+    input.advisory && input.advisory.trim() !== "" ? input.advisory : null,
   ].filter((b): b is string => b !== null);
   if (contextBlocks.length > 0) prompts.push({ content: contextBlocks.join("\n\n") });
 

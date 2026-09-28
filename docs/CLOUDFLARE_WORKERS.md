@@ -193,6 +193,14 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
 ### Env/secrets/filesystem
 
 - Secrets via `wrangler secret put`; injected per-request.
+- Jev (System 1 advisory layer) is a single outbound subrequest with no
+  filesystem, Workers-bindings, or crypto dependency — it works as-is once the
+  key is bound: `wrangler secret put TYPESAFE_API_KEY` (plus optional
+  `TYPESAFE_BASE_URL` / `TYPESAFE_DEFAULT_MODEL` as vars, both defaulted
+  server-side). With no key bound the layer stays disabled and costs nothing.
+  Note it is one of the fixed `RuntimeEnv` string slots, so an MCP client
+  `secret_ref` of `env:TYPESAFE_API_KEY` resolves it — superadmin-only, and it
+  forwards the key as a Bearer token to that client's URL.
 - `GITHUB_PRIVATE_KEY_FILE` (path-based PEM) **impossible** — no filesystem. Use
   inline `GITHUB_PRIVATE_KEY` secret (already supported per `docs/GITHUB_SETUP.md`).
 - Migrations: `wrangler d1 migrations create/apply`; seed via

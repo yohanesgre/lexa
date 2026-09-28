@@ -79,6 +79,9 @@ export interface WorkersEnv {
   LXK_RATE_LIMIT_MAX?: string;
   LXK_RATE_LIMIT_WINDOW_MS?: string;
   LXK_ASSISTANT_REPO_CAP?: string;
+  TYPESAFE_API_KEY?: string;
+  TYPESAFE_BASE_URL?: string;
+  TYPESAFE_DEFAULT_MODEL?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
 }

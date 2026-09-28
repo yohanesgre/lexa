@@ -277,3 +277,36 @@
 2026-09-27 | wiki-right-redesign | DONE | released: wireframes PR #8 (56c9a01) + parent PR #111 (eba7f77) merged; CI green; auto-merge beat ci (not a required check) flagged | status/wiki-right-redesign/report.md
 2026-09-27 | assistant-mcp | WORKING | PR #110 merged (79f3479); MCP Phase 0 bump dispatched on feat/assistant-mcp | status/assistant-mcp/plan.md
 2026-09-27 | assistant-mcp | DONE | MCP registry + Jev default + read-only tool bridge; final gate GREEN (test:full 209f/1817); PR #112 | status/assistant-mcp/report.md
+2026-09-27 | jev-system1-mcp-clients | PLAN | approved Jev System 1 REST + callable integration; remove local stdio and relabel remote MCP Clients | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WAIT | implementation paused pending branch-create approval for feat/jev-system1-mcp-clients | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | branch creation approved; starting wireframe-first implementation | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WAIT | stopped before edits: current branch is fix/wiki-edit-styling; need worktree approval | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | worktree .worktrees/jev-system1-mcp-clients created from main at cdd73be; wireframes initialized | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | wireframe pass incomplete; repair malformed partial edits and pass build before implementation | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WAIT | wireframe repair blocked: three sources truncate mid-form; review partial diff before recovery | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | reapplying MCP Clients wireframes from clean committed sources after review found truncated forms | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WAIT | third wireframe pass failed acceptance; diagnosis required before another edit | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | approved recovery: restore two corrupted MCP wireframe sources only, preserve valid project/index edits | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | restored admin/workspace sources; build passed; narrow wireframe edits restarting one file at a time | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WAIT | focused admin wireframe pass incomplete; diagnose partial edit before recovery | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | diagnosis confirms coherent admin edits; applying localized cleanup without restoring file | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | targeted admin/workspace edits complete; beginning wireframe build and Phase 1 acceptance gate | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | reviewer requested correction: workspace secret_ref examples must use env:/file: formats from plan | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | review requested project wireframe fixes: client column label and visible empty-registry state | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | acceptance scan false alarms diagnosed; rerunning build with corrected escaped-copy and submodule-HEAD checks | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | Phase 1 complete: wireframe build passed and review approved; proceeding backend/schema, React still waits on submodule commit/push authorization | status/jev-system1-mcp-clients/plan.md
+2026-09-27 | jev-system1-mcp-clients | WORKING | Phase 2a files changed; focused tests/typecheck pass; service/API tests depend on removed Jev seed and are queued for Phase 2b | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 2b complete: stdio validation now runtime-independent, reserved jev guards dropped, docs realigned; backend suite green | .tmp/jev-phase2b.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 2b tests/typecheck/invariants pass; Phase 2c addresses connector spawn/auth path and final API docs accuracy | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WAIT | Phase 2c paused after review: env:NAME examples do not map to dynamic secrets and arbitrary RuntimeEnv lookup could forward unrelated secrets | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | maintainer chose fixed RuntimeEnv keys for MCP env refs; plan/design addendum accepted, proceeding with explicit supported-key validation and copy updates | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | fixed-key decision recorded in plan and ARCHITECTURE; Phase 2c code/docs lane dispatched | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | final review found header-error secret leak path; fixing guard/sanitization plus legacy-row and doc gaps | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 2 done: stdio removed, Bearer auth on fixed-key contract, leak paths closed, gates green; starting Phase 3 | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 3 Jev REST client started; contract + env-wiring research first | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 3 done: Jev client speaks official contract, gates green, review approved with fixes landed; starting Phase 4 | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 4 preflight plus callable tool started; integration-point research first | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 4 done: preflight plus jev_assess in both runs, review nits fixed, assistant plus services 558 green | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | wireframe gate unblocked: submodule 017e0b2 pushed, parent gitlink staged; Phase 5 React transcription started | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 5 done: transcription reviewed and fixed, wireframes e239b95 pushed and staged; Phase 6 docs sweep started | status/jev-system1-mcp-clients/plan.md
+2026-09-28 | jev-system1-mcp-clients | DONE | all phases complete, 213 files 1993 tests green, report written; uncommitted awaiting review | status/jev-system1-mcp-clients/report.md

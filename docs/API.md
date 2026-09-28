@@ -1511,16 +1511,29 @@ GET    /api/admin/assistant/calls   (superadmin)
 → 200 { data: AssistantCallLogRow[] }   // last 100, created_at DESC
   | 403 FORBIDDEN
 
-### Assistant MCP servers
+### Assistant MCP clients
 
-The assistant can consume external MCP (Model Context Protocol) servers. The
-registry mirrors the provider registry: `assistant_mcp_servers` is global
-(superadmin CRUD), `assistant_mcp_project_servers` is per-project availability
-(absence = unavailable). Only read-only-annotated tools are exposed to the
-model (tool-loop wiring lands in a later phase). `secret_ref` is never
-serialized — responses expose `hasSecret` only. On Cloudflare Workers any
-stdio write is rejected (`MCP_STDIO_UNAVAILABLE`) because there is no process
-spawn. `transportType` is `http` | `sse` | `stdio`.
+The assistant can consume external MCP (Model Context Protocol) servers. Every
+registry row is a **client** — a connection from Lexa to a remote MCP server —
+never a server hosted by Lexa. The registry mirrors the provider registry:
+`assistant_mcp_servers` is global (superadmin CRUD),
+`assistant_mcp_project_servers` is per-project availability (absence =
+unavailable). Only read-only-annotated tools are exposed to the model
+(`buildMcpTools` per stream; `mcp__<serverId>__<tool>`, default-deny,
+fail-open discovery). `secret_ref` is never serialized — responses expose
+`hasSecret` only.
+
+Writes accept **HTTP and SSE only**: Lexa spawns no local process, so `stdio` is
+rejected on every runtime (Bun host included) with
+`MCP_INVALID_TRANSPORT_CONFIG`. The request and response schema still carries
+the historical `http` | `sse` | `stdio` literal, so a legacy stdio payload
+reaches the service and gets that exact domain error instead of a generic
+schema-decode 400. Migration `0010_remove_stdio_mcp_clients.sql` deletes every
+stored `transport_type='stdio'` row and its project bindings; the registry
+starts empty and no Jev client is seeded. The physical `command`/`args` columns
+and the `stdio` branch of the 0009 CHECK are retained untouched because D1
+cannot drop columns or rewrite a CHECK without a table rebuild — they are legacy
+shape, not supported input.
 
 ```
 McpServer = { id, label, transportType, url: string|null, command: string|null,
@@ -1528,34 +1541,46 @@ McpServer = { id, label, transportType, url: string|null, command: string|null,
               createdAt, updatedAt }
 
 GET    /api/assistant/mcp-servers   (superadmin)
-→ 200 { data: McpServer[] }   // seeded `jev` row present, enabled:false, hasSecret:false
+→ 200 { data: McpServer[] }   // every registered remote client; empty until one is created
   | 403 FORBIDDEN
 
 POST   /api/assistant/mcp-servers   (superadmin)
 body { label*, transportType*, url?, command?, args?, secretRef?, enabled? }
-  id is derived from the label (slug). http/sse require `url` (http/https, no
-  userinfo) and forbid `command`; stdio requires `command` and forbids `url`.
-  `secretRef` must match 'env:[A-Z0-9_]+' or 'file:/abs/path'; the reserved id
-  'jev' is rejected.
+  id is derived from the label (slug) and is an ordinary identifier — no id is
+  reserved. http/sse require `url` (http/https, no userinfo);
+  `transportType: "stdio"` → 400 MCP_INVALID_TRANSPORT_CONFIG. A `command` or a
+  non-empty `args` in an http/sse payload is REJECTED (400
+  MCP_INVALID_TRANSPORT_CONFIG) — never silently dropped. `secretRef` must be
+  `file:/abs/path` or `env:NAME`, and `NAME` must be a fixed `RuntimeEnv` key
+  (the snapshot `getEnv()`/`getEnvFromWorkers()` build); any other name → 400
+  MCP_INVALID_TRANSPORT_CONFIG.
 → 201 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 404 MCP_SERVER_NOT_FOUND
-  | 403 FORBIDDEN | 400 MCP_STDIO_UNAVAILABLE
+  | 403 FORBIDDEN
 
 PATCH  /api/assistant/mcp-servers/:id   (superadmin)
 body { label?, transportType?, url?, command?, args?, secretRef?, enabled? }
   Omitted fields unchanged; the merged row is re-validated, so switching
-  transport requires the matching field in the same request.
+  transport requires the matching field in the same request. `stdio` → 400
+  MCP_INVALID_TRANSPORT_CONFIG, as are a supplied `command`/`args` and an
+  unknown `env:` name (only a `secretRef` **in the request** is checked). An
+  omitted `secretRef` keeps the stored reference, whatever it is;
+  `secretRef: null` clears it.
 → 200 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 403 FORBIDDEN
-  | 404 MCP_SERVER_NOT_FOUND | 400 MCP_STDIO_UNAVAILABLE
+  | 404 MCP_SERVER_NOT_FOUND
 
 DELETE /api/assistant/mcp-servers/:id   (superadmin)
-→ 204 | 400 MCP_INVALID_TRANSPORT_CONFIG (the seeded 'jev' row is protected)
-  | 403 FORBIDDEN | 404 MCP_SERVER_NOT_FOUND
+→ 204 | 403 FORBIDDEN | 404 MCP_SERVER_NOT_FOUND
 
 POST   /api/assistant/mcp-servers/:id/test   (superadmin)
 → 200 { ok, toolCount, readOnlyToolCount, latencyMs, error: { code, message }|null }
   Always 200 when the row exists — a failed connect is a result, not a server
   error; 404 MCP_SERVER_NOT_FOUND only for an unknown id. `code` is
-  MCP_CONNECT_FAILED / MCP_STDIO_UNAVAILABLE on a failed connect.
+  MCP_CONNECT_FAILED on a failed connect, and MCP_INVALID_TRANSPORT_CONFIG for a
+  legacy stdio row (0010 removes those, so it is only reachable on a database
+  that predates it). MCP_TOOL_CALL_FAILED is a tool-loop code and never appears
+  here. MCP_STDIO_UNAVAILABLE stays reserved in the error catalog and is never
+  emitted; it is retained only so a client that still decodes the code keeps
+  parsing responses on the wire.
 
 GET    /api/projects/:id/assistant/mcp-servers   (project member — requireProjectReadById)
 → 200 { data: [{ projectId, serverId, enabled, createdAt, updatedAt }] }
@@ -1571,10 +1596,49 @@ body { entries: [{ serverId*, enabled* }] }
 Notes:
 - **SSRF:** http/sse registrations pass the SSRF guard at save time and again
   at connect time; the project `url_allowlist` applies at connect.
-- **stdio:** runs only when the Lexa server runs on the same host (self-hosted
-  Bun); never available on Cloudflare Workers.
-- **Secrets:** resolve only at connect time through `secret_ref`
-  (`server/env.ts` `resolveSecretRef`); never stored or echoed in plaintext.
+- **Secrets:** `secretRef` names a credential, never one, and is superadmin-only
+  (every route here is). It resolves only at connect time through
+  (`server/env.ts` `resolveSecretRef`) and is sent as the single header
+  `Authorization: Bearer <secret>`; with no reference, or one that resolves to
+  nothing, no authorization header is sent at all. Never stored or echoed in
+  plaintext — responses expose `hasSecret` only.
+  - `env:NAME` resolves **only fixed `RuntimeEnv` keys** — the snapshot built by
+    `getEnv()` (Bun) / `getEnvFromWorkers()` (Workers), enumerated by
+    `RUNTIME_ENV_STRING_KEYS` in `server/env.ts`. An arbitrary process env var or
+    Workers binding is not a snapshot key, so it is rejected at save time with
+    `MCP_INVALID_TRANSPORT_CONFIG` and, if an older row holds one anyway,
+    resolves to `null` at connect (fail closed, no header) until it is replaced.
+    There is no `process.env` fallback and no dedicated `LXK_MCP_SECRET_*`
+    namespace.
+    - The allowlist is the **union of both builders**, so a listed name can still
+      be dead on the runtime serving the request: `CRON_SECRET` is Workers-only
+      (`getEnv()` never copies it), and `DATABASE_PATH`, `PORT`,
+      `LXK_STORAGE_FS_ROOT` and the `LXK_S3_*` names are Bun-side slots
+      `getEnvFromWorkers()` forces to `undefined`. Such a reference resolves to
+      `null` and the client connects **with no `Authorization` header at all** —
+      an endpoint that allows anonymous access can therefore still report a
+      successful test with no credential sent.
+  - A stored reference that is no longer an allowlisted name (a pre-existing row)
+  is **not re-validated by an unrelated PATCH** — only a `secretRef` present in
+  the request body is checked, so the row stays editable; the stored value is
+  passed through unchanged and fails closed at connect until replaced or cleared.
+  - `file:/abs/path` reads a host file on the Bun host only; Workers has no
+    filesystem and resolves it to `null`.
+  - Referencing an infrastructure key is a deliberate forward: the value is sent
+    as Bearer to the configured remote URL, so only reference credential keys
+    intended for that endpoint. `file:` is a deliberate **file egress**: the
+    bytes of any host file the process can read are read at connect and sent as
+    the Bearer token to the configured URL (Bun-only), so a `file:` ref is an
+    explicit instruction to hand that file's contents to that endpoint.
+  - A resolved value containing CR, LF or NUL (a multiline PEM) cannot become a
+    header value; the connect is refused with `MCP_CONNECT_FAILED` and a fixed
+    message that never echoes the value. A failed connect reports a fixed generic
+    message — remote error text (SDK, transport, or MCP server response) is never
+    echoed into `error.message` or the server logs.
+- **Legacy columns:** `command` and `args` stay in the table and in the response
+  shape for compatibility; clients created through the API always store
+  `command = null` and `args = []`, and a payload that supplies either is
+  rejected rather than stripped.
 
 GET    /api/admin/assistant/runs?status=&projectId=&limit=&cursor=   (superadmin)
 → 200 { data: AssistantRunRow[], nextCursor: string|null,

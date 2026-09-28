@@ -11,6 +11,16 @@ import {
 } from "./ssrf";
 import { docToMarkdown } from "../../shared/markdown";
 import type { TipTapDoc } from "../../shared/types";
+import {
+  jevLog,
+  JEV_TOOL_TIMEOUT_MS,
+  systemOne,
+  type JevAnswer,
+  type JevFailureCode,
+  type JevPreflightEnv,
+  type JevQuestions,
+  type JevUsage,
+} from "./jev";
 
 export const MAX_TOOL_ROUNDS = 12;
 export const MAX_CHAT_TOOL_ROUNDS = 24;
@@ -88,6 +98,9 @@ export interface AssistantToolDeps {
   projectId: string;
   allowlist: string | null;
   searchApiKey: string | null;
+  // Jev advisory config, taken from the RuntimeEnv snapshot. Absent/null (or a
+  // blank key) omits `jev_assess` entirely — the same gate as `searchApiKey`.
+  jevEnv?: JevPreflightEnv | null | undefined;
   fetchImpl: FetchLike;
   storageGet: (key: string) => Promise<Uint8Array>;
   projectOwnsStorageKey: (projectId: string, key: string) => Promise<boolean>;
@@ -181,6 +194,119 @@ export async function fetchUrlText(rawUrl: string, allowlist: string | null, fet
     return contentType.includes("text/html") ? htmlToText(capped) : capped;
   }
   throw new UrlBlocked({ reason: "too many redirects" });
+}
+
+// ── Jev advisory tool ──────────────────────────────────────────────────────
+//
+// Bounds are hard caps, and oversize input is REFUSED rather than truncated:
+// a judgment silently computed over a clipped state is a judgment over
+// something the model never sent, so the model gets a typed failure and can
+// re-send a shorter state. The preflight state builder is the only lossy path:
+// every field is clipped at its own cap and marked (`…`), but the total-state
+// squeeze also drops a field outright, and sheds memory items from the tail,
+// without a marker.
+
+export const JEV_ASSESS_MAX_STATE_CHARS = 4000;
+export const JEV_ASSESS_MAX_QUESTIONS = 8;
+// Per stream invocation: buildAssistantTools runs once per buildStream, so this
+// counter cannot outlive the run that created it (a resume gets a fresh one).
+export const JEV_ASSESS_MAX_CALLS = 3;
+export const JEV_ASSESS_BUDGET_CODE = "BUDGET_EXCEEDED";
+
+export type JevAssessFailureCode = JevFailureCode | "STATE_TOO_LARGE" | "TOO_MANY_QUESTIONS" | "NO_QUESTIONS" | typeof JEV_ASSESS_BUDGET_CODE;
+
+export type JevAssessResult =
+  | { ok: true; answers: Record<string, JevAnswer>; usage: JevUsage }
+  | { ok: false; code: JevAssessFailureCode; message: string };
+
+const JEV_ASSESS_MESSAGES: Record<Exclude<JevAssessFailureCode, JevFailureCode>, string> = {
+  STATE_TOO_LARGE: `state exceeds the ${JEV_ASSESS_MAX_STATE_CHARS}-character limit — re-send a shorter state`,
+  TOO_MANY_QUESTIONS: `at most ${JEV_ASSESS_MAX_QUESTIONS} questions per call`,
+  NO_QUESTIONS: "at least one question is required",
+  [JEV_ASSESS_BUDGET_CODE]: `budget exhausted — at most ${JEV_ASSESS_MAX_CALLS} jev_assess calls per run`,
+};
+
+function jevFailure(code: JevAssessFailureCode, message: string): { ok: false; code: JevAssessFailureCode; message: string } {
+  return { ok: false, code, message: JEV_ASSESS_MESSAGES[code as Exclude<JevAssessFailureCode, JevFailureCode>] ?? message };
+}
+
+const jevContentSchema = z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]);
+const jevNoulCriteriaSchema = z.object({ true: jevContentSchema.optional(), false: jevContentSchema.optional() });
+
+// Mirrors the System 1 question contract: `noul` carries an optional
+// true/false description pair, `choice` a map of distinct options, `score` an
+// ordered level list. A malformed question never reaches the wire.
+const jevQuestionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("noul"), instructions: jevContentSchema, criteria: jevNoulCriteriaSchema.optional() }),
+  z.object({ type: z.literal("choice"), instructions: jevContentSchema, criteria: z.record(z.string(), jevContentSchema.nullable()) }),
+  z.object({ type: z.literal("score"), instructions: jevContentSchema, criteria: z.array(z.unknown()).min(2).max(10) }),
+]);
+
+function buildJevAssessTool(cfg: { env: JevPreflightEnv; apiKey: string; fetchImpl: FetchLike }) {
+  let calls = 0;
+  // `latencyMs` is optional in the log meta: a budget refusal is decided before
+  // any request, so there is no honest latency to report and the field is
+  // omitted rather than logged as 0.
+  const log = (outcome: "advisory" | "failed" | "skipped", code: JevAssessFailureCode | undefined, latencyMs: number | undefined, usage: JevUsage | undefined): void =>
+    jevLog("assess", {
+      outcome,
+      ...(code !== undefined ? { code } : {}),
+      ...(latencyMs !== undefined ? { latencyMs } : {}),
+      ...(usage !== undefined ? { usage } : {}),
+    });
+
+  return toolDefinition({
+    name: "jev_assess",
+    description:
+      "Ask Jev, a fast System 1 judgment API, for a typed second opinion on state you already have. Read-only and advisory: it cannot create, change or approve anything. Pass a compact state (<=4000 chars) and up to 8 noul/choice/score questions. Returns typed answers, or a typed failure the stream continues past. Max 3 calls per run.",
+    inputSchema: z.object({
+      state: z.string().min(1).describe("The context to judge, <=4000 characters"),
+      questions: z.record(z.string().min(1), jevQuestionSchema).describe("Up to 8 questions keyed by a caller-chosen id"),
+    }),
+    outputSchema: z.object({
+      ok: z.boolean(),
+      answers: z.record(z.string(), z.unknown()).optional(),
+      usage: z.object({ input_tokens: z.number(), output_tokens: z.number() }).optional(),
+      code: z.string().optional(),
+      message: z.string().optional(),
+    }),
+  }).server(async ({ state, questions }): Promise<JevAssessResult> => {
+    const ids = Object.keys(questions);
+    if (ids.length === 0) return jevFailure("NO_QUESTIONS", "");
+    if (ids.length > JEV_ASSESS_MAX_QUESTIONS) return jevFailure("TOO_MANY_QUESTIONS", "");
+    if (state.length > JEV_ASSESS_MAX_STATE_CHARS) return jevFailure("STATE_TOO_LARGE", "");
+
+    if (calls >= JEV_ASSESS_MAX_CALLS) {
+      log("failed", JEV_ASSESS_BUDGET_CODE, undefined, undefined);
+      return jevFailure(JEV_ASSESS_BUDGET_CODE, "");
+    }
+    calls += 1;
+
+    const started = Date.now();
+    try {
+      const res = await systemOne({
+        state,
+        questions: questions as JevQuestions,
+        apiKey: cfg.apiKey,
+        ...(typeof cfg.env.TYPESAFE_BASE_URL === "string" ? { baseUrl: cfg.env.TYPESAFE_BASE_URL } : {}),
+        ...(typeof cfg.env.TYPESAFE_DEFAULT_MODEL === "string" ? { model: cfg.env.TYPESAFE_DEFAULT_MODEL } : {}),
+        fetchImpl: cfg.fetchImpl,
+        timeoutMs: JEV_TOOL_TIMEOUT_MS,
+      });
+      const latencyMs = Date.now() - started;
+      if (!res.ok) {
+        log(res.code === "MISSING_KEY" ? "skipped" : "failed", res.code, latencyMs, undefined);
+        return { ok: false, code: res.code, message: res.message };
+      }
+      log("advisory", undefined, latencyMs, res.usage);
+      return { ok: true, answers: res.answers, usage: res.usage };
+    } catch {
+      // systemOne is total, so this is belt-and-braces: a Jev failure must
+      // never throw into the assistant stream.
+      log("failed", "NETWORK", Date.now() - started, undefined);
+      return { ok: false, code: "NETWORK", message: "Jev request failed before a response" };
+    }
+  });
 }
 
 // Build the active v1 read-only toolset. web_search is included only when an
@@ -424,6 +550,17 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
     }).server(async () => deps.getBoardStructure())
   );
 
+  // Jev is advisory-only: the second opinion the model may request on state it
+  // already holds, never a mutation path. Present wherever the key is configured
+  // (new runs AND resumes) — the per-stream call budget lives in the closure
+  // below, and each buildAssistantTools call is one stream invocation. Pushed
+  // last, after the read toolset, so the tools that produce the state it judges
+  // are read first.
+  const jevApiKey = typeof deps.jevEnv?.TYPESAFE_API_KEY === "string" ? deps.jevEnv.TYPESAFE_API_KEY.trim() : "";
+  if (jevApiKey !== "") {
+    tools.push(buildJevAssessTool({ env: deps.jevEnv as JevPreflightEnv, apiKey: jevApiKey, fetchImpl: deps.fetchImpl }));
+  }
+
   return tools;
 }
 
@@ -512,6 +649,14 @@ export function toolCallDetail(name: string, rawArgs: unknown): string | undefin
     case "get_board_structure":
       detail = "Reading board structure";
       break;
+    case "jev_assess": {
+      // The state is the model's own context, not a label worth echoing, and
+      // it is up to 4k characters — only the question count is shown.
+      const asked = args["questions"];
+      const n = typeof asked === "object" && asked !== null && !Array.isArray(asked) ? Object.keys(asked).length : 0;
+      detail = n > 0 ? `Asking Jev ${n} question${n === 1 ? "" : "s"}` : "Asking Jev";
+      break;
+    }
   }
   if (detail === undefined) return undefined;
   return detail.length > DETAIL_CAP ? `${detail.slice(0, DETAIL_CAP - 1)}…` : detail;

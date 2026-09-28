@@ -56,8 +56,12 @@ describe("errorToStatus", () => {
     expect(errorToStatus(new McpInvalidTransportConfig({ reason: "url is required" }))).toBe(400);
     expect(errorResponse(asCatalogError(new McpInvalidTransportConfig({ reason: "url is required" }))).error.code).toBe("MCP_INVALID_TRANSPORT_CONFIG");
 
+    // Reserved since stdio was removed (migration 0010): the code, status, and
+    // message stay in the catalog, but the message must not advertise Bun-only
+    // stdio support any more.
     expect(errorToStatus(new McpStdioUnavailable())).toBe(400);
     expect(errorResponse(asCatalogError(new McpStdioUnavailable())).error.code).toBe("MCP_STDIO_UNAVAILABLE");
+    expect(errorMessage(asCatalogError(new McpStdioUnavailable()))).toBe("stdio MCP clients are not supported — the registry connects to remote http/sse servers only");
 
     expect(errorToStatus(new McpConnectFailed({ message: "boom" }))).toBe(502);
     expect(errorResponse(asCatalogError(new McpConnectFailed({ message: "boom" }))).error.code).toBe("MCP_CONNECT_FAILED");

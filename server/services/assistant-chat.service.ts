@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS } from "../assistant/tools";
+import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightEnv, type JevPreflightResult } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRow } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
@@ -112,8 +113,22 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       const sized = yield* Effect.forEach(attachments, (a) => storage.stat(a.storageKey).pipe(Effect.catchTag("StorageError", () => Effect.succeed(null)), Effect.map((size) => ({ mimeType: a.mimeType, size: size ?? 0 }))));
       yield* Effect.try({ try: () => assertAttachmentCaps(sized, caps), catch: (e) => e as InvalidArgs });
     });
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null) => ({
-      projectId, allowlist, searchApiKey, fetchImpl: fetch,
+    // Jev preflight. Advisory and fail-open by contract: any outcome other than
+    // a rendered segment leaves the run untouched, and the catch below keeps
+    // even a thrown helper from reaching the stream.
+    const runPreflight = (env: JevPreflightEnv, input: Parameters<typeof buildPreflightState>[0]): Effect.Effect<JevPreflightResult, never> =>
+      Effect.tryPromise(() => runJevPreflight({ state: buildPreflightState(input), env })).pipe(
+        Effect.catchAll(() => Effect.succeed<JevPreflightResult>({ segment: null, outcome: "failed", code: "NETWORK", latencyMs: 0 })),
+        // An unconfigured Jev is a deployment state, not a per-run event, so
+        // its outcome stands but the log line is dropped: one INFO per run for
+        // every chat on an instance that never asked for it is pure noise.
+        Effect.tap((result) => Effect.sync(() => {
+          if (result.code !== "MISSING_KEY") jevLog("preflight", result);
+        }))
+      );
+
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevEnv: JevPreflightEnv) => ({
+      projectId, allowlist, searchApiKey, jevEnv, fetchImpl: fetch,
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
@@ -223,7 +238,19 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         );
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(req.projectId, extractMemoryTerms(req.message, ""));
-        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, mentionContext, writeTools: enabledWriteTools });
+        const env = yield* currentEnv;
+        // Preflight runs once per NEW run, never on resume; only inputs this run
+        // already loaded are serialized (no history, no attachments, no keys).
+        const preflight = yield* runPreflight(env, {
+          runKind: "chat",
+          projectId: req.projectId,
+          threadId: chatId,
+          threadLabel: title,
+          userMessage: req.message,
+          taskWikiContext: mentionContext,
+          memoryHits,
+        });
+        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, mentionContext, writeTools: enabledWriteTools, advisory: preflight.segment });
         const refs: unknown[] = attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType }));
         const userContent: string | unknown[] = refs.length > 0 ? [{ type: "text", content: req.message }, ...refs] : req.message;
         let citations: import("../../shared/assistant").Citation[] = [];
@@ -241,7 +268,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
-            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key), onCitation: (c) => { citations = collectCitation(citations, c); } });
+            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env), onCitation: (c) => { citations = collectCitation(citations, c); } });
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
@@ -286,6 +313,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
+        // No preflight on resume: the judgment was made against the original
+        // request. The tool is still offered — its budget is per stream.
+        const env = yield* currentEnv;
         const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, writeTools: enabledWriteTools });
         const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
@@ -295,7 +325,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
-          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
           toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),

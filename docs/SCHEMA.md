@@ -845,11 +845,13 @@ ALTER TABLE task_comments ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
 
 -- Assistant MCP server registry (0009_assistant_mcp.sql). Global registry
 -- (superadmin-managed) + per-project availability junction; a project's absent
--- row means the server is unavailable there. `transport_type` pins exactly one
--- transport shape (CHECK): http/sse carry a url and no command; stdio carries a
--- command and no url. `secret_ref` stores only a reference — 'env:NAME' or
--- 'file:/abs/path' — never a plaintext credential; the repo's public mapper
--- drops it and exposes `hasSecret` instead.
+-- row means the server is unavailable there. The registry holds REMOTE MCP
+-- clients only — http/sse, which carry a url and no command. `command`/`args`
+-- and the stdio arm of the CHECK are the retained 0009 shape: D1 supports
+-- neither DROP COLUMN nor a CHECK rewrite, and 0010 empties the stdio rows
+-- instead of rebuilding the table (see below). `secret_ref` stores only a
+-- reference — 'env:NAME' or 'file:/abs/path' — never a plaintext credential;
+-- the repo's public mapper drops it and exposes `hasSecret` instead.
 CREATE TABLE assistant_mcp_servers (
   id TEXT PRIMARY KEY,                                  -- stable slug, e.g. 'jev'
   label TEXT NOT NULL,
@@ -876,12 +878,11 @@ CREATE TABLE assistant_mcp_project_servers (
   PRIMARY KEY (project_id, server_id)
 );
 
--- Seeded by 0009: the maintainer's local Jev MCP server (stdio, disabled).
--- Never auto-enabled: stdio requires the `jev-mcp` binary on the Lexa host and
--- is impossible on Cloudflare Workers. The row is protected — the service
--- refuses to create/delete an id of 'jev'.
-INSERT OR IGNORE INTO assistant_mcp_servers (id, label, transport_type, command, args, enabled)
-VALUES ('jev', 'Jev', 'stdio', 'jev-mcp', '[]', 0);
+-- 0009 seeded a disabled stdio 'jev' row (the `jev-mcp` binary on the Lexa
+-- host, impossible on Cloudflare Workers). 0010_remove_stdio_mcp_clients.sql
+-- deletes that row together with every other stdio row and its project
+-- bindings, so a current database has no stdio registrations. This DDL block
+-- above is the 0009 baseline and is kept for historical reference.
 
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/assistant (no CHECK in DDL).
@@ -973,7 +974,12 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- (Herald→Assistant), 0007_runtimes_team_restrict.sql (runtimes.team_id →
 -- RESTRICT), 0008_remove_agent_runtimes.sql (drops the runtime tier; rebuilds
 -- runtime_tasks → assistant_tasks and assistant_settings without the engine
--- columns). Future migrations continue at 0009_*.sql.
+-- columns), 0009_assistant_mcp.sql (assistant MCP client registry),
+-- 0010_remove_stdio_mcp_clients.sql (deletes every stdio registration and its
+-- project bindings — junction rows first, because the Bun runner has foreign
+-- keys OFF and ON DELETE CASCADE would not fire; http/sse rows untouched, and
+-- the tables are not rebuilt so the legacy command/args columns and the 0009
+-- CHECK survive). Future migrations continue at 0011_*.sql.
 ```
 
 ## Design Notes

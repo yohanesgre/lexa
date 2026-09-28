@@ -8403,7 +8403,7 @@
   .health-details-kv dd { margin:0; color:var(--lx-text-secondary); word-break:break-all; }
   @media (max-width:640px){ .health-details-kv { grid-template-columns:1fr; gap:0; } .health-details-kv dt { margin-top:6px; } }
 
-  /* MCP server registry badges (assistant MCP section) */
+  /* MCP client registry badges (assistant MCP section) */
   .mcp-transport-badge {
     display: inline-flex;
     align-items: center;
@@ -8413,14 +8413,4 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--lx-text-secondary);
-  }
-  .mcp-seeded-tag {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 6px;
-    border: 1px solid var(--lx-border-default);
-    border-radius: 9999px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--lx-text-muted);
   }

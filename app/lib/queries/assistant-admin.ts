@@ -119,7 +119,7 @@ export function useFetchModels() {
   });
 }
 
-// ── MCP servers ──
+// ── MCP clients ──
 
 export function useMcpServers() {
   return useQuery({
@@ -137,10 +137,10 @@ export function useCreateMcpServer() {
     mutationFn: (input: api.McpServerInput) => api.createMcpServer(input),
     onSuccess: (server) => {
       qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ? [...old, server] : [server]));
-      toast.push("success", "MCP server created");
+      toast.push("success", "MCP client created");
     },
     onError: (err) => {
-      toast.push("error", "Failed to create MCP server", toastMessage(err));
+      toast.push("error", "Failed to create MCP client", toastMessage(err));
     },
   });
 }
@@ -152,10 +152,10 @@ export function useUpdateMcpServer() {
     mutationFn: ({ id, ...input }: { id: string } & Partial<api.McpServerInput>) => api.updateMcpServer(id, input),
     onSuccess: (server) => {
       qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ?? []).map((s) => (s.id === server.id ? server : s)));
-      toast.push("success", "MCP server updated");
+      toast.push("success", "MCP client updated");
     },
     onError: (err) => {
-      toast.push("error", "Failed to update MCP server", toastMessage(err));
+      toast.push("error", "Failed to update MCP client", toastMessage(err));
     },
   });
 }
@@ -167,10 +167,10 @@ export function useDeleteMcpServer() {
     mutationFn: (id: string) => api.deleteMcpServer(id),
     onSuccess: (_v, id) => {
       qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ?? []).filter((s) => s.id !== id));
-      toast.push("success", "MCP server deleted");
+      toast.push("success", "MCP client deleted");
     },
     onError: (err) => {
-      toast.push("error", "Failed to delete MCP server", toastMessage(err));
+      toast.push("error", "Failed to delete MCP client", toastMessage(err));
     },
   });
 }
@@ -208,7 +208,7 @@ export function useSetProjectMcpServers(projectId: string) {
       qc.setQueryData<api.McpProjectServer[]>(["project-mcp-servers", projectId], res.data);
     },
     onError: (err) => {
-      toast.push("error", "Failed to update project MCP servers", toastMessage(err));
+      toast.push("error", "Failed to update project MCP clients", toastMessage(err));
     },
   });
 }

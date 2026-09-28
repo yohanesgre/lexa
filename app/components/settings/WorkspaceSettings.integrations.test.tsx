@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Workspace → Integrations mounts the MCP Servers registry beside the
+// Workspace → Integrations mounts the MCP Clients registry beside the
 // Assistant Providers registry (same components as the admin control panel).
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi } from "vitest";
@@ -56,12 +56,23 @@ vi.mock("../../lib/queries/assistant-admin", () => ({
 import { WorkspaceSettings } from "./WorkspaceSettings";
 
 describe("Workspace settings integrations tab", () => {
-  it("renders the MCP Servers registry beside Assistant Providers", async () => {
+  it("renders the MCP Clients registry beside Assistant Providers", async () => {
     const user = userEvent.setup();
     render(<WorkspaceSettings />);
     await user.click(screen.getByRole("tab", { name: "Integrations" }));
     expect(screen.getByRole("heading", { name: "Assistant Providers" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "MCP Servers" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save server" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP Clients" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save client" })).toBeInTheDocument();
+  });
+
+  it("shows the remote-client empty state and never a local stdio form", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceSettings />);
+    await user.click(screen.getByRole("tab", { name: "Integrations" }));
+    expect(screen.getByText("No MCP clients yet")).toBeInTheDocument();
+    expect(screen.getByText(/An optional secret reference supplies a Bearer token/)).toBeInTheDocument();
+    const transport = screen.getByLabelText("Transport") as HTMLSelectElement;
+    expect(Array.from(transport.options).map((o) => o.value)).toEqual(["http", "sse"]);
+    expect(screen.queryByText(/stdio/i)).not.toBeInTheDocument();
   });
 });

@@ -274,9 +274,11 @@ tools, keeps only those annotated `readOnlyHint === true` (default-deny),
 prefixes them `mcp__<serverId>__<tool>`, and appends them to the same `tools`
 array the in-repo registry produces. Discovery is fail-open (`Promise.allSettled`
 + 5s per-server timeout); the toolset closes exactly once via
-`StreamRunContext.onDispose` in `buildStream`'s `finally`. stdio runs only on
-the same-host Bun process (`server/assistant/mcp-stdio.ts`, lazily imported,
-`isWorkers()`-guarded); http/sse URLs are SSRF-validated at connect.
+`StreamRunContext.onDispose` in `buildStream`'s `finally`. Every row is a
+client of a **remote** MCP server: http/sse only, SSRF-validated at connect, and
+`stdio` is not supported anywhere — see "Jev — System 1 advisory layer + MCP
+Clients" below, which removes local stdio execution and migration 0010 deletes
+the stored stdio registrations.
 
 **No cycle (invariant #1).** The bridge is a plain assistant-tier module:
 it imports the registry repo type, env/errors, the SSRF guard, the
@@ -285,6 +287,119 @@ chat/task service. Chat/task services consume it, not the reverse. MCP tool
 calls are not task mutations, so they emit no `task_activity` rows; v1 exposes
 no write tools, and routing MCP writes through `assistant_pending_writes` is a
 deliberate follow-up (it needs a rebuild migration).
+
+### Jev — System 1 advisory layer + MCP Clients
+
+**Status:** Accepted · **Date:** 2026-09-27 · **Decider:** maintainer
+
+Typesafe Jev is a typed System 1 judgment API, not a chat-completion provider or
+an MCP endpoint. Lexa calls `POST https://api.typesafe.ai/v1/systemone` with a
+Bearer key and `{ state, model, questions }`; the API returns typed answers and
+usage, without chat messages or streaming. Jev is configured with
+`TYPESAFE_API_KEY`, optional `TYPESAFE_BASE_URL` (default
+`https://api.typesafe.ai`) and `TYPESAFE_DEFAULT_MODEL` (default `jev-latest`).
+These are server environment values; Jev does not enter `ProviderKind` or the
+MCP registry.
+
+**Decision:** Jev has two advisory paths. Each new chat or task-assistant run
+gets one bounded REST preflight whose fixed typed judgments are added to the
+existing assistant prompt. The assistant can also call a read-only `jev_assess`
+tool for follow-up judgments. Neither path authorizes writes; existing assistant
+tool and approval rules remain authoritative. Preflight fails open, and resumed
+streams do not repeat it. Jev and the main model remain distinct: Jev supplies
+structured judgment; the existing model produces the response and controls the
+tool loop.
+
+Generic remote MCP integrations remain separate and support HTTP/SSE only.
+Product-facing “MCP Servers” copy becomes “MCP Clients”; API routes and database
+identifiers remain unchanged for compatibility. Local stdio support and the
+seeded Jev MCP row are removed. Migration 0010 deletes all stored stdio clients
+and their project bindings. Legacy `command`/`args` columns and the historical
+SQLite transport CHECK remain because the D1 migration path cannot drop columns
+without a table rebuild; application validation accepts only HTTP/SSE. Remote
+`secret_ref` values are sent as Bearer authorization headers after resolution.
+`env:NAME` resolves only keys in the fixed `RuntimeEnv` snapshot built by
+`getEnv()`/`getEnvFromWorkers()` (maintainer decision 2026-09-28: no dedicated
+MCP secret namespace); unknown names fail closed with no header, and save-time
+validation rejects them. Setting `secret_ref` is superadmin-only; naming an
+infrastructure secret key deliberately forwards it as Bearer to the configured
+remote URL.
+
+**Data flow:**
+
+```text
+new assistant run → bounded state + fixed questions → Jev REST preflight
+  → advisory answers in system prompt → existing assistant stream/tool loop
+  → optional jev_assess → advisory typed result → existing assistant decides
+```
+
+Preflight is capped at 3 seconds and 8,000 state characters; the callable tool
+is capped at 3 calls per stream invocation, 10 seconds per request, and 4,000
+state characters. Neither path logs request state or credentials. Missing keys,
+timeouts, rate limits, and upstream errors skip preflight or return a typed tool
+failure without failing the assistant run. No task mutations or
+`task_activity` rows are emitted.
+
+**Implementation boundary.** Jev is a plain async module in the assistant tier
+(`server/assistant/jev.ts`) plus one tool in the existing read toolset
+(`jev_assess` in `server/assistant/tools.ts`) — deliberately **not** an Effect
+service. It needs no repository, no transaction, and no shared state, so a
+service tag would add a layer edge that carries nothing; the chat and task
+services call it the way they call the MCP bridge. The same reasoning keeps it
+out of the service dependency graph: Jev has no dependency that could point back
+at a service, so **invariant #1 holds without a new rule**.
+
+- **Preflight flow (once per new run).** Both entry points
+  (`runChatStream`, `runStream`) assemble the state from context the run has
+  *already loaded* — run kind, project/thread identifiers and labels, the latest
+  user message, the task/wiki context, project-memory hits — and await the
+  verdict before `buildStream`, so the advisory is part of the prompt the model
+  actually receives. History, attachments, and credentials are excluded by
+  construction: the state builder's type is a whitelist with a fixed key order.
+  The three fixed questions (write intent, ambiguity/missing fields, memory or
+  prior-decision conflict) render as one clearly labeled non-authoritative
+  block, and a conflict line carries its own deferral — live project data stays
+  authoritative. **Resume** (`resumeChatStream`, `resumeThreadStream`) issues no
+  preflight: the judgment was made against the original request. The
+  `jev_assess` tool is still offered there, because its 3-call budget is per
+  stream invocation, not per run lifetime.
+- **Callable flow.** `jev_assess` is added to the toolset only when a
+  non-blank `TYPESAFE_API_KEY` is present, so an unconfigured Jev leaves the
+  toolset unchanged. It accepts a bounded `state` plus typed `noul`/`choice`/
+  `score` questions and returns typed answers and usage, or a typed
+  `{ ok:false, code }`. It is read-only by construction: it reaches the same
+  judgment endpoint and nothing else.
+- **Bounds.** Preflight 3s / 8 000 state chars (ids 128, labels 200, each memory
+  item 400, message 2 000, task/wiki context 4 000). Tool 10s per request,
+  4 000 state chars, 8 questions, 3 calls per stream. Responses are read under a
+  64 KB cap, and no call retries — a retry cannot fit the preflight budget, and
+  both paths fail open on one attempt. Oversize *tool* input is refused with a
+  typed `STATE_TOO_LARGE` rather than silently truncated, so a judgment is never
+  computed over a state the model did not send. The preflight state is the only
+  lossy path: clipped fields are marked with `…`, but the 8 000-char squeeze
+  deletes the context or the message outright when neither fits, and drops
+  memory items from the tail unmarked.
+- **Fail-open, uniformly.** A missing key, timeout, transport error, 401/403,
+  429/529, an unreadable body, an oversized response, or an answer that does not
+  match the question set yields no advisory block and no thrown error — the
+  assistant run proceeds exactly as it would with Jev disabled. A failing tool
+  returns a typed failure the model can read and route around. The one-line
+  stderr log records only mode, outcome, failure code, latency, and token usage;
+  a call that never reached the network logs no latency rather than a fabricated
+  0, and an unconfigured Jev (`MISSING_KEY`) logs nothing at all — the disable
+  switch is a deployment state, not a per-run event.
+- **No write path, no cycle.** Jev can neither queue nor apply a write, so it
+  emits no `task_activity` row (invariant #12) and cannot bypass the existing
+  approval protocol — the advisory block states that in-band. Because
+  `server/assistant/jev.ts` imports nothing but a `RuntimeEnv` *type*, it holds
+  no service reference at all: there is no edge for a cycle to form.
+
+**Options rejected:** Jev as a chat provider is incompatible with its typed,
+non-streaming API; Jev as an MCP client would require an undocumented hosted MCP
+endpoint; local stdio wrappers are host-dependent and not the requested remote
+integration. A callable-only integration leaves Jev use dependent on the model's
+decision; automatic-only removes useful follow-up judgments. Both advisory modes
+are retained.
 
 ### Removal record — the agent-runtime (Blacksmith) tier
 

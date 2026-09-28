@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { buildAssistantTools, MAX_TOOL_ROUNDS } from "../assistant/tools";
+import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightEnv, type JevPreflightResult } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRow } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
@@ -115,8 +116,22 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       const sized = yield* Effect.forEach(attachments, (a) => storage.stat(a.storageKey).pipe(Effect.catchTag("StorageError", () => Effect.succeed(null)), Effect.map((size) => ({ mimeType: a.mimeType, size: size ?? 0 }))));
       yield* Effect.try({ try: () => assertAttachmentCaps(sized, caps), catch: (e) => e as InvalidArgs });
     });
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null) => ({
-      projectId, allowlist, searchApiKey, fetchImpl: fetch,
+    // Jev preflight. Advisory and fail-open by contract: any outcome other than
+    // a rendered segment leaves the run untouched, and the catch below keeps
+    // even a thrown helper from reaching the stream.
+    const runPreflight = (env: JevPreflightEnv, input: Parameters<typeof buildPreflightState>[0]): Effect.Effect<JevPreflightResult, never> =>
+      Effect.tryPromise(() => runJevPreflight({ state: buildPreflightState(input), env })).pipe(
+        Effect.catchAll(() => Effect.succeed<JevPreflightResult>({ segment: null, outcome: "failed", code: "NETWORK", latencyMs: 0 })),
+        // An unconfigured Jev is a deployment state, not a per-run event, so
+        // its outcome stands but the log line is dropped: one INFO per run for
+        // every task on an instance that never asked for it is pure noise.
+        Effect.tap((result) => Effect.sync(() => {
+          if (result.code !== "MISSING_KEY") jevLog("preflight", result);
+        }))
+      );
+
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevEnv: JevPreflightEnv) => ({
+      projectId, allowlist, searchApiKey, jevEnv, fetchImpl: fetch,
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
@@ -320,17 +335,32 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const repoContent = yield* loadTaskRepoContent(task).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(task.projectId, extractMemoryTerms(doc.title, doc.context));
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
+        const env = yield* currentEnv;
+        // The selection/instruction is resolved before the prompt build because
+        // it is the preflight's "latest user message": the judgment must see the
+        // same text the model will.
+        let effectiveSelection = task.selection ?? "";
+        if (skill.id === "polish" && !effectiveSelection.trim()) { const fallback = doc.context?.trim() ? doc.context : ""; if (fallback) effectiveSelection = fallback; }
+        const instruction = [effectiveSelection.trim() ? `Selected text:\n"""\n${effectiveSelection}\n"""` : null, task.extraPrompt].filter((s): s is string => !!s && s.trim() !== "").join("\n\n");
+        // Preflight runs once per NEW run, never on resume; only inputs this run
+        // already loaded are serialized (no history, no attachments, no keys).
+        const preflight = yield* runPreflight(env, {
+          runKind: "task",
+          projectId: task.projectId,
+          threadId: task.documentId,
+          threadLabel: doc.title,
+          userMessage: instruction,
+          taskWikiContext: doc.context,
+          memoryHits,
+        });
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key));
+        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env));
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];
         const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: task.documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(task.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
-        let effectiveSelection = task.selection ?? "";
-        if (skill.id === "polish" && !effectiveSelection.trim()) { const fallback = doc.context?.trim() ? doc.context : ""; if (fallback) effectiveSelection = fallback; }
-        const instruction = [effectiveSelection.trim() ? `Selected text:\n"""\n${effectiveSelection}\n"""` : null, task.extraPrompt].filter((s): s is string => !!s && s.trim() !== "").join("\n\n");
         const userContent = buildUserMessage({ instruction, summary: verdict.summary, summarizedCount: verdict.summarizedCount }) as string;
         return buildStream({
           keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as object) } as never),
@@ -355,10 +385,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const repoContent = yield* loadTaskRepoContent({ projectId: thread.projectId, documentType, documentId } as Parameters<typeof loadTaskRepoContent>[0]).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms(doc.title, doc.context));
+        // No preflight on resume: the judgment was made against the original
+        // request. The tool is still offered — its budget is per stream.
+        const env = yield* currentEnv;
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key));
+        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env));
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-// Wireframe admin-assistant-providers.html §MCP Servers: seeded Jev rendered
-// disabled with the same-host stdio caveat, transport-conditional form fields,
-// and the test-result states (ok counts / MCP_CONNECT_FAILED /
-// MCP_STDIO_UNAVAILABLE via body error.code).
+// Wireframe admin-assistant-providers.html §MCP Clients: remote HTTP/SSE
+// registry with the accurate empty state ("No MCP clients yet"), a
+// two-option transport select defaulting to http, the Bearer secret-reference
+// helper, and the test-result states (ok counts / MCP_CONNECT_FAILED).
+// No Jev seed row, no stdio/command/args controls, no MCP_STDIO_UNAVAILABLE.
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -28,10 +29,6 @@ vi.mock("../../lib/queries/assistant-admin", () => ({
 import { AssistantMcpSection } from "./AssistantMcpSection";
 import type { McpServer } from "../../lib/api";
 
-const JEV: McpServer = {
-  id: "jev", label: "Jev", transportType: "stdio", url: null, command: "jev-mcp",
-  args: [], hasSecret: false, enabled: false, createdAt: "t", updatedAt: "t",
-};
 const LINEAR: McpServer = {
   id: "linear", label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp", command: null,
   args: [], hasSecret: true, enabled: true, createdAt: "t", updatedAt: "t",
@@ -42,7 +39,7 @@ function row(name: RegExp): HTMLElement {
 }
 
 beforeEach(() => {
-  h.servers = [JEV, LINEAR];
+  h.servers = [LINEAR];
   h.isLoading = false;
   h.testResult = null;
   h.created = [];
@@ -50,34 +47,107 @@ beforeEach(() => {
   h.deleted = [];
 });
 
-describe("AssistantMcpSection", () => {
-  it("renders the seeded Jev row disabled with the same-host stdio caveat", () => {
+describe("AssistantMcpSection — literal copy", () => {
+  it("names the registry MCP Clients and never MCP Servers", () => {
     render(<AssistantMcpSection />);
-    const jevRow = row(/Jev/);
-    expect(within(jevRow).getByText("jev")).toBeInTheDocument();
-    expect(within(jevRow).getByText("seeded")).toBeInTheDocument();
-    expect(within(jevRow).getByText("stdio")).toBeInTheDocument();
-    expect(within(jevRow).getByText("jev-mcp")).toBeInTheDocument();
-    expect(within(jevRow).getByText("Not tested")).toBeInTheDocument();
-    expect(within(jevRow).getByRole("button", { name: "Jev disabled" })).not.toHaveClass("is-on");
-    // The stdio form (default transport) carries the caveat copy.
-    expect(screen.getByText(/stdio runs only when the Lexa server runs on this host/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP Clients" })).toBeInTheDocument();
+    // "MCP server" survives only in protocol-correct phrases ("remote MCP servers");
+    // never as a user-facing label.
+    expect(screen.queryByText("MCP Servers")).not.toBeInTheDocument();
+    expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /MCP server/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save server" })).not.toBeInTheDocument();
   });
 
-  it("swaps the endpoint fields when the transport changes", async () => {
+  it("describes remote HTTP/SSE clients and the Bearer secret reference", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.getByText(/connect to remote MCP servers over HTTP or SSE/)).toBeInTheDocument();
+    expect(screen.getByText(/An optional secret reference supplies a Bearer token/)).toBeInTheDocument();
+  });
+
+  it("has no stdio, command, args, seeded or local-process copy anywhere", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.queryByText(/stdio/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/child process|spawn|same host/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("seeded")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Command")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Args/)).not.toBeInTheDocument();
+  });
+
+  it("labels the table columns Client / Endpoint", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Endpoint" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Server" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AssistantMcpSection — empty state", () => {
+  it("renders the wireframe empty state verbatim", () => {
+    h.servers = [];
+    render(<AssistantMcpSection />);
+    expect(screen.getByText("No MCP clients yet")).toBeInTheDocument();
+    expect(screen.getByText("Add a remote MCP client below. No clients are pre-seeded.")).toBeInTheDocument();
+  });
+
+  it("shows a table-shaped skeleton while loading", () => {
+    h.isLoading = true;
+    render(<AssistantMcpSection />);
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByText("No MCP clients yet")).not.toBeInTheDocument();
+  });
+});
+
+describe("AssistantMcpSection — transport form", () => {
+  it("offers only the two remote transports and defaults to http", () => {
+    render(<AssistantMcpSection />);
+    const select = screen.getByLabelText("Transport") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["http", "sse"]);
+    expect(select.value).toBe("http");
+    expect(screen.getByLabelText("URL")).toBeInTheDocument();
+  });
+
+  it("keeps the URL field across both transports", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
-    expect(screen.getByLabelText("Command")).toBeInTheDocument();
-    expect(screen.queryByLabelText("URL")).not.toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText("Transport"), "http");
-    expect(screen.getByLabelText("URL")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Command")).not.toBeInTheDocument();
-
     await user.selectOptions(screen.getByLabelText("Transport"), "sse");
     expect(screen.getByLabelText("URL")).toBeInTheDocument();
   });
 
+  it("explains that the URL is allowlist-checked at save and connect", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.getByText(/checked against the allowlist at save and connect/)).toBeInTheDocument();
+    expect(screen.getByText(/SSRF-checked against the URL allowlist at save and again at connect/)).toBeInTheDocument();
+  });
+
+  it("documents the secret reference as a Bearer token resolved at connect time", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.getByText(/Bearer token reference, never stored as a secret value/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("env:NAME or file:/abs/path")).toBeInTheDocument();
+  });
+
+  it("marks a stored secret reference as saved without naming its scheme", async () => {
+    const user = userEvent.setup();
+    render(<AssistantMcpSection />);
+    await user.click(within(row(/Linear/)).getByRole("button", { name: "Edit MCP client" }));
+    const chip = await screen.findByText(/Saved/, { selector: ".chip" });
+    // secret_ref is write-only — the app cannot know whether it is env: or file:.
+    expect(chip).toHaveTextContent("Saved · •••");
+    expect(chip.textContent).not.toContain("env");
+    expect(chip.textContent).not.toContain("file:");
+  });
+
+  it("saves a client with label + url and no command/args", async () => {
+    const user = userEvent.setup();
+    render(<AssistantMcpSection />);
+    await user.type(screen.getByLabelText("Label"), "Linear");
+    await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
+    await user.click(screen.getByRole("button", { name: "Save client" }));
+    expect(h.created).toEqual([{ label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp" }]);
+  });
+});
+
+describe("AssistantMcpSection — test results", () => {
   it("shows OK tool counts in the row from the test response body", async () => {
     const user = userEvent.setup();
     h.testResult = { ok: true, toolCount: 12, readOnlyToolCount: 9, latencyMs: 412, error: null };
@@ -94,27 +164,34 @@ describe("AssistantMcpSection", () => {
     expect(await screen.findByText("MCP_CONNECT_FAILED")).toBeInTheDocument();
   });
 
-  it("shows MCP_STDIO_UNAVAILABLE from the stdio test body", async () => {
+  it("shows MCP_INVALID_TRANSPORT_CONFIG when a test-endpoint transport check fails", async () => {
     const user = userEvent.setup();
-    h.testResult = { ok: false, toolCount: 0, readOnlyToolCount: 0, latencyMs: 0, error: { code: "MCP_STDIO_UNAVAILABLE", message: "stdio unavailable" } };
+    h.testResult = { ok: false, toolCount: 0, readOnlyToolCount: 0, latencyMs: 0, error: { code: "MCP_INVALID_TRANSPORT_CONFIG", message: "unsupported transport" } };
     render(<AssistantMcpSection />);
-    await user.click(within(row(/Jev/)).getByRole("button", { name: "Test" }));
-    expect(await screen.findByText("MCP_STDIO_UNAVAILABLE")).toBeInTheDocument();
+    await user.click(within(row(/Linear/)).getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("MCP_INVALID_TRANSPORT_CONFIG")).toBeInTheDocument();
   });
+});
 
+describe("AssistantMcpSection — registry actions", () => {
   it("toggling enabled sends the inverted value", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
-    await user.click(within(row(/Jev/)).getByRole("button", { name: "Jev disabled" }));
-    expect(h.updated).toEqual([{ id: "jev", enabled: true }]);
+    await user.click(within(row(/Linear/)).getByRole("button", { name: "Linear enabled" }));
+    expect(h.updated).toEqual([{ id: "linear", enabled: false }]);
   });
 
   it("delete opens a confirm dialog and deletes by id", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
-    await user.click(within(row(/Linear/)).getByRole("button", { name: "Delete MCP server" }));
-    expect(screen.getByText("Delete MCP server?")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Delete server/ }));
+    await user.click(within(row(/Linear/)).getByRole("button", { name: "Delete MCP client" }));
+    expect(screen.getByText("Delete MCP client?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Delete client/ }));
     expect(h.deleted).toEqual(["linear"]);
+  });
+
+  it("keeps the read-only tools warning", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.getByText("Only read-only tools are exposed")).toBeInTheDocument();
   });
 });

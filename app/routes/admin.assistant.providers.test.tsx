@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // /admin/assistant/providers — the Providers & Models tab renders the provider
-// registry AND the MCP server registry (same components as the workspace
+// registry AND the MCP client registry (same components as the workspace
 // Integrations tab).
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi } from "vitest";
@@ -27,10 +27,17 @@ vi.mock("../lib/queries/assistant-admin", () => ({
 import { AssistantProvidersTab } from "./admin.assistant.providers";
 
 describe("admin assistant providers tab", () => {
-  it("renders both the provider registry and the MCP server registry", () => {
+  it("renders both the provider registry and the MCP client registry", () => {
     render(<AssistantProvidersTab />);
     expect(screen.getByRole("heading", { name: "Assistant Providers" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "MCP Servers" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save server" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP Clients" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save client" })).toBeInTheDocument();
+  });
+
+  it("never shows the removed 'MCP Servers' surface or a stdio option", () => {
+    render(<AssistantProvidersTab />);
+    expect(screen.queryByText("MCP Servers")).not.toBeInTheDocument();
+    const transport = screen.getByLabelText("Transport") as HTMLSelectElement;
+    expect(Array.from(transport.options).map((o) => o.value)).toEqual(["http", "sse"]);
   });
 });

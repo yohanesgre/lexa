@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// Wireframe settings-project-herald.html §MCP servers: per-project availability
-// default OFF; globally-disabled servers render a disabled toggle with
+// Wireframe settings-project-herald.html §MCP clients: per-project availability
+// default OFF; the empty state is the "No MCP clients registered" box with the
+// workspace link; globally-disabled clients render a disabled toggle with
 // "Global off"; toggling PUTs the replace-set.
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -34,24 +35,44 @@ const LINEAR: McpServer = {
   id: "linear", label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp", command: null,
   args: [], hasSecret: false, enabled: true, createdAt: "t", updatedAt: "t",
 };
-const JEV: McpServer = {
-  id: "jev", label: "Jev", transportType: "stdio", url: null, command: "jev-mcp",
+const NOTION: McpServer = {
+  id: "notion", label: "Notion", transportType: "sse", url: "https://mcp.notion.example/sse", command: null,
   args: [], hasSecret: false, enabled: false, createdAt: "t", updatedAt: "t",
 };
 
 beforeEach(() => {
-  h.servers = [JEV, LINEAR];
+  h.servers = [NOTION, LINEAR];
   h.rows = [];
   h.saved = [];
   h.pending = false;
 });
 
 describe("AssistantProjectMcpSection", () => {
-  it("defaults to off and disables globally-off servers with 'Global off'", () => {
+  it("names the section MCP clients and never MCP servers", () => {
     render(<AssistantProjectMcpSection project={PROJECT} />);
-    const jevRow = screen.getByRole("row", { name: /Jev/ });
-    expect(within(jevRow).getByRole("button", { name: "Jev not enabled for this project" })).toBeDisabled();
-    expect(within(jevRow).getByText("Global off")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "MCP clients" })).toBeInTheDocument();
+    expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
+    expect(screen.queryByText(/stdio/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the read-only tools and default-off markers", () => {
+    render(<AssistantProjectMcpSection project={PROJECT} />);
+    expect(screen.getByText("read-only tools")).toBeInTheDocument();
+    expect(screen.getByText("default off")).toBeInTheDocument();
+  });
+
+  it("labels the table columns Client / Endpoint", () => {
+    render(<AssistantProjectMcpSection project={PROJECT} />);
+    expect(screen.getByRole("columnheader", { name: "Client" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Endpoint" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Server" })).not.toBeInTheDocument();
+  });
+
+  it("defaults to off and disables globally-off clients with 'Global off'", () => {
+    render(<AssistantProjectMcpSection project={PROJECT} />);
+    const notionRow = screen.getByRole("row", { name: /Notion/ });
+    expect(within(notionRow).getByRole("button", { name: "Notion not enabled for this project" })).toBeDisabled();
+    expect(within(notionRow).getByText("Global off")).toBeInTheDocument();
 
     const linearRow = screen.getByRole("row", { name: /Linear/ });
     expect(within(linearRow).getByRole("button", { name: "Linear not enabled for this project" })).not.toHaveClass("is-on");
@@ -68,15 +89,23 @@ describe("AssistantProjectMcpSection", () => {
     render(<AssistantProjectMcpSection project={PROJECT} />);
     await user.click(screen.getByRole("button", { name: "Linear not enabled for this project" }));
     expect(h.saved).toEqual([[
-      { serverId: "jev", enabled: false },
+      { serverId: "notion", enabled: false },
       { serverId: "linear", enabled: true },
     ]]);
   });
 
-  it("empty registry shows the muted one-liner linking to workspace", () => {
+  it("empty registry renders the wireframe empty box linking to workspace", () => {
     h.servers = [];
     render(<AssistantProjectMcpSection project={PROJECT} />);
-    expect(screen.getByText(/No MCP servers registered/)).toBeInTheDocument();
+    expect(screen.getByText("No MCP clients registered")).toBeInTheDocument();
+    expect(screen.getByText("Register a remote MCP client in Workspace settings before enabling it for this project.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Workspace → Assistant Providers/ })).toHaveAttribute("href", "/settings/workspace");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("explains that global enablement is the master switch", () => {
+    render(<AssistantProjectMcpSection project={PROJECT} />);
+    expect(screen.getByText(/Which registered Remote MCP clients this project's Assistant may call/)).toBeInTheDocument();
+    expect(screen.getByText(/Workspace → Assistant Providers → MCP Clients/)).toBeInTheDocument();
   });
 });
