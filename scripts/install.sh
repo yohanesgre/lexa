@@ -96,14 +96,32 @@ deploy_docker() {
   # Local deploy — the operator may reach the app via either loopback
   # hostname; trust both or Better Auth rejects one of them.
   local trusted="${public_url},http://localhost:${PORT},http://127.0.0.1:${PORT}"
-  write_env_file ".env" \
+  # One-time: a pre-P4 deploy dir keeps its app keys in a flat `.env`. Convert
+  # them to the canonical `.env.toml` (merge — GITHUB_* survive) before the
+  # tooling-only `.env` is written.
+  migrate_legacy_deploy_env "${PWD}"
+  step "write env" write_env_toml "${PWD}/.env.toml" \
     "LXK_ENV=production" \
     "LXK_PUBLIC_URL=${public_url}" \
-    "LXK_TRUSTED_ORIGINS=${trusted}"
+    "LXK_TRUSTED_ORIGINS=${trusted}" \
+    "DATABASE_PATH=/app/data/lexa.db" \
+    "PORT=3000"
+  # Flat `.env` = compose tooling only. COMPOSE_PROJECT_NAME (if already set by
+  # the operator) is preserved by the merge; setting it here would rename the
+  # compose project and orphan the existing `lexa-data` volume. A pinned
+  # LXK_IMAGE_TAG is likewise preserved and only overridden by --image.
+  local image_tag="${IMAGE_TAG:-$(env_file_value "${PWD}/.env" LXK_IMAGE_TAG)}"
+  image_tag="${image_tag:-latest}"
+  local tooling=("LXK_IMAGE_TAG=${image_tag}")
+  [ -n "${CF_TOKEN:-}" ] && tooling+=("CF_TUNNEL_TOKEN=${CF_TOKEN}")
+  step "write compose env" write_env_file "${PWD}/.env" "${tooling[@]}"
   # Local docker deploy = direct semantics (host port mapping, no tunnel) —
   # the wizard URL must be reachable on the host.
   DEPLOY_DIR="${PWD}" compose_render direct "${PORT}" "${BIND}"
   step "compose pull" retry 3 mutate docker compose pull
+  # The container runs as uid 1000 (USER bun); when the installer runs as a
+  # different uid a 0600 `.env.toml` would be unreadable and crash-loop.
+  step "env mount perms" grant_container_read "${PWD}/.env.toml" "ghcr.io/yohanesgre/lexa:${image_tag}"
   step "compose up" mutate docker compose up -d --wait
   step "wait health" wait_for "http://${BIND}:${PORT}/api/health"
   final_banner "http://${BIND}:${PORT}"
@@ -129,11 +147,17 @@ deploy_bare() {
     # tarball and is dev-only).
     step "bun install" bun install --frozen-lockfile --production --ignore-scripts
   fi
-  if [ -f "${INSTALL_DIR}/.env" ] && [ -n "${FROM_REPO}" ]; then
-    echo "  ✓ ${FROM_REPO}/.env exists — kept (dev env untouched)"
+  local existing_env=""
+  [ -f "${INSTALL_DIR}/.env.toml" ] && existing_env="${INSTALL_DIR}/.env.toml"
+  if [ -z "$existing_env" ] && [ -f "${INSTALL_DIR}/.env" ]; then
+    existing_env="${INSTALL_DIR}/.env"
+  fi
+  if [ -n "${existing_env}" ] && [ -n "${FROM_REPO}" ]; then
+    echo "  ✓ ${existing_env} exists — kept (dev env untouched)"
   else
     local bare_public="${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
-    step "write env" write_env_file "${INSTALL_DIR}/.env" \
+    migrate_legacy_deploy_env "${INSTALL_DIR}"
+    step "write env" write_env_toml "${INSTALL_DIR}/.env.toml" \
       "LXK_ENV=production" \
       "PORT=${BARE_PORT}" \
       "DATABASE_PATH=${INSTALL_DIR}/data/lexa.db" \
@@ -262,7 +286,7 @@ deploy_dev() {
   cd "${REPO_DIR}"
   step "bun install" bun install
   if [ "${ASSUME_YES}" = "1" ]; then
-    bun run setup --yes --admin-email "${ADMIN_EMAIL:-admin@lexa.local}"
+    bun run setup --yes --admin-email "${ADMIN_EMAIL:-admin@lexa.local}" --migrate-env
   else
     bun run setup
   fi

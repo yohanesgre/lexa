@@ -14,7 +14,7 @@
 // general TOML, and is deliberately not a byte-for-byte `Bun.TOML` clone (a
 // parity test pins the subset behavior whenever Bun is present).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, rmSync, renameSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, mkdirSync, chmodSync, rmSync, renameSync, copyFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { RUNTIME_ENV_STRING_KEYS } from "./env";
 
@@ -347,13 +347,47 @@ export function readEnvFile(path: string): Record<string, string> {
   return /\.toml(\.|$)/.test(basename(path)) ? parseEnvToml(text) : parseDotenv(text);
 }
 
+/**
+ * True when `path` exists, false when it is absent. Any other stat failure
+ * (EACCES on a parent directory, ELOOP, …) throws — silently treating it as
+ * absent would boot with defaults while the operator believes their file was
+ * applied.
+ */
+function isPresent(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw new EnvFileError([{ section: "", key: "", message: `cannot stat env file: ${path} (${code ?? "error"})` }]);
+  }
+}
+
 /** `.env.toml` when present, else legacy `.env`, else null. */
 export function resolveEnvFilePath(cwd: string = process.cwd()): string | null {
   const toml = join(cwd, ".env.toml");
-  if (existsSync(toml)) return toml;
+  if (isPresent(toml)) return toml;
   const legacy = join(cwd, ".env");
-  if (existsSync(legacy)) return legacy;
+  if (isPresent(legacy)) return legacy;
   return null;
+}
+
+/**
+ * Read a resolved env file, converting any read/parse failure into an
+ * `EnvFileError` that names the path (never values). A present file that cannot
+ * be read or parsed must fail the caller — never fall through to defaults.
+ */
+function readEnvFileChecked(path: string): Record<string, string> {
+  try {
+    return readEnvFile(path);
+  } catch (e) {
+    if (e instanceof EnvFileError) {
+      throw new EnvFileError([{ section: "", key: "", message: `cannot read env file: ${path}: ${e.message}` }]);
+    }
+    const code = (e as NodeJS.ErrnoException).code;
+    throw new EnvFileError([{ section: "", key: "", message: `cannot read env file: ${path}${code ? ` (${code})` : ""}` }]);
+  }
 }
 
 export interface ApplyEnvFileOptions {
@@ -379,7 +413,7 @@ export function applyEnvFile(opts: ApplyEnvFileOptions = {}): ApplyEnvFileResult
   const env = opts.env ?? process.env;
   let path: string | null;
   if (opts.path !== undefined) {
-    if (!existsSync(opts.path)) {
+    if (!isPresent(opts.path)) {
       throw new EnvFileError([{ section: "", key: "", message: `env file not found: ${opts.path}` }]);
     }
     path = opts.path;
@@ -390,7 +424,7 @@ export function applyEnvFile(opts: ApplyEnvFileOptions = {}): ApplyEnvFileResult
       return { path: null, applied: [], skipped: [] };
     }
   }
-  const values = readEnvFile(path);
+  const values = readEnvFileChecked(path);
   const applied: string[] = [];
   const skipped: string[] = [];
   for (const [k, v] of Object.entries(values)) {

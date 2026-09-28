@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -207,11 +207,44 @@ describe("applyEnvFile", () => {
     const dir = tmpDir();
     expect(() => applyEnvFile({ path: join(dir, "nope.toml"), env: {} })).toThrow(EnvFileError);
   });
+
+  it("fails fast with a path-naming error when a resolved .env.toml is unparseable", () => {
+    const dir = tmpDir();
+    const path = join(dir, ".env.toml");
+    writeFileSync(path, "[core]\nPORT = \n");
+    let err: unknown;
+    try {
+      applyEnvFile({ cwd: dir, env: {} });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(EnvFileError);
+    expect((err as Error).message).toContain(path);
+  });
+
+  it("fails fast when a resolved env path exists but cannot be read", () => {
+    const dir = tmpDir();
+    mkdirSync(join(dir, ".env.toml")); // a directory: readFileSync fails deterministically
+    let err: unknown;
+    try {
+      applyEnvFile({ cwd: dir, env: {} });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(EnvFileError);
+    expect((err as Error).message).toContain(join(dir, ".env.toml"));
+  });
 });
 
 describe("resolveEnvFilePath", () => {
   it("returns null for an empty directory", () => {
     expect(resolveEnvFilePath(tmpDir())).toBeNull();
+  });
+
+  it("throws when a candidate exists but cannot be stat'd (symlink loop)", () => {
+    const dir = tmpDir();
+    symlinkSync(join(dir, ".env.toml"), join(dir, ".env.toml"));
+    expect(() => resolveEnvFilePath(dir)).toThrow(EnvFileError);
   });
 });
 
@@ -340,6 +373,28 @@ describe("env-file boot order (SEV regression)", () => {
     const res = spawnSync("bun", [script], { cwd: dir, encoding: "utf8" });
     expect(res.status).toBe(0);
     expect(res.stdout).toContain("PUBLIC_URL=http://file-only.example.test");
+  });
+
+  it("exits non-zero naming the path when the resolved .env.toml is unparseable", () => {
+    const dir = tmpDir();
+    const path = join(dir, ".env.toml");
+    writeFileSync(path, "[core]\nPORT = \n");
+    const script = join(dir, "probe-bad.ts");
+    writeFileSync(script, [`import ${JSON.stringify(ENV_BOOT)};`, 'console.log("should not reach");', ""].join("\n"));
+    const res = spawnSync("bun", [script], { cwd: dir, encoding: "utf8" });
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toContain(path);
+    expect(res.stdout).not.toContain("should not reach");
+  });
+
+  it("still warns and falls through when no env file exists", () => {
+    const dir = tmpDir();
+    const script = join(dir, "probe-none.ts");
+    writeFileSync(script, [`import ${JSON.stringify(ENV_BOOT)};`, 'console.log("booted");', ""].join("\n"));
+    const res = spawnSync("bun", [script], { cwd: dir, encoding: "utf8" });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("no .env.toml or .env found");
+    expect(res.stdout).toContain("booted");
   });
 });
 

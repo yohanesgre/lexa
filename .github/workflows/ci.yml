@@ -100,22 +100,41 @@ jobs:
         timeout-minutes: 5
         run: |
           docker build -t lexa:ci .
+          ENV_DIR="$(mktemp -d)"
+          cat > "$ENV_DIR/.env.toml" <<'TOML'
+          [core]
+          DATABASE_PATH = "/app/data/lexa.db"
+          PORT = "3000"
+
+          [auth]
+          LXK_ADMIN_EMAILS = "ci@example.com"
+          TOML
           docker run -d --name lexa-ci -p 3001:3000 \
-            -e LXK_API_KEY=test-ci-key \
-            -e LXK_ADMIN_EMAILS=ci@example.com \
+            -v "$ENV_DIR/.env.toml:/app/.env.toml:ro" \
             lexa:ci
           echo "waiting for /api/health..."
+          ok=0
           for i in $(seq 1 30); do
             if curl -sf http://localhost:3001/api/health | grep -q '"ok":true'; then
               echo "health check passed: {\"ok\":true}"
-              exit 0
+              ok=1
+              break
             fi
             sleep 1
           done
-          echo "::error::Docker health check failed"
-          docker logs lexa-ci || true
-          curl -v http://localhost:3001/api/health || true
-          exit 1
+          if [ "$ok" != "1" ]; then
+            echo "::error::Docker health check failed"
+            docker logs lexa-ci || true
+            curl -v http://localhost:3001/api/health || true
+            exit 1
+          fi
+          if docker logs lexa-ci 2>&1 | grep -q 'env-file: loaded'; then
+            echo "boot log: env-file: loaded"
+          else
+            echo "::error::container boot did not apply the mounted .env.toml"
+            docker logs lexa-ci || true
+            exit 1
+          fi
 
       - name: Cleanup Docker (always)
         if: always() && steps.changes.outputs.docker == 'true'
@@ -350,9 +369,64 @@ jobs:
         run: |
           WORKDIR="$(mktemp -d)"
           cd "$WORKDIR"
-          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191
+          # The e2e must run an image that actually applies the mounted
+          # .env.toml. The published `:latest` release tag can predate the
+          # loader (the loader landed on main after the last release), so the
+          # e2e tracks `staging` (rebuilt from main on every push). Once a
+          # release ships the loader, `:latest` is equivalent.
+          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191 --image staging
           curl -sf http://127.0.0.1:9191/api/health | grep -q '"ok":true'
           cd lexa-deploy
+          test -f .env.toml || { echo "::error::installer did not write .env.toml"; exit 1; }
+          grep -q 'LXK_PUBLIC_URL' .env.toml || { echo "::error::.env.toml missing app keys"; exit 1; }
+          grep -q 'target: /app/.env.toml' docker-compose.yml || { echo "::error::compose does not bind .env.toml"; exit 1; }
+          grep -q 'create_host_path: false' docker-compose.yml || { echo "::error::compose bind must not auto-create the host path"; exit 1; }
+          # SEV2: the installer derives the mounted file's group from the image's
+          # own gid (never a hardcode); assert that exact ownership + mode, then
+          # the container boot below is the end-to-end proof.
+          APP_IMAGE="$(docker compose config --images app | head -1)"
+          ENV_GID="$(stat -c %g .env.toml)"
+          ENV_MODE="$(stat -c %a .env.toml)"
+          IMAGE_GID="$(docker run --rm --entrypoint sh "$APP_IMAGE" -c 'id -g')"
+          echo ".env.toml owner $(id -u):${ENV_GID} mode ${ENV_MODE} (image gid ${IMAGE_GID})"
+          [ "$ENV_GID" = "$IMAGE_GID" ] || { echo "::error::.env.toml group is $ENV_GID, expected the image gid $IMAGE_GID"; exit 1; }
+          [ "$ENV_MODE" = "640" ] || { echo "::error::.env.toml mode is $ENV_MODE, expected 640"; exit 1; }
+          if docker compose logs app 2>&1 | grep -q 'env-file: loaded'; then
+            echo "boot log: env-file: loaded"
+          else
+            echo "::error::container boot did not apply the mounted .env.toml"
+            docker compose logs app || true
+            exit 1
+          fi
+          # Values must be APPLIED, not just written: run the image with a
+          # non-default PORT from a fixture .env.toml and health-check that port.
+          PORT_DIR="$(mktemp -d)"
+          cat > "$PORT_DIR/.env.toml" <<'TOML'
+          [core]
+          PORT = "3100"
+          DATABASE_PATH = "/app/data/lexa.db"
+
+          [auth]
+          LXK_ADMIN_EMAILS = "ci@example.com"
+          TOML
+          chmod 644 "$PORT_DIR/.env.toml"
+          docker run -d --name lexa-ci-port -p 3101:3100 \
+            -v "$PORT_DIR/.env.toml:/app/.env.toml:ro" "$APP_IMAGE" >/dev/null
+          pok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3101/api/health | grep -q '"ok":true'; then
+              pok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$pok" != "1" ]; then
+            echo "::error::container did not bind PORT=3100 from the mounted .env.toml"
+            docker logs lexa-ci-port || true
+            docker rm -f lexa-ci-port >/dev/null 2>&1 || true
+            exit 1
+          fi
+          docker rm -f lexa-ci-port >/dev/null 2>&1 || true
           docker compose down -v
           cd "$WORKDIR"
           rm -rf lexa-deploy
