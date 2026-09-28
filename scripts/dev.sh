@@ -2,8 +2,10 @@
 # Lexa local dev — one command: API server (:3000) + vite frontend (:5173).
 #   bun run dev:full
 #
-# - Loads .env (LXK_API_KEY etc.) into the shell so both processes see it.
-# - vite auto-loads .env; browser auth rides the session cookie.
+# - Loads .env.toml (or legacy .env) into the shell so both processes see it.
+# - Vite inherits those exported values from the process environment; it is not
+#   TOML-aware and additionally auto-loads a legacy flat .env if one exists.
+# - Browser auth rides the session cookie.
 # - The API server injects the current key into served HTML (meta tag), so
 #   `bun run setup` rotating the key never breaks the browser — no rebuild.
 # - Ctrl-C stops BOTH processes.
@@ -11,21 +13,24 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [ ! -f .env ]; then
-  echo "No .env found — run \`bun run setup\` first." >&2
+if [ ! -f .env.toml ] && [ ! -f .env ]; then
+  echo "No .env.toml found — run \`bun run setup\` first." >&2
   exit 1
 fi
 
-set -a
-. ./.env
-set +a
+ENV_EXPORTS="$(bun server/env-file.ts --export-shell)" || {
+  echo "Failed to load .env.toml — fix the error above." >&2
+  exit 1
+}
+eval "$ENV_EXPORTS"
 
+# Defaults apply only when the file did not set them.
 # Sample data on every boot (dev convenience) unless opted out.
-# `bun run setup` with N (or --no-seed) writes LXK_SEED_DEV=0 to .env;
+# `bun run setup` with N (or --no-seed) writes LXK_SEED_DEV=0;
 # Delete data/lexa.db* to reset.
 export LXK_SEED_DEV="${LXK_SEED_DEV:-1}"
 # Dev flavor — enables the vite dev origin in Better Auth trustedOrigins
-# (cookie-bearing auth POSTs through the :5173 proxy) regardless of .env state.
+# (cookie-bearing auth POSTs through the :5173 proxy) regardless of file state.
 export LXK_ENV="${LXK_ENV:-dev}"
 
 cleanup() {
@@ -41,7 +46,7 @@ echo "  API:      http://localhost:3000  (bun server/entry.ts)"
 echo "  Frontend: http://localhost:5173  (vite, proxies /api → :3000)"
 echo ""
 
-bun --env-file=.env run server/entry.ts &
+bun run server/entry.ts &
 SERVER_PID=$!
 
 # Pin the vite port so the banner stays true; fail loudly if it's taken.

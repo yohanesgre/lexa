@@ -10,10 +10,13 @@
 //   bun run check:mobile       # in another terminal
 //
 // Requires a logged-in user. The script logs in as the seed admin from
-// .env (LXK_ADMIN_EMAILS) using the seed password "admin1234" — adjust
+// .env.toml (LXK_ADMIN_EMAILS) using the seed password "admin1234" — adjust
 // the login call if your seed differs.
 
+import { applyEnvFile } from "../server/env-file.ts";
 import { chromium, devices } from "playwright";
+
+applyEnvFile();
 
 const BASE = process.env.LEXA_BASE_URL ?? "http://localhost:5173";
 const ADMIN_EMAIL = process.env.LXK_ADMIN_EMAILS?.split(",")[0]?.trim();

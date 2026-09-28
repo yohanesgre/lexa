@@ -4,7 +4,7 @@
   "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, two-way GitHub issue sync.",
   "scripts": {
     "test": "vitest run",
-    "test:critical": "vitest run shared server/services server/db server/repos",
+    "test:critical": "vitest run shared server/services server/db server/repos server/env-file.test.ts",
     "test:full": "vitest run",
     "test:shared": "vitest run shared",
     "test:be": "vitest run shared server",
@@ -12,7 +12,7 @@
     "test:cli": "vitest run cli/src",
     "prepare": "./scripts/prepare-effect.sh",
     "dev": "vite dev",
-    "dev:server": "bun --env-file=.env run server/entry.ts",
+    "dev:server": "bun run server/entry.ts",
     "dev:full": "bash scripts/dev.sh",
     "lx-dev": "bun run cli/src/index.ts",
     "compile:cli": "bun run scripts/compile-cli.ts",
@@ -25,7 +25,7 @@
     "deploy:workers": "bun run db:migrations:apply && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "doctor": "npx react-doctor@latest",
-    "check:mobile": "bun --env-file=.env scripts/check-mobile.mjs",
+    "check:mobile": "bun scripts/check-mobile.mjs",
     "check:invariants": "bun run scripts/check-invariants.ts",
     "ci:local": "bash scripts/ci-local.sh"
   },

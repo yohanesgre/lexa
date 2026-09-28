@@ -1,3 +1,7 @@
+// Load-bearing FIRST import: env-boot.ts runs applyEnvFile() as a module side
+// effect, so `process.env` is populated before every other module below (auth,
+// limits, logger) snapshots it at import scope. Do not reorder.
+import "./env-boot";
 import { runMigrations } from "./db/migrate";
 import { backfillTaskKeys } from "./db/task-keys-backfill";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";

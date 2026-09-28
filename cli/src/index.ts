@@ -520,18 +520,24 @@ GitHub sync (optional integration):
                                        read the LIVE server state (default;
                                        needs login — the server DB is the
                                        source of truth); --local: validate
-                                       GITHUB_* in the LOCAL env file (offline
-                                       offline GITHUB_* bootstrap check)
+                                       GITHUB_* in the LOCAL env file
+                                       (.env.toml; a legacy .env is
+                                       auto-selected when .env.toml is
+                                       absent, --env-file overrides —
+                                       offline bootstrap check)
   github setup [--local] [--env-file <path>]
                                        configure App ID + PEM + webhook secret
                                        (default: push to the server API —
                                        applied immediately, REPLACES the
                                        current server values like web Settings;
                                        needs login; --local: write the env
-                                       file as BOOTSTRAP — imported on next
-                                       boot only while unset, never overwrites
-                                       web Settings values, inert once the
-                                       server has DB config)
+                                       file as BOOTSTRAP — .env.toml by
+                                       default (legacy .env auto-selected
+                                       when .env.toml is absent; --env-file
+                                       overrides) —
+                                       imported on next boot only while unset,
+                                       never overwrites web Settings values,
+                                       inert once the server has DB config)
   github check <slug> <owner/repo>     acceptance round-trip against the live
                                        server (creates a real issue; needs
                                        login — config source irrelevant)
@@ -559,20 +565,27 @@ const GROUP_HELP: Record<string, string> = {
                                        read the LIVE server state (default —
                                        needs login; the server DB is the source
                                        of truth at runtime); --local: validate
-                                       GITHUB_* in the LOCAL env file (offline
-                                       bootstrap check)
+                                       GITHUB_* in the LOCAL env file
+                                       (.env.toml; a legacy .env is
+                                       auto-selected when .env.toml is
+                                       absent, --env-file overrides —
+                                       offline bootstrap check)
   github setup [--local] [--env-file <path>]
                                        configure GITHUB_APP_ID + PEM + secret
                                        (default: push to the server API —
                                        applied immediately, REPLACES the
                                        current server values like web Settings;
                                        needs login; --local: write the env file
-                                       as first-boot BOOTSTRAP — imported on
-                                       the next boot only while still unset,
-                                       never overwrites web Settings values,
-                                       inert once the server has DB config;
-                                       --app-id, --pem-file, --webhook-secret
-                                       for non-interactive runs)
+                                       as first-boot BOOTSTRAP — .env.toml by
+                                       default (legacy .env auto-selected when
+                                       .env.toml is absent; --env-file
+                                       overrides) —
+                                       imported on the next boot only while
+                                       still unset, never overwrites web
+                                       Settings values, inert once the server
+                                       has DB config; --app-id, --pem-file,
+                                       --webhook-secret for non-interactive
+                                       runs)
   github check <slug> <owner/repo>     Lexa→GitHub acceptance round-trip
                                        against the live server (creates a real
                                        issue; needs login — config source

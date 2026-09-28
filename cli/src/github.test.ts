@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdGithubCheck, cmdGithubSetup, cmdGithubStatus } from "./github";
+import { readEnvFile, writeEnvFile } from "../../server/env-file";
 import type { LexaClient } from "./api";
 import type { TaskInfo } from "./api";
 
@@ -99,6 +100,39 @@ describe("cmdGithubStatus", () => {
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
       await Effect.runPromise(cmdGithubStatus({ local: true }));
       expect(outputOf(log)).toContain("==> Reading .env");
+      log.mockRestore();
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("validates GITHUB_* from a .env.toml file", async () => {
+    const tomlFile = join(dir, ".env.toml");
+    writeEnvFile(tomlFile, {
+      GITHUB_APP_ID: "123456",
+      GITHUB_PRIVATE_KEY_FILE: realPem,
+      GITHUB_WEBHOOK_SECRET: "0123456789abcdef",
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": tomlFile }));
+    const out = outputOf(log);
+    expect(out).toContain("✅ GITHUB_APP_ID — 123456");
+    expect(out).toContain(`✅ GITHUB_PRIVATE_KEY_FILE — ${realPem}`);
+    expect(out).toContain("Config looks complete");
+    log.mockRestore();
+  });
+
+  it("prefers .env.toml over legacy .env when both exist", async () => {
+    const cwd = process.cwd();
+    writeEnv(completeEnv());
+    writeEnvFile(join(dir, ".env.toml"), { GITHUB_APP_ID: "777" });
+    process.chdir(dir);
+    try {
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await Effect.runPromise(cmdGithubStatus({ local: true }));
+      const out = outputOf(log);
+      expect(out).toContain("==> Reading .env.toml");
+      expect(out).toContain("✅ GITHUB_APP_ID — 777");
       log.mockRestore();
     } finally {
       process.chdir(cwd);
@@ -299,6 +333,39 @@ describe("cmdGithubSetup", () => {
       expect(out).toContain("never overwrite values already set");
       expect(out).toContain("env-file writes are inert");
       log.mockRestore();
+    });
+  });
+
+  describe("toml target (.env.toml)", () => {
+    it("writes TOML, drops a stale inline key, and keeps unrelated keys at 0600", async () => {
+      const tomlFile = join(dir, ".env.toml");
+      writeEnvFile(tomlFile, { LXK_API_KEY: "keepme", GITHUB_PRIVATE_KEY: "stale-inline" });
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      await Effect.runPromise(cmdGithubSetup({ local: true, "env-file": tomlFile, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }));
+      const raw = readFileSync(tomlFile, "utf-8");
+      expect(raw).toContain('GITHUB_APP_ID = "123456"');
+      expect(raw).toContain(`GITHUB_PRIVATE_KEY_FILE = "${goodPem}"`);
+      expect(raw).toContain('GITHUB_WEBHOOK_SECRET = "0123456789abcdef"');
+      const parsed = readEnvFile(tomlFile);
+      expect(parsed.LXK_API_KEY).toBe("keepme");
+      expect(parsed.GITHUB_PRIVATE_KEY).toBeUndefined();
+      expect(statSync(tomlFile).mode & 0o777).toBe(0o600);
+      expect(outputOf(log)).toContain(`Wrote ${tomlFile}`);
+      log.mockRestore();
+    });
+
+    it("defaults to .env.toml when no env file exists", async () => {
+      const cwd = process.cwd();
+      process.chdir(dir);
+      try {
+        const log = vi.spyOn(console, "log").mockImplementation(() => {});
+        await Effect.runPromise(cmdGithubSetup({ local: true, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }));
+        expect(existsSync(join(dir, ".env.toml"))).toBe(true);
+        expect(readEnvFile(join(dir, ".env.toml")).GITHUB_APP_ID).toBe("123456");
+        log.mockRestore();
+      } finally {
+        process.chdir(cwd);
+      }
     });
   });
 });

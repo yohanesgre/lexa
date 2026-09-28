@@ -11,9 +11,32 @@ wizard (email + password ≥8) — the script never handles passwords.
 > them; `lexa-cli` is now an operate-only headless frontend (tasks, wiki,
 > machines, keys, upgrades).
 
-The working `.env*` files are **never committed** — values are generated on
-the machine by the install script or the setup wizard, and all `.env*` are
-gitignored. The tracked `.env.example` (repo root) is the dev template only.
+The canonical config file is **`.env.toml`**. It is structured TOML where the
+sections (`[core]`, `[auth]`, `[github]`, …) are presentation only and every
+leaf key is the env-var name verbatim (`DATABASE_PATH`, `LXK_*`, `GITHUB_*`,
+`TYPESAFE_*`). Working env files are **never committed** — values are generated
+on the machine by the install script or the setup wizard, and all working
+`.env*` files are gitignored. The tracked `.env.toml.example` (repo root) is the
+dev + reference template; `.env.toml` itself is written by `bun run setup` (0600).
+
+The loader is `server/env-file.ts` — a plain module with a CLI. `server/entry.ts`
+calls `applyEnvFile()` at boot, `scripts/dev.sh` evals
+`bun server/env-file.ts --export-shell`, and `bun run setup` writes the file.
+**Real environment variables always win** over file values; the loader never
+overwrites an already-set variable.
+
+Precedence: **real env → `.env.toml` → legacy `.env` → defaults.** A flat `.env`
+is deprecated: it is still read as a one-release fallback, and migration
+(`bun server/env-file.ts --migrate`, or `bun run setup`'s auto-migration)
+converts it to `.env.toml` and renames the original to `.env.legacy` (0600).
+
+> **Installer follow-up (deferred lane):** the docker / bare / systemd installer
+> still writes the legacy flat `.env` for now. The loader's legacy `.env`
+> fallback is not what feeds the deployed targets: bare/systemd uses Bun's
+> `--env-file=.env`, and docker compose interpolates `.env` into the container's
+> `environment:` list. Both keep working; attaching `.env.toml` to the installer
+> (compose mount, dropping `--env-file=.env`, the merge-not-truncate fix for
+> re-runs) lands in a separate lane and will be documented here when it ships.
 
 ## Targets
 
@@ -29,7 +52,7 @@ for a tag, or `main` for the bleeding edge.
 
 | Target | Needs | Layout |
 |---|---|---|
-| `docker` | docker + compose plugin | deploy dir with compose file + `.env`; prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest`; `--image <tag>` pins, e.g. a version tag or `staging` to track main) |
+| `docker` | docker + compose plugin | deploy dir with compose file + flat `.env` (the installer writes it; the switch to `.env.toml` is the follow-up above); prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest`; `--image <tag>` pins, e.g. a version tag or `staging` to track main) |
 | `bare` | curl, `sha256sum`; bun auto-installed if absent | `~/.lexa-server` (release tarball, checksum-verified) + `lexa-start.sh`; `--systemd` writes + enables the `lexa` unit |
 | `workers` | bun (runs `bunx wrangler`), Cloudflare API token | D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`) |
 | `dev` | git + bun | clones the repo into `./lexa`, `bun install`, `bun run setup`, `bun run dev:full` |
@@ -122,6 +145,12 @@ default columns appear when the first project is created.
 
 ## Who writes what
 
+`bun run setup` (via `server/env-file.ts`) writes `.env.toml` at 0600, merging
+into any existing file. The loader applies `.env.toml` (or a legacy `.env`) at
+boot and never overwrites a variable already set in the real environment. Setup
+and `--local` CLI writes preserve `GITHUB_*` / `LXK_MCP_MASTER_KEY` across
+re-runs.
+
 | Variable | Written by | Required |
 |---|---|---|
 | `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lx login` device flow) | only for non-browser clients (CLI/scripts) |
@@ -129,12 +158,12 @@ default columns appear when the first project is created.
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
-| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; preserved across re-runs | only for GitHub sync |
+| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; re-add after an install-script re-run (preservation lands with the `.env.toml` installer lane, P4) | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_MCP_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across re-runs like `GITHUB_*` | no — but **required to store an MCP token**; unset allows only secret-less MCP clients |
+| `LXK_MCP_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); re-add after an install-script re-run, like `GITHUB_*` | no — but **required to store an MCP token**; unset allows only secret-less MCP clients |
 
 ## Full variable reference
 
@@ -200,10 +229,11 @@ no email transport anywhere.
   pinned release tag (`…/v2026.1.2/scripts/install.sh`), never `main` — the
   script content cannot change between your read and your run. Bare-metal
   tarballs are additionally sha256-verified by the script.
-- `.env*` files are gitignored — values are generated on
-  the machine, never committed. The install script preserves `GITHUB_*`
-  across re-runs so upgrades don't clobber sync config (DB-minted API keys
-  survive in the data volume / D1).
+- `.env.toml` (and any legacy `.env*`) is gitignored — values are generated on
+  the machine, never committed. Re-running the install script rewrites the flat
+  `.env`, so re-add `GITHUB_*` afterwards; preservation lands with the
+  `.env.toml` installer lane (P4). DB-minted API keys
+  survive in the data volume / D1.
 - The GitHub App private key is never written to the env file: it is either
   referenced via `GITHUB_PRIVATE_KEY_FILE` or mounted read-only into the
   container (`./github-app.private-key.pem:/app/github-app.private-key.pem:ro`
@@ -224,10 +254,46 @@ no email transport anywhere.
   2026-09-28, so the key is **required to store a token** (secret-less clients
   stay legal). It is set by hand in the server environment (or
   `wrangler secret put` on Workers — see `docs/CLOUDFLARE_WORKERS.md`), **never
-  committed, never written into `.env` that gets committed or into a log line**,
+  committed, never written into a committed `.env.toml` or into a log line**,
   and it is the one value that must not travel with a backup: the DB stores
   ciphertext, so a backup without the key is inert. Keeping them apart is what
   makes the ciphertext worth storing — see `docs/BACKUPS.md`.
+
+## Upgrading to `.env.toml` (2026-09-29)
+
+`.env.toml` is now the canonical config file. A flat `.env` is still read as a
+one-release fallback — precedence is real env → `.env.toml` → legacy `.env` →
+defaults — so existing installs keep booting unchanged.
+
+1. **Convert the file — dev / non-container hosts only (recommended, one
+   command).** From the directory that holds your `.env`:
+   ```bash
+   bun server/env-file.ts --migrate            # add --dry-run to preview
+   ```
+   Run this only on a dev machine or a host that runs the app directly — NOT on
+   a docker or bare-installer target yet (see step 3). It writes `.env.toml`
+   (0600), verifies a byte-exact round-trip, then renames
+   the original to `.env.legacy` (0600). `bun run setup` does the same
+   automatically (interactive confirm; `--migrate-env` for non-interactive),
+   and `setup --env-file <path>.toml` writes TOML directly. Dead keys
+   (`LXK_API_KEY`, `VITE_LXK_API_KEY`, `RUNTIME_*`, `LXK_ACCESS_*`) are dropped
+   rather than carried.
+2. **Rollback** — nothing is destructive: restore the legacy file and remove the
+   new one.
+   ```bash
+   rm .env.toml && mv .env.legacy .env
+   ```
+3. **⚠️ Do NOT convert docker / bare-installer targets yet.** The docker / bare
+   installer still writes the legacy flat `.env` (the installer switch to
+   `.env.toml` is a separate follow-up lane, P4). Docker gets its env via
+   **compose interpolation of the flat `.env`** — nothing mounts `.env.toml`
+   into the container until P4 — and a bare host loads the flat `.env` via
+   `bun --env-file=.env`. Converting those targets strips `GITHUB_*` /
+   `LXK_ENV` / `LXK_PUBLIC_URL` from that flow (compose/systemd no longer see
+   the keys). Wait for the `.env.toml` installer lane; no action needed on
+   that target yet.
+4. **Permissions** — `.env.toml` is written 0600 and stays gitignored
+   (`.env.toml.example` is the only tracked env file).
 
 ## Upgrading across managed-only MCP client secrets (2026-09-28)
 

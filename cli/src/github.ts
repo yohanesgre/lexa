@@ -6,8 +6,10 @@
 // Lexa→GitHub leg of the RELEASE.md acceptance round-trip against a live
 // server.
 import { Effect } from "effect";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname } from "node:path";
 import { randomBytes } from "node:crypto";
+import { assertEnvWriteTarget, formatDotenv, readEnvFile, writeEnvFile } from "../../server/env-file";
 import { LexaClient, type GithubSettingsInfo } from "./api";
 
 const OWNED_KEYS = new Set(["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]);
@@ -17,20 +19,53 @@ function flagStr(flags: Record<string, string | boolean>, name: string): string 
   return typeof v === "string" ? v : "";
 }
 
+// `.env.toml` is the canonical bootstrap file; a legacy flat `.env` still
+// works (read + written as dotenv). With no `--env-file`, prefer whichever
+// exists — `.env.toml` wins when both do — else the canonical default.
 function envFileFor(flags: Record<string, string | boolean>): string {
-  return flagStr(flags, "env-file") || ".env";
+  const explicit = flagStr(flags, "env-file");
+  if (explicit) return explicit;
+  if (existsSync(".env.toml")) return ".env.toml";
+  if (existsSync(".env")) return ".env";
+  return ".env.toml";
 }
 
-function readEnv(file: string): Map<string, string> {
-  const out = new Map<string, string>();
+function isTomlPath(path: string): boolean {
+  return /\.toml(\.|$)/.test(basename(path));
+}
+
+// Bootstrap values; an absent or unparseable file is an empty map — status is
+// a diagnostic and must not crash on a malformed file.
+function readEnv(file: string): Record<string, string> {
   try {
-    if (!existsSync(file)) return out;
-    for (const line of readFileSync(file, "utf-8").split("\n")) {
-      const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
-      if (m) out.set(m[1]!, m[2]!);
-    }
-  } catch { /* unreadable file = empty map */ }
-  return out;
+    return existsSync(file) ? readEnvFile(file) : {};
+  } catch {
+    return {};
+  }
+}
+
+// Rewrite the file as `existing - OWNED_KEYS + updates` in the format the
+// extension implies, 0600. A temp file + rename keeps a TOML write from
+// re-merging the on-disk owned keys (e.g. a stale inline GITHUB_PRIVATE_KEY).
+function writeEnvBlock(file: string, updates: Record<string, string>): void {
+  assertEnvWriteTarget(file);
+  const existing = existsSync(file) ? readEnvFile(file) : {};
+  const merged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(existing)) if (!OWNED_KEYS.has(k)) merged[k] = v;
+  for (const [k, v] of Object.entries(updates)) merged[k] = v;
+  const dir = dirname(file);
+  if (dir && dir !== ".") mkdirSync(dir, { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  rmSync(tmp, { force: true });
+  try {
+    if (isTomlPath(file)) writeEnvFile(tmp, merged);
+    else writeFileSync(tmp, formatDotenv(merged), { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 function pemHeaderOk(pemPath: string): boolean {
@@ -85,11 +120,11 @@ function prompt(question: string, fallback = ""): Promise<string> {
   });
 }
 
-function printStatus(env: Map<string, string>): void {
-  const appId = env.get("GITHUB_APP_ID") ?? "";
-  const inlineKey = env.get("GITHUB_PRIVATE_KEY") ?? "";
-  const keyFile = env.get("GITHUB_PRIVATE_KEY_FILE") ?? "";
-  const secret = env.get("GITHUB_WEBHOOK_SECRET") ?? "";
+function printStatus(env: Record<string, string>): void {
+  const appId = env.GITHUB_APP_ID ?? "";
+  const inlineKey = env.GITHUB_PRIVATE_KEY ?? "";
+  const keyFile = env.GITHUB_PRIVATE_KEY_FILE ?? "";
+  const secret = env.GITHUB_WEBHOOK_SECRET ?? "";
   let missing = 0;
 
   const row = (ok: boolean, label: string, detail: string): void => {
@@ -164,7 +199,7 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   const appId = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "app-id");
     if (fromFlag) return fromFlag;
-    const current = env.get("GITHUB_APP_ID") ?? "";
+    const current = env.GITHUB_APP_ID ?? "";
     if (current && !isTTY) return current;
     if (!isTTY) throw new Error("--app-id required on a non-TTY (or run on a terminal)");
     return yield* Effect.promise(() => prompt(`  GitHub App ID${current ? ` [${current}]` : ""}: `, current));
@@ -174,7 +209,7 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   const keyFile = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "pem-file");
     if (fromFlag) return fromFlag;
-    const current = env.get("GITHUB_PRIVATE_KEY_FILE") ?? "";
+    const current = env.GITHUB_PRIVATE_KEY_FILE ?? "";
     if (current && !isTTY) return current;
     if (!isTTY) throw new Error("--pem-file required on a non-TTY (or run on a terminal)");
     return yield* Effect.promise(() => prompt(`  Private key PEM path${current ? ` [${current}]` : ""}: `, current));
@@ -185,7 +220,7 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   const secret = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "webhook-secret");
     if (fromFlag) return fromFlag;
-    const current = env.get("GITHUB_WEBHOOK_SECRET") ?? "";
+    const current = env.GITHUB_WEBHOOK_SECRET ?? "";
     if (current && !isTTY) return current;
     if (!isTTY) throw new Error("--webhook-secret required on a non-TTY (or run on a terminal)");
     const generated = generateSecret();
@@ -207,17 +242,7 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   // --local provisioning (env-file bootstrap): rewrite the env file, keep
   // every other key, own the GitHub block. The server imports these on its
   // next boot when its settings DB values are unset.
-  const carried: string[] = [];
-  try {
-    if (existsSync(file)) {
-      for (const line of readFileSync(file, "utf-8").split("\n")) {
-        const m = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line.trim());
-        if (m && OWNED_KEYS.has(m[1]!)) continue;
-        if (line.trim() !== "") carried.push(line);
-      }
-    }
-  } catch { /* fresh file */ }
-  writeFileSync(file, [...carried, `GITHUB_APP_ID=${appId}`, `GITHUB_PRIVATE_KEY_FILE=${keyFile}`, `GITHUB_WEBHOOK_SECRET=${secret}`, ""].join("\n"), { mode: 0o600 });
+  writeEnvBlock(file, { GITHUB_APP_ID: appId, GITHUB_PRIVATE_KEY_FILE: keyFile, GITHUB_WEBHOOK_SECRET: secret });
   console.log(`  Wrote ${file}`);
   console.log("");
   console.log("  These values are the first-boot BOOTSTRAP: the server imports");

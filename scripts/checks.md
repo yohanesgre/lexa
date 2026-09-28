@@ -28,7 +28,7 @@ bun run check:invariants
 bash wireframes/build.sh
 
 # 5. Mobile check (if touched app/routes, app/components, app/styles)
-bun --env-file=.env scripts/check-mobile.mjs  # or bun run check:mobile
+bun scripts/check-mobile.mjs  # or bun run check:mobile (loads .env.toml via the loader)
 
 # 6. Secrets / staged sanity
 git diff --cached --name-only | grep -E '(\.env|\.pem|private-key|config\.json)' && echo "BLOCKED: secrets staged"

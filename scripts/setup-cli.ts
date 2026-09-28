@@ -2,8 +2,9 @@
 /**
  * Lexa CLI setup wizard (dev bootstrap / bare-metal bootstrap).
  *
- *   bun run setup                                      # interactive, dev (.env)
- *   bun run setup --env-file .env.prod --admin-email ops@x.com --yes
+ *   bun run setup                                      # interactive, dev (.env.toml)
+ *   bun run setup --env-file .env.prod.toml --admin-email ops@x.com --yes
+ *   bun run setup --migrate-env                        # convert a legacy .env non-interactively
  *   bun run setup --no-seed                            # empty workspace, no boot seed
  *   bun run setup --seed                               # force sample data non-interactively
  *
@@ -13,14 +14,19 @@
  * post-setup (login → Settings → API Keys).
  *
  * LXK_ENV is written explicitly so the server knows its environment.
+ * The target defaults to `.env.toml`; `--env-file` picks another path and the
+ * extension decides the format (`.toml` → TOML, anything else → legacy dotenv).
+ * When `.env.toml` is absent but a legacy `.env` sits next to it, setup offers
+ * a one-time conversion (interactive confirm, or `--migrate-env`).
  * This script is the first thing you run on a fresh box
  * — no lx binary required.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync, rmSync } from "node:fs";
+import { resolve, dirname, join, basename } from "node:path";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../server/db/migrate";
 import { setSetting } from "../server/db/settings";
+import { assertEnvWriteTarget, DEAD_KEYS, formatDotenv, readEnvFile, writeEnvFile } from "../server/env-file";
 
 // ── tiny prompt helper (Bun's prompt() is line-based and interactive) ──
 function ask(question: string, fallback = ""): string {
@@ -28,21 +34,109 @@ function ask(question: string, fallback = ""): string {
   return answer || fallback;
 }
 
-function loadEnv(file: string): Record<string, string> {
-  if (!existsSync(file)) return {};
+export function isTomlPath(path: string): boolean {
+  return /\.toml(\.|$)/.test(basename(path));
+}
+
+function dropDeadKeys(values: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of readFileSync(file, "utf-8").split("\n")) {
-    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (m) out[m[1]!] = m[2]!;
-  }
+  for (const [k, v] of Object.entries(values)) if (!DEAD_KEYS.includes(k)) out[k] = v;
   return out;
 }
 
-function writeEnv(file: string, env: Record<string, string>) {
-  mkdirSync(dirname(file), { recursive: true });
-  const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
-  writeFileSync(file, lines.join("\n") + "\n");
-  try { chmodSync(file, 0o600); } catch {}
+// Merge `updates` over the existing file (dead keys dropped) and write 0600 in
+// the format the extension implies. A temp file + rename guarantees the TOML
+// merge cannot re-introduce a dropped key from the on-disk copy.
+export function writeEnvByPath(path: string, updates: Record<string, string>): void {
+  assertEnvWriteTarget(path);
+  const existing = existsSync(path) ? readEnvFile(path) : {};
+  const merged = dropDeadKeys({ ...existing, ...updates });
+  const dir = dirname(path);
+  if (dir && dir !== ".") mkdirSync(dir, { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  rmSync(tmp, { force: true });
+  try {
+    if (isTomlPath(path)) writeEnvFile(tmp, merged);
+    else writeFileSync(tmp, formatDotenv(merged), { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, path);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+// One-time flat `.env` → `.env.toml` conversion: dead keys dropped, verified
+// against the written file, then the legacy file renamed `.env` → `.env.legacy`.
+export function migrateLegacyEnv(dir: string): { target: string; legacy: string } {
+  const legacy = join(dir, ".env");
+  const target = join(dir, ".env.toml");
+  const dest = join(dir, ".env.legacy");
+  if (existsSync(target)) throw new Error(`${target} already exists`);
+  if (existsSync(dest)) throw new Error(`${dest} already exists — move it aside before migrating`);
+  const values = dropDeadKeys(readEnvFile(legacy));
+  if (Object.keys(values).length === 0) throw new Error(`${legacy} has no live keys to migrate`);
+  try {
+    writeEnvFile(target, values);
+    const written = readEnvFile(target);
+    for (const [k, v] of Object.entries(values)) {
+      if (written[k] !== v) throw new Error(`migration verification failed for ${k}`);
+    }
+  } catch (e) {
+    rmSync(target, { force: true });
+    throw e;
+  }
+  renameSync(legacy, dest);
+  chmodSync(dest, 0o600);
+  return { target, legacy: dest };
+}
+
+export interface EnvTarget {
+  envFile: string;
+  env: Record<string, string>;
+  migrated: boolean;
+}
+
+// Resolve the target env file and its values. `.env.toml` is canonical; with
+// no `--env-file` a legacy `.env` is offered for conversion, and on decline
+// (or non-interactive without `--migrate-env`) it is used as-is for this run.
+export function resolveEnvTarget(opts: {
+  envFileArg: string | undefined;
+  migrateEnvFlag: boolean;
+  interactive: boolean;
+  askFn?: (question: string, fallback?: string) => string;
+  log?: (message: string) => void;
+}): EnvTarget {
+  const log = opts.log ?? ((m: string) => console.log(m));
+  const askFn = opts.askFn ?? ask;
+  let envFile = opts.envFileArg ?? ".env.toml";
+  const legacyPath = join(dirname(envFile), ".env");
+  let migrated = false;
+  // Auto-migration targets `.env.toml` only. `--env-file other.toml` must not
+  // silently convert the sibling `.env` into a `.env.toml` the caller never
+  // asked for (and then read the wrong file).
+  const canonicalTarget = basename(envFile) === ".env.toml";
+  if (canonicalTarget && existsSync(legacyPath) && !existsSync(envFile)) {
+    const confirmed =
+      opts.migrateEnvFlag ||
+      (opts.interactive && askFn("Migrate .env to .env.toml (renames .env to .env.legacy)?", "y").toLowerCase().startsWith("y"));
+    if (confirmed) {
+      const res = migrateLegacyEnv(dirname(envFile));
+      log(`  Migrated ${legacyPath} → ${res.target}`);
+      log(`  Legacy kept at ${res.legacy} (0600).`);
+      log(`  Rollback: rm ${res.target} && mv ${res.legacy} ${legacyPath}`);
+      migrated = true;
+    } else {
+      log(`  Found ${legacyPath} but no ${envFile} — keeping the legacy file for this run.`);
+      log("  Re-run with --migrate-env to convert it to .env.toml.");
+      envFile = legacyPath;
+    }
+  }
+  if (!isTomlPath(envFile)) {
+    log(`  Note: ${envFile} is a flat legacy env file — migrate to .env.toml when you can.`);
+  }
+  const env = existsSync(envFile) ? readEnvFile(envFile) : {};
+  return { envFile, env, migrated };
 }
 
 function ensureDirForDb(path: string) {
@@ -64,10 +158,13 @@ async function main() {
   console.log("  Lexa Setup");
   console.log("══════════════════════════════════════════════");
 
-  // Resolve the env file first, then the environment name.
-  const envFileArg = flagValue("--env-file");
-  const envFile = envFileArg || ".env";
-  const env = loadEnv(envFile);
+  // Resolve the env file first, then the environment name. `.env.toml` is the
+  // canonical target; `--env-file` overrides and the extension decides format.
+  const { envFile, env } = resolveEnvTarget({
+    envFileArg: flagValue("--env-file"),
+    migrateEnvFlag: hasFlag("--migrate-env"),
+    interactive: !NON_INTERACTIVE,
+  });
   const flavor = env.LXK_ENV || "dev";
   // DB path: explicit flag/env wins, then the env file, then the default —
   // a custom DATABASE_PATH in the env file must drive migrations/settings too.
@@ -114,13 +211,13 @@ async function main() {
   }
 
   // 3. Persist env file — LXK_ENV is always explicit so the seed gate works.
-  // Drop legacy provisioned keys: the server no longer reads LXK_API_KEY
-  // (API keys are minted post-setup).
-  delete env.LXK_API_KEY;
+  // Drop legacy provisioned keys: the server no longer reads them (API keys
+  // are minted post-setup).
+  for (const k of DEAD_KEYS) delete env[k];
   if (!env.DATABASE_PATH) env.DATABASE_PATH = "./data/lexa.db";
   if (!env.PORT) env.PORT = "3000";
   env.LXK_ENV = flavor;
-  writeEnv(envFile, env);
+  writeEnvByPath(envFile, env);
   console.log(`\n  Wrote ${envFile}`);
 
   // 4. Migrations
@@ -214,7 +311,7 @@ async function main() {
   }
   if (seedChoice !== null) {
     env.LXK_SEED_DEV = seedChoice === "yes" ? "1" : "0";
-    writeEnv(envFile, env);
+    writeEnvByPath(envFile, env);
     console.log(`  Wrote ${envFile} (LXK_SEED_DEV=${env.LXK_SEED_DEV})`);
   }
   // 7. Lock setup — CLI-provisioned instances are complete; /api/setup/*
@@ -253,7 +350,9 @@ async function main() {
   console.log("");
 }
 
-main().catch((e) => {
-  console.error("Setup failed:", e);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((e) => {
+    console.error("Setup failed:", e);
+    process.exit(1);
+  });
+}
