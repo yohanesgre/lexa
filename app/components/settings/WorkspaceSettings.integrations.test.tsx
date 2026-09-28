@@ -47,6 +47,9 @@ vi.mock("../../lib/queries/assistant-admin", () => ({
   useCreateProvider: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateProvider: () => ({ mutate: vi.fn(), isPending: false }),
   useMcpServers: () => ({ data: [], isLoading: false }),
+  // Capability unknown from an idle query: the section treats it as OFF, which
+  // is exactly the no-master-key surface these tests are not asserting on.
+  useMcpManagedSecrets: () => ({ data: false }),
   useCreateMcpServer: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateMcpServer: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteMcpServer: () => ({ mutate: vi.fn(), isPending: false }),

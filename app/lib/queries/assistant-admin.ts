@@ -121,13 +121,42 @@ export function useFetchModels() {
 
 // ── MCP clients ──
 
-export function useMcpServers() {
-  return useQuery({
-    queryKey: ["assistant-mcp-servers"],
-    queryFn: () => api.listMcpServers().then((r) => r.data),
+// The registry cache holds the WHOLE list body, not just the rows, because the
+// body also carries `managedSecretsEnabled` — the server's real capability for
+// managed tokens. Both hooks below read the same key, so the flag costs no extra
+// request and can never disagree with the rows it describes.
+const MCP_SERVERS_KEY = ["assistant-mcp-servers"] as const;
+type McpServerList = { data: api.McpServer[]; managedSecretsEnabled: boolean | undefined };
+
+function mcpServersQuery() {
+  return {
+    queryKey: MCP_SERVERS_KEY,
+    queryFn: (): Promise<McpServerList> => api.listMcpServers(),
     retry: false,
     staleTime: 30_000,
-  });
+  };
+}
+
+export function useMcpServers() {
+  return useQuery({ ...mcpServersQuery(), select: (r) => r.data });
+}
+
+// `undefined` while the list is in flight — the caller must treat that as
+// "capability not known yet", never as "off".
+export function useMcpManagedSecrets() {
+  return useQuery({ ...mcpServersQuery(), select: (r) => r.managedSecretsEnabled });
+}
+
+// Mutations write the list body, preserving the capability from the old entry.
+// A cold cache leaves the capability `undefined` — unknown, never a fabricated
+// `false`, which the UI would render as a definitive "managed tokens are off".
+// A mounted list query is in flight in that case and overwrites the entry with
+// the server's truth as soon as it resolves.
+function withServer(
+  old: McpServerList | undefined,
+  next: (rows: api.McpServer[]) => api.McpServer[]
+): McpServerList {
+  return { data: next(old?.data ?? []), managedSecretsEnabled: old?.managedSecretsEnabled };
 }
 
 export function useCreateMcpServer() {
@@ -136,7 +165,7 @@ export function useCreateMcpServer() {
   return useMutation({
     mutationFn: (input: api.McpServerInput) => api.createMcpServer(input),
     onSuccess: (server) => {
-      qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ? [...old, server] : [server]));
+      qc.setQueryData<McpServerList>(MCP_SERVERS_KEY, (old) => withServer(old, (rows) => [...rows, server]));
       toast.push("success", "MCP client created");
     },
     onError: (err) => {
@@ -149,9 +178,9 @@ export function useUpdateMcpServer() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string } & Partial<api.McpServerInput>) => api.updateMcpServer(id, input),
+    mutationFn: ({ id, ...input }: { id: string } & api.McpServerPatch) => api.updateMcpServer(id, input),
     onSuccess: (server) => {
-      qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ?? []).map((s) => (s.id === server.id ? server : s)));
+      qc.setQueryData<McpServerList>(MCP_SERVERS_KEY, (old) => withServer(old, (rows) => rows.map((s) => (s.id === server.id ? server : s))));
       toast.push("success", "MCP client updated");
     },
     onError: (err) => {
@@ -166,7 +195,7 @@ export function useDeleteMcpServer() {
   return useMutation({
     mutationFn: (id: string) => api.deleteMcpServer(id),
     onSuccess: (_v, id) => {
-      qc.setQueryData<api.McpServer[]>(["assistant-mcp-servers"], (old) => (old ?? []).filter((s) => s.id !== id));
+      qc.setQueryData<McpServerList>(MCP_SERVERS_KEY, (old) => withServer(old, (rows) => rows.filter((s) => s.id !== id)));
       toast.push("success", "MCP client deleted");
     },
     onError: (err) => {

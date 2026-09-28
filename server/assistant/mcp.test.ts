@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Context, Effect, Layer } from "effect";
 import type { StreamChunk } from "@tanstack/ai";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
-import type { McpServerRow } from "../repos/assistant-mcp.repo";
+import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { McpConnector } from "../services/assistant-mcp.service";
 import { getEnvFromWorkers, type RuntimeEnv } from "../env";
 import type { StreamFrame } from "../../shared/assistant";
@@ -110,7 +110,10 @@ const MCP_TOOL_FIXTURE: McpDiscoveredTool = {
   execute: async () => "ok",
 };
 
-function row(overrides: Partial<McpServerRow> = {}): McpServerRow {
+// No managed secret unless a test asks for one: the three blob columns are
+// all-or-nothing in storage, and nulls mean "no ciphertext row" (the LEFT JOIN
+// found nothing), which is the secret-less reference-or-nothing case.
+function row(overrides: Partial<McpServerRowWithSecret> = {}): McpServerRowWithSecret {
   return {
     id: "fake",
     label: "Fake",
@@ -122,6 +125,9 @@ function row(overrides: Partial<McpServerRow> = {}): McpServerRow {
     enabled: 1,
     created_at: "",
     updated_at: "",
+    secret_ciphertext: null,
+    secret_iv: null,
+    secret_key_id: null,
     ...overrides,
   };
 }
@@ -498,7 +504,7 @@ describe("SSRF at connect", () => {
 
 // 0010 deletes every stored stdio row; these rows can only be reproduced by
 // hand, so this is the regression guard for "no local process, ever".
-function legacyStdioRow(overrides: Partial<McpServerRow> = {}): McpServerRow {
+function legacyStdioRow(overrides: Partial<McpServerRowWithSecret> = {}): McpServerRowWithSecret {
   return row({ id: "legacy", transport_type: "stdio", url: null, command: "legacy-mcp", args: '["--stdio"]', ...overrides });
 }
 
@@ -551,7 +557,7 @@ describe("remote bearer auth", () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  async function connect(env: RuntimeEnv, overrides: Partial<McpServerRow> = {}): Promise<Record<string, unknown>> {
+  async function connect(env: RuntimeEnv, overrides: Partial<McpServerRowWithSecret> = {}): Promise<Record<string, unknown>> {
     await liveMcpClientFactory.create(row({ secret_ref: "env:MCP_REMOTE_TOKEN", ...overrides }), { env, allowlist: null });
     return sdkMock.calls[0]!.transport as Record<string, unknown>;
   }
@@ -764,7 +770,7 @@ describe("remote bearer auth", () => {
 // message is the only part a superadmin sees, so it must never carry remote
 // text (a JSON-RPC error, a fetch TypeError quoting the header, an SDK stack).
 describe("connect error forwarding (LiveMcpConnector)", () => {
-  async function liveConnect(r: McpServerRow, env: RuntimeEnv = {}): Promise<unknown> {
+  async function liveConnect(r: McpServerRowWithSecret, env: RuntimeEnv = {}): Promise<unknown> {
     const ctx = await Effect.runPromise(Effect.scoped(Layer.build(LiveMcpConnector)));
     const connector = Context.get(ctx, McpConnector);
     return Effect.runPromise(connector.connect(r, { env, allowlist: null }).pipe(Effect.flip));

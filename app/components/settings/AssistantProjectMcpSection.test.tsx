@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 
 const h = vi.hoisted(() => ({
   servers: [] as unknown[],
+  managedSecrets: true as boolean | undefined,
   rows: [] as unknown[],
   saved: [] as unknown[],
   pending: false,
@@ -17,6 +18,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("../../lib/queries/assistant-admin", () => ({
   useMcpServers: () => ({ data: h.servers, isLoading: false }),
+  useMcpManagedSecrets: () => ({ data: h.managedSecrets }),
   useProjectMcpServers: () => ({ data: h.rows }),
   useSetProjectMcpServers: () => ({ mutate: (entries: unknown, opts?: { onSuccess?: () => void }) => { h.saved.push(entries); opts?.onSuccess?.(); }, isPending: h.pending }),
 }));
@@ -33,15 +35,16 @@ const PROJECT = { id: "p1", name: "Emberfall", slug: "emberfall" } as unknown as
 
 const LINEAR: McpServer = {
   id: "linear", label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp", command: null,
-  args: [], hasSecret: false, enabled: true, createdAt: "t", updatedAt: "t",
+  args: [], hasSecret: false, secretSource: "none", enabled: true, createdAt: "t", updatedAt: "t",
 };
 const NOTION: McpServer = {
   id: "notion", label: "Notion", transportType: "sse", url: "https://mcp.notion.example/sse", command: null,
-  args: [], hasSecret: false, enabled: false, createdAt: "t", updatedAt: "t",
+  args: [], hasSecret: false, secretSource: "none", enabled: false, createdAt: "t", updatedAt: "t",
 };
 
 beforeEach(() => {
   h.servers = [NOTION, LINEAR];
+  h.managedSecrets = true;
   h.rows = [];
   h.saved = [];
   h.pending = false;

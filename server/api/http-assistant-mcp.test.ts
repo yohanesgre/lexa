@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { Effect, Layer } from "effect";
 import { runMigrations } from "../db/migrate";
 import { createApiHandler } from "./http";
 import { McpConnectFailed } from "./errors";
-import { McpConnector, envSecretRefReason, PROCESS_FIELDS_REJECTED } from "../services/assistant-mcp.service";
+import { McpConnector, envSecretRefReason, PROCESS_FIELDS_REJECTED, SECRET_BOTH_SOURCES_REJECTED, SECRET_REQUIRES_MASTER_KEY } from "../services/assistant-mcp.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "j".repeat(43);
@@ -131,6 +131,56 @@ describe("MCP client registry (superadmin)", () => {
   it("member key → 403", async () => {
     const res = await handler(authed("GET", "/api/assistant/mcp-servers", undefined, MEMBER_KEY));
     expect(res.status).toBe(403);
+  });
+
+  it("carries managedSecretsEnabled alongside data, and never a key value", async () => {
+    const res = await handler(authed("GET", "/api/assistant/mcp-servers"));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: unknown[]; managedSecretsEnabled: unknown };
+    // Additive sibling of `data`: the row shape is untouched. No key is set in
+    // this suite's default env, so the capability reads false.
+    expect(body.managedSecretsEnabled).toBe(false);
+    expect(body).toHaveProperty("data");
+    expect(JSON.stringify(body)).not.toContain("LXK_MCP_MASTER_KEY");
+  });
+
+  it("managedSecretsEnabled is true when the server env configures a master key, and a managed save then succeeds", async () => {
+    // Same env snapshot the save path reads, so the rendered capability and the
+    // enforced one cannot disagree: true here, and the very next call proves
+    // the feature really works.
+    process.env.LXK_MCP_MASTER_KEY = Buffer.alloc(32, 9).toString("base64");
+    try {
+      const res = await handler(authed("GET", "/api/assistant/mcp-servers"));
+      expect(res.status).toBe(200);
+      const body = await res.json() as { managedSecretsEnabled: unknown };
+      expect(body.managedSecretsEnabled).toBe(true);
+
+      const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
+        label: "Keyed",
+        transportType: "http",
+        url: "https://mcp.test/mcp",
+        secret: "bearer_token_for_the_keyed_server",
+      }));
+      expect(created.status).toBe(201);
+      const createdBody = await created.json() as Record<string, unknown>;
+      expect(createdBody).toMatchObject({ hasSecret: true, secretSource: "managed" });
+      expect(JSON.stringify(createdBody)).not.toContain("bearer_token_for_the_keyed_server");
+    } finally {
+      delete process.env.LXK_MCP_MASTER_KEY;
+    }
+  });
+
+  it("a managed save is refused with the frozen code when the capability is false", async () => {
+    const res = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Unkeyed",
+      transportType: "http",
+      url: "https://mcp.test/mcp",
+      secret: "bearer_token_with_no_key",
+    }));
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("MCP_INVALID_TRANSPORT_CONFIG");
+    expect(body.error.message).toBe(SECRET_REQUIRES_MASTER_KEY);
   });
 
   it("create → 201, then patch, delete → 204", async () => {
@@ -357,5 +407,112 @@ describe("Per-project MCP availability", () => {
     }, ADMIN_KEY));
     expect(res.status).toBe(404);
     expect((await res.json() as { error: { code: string } }).error.code).toBe("MCP_SERVER_NOT_FOUND");
+  });
+});
+
+// The managed-secret wire contract over HTTP. The master key reaches the service
+// through RuntimeEnv, and the Bun handler resolves the fallback snapshot with
+// getEnv() PER REQUEST, so setting process.env around a case is what the
+// production single-key deployment does at boot.
+describe("managed MCP client secrets over HTTP", () => {
+  const MASTER_KEY = Buffer.from("h".repeat(32)).toString("base64");
+  const TOKEN = "planted-http-managed-token-4c8e1b-do-not-leak";
+
+  const secretRow = (id: string) =>
+    db.prepare("SELECT server_id, ciphertext, iv, key_id FROM assistant_mcp_secrets WHERE server_id = ?").get(id) as
+      | { server_id: string; ciphertext: string; iv: string; key_id: string }
+      | null;
+
+  const refOf = (id: string) =>
+    (db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = ?").get(id) as
+      | { secret_ref: string | null }
+      | null)?.secret_ref ?? null;
+
+  // `secret` is write-only by construction, so the response body is the only
+  // place a leaked value could surface, and the raw row is the only place the
+  // stored ciphertext can be checked for a plaintext leak.
+  afterEach(() => {
+    delete process.env.LXK_MCP_MASTER_KEY;
+    delete process.env.LXK_MCP_MASTER_KEY_PREV;
+  });
+
+  it("POST with a managed secret → 201, hasSecret + secretSource managed, and no value anywhere in the response", async () => {
+    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+
+    const res = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Managed HTTP",
+      transportType: "http",
+      url: "https://mcp.test/managed",
+      secret: TOKEN,
+    }));
+    expect(res.status).toBe(201);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ id: "managed-http", hasSecret: true, secretSource: "managed" });
+    // Write-only: neither the token nor a secret/ciphertext field is echoed.
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+    expect(body).not.toHaveProperty("secret");
+    expect(body).not.toHaveProperty("secretRef");
+    expect(body).not.toHaveProperty("ciphertext");
+
+    // The stored blob is ciphertext, and the registry ref stays null: the
+    // credential lives in the secret table only.
+    const stored = secretRow("managed-http");
+    expect(stored).toBeDefined();
+    expect(stored!.ciphertext).not.toContain(TOKEN);
+    expect(stored!.iv).not.toContain(TOKEN);
+    expect(refOf("managed-http")).toBeNull();
+  });
+
+  it("PATCH clearSecret → 200 with hasSecret false and secretSource none, and the ciphertext row is gone", async () => {
+    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+
+    const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Clearable",
+      transportType: "http",
+      url: "https://mcp.test/clearable",
+      secret: TOKEN,
+    }));
+    expect(created.status).toBe(201);
+    expect(secretRow("clearable")).toBeDefined();
+
+    const cleared = await handler(authed("PATCH", "/api/assistant/mcp-servers/clearable", { clearSecret: true }));
+    expect(cleared.status).toBe(200);
+    const body = await cleared.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ id: "clearable", hasSecret: false, secretSource: "none" });
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+    expect(secretRow("clearable")).toBeNull();
+    expect(refOf("clearable")).toBeNull();
+  });
+
+  it("PATCH carrying both a secret and a secretRef → 400 MCP_INVALID_TRANSPORT_CONFIG, and nothing is written", async () => {
+    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+
+    const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Both Sources",
+      transportType: "http",
+      url: "https://mcp.test/both",
+    }));
+    expect(created.status).toBe(201);
+    expect(refOf("both-sources")).toBeNull();
+    expect(secretRow("both-sources")).toBeNull();
+
+    const refused = await handler(authed("PATCH", "/api/assistant/mcp-servers/both-sources", {
+      secret: TOKEN,
+      secretRef: "env:CRON_SECRET",
+    }));
+    expect(refused.status).toBe(400);
+    expect((await refused.json() as { error: { code: string; message: string } }).error).toMatchObject({
+      code: "MCP_INVALID_TRANSPORT_CONFIG",
+      message: SECRET_BOTH_SOURCES_REJECTED,
+    });
+
+    // The refused call wrote nothing: still no ciphertext row and no reference,
+    // so the two-source payload can never half-apply over the wire either.
+    expect(secretRow("both-sources")).toBeNull();
+    expect(refOf("both-sources")).toBeNull();
+    const list = await handler(authed("GET", "/api/assistant/mcp-servers"));
+    expect((await list.json() as { data: Array<Record<string, unknown>> }).data).toMatchObject([
+      { id: "both-sources", hasSecret: false, secretSource: "none" },
+    ]);
   });
 });

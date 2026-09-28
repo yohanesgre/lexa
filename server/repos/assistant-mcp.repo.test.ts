@@ -7,7 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { DbBunLive } from "../db/db";
-import { AssistantMcpRepo, toPublic, MCP_CLIENT_TRANSPORTS, type CreateMcpServerInput, type McpServerRow, type McpClientTransportType, type McpTransportType } from "./assistant-mcp.repo";
+import { AssistantMcpRepo, toPublic, MCP_CLIENT_TRANSPORTS, type CreateMcpServerInput, type McpClientTransportType, type McpTransportType } from "./assistant-mcp.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -183,12 +183,14 @@ describe("AssistantMcpRepo", () => {
     const raw = await Effect.runPromise(repo.getById("web"));
     expect(raw.secret_ref).toBe("env:MY_SECRET_TOKEN");
 
-    const pub = toPublic(raw as McpServerRow);
+    const pub = toPublic(raw);
     expect(pub.hasSecret).toBe(true);
+    expect(pub.secretSource).toBe("reference");
     expect(JSON.stringify(pub)).not.toContain("MY_SECRET_TOKEN");
     expect("secret_ref" in pub).toBe(false);
 
-    const noSecret = toPublic({ ...raw, secret_ref: null } as McpServerRow);
+    const noSecret = toPublic({ ...raw, secret_ref: null });
     expect(noSecret.hasSecret).toBe(false);
+    expect(noSecret.secretSource).toBe("none");
   });
 });

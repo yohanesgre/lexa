@@ -310,3 +310,11 @@
 2026-09-28 | jev-system1-mcp-clients | WORKING | wireframe gate unblocked: submodule 017e0b2 pushed, parent gitlink staged; Phase 5 React transcription started | status/jev-system1-mcp-clients/plan.md
 2026-09-28 | jev-system1-mcp-clients | WORKING | Phase 5 done: transcription reviewed and fixed, wireframes e239b95 pushed and staged; Phase 6 docs sweep started | status/jev-system1-mcp-clients/plan.md
 2026-09-28 | jev-system1-mcp-clients | DONE | all phases complete, 213 files 1993 tests green, report written; uncommitted awaiting review | status/jev-system1-mcp-clients/report.md
+2026-09-28 | mcp-managed-secrets | PLAN | UI-managed MCP Bearer secrets via envelope encryption; wireframes then backend then React | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | WORKING | branch approved; Phase 0 wireframe work starting | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | WORKING | Phase 0 approved after re-reviews; Phase 1 backend started (crypto plus migration first) | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | WORKING | Phase 1a done: crypto module plus 0011 plus env green; lane B service and docs starting | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | WORKING | Phase 1 done: rotation fix plus proof matrix green, docs complete; Phase 2 React starting | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | WORKING | Phase 1 done: review MEDs fixed, proof matrix plus routes green; Phase 2 React starting | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | WORKING | Phase 2 done: transcription plus capability flag green; final review starting | status/mcp-managed-secrets/plan.md
+2026-09-28 | mcp-managed-secrets | DONE | all phases complete, 215 files 2095 tests green, report written; uncommitted awaiting review | status/mcp-managed-secrets/report.md

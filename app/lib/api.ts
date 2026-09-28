@@ -701,14 +701,22 @@ export function reorderAssistantProviderModels(id: string, orderedIds: string[])
 // migration 0010 removed every stored stdio row.
 export type McpTransportType = "http" | "sse" | "stdio";
 
+// Which write-only source a stored client authenticates with. Exactly-one
+// source is enforced on every write, so a client is managed XOR reference;
+// "none" is a legal, deliberately secret-less client.
+export type McpSecretSource = "managed" | "reference" | "none";
+
 export interface McpServer {
   id: string;
   label: string;
   transportType: McpTransportType;
   url: string | null;
+  // Compat only: `command`/`args` mirror the legacy stdio columns and are never
+  // read by the app — remote HTTP/SSE is the only supported transport.
   command: string | null;
   args: string[];
   hasSecret: boolean;
+  secretSource: McpSecretSource;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -718,11 +726,19 @@ export interface McpServerInput {
   label: string;
   transportType: McpTransportType;
   url?: string | null;
+  // Compat with the legacy stdio columns — never sent by the MCP form.
   command?: string | null;
   args?: string[];
+  // Write-only. Omitted or empty means "keep the stored source" — a blank
+  // value is NEVER a removal, so there is no null-both form here.
   secretRef?: string | null;
+  secret?: string | null;
   enabled?: boolean;
 }
+
+// Update carries the one explicit removal route; it nulls both the stored
+// reference and the ciphertext row server-side.
+export type McpServerPatch = Partial<McpServerInput> & { clearSecret?: boolean };
 
 export interface McpTestResult {
   ok: boolean;
@@ -740,7 +756,11 @@ export interface McpProjectServer {
   updatedAt: string;
 }
 
-export function listMcpServers(): Promise<{ data: McpServer[] }> {
+// `managedSecretsEnabled` is the SERVER's real capability for managed tokens (a
+// master key is configured), reported alongside the rows. The UI renders the
+// managed branch from it instead of assuming the feature exists — a build that
+// hardcoded it on would offer a save the API refuses.
+export function listMcpServers(): Promise<{ data: McpServer[]; managedSecretsEnabled: boolean }> {
   return request(`${BASE}/assistant/mcp-servers`);
 }
 
@@ -748,7 +768,7 @@ export function createMcpServer(input: McpServerInput): Promise<McpServer> {
   return request(`${BASE}/assistant/mcp-servers`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateMcpServer(id: string, input: Partial<McpServerInput>): Promise<McpServer> {
+export function updateMcpServer(id: string, input: McpServerPatch): Promise<McpServer> {
   return request(`${BASE}/assistant/mcp-servers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 

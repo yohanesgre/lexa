@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS } from "../assistant/tools";
 import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightEnv, type JevPreflightResult } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
-import type { McpServerRow } from "../repos/assistant-mcp.repo";
+import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, CHAT_IDENTITY } from "../assistant/prompt";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
@@ -63,9 +63,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       Effect.gen(function* () {
         const env = yield* currentEnv;
         const servers = yield* Effect.tryPromise({
-          try: () => dbAll<McpServerRow>(ENABLED_MCP_SERVERS_SQL, projectId),
+          try: () => dbAll<McpServerRowWithSecret>(ENABLED_MCP_SERVERS_SQL, projectId),
           catch: () => new DbError({ message: "failed to load enabled MCP servers" }),
-        }).pipe(Effect.catchAll(() => Effect.succeed([] as McpServerRow[])));
+        }).pipe(Effect.catchAll(() => Effect.succeed([] as McpServerRowWithSecret[])));
         if (servers.length === 0) return undefined;
         return yield* Effect.promise(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined));
       });

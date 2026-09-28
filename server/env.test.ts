@@ -265,4 +265,26 @@ describe("RUNTIME_ENV_STRING_KEYS", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("carries both MCP master keys on both paths, and both are forwardable env: names", () => {
+    // Managed MCP secrets are configured on every runtime, so both slots must
+    // come back from BOTH builders — the generic "copied by at least one path"
+    // test cannot catch a slot only one of them forwards. The generic test also
+    // pins the membership of each name in the `env:` allowlist.
+    const source = { LXK_MCP_MASTER_KEY: "active-key", LXK_MCP_MASTER_KEY_PREV: "prev-key" };
+    for (const env of [getEnv(source), getEnvFromWorkers(source)]) {
+      expect(env.LXK_MCP_MASTER_KEY).toBe("active-key");
+      expect(env.LXK_MCP_MASTER_KEY_PREV).toBe("prev-key");
+      for (const key of ["LXK_MCP_MASTER_KEY", "LXK_MCP_MASTER_KEY_PREV"]) {
+        expect(isRuntimeEnvStringKey(key), key).toBe(true);
+        expect(resolveSecretRef(`env:${key}`, env)).toBe(key === "LXK_MCP_MASTER_KEY" ? "active-key" : "prev-key");
+      }
+    }
+    // Unset on both paths is a clean undefined — the crypto layer reads that
+    // as "feature disabled", never as an empty key.
+    for (const env of [getEnv({}), getEnvFromWorkers({})]) {
+      expect(env.LXK_MCP_MASTER_KEY).toBeUndefined();
+      expect(env.LXK_MCP_MASTER_KEY_PREV).toBeUndefined();
+    }
+  });
 });

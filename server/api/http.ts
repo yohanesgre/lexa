@@ -1509,11 +1509,26 @@ const McpServerSchema = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   args: Schema.Array(Schema.String),
   hasSecret: Schema.Boolean,
+  secretSource: Schema.Literal("managed", "reference", "none"),
   enabled: Schema.Boolean,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
-const McpServerListResponse = Schema.Struct({ data: Schema.Array(McpServerSchema) });
+// `managedSecretsEnabled` is additive and read-only: it says whether this server
+// can encrypt a managed token at all (a master key is configured), so the
+// registry UI renders the managed branch from the response instead of assuming
+// it. The row shape above is untouched, and the field is a capability, never key
+// material.
+const McpServerListResponse = Schema.Struct({
+  data: Schema.Array(McpServerSchema),
+  managedSecretsEnabled: Schema.Boolean,
+});
+// `secret` is write-only by construction: it exists on the request schemas and
+// NOT on McpServerSchema, so a response can never carry it. An empty value means
+// "keep the stored source" — removal is `clearSecret: true` on the update.
+// 4096 chars bounds a bearer token at schema decode (400 before the service),
+// so an oversized body field never reaches the crypto module.
+const McpManagedSecretSchema = Schema.NullOr(Schema.String.pipe(Schema.maxLength(4096)));
 const McpServerCreatePayload = Schema.Struct({
   label: Schema.String,
   transportType: McpTransportTypeSchema,
@@ -1521,6 +1536,7 @@ const McpServerCreatePayload = Schema.Struct({
   command: Schema.optional(Schema.NullOr(Schema.String)),
   args: Schema.optional(Schema.Array(Schema.String)),
   secretRef: Schema.optional(Schema.NullOr(Schema.String)),
+  secret: Schema.optional(McpManagedSecretSchema),
   enabled: Schema.optional(Schema.Boolean),
 });
 const McpServerUpdatePayload = Schema.Struct({
@@ -1530,6 +1546,8 @@ const McpServerUpdatePayload = Schema.Struct({
   command: Schema.optional(Schema.NullOr(Schema.String)),
   args: Schema.optional(Schema.Array(Schema.String)),
   secretRef: Schema.optional(Schema.NullOr(Schema.String)),
+  secret: Schema.optional(McpManagedSecretSchema),
+  clearSecret: Schema.optional(Schema.Boolean),
   enabled: Schema.optional(Schema.Boolean),
 });
 const McpTestResponse = Schema.Struct({
@@ -4119,7 +4137,12 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const service = yield* AssistantMcpService;
-        return { data: yield* service.list() };
+        // One request, both reads: the rows and the managed-secrets capability
+        // the form needs to decide between the reference and managed branches.
+        const [data, managedSecretsEnabled] = yield* Effect.all([service.list(), service.managedSecretsEnabled()], {
+          concurrency: 2,
+        });
+        return { data, managedSecretsEnabled };
       }))
     )
     .handle("createMcpServer", (req) =>
@@ -4133,6 +4156,9 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
           command: req.payload.command ?? null,
           args: req.payload.args !== undefined ? [...req.payload.args] : [],
           secretRef: req.payload.secretRef ?? null,
+          // Carried only when present: an omitted `secret` is "no managed
+          // token", which the service needs to tell apart from a keep.
+          ...(req.payload.secret !== undefined && req.payload.secret !== null ? { secret: req.payload.secret } : {}),
           ...(req.payload.enabled !== undefined ? { enabled: req.payload.enabled } : {}),
         });
       }))
@@ -4148,6 +4174,8 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         if (req.payload.command !== undefined) patch.command = req.payload.command;
         if (req.payload.args !== undefined) patch.args = [...req.payload.args];
         if (req.payload.secretRef !== undefined) patch.secretRef = req.payload.secretRef;
+        if (req.payload.secret !== undefined && req.payload.secret !== null) patch.secret = req.payload.secret;
+        if (req.payload.clearSecret !== undefined) patch.clearSecret = req.payload.clearSecret;
         if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;
         return yield* service.update(req.path.id, patch);
       }))

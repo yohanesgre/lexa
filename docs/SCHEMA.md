@@ -851,7 +851,9 @@ ALTER TABLE task_comments ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
 -- neither DROP COLUMN nor a CHECK rewrite, and 0010 empties the stdio rows
 -- instead of rebuilding the table (see below). `secret_ref` stores only a
 -- reference — 'env:NAME' or 'file:/abs/path' — never a plaintext credential;
--- the repo's public mapper drops it and exposes `hasSecret` instead.
+-- the repo's public mapper drops it and exposes `hasSecret` + `secretSource`
+-- instead. A managed token is never stored here at all: it lives encrypted in
+-- `assistant_mcp_secrets` (0011).
 CREATE TABLE assistant_mcp_servers (
   id TEXT PRIMARY KEY,                                  -- stable slug, e.g. 'jev'
   label TEXT NOT NULL,
@@ -883,6 +885,34 @@ CREATE TABLE assistant_mcp_project_servers (
 -- deletes that row together with every other stdio row and its project
 -- bindings, so a current database has no stdio registrations. This DDL block
 -- above is the 0009 baseline and is kept for historical reference.
+
+-- 0011: managed MCP client secrets (envelope encryption).
+--
+-- A client credential entered in the webapp is stored here as AES-256-GCM
+-- ciphertext; the master key never leaves the environment
+-- (LXK_MCP_MASTER_KEY, with LXK_MCP_MASTER_KEY_PREV as the rotation read
+-- path). `key_id` records the keyring SLOT the blob was encrypted under
+-- ('active' | 'prev') — never a fingerprint, counter, or date — so a rotation
+-- keeps existing rows readable through the PREV slot and needs no rewrap.
+--
+-- New table only: no ALTER, no rebuild, no data movement, so it is safe on
+-- both runners. Ciphertext is kept out of assistant_mcp_servers on purpose —
+-- a `SELECT *` of the registry can never surface a blob, and the registry
+-- reads the secret through a LEFT JOIN (absence of a row = no managed token).
+--
+-- The FK cascades under the Workers/D1 runner, but the Bun runner executes
+-- with `PRAGMA foreign_keys = OFF` (server/db/migrate.ts), where the cascade
+-- never fires — so repo.remove deletes this row explicitly instead of relying
+-- on the parent DELETE alone (same lesson as 0010).
+
+CREATE TABLE assistant_mcp_secrets (
+  server_id TEXT PRIMARY KEY REFERENCES assistant_mcp_servers(id) ON DELETE CASCADE,
+  ciphertext TEXT NOT NULL,                                -- base64, AES-256-GCM (ciphertext||128-bit tag)
+  iv TEXT NOT NULL,                                        -- base64, 12 random bytes per write
+  key_id TEXT NOT NULL,                                    -- 'active' | 'prev' — the keyring slot
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/assistant (no CHECK in DDL).
@@ -979,7 +1009,9 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- project bindings — junction rows first, because the Bun runner has foreign
 -- keys OFF and ON DELETE CASCADE would not fire; http/sse rows untouched, and
 -- the tables are not rebuilt so the legacy command/args columns and the 0009
--- CHECK survive). Future migrations continue at 0011_*.sql.
+-- CHECK survive), 0011_mcp_managed_secrets.sql (managed MCP client secrets —
+-- new `assistant_mcp_secrets` table, CREATE TABLE only, ciphertext only). Future
+-- migrations continue at 0012_*.sql.
 ```
 
 ## Design Notes
@@ -1058,6 +1090,38 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
   delegation was removed in the squashed baseline.
 - **Id rebind consequence (one-time, history):** threads keyed on the pre-squash
   agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
+
+### Managed MCP client secrets (`assistant_mcp_secrets`)
+`assistant_mcp_servers.secret_ref` is a **reference** only. A credential entered
+in the webapp is envelope-encrypted and stored in its own table,
+`assistant_mcp_secrets` (0011), keyed by `server_id`.
+
+- **One row per client.** `server_id` is the PRIMARY KEY, so a client has at
+  most one stored blob. Upsert (`ON CONFLICT(server_id) DO UPDATE`) is the write,
+  so re-entering a token replaces the blob and rotates the IV in one statement
+  pair.
+- **Ciphertext never enters the registry.** The blob lives only in this table —
+  a bare `SELECT *` of `assistant_mcp_servers` can never surface one. The
+  registry (and the assistant tool bridge) reads it through a `LEFT JOIN`
+  aliased to `secret_ciphertext` / `secret_iv` / `secret_key_id`; **absence of a
+  row means no managed token**, which is how a secret-less client is
+  represented.
+- **FK cascade + explicit delete.** `ON DELETE CASCADE` fires under the
+  Workers/D1 runner, but the Bun runner runs with `PRAGMA foreign_keys = OFF`
+  (`server/db/migrate.ts`), where it does not. `repo.remove` therefore deletes
+  the secret row explicitly before the parent `DELETE` (same lesson as 0010) —
+  otherwise a deleted client would strand ciphertext no operator can read.
+- **Columns are envelope, not credential.** `ciphertext` (base64 of
+  `ciphertext || 128-bit tag`), `iv` (base64, 12 random bytes per write), and
+  `key_id` — the **keyring slot** (`'active'` | `'prev'`), never a fingerprint,
+  counter, or date. Slot naming is what makes rotation rewrap-free: an
+  existing `prev` row keeps resolving through `LXK_MCP_MASTER_KEY_PREV`.
+- **No plaintext column, ever.** The master key lives only in the environment
+  (`LXK_MCP_MASTER_KEY`); the table is written exclusively by the encrypt path
+  and read exclusively at connect. Redaction rules exclude both plaintext and
+  ciphertext from logs, reports, and error bodies.
+- **Delete is crypto-free.** `deleteSecret` is a plain row delete, so the
+  clear-a-secret affordance works on a deployment whose master key is gone.
 
 ### Task field options (custom priority/type)
 Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. `tasks.priority` / `tasks.type` are plain TEXT columns (DEFAULT `'medium'` / `'task'`) with **no FK** — SQLite enforces nothing; the service validates the value against the project's option rows (`InvalidOption` 422) and resolves an empty value to the first option.

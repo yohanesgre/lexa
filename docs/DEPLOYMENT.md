@@ -134,6 +134,7 @@ default columns appear when the first project is created.
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
+| `LXK_MCP_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across re-runs like `GITHUB_*` | no — unset simply disables managed MCP tokens |
 
 ## Full variable reference
 
@@ -151,6 +152,8 @@ default columns appear when the first project is created.
 | `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
+| `LXK_MCP_MASTER_KEY` | **optional** — master key for managed MCP client tokens (Bearer tokens entered in the webapp instead of referenced). Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → managed secrets are disabled**: a save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, while `env:`/`file:` references keep working unchanged and a client with an already-stored token keeps its stored value. Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_MCP_MASTER_KEY_PREV` to the **old** value, `LXK_MCP_MASTER_KEY` to the **new** one, restart, then re-enter tokens in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
+| `LXK_MCP_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_MCP_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any token entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
 | `LXK_TRUSTED_PROXY_CIDRS` | comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when cloudflared or another sidecar connects from this host. Set it when the proxy is a separate container/host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
@@ -219,6 +222,18 @@ no email transport anywhere.
   slot of the fixed `RuntimeEnv` snapshot, so an MCP client `secret_ref` of
   `env:TYPESAFE_API_KEY` deliberately forwards it as a Bearer token to that
   client's URL — superadmin-only, and only sensible for a trusted server.
+- `LXK_MCP_MASTER_KEY` (and its read-only `LXK_MCP_MASTER_KEY_PREV`) is the
+  envelope key for managed MCP client tokens. It is set by hand in the server
+  environment (or `wrangler secret put` on Workers — see
+  `docs/CLOUDFLARE_WORKERS.md`), **never committed, never written into `.env`
+  that gets committed or into a log line**, and it is the one value that must
+  not travel with a backup: the DB stores ciphertext, so a backup without the
+  key is inert. Keeping them apart is what makes the ciphertext worth storing —
+  see `docs/BACKUPS.md`. The two master-key env names are on the MCP secret-ref
+  denylist, so a client credential can never forward the envelope key itself.
+  That denylist covers `env:` references only — never point a `file:` ref at the
+  master-key file, because a `file:` ref is a deliberate file egress and would
+  hand those bytes to the client's remote endpoint.
 
 ## Upgrading across the agent-runtime removal (2026-09-26)
 

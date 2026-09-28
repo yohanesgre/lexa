@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,31 +13,49 @@ import { RuntimeEnvLive } from "../runtime-env";
 import { LiveMcpConnector } from "../assistant/mcp";
 import {
   AssistantMcpService,
+  denylistedSecretRefReason,
   envSecretRefReason,
   McpConnector,
   PROCESS_FIELDS_REJECTED,
+  SECRET_BOTH_SOURCES_REJECTED,
+  SECRET_CLEAR_CONFLICT_REJECTED,
+  SECRET_REQUIRES_MASTER_KEY,
   slugifyMcpId,
   validateTransportConfig,
   type McpConnectorShape,
   type McpTransportConfig,
 } from "./assistant-mcp.service";
+import {
+  MCP_MASTER_KEY_INVALID,
+  MCP_SECRET_DECRYPT_FAILED,
+  MCP_SECRET_KEY_ID_ACTIVE,
+  MCP_SECRET_REF_DENYLIST,
+} from "../assistant/mcp-secret";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 const STDIO_REASON = "transportType 'stdio' is not supported — MCP clients connect to remote http/sse servers";
 const SECRET_NOT_SINGLE_LINE = "resolved MCP secret cannot be sent in an HTTP header; use a single-line token";
+// The connect-time denylist refusal is a private const in server/assistant/mcp.ts
+// (same convention as SECRET_NOT_SINGLE_LINE above): pinned here so a drift in
+// the copy is a failing test, not a silently different message in a 502 body.
+const SECRET_REF_DENIED_REASON = "MCP secret reference names a master key and is refused as a client credential";
 
 // The live connector is the only caller of `createMCPClient` on this path, so
 // stubbing it observes exactly what a real connect would receive — no dial, no
 // spawn — and proves the refused secret never reached the SDK.
-const sdkMock = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown>> }));
+// `ok` is flipped only by the rotation test, where a DECRYPTED token must reach
+// the SDK. Every refusal path leaves it false, so "the secret reached the SDK"
+// stays a visible failure rather than a silent pass.
+const sdkMock = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown>>, ok: false }));
 vi.mock("@tanstack/ai-mcp", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/ai-mcp")>();
   return {
     ...actual,
     createMCPClient: (async (options: Record<string, unknown>) => {
       sdkMock.calls.push(options);
-      throw new Error("unreachable: a refused secret must not reach the SDK");
+      if (!sdkMock.ok) throw new Error("unreachable: a refused secret must not reach the SDK");
+      return { tools: async () => [], close: async () => {} };
     }) as unknown as typeof actual.createMCPClient,
   };
 });
@@ -66,6 +84,7 @@ vi.mock("../env", async (importOriginal) => {
 });
 
 let dir: string;
+let dbPath: string;
 let db: Database;
 let service: AssistantMcpService;
 
@@ -81,6 +100,8 @@ afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
   ssrfMock.block = false;
   runtimeMock.workers = false;
+  sdkMock.calls = [];
+  sdkMock.ok = false;
 });
 
 function setup(connector: McpConnectorShape = okConnector) {
@@ -96,8 +117,69 @@ function setup(connector: McpConnectorShape = okConnector) {
   service = Context.get(ctx, AssistantMcpService);
 }
 
+// The live connector, so a connect goes through the REAL crypto path
+// (remoteTransportFor -> decrypt) instead of a stub. dbPath is recorded so a
+// test can grep the raw database file for a plaintext marker.
+function setupLive() {
+  dir = mkdtempSync(join(tmpdir(), "lexa-assistant-mcp-live-svc-"));
+  dbPath = join(dir, "test.db");
+  runMigrations(dbPath, MIGRATIONS);
+  db = new Database(dbPath);
+  db.exec("PRAGMA foreign_keys = ON");
+  const layer = AssistantMcpService.Default.pipe(
+    Layer.provide(Layer.mergeAll(DbBunLive(db), LiveMcpConnector))
+  );
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
+  service = Context.get(ctx, AssistantMcpService);
+}
+
+// The raw database file, not a SELECT: a plaintext leak would live in a page
+// image, so reading through SQLite could not see it. WAL and SHM are included
+// because an uncheckpointed write lives there, not in the main file.
+function rawDatabaseBytes(): string {
+  const parts = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].filter(existsSync);
+  return Buffer.concat(parts.map((file) => readFileSync(file))).toString("latin1");
+}
+
 const run = <A, E>(eff: Effect.Effect<A, E>) => Effect.runPromise(eff);
 const runEither = <A, E>(eff: Effect.Effect<A, E>) => Effect.runPromise(Effect.either(eff));
+
+// The master key lives in the RuntimeEnv snapshot, so a managed save is driven
+// by the per-request env exactly as the HTTP handler supplies it. Three
+// distinct 32-byte keys stand for "before rotation", "after rotation", and the
+// PREV slot.
+function keyOf(seed: string): string {
+  let text = "";
+  while (Buffer.byteLength(text) < 32) text += seed;
+  return Buffer.from(text.slice(0, 32)).toString("base64");
+}
+const KEY_A = keyOf("a");
+const KEY_B = keyOf("b");
+const PREV_KEY = keyOf("p");
+const MARKER = "planted-managed-token-9f3a7c-do-not-leak";
+const CONTROL = "planted-plaintext-control-4b1e8d-must-appear";
+
+const envWith = (over: Partial<RuntimeEnv> = {}): RuntimeEnv => ({ ...over } as unknown as RuntimeEnv);
+
+const withKey = <A, E>(env: RuntimeEnv, eff: Effect.Effect<A, E>) =>
+  Effect.runPromise(eff.pipe(Effect.provide(RuntimeEnvLive(env))));
+
+const withKeyEither = <A, E>(env: RuntimeEnv, eff: Effect.Effect<A, E>) =>
+  Effect.runPromise(Effect.either(eff.pipe(Effect.provide(RuntimeEnvLive(env)))));
+
+// `null`, not `undefined`, when the row is absent: the test-only bun:sqlite
+// shim normalizes a miss to null exactly like bun:sqlite does, and a helper
+// that lied about it would turn "no secret row" into a passing falsy check.
+const secretRow = (id: string) =>
+  db.prepare("SELECT server_id, ciphertext, iv, key_id FROM assistant_mcp_secrets WHERE server_id = ?").get(id) as
+    | { server_id: string; ciphertext: string; iv: string; key_id: string }
+    | null;
+
+const secretCount = () =>
+  (db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets").get() as { n: number }).n;
+
+const refOf = (id: string) =>
+  (db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = ?").get(id) as { secret_ref: string | null }).secret_ref;
 
 const http = (over: Partial<McpTransportConfig> = {}): McpTransportConfig => ({
   transportType: "http",
@@ -207,6 +289,16 @@ describe("validateTransportConfig", () => {
 
   it("accepts every fixed RuntimeEnv key and still requires the transport shape", () => {
     for (const key of RUNTIME_ENV_STRING_KEYS) {
+      // The two master keys are RuntimeEnv slots but are never a client
+      // credential — the denylist is the one deliberate exclusion, so the
+      // allowlist loop states it instead of skipping it silently.
+      if ((MCP_SECRET_REF_DENYLIST as readonly string[]).includes(key)) {
+        expect(validateTransportConfig(http({ secretRef: `env:${key}` })), key).toEqual({
+          ok: false,
+          reason: denylistedSecretRefReason(key),
+        });
+        continue;
+      }
       expect(validateTransportConfig(http({ secretRef: `env:${key}` })), key).toEqual({
         ok: true,
         transportType: "http",
@@ -293,8 +385,14 @@ describe("AssistantMcpService", () => {
     expect(refused).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: envSecretRefReason("LINEAR_TOKEN") } });
     expect((await run(service.list()))[0]).toMatchObject({ id: "remote", hasSecret: true });
 
-    const cleared = await run(service.update("remote", { secretRef: null }));
+    // Removal is the explicit `clearSecret` affordance now. `secretRef: null`
+    // is an EMPTY field, which means "keep" — a UI that always posts its form
+    // must not be able to wipe a credential by saving a blank input.
+    const keptOnBlank = await run(service.update("remote", { secretRef: null }));
+    expect(keptOnBlank.hasSecret).toBe(true);
+    const cleared = await run(service.update("remote", { clearSecret: true }));
     expect(cleared.hasSecret).toBe(false);
+    expect(cleared.secretSource).toBe("none");
 
     const accepted = await run(service.update("remote", { secretRef: "env:LXK_S3_SECRET_ACCESS_KEY" }));
     expect(accepted.hasSecret).toBe(true);
@@ -544,6 +642,487 @@ describe("AssistantMcpService", () => {
         error: { code: "MCP_INVALID_TRANSPORT_CONFIG", message: STDIO_REASON },
       });
     }
+  });
+});
+
+// Managed secrets (envelope encryption). Each test drives the REAL service and,
+// where a connect is involved, the REAL LiveMcpConnector — the crypto path
+// (remoteTransportFor -> decryptMcpSecret) is the thing under test, so a stub
+// would prove nothing. `sdkMock` is the only seam: it records exactly what the
+// SDK was handed, and `ok` stays false on every refusal path, so a secret that
+// reached the SDK is a visible failure rather than a silent pass.
+describe("managed MCP client secrets", () => {
+  const managedEnv = (over: Partial<RuntimeEnv> = {}): RuntimeEnv =>
+    envWith({ LXK_MCP_MASTER_KEY: KEY_A, ...over });
+  // The rotation env: a NEW active key with the one that wrote the rows demoted
+  // to PREV. Exactly what an operator sets to rotate without an outage. `null`
+  // prev is the "PREV retired" state — a rotation completed, PREV emptied.
+  const rotatedEnv = (prev: string | null = KEY_A, active: string = KEY_B): RuntimeEnv =>
+    envWith({ LXK_MCP_MASTER_KEY: active, ...(prev === null ? {} : { LXK_MCP_MASTER_KEY_PREV: prev }) });
+  const noKeyEnv = (): RuntimeEnv => envWith({});
+
+  const createInput = (over: Partial<Parameters<typeof service.create>[0]> = {}) => ({
+    label: "Managed",
+    transportType: "http" as const,
+    url: "https://mcp.test/managed",
+    ...over,
+  });
+
+  it("1. stores exactly one source on create and update — the other is removed, both is refused", async () => {
+    setup();
+
+    // Managed only: ciphertext row written, registry ref stays null, the public
+    // shape says `managed` and never carries the value.
+    const managed = await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
+    expect(managed).toMatchObject({ id: "managed", hasSecret: true, secretSource: "managed" });
+    expect(refOf("managed")).toBeNull();
+    const stored = secretRow("managed");
+    expect(stored).toBeDefined();
+    expect(stored!.key_id).toBe(MCP_SECRET_KEY_ID_ACTIVE);
+    expect(stored!.ciphertext).not.toContain(MARKER);
+    expect(stored!.iv).not.toContain(MARKER);
+
+    // Reference only: no ciphertext row at all.
+    const referenced = await withKey(managedEnv(), service.create(createInput({
+      label: "Referenced",
+      secretRef: "env:CRON_SECRET",
+    })));
+    expect(referenced).toMatchObject({ id: "referenced", hasSecret: true, secretSource: "reference" });
+    expect(secretRow("referenced")).toBeNull();
+    expect(refOf("referenced")).toBe("env:CRON_SECRET");
+
+    // Neither: a secret-less client stays legal.
+    const bare = await withKey(managedEnv(), service.create(createInput({ label: "Bare" })));
+    expect(bare).toMatchObject({ id: "bare", hasSecret: false, secretSource: "none" });
+    expect(secretRow("bare")).toBeNull();
+    expect(refOf("bare")).toBeNull();
+
+    // Both on create: refused, and nothing at all is written for that label.
+    const both = await withKeyEither(managedEnv(), service.create(createInput({
+      label: "Both",
+      secret: MARKER,
+      secretRef: "env:CRON_SECRET",
+    })));
+    expect(both).toMatchObject({
+      _tag: "Left",
+      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_BOTH_SOURCES_REJECTED },
+    });
+    expect((await run(service.list())).map((s) => s.id)).toEqual(["bare", "managed", "referenced"]);
+    expect(secretRow("both")).toBeNull();
+    expect(secretCount()).toBe(1);
+
+    // Choosing a reference on update DELETES the ciphertext row.
+    const toRef = await withKey(managedEnv(), service.update("managed", { secretRef: "env:CRON_SECRET" }));
+    expect(toRef).toMatchObject({ hasSecret: true, secretSource: "reference" });
+    expect(secretRow("managed")).toBeNull();
+    expect(refOf("managed")).toBe("env:CRON_SECRET");
+
+    // Choosing a managed token on update NULLS the stored ref.
+    const toManaged = await withKey(managedEnv(), service.update("referenced", { secret: MARKER }));
+    expect(toManaged).toMatchObject({ hasSecret: true, secretSource: "managed" });
+    expect(refOf("referenced")).toBeNull();
+    expect(secretRow("referenced")).toBeDefined();
+
+    // Both on update: refused, and the stored source survives untouched.
+    const before = secretRow("referenced")!;
+    const bothUpdate = await withKeyEither(managedEnv(), service.update("referenced", {
+      secret: MARKER,
+      secretRef: "env:CRON_SECRET",
+    }));
+    expect(bothUpdate).toMatchObject({
+      _tag: "Left",
+      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_BOTH_SOURCES_REJECTED },
+    });
+    expect(secretRow("referenced")).toEqual(before);
+
+    // clearSecret + a value is refused rather than silently resolved, so a UI
+    // bug can never erase one source and store the other in one request.
+    const clearConflict = await withKeyEither(managedEnv(), service.update("referenced", {
+      clearSecret: true,
+      secret: MARKER,
+    }));
+    expect(clearConflict).toMatchObject({
+      _tag: "Left",
+      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_CLEAR_CONFLICT_REJECTED },
+    });
+    expect(secretRow("referenced")).toEqual(before);
+  });
+
+  it("2. refuses a managed write with no master key, and a malformed key, without half-applying anything", async () => {
+    setup();
+
+    // The documented disable switch: no key, no managed secret, and the registry
+    // row is not created either — a disabled deployment accumulates no orphans.
+    const noKey = await withKeyEither(noKeyEnv(), service.create(createInput({ secret: MARKER })));
+    expect(noKey).toMatchObject({
+      _tag: "Left",
+      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_REQUIRES_MASTER_KEY },
+    });
+    expect(await run(service.list())).toEqual([]);
+    expect(secretCount()).toBe(0);
+
+    // A configured-but-wrong key is told, not silently treated as disabled.
+    const malformed = await withKeyEither(
+      envWith({ LXK_MCP_MASTER_KEY: "too-short" }),
+      service.create(createInput({ secret: MARKER }))
+    );
+    expect(malformed).toMatchObject({
+      _tag: "Left",
+      left: { _tag: "McpInvalidTransportConfig", reason: MCP_MASTER_KEY_INVALID },
+    });
+    expect(await run(service.list())).toEqual([]);
+    expect(secretCount()).toBe(0);
+
+    // `env:`/`file:` references are untouched by the switch: they keep saving
+    // and keep reporting `reference` with no key configured at all.
+    const ref = await withKey(noKeyEnv(), service.create(createInput({
+      label: "Ref Only",
+      secretRef: "env:CRON_SECRET",
+    })));
+    expect(ref).toMatchObject({ id: "ref-only", hasSecret: true, secretSource: "reference" });
+    expect(secretCount()).toBe(0);
+
+    // An update that would store a token is refused the same way, and the
+    // stored row keeps whatever it had.
+    const refusedUpdate = await withKeyEither(noKeyEnv(), service.update("ref-only", { secret: MARKER }));
+    expect(refusedUpdate).toMatchObject({
+      _tag: "Left",
+      left: { _tag: "McpInvalidTransportConfig", reason: SECRET_REQUIRES_MASTER_KEY },
+    });
+    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
+    expect(secretCount()).toBe(0);
+  });
+
+  it("3. refuses a denylisted ref at save and again at connect, including a legacy stored one", async () => {
+    setupLive();
+    // A legal stored ref, so each refused update below has something to protect.
+    await withKey(managedEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
+    for (const name of MCP_SECRET_REF_DENYLIST) {
+      const refused = await withKeyEither(managedEnv(), service.create(createInput({
+        label: `Denied ${name}`,
+        secretRef: `env:${name}`,
+      })));
+      expect(refused, name).toMatchObject({
+        _tag: "Left",
+        left: { _tag: "McpInvalidTransportConfig", reason: denylistedSecretRefReason(name) },
+      });
+      const refusedUpdate = await withKeyEither(managedEnv(), service.update("ref-only", { secretRef: `env:${name}` }));
+      expect(refusedUpdate, name).toMatchObject({
+        _tag: "Left",
+        left: { _tag: "McpInvalidTransportConfig", reason: denylistedSecretRefReason(name) },
+      });
+    }
+    // Nothing was created or overwritten by the refused writes.
+    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
+    expect(await run(service.list())).toHaveLength(1);
+    expect(secretCount()).toBe(0);
+
+    // A row written before the denylist existed: the stored ref names the master
+    // key, and the env really carries it, so without the connect-time guard the
+    // envelope key itself would be forwarded as a Bearer token.
+    db.exec(
+      `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
+       VALUES ('legacy-key-ref', 'Legacy Key Ref', 'http', 'https://mcp.test/legacy', NULL, '[]', 'env:LXK_MCP_MASTER_KEY', 0)`
+    );
+    const report = await withKey(managedEnv({ LXK_MCP_MASTER_KEY: KEY_A }), service.testConnection("legacy-key-ref"));
+    expect(report).toMatchObject({
+      ok: false,
+      toolCount: 0,
+      error: { code: "MCP_CONNECT_FAILED", message: SECRET_REF_DENIED_REASON },
+    });
+    // The key never reached the SDK, and never reached the report body either.
+    expect(sdkMock.calls).toEqual([]);
+    expect(JSON.stringify(report)).not.toContain(KEY_A);
+  });
+
+  it("4. an undecryptable blob is a hard error that leaks neither secret nor ciphertext", async () => {
+    setupLive();
+    // The URL plants a KNOWN plaintext string in the database so the byte scan
+    // below is a positive control: it can see plaintext that really is stored,
+    // so "not present" for the token means absent, not invisible. The label
+    // stays "Managed" so the slug id matches the other assertions.
+    await withKey(managedEnv(), service.create(createInput({ url: `https://mcp.test/${CONTROL}`, secret: MARKER })));
+    const stored = secretRow("managed")!;
+    expect(stored.ciphertext).not.toBe("");
+
+    // Wrong key: neither slot opens it, so the connect fails hard instead of
+    // silently authenticating as anonymous.
+    const wrongKey = await withKey(
+      rotatedEnv(PREV_KEY, KEY_B),
+      service.testConnection("managed")
+    );
+    expect(wrongKey).toMatchObject({
+      ok: false,
+      toolCount: 0,
+      readOnlyToolCount: 0,
+      error: { code: "MCP_CONNECT_FAILED", message: MCP_SECRET_DECRYPT_FAILED },
+    });
+    const wrongBody = JSON.stringify(wrongKey);
+    expect(wrongBody).not.toContain(MARKER);
+    expect(wrongBody).not.toContain(stored.ciphertext);
+    expect(sdkMock.calls).toEqual([]);
+
+    // Tampered row: flip one stored ciphertext byte and the same fixed failure
+    // comes back — the tampered value is not echoed either.
+    const bytes = Buffer.from(stored.ciphertext, "base64");
+    bytes[0] = (bytes[0]! ^ 0xff) & 0xff;
+    const tampered = bytes.toString("base64");
+    db.prepare("UPDATE assistant_mcp_secrets SET ciphertext = ? WHERE server_id = ?").run(tampered, "managed");
+    const logged: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      logged.push(String(chunk));
+      return true;
+    });
+    let tamperedReport: unknown;
+    try {
+      tamperedReport = await withKey(managedEnv(), service.testConnection("managed"));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(tamperedReport).toMatchObject({
+      ok: false,
+      error: { code: "MCP_CONNECT_FAILED", message: MCP_SECRET_DECRYPT_FAILED },
+    });
+    const tamperedBody = JSON.stringify(tamperedReport);
+    expect(tamperedBody).not.toContain(MARKER);
+    expect(tamperedBody).not.toContain(tampered);
+    const stderr = logged.join("\n");
+    expect(stderr).not.toContain(MARKER);
+    expect(stderr).not.toContain(tampered);
+    expect(stderr).not.toContain(MCP_SECRET_DECRYPT_FAILED.split(" ")[0]!);
+    expect(sdkMock.calls).toEqual([]);
+
+    // The raw database file, not a SELECT: a plaintext leak would live in a
+    // page image or an uncheckpointed WAL frame, which no query could see.
+    // CONTROL (the planted URL) and the tampered blob are both expected to be
+    // readable as raw bytes — that is the positive control proving this scan can
+    // see what is really stored; the token must be nowhere in it.
+    const raw = rawDatabaseBytes();
+    expect(raw).toContain(CONTROL);
+    expect(raw).toContain(tampered);
+    expect(raw).not.toContain(MARKER);
+  });
+
+  it("5. a row written under the active key survives that key moving to PREV, and dies when it is dropped", async () => {
+    setupLive();
+    // Written while KEY_A is active; the row records the slot, not the key.
+    await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
+    const stored = secretRow("managed")!;
+    expect(stored.key_id).toBe(MCP_SECRET_KEY_ID_ACTIVE);
+
+    // Rotation: KEY_B becomes active, KEY_A is demoted to PREV. The row still
+    // says `active`, so only a fallback can open it — and the decrypted token
+    // must actually reach the SDK as the Bearer credential.
+    sdkMock.ok = true;
+    const rotated = await withKey(rotatedEnv(), service.testConnection("managed"));
+    expect(rotated).toMatchObject({ ok: true, toolCount: 0, error: null });
+    expect(sdkMock.calls).toHaveLength(1);
+    expect((sdkMock.calls[0]!.transport as { headers: Record<string, string> }).headers).toEqual({
+      Authorization: `Bearer ${MARKER}`,
+    });
+    // The rotation is a read-path event only: no rewrap, no re-encryption.
+    expect(secretRow("managed")).toEqual(stored);
+
+    // Retiring PREV (the documented unfinished-rotation state) is the one thing
+    // that does kill the row: a hard error, never a silent anonymous connect.
+    sdkMock.calls = [];
+    const retired = await withKey(rotatedEnv(null, KEY_B), service.testConnection("managed"));
+    expect(retired).toMatchObject({
+      ok: false,
+      toolCount: 0,
+      error: { code: "MCP_CONNECT_FAILED", message: MCP_SECRET_DECRYPT_FAILED },
+    });
+    expect(JSON.stringify(retired)).not.toContain(MARKER);
+    expect(sdkMock.calls).toEqual([]);
+  });
+
+  it("6. clearSecret revokes a stored token with no master key configured", async () => {
+    setup();
+    await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
+    expect(secretCount()).toBe(1);
+
+    // A pure row delete: revocation must not depend on a key being present, or
+    // a rotated-away key would leave a credential no one can remove.
+    const cleared = await withKey(noKeyEnv(), service.update("managed", { clearSecret: true }));
+    expect(cleared).toMatchObject({ id: "managed", hasSecret: false, secretSource: "none" });
+    expect(secretCount()).toBe(0);
+    expect(refOf("managed")).toBeNull();
+
+    // Same for a stored reference, and for a client that never had a secret.
+    await withKey(noKeyEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
+    const refCleared = await withKey(noKeyEnv(), service.update("ref-only", { clearSecret: true }));
+    expect(refCleared).toMatchObject({ hasSecret: false, secretSource: "none" });
+    expect(refOf("ref-only")).toBeNull();
+    const bareCleared = await withKey(noKeyEnv(), service.update("managed", { clearSecret: true, label: "Managed" }));
+    expect(bareCleared).toMatchObject({ label: "Managed", hasSecret: false, secretSource: "none" });
+
+    // remove() takes the child row with it (FK-OFF runner included).
+    await withKey(managedEnv(), service.create(createInput({ label: "Doomed", secret: MARKER })));
+    expect(secretCount()).toBe(1);
+    await withKey(managedEnv(), service.remove("doomed"));
+    expect(secretCount()).toBe(0);
+  });
+
+  it("7. never returns the token, the ciphertext, or the key in a public shape", async () => {
+    setup();
+    const created = await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
+    const stored = secretRow("managed")!;
+    const publicKeys = [
+      "args",
+      "command",
+      "createdAt",
+      "enabled",
+      "hasSecret",
+      "id",
+      "label",
+      "secretSource",
+      "transportType",
+      "updatedAt",
+      "url",
+    ];
+    // The service return value IS the HTTP response body (http.ts responds with
+    // it verbatim), so pinning the key set pins the API contract.
+    expect(Object.keys(created).sort()).toEqual(publicKeys);
+    for (const shape of [created, (await run(service.list()))[0]!, (await run(service.update("managed", { label: "Managed" })))]) {
+      const body = JSON.stringify(shape);
+      expect(body).not.toContain(MARKER);
+      expect(body).not.toContain(stored.ciphertext);
+      expect(body).not.toContain(stored.iv);
+      expect(body).not.toContain(KEY_A);
+      expect(body).not.toContain("secretRef");
+      expect(body).not.toContain("secret_ref");
+    }
+    // The report body is the other surface a secret could reach.
+    const report = await withKey(managedEnv(), service.testConnection("managed"));
+    expect(JSON.stringify(report)).not.toContain(MARKER);
+    expect(JSON.stringify(report)).not.toContain(stored.ciphertext);
+  });
+
+  it("8. an unrelated patch passes the stored ref and ciphertext through untouched, with or without a key", async () => {
+    setup();
+    await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
+    await withKey(managedEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
+    const managedBefore = secretRow("managed")!;
+
+    // Renaming a managed client must not re-encrypt (a fresh IV per write would
+    // change the blob), must not need a key, and must not drop the row.
+    const renamed = await withKey(noKeyEnv(), service.update("managed", { label: "Managed Renamed" }));
+    expect(renamed).toMatchObject({ label: "Managed Renamed", hasSecret: true, secretSource: "managed" });
+    expect(secretRow("managed")).toEqual(managedBefore);
+
+    // Same under a DIFFERENT key: a patch has no business touching the blob.
+    const underOther = await withKey(rotatedEnv(), service.update("managed", { enabled: true }));
+    expect(underOther).toMatchObject({ enabled: true, hasSecret: true, secretSource: "managed" });
+    expect(secretRow("managed")).toEqual(managedBefore);
+
+    // An empty secret field means "keep" — a UI that always posts its form can
+    // never blank a stored credential by saving a blank input.
+    const blank = await withKey(managedEnv(), service.update("managed", { secret: "", secretRef: null }));
+    expect(blank).toMatchObject({ hasSecret: true, secretSource: "managed" });
+    expect(secretRow("managed")).toEqual(managedBefore);
+
+    // The legacy-freeze lesson for a stored reference: an unrelated patch keeps
+    // it, with no key configured and no secret fields supplied.
+    const refKept = await withKey(noKeyEnv(), service.update("ref-only", { label: "Ref Renamed" }));
+    expect(refKept).toMatchObject({ label: "Ref Renamed", hasSecret: true, secretSource: "reference" });
+    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
+  });
+
+  // The write ORDER is the safety property: the ciphertext is stored BEFORE the
+  // registry write that clears `secret_ref`. A fault in between must leave the
+  // client with the credential it already had, never with none — an
+  // unauthenticated connect is indistinguishable from a working one.
+  it("9. a fault between the ciphertext upsert and the ref clear keeps the stored ref", async () => {
+    setup();
+    // Both clients with a live credential to protect are created BEFORE the
+    // fault is armed: the trigger refuses every ciphertext INSERT, so a managed
+    // client created under it would fail for a reason this test is not about.
+    await withKey(managedEnv(), service.create(createInput({ label: "Ref Only", secretRef: "env:CRON_SECRET" })));
+    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
+    expect(secretRow("ref-only")).toBeNull();
+    await withKey(managedEnv(), service.create(createInput({ label: "Managed", secret: MARKER })));
+
+    // Fault injection at the storage boundary: a trigger that makes the
+    // ciphertext upsert fail exactly as a disk/constraint fault would. RAISE
+    // (not ABORT) keeps the surrounding statement recoverable.
+    db.exec(`CREATE TRIGGER fail_secret_upsert BEFORE INSERT ON assistant_mcp_secrets
+             BEGIN SELECT RAISE(FAIL, 'injected upsert fault'); END;`);
+
+    const faulted = await withKeyEither(managedEnv(), service.update("ref-only", { secret: MARKER }));
+    expect(faulted).toMatchObject({ _tag: "Left", left: { _tag: "DbError" } });
+    // The registry write that nulls the ref never ran: the client still
+    // authenticates with its old reference instead of connecting anonymously.
+    expect(refOf("ref-only")).toBe("env:CRON_SECRET");
+    expect(secretRow("ref-only")).toBeNull();
+    expect(await run(service.list())).toMatchObject([
+      { id: "managed", hasSecret: true, secretSource: "managed" },
+      { id: "ref-only", hasSecret: true, secretSource: "reference" },
+    ]);
+
+    // The same fault on a managed re-save leaves the PREVIOUS ciphertext in
+    // place (the upsert is atomic), so a client is never left credential-less.
+    const before = secretRow("managed")!;
+    const refaulted = await withKeyEither(managedEnv(), service.update("managed", { secret: `${MARKER}-2` }));
+    expect(refaulted).toMatchObject({ _tag: "Left", left: { _tag: "DbError" } });
+    expect(secretRow("managed")).toEqual(before);
+
+    // With the fault removed, the success path stores exactly ONE source: the
+    // new ciphertext, and no stale reference beside it.
+    db.exec("DROP TRIGGER fail_secret_upsert");
+    const retried = await withKey(managedEnv(), service.update("ref-only", { secret: MARKER }));
+    expect(retried).toMatchObject({ id: "ref-only", hasSecret: true, secretSource: "managed" });
+    expect(refOf("ref-only")).toBeNull();
+    expect(secretRow("ref-only")).toBeDefined();
+    expect(secretCount()).toBe(2);
+
+    // A managed CREATE has no prior credential to protect, but the same
+    // ordering means an encryption fault leaves NO registration at all: the
+    // token is sealed before the registry row is written.
+    const sealFault = vi.spyOn(crypto.subtle, "encrypt").mockRejectedValueOnce(new Error("injected encrypt fault"));
+    try {
+      const cryptoFault = await withKeyEither(managedEnv(), service.create(createInput({ label: "Never", secret: MARKER })));
+      expect(cryptoFault).toMatchObject({
+        _tag: "Left",
+        left: { _tag: "McpInvalidTransportConfig", reason: "managed MCP secret could not be encrypted" },
+      });
+    } finally {
+      sealFault.mockRestore();
+    }
+    expect(await run(service.list())).toMatchObject([{ id: "managed" }, { id: "ref-only" }]);
+    // No registration and no ciphertext row for the failed label: the whole row
+    // is absent, not a row with an empty credential.
+    expect(db.prepare("SELECT id FROM assistant_mcp_servers WHERE id = ?").get("never")).toBeNull();
+    expect(secretRow("never")).toBeNull();
+  });
+
+  // The 400 body is built from `reason` verbatim, so a third-party WebCrypto or
+  // driver message must never reach it: such text can quote the key material
+  // the import choked on. Every import failure reduces to the fixed shape
+  // message, and no other text (canary included) survives.
+  it("10. a failing key import reports the fixed shape message, never the third-party error", async () => {
+    setup();
+    const canary = "CANARY-THIRD-PARTY-KEY-MATERIAL";
+    const importKey = crypto.subtle.importKey.bind(crypto.subtle);
+    const spy = vi.spyOn(crypto.subtle, "importKey").mockRejectedValueOnce(new Error(`${canary}: unsupported key length`));
+    try {
+      const refused = await withKeyEither(managedEnv(), service.create(createInput({ secret: MARKER })));
+      expect(refused).toMatchObject({
+        _tag: "Left",
+        left: { _tag: "McpInvalidTransportConfig", reason: MCP_MASTER_KEY_INVALID },
+      });
+      const body = JSON.stringify(refused);
+      expect(body).not.toContain(canary);
+      expect(body).not.toContain("unsupported key length");
+      expect(body).not.toContain(MARKER);
+    } finally {
+      spy.mockRestore();
+    }
+    // Nothing was written, and the key still imports normally afterwards.
+    expect(await run(service.list())).toEqual([]);
+    expect(secretCount()).toBe(0);
+    const ok = await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
+    expect(ok).toMatchObject({ id: "managed", hasSecret: true, secretSource: "managed" });
+    expect(importKey).toBeTypeOf("function");
   });
 });
 
