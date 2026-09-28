@@ -12,48 +12,74 @@
 import { readFileSync } from "node:fs";
 import type { D1Database, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 
-export interface RuntimeEnv {
+// Every string slot of RuntimeEnv, in one place. `RuntimeEnv` is DERIVED from
+// this list, so adding a slot here is the only way to add one — and the MCP
+// `env:NAME` save-time allowlist is this very list, so it can never drift from
+// the shape the two builders copy.
+export const RUNTIME_ENV_STRING_KEYS = [
   // Storage / runtime
-  DATABASE_PATH?: string | undefined;
-  PORT?: string | undefined;
-  LXK_ENV?: string | undefined;
-  LXK_PUBLIC_URL?: string | undefined;
-  LXK_TRUSTED_ORIGINS?: string | undefined;
-  LXK_TRUSTED_PROXY_CIDRS?: string | undefined;
-  LXK_ADMIN_EMAILS?: string | undefined;
+  "DATABASE_PATH",
+  "PORT",
+  "LXK_ENV",
+  "LXK_PUBLIC_URL",
+  "LXK_TRUSTED_ORIGINS",
+  "LXK_TRUSTED_PROXY_CIDRS",
+  "LXK_ADMIN_EMAILS",
   // GitHub
-  GITHUB_APP_ID?: string | undefined;
-  GITHUB_PRIVATE_KEY?: string | undefined;
-  GITHUB_PRIVATE_KEY_FILE?: string | undefined;
-  GITHUB_WEBHOOK_SECRET?: string | undefined;
+  "GITHUB_APP_ID",
+  "GITHUB_PRIVATE_KEY",
+  "GITHUB_PRIVATE_KEY_FILE",
+  "GITHUB_WEBHOOK_SECRET",
   // Storage drivers
-  LXK_STORAGE_DRIVER?: string | undefined;
-  LXK_STORAGE_FS_ROOT?: string | undefined;
-  LXK_S3_BUCKET?: string | undefined;
-  LXK_S3_ACCESS_KEY_ID?: string | undefined;
-  LXK_S3_SECRET_ACCESS_KEY?: string | undefined;
-  LXK_S3_ENDPOINT?: string | undefined;
-  LXK_S3_REGION?: string | undefined;
+  "LXK_STORAGE_DRIVER",
+  "LXK_STORAGE_FS_ROOT",
+  "LXK_S3_BUCKET",
+  "LXK_S3_ACCESS_KEY_ID",
+  "LXK_S3_SECRET_ACCESS_KEY",
+  "LXK_S3_ENDPOINT",
+  "LXK_S3_REGION",
   // Body / limits
-  LXK_MAX_BODY_MB?: string | undefined;
-  LXK_MAX_UPLOAD_MB?: string | undefined;
-  LXK_RATE_LIMIT_MAX?: string | undefined;
-  LXK_RATE_LIMIT_WINDOW_MS?: string | undefined;
+  "LXK_MAX_BODY_MB",
+  "LXK_MAX_UPLOAD_MB",
+  "LXK_RATE_LIMIT_MAX",
+  "LXK_RATE_LIMIT_WINDOW_MS",
   // Assistant
-  LXK_ASSISTANT_REPO_CAP?: string | undefined;
+  "LXK_ASSISTANT_REPO_CAP",
+  // Jev (Typesafe System 1 advisory layer)
+  "TYPESAFE_API_KEY",
+  "TYPESAFE_BASE_URL",
+  "TYPESAFE_DEFAULT_MODEL",
   // Logging
-  LOG_LEVEL?: string | undefined;
-  TANSTACK_AI_DEBUG?: string | undefined;
-  TANSTACK_AI_JSON?: string | undefined;
+  "LOG_LEVEL",
+  "TANSTACK_AI_DEBUG",
+  "TANSTACK_AI_JSON",
   // Backups / seed
-  LXK_BACKUP_ENABLED?: string | undefined;
-  LXK_BACKUP_RETENTION?: string | undefined;
-  LXK_SEED_DEV?: string | undefined;
-  // Workers bindings (only present on the Workers path)
+  "LXK_BACKUP_ENABLED",
+  "LXK_BACKUP_RETENTION",
+  "LXK_SEED_DEV",
+  // Workers secret binding
+  "CRON_SECRET",
+] as const;
+
+export type RuntimeEnvStringKey = (typeof RUNTIME_ENV_STRING_KEYS)[number];
+
+export interface RuntimeEnv extends Partial<Record<RuntimeEnvStringKey, string | undefined>> {
+  // Workers bindings (only present on the Workers path) — objects, never
+  // strings, so they are deliberately absent from RUNTIME_ENV_STRING_KEYS.
   DB?: D1Database | undefined;
   BLOB?: R2Bucket | undefined;
   KV?: KVNamespace | undefined;
-  CRON_SECRET?: string | undefined;
+}
+
+const RUNTIME_ENV_STRING_KEY_SET: ReadonlySet<string> = new Set(RUNTIME_ENV_STRING_KEYS);
+
+// True when `name` is a string slot of the RuntimeEnv snapshot — i.e. copied by
+// at least one of getEnv()/getEnvFromWorkers(). The MCP `env:NAME` save-time
+// allowlist is exactly this: an arbitrary process var or Workers binding is not
+// a runtime key, so it can never resolve and is refused at save time rather than
+// stored as a dead reference.
+export function isRuntimeEnvStringKey(name: string): name is RuntimeEnvStringKey {
+  return RUNTIME_ENV_STRING_KEY_SET.has(name);
 }
 
 export type ProcessEnvSource = Record<string, string | undefined>;
@@ -89,6 +115,9 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_RATE_LIMIT_MAX: source.LXK_RATE_LIMIT_MAX,
     LXK_RATE_LIMIT_WINDOW_MS: source.LXK_RATE_LIMIT_WINDOW_MS,
     LXK_ASSISTANT_REPO_CAP: source.LXK_ASSISTANT_REPO_CAP,
+    TYPESAFE_API_KEY: source.TYPESAFE_API_KEY,
+    TYPESAFE_BASE_URL: source.TYPESAFE_BASE_URL,
+    TYPESAFE_DEFAULT_MODEL: source.TYPESAFE_DEFAULT_MODEL,
     LOG_LEVEL: source.LOG_LEVEL,
     TANSTACK_AI_DEBUG: source.TANSTACK_AI_DEBUG ?? source.LXK_TANSTACK_AI_DEBUG,
     TANSTACK_AI_JSON: source.TANSTACK_AI_JSON ?? source.LXK_TANSTACK_AI_JSON,
@@ -132,6 +161,9 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_RATE_LIMIT_MAX: s("LXK_RATE_LIMIT_MAX"),
     LXK_RATE_LIMIT_WINDOW_MS: s("LXK_RATE_LIMIT_WINDOW_MS"),
     LXK_ASSISTANT_REPO_CAP: s("LXK_ASSISTANT_REPO_CAP"),
+    TYPESAFE_API_KEY: s("TYPESAFE_API_KEY"),
+    TYPESAFE_BASE_URL: s("TYPESAFE_BASE_URL"),
+    TYPESAFE_DEFAULT_MODEL: s("TYPESAFE_DEFAULT_MODEL"),
     LOG_LEVEL: s("LOG_LEVEL"),
     TANSTACK_AI_DEBUG: s("TANSTACK_AI_DEBUG") ?? s("LXK_TANSTACK_AI_DEBUG"),
     TANSTACK_AI_JSON: s("TANSTACK_AI_JSON") ?? s("LXK_TANSTACK_AI_JSON"),
@@ -175,6 +207,10 @@ export function resolveDatabasePath(env: RuntimeEnv): string {
 // (Bun only — Workers has no filesystem; the node:fs shim throws, so the
 // branch is guarded and returns null). Missing/unresolvable refs resolve to
 // null (fail closed); the caller decides whether a credential was required.
+// `env:` never falls back to process.env — an arbitrary host var or Workers
+// binding is not a snapshot slot, so it resolves to null (no header). The save
+// -time allowlist is `isRuntimeEnvStringKey`; this resolver stays permissive so
+// an older stored row still connects (without a header) rather than throwing.
 export function resolveSecretRef(ref: string | null | undefined, env: RuntimeEnv): string | null {
   if (!ref) return null;
   if (ref.startsWith("env:")) {
@@ -185,7 +221,12 @@ export function resolveSecretRef(ref: string | null | undefined, env: RuntimeEnv
   if (ref.startsWith("file:")) {
     if (isWorkers()) return null;
     try {
-      return readFileSync(ref.slice(5), "utf8").trim();
+      const value = readFileSync(ref.slice(5), "utf8").trim();
+      // Same fail-closed rule as the `env:` branch: a zero-byte or
+      // whitespace-only file is no credential, and returning "" would send
+      // `Authorization: "Bearer "` — an empty bearer a server may read as an
+      // anonymous request rather than as "no credential sent".
+      return value === "" ? null : value;
     } catch {
       return null;
     }

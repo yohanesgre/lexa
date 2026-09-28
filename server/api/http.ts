@@ -4349,7 +4349,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnect
     AssistantProvidersRepo.Default, AssistantModelsRepo.Default, AssistantCallLogsRepo.Default, AssistantModelPricesRepo.Default,
     AssistantHealthRepo.Default, AssistantHealthService.Default, AssistantGateway.Default,
     // MCP connector seam: tests may inject a fake, otherwise the live
-    // stdio/HTTP/SSE connector backs the registry test endpoint.
+    // HTTP/SSE connector backs the registry test endpoint.
     AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? LiveMcpConnector)),
   );
 }

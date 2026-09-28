@@ -155,6 +155,9 @@ default columns appear when the first project is created.
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
 | `LXK_TRUSTED_PROXY_CIDRS` | comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when cloudflared or another sidecar connects from this host. Set it when the proxy is a separate container/host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
 | `PORT` | server port (default 3000) |
+| `TYPESAFE_API_KEY` | Typesafe Jev API key for the System 1 advisory layer. **Unset → Jev is disabled**: no Jev request is made and the assistant behaves exactly as before. Hand-set only; never logged, never written into a tool argument, prompt, or response. A set key enables the whole layer (`server/assistant/jev.ts`): one bounded REST preflight per new chat or task-assistant run, plus the read-only `jev_assess` tool for follow-up judgments. Both are advisory and fail open, so a Jev failure leaves the assistant run unchanged. When the key is set, the preflight runs ahead of the provider call and can add up to 3s (`JEV_PREFLIGHT_TIMEOUT_MS`) to first-token latency on a new run. |
+| `TYPESAFE_BASE_URL` | Jev API origin (default `https://api.typesafe.ai`); requests go to `{TYPESAFE_BASE_URL}/v1/systemone`. Only change it for a self-hosted or proxied endpoint. |
+| `TYPESAFE_DEFAULT_MODEL` | Jev model id (default `jev-latest`). |
 
 **Unused by the server:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare
 Access) — the server reads them nowhere. Browsers authenticate via the
@@ -207,6 +210,15 @@ no email transport anywhere.
   (256-bit), rate-limited per IP, revocable per-named-key (Settings → API
   Keys). Failed logins on `/api/auth/*` are throttled in-process (Better Auth
   rate-limit plugin; ~5 attempts/60s per email, 15 min lockout).
+- `TYPESAFE_API_KEY` is a third-party credential held the same way as the
+  GitHub key: set by hand (or `wrangler secret put` on Workers), never
+  committed, never logged. The Jev client logs nothing itself and returns only
+  a typed outcome — a request's state text and the key are absent from every
+  failure message, and the stderr log line carries only `mode`, `outcome`,
+  `code`, `latencyMs`, and returned `usage` — never state text. It is also a
+  slot of the fixed `RuntimeEnv` snapshot, so an MCP client `secret_ref` of
+  `env:TYPESAFE_API_KEY` deliberately forwards it as a Bearer token to that
+  client's URL — superadmin-only, and only sensible for a trusted server.
 
 ## Upgrading across the agent-runtime removal (2026-09-26)
 

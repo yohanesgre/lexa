@@ -106,6 +106,22 @@ const SEED_PRE_RENAME = `
            ('chat', 'th2', 'p1', 'hearth-blacksmith', '[]');
 `;
 
+// Pre-0010 MCP registry state: the stdio 'jev' seed (0009) plus a user-registered
+// stdio client and two remote clients, all with project bindings. 0010 must drop
+// the stdio rows and their bindings while the http/sse rows survive untouched.
+const SEED_PRE_0010 = `
+  INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+  INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, enabled) VALUES
+    ('web-mcp',  'Web MCP',  'http',  'https://mcp.test/mcp', NULL, '[]', 1),
+    ('sse-mcp',  'SSE MCP',  'sse',   'https://mcp.test/sse', NULL, '[]', 1),
+    ('local-mcp', 'Local MCP', 'stdio', NULL, 'local-mcp', '["--stdio"]', 0);
+  INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES
+    ('p1', 'jev',       1),
+    ('p1', 'web-mcp',   0),
+    ('p1', 'sse-mcp',   1),
+    ('p1', 'local-mcp', 1);
+`;
+
 // End state shared by the FK-OFF (Bun) and FK-ON (D1) paths — they must agree.
 // Parameterized on the thread table + agent identity because the 0005-only
 // path stops at `herald`, while the full chain (0005+0006) ends at `assistant`.
@@ -176,7 +192,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -187,7 +203,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -214,7 +230,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -769,35 +785,38 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     db.close();
   });
 
-  it("0009 fresh database: MCP registry tables + the disabled jev seed", () => {
+  it("0009 + 0010 fresh database: MCP registry tables exist with no stdio rows", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     const db = new Database(dbPath);
     db.exec("PRAGMA foreign_keys = ON");
+    expect(appliedMigrations(dbPath)).toContain("0010_remove_stdio_mcp_clients.sql");
     for (const t of ["assistant_mcp_servers", "assistant_mcp_project_servers"]) {
       expect(tableExists(db, t)).toBe(true);
     }
+    // Legacy columns survive: 0010 deletes rows, it never rebuilds the table.
     const cols = (db.prepare("PRAGMA table_info(assistant_mcp_servers)").all() as { name: string }[]).map((c) => c.name);
     expect(cols).toEqual(expect.arrayContaining([
       "id", "label", "transport_type", "url", "command", "args", "secret_ref", "enabled", "created_at", "updated_at",
     ]));
 
-    // Seeded Jev row: stdio, no url/secret, never auto-enabled.
-    expect(db.prepare("SELECT id, label, transport_type, url, command, args, secret_ref, enabled FROM assistant_mcp_servers").all()).toEqual([
-      { id: "jev", label: "Jev", transport_type: "stdio", url: null, command: "jev-mcp", args: "[]", secret_ref: null, enabled: 0 },
-    ]);
+    // 0009 seeded the stdio 'jev' row; 0010 removed it. No stdio row may remain.
+    expect(db.prepare("SELECT id, transport_type, command FROM assistant_mcp_servers").all()).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_servers WHERE transport_type = 'stdio'").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_project_servers").get()).toEqual({ n: 0 });
 
-    // Transport CHECK: http needs a url, stdio needs a command.
+    // Historical transport CHECK retained verbatim: http needs a url, stdio needs a command.
     expect(() => db.exec(`INSERT INTO assistant_mcp_servers (id, label, transport_type, command) VALUES ('h1','H','http','c')`)).toThrow();
     expect(() => db.exec(`INSERT INTO assistant_mcp_servers (id, label, transport_type) VALUES ('s1','S','stdio')`)).toThrow();
 
     // Junction cascades on both parents.
     db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1')`);
-    db.exec(`INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES ('p1', 'jev', 1)`);
+    db.exec(`INSERT INTO assistant_mcp_servers (id, label, transport_type, url) VALUES ('r1', 'R', 'http', 'https://mcp.test')`);
+    db.exec(`INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES ('p1', 'r1', 1)`);
     const fks = db.prepare("PRAGMA foreign_key_list(assistant_mcp_project_servers)").all() as Array<{ from: string; table: string; on_delete: string }>;
     expect(fks.find((f) => f.from === "server_id")?.on_delete).toBe("CASCADE");
     expect(fks.find((f) => f.from === "project_id")?.on_delete).toBe("CASCADE");
-    db.exec(`DELETE FROM assistant_mcp_servers WHERE id = 'jev'`);
+    db.exec(`DELETE FROM assistant_mcp_servers WHERE id = 'r1'`);
     expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_project_servers").get()).toEqual({ n: 0 });
     db.close();
   });
@@ -830,6 +849,132 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     ]);
     db.exec(`INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES ('p1', 'jev', 1)`);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.close();
+  });
+
+  it("0010 removes every stdio registration and its project bindings, keeping http/sse (Bun runner, foreign_keys=OFF)", () => {
+    const dir = stageThrough("0009");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    // This is the FK-OFF runner: ON DELETE CASCADE never fires there, so only
+    // the explicit junction DELETE in 0010 clears the bindings. bun:sqlite opens
+    // connections with foreign_keys=1, so the regime is pinned and then asserted
+    // — otherwise the test silently exercises the D1/FK-ON path and proves
+    // nothing about the junction-first ordering.
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = OFF");
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 0 });
+    db.exec(SEED_PRE_0010);
+
+    expect(db.prepare("SELECT id, transport_type FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
+      { id: "jev", transport_type: "stdio" },
+      { id: "local-mcp", transport_type: "stdio" },
+      { id: "sse-mcp", transport_type: "sse" },
+      { id: "web-mcp", transport_type: "http" },
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_project_servers").get()).toEqual({ n: 4 });
+
+    const sql = readFileSync(join(MIGRATIONS, "0010_remove_stdio_mcp_clients.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0010_remove_stdio_mcp_clients.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    // stdio registration and every binding that referenced it are gone.
+    expect(db.prepare("SELECT id, transport_type FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
+      { id: "sse-mcp", transport_type: "sse" },
+      { id: "web-mcp", transport_type: "http" },
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_servers WHERE transport_type = 'stdio'").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT server_id, enabled FROM assistant_mcp_project_servers ORDER BY server_id").all()).toEqual([
+      { server_id: "sse-mcp", enabled: 1 },
+      { server_id: "web-mcp", enabled: 0 },
+    ]);
+    // No orphan junction rows: the cleanup runs junction-first even with FKs OFF.
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.close();
+  });
+
+  it("0010 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
+    const dir = stageThrough("0009");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0010_remove_stdio_mcp_clients.sql");
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0010);
+
+    const sql = readFileSync(join(MIGRATIONS, "0010_remove_stdio_mcp_clients.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0010_remove_stdio_mcp_clients.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    expect(db.prepare("SELECT id, transport_type, url, command FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
+      { id: "sse-mcp", transport_type: "sse", url: "https://mcp.test/sse", command: null },
+      { id: "web-mcp", transport_type: "http", url: "https://mcp.test/mcp", command: null },
+    ]);
+    expect(db.prepare("SELECT server_id FROM assistant_mcp_project_servers ORDER BY server_id").all()).toEqual([
+      { server_id: "sse-mcp" },
+      { server_id: "web-mcp" },
+    ]);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    // Historical CHECK + legacy columns untouched by the cleanup.
+    expect(() => db.exec(`INSERT INTO assistant_mcp_servers (id, label, transport_type) VALUES ('s1','S','stdio')`)).toThrow();
+    const cols = (db.prepare("PRAGMA table_info(assistant_mcp_servers)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining(["command", "args"]));
+    db.close();
+  });
+
+  it("0010 rolls back atomically with foreign_keys=ON (no partial cleanup)", () => {
+    const dir = stageThrough("0009");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0010);
+
+    const sql = readFileSync(join(MIGRATIONS, "0010_remove_stdio_mcp_clients.sql"), "utf-8");
+    // FK-violating statement after the cleanup: no such project row exists.
+    const broken = `${sql}\nUPDATE assistant_mcp_project_servers SET project_id = 'ghost' WHERE server_id = 'web-mcp';\n`;
+    db.exec("BEGIN");
+    let threw = false;
+    try {
+      db.exec(broken);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0010_remove_stdio_mcp_clients.sql");
+      db.exec("COMMIT");
+    } catch {
+      threw = true;
+      db.exec("ROLLBACK");
+    }
+    expect(threw).toBe(true);
+
+    // Pre-0010 state untouched: every stdio row and binding survives.
+    expect(db.prepare("SELECT id FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
+      { id: "jev" },
+      { id: "local-mcp" },
+      { id: "sse-mcp" },
+      { id: "web-mcp" },
+    ]);
+    expect(db.prepare("SELECT server_id FROM assistant_mcp_project_servers ORDER BY server_id").all()).toEqual([
+      { server_id: "jev" },
+      { server_id: "local-mcp" },
+      { server_id: "sse-mcp" },
+      { server_id: "web-mcp" },
+    ]);
+    expect(appliedMigrations(dbPath)).not.toContain("0010_remove_stdio_mcp_clients.sql");
     db.close();
   });
 });

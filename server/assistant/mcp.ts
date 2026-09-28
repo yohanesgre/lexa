@@ -4,17 +4,21 @@
 import { Effect, Layer } from "effect";
 import {
   createMCPClient,
+  type HttpTransportConfig,
   type MCPClient,
   type MCPClientOptions,
+  type SseTransportConfig,
   type ToolAnnotations,
-  type TransportConfig,
 } from "@tanstack/ai-mcp";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { McpConnectFailed, McpStdioUnavailable, McpToolCallFailed } from "../api/errors";
-import { isWorkers, type RuntimeEnv } from "../env";
-import { parseArgs, type McpServerRow } from "../repos/assistant-mcp.repo";
+import { McpConnectFailed, McpToolCallFailed } from "../api/errors";
+import { isWorkers, resolveSecretRef, type RuntimeEnv } from "../env";
+import {
+  MCP_CLIENT_TRANSPORTS,
+  type McpClientTransportType,
+  type McpServerRow,
+  type McpTransportType,
+} from "../repos/assistant-mcp.repo";
 import { McpConnector, type McpConnectorShape } from "../services/assistant-mcp.service";
-import { buildStdioTransport } from "./mcp-stdio";
 import { validateUrl } from "./ssrf";
 
 export const MCP_DISCOVERY_TIMEOUT_MS = 5000;
@@ -126,6 +130,14 @@ function defaultMcpCallSink(entry: McpToolCallAudit, projectId: string): void {
   }
 }
 
+// Same rule as THIRD_PARTY_CONNECT_FAILURE, for the tool path. A thrown Error
+// from the SDK, fetch, or a remote JSON-RPC error lands in the model-visible
+// tool result and in the stream's error frame; remote text routinely quotes the
+// Authorization header. Only a refusal Lexa built itself (timeout, missing
+// execute) keeps its own text — that text names the tool and the budget, which
+// is the actionable part.
+const THIRD_PARTY_TOOL_CALL_FAILURE = "MCP tool call failed — remote error details are not forwarded";
+
 function capMcpResult(result: unknown, cap: number = MCP_TOOL_RESULT_CAP): unknown {
   if (typeof result === "string") return result.length > cap ? result.slice(0, cap) : result;
   if (result === null || result === undefined) return result;
@@ -206,7 +218,7 @@ function wrapMcpTool(
           durationMs: Date.now() - started,
           errorCode: e instanceof McpToolCallFailed ? "MCP_TOOL_CALL_FAILED" : "MCP_TOOL_CALL_ERROR",
         });
-        throw e instanceof McpToolCallFailed ? e : new McpToolCallFailed({ message: e instanceof Error ? e.message : "MCP tool call failed" });
+        throw e instanceof McpToolCallFailed ? e : new McpToolCallFailed({ message: THIRD_PARTY_TOOL_CALL_FAILURE });
       } finally {
         if (timer !== undefined) clearTimeout(timer);
         parent?.removeEventListener("abort", onAbort);
@@ -244,8 +256,17 @@ export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpTool
     await Promise.allSettled(handles.map((handle) => handle.close()));
   };
 
+  // Only remote http/sse rows are ever handed to a factory: 0010 removed the
+  // stored stdio registrations, and a leftover row must not reach a transport
+  // builder (let alone a process spawn) on any runtime.
+  const connectable: McpServerRow[] = [];
+  for (const row of opts.servers) {
+    if (isRemoteMcpTransport(row.transport_type)) connectable.push(row);
+    else logMcpSkip(opts.projectId, row.id, `transport '${row.transport_type}' — ${UNSUPPORTED_TRANSPORT_REASON}`, null);
+  }
+
   const settled = await Promise.allSettled(
-    opts.servers.map(async (row) => {
+    connectable.map(async (row) => {
       const client = await withTimeout(factory.create(row, { env: opts.env, allowlist: opts.allowlist }), discoveryTimeoutMs);
       handles.push(client);
       const discovered = await withTimeout(client.tools(), discoveryTimeoutMs);
@@ -255,9 +276,12 @@ export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpTool
 
   const tools: unknown[] = [];
   const usedNames = new Set<string>();
-  for (const outcome of settled) {
+  // `allSettled` preserves input order, so the index still identifies the row:
+  // the skip log's server id is the only attribution left once the error text
+  // is redacted to THIRD_PARTY_CONNECT_FAILURE.
+  for (const [index, outcome] of settled.entries()) {
     if (outcome.status === "rejected") {
-      logMcpSkip(opts.projectId, "discovery", outcome.reason);
+      logMcpSkip(opts.projectId, connectable[index]!.id, "discovery", outcome.reason);
       continue;
     }
     const { row, discovered } = outcome.value;
@@ -265,7 +289,7 @@ export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpTool
       if (!isReadOnlyMcpTool(tool)) continue;
       const name = prefixedMcpToolName(row.id, tool.name);
       if (usedNames.has(name)) {
-        logMcpSkip(opts.projectId, `duplicate tool name '${name}'`, null);
+        logMcpSkip(opts.projectId, row.id, `duplicate tool name '${name}'`, null);
         continue;
       }
       usedNames.add(name);
@@ -275,14 +299,22 @@ export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpTool
   return { tools, close };
 }
 
-function logMcpSkip(projectId: string, reason: string, error: unknown): void {
+// The skip log is the other place a connect failure surfaces, so only a refusal
+// Lexa constructed itself keeps its text; a third-party Error (SDK, fetch, remote
+// JSON-RPC) is logged as the same fixed generic reason it becomes in the report.
+function logMcpSkip(projectId: string, serverId: string, reason: string, error: unknown): void {
+  const detail = error instanceof McpConnectFailed
+    ? error.message
+    : error === null || error === undefined
+      ? null
+      : THIRD_PARTY_CONNECT_FAILURE;
   try {
     process.stderr.write(
       `${JSON.stringify({
         level: "WARN",
         service: "assistant-mcp",
         message: `MCP server skipped: ${reason}`,
-        meta: { projectId, reason, error: error instanceof Error ? error.message : error === null ? null : String(error) },
+        meta: { projectId, serverId, reason, error: detail },
         timestamp: new Date().toISOString(),
       })}\n`
     );
@@ -297,14 +329,41 @@ export async function validateMcpTransportUrl(row: McpServerRow, allowlist: stri
   await validateUrl(row.url, allowlist);
 }
 
-async function transportFor(row: McpServerRow, opts: { env: RuntimeEnv; allowlist: string | null }): Promise<TransportConfig | Transport> {
-  if (row.transport_type === "stdio") {
-    if (isWorkers()) throw new McpStdioUnavailable();
-    if (row.command === null || row.command === "") throw new McpConnectFailed({ message: `MCP server '${row.id}' has no command` });
-    return buildStdioTransport({ command: row.command, args: parseArgs(row.args), env: opts.env, secretRef: row.secret_ref });
+// Stored column domain is wider than the transports Lexa can connect: migration
+// 0010 deletes every stdio row, and the 0009 CHECK still admits one. A row that
+// names anything but http/sse is refused here, before a client exists — Lexa is
+// a client of remote MCP servers and never spawns a local process.
+export function isRemoteMcpTransport(transportType: McpTransportType): transportType is McpClientTransportType {
+  return (MCP_CLIENT_TRANSPORTS as readonly string[]).includes(transportType);
+}
+
+export const UNSUPPORTED_TRANSPORT_REASON = "MCP clients connect to remote http/sse servers only — local process transport is not supported";
+
+// A resolved credential is opaque bytes, but an HTTP header is not: a value with
+// CR/LF/NUL (a multiline PEM from an allowlisted key, or a `file:` read) is
+// rejected by fetch with a TypeError whose message quotes the value verbatim —
+// which would then reach stderr and the test-report body. Refuse the value here,
+// before the factory or the SDK ever sees it, with a message naming no secret.
+const SECRET_NOT_SINGLE_LINE = "resolved MCP secret cannot be sent in an HTTP header; use a single-line token";
+
+// `secret_ref` names a credential, never one. The resolved value goes out as the
+// single `Authorization: Bearer` header and is never returned or logged; an
+// absent or unresolvable reference connects with no headers at all.
+async function remoteTransportFor(
+  row: McpServerRow,
+  opts: { env: RuntimeEnv; allowlist: string | null }
+): Promise<HttpTransportConfig | SseTransportConfig> {
+  if (!isRemoteMcpTransport(row.transport_type)) {
+    throw new McpConnectFailed({ message: `MCP server '${row.id}': ${UNSUPPORTED_TRANSPORT_REASON}` });
   }
   await validateMcpTransportUrl(row, opts.allowlist);
-  return { type: row.transport_type, url: row.url! } as TransportConfig;
+  const secret = resolveSecretRef(row.secret_ref, opts.env);
+  if (secret !== null && /[\r\n\0]/.test(secret)) throw new McpConnectFailed({ message: SECRET_NOT_SINGLE_LINE });
+  const base = {
+    url: row.url!,
+    ...(secret !== null ? { headers: { Authorization: `Bearer ${secret}` } } : {}),
+  };
+  return row.transport_type === "sse" ? { type: "sse", ...base } : { type: "http", ...base };
 }
 
 // SDK's default AJV validator compiles schemas with `new Function`, which
@@ -332,7 +391,7 @@ export const liveMcpClientFactory: McpClientFactory = {
   create: async (row, opts) => {
     const clientOptions = clientOptionsForRuntime();
     const client = await createMCPClient({
-      transport: await transportFor(row, opts),
+      transport: await remoteTransportFor(row, opts),
       name: "lexa-assistant",
       version: "1.0.0",
       ...(clientOptions !== undefined ? { clientOptions } : {}),
@@ -341,10 +400,15 @@ export const liveMcpClientFactory: McpClientFactory = {
   },
 };
 
-function toConnectError(error: unknown): McpStdioUnavailable | McpConnectFailed {
-  if (error instanceof McpStdioUnavailable) return error;
+// Only a refusal Lexa constructed itself keeps its own text. Anything from the
+// SDK, fetch, or a remote JSON-RPC error is replaced by a fixed message: that
+// text reaches stderr (skip log) and the 200 test-report body, and third-party
+// messages routinely quote the Authorization header or the response body.
+const THIRD_PARTY_CONNECT_FAILURE = "MCP connect failed — remote error details are not forwarded";
+
+function toConnectError(error: unknown): McpConnectFailed {
   if (error instanceof McpConnectFailed) return error;
-  return new McpConnectFailed({ message: error instanceof Error ? error.message : "MCP connect failed" });
+  return new McpConnectFailed({ message: THIRD_PARTY_CONNECT_FAILURE });
 }
 
 // Live connector for the registry test endpoint and the tool bridge. The tag is

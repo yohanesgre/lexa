@@ -4,7 +4,7 @@ import { AssistantMcpSection } from "../components/settings/AssistantMcpSection"
 
 // /admin/assistant/providers — Providers & Models tab. Reuses the workspace
 // Integrations sections verbatim (superadmin-gated, same endpoints): the LLM
-// provider registry plus the MCP server registry.
+// provider registry plus the MCP client registry.
 export function AssistantProvidersTab() {
   return (
     <>

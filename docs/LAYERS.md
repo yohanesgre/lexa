@@ -904,6 +904,9 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
   // + assistant_mcp_project_servers(project_id→projects ON DELETE CASCADE,server_id→assistant_mcp_servers ON DELETE CASCADE,enabled,PK(project_id,server_id))
   // thin: list/getById/create/update/remove/listForProject/setProjectServers (withTx replace-set); update sets updated_at = datetime('now')
   // toPublic/projectToPublic drop secret_ref → hasSecret (never serialized)
+  // the stored column domain still names 'stdio' (D1 cannot drop a column or rewrite the CHECK) and
+  // migration 0010 deletes every such row; read types keep McpTransportType, while create/update
+  // inputs take McpClientTransportType ("http" | "sse") so a caller cannot persist stdio.
 }) {}
 // AssistantSettingsRepo after the squashed baseline + 0008: assistant_settings dropped kind/base_url/api_key/model/vision_model
 // (baseline) and engine/engine_switcher_enabled (0008) — now only
@@ -912,23 +915,28 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
 // price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
 ```
 
-### Lexa/AssistantMcpService — MCP server registry
+### Lexa/AssistantMcpService — remote MCP client registry
 
 ```typescript
 export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("Lexa/AssistantMcpService", {
   dependencies: [AssistantMcpRepo.Default],
   effect: Effect.gen(function* () {
     // Also requires McpConnector (injectable seam @Context.Tag). The live connector
-    // (stdio spawn / HTTP+SSE JSON-RPC tools/list) is server/assistant/mcp.ts
+    // (HTTP+SSE JSON-RPC tools/list) is server/assistant/mcp.ts
     // `LiveMcpConnector`, wired as the default in the API layer; tests inject a fake.
     return {
-      // list/create/update/remove — id is slugified from the label, 'jev' reserved;
+      // list/create/update/remove — id is slugified from the label (no reserved id);
       // listForProject/setProjectServers — replace-set availability (validates ids);
       // testConnection — always resolves: a failed connect folds into
       //   { ok:false, error:{code,message} }, never a thrown error.
-      // Validation (pure validateTransportConfig): transport shape, http/https url
-      //   with no userinfo, secretRef 'env:[A-Z0-9_]+' | 'file:/abs/path', command
-      //   non-empty for stdio, Workers stdio → McpStdioUnavailable.
+      // Validation (pure validateTransportConfig): REMOTE http/sse only. `stdio` →
+      //   MCP_INVALID_TRANSPORT_CONFIG on every runtime — no process is ever spawned;
+      //   http/https url with no userinfo; `command`/non-empty `args` rejected (never
+      //   dropped); secretRef 'file:/abs/path' (Bun only) | 'env:NAME' where NAME must be
+      //   a fixed RuntimeEnv string slot (isRuntimeEnvStringKey) — an unknown name is
+      //   rejected here rather than stored as a reference that cannot resolve. The
+      //   accepted branch returns the narrowed McpClientTransportType, so the repo
+      //   write is remote-only by construction.
       // SSRF: validateUrl at save time; the connector revalidates at connect time.
       // No cycles: repo + connector only — never GitHubService or chat services.
     };
@@ -972,11 +980,45 @@ export async function buildMcpTools(opts: {
   100 000 chars per result (`MCP_TOOL_RESULT_CAP`).
 - **SSRF:** http/sse URLs re-run `validateUrl(url, allowlist)` at connect time
   (`validateMcpTransportUrl`) — the save-time pass is fast feedback only.
-- **stdio:** `server/assistant/mcp-stdio.ts`, imported lazily
-  (`await import("@tanstack/ai-mcp/stdio")`), guarded by `isWorkers()`; command
-  + args array (never a shell string); child env = `STDIO_ENV_ALLOWLIST` host
-  vars + the resolved `secret_ref` (`env:NAME` → that name, `file:/abs/path` →
-  `MCP_SECRET`). Stdio is skipped on Workers with `McpStdioUnavailable`.
+- **Remote auth:** the transport builder sends exactly one header —
+  `Authorization: Bearer <resolved secret>` — and no header at all when
+  `secret_ref` is absent or resolves to `null`. `resolveSecretRef`
+  (`server/env.ts`) reads `env:NAME` from the `RuntimeEnv` snapshot only (no
+  `process.env` fallback, no arbitrary Workers binding) and `file:/abs/path` on
+  the Bun host. Save-time validation (`validateTransportConfig`) accepts an
+  `env:NAME` only when the name is a fixed `RuntimeEnv` string slot
+  (`RUNTIME_ENV_STRING_KEYS` / `isRuntimeEnvStringKey`, the same list `RuntimeEnv`
+  is derived from), so a reference that could never resolve is refused with
+  `McpInvalidTransportConfig` at create/update instead of being stored. On
+  update only a `secretRef` **present in the request** is validated, so a
+  pre-existing stored ref that is no longer allowlisted passes through unchanged
+  and fails closed at connect (no header) instead of freezing the row.
+  - The allowlist is the **union of both env builders**, so a listed name can be
+    dead on the serving runtime: `CRON_SECRET` is Workers-only (never copied by
+    `getEnv()`), and `DATABASE_PATH`, `PORT`, `LXK_STORAGE_FS_ROOT` and the
+    `LXK_S3_*` names are Bun-side slots `getEnvFromWorkers()` forces to
+    `undefined`. A dead reference resolves to `null` and the client connects with
+    **no `Authorization` header**, so an anonymous-capable endpoint can report a
+    successful test with no credential sent.
+  - A resolved value with CR/LF/NUL (a multiline PEM from an allowlisted key or a
+    `file:` read) is refused with a fixed `McpConnectFailed` message before the
+    factory/SDK is called; otherwise fetch throws a `TypeError` that quotes the
+    value. Both sinks then redact: `toConnectError` (test-report body) and
+    `logMcpSkip` (stderr) replace **all** third-party connect text — SDK, fetch,
+    remote JSON-RPC — with one fixed generic message, and only a
+    `McpConnectFailed` Lexa constructed itself keeps its own text.
+  - Configuring `secret_ref` is superadmin-only, and both forms are deliberate
+    egress: an `env:` reference forwards the named infrastructure key as Bearer to
+    the configured remote URL, and `file:` reads the bytes of any host file the
+    process can read (Bun-only) and sends them as the Bearer token to that URL.
+- **stdio:** removed. `AssistantMcpService` accepts http/sse only and returns
+  `McpInvalidTransportConfig` for a `stdio` payload on every runtime, so no code
+  path spawns a child process; migration 0010 deletes every stored stdio
+  registration and its project bindings. `server/assistant/mcp-stdio.ts` and its
+  lazy `@tanstack/ai-mcp/stdio` import are deleted, the bridge filters rows
+  through `isRemoteMcpTransport` before any factory call, and the
+  `McpStdioUnavailable` catalog entry is reserved but never constructed or
+  emitted (kept only so a client decoding the code still parses the wire).
 - **Workers output-schema validation:** the SDK's AJV validator compiles with
   `new Function`, forbidden on workerd; on Workers a permissive
   `jsonSchemaValidator` is supplied and wrapped tools drop `outputSchema`.
@@ -994,6 +1036,123 @@ Wiring: `AssistantChatService` (stream + resume) and `AssistantTaskService`
 `buildMcpTools`, append `.tools` after the registry/write tools (and the vision
 tool), and pass `onDispose: toolset.close`. The live connector is the API-layer
 default (`createApiHandler(..., { mcpConnector })` still overrides for tests).
+
+### Jev advisory boundary — `server/assistant/jev.ts` + `jev_assess`
+
+Typesafe Jev is a **typed System 1 judgment REST API**, not a chat-completion
+provider, a text-generation model, or an MCP endpoint. There is **no
+`Effect.Service` and no service-layer dependency for it**: `jev.ts` is a plain
+async module in the assistant tier, exactly like `mcp.ts`, and the chat/task
+services *call* it — nothing calls *it*.
+
+```typescript
+// server/assistant/jev.ts — plain module, no Effect, no tags, no deps.
+export async function systemOne(params: SystemOneParams): Promise<JevResult>
+//   POST {baseUrl}/v1/systemone, Bearer auth, { state, model, questions }.
+//   Total: every failure is a typed { ok:false, code } — it never throws.
+export function buildPreflightState(input: PreflightStateInput): string
+export const PREFLIGHT_QUESTIONS: JevQuestions
+export function buildAdvisorySegment(answers: Record<string, JevAnswer> | null | undefined): string
+export async function runJevPreflight(params: JevPreflightParams): Promise<JevPreflightResult>
+export function jevLog(mode: "preflight" | "assess", result: JevLogMeta): void
+```
+
+- **Transport (`systemOne`)** is total and typed. Failure codes:
+  `MISSING_KEY | TIMEOUT | NETWORK | AUTH | RATE_LIMITED | INVALID_RESPONSE |
+  HTTP_<status>`; 401/403 → `AUTH`, 429/529 → `RATE_LIMITED` (529 is Typesafe's
+  overload signal), anything else non-ok → `HTTP_<status>`. **No retry** — a
+  retry cannot fit the 3s preflight budget and the caller fails open on one
+  attempt. A missing/blank key returns `MISSING_KEY` before any request, so
+  Jev can never send an anonymous `Bearer " "`. The response body is read under
+  a hard 64 KB cap (`content-length` short-circuit + a streaming byte counter
+  that cancels the reader), so an oversized or endless body is never
+  materialized. Every answer is re-validated (`noul`/`choice`/`score` shapes,
+  `noul ∈ [0,1]`) and **every question asked must come back answered**, or the
+  whole call is `INVALID_RESPONSE`. Upstream text never reaches a Lexa message:
+  transport errors are reported as a fixed catalog string.
+- **Preflight flow (once per NEW run).** `AssistantChatService.runChatStream`
+  and `AssistantTaskService.runStream` build the state from inputs the run has
+  *already loaded* — run kind, project/thread ids + labels, the latest user
+  message, the task/wiki context, project-memory hits — and await the verdict
+  **before** `buildStream` (so the advisory is in the prompt the model gets).
+  `buildPreflightState` is a whitelist type with a fixed key order: there is no
+  index signature and no spread, so an extra key on a caller's object cannot
+  reach the wire. No history, no attachments, no credentials. Caps
+  (`JEV_PREFLIGHT_*`): ids 128 chars, labels 200, each memory item 400, message
+  2 000, task/wiki context 4 000, serialized state 8 000 — the total closed by a
+  deterministic squeeze (context first, then message, then the memory tail).
+  `clip()` marks a shortened field with `…`; see **lossy paths** below for what
+  the squeeze drops without a marker.
+- **Fixed questions** (`PREFLIGHT_QUESTIONS`, stable ids — changing one is a
+  behavior change): `write_intent` (choice `none|read|write`), `ambiguity`
+  (noul), `memory_conflict` (noul). The advisory segment
+  (`buildAdvisorySegment`) is a labeled `Jev advisory (non-authoritative)`
+  block — one `- ` line per answer, plus a fixed footer that write tools remain
+  approval-gated and live project data remains authoritative. A mistyped or
+  unrecognized answer drops its line instead of throwing, and the write-intent
+  choice is filtered against the closed option set so upstream text can never
+  reach the prompt verbatim.
+- **`jev_assess` tool** (`server/assistant/tools.ts`, `buildJevAssessTool`) is
+  added to the toolset **only when `TYPESAFE_API_KEY` is a non-blank string** —
+  the same gate shape as `web_search`'s Exa key, so an unconfigured Jev leaves
+  the toolset byte-identical. Input is a bounded `state` plus a
+  `z.discriminatedUnion` mirror of the `noul`/`choice`/`score` contract (a
+  malformed question never reaches the wire). Result is typed: `{ ok:true,
+  answers, usage }` or `{ ok:false, code, message }` — a failure never throws
+  into the stream, so the model can read it and continue.
+- **Budgets.** Preflight: 3s (`JEV_PREFLIGHT_TIMEOUT_MS`) and 8 000 state
+  chars, once per new run. Tool: 10s per request
+  (`JEV_TOOL_TIMEOUT_MS`), ≤4 000 state chars (`JEV_ASSESS_MAX_STATE_CHARS`),
+  ≤8 questions (`JEV_ASSESS_MAX_QUESTIONS`), ≤3 calls per stream invocation
+  (`JEV_ASSESS_MAX_CALLS`, over-budget → typed `BUDGET_EXCEEDED`). The call
+  counter lives in the `buildAssistantTools` closure, so a resume gets a fresh
+  budget and the counter cannot outlive the run that created it. Oversize tool
+  input is **refused, not truncated** (`STATE_TOO_LARGE`): a judgment silently
+  computed over a clipped state is a judgment over something the model never
+  sent.
+- **Lossy paths (preflight only).** The tool is never lossy — oversize input is
+  refused. The preflight state builder is, on three levels: every field is
+  clipped at its own cap and the clip is marked with `…` (ids 128, labels 200,
+  memory items 400, message 2 000, context 4 000); the 8 000-char squeeze clips
+  the context and then the message, also marked — but **deletes** either field
+  outright when no room is left for it; and the memory **tail is dropped
+  unmarked**, one item at a time, until the list is empty and the `memory` key
+  disappears. A clipped field is visibly clipped; a dropped field or a dropped
+  memory item is not, so a verdict may be missing context the run had.
+- **Resume.** `resumeChatStream` / `resumeThreadStream` build no preflight
+  state and make no Jev call — the judgment was made against the original
+  request — but the `jev_assess` tool **is** still offered, because its budget
+  is per stream invocation. The tools are therefore assembled on both paths;
+  only the preflight is new-run-only.
+- **Env is read at call time.** `currentEnv` (`server/runtime-env.ts`) is
+  resolved when a service *method* runs, not when its layer is built, so the
+  `RuntimeEnv` snapshot must be provided to the effect (the same place
+  `server/api/http.ts` provides it per request) and not only to the built
+  layer. Missing that is a `Service not found` defect at run time, not a typed
+  error.
+- **Logging is bounded by type.** `jevLog` takes `(mode, result)` and the meta is
+  declared field by field, so a rendered advisory segment cannot ride along in a
+  log line. One stderr line: `mode`, `outcome`, `code?`, `latencyMs?`,
+  `usage?`, timestamp. No state, no key, no upstream body. `code` is the
+  caller's own typed code (`JevFailureCode` for the preflight,
+  `JevAssessFailureCode` for the tool); `latencyMs` is omitted when the call
+  never reached the network (e.g. the per-stream budget refusal) rather than
+  logged as a fabricated 0. A `MISSING_KEY` preflight — an unconfigured Jev, a
+  deployment state rather than a run event — logs no line at all, so the
+  `skipped` outcome is returned but not written once per run.
+- **No cycle (invariant #1), no write (invariant #12).** `jev.ts` imports only
+  a `RuntimeEnv` *type* — never a repo, a service, or `GitHubService`; the
+  assistant services depend on it, never the reverse. Jev is advisory text: it
+  cannot queue a write, apply a pending row, or emit `task_activity`. Writes
+  still go through the existing approval protocol, and the advisory footer says
+  so to the model in-band.
+
+Tests: `server/assistant/jev.test.ts` (state caps, exclusions, advisory
+rendering, preflight fail-open/disable, log shape) + the service-level suites
+`server/services/assistant-chat.service.test.ts` and
+`assistant-task.service.test.ts`, which fake `fetch` and prove the advisory
+reaches the real prompt, resume makes zero Jev calls, every failure mode leaves
+the run intact, and Jev emits no `task_activity` of its own.
 
 ### Lexa/Assistant — assistant tier (server-side TanStack AI)
 
@@ -1269,8 +1428,8 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ApprovalsPending` | 409 | resume while rows in the batch are still undecided — payload `{ batchId, remaining }` |
 | `ToolDenied` | 403 | write-tool execution refused by authorization at resume time |
 | `McpServerNotFound` | 404 | MCP registry: unknown server id (update/delete/test/project availability) |
-| `McpInvalidTransportConfig` | 400 | reserved slug id (`jev`), transport shape mismatch, bad url/secretRef, or deleting the protected `jev` row |
-| `McpStdioUnavailable` | 400 | stdio registered or tested on Cloudflare Workers (no process spawn) |
+| `McpInvalidTransportConfig` | 400 | `stdio` transport, `command`/`args` on a remote transport, transport shape mismatch, bad url/secretRef (including an `env:` name outside the fixed `RuntimeEnv` keys), or an SSRF-blocked host |
+| `McpStdioUnavailable` | 400 | reserved, no longer emitted — stdio clients were removed (migration 0010); kept so an older stored code still maps to a response |
 | `McpConnectFailed` | 502 | MCP connector could not connect or `tools/list` failed (folded into the test report) |
 | `McpToolCallFailed` | 502 | MCP tool invocation failed (tool-loop phase) |
 

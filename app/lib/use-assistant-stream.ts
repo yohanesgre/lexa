@@ -95,7 +95,10 @@ const IDLE: AssistantStreamSnapshot = Object.freeze({
   hasIngress: false,
 });
 
-// Tool frame names → wireframe chip copy (assistant-chat.html annotations).
+// Tool frame names → chip copy. `web_search` / `fetch_url` / `read_s3_file`
+// are wireframe copy (assistant-chat.html annotations); `jev_assess` is
+// wireframe copy from herald-popover.html annotations (read-only follow-up
+// judgment tool) — added so a call never renders the raw tool name.
 function toolLabel(name: string): string {
   switch (name) {
     case "web_search":
@@ -103,6 +106,8 @@ function toolLabel(name: string): string {
     case "fetch_url":
     case "read_s3_file":
       return "Reading file…";
+    case "jev_assess":
+      return "Asking Jev…";
     default:
       return name;
   }

@@ -33,8 +33,8 @@ function mockFetch(): void {
   });
 }
 
-const JEV: McpServer = {
-  id: "jev", label: "Jev", transportType: "stdio", url: null, command: "jev-mcp",
+const SENTRY: McpServer = {
+  id: "sentry", label: "Sentry", transportType: "sse", url: "https://mcp.sentry.example/sse", command: null,
   args: [], hasSecret: false, enabled: false, createdAt: "t", updatedAt: "t",
 };
 const LINEAR: McpServer = {
@@ -72,30 +72,30 @@ function getCalls(url: string): number {
 describe("MCP server mutations — cache from the authoritative response", () => {
   it("useCreateMcpServer appends the response to the cache — no refetch", async () => {
     routes.set("POST /api/assistant/mcp-servers", LINEAR);
-    queryClient.setQueryData(["assistant-mcp-servers"], [JEV]);
+    queryClient.setQueryData(["assistant-mcp-servers"], [SENTRY]);
     const before = getCalls("/api/assistant/mcp-servers");
     const { result } = renderHook(() => useCreateMcpServer(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ label: "Linear", transportType: "http", url: LINEAR.url! }); });
-    expect(queryClient.getQueryData<McpServer[]>(["assistant-mcp-servers"])).toEqual([JEV, LINEAR]);
+    expect(queryClient.getQueryData<McpServer[]>(["assistant-mcp-servers"])).toEqual([SENTRY, LINEAR]);
     expect(getCalls("/api/assistant/mcp-servers")).toBe(before);
   });
 
   it("useUpdateMcpServer replaces the matching row in place", async () => {
-    routes.set("PATCH /api/assistant/mcp-servers/jev", { ...JEV, enabled: true });
-    queryClient.setQueryData(["assistant-mcp-servers"], [JEV, LINEAR]);
+    routes.set("PATCH /api/assistant/mcp-servers/sentry", { ...SENTRY, enabled: true });
+    queryClient.setQueryData(["assistant-mcp-servers"], [SENTRY, LINEAR]);
     const { result } = renderHook(() => useUpdateMcpServer(), { wrapper });
-    await act(async () => { await result.current.mutateAsync({ id: "jev", enabled: true }); });
+    await act(async () => { await result.current.mutateAsync({ id: "sentry", enabled: true }); });
     const next = queryClient.getQueryData<McpServer[]>(["assistant-mcp-servers"])!;
-    expect(next[0]).toMatchObject({ id: "jev", enabled: true });
+    expect(next[0]).toMatchObject({ id: "sentry", enabled: true });
     expect(next[1]).toMatchObject({ id: "linear" });
   });
 
   it("useDeleteMcpServer filters the row", async () => {
     routes.set("DELETE /api/assistant/mcp-servers/linear", 204);
-    queryClient.setQueryData(["assistant-mcp-servers"], [JEV, LINEAR]);
+    queryClient.setQueryData(["assistant-mcp-servers"], [SENTRY, LINEAR]);
     const { result } = renderHook(() => useDeleteMcpServer(), { wrapper });
     await act(async () => { await result.current.mutateAsync("linear"); });
-    expect(queryClient.getQueryData<McpServer[]>(["assistant-mcp-servers"])).toEqual([JEV]);
+    expect(queryClient.getQueryData<McpServer[]>(["assistant-mcp-servers"])).toEqual([SENTRY]);
   });
 
   it("useSetProjectMcpServers replaces the project cache from the response — no refetch", async () => {

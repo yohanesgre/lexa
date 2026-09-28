@@ -1,13 +1,20 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   DEFAULT_DATABASE_PATH,
   DEFAULT_PUBLIC_URL,
   getEnv,
   getEnvFromWorkers,
+  isRuntimeEnvStringKey,
+  RUNTIME_ENV_STRING_KEYS,
   resolveDatabasePath,
   resolvePublicUrl,
+  resolveSecretRef,
   resolveTrustedOrigins,
   resolveTrustedProxyCidrs,
+  type RuntimeEnv,
 } from "./env";
 
 describe("getEnv", () => {
@@ -147,5 +154,115 @@ describe("getEnvFromWorkers", () => {
     expect(rt.LOG_LEVEL).toBeUndefined();
     // Removed env keys are dropped entirely, never passed through.
     expect("LXK_API_KEY" in rt).toBe(false);
+  });
+});
+
+// The MCP `env:NAME` allowlist is this list, and this list is the string slots
+// of RuntimeEnv itself. If the two ever drift, an `env:` reference is either
+// refused for a key that resolves, or accepted for one that cannot.
+describe("RUNTIME_ENV_STRING_KEYS", () => {
+  // The two builders each copy a subset of the snapshot (the Bun host has no
+  // CRON_SECRET binding; Workers forces LXK_STORAGE_DRIVER and drops the
+  // Bun-only storage slots). The allowlist is the union: a name is acceptable
+  // when EITHER path can copy it, and never narrower than what either copies.
+  it("covers exactly the string slots the two builders declare and copy", () => {
+    const source = Object.fromEntries(RUNTIME_ENV_STRING_KEYS.map((k) => [k, `v-${k}`]));
+    const snapshots: Array<[string, RuntimeEnv]> = [
+      ["getEnv", getEnv(source as Record<string, string | undefined>)],
+      ["getEnvFromWorkers", getEnvFromWorkers(source)],
+    ];
+    for (const [name, env] of snapshots) {
+      // Nothing either builder copies as a string may be outside the list.
+      for (const [key, value] of Object.entries(env)) {
+        if (typeof value !== "string") continue;
+        expect(RUNTIME_ENV_STRING_KEYS, `${name} copies ${key}`).toContain(key);
+      }
+    }
+    // Every listed name is really copied on at least one path. `key in env` is
+    // not enough: a builder may declare a slot as an explicit `undefined`, so the
+    // seeded value has to come back out of one of the two snapshots.
+    for (const key of RUNTIME_ENV_STRING_KEYS) {
+      expect(snapshots.some(([, env]) => env[key] === `v-${key}`), key).toBe(true);
+    }
+  });
+
+  it("carries a source value through on the path that owns the slot", () => {
+    const source = Object.fromEntries(RUNTIME_ENV_STRING_KEYS.map((k) => [k, `v-${k}`]));
+    const bun = getEnv(source as Record<string, string | undefined>);
+    const workers = getEnvFromWorkers(source);
+    expect(bun.GITHUB_WEBHOOK_SECRET).toBe("v-GITHUB_WEBHOOK_SECRET");
+    expect(bun.LXK_S3_SECRET_ACCESS_KEY).toBe("v-LXK_S3_SECRET_ACCESS_KEY");
+    expect(workers.GITHUB_WEBHOOK_SECRET).toBe("v-GITHUB_WEBHOOK_SECRET");
+    expect(workers.CRON_SECRET).toBe("v-CRON_SECRET");
+    // Workers path differences are preserved, not forced through the list.
+    expect(workers.LXK_STORAGE_DRIVER).toBe("r2");
+    expect(bun.CRON_SECRET).toBeUndefined();
+  });
+
+  it("names RuntimeEnv string slots only — never a Workers binding", () => {
+    // Positive membership is proved by the seeded snapshot round-trip above
+    // (asserting `isRuntimeEnvStringKey(k)` for every listed `k` would only
+    // restate how the Set is built, so it is not repeated here). What matters
+    // is the negative direction: nothing outside the list is a slot.
+    // D1/R2/KV bindings are copied as objects, so `env:` can never name them.
+    for (const binding of ["DB", "BLOB", "KV"]) {
+      expect(isRuntimeEnvStringKey(binding), binding).toBe(false);
+    }
+    // Arbitrary host/Workers names are outside the snapshot.
+    for (const unknown of ["LINEAR_TOKEN", "MCP_REMOTE_TOKEN", "LXK_TANSTACK_AI_DEBUG"]) {
+      expect(isRuntimeEnvStringKey(unknown), unknown).toBe(false);
+    }
+  });
+
+  it("carries the Jev config on both paths, and it is a forwardable env: name", () => {
+    // Jev is configured on every runtime, so all three slots must come back
+    // from both builders — the generic "copied by at least one path" test
+    // cannot catch a slot that only one of them forwards.
+    const source = { TYPESAFE_API_KEY: "tk", TYPESAFE_BASE_URL: "https://jev.example.com", TYPESAFE_DEFAULT_MODEL: "jev-x" };
+    for (const env of [getEnv(source), getEnvFromWorkers(source)]) {
+      expect(env.TYPESAFE_API_KEY).toBe("tk");
+      expect(env.TYPESAFE_BASE_URL).toBe("https://jev.example.com");
+      expect(env.TYPESAFE_DEFAULT_MODEL).toBe("jev-x");
+    }
+    // Same class as the other infrastructure keys: the MCP `env:NAME` allowlist
+    // is this list, so naming it here forwards it as a Bearer token.
+    for (const key of ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL"]) {
+      expect(isRuntimeEnvStringKey(key), key).toBe(true);
+    }
+  });
+
+  it("resolves both snapshot shapes through resolveSecretRef and fails closed otherwise", () => {
+    const bun = getEnv({ GITHUB_WEBHOOK_SECRET: "bun-secret" });
+    expect(resolveSecretRef("env:GITHUB_WEBHOOK_SECRET", bun)).toBe("bun-secret");
+    const workers = getEnvFromWorkers({ GITHUB_WEBHOOK_SECRET: "workers-secret" });
+    expect(resolveSecretRef("env:GITHUB_WEBHOOK_SECRET", workers)).toBe("workers-secret");
+
+    // A Workers binding outside the snapshot is not copied, so it fails closed.
+    const outside = getEnvFromWorkers({ MCP_REMOTE_TOKEN: "workers-secret" });
+    expect("MCP_REMOTE_TOKEN" in outside).toBe(false);
+    expect(resolveSecretRef("env:MCP_REMOTE_TOKEN", outside)).toBeNull();
+    // An unset slot is a fail-closed null, not a header with an empty bearer.
+    expect(resolveSecretRef("env:CRON_SECRET", workers)).toBeNull();
+  });
+
+  // The `env:` branch fails closed on an empty value; `file:` trimmed to "" used
+  // to pass that through, producing `Authorization: "Bearer "`. A zero-byte or
+  // whitespace-only secret file is no credential either way.
+  it("resolves a file reference to null when the file is empty or whitespace-only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lexa-secret-ref-"));
+    try {
+      const empty = join(dir, "empty");
+      writeFileSync(empty, "");
+      const blank = join(dir, "blank");
+      writeFileSync(blank, "  \n\t\n");
+      const real = join(dir, "token");
+      writeFileSync(real, "  file-secret\n");
+
+      expect(resolveSecretRef(`file:${empty}`, getEnv({}))).toBeNull();
+      expect(resolveSecretRef(`file:${blank}`, getEnv({}))).toBeNull();
+      expect(resolveSecretRef(`file:${real}`, getEnv({}))).toBe("file-secret");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

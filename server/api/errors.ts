@@ -107,6 +107,11 @@ export class ApprovalsPending extends Data.TaggedError("ApprovalsPending")<{ bat
 export class ToolDenied extends Data.TaggedError("ToolDenied")<{ message: string }> {}
 export class McpServerNotFound extends Data.TaggedError("McpServerNotFound")<{ id: string }> {}
 export class McpInvalidTransportConfig extends Data.TaggedError("McpInvalidTransportConfig")<{ reason: string }> {}
+// Reserved, no longer emitted: local stdio MCP clients were removed (migration
+// 0010 deletes the stored rows; application validation rejects the payload with
+// McpInvalidTransportConfig on every runtime). The class, its MCP_STDIO_UNAVAILABLE
+// code, and its 400 status stay in the catalog so an older stored code still maps
+// to a real response.
 export class McpStdioUnavailable extends Data.TaggedError("McpStdioUnavailable")<{}> {}
 export class McpConnectFailed extends Data.TaggedError("McpConnectFailed")<{ message?: string }> {}
 export class McpToolCallFailed extends Data.TaggedError("McpToolCallFailed")<{ message?: string }> {}
@@ -455,7 +460,7 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "McpInvalidTransportConfig":
       return String(error.reason ?? "Invalid MCP transport configuration");
     case "McpStdioUnavailable":
-      return "stdio MCP servers run only when the Lexa server runs on this host (self-hosted Bun) — not available on Cloudflare Workers";
+      return "stdio MCP clients are not supported — the registry connects to remote http/sse servers only";
     case "McpConnectFailed":
       return typeof error.message === "string" && error.message ? error.message : "Could not connect to the MCP server";
     case "McpToolCallFailed":

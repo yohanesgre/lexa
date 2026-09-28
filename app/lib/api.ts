@@ -694,7 +694,11 @@ export function reorderAssistantProviderModels(id: string, orderedIds: string[])
   return request(`${BASE}/admin/assistant/providers/${id}/models/reorder`, { method: "POST", body: JSON.stringify({ orderedIds }) });
 }
 
-// ── MCP server registry (assistant MCP servers) ──
+// ── MCP client registry (assistant MCP clients) ──
+// Remote HTTP/SSE clients only. The `stdio` member of McpTransportType and the
+// `command`/`args` fields are retained for API/TS compatibility with the legacy
+// columns; the server rejects stdio (MCP_INVALID_TRANSPORT_CONFIG) and
+// migration 0010 removed every stored stdio row.
 export type McpTransportType = "http" | "sse" | "stdio";
 
 export interface McpServer {
