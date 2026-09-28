@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // Wireframe admin-assistant-providers.html §MCP Clients: remote HTTP/SSE
 // registry with the accurate empty state ("No MCP clients yet"), a
-// two-option transport select defaulting to http, the Bearer secret-reference
-// helper, and the test-result states (ok counts / MCP_CONNECT_FAILED).
-// No Jev seed row, no stdio/command/args controls, no MCP_STDIO_UNAVAILABLE.
+// two-option transport select defaulting to http, one-line field hints, and
+// the test-result states (ok counts / MCP_CONNECT_FAILED).
+// No section subtitle, no notice panel, no stdio/command/args controls,
+// no MCP_STDIO_UNAVAILABLE.
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
@@ -59,10 +60,13 @@ describe("AssistantMcpSection — literal copy", () => {
     expect(screen.queryByRole("button", { name: "Save server" })).not.toBeInTheDocument();
   });
 
-  it("describes remote HTTP/SSE clients and the Bearer secret reference", () => {
+  it("carries no section subtitle and no verbose notice copy", () => {
     render(<AssistantMcpSection />);
-    expect(screen.getByText(/connect to remote MCP servers over HTTP or SSE/)).toBeInTheDocument();
-    expect(screen.getByText(/An optional secret reference supplies a Bearer token/)).toBeInTheDocument();
+    expect(screen.queryByText(/connect to remote MCP servers over HTTP or SSE/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/read-only-annotated tools/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/An optional secret reference supplies a Bearer token/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Only read-only tools are exposed")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connects Lexa's MCP client to a remote MCP server/)).not.toBeInTheDocument();
   });
 
   it("has no stdio, command, args, seeded or local-process copy anywhere", () => {
@@ -114,16 +118,17 @@ describe("AssistantMcpSection — transport form", () => {
     expect(screen.getByLabelText("URL")).toBeInTheDocument();
   });
 
-  it("explains that the URL is allowlist-checked at save and connect", () => {
+  it("keeps one line hints for the URL and secret reference fields", () => {
     render(<AssistantMcpSection />);
-    expect(screen.getByText(/checked against the allowlist at save and connect/)).toBeInTheDocument();
-    expect(screen.getByText(/SSRF-checked against the URL allowlist at save and again at connect/)).toBeInTheDocument();
-  });
-
-  it("documents the secret reference as a Bearer token resolved at connect time", () => {
-    render(<AssistantMcpSection />);
+    expect(screen.getByText(/http\(s\) only · no userinfo · SSRF-checked against the URL allowlist at save and connect/)).toBeInTheDocument();
     expect(screen.getByText(/Bearer token reference, never stored as a secret value/)).toBeInTheDocument();
     expect(screen.getByPlaceholderText("env:NAME or file:/abs/path")).toBeInTheDocument();
+  });
+
+  it("drops the verbose secret-reference essay", () => {
+    render(<AssistantMcpSection />);
+    expect(screen.queryByText(/fails closed at connect with no Authorization header/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/read back as/)).not.toBeInTheDocument();
   });
 
   it("marks a stored secret reference as saved without naming its scheme", async () => {
@@ -188,10 +193,5 @@ describe("AssistantMcpSection — registry actions", () => {
     expect(screen.getByText("Delete MCP client?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Delete client/ }));
     expect(h.deleted).toEqual(["linear"]);
-  });
-
-  it("keeps the read-only tools warning", () => {
-    render(<AssistantMcpSection />);
-    expect(screen.getByText("Only read-only tools are exposed")).toBeInTheDocument();
   });
 });

@@ -84,8 +84,6 @@ export function AssistantProjectMcpSection({ project }: { project: Project }) {
           </table>
         </div>
       )}
-
-      <div className="field-hint mt-3">Which registered Remote MCP clients this project&apos;s Assistant may call. A client must be enabled globally first (Workspace → Assistant Providers → MCP Clients); then it must be explicitly enabled here.</div>
     </section>
   );
 }
