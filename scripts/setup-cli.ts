@@ -44,6 +44,15 @@ function dropDeadKeys(values: Record<string, string>): Record<string, string> {
   return out;
 }
 
+// A fresh install must ship a secrets keyring key: generate one 32-byte key
+// when the env file does not already carry one. Existing values (an operator's
+// key, or a rotated pair) are preserved verbatim.
+function ensureSecretsMasterKey(values: Record<string, string>): void {
+  if (!values.LXK_SECRETS_MASTER_KEY) {
+    values.LXK_SECRETS_MASTER_KEY = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64");
+  }
+}
+
 // Merge `updates` over the existing file (dead keys dropped) and write 0600 in
 // the format the extension implies. A temp file + rename guarantees the TOML
 // merge cannot re-introduce a dropped key from the on-disk copy.
@@ -217,6 +226,7 @@ async function main() {
   if (!env.DATABASE_PATH) env.DATABASE_PATH = "./data/lexa.db";
   if (!env.PORT) env.PORT = "3000";
   env.LXK_ENV = flavor;
+  ensureSecretsMasterKey(env);
   writeEnvByPath(envFile, env);
   console.log(`\n  Wrote ${envFile}`);
 
@@ -311,6 +321,7 @@ async function main() {
   }
   if (seedChoice !== null) {
     env.LXK_SEED_DEV = seedChoice === "yes" ? "1" : "0";
+    ensureSecretsMasterKey(env);
     writeEnvByPath(envFile, env);
     console.log(`  Wrote ${envFile} (LXK_SEED_DEV=${env.LXK_SEED_DEV})`);
   }

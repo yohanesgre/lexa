@@ -56,7 +56,7 @@ export const ENV_SECTION_ORDER = [
   "storage",
   "limits",
   "assistant",
-  "mcp",
+  "secrets",
   "logging",
   "backups",
   "dev",
@@ -85,7 +85,7 @@ section(
 );
 section(["LXK_MAX_BODY_MB", "LXK_MAX_UPLOAD_MB", "LXK_RATE_LIMIT_MAX", "LXK_RATE_LIMIT_WINDOW_MS"], "limits");
 section(["LXK_ASSISTANT_REPO_CAP", "TYPESAFE_API_KEY", "TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL"], "assistant");
-section(["LXK_MCP_MASTER_KEY", "LXK_MCP_MASTER_KEY_PREV"], "mcp");
+section(["LXK_SECRETS_MASTER_KEY", "LXK_SECRETS_MASTER_KEY_PREV"], "secrets");
 section(["LOG_LEVEL", "TANSTACK_AI_DEBUG", "TANSTACK_AI_JSON"], "logging");
 section(["LXK_BACKUP_ENABLED", "LXK_BACKUP_RETENTION"], "backups");
 section(["LXK_SEED_DEV"], "dev");

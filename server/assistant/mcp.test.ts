@@ -24,7 +24,7 @@ import {
   type McpToolCallAudit,
 } from "./mcp";
 import { buildStream, type StreamRunContext } from "./build-stream";
-import { encryptMcpSecret, mcpKeyringFromEnv, MCP_SECRET_DECRYPT_FAILED } from "./mcp-secret";
+import { encryptSecret, secretsKeyringFromEnv, SECRET_DECRYPT_FAILED } from "./secrets";
 
 const providerMock = vi.hoisted(() => ({ script: [] as Array<Record<string, unknown>> }));
 
@@ -36,7 +36,7 @@ const THIRD_PARTY_TOOL_CALL_FAILURE = "MCP tool call failed — remote error det
 // Managed-only: the legacy stored-reference hard failure and the no-key hard
 // failure, both private consts in server/assistant/mcp.ts.
 const SECRET_REF_UNSUPPORTED = "MCP secret references are no longer supported — store a managed token or clear the reference";
-const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_MCP_MASTER_KEY, which is not configured";
+const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_SECRETS_MASTER_KEY, which is not configured";
 
 // Transport capture: the live factory is the only caller of `createMCPClient`, so
 // stubbing it observes the exact transport config handed to ai-mcp 0.4.6 without
@@ -140,12 +140,12 @@ function row(overrides: Partial<McpServerRowWithSecret> = {}): McpServerRowWithS
 const MCP_TEST_KEY = Buffer.from("k".repeat(32)).toString("base64");
 const MCP_TEST_KEY_OTHER = Buffer.from("m".repeat(32)).toString("base64");
 const keyedEnv = (over: Partial<RuntimeEnv> = {}): RuntimeEnv =>
-  ({ LXK_MCP_MASTER_KEY: MCP_TEST_KEY, ...over }) as unknown as RuntimeEnv;
+  ({ LXK_SECRETS_MASTER_KEY: MCP_TEST_KEY, ...over }) as unknown as RuntimeEnv;
 
 async function sealedRow(secret: string, overrides: Partial<McpServerRowWithSecret> = {}): Promise<McpServerRowWithSecret> {
   const id = overrides.id ?? "fake";
-  const keyring = await mcpKeyringFromEnv(keyedEnv());
-  const sealed = await encryptMcpSecret(secret, id, keyring!.active, keyring!);
+  const keyring = await secretsKeyringFromEnv(keyedEnv());
+  const sealed = await encryptSecret(secret, "mcp", id, keyring!.active, keyring!);
   return row({ ...overrides, id, secret_ciphertext: sealed.ciphertextB64, secret_iv: sealed.ivB64, secret_key_id: sealed.keyId });
 }
 
@@ -610,9 +610,9 @@ describe("managed remote auth", () => {
   it("hard-fails an undecryptable blob instead of connecting anonymously", async () => {
     const r = await sealedRow("managed-secret");
     const err = await liveMcpClientFactory
-      .create(r, { env: { LXK_MCP_MASTER_KEY: MCP_TEST_KEY_OTHER } as unknown as RuntimeEnv, allowlist: null })
+      .create(r, { env: { LXK_SECRETS_MASTER_KEY: MCP_TEST_KEY_OTHER } as unknown as RuntimeEnv, allowlist: null })
       .catch((e: unknown) => e);
-    expect(err).toMatchObject({ _tag: "McpConnectFailed", message: MCP_SECRET_DECRYPT_FAILED });
+    expect(err).toMatchObject({ _tag: "McpConnectFailed", message: SECRET_DECRYPT_FAILED });
     expect(sdkMock.calls).toEqual([]);
   });
 

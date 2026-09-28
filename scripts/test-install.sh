@@ -175,6 +175,20 @@ lib_call write_env_toml "${tomldir}/noeol.toml" 'PORT=3000' >/dev/null 2>&1
 assert_grep "write_env_toml appends after missing trailing newline" '^PORT = "3000"$' "$(cat "${tomldir}/noeol.toml")"
 assert_eq "write_env_toml did not glue lines" "2" "$(wc -l < "${tomldir}/noeol.toml")"
 
+echo "== secrets_master_key_entry =="
+
+secretsdir="$(mktemp -d)"
+secrets_entry="$(lib_call secrets_master_key_entry "${secretsdir}/.env.toml")"
+assert_grep "secrets key entry names LXK_SECRETS_MASTER_KEY" '^LXK_SECRETS_MASTER_KEY=' "$secrets_entry"
+secrets_val="${secrets_entry#LXK_SECRETS_MASTER_KEY=}"
+assert_eq "generated secrets key decodes to 32 bytes" "32" "$(printf '%s' "$secrets_val" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+
+# Write it, then a second call must return the SAME value (merge/re-run preserves).
+lib_call write_env_toml "${secretsdir}/.env.toml" "$secrets_entry" >/dev/null 2>&1
+secrets_again="$(lib_call secrets_master_key_entry "${secretsdir}/.env.toml")"
+assert_eq "secrets key preserved on re-run" "$secrets_entry" "$secrets_again"
+assert_grep "written secrets key lands in .env.toml" '^LXK_SECRETS_MASTER_KEY = ".*"$' "$(cat "${secretsdir}/.env.toml")"
+
 echo "== migrate_legacy_deploy_env =="
 
 mdir="$(mktemp -d)"
@@ -196,12 +210,12 @@ assert_eq "migration skips when .env.toml exists" "absent" "$([ -f "${mdir}/.env
 # SEV1: a legacy .env carrying keys outside the installer whitelist must migrate,
 # not abort the install. These are loader-valid RuntimeEnv keys.
 migdir="$(mktemp -d)"
-printf 'LXK_MCP_MASTER_KEY=AAAA\nLOG_LEVEL=debug\nTYPESAFE_API_KEY=tf-key\nLXK_S3_BUCKET=bucket\nPORT="3100"\nLXK_API_KEY=dead\n' > "${migdir}/.env"
+printf 'LXK_SECRETS_MASTER_KEY=AAAA\nLOG_LEVEL=debug\nTYPESAFE_API_KEY=tf-key\nLXK_S3_BUCKET=bucket\nPORT="3100"\nLXK_API_KEY=dead\n' > "${migdir}/.env"
 mig_rc=0
 lib_call migrate_legacy_deploy_env "${migdir}" >/dev/null 2>&1 || mig_rc=$?
 assert_rc "migration with non-whitelist keys does not die" 0 "$mig_rc"
 mig_body="$(cat "${migdir}/.env.toml" 2>/dev/null)"
-assert_grep "migration carries LXK_MCP_MASTER_KEY" '^LXK_MCP_MASTER_KEY = "AAAA"$' "$mig_body"
+assert_grep "migration carries LXK_SECRETS_MASTER_KEY" '^LXK_SECRETS_MASTER_KEY = "AAAA"$' "$mig_body"
 assert_grep "migration carries LOG_LEVEL" '^LOG_LEVEL = "debug"$' "$mig_body"
 assert_grep "migration carries TYPESAFE_API_KEY" '^TYPESAFE_API_KEY = "tf-key"$' "$mig_body"
 assert_grep "migration carries storage key" '^LXK_S3_BUCKET = "bucket"$' "$mig_body"
@@ -381,6 +395,8 @@ assert_grep "dry-run .env.toml writes DATABASE_PATH" '^DATABASE_PATH = "/app/dat
 assert_grep "dry-run .env keeps tooling LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=latest$' "$(cat "${drydir}/lexa-deploy/.env" 2>/dev/null)"
 assert_eq "dry-run flat .env has no app keys" "0" "$(grep -c 'LXK_PUBLIC_URL' "${drydir}/lexa-deploy/.env" 2>/dev/null || true)"
 assert_eq "dry-run .env.toml mode 0600" "600" "$(stat -c %a "${drydir}/lexa-deploy/.env.toml")"
+dry_key="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${drydir}/lexa-deploy/.env.toml" | head -1)"
+assert_eq "dry-run install generates a 32-byte secrets key" "32" "$(printf '%s' "$dry_key" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
 assert_grep "dry-run marks env mount perms step" 'grant_container_read' "$dry_out"
 assert_grep "dry-run logs grant_container_read intent" '\[dry-run\] chmod 640' "$dry_out"
 
@@ -404,6 +420,34 @@ pres_body="$(cat "${presdir}/lexa-deploy/.env.toml")"
 assert_grep "re-run preserves GITHUB_APP_ID" '^GITHUB_APP_ID = "999"$' "$pres_body"
 assert_grep "re-run preserves GITHUB_PRIVATE_KEY_FILE" '^GITHUB_PRIVATE_KEY_FILE = "/app/github-app.private-key.pem"$' "$pres_body"
 assert_grep "re-run updates installer-owned LXK_PUBLIC_URL" '^LXK_PUBLIC_URL = "http://127.0.0.1:9292"$' "$pres_body"
+pres_key1="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${presdir}/lexa-deploy/.env.toml" | head -1)"
+assert_eq "re-run .env.toml carries a 32-byte secrets key" "32" "$(printf '%s' "$pres_key1" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+pres2_rc=0
+(cd "${presdir}" && INSTALL_DRY_RUN=1 PATH="${presdir}/bin:${PATH}" bash "$INSTALL" docker --port 9292 >/dev/null 2>&1) || pres2_rc=$?
+assert_rc "second re-run install.sh docker completes" 0 "$pres2_rc"
+pres_key2="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${presdir}/lexa-deploy/.env.toml" | head -1)"
+assert_eq "re-run preserves LXK_SECRETS_MASTER_KEY" "$pres_key1" "$pres_key2"
+
+echo "== dry-run never prints a master key =="
+
+# Regression: command substitution expands the key entry into step()'s argv, and
+# the dry-run branch echoes the whole argv. A preserved master key must never
+# reach stdout — it must be redacted to `=***`.
+redactdir="$(mktemp -d)"
+mkdir -p "${redactdir}/bin" "${redactdir}/lexa-deploy"
+cat > "${redactdir}/bin/docker" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+chmod +x "${redactdir}/bin/docker"
+redact_fixture="SYNTHETICMASTERKEYVALUE"
+printf 'LXK_SECRETS_MASTER_KEY = "%s"\n' "${redact_fixture}" > "${redactdir}/lexa-deploy/.env.toml"
+redact_rc=0
+redact_out="$(cd "${redactdir}" && INSTALL_DRY_RUN=1 PATH="${redactdir}/bin:${PATH}" bash "$INSTALL" docker --port 9595 2>&1)" || redact_rc=$?
+assert_rc "redaction dry-run install.sh docker completes" 0 "$redact_rc"
+assert_eq "dry-run stdout does not leak the master key" "0" "$(printf '%s' "$redact_out" | grep -c "${redact_fixture}" || true)"
+assert_grep "dry-run redacts the master key entry to =***" 'LXK_SECRETS_MASTER_KEY=\*\*\*' "$redact_out"
+assert_grep "redacted key is on the write_env_toml dry-run line" '#» DRY-RUN write_env_toml .*LXK_SECRETS_MASTER_KEY=\*\*\*' "$redact_out"
 
 echo "== installer preserves pinned tooling keys =="
 

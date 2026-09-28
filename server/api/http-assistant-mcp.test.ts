@@ -146,14 +146,14 @@ describe("MCP client registry (superadmin)", () => {
     // this suite's default env, so the capability reads false.
     expect(body.managedSecretsEnabled).toBe(false);
     expect(body).toHaveProperty("data");
-    expect(JSON.stringify(body)).not.toContain("LXK_MCP_MASTER_KEY");
+    expect(JSON.stringify(body)).not.toContain("LXK_SECRETS_MASTER_KEY");
   });
 
   it("managedSecretsEnabled is true when the server env configures a master key, and a managed save then succeeds", async () => {
     // Same env snapshot the save path reads, so the rendered capability and the
     // enforced one cannot disagree: true here, and the very next call proves
     // the feature really works.
-    process.env.LXK_MCP_MASTER_KEY = Buffer.alloc(32, 9).toString("base64");
+    process.env.LXK_SECRETS_MASTER_KEY = Buffer.alloc(32, 9).toString("base64");
     try {
       const res = await handler(authed("GET", "/api/assistant/mcp-servers"));
       expect(res.status).toBe(200);
@@ -171,7 +171,7 @@ describe("MCP client registry (superadmin)", () => {
       expect(createdBody).toMatchObject({ hasSecret: true, secretSource: "managed" });
       expect(JSON.stringify(createdBody)).not.toContain("bearer_token_for_the_keyed_server");
     } finally {
-      delete process.env.LXK_MCP_MASTER_KEY;
+      delete process.env.LXK_SECRETS_MASTER_KEY;
     }
   });
 
@@ -463,12 +463,12 @@ describe("managed MCP client secrets over HTTP", () => {
   // place a leaked value could surface, and the raw row is the only place the
   // stored ciphertext can be checked for a plaintext leak.
   afterEach(() => {
-    delete process.env.LXK_MCP_MASTER_KEY;
-    delete process.env.LXK_MCP_MASTER_KEY_PREV;
+    delete process.env.LXK_SECRETS_MASTER_KEY;
+    delete process.env.LXK_SECRETS_MASTER_KEY_PREV;
   });
 
   it("POST with a managed secret → 201, hasSecret + secretSource managed, and no value anywhere in the response", async () => {
-    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
 
     const res = await handler(authed("POST", "/api/assistant/mcp-servers", {
       label: "Managed HTTP",
@@ -495,7 +495,7 @@ describe("managed MCP client secrets over HTTP", () => {
   });
 
   it("PATCH clearSecret → 200 with hasSecret false and secretSource none, and the ciphertext row is gone", async () => {
-    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
 
     const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
       label: "Clearable",
@@ -516,7 +516,7 @@ describe("managed MCP client secrets over HTTP", () => {
   });
 
   it("PATCH secret + secretRef stores the managed token, ignores the ref, and logs one WARN", async () => {
-    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
 
     const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
       label: "Ignored Ref",
@@ -557,7 +557,7 @@ describe("managed MCP client secrets over HTTP", () => {
   });
 
   it("PATCH secretRef alone on a managed row is ignored: 200, source managed, ciphertext untouched, stored ref null, one WARN", async () => {
-    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
 
     const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
       label: "Managed Ref",
@@ -600,7 +600,7 @@ describe("managed MCP client secrets over HTTP", () => {
   });
 
   it("PATCH clearSecret + secretRef succeeds; clearSecret + secret is still refused", async () => {
-    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
 
     const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
       label: "Clearable",
@@ -635,7 +635,7 @@ describe("managed MCP client secrets over HTTP", () => {
   // The response literal is `managed | none` — a `reference` value must never
   // come back from any route.
   it("never reports secretSource reference", async () => {
-    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
     await handler(authed("POST", "/api/assistant/mcp-servers", {
       label: "Source Check",
       transportType: "http",

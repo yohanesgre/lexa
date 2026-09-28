@@ -22,12 +22,12 @@ import { type RuntimeEnv } from "../env";
 import { currentEnv } from "../runtime-env";
 import { UrlBlocked, validateUrl } from "../assistant/ssrf";
 import {
-  encryptMcpSecret,
-  mcpKeyringFromEnv,
-  mcpManagedSecretsEnabled,
-  MCP_MASTER_KEY_INVALID,
-  type McpKeyring,
-} from "../assistant/mcp-secret";
+  encryptSecret,
+  secretsKeyringFromEnv,
+  secretsManagedEnabled,
+  SECRETS_MASTER_KEY_INVALID,
+  type SecretKeyring,
+} from "../assistant/secrets";
 
 export interface McpTransportConfig {
   transportType: McpTransportType;
@@ -124,7 +124,7 @@ export const SECRET_CLEAR_CONFLICT_REJECTED =
   "clearSecret: true cannot be combined with a secret in the same request";
 
 export const SECRET_REQUIRES_MASTER_KEY =
-  "a managed MCP token needs LXK_MCP_MASTER_KEY to be set — managed secrets are disabled without it";
+  "a managed MCP token needs LXK_SECRETS_MASTER_KEY to be set — managed secrets are disabled without it";
 
 /**
  * Resolve what a write intends to do with the secret. Read from the REQUEST
@@ -220,12 +220,12 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
     // quote the key material it choked on, and `reason` is copied verbatim into
     // the 400 body. The fixed shape message names the requirement and nothing
     // else, so every import failure class reduces to it.
-    const keyringForSave = (): Effect.Effect<McpKeyring, McpInvalidTransportConfig> =>
+    const keyringForSave = (): Effect.Effect<SecretKeyring, McpInvalidTransportConfig> =>
       Effect.gen(function* () {
         const env = yield* currentEnv;
         const keyring = yield* Effect.tryPromise({
-          try: () => mcpKeyringFromEnv(env),
-          catch: () => new McpInvalidTransportConfig({ reason: MCP_MASTER_KEY_INVALID }),
+          try: () => secretsKeyringFromEnv(env),
+          catch: () => new McpInvalidTransportConfig({ reason: SECRETS_MASTER_KEY_INVALID }),
         });
         if (keyring === null) return yield* Effect.fail(new McpInvalidTransportConfig({ reason: SECRET_REQUIRES_MASTER_KEY }));
         return keyring;
@@ -240,10 +240,10 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
     const sealSecret = (
       id: string,
       plaintext: string,
-      keyring: McpKeyring
+      keyring: SecretKeyring
     ): Effect.Effect<McpSecretStorage, McpInvalidTransportConfig> =>
       Effect.tryPromise({
-        try: () => encryptMcpSecret(plaintext, id, keyring.active, keyring),
+        try: () => encryptSecret(plaintext, "mcp", id, keyring.active, keyring),
         catch: () => new McpInvalidTransportConfig({ reason: "managed MCP secret could not be encrypted" }),
       }).pipe(
         Effect.map((sealed) => ({ ciphertext: sealed.ciphertextB64, iv: sealed.ivB64, keyId: sealed.keyId }))
@@ -276,7 +276,7 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
       Effect.gen(function* () {
         const env = yield* currentEnv;
         return yield* Effect.tryPromise({
-          try: () => mcpManagedSecretsEnabled(env),
+          try: () => secretsManagedEnabled(env),
           catch: (cause) => cause,
         }).pipe(Effect.orElseSucceed(() => false));
       });

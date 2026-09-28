@@ -89,6 +89,14 @@ on_failure() {
   FAILURE_HANDLER="$1"
 }
 
+# _redact_secret_entries <text> — replace the value of any `LXK_*MASTER_KEY*=`
+# entry with `***` (covers LXK_SECRETS_MASTER_KEY and ..._PREV). Applied to the
+# dry-run argv echo: command substitution expands the key entry into step()'s
+# argv, and a master key must never reach stdout.
+_redact_secret_entries() {
+  printf '%s' "$1" | sed -E 's/(LXK_[A-Z0-9_]*MASTER_KEY[A-Z0-9_]*=)[^[:space:]]*/\1***/g'
+}
+
 # step "node-name" cmd [args...]
 # Prints the node marker, runs the command; on failure invokes the registered
 # failure handler (E-path) then dies. Happy path output stays clean.
@@ -96,7 +104,7 @@ step() {
   local name="$1"
   shift
   if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf '#» DRY-RUN %s\n' "$*"
+    printf '#» DRY-RUN %s\n' "$(_redact_secret_entries "$*")"
   else
     printf '#» %s\n' "$name"
   fi
@@ -209,7 +217,7 @@ verify_checksum() {
 # compose itself interpolates.
 # Keys the app no longer reads — migration drops them, never carries them.
 # ---------------------------------------------------------------------------
-ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
+ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET LXK_SECRETS_MASTER_KEY COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
 ENV_FILE_DEAD_KEYS=" VITE_LXK_API_KEY LXK_API_KEY LXK_ACCESS_AUD LXK_ACCESS_TEAM LXK_RUNTIME_DAEMON_TOKEN LXK_RUNTIME_REPO_CAP RUNTIME_STALE_RUN_MIN "
 # Compose-tooling keys: compose itself interpolates these from the flat `.env`,
 # so migration must NOT move them into `.env.toml` (that would drop the compose
@@ -407,7 +415,7 @@ write_env_toml() {
 # write_env_toml_loader <path> <key=value...>
 # Migration write path: accepts every key the loader can represent
 # (^[A-Z][A-Z0-9_]*$), not just the installer whitelist, so a legacy `.env`
-# carrying LXK_MCP_MASTER_KEY / LOG_LEVEL / TYPESAFE_* / storage keys survives.
+# carrying LXK_SECRETS_MASTER_KEY / LOG_LEVEL / TYPESAFE_* / storage keys survives.
 write_env_toml_loader() {
   local path="$1"
   shift
@@ -475,6 +483,20 @@ env_file_value() {
   line="${line#*=}"
   line="${line#"${line%%[![:space:]]*}"}"
   dotenv_raw_value "$line"
+}
+
+# secrets_master_key_entry <path>
+# `LXK_SECRETS_MASTER_KEY=<value>` for the installer write path. The file's
+# existing value is kept when present (merge preserves an operator/previous key
+# verbatim), otherwise a fresh 32-byte base64 key is generated. A brand-new
+# install therefore always ships a key; a re-run never rotates it.
+secrets_master_key_entry() {
+  local path="$1" existing=""
+  existing="$(env_file_value "$path" LXK_SECRETS_MASTER_KEY || true)"
+  if [ -z "$existing" ]; then
+    existing="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+  fi
+  printf 'LXK_SECRETS_MASTER_KEY=%s\n' "$existing"
 }
 
 # migrate_legacy_deploy_env <dir>

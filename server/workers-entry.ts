@@ -82,10 +82,11 @@ export interface WorkersEnv {
   TYPESAFE_API_KEY?: string;
   TYPESAFE_BASE_URL?: string;
   TYPESAFE_DEFAULT_MODEL?: string;
-  // Managed MCP secrets: the AES-GCM envelope key pair. Optional — an unset
-  // active key disables managed secrets and leaves env:/file: refs as-is.
-  LXK_MCP_MASTER_KEY?: string;
-  LXK_MCP_MASTER_KEY_PREV?: string;
+  // Managed secrets: the AES-GCM envelope key pair shared by MCP tokens,
+  // provider keys, and Jev. Optional — an unset active key disables managed
+  // secrets and leaves env:/file: refs as-is.
+  LXK_SECRETS_MASTER_KEY?: string;
+  LXK_SECRETS_MASTER_KEY_PREV?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
 }
