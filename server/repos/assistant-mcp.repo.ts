@@ -69,11 +69,11 @@ export interface McpServerPublic {
   updatedAt: string;
 }
 
-// Which of the two sources a stored client authenticates with. Exactly-one
-// source is enforced on every write, so a client is managed XOR reference;
-// "none" is a legal, deliberately secret-less client. The managed arm wins when
-// a row somehow holds both, because the ciphertext is authoritative on read.
-export type McpSecretSource = "managed" | "reference" | "none";
+// Managed-only (maintainer decision 2026-09-28): a client either authenticates
+// with an envelope-encrypted managed token, or it is deliberately secret-less.
+// The legacy `reference` arm is gone; `row.secret_ref` is never a credential
+// any more and is ignored on read (and cleared on every write).
+export type McpSecretSource = "managed" | "none";
 
 export interface ProjectMcpServerPublic {
   projectId: string;
@@ -93,7 +93,6 @@ export interface CreateMcpServerInput {
   url: string | null;
   command: string | null;
   args: string[];
-  secretRef: string | null;
   enabled: boolean;
 }
 
@@ -103,7 +102,6 @@ export interface UpdateMcpServerInput {
   url?: string | null;
   command?: string | null;
   args?: string[];
-  secretRef?: string | null;
   enabled?: boolean;
 }
 
@@ -118,14 +116,12 @@ export function parseArgs(raw: string | null | undefined): string[] {
 }
 
 // Boundary mapper: the raw row never crosses the API. `secret_ref` is dropped
-// entirely and replaced with hasSecret + secretSource — the secret reference
+// entirely and replaced with hasSecret + secretSource — the legacy reference
 // must never be serialized, logged, or echoed, and neither may the ciphertext.
-// `hasSecret` is true for EITHER source; `secretSource` says which one, so the
-// UI can render the right branch and a clear affordance without ever being
-// handed a value.
+// Managed-only: `hasSecret` is true exactly when a ciphertext row exists, and
+// `row.secret_ref` is deliberately ignored (a stale value is not a credential).
 export function toPublic(row: McpServerRowWithSecret): McpServerPublic {
   const managed = row.secret_ciphertext !== null;
-  const reference = !managed && row.secret_ref !== null && row.secret_ref !== "";
   return {
     id: row.id,
     label: row.label,
@@ -133,8 +129,8 @@ export function toPublic(row: McpServerRowWithSecret): McpServerPublic {
     url: row.url,
     command: row.command,
     args: parseArgs(row.args),
-    hasSecret: managed || reference,
-    secretSource: managed ? "managed" : reference ? "reference" : "none",
+    hasSecret: managed,
+    secretSource: managed ? "managed" : "none",
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -173,15 +169,14 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
       create: (input: CreateMcpServerInput): Effect.Effect<McpServerRowWithSecret, DbError | ConstraintViolation> =>
         run(
           db,
-          `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, enabled)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           input.id,
           input.label,
           input.transportType,
           input.url,
           input.command,
           JSON.stringify(input.args),
-          input.secretRef,
           input.enabled ? 1 : 0
         ).pipe(
           Effect.flatMap(() => queryFirst<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} WHERE s.id = ?`, input.id)),
@@ -199,12 +194,16 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
           if (patch.url !== undefined) { sets.push("url = ?"); params.push(patch.url); }
           if (patch.command !== undefined) { sets.push("command = ?"); params.push(patch.command); }
           if (patch.args !== undefined) { sets.push("args = ?"); params.push(JSON.stringify(patch.args)); }
-          if (patch.secretRef !== undefined) { sets.push("secret_ref = ?"); params.push(patch.secretRef); }
           if (patch.enabled !== undefined) { sets.push("enabled = ?"); params.push(patch.enabled ? 1 : 0); }
           if (sets.length === 0) {
             const current = yield* queryFirst<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} WHERE s.id = ?`, id);
             return current;
           }
+          // Managed-only cleanup: every write nulls the legacy `secret_ref`
+          // unconditionally, so a stale reference can never survive an edit.
+          // The column stays (D1 cannot drop it), but nothing reads or writes a
+          // value into it any more.
+          sets.push("secret_ref = NULL");
           sets.push("updated_at = datetime('now')");
           params.push(id);
           yield* run(db, `UPDATE assistant_mcp_servers SET ${sets.join(", ")} WHERE id = ?`, ...params);

@@ -18,7 +18,7 @@ import {
   McpInvalidTransportConfig,
   McpServerNotFound,
 } from "../api/errors";
-import { isRuntimeEnvStringKey, type RuntimeEnv } from "../env";
+import { type RuntimeEnv } from "../env";
 import { currentEnv } from "../runtime-env";
 import { UrlBlocked, validateUrl } from "../assistant/ssrf";
 import {
@@ -26,7 +26,6 @@ import {
   mcpKeyringFromEnv,
   mcpManagedSecretsEnabled,
   MCP_MASTER_KEY_INVALID,
-  MCP_SECRET_REF_DENYLIST,
   type McpKeyring,
 } from "../assistant/mcp-secret";
 
@@ -35,7 +34,6 @@ export interface McpTransportConfig {
   url: string | null;
   command: string | null;
   args: string[];
-  secretRef: string | null;
 }
 
 export type McpValidationResult =
@@ -62,11 +60,9 @@ export interface McpCreateInput {
   url?: string | null;
   command?: string | null;
   args?: string[];
-  secretRef?: string | null;
   /**
    * A managed Bearer token, stored as AES-256-GCM ciphertext. Write-only: it
-   * is never returned, logged, or echoed. A non-empty value is a second source
-   * of truth, so it is legal only when `secretRef` is absent.
+   * is never returned, logged, or echoed. Managed-only since 2026-09-28.
    */
   secret?: string | null;
   enabled?: boolean;
@@ -78,14 +74,13 @@ export interface McpUpdateInput {
   url?: string | null;
   command?: string | null;
   args?: string[];
-  secretRef?: string | null;
-  /** A managed Bearer token replacing whatever source is stored. Write-only. */
+  /** A managed Bearer token replacing whatever is stored. Write-only. */
   secret?: string | null;
   /**
-   * The only removal route: `true` nulls the stored reference AND deletes the
-   * ciphertext row. An omitted or empty `secret`/`secretRef` means "keep" — an
-   * empty string is not a way to clear, so a UI cannot wipe a secret by saving
-   * a blank field. Needs no master key (a row delete, no crypto).
+   * The only removal route: `true` deletes the ciphertext row. An omitted or
+   * empty `secret` means "keep" — an empty string is not a way to clear, so a
+   * UI cannot wipe a secret by saving a blank field. Needs no master key (a
+   * row delete, no crypto).
    */
   clearSecret?: boolean;
   enabled?: boolean;
@@ -103,13 +98,6 @@ export const STDIO_TRANSPORT_REJECTED = "transportType 'stdio' is not supported 
 // A blank `command` is the one exception: it is absent, not a process request.
 export const PROCESS_FIELDS_REJECTED = "command/args are not supported for http/sse transports — MCP clients connect to remote servers only";
 
-// Save-time allowlist for `env:NAME` (maintainer decision 2026-09-28: the fixed
-// RuntimeEnv snapshot, no dedicated MCP secret namespace). A name outside the
-// snapshot can never resolve, so it is refused here instead of being stored and
-// silently failing at connect. `file:` refs are unaffected (Bun-only, unchanged).
-export const envSecretRefReason = (name: string): string =>
-  `secretRef 'env:${name}' is not a RuntimeEnv key — env references resolve only fixed runtime environment keys`;
-
 // Wire compat: `command: ""` (or whitespace) meant "no command" before the
 // remote-only rule and was stored as null, so a blank value is absent, not a
 // process request. Non-blank commands are still refused.
@@ -122,32 +110,18 @@ export const blankCommand = (command: string | null | undefined): string | null 
 export const blankSecret = (secret: string | null | undefined): string | null =>
   secret === null || secret === undefined || secret.trim() === "" ? null : secret;
 
-// A `secret_ref` may never name a master key: `env:LXK_MCP_MASTER_KEY` would
-// forward the envelope key itself as a Bearer token to a remote server. The
-// master keys ARE fixed RuntimeEnv slots, so the allowlist above would otherwise
-// accept them. Checked at save AND again at connect (server/assistant/mcp.ts),
-// because a row written before this rule existed must not forward a key either.
-export const denylistedSecretRefReason = (name: string): string =>
-  `secretRef 'env:${name}' names an MCP master key and is never a client credential`;
-
-// Exactly-one-source normalize. A managed token and a `secretRef` are two ways
-// to say the same thing, and letting both persist means the connect path has to
-// guess which one authenticates. Neither is also legal: secret-less clients
-// exist today and must keep saving. Refusing only the BOTH case keeps the rule
-// small enough to enforce at every write.
+// What a write intends to do with the credential. Managed-only: either a
+// managed token is stored, it is explicitly cleared, or this request says
+// nothing about it. A secret-less client is the `none` case.
 export type McpSecretIntent =
   | { kind: "none" }
   | { kind: "clear" }
-  | { kind: "managed"; secret: string }
-  | { kind: "reference"; secretRef: string };
+  | { kind: "managed"; secret: string };
 
 export type McpSecretIntentResult = { ok: true; intent: McpSecretIntent } | { ok: false; reason: string };
 
-export const SECRET_BOTH_SOURCES_REJECTED =
-  "a managed token and a secretRef are mutually exclusive — store exactly one source (or neither)";
-
 export const SECRET_CLEAR_CONFLICT_REJECTED =
-  "clearSecret: true cannot be combined with a secret or a secretRef in the same request";
+  "clearSecret: true cannot be combined with a secret in the same request";
 
 export const SECRET_REQUIRES_MASTER_KEY =
   "a managed MCP token needs LXK_MCP_MASTER_KEY to be set — managed secrets are disabled without it";
@@ -158,26 +132,18 @@ export const SECRET_REQUIRES_MASTER_KEY =
  * as a side effect of an unrelated patch (the legacy-freeze lesson).
  *
  * `clearSecret: true` is the only removal route, and a confirm dialog sends it
- * alone — carrying it together with a new value is refused rather than silently
+ * alone — carrying it together with a new token is refused rather than silently
  * resolved, so a UI bug can never erase one and store the other in one breath.
  */
-export function normalizeSecretIntent(input: { secret?: string | null; secretRef?: string | null; clearSecret?: boolean | undefined }): McpSecretIntentResult {
+export function normalizeSecretIntent(input: { secret?: string | null; clearSecret?: boolean | undefined }): McpSecretIntentResult {
   const secret = blankSecret(input.secret);
-  const secretRef = blankReference(input.secretRef);
   if (input.clearSecret === true) {
-    if (secret !== null || secretRef !== null) return { ok: false, reason: SECRET_CLEAR_CONFLICT_REJECTED };
+    if (secret !== null) return { ok: false, reason: SECRET_CLEAR_CONFLICT_REJECTED };
     return { ok: true, intent: { kind: "clear" } };
   }
-  if (secret !== null && secretRef !== null) return { ok: false, reason: SECRET_BOTH_SOURCES_REJECTED };
   if (secret !== null) return { ok: true, intent: { kind: "managed", secret } };
-  if (secretRef !== null) return { ok: true, intent: { kind: "reference", secretRef } };
   return { ok: true, intent: { kind: "none" } };
 }
-
-// `secretRef: ""` means "no reference" (an empty field), not a reference to the
-// empty name; the same absent-not-value rule as the token.
-export const blankReference = (ref: string | null | undefined): string | null =>
-  ref === null || ref === undefined || ref.trim() === "" ? null : ref;
 
 // Pure shape checks — unit-testable without DNS or a network. The accepted
 // branch returns the narrowed transport so every write carries
@@ -201,20 +167,6 @@ export function validateTransportConfig(config: McpTransportConfig): McpValidati
   }
   if (blankCommand(config.command) !== null || config.args.length > 0)
     return { ok: false, reason: PROCESS_FIELDS_REJECTED };
-  if (config.secretRef !== null) {
-    if (!/^env:[A-Z0-9_]+$/.test(config.secretRef) && !/^file:\//.test(config.secretRef)) {
-      return { ok: false, reason: "secretRef must be 'env:NAME' or 'file:/absolute/path'" };
-    }
-    if (config.secretRef.startsWith("env:")) {
-      const name = config.secretRef.slice(4);
-      if (!isRuntimeEnvStringKey(name)) return { ok: false, reason: envSecretRefReason(name) };
-      // The master keys are fixed RuntimeEnv slots, so the allowlist accepts
-      // them; without this they would be forwardable as Bearer credentials.
-      if ((MCP_SECRET_REF_DENYLIST as readonly string[]).includes(name)) {
-        return { ok: false, reason: denylistedSecretRefReason(name) };
-      }
-    }
-  }
   return { ok: true, transportType: config.transportType, url: config.url };
 }
 
@@ -329,9 +281,9 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
         }).pipe(Effect.orElseSucceed(() => false));
       });
 
-    // Exactly-one source, applied BEFORE any write: a refused payload leaves
-    // the registry untouched, so the two-source case can never half-apply.
-    const resolveIntent = (input: { secret?: string | null; secretRef?: string | null; clearSecret?: boolean | undefined }) =>
+    // Intent normalized BEFORE any write: a refused payload leaves the registry
+    // untouched, so a clear/secret conflict can never half-apply.
+    const resolveIntent = (input: { secret?: string | null; clearSecret?: boolean | undefined }) =>
       Effect.gen(function* () {
         const result = normalizeSecretIntent(input);
         if (!result.ok) return yield* Effect.fail(new McpInvalidTransportConfig({ reason: result.reason }));
@@ -349,14 +301,11 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
         // non-blank command or non-empty args fails with
         // MCP_INVALID_TRANSPORT_CONFIG instead of being dropped on the floor.
         // A blank command normalizes to null here, so the row stores null.
-        // secretRef is whatever the intent says — a managed create stores null
-        // there, because the credential lives in the ciphertext row.
         const config: McpTransportConfig = {
           transportType: input.transportType,
           url: input.transportType === "http" || input.transportType === "sse" ? input.url ?? null : null,
           command: blankCommand(input.command),
           args: input.args ?? [],
-          secretRef: intent.kind === "reference" ? intent.secretRef : null,
         };
         const transportType = yield* validateAndGuard(config);
         // A managed create with no master key is refused BEFORE the registry row
@@ -378,7 +327,6 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
           // Proven empty by the validator; the 0009 CHECK requires it anyway.
           command: null,
           args: config.args,
-          secretRef: config.secretRef,
           enabled: input.enabled === true,
         });
         if (sealed !== null) yield* repo.putSecret(id, sealed);
@@ -392,43 +340,26 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
       Effect.gen(function* () {
         const existing = yield* requireRow(id);
         const intent = yield* resolveIntent(patch);
-        // Only the request decides the process fields and the secret source: a
-        // value supplied here is validated (and refused when illegal), while any
-        // legacy value already stored is passed through by the write rather than
-        // blocking an unrelated patch. The stored ref is unresolvable either way
-        // (an `env:` name outside the snapshot) and the connect path fails closed
-        // with no header, so re-validating it would only freeze the row.
+        // Only the request decides the process fields: a value supplied here is
+        // validated (and refused when illegal), while any legacy value already
+        // stored is normalized away by the write rather than blocking an
+        // unrelated patch. The stored `secret_ref` is never read as a credential
+        // (the connect path hard-fails on one) and is nulled by every write.
         const merged: McpTransportConfig = {
           transportType: patch.transportType ?? existing.transport_type,
           url: patch.url !== undefined ? patch.url : existing.url,
           command: blankCommand(patch.command),
           args: patch.args ?? [],
-          secretRef: intent.kind === "reference" ? intent.secretRef : null,
         };
         const transportType = yield* validateAndGuard(merged);
-        // The stored reference passes through untouched unless this request
-        // REPLACES it with the other source or clears it — an unrelated patch
-        // must never silently drop a credential (the legacy-freeze lesson, now
-        // for managed secrets too). Choosing a managed token is exactly such a
-        // replacement: the ciphertext row is about to be written, so keeping the
-        // ref would leave a row carrying BOTH sources and a stale credential
-        // behind in a column nothing reads any more.
-        const nextSecretRef =
-          intent.kind === "reference"
-            ? intent.secretRef
-            : intent.kind === "clear" || intent.kind === "managed"
-              ? null
-              : existing.secret_ref;
         const keyring = intent.kind === "managed" ? yield* keyringForSave() : null;
         // A managed update seals the token FIRST and writes the ciphertext row
-        // BEFORE the registry write that nulls `secret_ref`. A fault between the
-        // two leaves the stored reference intact — a client that still
-        // authenticates with its old credential — where the reverse order would
-        // leave a row with NO credential at all: a silent anonymous connect, the
-        // exact failure this feature exists to prevent. The transient
-        // both-sources state is safe by construction: the read path treats
-        // present ciphertext as authoritative, so the client authenticates with
-        // the token just entered, never with the stale ref.
+        // BEFORE the registry write. A fault between the two leaves the previous
+        // credential intact — a client that still authenticates with its old
+        // token — where the reverse order would leave a row with NO credential
+        // at all: a silent anonymous connect, the exact failure this feature
+        // exists to prevent. The registry write always nulls the legacy
+        // `secret_ref` (repo.update), so no stale reference can survive an edit.
         const sealed = intent.kind === "managed" && keyring !== null
           ? yield* sealSecret(id, intent.secret, keyring)
           : null;
@@ -439,13 +370,12 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
           url: merged.url,
           command: null,
           args: merged.args,
-          secretRef: nextSecretRef,
           enabled: patch.enabled !== undefined ? patch.enabled : existing.enabled === 1,
         }).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new McpServerNotFound({ id }))));
-        // Exactly-one source: choosing one deletes the other. The clear path is
-        // a pure row delete and needs no master key, so a superadmin can always
-        // revoke a credential even on a deployment whose key is gone.
-        if (intent.kind === "reference" || intent.kind === "clear") yield* repo.deleteSecret(id);
+        // The clear path is a pure row delete and needs no master key, so a
+        // superadmin can always revoke a credential even on a deployment whose
+        // key is gone.
+        if (intent.kind === "clear") yield* repo.deleteSecret(id);
         return toPublic(yield* requireWrittenRow(id));
       });
 

@@ -11,7 +11,7 @@ import {
   type ToolAnnotations,
 } from "@tanstack/ai-mcp";
 import { McpConnectFailed, McpToolCallFailed } from "../api/errors";
-import { isWorkers, resolveSecretRef, type RuntimeEnv } from "../env";
+import { isWorkers, type RuntimeEnv } from "../env";
 import {
   MCP_CLIENT_TRANSPORTS,
   type McpClientTransportType,
@@ -25,7 +25,6 @@ import {
   MCP_SECRET_DECRYPT_FAILED as SECRET_DECRYPT_FAILED,
   MCP_SECRET_KEY_ID_ACTIVE,
   MCP_SECRET_KEY_ID_PREV,
-  MCP_SECRET_REF_DENYLIST,
   type McpSecretKeyId,
 } from "./mcp-secret";
 import { validateUrl } from "./ssrf";
@@ -353,17 +352,17 @@ export function isRemoteMcpTransport(transportType: McpTransportType): transport
 export const UNSUPPORTED_TRANSPORT_REASON = "MCP clients connect to remote http/sse servers only — local process transport is not supported";
 
 // A resolved credential is opaque bytes, but an HTTP header is not: a value with
-// CR/LF/NUL (a multiline PEM from an allowlisted key, or a `file:` read) is
-// rejected by fetch with a TypeError whose message quotes the value verbatim —
-// which would then reach stderr and the test-report body. Refuse the value here,
-// before the factory or the SDK ever sees it, with a message naming no secret.
+// CR/LF/NUL (a multiline PEM stored as a managed token) is rejected by fetch with
+// a TypeError whose message quotes the value verbatim — which would then reach
+// stderr and the test-report body. Refuse the value here, before the factory or
+// the SDK ever sees it, with a message naming no secret.
 const SECRET_NOT_SINGLE_LINE = "resolved MCP secret cannot be sent in an HTTP header; use a single-line token";
 
-// A stored reference that names a master key is refused again at connect, not
-// only at save: a row written before the denylist existed (or by hand) would
-// otherwise forward the envelope key itself as a Bearer token to a remote
-// server. Fixed message, no echo of the name.
-const SECRET_REF_DENIED = "MCP secret reference names a master key and is refused as a client credential";
+// A stored reference is no longer a supported credential. This is the legacy
+// fail-closed branch: a row whose `secret_ref` is set (and has no managed
+// ciphertext) must NOT connect anonymously, because an unauthenticated client
+// looks identical to a working one. Fixed message, no echo of the ref.
+const SECRET_REF_UNSUPPORTED = "MCP secret references are no longer supported — store a managed token or clear the reference";
 
 // An undecryptable managed blob is a HARD failure, never a silent no-header
 // connect: a client that quietly authenticates as anonymous looks identical to
@@ -378,14 +377,10 @@ const SECRET_REF_DENIED = "MCP secret reference names a master key and is refuse
 // failure — the same silent-anonymous trap.
 const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_MCP_MASTER_KEY, which is not configured";
 
-function isDenylistedSecretRef(ref: string): boolean {
-  return ref.startsWith("env:") && (MCP_SECRET_REF_DENYLIST as readonly string[]).includes(ref.slice(4));
-}
-
 // The managed blob is decrypted exactly here, at connect — never in the repo,
 // the service, or a public shape. A keyring is built from the same RuntimeEnv
-// snapshot the reference branch reads, so a Workers per-request binding and the
-// Bun process env behave identically.
+// snapshot the save path reads, so a Workers per-request binding and the Bun
+// process env behave identically.
 async function resolveManagedSecret(row: McpServerRowWithSecret, secret: ManagedSecretCellsOk, env: RuntimeEnv): Promise<string> {
   const keyring = await mcpKeyringFromEnv(env).catch(() => {
     // A configured-but-malformed key throws the fixed shape message; it is a
@@ -428,11 +423,15 @@ function managedSecretCells(row: McpServerRowWithSecret): ManagedSecretCells {
   return { present: true, cells: { ciphertextB64: secret_ciphertext, ivB64: secret_iv, keyId: secret_key_id } };
 }
 
-// `secret_ref` names a credential, never one. The resolved value goes out as the
-// single `Authorization: Bearer` header and is never returned or logged; an
-// absent or unresolvable reference connects with no headers at all. A stored
-// ciphertext is authoritative and short-circuits the reference branch, so a
-// client can never send two credentials.
+// Managed-only: the decrypted token is the single `Authorization: Bearer`
+// header and is never returned or logged. Precedence is explicit — a present
+// ciphertext is authoritative and wins outright; a legacy `secret_ref` beside
+// it is never consulted. `secret_ref` is only fatal when NO ciphertext exists,
+// because it is no longer resolvable and connecting without the credential it
+// names would be indistinguishable from a working client. Neither branch ever
+// connects anonymously: an unopenable ciphertext hard-fails too, and which
+// branch fired is decided by the ciphertext alone. A genuinely secret-less row
+// (neither ciphertext nor ref) connects with no headers at all.
 async function remoteTransportFor(
   row: McpServerRowWithSecret,
   opts: { env: RuntimeEnv; allowlist: string | null }
@@ -446,11 +445,8 @@ async function remoteTransportFor(
   if (managed.present) {
     if (managed.cells === null) throw new McpConnectFailed({ message: SECRET_DECRYPT_FAILED });
     secret = await resolveManagedSecret(row, managed.cells, opts.env);
-  } else {
-    if (row.secret_ref !== null && isDenylistedSecretRef(row.secret_ref)) {
-      throw new McpConnectFailed({ message: SECRET_REF_DENIED });
-    }
-    secret = resolveSecretRef(row.secret_ref, opts.env);
+  } else if (row.secret_ref !== null && row.secret_ref !== "") {
+    throw new McpConnectFailed({ message: SECRET_REF_UNSUPPORTED });
   }
   if (secret !== null && /[\r\n\0]/.test(secret)) throw new McpConnectFailed({ message: SECRET_NOT_SINGLE_LINE });
   const base = {

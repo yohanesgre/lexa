@@ -35,7 +35,6 @@ const HTTP = {
   url: "https://mcp.example.com",
   command: null,
   args: ["--header"],
-  secretRef: null,
   enabled: true,
 };
 
@@ -73,7 +72,6 @@ describe("AssistantMcpRepo", () => {
       url: "https://mcp.example.com/v2",
       command: null,
       args: [],
-      secretRef: "env:LOCAL_TOKEN",
       enabled: false,
     }));
     expect(updated.label).toBe("Web v2");
@@ -81,7 +79,7 @@ describe("AssistantMcpRepo", () => {
     expect(updated.url).toBe("https://mcp.example.com/v2");
     expect(updated.command).toBeNull();
     expect(updated.args).toBe("[]");
-    expect(updated.secret_ref).toBe("env:LOCAL_TOKEN");
+    expect(updated.secret_ref).toBeNull();
     expect(updated.enabled).toBe(0);
     expect(updated.updated_at).not.toBe("2000-01-01 00:00:00");
   });
@@ -177,20 +175,31 @@ describe("AssistantMcpRepo", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_project_servers").get()).toEqual({ n: 0 });
   });
 
-  it("toPublic never returns secret_ref — only hasSecret", async () => {
+  it("never writes secret_ref; any update nulls a legacy stored value", async () => {
     setup();
-    await Effect.runPromise(repo.create({ ...HTTP, secretRef: "env:MY_SECRET_TOKEN" }));
-    const raw = await Effect.runPromise(repo.getById("web"));
+    const created = await Effect.runPromise(repo.create(HTTP));
+    expect(created.secret_ref).toBeNull();
+
+    db.exec(`UPDATE assistant_mcp_servers SET secret_ref = 'env:STALE' WHERE id = 'web'`);
+    const updated = await Effect.runPromise(repo.update("web", { label: "Web v2" }));
+    expect(updated.secret_ref).toBeNull();
+  });
+
+  it("toPublic ignores a raw legacy secret_ref and never returns the ref", async () => {
+    setup();
+    db.exec(
+      `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
+       VALUES ('legacy-ref', 'Legacy', 'http', 'https://mcp.example.com', NULL, '[]', 'env:MY_SECRET_TOKEN', 1)`
+    );
+    const raw = await Effect.runPromise(repo.getById("legacy-ref"));
     expect(raw.secret_ref).toBe("env:MY_SECRET_TOKEN");
 
     const pub = toPublic(raw);
-    expect(pub.hasSecret).toBe(true);
-    expect(pub.secretSource).toBe("reference");
+    // A stored reference is no longer a credential: only ciphertext counts.
+    expect(pub.hasSecret).toBe(false);
+    expect(pub.secretSource).toBe("none");
     expect(JSON.stringify(pub)).not.toContain("MY_SECRET_TOKEN");
     expect("secret_ref" in pub).toBe(false);
-
-    const noSecret = toPublic({ ...raw, secret_ref: null });
-    expect(noSecret.hasSecret).toBe(false);
-    expect(noSecret.secretSource).toBe("none");
+    expect("secretRef" in pub).toBe(false);
   });
 });

@@ -198,24 +198,26 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   key is bound: `wrangler secret put TYPESAFE_API_KEY` (plus optional
   `TYPESAFE_BASE_URL` / `TYPESAFE_DEFAULT_MODEL` as vars, both defaulted
   server-side). With no key bound the layer stays disabled and costs nothing.
-  Note it is one of the fixed `RuntimeEnv` string slots, so an MCP client
-  `secret_ref` of `env:TYPESAFE_API_KEY` resolves it — superadmin-only, and it
-  forwards the key as a Bearer token to that client's URL.
 - `GITHUB_PRIVATE_KEY_FILE` (path-based PEM) **impossible** — no filesystem. Use
   inline `GITHUB_PRIVATE_KEY` secret (already supported per `docs/GITHUB_SETUP.md`).
-- **Managed MCP client secrets** (a Bearer token entered in the webapp rather
-  than referenced) work natively here — which is the point, since Workers has no
-  per-client auth path other than a bound secret. Both envelope keys are ordinary
-  Workers secrets:
+- **Managed MCP client secrets** (a Bearer token entered in the webapp) work
+  natively here — which is the point, since Workers has no per-client auth path
+  other than a bound secret. The managed token is the **only** credential
+  source: the `env:`/`file:` reference mode was removed on 2026-09-28. Both
+  envelope keys are ordinary Workers secrets:
   ```bash
   wrangler secret put LXK_MCP_MASTER_KEY        # base64 of exactly 32 bytes
   wrangler secret put LXK_MCP_MASTER_KEY_PREV   # optional: rotation read path only
   ```
-  With no `LXK_MCP_MASTER_KEY` bound, managed tokens are **disabled** — the save
-  is refused with `MCP_INVALID_TRANSPORT_CONFIG` and `env:`/`file:` references
-  behave exactly as before, so this is optional configuration, not a requirement.
-  See `docs/DEPLOYMENT.md` (variable reference, rotation) and `docs/BACKUPS.md`
-  (the key must never be co-located with D1 exports).
+  `LXK_MCP_MASTER_KEY` is **required to store a token**: with no key bound, a
+  save carrying a token is refused with `MCP_INVALID_TRANSPORT_CONFIG`, while a
+  secret-less client (no token at all) remains legal and connects with no
+  `Authorization` header. An already-stored token is **never silently dropped** —
+  it keeps `hasSecret: true` and hard-fails at connect until the key is restored
+  or the token is cleared. Clearing needs no key (`clearSecret: true` is a pure
+  row delete, so a credential can always be revoked even on a key-less
+  deployment). See `docs/DEPLOYMENT.md` (variable reference, rotation) and
+  `docs/BACKUPS.md` (the key must never be co-located with D1 exports).
   - **Crypto parity caveat:** encryption is AES-256-GCM through
     `crypto.subtle` with a 12-byte IV and a 128-bit tag, chosen because it is
     the only AEAD both Bun and workerd expose (XChaCha20/ChaCha20 are absent on
@@ -232,6 +234,12 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
     `LXK_MCP_MASTER_KEY_PREV` with no rewrap.
 - Migrations: `wrangler d1 migrations create/apply`; seed via
   `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
+  Migration `0012_remove_mcp_secret_refs.sql` (a single `UPDATE` clearing the
+  legacy `secret_ref` column) must be applied **with or before** the build that
+  removes reference mode: reference resolution is gone in code, so an
+  un-migrated row with a stored ref refuses to connect with a hard
+  `MCP_CONNECT_FAILED` (never an anonymous connect) until it is cleared — the
+  migration clears every row, and any write to a client nulls its ref too.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it; the
   old `lexa-cli deploy` compose flow is gone (removed in cli-v2026.2.0).
 - The AI path is fully in-process (the agent-runtime tier is removed) — no

@@ -4,7 +4,6 @@ import { useMcpServers, useMcpManagedSecrets, useCreateMcpServer, useUpdateMcpSe
 import type { McpServer } from "../../lib/api";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import {
-  MCP_SECRET_MODES,
   MCP_TRANSPORTS,
   canSubmitMcpForm,
   endpointOf,
@@ -14,9 +13,7 @@ import {
   slugifyMcpId,
   toolCountsLabel,
   withSecretField,
-  withSecretMode,
   type McpFormState,
-  type McpSecretMode,
   type McpTestState,
 } from "./assistant-mcp-logic";
 
@@ -35,8 +32,10 @@ export function AssistantMcpSection() {
   // Tri-state, kept to the render: true (key present), false (the server said
   // it is absent), undefined (unanswered — in flight, or a failed list request,
   // which never retries). Only `false` is a fact the warning notice may state;
-  // the managed option is not selectable until the answer is `true`, because
-  // offering it early would only produce a save the API refuses.
+  // the token field is disabled until the answer is `true`, because offering it
+  // early would only produce a save the API refuses. A stored token stays
+  // visible and clearable regardless. The two hooks share one query key, so the
+  // flag and the rows always describe the same read.
   const { data: managedSecretsEnabled } = useMcpManagedSecrets();
   const update = useUpdateMcpServer();
   const remove = useDeleteMcpServer();
@@ -217,10 +216,10 @@ function McpClientForm({ editing, managedSecretsEnabled, onCancel }: { editing: 
   const derivedId = editing ? editing.id : slugifyMcpId(state.label);
   const set = <K extends keyof McpFormState>(key: K, value: McpFormState[K]) => setState((prev) => ({ ...prev, [key]: value }));
 
-  const managed = state.secretMode === "managed";
-  // secret_ref and the ciphertext row are both write-only: the list/detail
-  // response carries hasSecret + secretSource and nothing else, so the chip is
-  // a fixed-width mask — never a value, a name, a path, or a suffix.
+  const tokenEnabled = managedSecretsEnabled === true;
+  // The stored secret and its ciphertext row are both write-only: the
+  // list/detail response carries hasSecret + secretSource and nothing else, so
+  // the chip is a fixed-width mask — never a value, a name, a path, or a suffix.
   const hasSecret = (editing?.hasSecret ?? false) && !state.clearPending;
 
   const handleSave = () => {
@@ -267,86 +266,53 @@ function McpClientForm({ editing, managedSecretsEnabled, onCancel }: { editing: 
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="mcp-url">URL</label>
           <input id="mcp-url" className="prop-input w-full font-mono" placeholder="https://mcp.linear.example/mcp" value={state.url} onChange={(e) => set("url", e.target.value)} />
-          <div className="field-hint">http(s) only · no userinfo · SSRF-checked against the URL allowlist at save and connect.</div>
+          <div className="field-hint">http(s) URLs only.</div>
         </div>
-      </div>
-
-      <div className="field mt-3" style={{ marginBottom: 0 }}>
-        <label className="field-label" htmlFor="mcp-secret-source">Secret source</label>
-        <select
-          id="mcp-secret-source"
-          className="prop-input"
-          style={{ width: 240, height: 32, fontSize: 12 }}
-          value={state.secretMode}
-          onChange={(e) => setState((prev) => withSecretMode(prev, e.target.value as McpSecretMode))}
-        >
-          {MCP_SECRET_MODES.map((m) => <option key={m.value} value={m.value} disabled={m.value === "managed" && managedSecretsEnabled !== true}>{m.label}</option>)}
-        </select>
-        <div className="field-hint">One Bearer secret per client. Pick where it comes from — either way the value is write-only and never shown back.</div>
       </div>
 
       {managedSecretsEnabled === false && (
         <div className="notice notice-warning mt-3">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-          <span>Managed tokens are off — this server has no <span className="font-mono">LXK_MCP_MASTER_KEY</span>, so a token cannot be encrypted. Set it and restart to enable. References work exactly as they do today.</span>
+          <span>Token storage is off — this server has no <span className="font-mono">LXK_MCP_MASTER_KEY</span>, so a Bearer token cannot be encrypted. Set it and restart to enable. A client can still save without a token; a stored token stays visible and can be cleared without the key.</span>
         </div>
       )}
 
       <div className="field mt-3" style={{ marginBottom: 0 }}>
         <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
-          <label className="field-label" style={{ marginBottom: 0 }} htmlFor={managed ? "mcp-token" : "mcp-secret-ref"}>{managed ? "Bearer token" : "Secret reference"}</label>
+          <label className="field-label" style={{ marginBottom: 0 }} htmlFor="mcp-token">Bearer token</label>
           {hasSecret ? (
             <span className="chip font-micro text-2xs" style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 20, padding: "0 8px", background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)" }}>
               Saved · <span className="font-mono">••••••••</span>
             </span>
           ) : (
-            managed && !state.clearPending && (
+            tokenEnabled && !state.clearPending && (
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">write-only</span>
             )
           )}
         </div>
 
-        {managed ? (
-          <input
-            id="mcp-token"
-            className="prop-input w-full font-mono"
-            type="password"
-            placeholder={hasSecret ? "Type to replace the stored token" : "Paste the Bearer token"}
-            autoComplete="off"
-            value={state.secret}
-            onChange={(e) => setState((prev) => withSecretField(prev, "secret", e.target.value))}
-          />
-        ) : (
-          <input
-            id="mcp-secret-ref"
-            className="prop-input w-full font-mono"
-            placeholder="env:NAME or file:/abs/path"
-            value={state.secretRef}
-            onChange={(e) => setState((prev) => withSecretField(prev, "secretRef", e.target.value))}
-            style={{ maxWidth: 480 }}
-          />
-        )}
-
-        <div className="field-hint">
-          {state.clearPending ? (
-            <>Entering a value here cancels the pending clear — the reference is kept, never cleared.</>
-          ) : managed ? (
-            managedSecretsEnabled === false && hasSecret ? (
-              <><span className="font-mono">secretSource: &quot;managed&quot;</span> · <span className="font-mono">hasSecret: true</span> — the stored ciphertext is still on disk and still decrypts on the next connect. Set the key and restart to unlock it; a missing key never silently drops a secret, and re-entering a token needs the key too.</>
-            ) : hasSecret ? (
-              // Card 3 of the state catalog, transcribed from the admin surface
-              // (admin-assistant-providers.html §Secret source — states); the
-              // workspace card is shorter but says the same thing, and this
-              // component renders on both. "Empty keeps the stored token" is
-              // load-bearing: it is why a masked field is never a removal route.
-              <>Read back as <span className="font-mono">secretSource: &quot;managed&quot;</span> · <span className="font-mono">hasSecret: true</span> — the chip is a fixed-width mask, never a value or a suffix. Empty keeps the stored token; typing replaces it on Save.</>
-            ) : (
-              <>Encrypted with AES-256-GCM (fresh 12-byte IV, bound to the client id) before it reaches SQLite. The master key lives only in the server environment — never in the DB, a backup, a response, or a log. Decrypted only at connect, then sent as <span className="font-mono">Authorization: Bearer</span>.</>
-            )
-          ) : (
-            <>Bearer token reference, never the token itself. <span className="font-mono">env:NAME</span> resolves only when NAME is already a key in the server <span className="font-mono">RuntimeEnv</span> snapshot (Bun or Workers) — an unknown name is rejected on save, and a stored one that cannot resolve fails closed at connect with no Authorization header. For a dedicated token on a host with file access use <span className="font-mono">file:/absolute/path</span>. Resolved at connect time and sent as an Authorization Bearer token. Empty keeps the stored reference.</>
-          )}
-        </div>
+        <input
+          id="mcp-token"
+          className="prop-input w-full font-mono"
+          type="password"
+          // "Empty keeps the stored token" is load-bearing: it is why a masked
+          // field is never a removal route. It rides in the placeholder because
+          // the prose version was a paragraph per state. A pending clear on a
+          // disabled field cannot be typed away (no master key), so it must not
+          // promise a keystroke: it states the Save outcome instead, and the
+          // Keep token button below is its cancel route.
+          placeholder={
+            state.clearPending
+              ? tokenEnabled
+                ? "Type to cancel the pending clear"
+                : "Save removes the stored token"
+              : "Leave empty to keep stored token"
+          }
+          autoComplete="off"
+          disabled={!tokenEnabled}
+          value={state.secret}
+          onChange={(e) => setState((prev) => withSecretField(prev, e.target.value))}
+        />
 
         {hasSecret && (
           <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
@@ -361,6 +327,14 @@ function McpClientForm({ editing, managedSecretsEnabled, onCancel }: { editing: 
           <div className="notice notice-danger" style={{ marginTop: 10 }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
             <span>Secret will be removed on Save.</span>
+          </div>
+        )}
+
+        {state.clearPending && !tokenEnabled && (
+          <div className="flex items-center gap-2" style={{ marginTop: 10 }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setState((prev) => ({ ...prev, clearPending: false }))}>
+              Keep token
+            </button>
           </div>
         )}
       </div>

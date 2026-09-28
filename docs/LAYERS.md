@@ -908,8 +908,9 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
   //   has foreign keys OFF and the cascade would not fire. Every read goes through one LEFT JOIN projection
   //   (SELECT_WITH_SECRET), so the blob never lands in a bare SELECT * of the registry.
   // thin: list/getById/create/update/remove/listForProject/setProjectServers (withTx replace-set); update sets updated_at = datetime('now')
-  // toPublic/projectToPublic drop secret_ref AND the ciphertext columns → hasSecret + secretSource ("managed"|"reference"|"none"),
-  //   never serialized; the managed arm wins when a row somehow holds both, because ciphertext is authoritative on read
+  // toPublic/projectToPublic ignore secret_ref AND drop the ciphertext columns → hasSecret + secretSource
+  //   ("managed"|"none") — legacy `secret_ref` is never a credential; hasSecret is true exactly when a managed
+  //   ciphertext row exists (managed-only since 2026-09-28; migration 0012 cleared every stored ref)
   // the stored column domain still names 'stdio' (D1 cannot drop a column or rewrite the CHECK) and
   // migration 0010 deletes every such row; read types keep McpTransportType, while create/update
   // inputs take McpClientTransportType ("http" | "sse") so a caller cannot persist stdio.
@@ -938,24 +939,19 @@ export class AssistantMcpService extends Effect.Service<AssistantMcpService>()("
       // Validation (pure validateTransportConfig): REMOTE http/sse only. `stdio` →
       //   MCP_INVALID_TRANSPORT_CONFIG on every runtime — no process is ever spawned;
       //   http/https url with no userinfo; `command`/non-empty `args` rejected (never
-      //   dropped); secretRef 'file:/abs/path' (Bun only) | 'env:NAME' where NAME must be
-      //   a fixed RuntimeEnv string slot (isRuntimeEnvStringKey) — an unknown name is
-      //   rejected here rather than stored as a reference that cannot resolve. The
-      //   accepted branch returns the narrowed McpClientTransportType, so the repo
-      //   write is remote-only by construction.
-      // Secret sources: exactly one per client, resolved BEFORE any write
-      //   (normalizeSecretIntent reads the REQUEST only — a stored value is never an
-      //   input, so an unrelated patch can never clear a credential):
+      //   dropped). The accepted branch returns the narrowed McpClientTransportType, so
+      //   the repo write is remote-only by construction. (The env:/file: reference
+      //   validation block was removed with reference mode, 2026-09-28.)
+      // Secret intent: managed-only, resolved BEFORE any write (normalizeSecretIntent
+      //   reads the REQUEST only — a stored value is never an input, so an unrelated
+      //   patch can never clear a credential):
       //     managed   — `secret` encrypted into assistant_mcp_secrets
-      //     reference — `secretRef` stored on the registry row
-      //     clear     — `clearSecret: true`; nulls the ref AND deletes the blob row
-      //     none      — a legal, deliberately secret-less client (both sources would be
-      //                 SECRET_BOTH_SOURCES_REJECTED; clear + a value is refused)
-      //   Storing one source deletes the other, so a client can never send two
-      //   credentials. An empty/blank `secret` or `secretRef` is ABSENT, not a value:
-      //   "empty means keep" is why removal needs the explicit clearSecret flag.
-      //   MCP_SECRET_REF_DENYLIST (the two master keys) is refused here as well as at
-      //   connect — see "Managed MCP client secrets" below.
+      //     clear     — `clearSecret: true`; deletes the blob row
+      //     none      — a legal, deliberately secret-less client (clear + a value is
+      //                 refused; a save carrying `secret` needs a master key)
+      //   An empty/blank `secret` is ABSENT, not a value: "empty means keep" is why
+      //   removal needs the explicit clearSecret flag. A `secretRef` in the request is
+      //   accepted-and-ignored at the HTTP layer, never mapped here.
       // SSRF: validateUrl at save time; the connector revalidates at connect time.
       // No cycles: repo + connector only — never GitHubService or chat services.
     };
@@ -1000,41 +996,22 @@ export async function buildMcpTools(opts: {
 - **SSRF:** http/sse URLs re-run `validateUrl(url, allowlist)` at connect time
   (`validateMcpTransportUrl`) — the save-time pass is fast feedback only.
 - **Remote auth:** the transport builder sends exactly one header —
-  `Authorization: Bearer <resolved secret>` — and no header at all when
-  `secret_ref` is absent or resolves to `null`. Resolution is
-  **ciphertext-first**: a stored `assistant_mcp_secrets` row short-circuits the
-  reference branch entirely, so a client can never send two credentials. The
-  managed row is opened only here, at connect — never in the repo, the service,
-  or a public shape; see "Managed MCP client secrets" below for the failure
-  split. Otherwise `resolveSecretRef`
-  (`server/env.ts`) reads `env:NAME` from the `RuntimeEnv` snapshot only (no
-  `process.env` fallback, no arbitrary Workers binding) and `file:/abs/path` on
-  the Bun host. Save-time validation (`validateTransportConfig`) accepts an
-  `env:NAME` only when the name is a fixed `RuntimeEnv` string slot
-  (`RUNTIME_ENV_STRING_KEYS` / `isRuntimeEnvStringKey`, the same list `RuntimeEnv`
-  is derived from), so a reference that could never resolve is refused with
-  `McpInvalidTransportConfig` at create/update instead of being stored. On
-  update only a `secretRef` **present in the request** is validated, so a
-  pre-existing stored ref that is no longer allowlisted passes through unchanged
-  and fails closed at connect (no header) instead of freezing the row.
-  - The allowlist is the **union of both env builders**, so a listed name can be
-    dead on the serving runtime: `CRON_SECRET` is Workers-only (never copied by
-    `getEnv()`), and `DATABASE_PATH`, `PORT`, `LXK_STORAGE_FS_ROOT` and the
-    `LXK_S3_*` names are Bun-side slots `getEnvFromWorkers()` forces to
-    `undefined`. A dead reference resolves to `null` and the client connects with
-    **no `Authorization` header**, so an anonymous-capable endpoint can report a
-    successful test with no credential sent.
-  - A resolved value with CR/LF/NUL (a multiline PEM from an allowlisted key or a
-    `file:` read) is refused with a fixed `McpConnectFailed` message before the
-    factory/SDK is called; otherwise fetch throws a `TypeError` that quotes the
-    value. Both sinks then redact: `toConnectError` (test-report body) and
-    `logMcpSkip` (stderr) replace **all** third-party connect text — SDK, fetch,
-    remote JSON-RPC — with one fixed generic message, and only a
-    `McpConnectFailed` Lexa constructed itself keeps its own text.
-  - Configuring `secret_ref` is superadmin-only, and both forms are deliberate
-    egress: an `env:` reference forwards the named infrastructure key as Bearer to
-    the configured remote URL, and `file:` reads the bytes of any host file the
-    process can read (Bun-only) and sends them as the Bearer token to that URL.
+  `Authorization: Bearer <managed token>` — and no header at all for a
+  genuinely secret-less client. Managed-only (2026-09-28): a stored
+  `assistant_mcp_secrets` row is decrypted here and is the **only** credential
+  source; a legacy stored `secret_ref` with no blob **hard-fails**
+  `McpConnectFailed` (never an anonymous connect, which would be
+  indistinguishable from a working client). The secret row is opened only here,
+  at connect — never in the repo, the service, or a public shape; see "Managed
+  MCP client secrets" below for the failure split. (The `resolveSecretRef`
+  env/file path and its save-time allowlist/denylist validation were deleted
+  with reference mode.)
+  - A decrypted token with CR/LF/NUL is refused with a fixed `McpConnectFailed`
+    message before the factory/SDK is called; otherwise fetch throws a
+    `TypeError` that quotes the value. Both sinks then redact: `toConnectError`
+    (test-report body) and `logMcpSkip` (stderr) replace **all** third-party
+    connect text — SDK, fetch, remote JSON-RPC — with one fixed generic message,
+    and only a `McpConnectFailed` Lexa constructed itself keeps its own text.
 - **stdio:** removed. `AssistantMcpService` accepts http/sse only and returns
   `McpInvalidTransportConfig` for a `stdio` payload on every runtime, so no code
   path spawns a child process; migration 0010 deletes every stored stdio
@@ -1063,78 +1040,19 @@ default (`createApiHandler(..., { mcpConnector })` still overrides for tests).
 
 ### Managed MCP client secrets — `server/assistant/mcp-secret.ts`
 
-A client credential may be **entered** in the webapp instead of referenced. It
-is envelope-encrypted with AES-256-GCM and stored in `assistant_mcp_secrets`;
-the master key lives only in the environment. Prose-only (no invariant
-registration), consistent with the other MCP rules above.
+A client credential is **entered** in the webapp (managed-only since
+2026-09-28 — the env:/file: reference source is gone). It is envelope-encrypted
+with AES-256-GCM and stored in `assistant_mcp_secrets`; the master key lives
+only in the environment. Prose-only (no invariant registration), consistent
+with the other MCP rules above.
 
 ```typescript
 // server/assistant/mcp-secret.ts — PLAIN module, not an Effect.Service.
-export const MCP_SECRET_REF_DENYLIST: readonly string[] = ["LXK_MCP_MASTER_KEY", "LXK_MCP_MASTER_KEY_PREV"];
 export async function mcpKeyringFromEnv(env): Promise<McpKeyring | null>  // null = no active key
 export async function parseMasterKey(raw: string | null | undefined): Promise<CryptoKey>
 export async function encryptMcpSecret(plaintext, serverId, key, keyring?): Promise<McpEncryptedSecret>
 export async function decryptMcpSecret(row: McpSecretRow, keyring: McpKeyring): Promise<string>
 ```
-
-- **Plain module, no `Effect.Service`.** It imports only the `RuntimeEnv` type
-  and Web Crypto — no service dependencies, no DB, no Node builtins (base64 goes
-  through `atob`/`btoa`, because the Workers bundle ships none). The same code
-  runs on Bun and workerd, so invariant #1 is not merely respected: there is no
-  edge here to form a cycle from. It is called *by* `AssistantMcpService` (save)
-  and *by* `server/assistant/mcp.ts` (connect); it calls neither back.
-- **No writes.** The module is pure crypto — it never touches the database. All
-  storage goes through `AssistantMcpRepo.putSecret` / `deleteSecret`, so the
-  repo write contract and the encryption step stay separable. `storeSecret` in
-  the service is the single ciphertext write point (encrypt-then-upsert, fresh
-  IV per write, AAD bound to the client id).
-- **Ciphertext-first resolution.** At connect, a present
-  `assistant_mcp_secrets` row is authoritative and short-circuits the
-  `secret_ref` branch, so a client can never send two credentials. The
-  three blob columns are all-or-nothing: a half-present row (only a
-  ciphertext, an unknown `key_id`) is **not** a secret-less client, it is a row
-  Lexa cannot authenticate. `key_id` names a keyring **slot**
-  (`'active' | 'prev'`), never a fingerprint — which is what makes rotation
-  rewrap-free: a `prev` row keeps resolving through `LXK_MCP_MASTER_KEY_PREV`.
-- **The failure split is the point.** Two classes, deliberately different:
-  - *Unresolvable reference* (`env:`/`file:` absent or dead) → **no
-    `Authorization` header** at all, unchanged fail-closed behavior.
-  - *Undecryptable ciphertext* (wrong key, tampered blob, unknown `key_id`, a
-    retired `prev` slot, a managed row with no master key configured) → **hard
-    `McpConnectFailed`**, never a silent no-header connect. A client that
-    quietly authenticates as anonymous looks identical to a working one, so the
-    hard failure is the only safe reading. Every class of decrypt failure
-    reduces to ONE fixed message, and `toConnectError` replaces anything
-    third-party with a generic one, so no log line, test-report body, or HTTP
-    response can quote secret material.
-- **Denylist at save AND at connect.** A `secret_ref` may never name a master
-  key: `env:LXK_MCP_MASTER_KEY` would forward the envelope key itself as a
-  `Bearer` token to a remote server. Both master keys *are* fixed `RuntimeEnv`
-  slots, so the `isRuntimeEnvStringKey` allowlist accepts them by itself.
-  `validateTransportConfig` refuses them at create/update
-  (`McpInvalidTransportConfig`); `remoteTransportFor` refuses them again at
-  connect, because a row written before the rule existed must not forward a key
-  either.
-- **Exactly one source per client.** `normalizeSecretIntent` reads the REQUEST
-  only — a stored value is never an input, so an unrelated patch can never clear
-  a credential (the legacy-freeze lesson). A managed token and a `secretRef` at
-  once is refused; carrying neither is legal (secret-less clients exist today).
-  Storing one source deletes the other. `clearSecret: true` is the only removal
-  route, and it is a pure row delete — it needs **no master key**, so a
-  credential can always be revoked even on a deployment whose key is gone.
-- **Disabled without a key.** `mcpKeyringFromEnv` returns `null` when no active
-  key is set — the documented disable switch: a managed save is refused with
-  `MCP_INVALID_TRANSPORT_CONFIG`, and `env:`/`file:` references behave exactly as
-  before. A configured-but-**malformed** key is an error, never a silent
-  disable; an operator who set the key wrong is told. A stored token is never
-  dropped by a missing key.
-- **Redaction covers plaintext AND ciphertext.** The module never logs, no
-  returned or thrown string carries the plaintext, the ciphertext, or the key,
-  and `toPublic` drops both `secret_ref` and the blob columns in favour of
-  `hasSecret` + `secretSource` (`"managed" | "reference" | "none"`). The write
-  schema carries `secret`; the response schema does not, so a response can
-  never return a value. The master key is never in the DB, a backup, a
-  response, or a log.
 - **Key handling.** `parseMasterKey` imports as **non-extractable**
   (`extractable: false`), so the raw bytes cannot be read back out of the
   runtime. AES-256-GCM is the only AEAD both Bun and workerd expose through
@@ -1535,9 +1453,9 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ApprovalsPending` | 409 | resume while rows in the batch are still undecided — payload `{ batchId, remaining }` |
 | `ToolDenied` | 403 | write-tool execution refused by authorization at resume time |
 | `McpServerNotFound` | 404 | MCP registry: unknown server id (update/delete/test/project availability) |
-| `McpInvalidTransportConfig` | 400 | `stdio` transport, `command`/`args` on a remote transport, transport shape mismatch, bad url/secretRef (including an `env:` name outside the fixed `RuntimeEnv` keys, or one naming a master key), an SSRF-blocked host, or a managed token with no master key / both secret sources at once / `clearSecret` combined with a value |
+| `McpInvalidTransportConfig` | 400 | `stdio` transport, `command`/`args` on a remote transport, transport shape mismatch, bad url, an SSRF-blocked host, a managed token with no master key, or `clearSecret` combined with a value |
 | `McpStdioUnavailable` | 400 | reserved, no longer emitted — stdio clients were removed (migration 0010); kept so an older stored code still maps to a response |
-| `McpConnectFailed` | 502 | MCP connector could not connect or `tools/list` failed (folded into the test report) |
+| `McpConnectFailed` | 502 | MCP connector could not connect or `tools/list` failed (folded into the test report); also a legacy stored `secret_ref` or an undecryptable managed blob — never a silent anonymous connect |
 | `McpToolCallFailed` | 502 | MCP tool invocation failed (tool-loop phase) |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no

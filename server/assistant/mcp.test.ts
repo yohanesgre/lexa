@@ -1,13 +1,10 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Context, Effect, Layer } from "effect";
 import type { StreamChunk } from "@tanstack/ai";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { McpConnector } from "../services/assistant-mcp.service";
-import { getEnvFromWorkers, type RuntimeEnv } from "../env";
+import { type RuntimeEnv } from "../env";
 import type { StreamFrame } from "../../shared/assistant";
 import {
   buildMcpTools,
@@ -27,6 +24,7 @@ import {
   type McpToolCallAudit,
 } from "./mcp";
 import { buildStream, type StreamRunContext } from "./build-stream";
+import { encryptMcpSecret, mcpKeyringFromEnv, MCP_SECRET_DECRYPT_FAILED } from "./mcp-secret";
 
 const providerMock = vi.hoisted(() => ({ script: [] as Array<Record<string, unknown>> }));
 
@@ -35,6 +33,10 @@ const providerMock = vi.hoisted(() => ({ script: [] as Array<Record<string, unkn
 const SECRET_NOT_SINGLE_LINE = "resolved MCP secret cannot be sent in an HTTP header; use a single-line token";
 const THIRD_PARTY_CONNECT_FAILURE = "MCP connect failed — remote error details are not forwarded";
 const THIRD_PARTY_TOOL_CALL_FAILURE = "MCP tool call failed — remote error details are not forwarded";
+// Managed-only: the legacy stored-reference hard failure and the no-key hard
+// failure, both private consts in server/assistant/mcp.ts.
+const SECRET_REF_UNSUPPORTED = "MCP secret references are no longer supported — store a managed token or clear the reference";
+const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_MCP_MASTER_KEY, which is not configured";
 
 // Transport capture: the live factory is the only caller of `createMCPClient`, so
 // stubbing it observes the exact transport config handed to ai-mcp 0.4.6 without
@@ -130,6 +132,21 @@ function row(overrides: Partial<McpServerRowWithSecret> = {}): McpServerRowWithS
     secret_key_id: null,
     ...overrides,
   };
+}
+
+// Managed-secret fixtures: the token field is write-only, so a connect test has
+// to build a real AES-GCM blob through the same module the connect path opens
+// it with (bound to the server id by the AAD).
+const MCP_TEST_KEY = Buffer.from("k".repeat(32)).toString("base64");
+const MCP_TEST_KEY_OTHER = Buffer.from("m".repeat(32)).toString("base64");
+const keyedEnv = (over: Partial<RuntimeEnv> = {}): RuntimeEnv =>
+  ({ LXK_MCP_MASTER_KEY: MCP_TEST_KEY, ...over }) as unknown as RuntimeEnv;
+
+async function sealedRow(secret: string, overrides: Partial<McpServerRowWithSecret> = {}): Promise<McpServerRowWithSecret> {
+  const id = overrides.id ?? "fake";
+  const keyring = await mcpKeyringFromEnv(keyedEnv());
+  const sealed = await encryptMcpSecret(secret, id, keyring!.active, keyring!);
+  return row({ ...overrides, id, secret_ciphertext: sealed.ciphertextB64, secret_iv: sealed.ivB64, secret_key_id: sealed.keyId });
 }
 
 function handle(tools: McpDiscoveredTool[], onClose?: () => void): McpClientHandle {
@@ -544,93 +561,62 @@ describe("transport guard (no local process)", () => {
   });
 });
 
-describe("remote bearer auth", () => {
-  let dir: string;
-  let secretFile: string;
-
-  beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "lexa-mcp-bearer-"));
-    secretFile = join(dir, "token");
-    writeFileSync(secretFile, "file-secret\n");
-  });
-  afterAll(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true });
-  });
-
-  async function connect(env: RuntimeEnv, overrides: Partial<McpServerRowWithSecret> = {}): Promise<Record<string, unknown>> {
-    await liveMcpClientFactory.create(row({ secret_ref: "env:MCP_REMOTE_TOKEN", ...overrides }), { env, allowlist: null });
+describe("managed remote auth", () => {
+  async function connect(env: RuntimeEnv, r: McpServerRowWithSecret): Promise<Record<string, unknown>> {
+    await liveMcpClientFactory.create(r, { env, allowlist: null });
     return sdkMock.calls[0]!.transport as Record<string, unknown>;
   }
 
-  it("sends only Authorization: Bearer for an env reference", async () => {
-    const env = { MCP_REMOTE_TOKEN: "env-secret" } as unknown as RuntimeEnv;
-    expect(await connect(env)).toEqual({ type: "http", url: "https://mcp.test/mcp", headers: { Authorization: "Bearer env-secret" } });
+  it("sends only Authorization: Bearer for a managed token", async () => {
+    const transport = await connect(keyedEnv(), await sealedRow("managed-secret"));
+    expect(transport).toEqual({ type: "http", url: "https://mcp.test/mcp", headers: { Authorization: "Bearer managed-secret" } });
   });
 
-  it("resolves a secret carried by the Workers RuntimeEnv snapshot", async () => {
-    const env = getEnvFromWorkers({ LXK_ENV: "prod", GITHUB_WEBHOOK_SECRET: "workers-secret" });
-    const transport = await connect(env, { secret_ref: "env:GITHUB_WEBHOOK_SECRET" });
-    expect(transport).toEqual({ type: "http", url: "https://mcp.test/mcp", headers: { Authorization: "Bearer workers-secret" } });
-  });
-
-  it("sends no header for a Workers binding the RuntimeEnv snapshot does not carry", async () => {
-    // getEnvFromWorkers is an explicit allowlist, so a binding outside it never
-    // reaches the resolver: fail closed (no Authorization) rather than guess.
-    const transport = await connect(getEnvFromWorkers({ MCP_REMOTE_TOKEN: "workers-secret" }));
-    expect("headers" in transport).toBe(false);
-  });
-
-  it("resolves a file reference (Bun host)", async () => {
-    const transport = await connect({}, { secret_ref: `file:${secretFile}` });
-    expect(transport.headers).toEqual({ Authorization: "Bearer file-secret" });
-  });
-
-  it("omits headers entirely when no secret is configured", async () => {
-    const transport = await connect({}, { secret_ref: null });
+  it("omits headers entirely when no managed secret is configured", async () => {
+    const transport = await connect(keyedEnv(), row());
     expect(transport).toEqual({ type: "http", url: "https://mcp.test/mcp" });
     expect("headers" in transport).toBe(false);
   });
 
-  // A zero-byte or whitespace-only file resolves to "", and the header was
-  // then built as `Authorization: "Bearer "` — an empty bearer that some
-  // servers read as anonymous rather than as "no credential". The `env:` branch
-  // already fails closed on an empty value; `file:` must match it.
-  it("omits headers for an empty or whitespace-only secret file", async () => {
-    for (const [name, contents] of [["empty", ""], ["blank", "  \n\t\n "]] as const) {
-      const path = join(dir, name);
-      writeFileSync(path, contents);
-      const transport = await connect({}, { secret_ref: `file:${path}` });
-      expect("headers" in transport, name).toBe(false);
-    }
-  });
-
-  it("omits headers when the reference cannot be resolved", async () => {
-    const transport = await connect({}, { secret_ref: "env:MCP_MISSING" });
+  it("omits headers for a secret-less row even with no master key configured", async () => {
+    const transport = await connect({}, row());
     expect("headers" in transport).toBe(false);
-    const unreadable = await connect({}, { secret_ref: `file:${join(dir, "absent")}` });
-    expect("headers" in unreadable).toBe(false);
-  });
-
-  it("never falls back to process.env for a named reference", async () => {
-    process.env.MCP_REMOTE_TOKEN = "host-secret";
-    try {
-      const transport = await connect({});
-      expect("headers" in transport).toBe(false);
-    } finally {
-      delete process.env.MCP_REMOTE_TOKEN;
-    }
   });
 
   it("sends Bearer for an sse transport too", async () => {
-    const transport = await connect({ MCP_REMOTE_TOKEN: "sse-secret" } as unknown as RuntimeEnv, {
-      transport_type: "sse",
-      url: "https://mcp.test/sse",
-    });
+    const transport = await connect(keyedEnv(), await sealedRow("sse-secret", { id: "sse", transport_type: "sse", url: "https://mcp.test/sse" }));
     expect(transport).toEqual({ type: "sse", url: "https://mcp.test/sse", headers: { Authorization: "Bearer sse-secret" } });
   });
 
+  // Managed-only (2026-09-28): a stored `secret_ref` is no longer a credential.
+  // Hard-fail rather than connect anonymously — an unauthenticated client is
+  // indistinguishable from a working one.
+  it("hard-fails a stored secret_ref, never connecting anonymously", async () => {
+    const err = await liveMcpClientFactory
+      .create(row({ secret_ref: "env:MCP_REMOTE_TOKEN" }), { env: keyedEnv(), allowlist: null })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpConnectFailed", message: SECRET_REF_UNSUPPORTED });
+    expect(sdkMock.calls).toEqual([]);
+  });
+
+  it("hard-fails a managed blob when no master key is configured", async () => {
+    const err = await liveMcpClientFactory
+      .create(await sealedRow("managed-secret"), { env: {}, allowlist: null })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpConnectFailed", message: SECRET_KEY_UNAVAILABLE });
+    expect(sdkMock.calls).toEqual([]);
+  });
+
+  it("hard-fails an undecryptable blob instead of connecting anonymously", async () => {
+    const r = await sealedRow("managed-secret");
+    const err = await liveMcpClientFactory
+      .create(r, { env: { LXK_MCP_MASTER_KEY: MCP_TEST_KEY_OTHER } as unknown as RuntimeEnv, allowlist: null })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpConnectFailed", message: MCP_SECRET_DECRYPT_FAILED });
+    expect(sdkMock.calls).toEqual([]);
+  });
+
   it("keeps the secret out of the connect error and the discovery log", async () => {
-    const env = { MCP_REMOTE_TOKEN: "leaky-secret" } as unknown as RuntimeEnv;
     sdkMock.failWith = new Error("connect ECONNREFUSED");
     const logged: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
@@ -638,14 +624,14 @@ describe("remote bearer auth", () => {
       return true;
     });
     try {
-      const toolset = await buildMcpTools({ servers: [row({ secret_ref: "env:MCP_REMOTE_TOKEN" })], projectId: "p1", env, allowlist: null });
+      const toolset = await buildMcpTools({ servers: [await sealedRow("leaky-secret")], projectId: "p1", env: keyedEnv(), allowlist: null });
       expect(toolset.tools).toEqual([]);
       await toolset.close();
     } finally {
       spy.mockRestore();
     }
     expect(logged.join("\n")).not.toContain("leaky-secret");
-    expect(logged.join("\n")).not.toContain("MCP_REMOTE_TOKEN");
+    expect(logged.join("\n")).not.toContain(MCP_TEST_KEY);
   });
 
   // The skip log is the other stderr sink for a connect failure, so third-party
@@ -678,80 +664,10 @@ describe("remote bearer auth", () => {
       return true;
     });
     try {
-      const toolset = await buildMcpTools({ servers: [row({ secret_ref: "env:MCP_REMOTE_TOKEN" })], projectId: "p1", env: { MCP_REMOTE_TOKEN: "a\nb" } as unknown as RuntimeEnv, allowlist: null });
-      expect(toolset.tools).toEqual([]);
-      await toolset.close();
-    } finally {
-      spy.mockRestore();
-    }
-    expect(logged.join("\n")).toContain(SECRET_NOT_SINGLE_LINE);
-  });
-
-  it("does not leak the secret through a failed tools/list", async () => {
-    const env = { MCP_REMOTE_TOKEN: "leaky-secret" } as unknown as RuntimeEnv;
-    sdkMock.failToolsWith = new Error("tools/list failed");
-    const logged: string[] = [];
-    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
-      logged.push(String(chunk));
-      return true;
-    });
-    try {
-      const toolset = await buildMcpTools({ servers: [row({ secret_ref: "env:MCP_REMOTE_TOKEN" })], projectId: "p1", env, allowlist: null });
-      expect(toolset.tools).toEqual([]);
-      await toolset.close();
-    } finally {
-      spy.mockRestore();
-    }
-    expect(logged.join("\n")).not.toContain("leaky-secret");
-  });
-
-  // A resolved secret with CR/LF/NUL cannot become a header value: Bun's fetch
-  // rejects it with a TypeError whose message quotes the value verbatim, which
-  // would then reach stderr (logMcpSkip) and the test-report body. The value is
-  // refused BEFORE it reaches the factory/SDK, with a message naming no secret.
-  it("refuses a multiline resolved secret before it reaches the SDK, with no secret in the message", async () => {
-    const pem = "-----BEGIN PRIVATE KEY-----\nleaky-pem-body\n-----END PRIVATE KEY-----";
-    const env = { MCP_REMOTE_TOKEN: pem } as unknown as RuntimeEnv;
-    const err = await liveMcpClientFactory
-      .create(row({ secret_ref: "env:MCP_REMOTE_TOKEN" }), { env, allowlist: null })
-      .catch((e: unknown) => e);
-    expect(err).toMatchObject({ _tag: "McpConnectFailed" });
-    const message = (err as { message?: string }).message ?? "";
-    expect(message).toBe(SECRET_NOT_SINGLE_LINE);
-    expect(message).not.toContain("leaky-pem-body");
-    expect(message).not.toContain("BEGIN PRIVATE KEY");
-    expect(sdkMock.calls).toEqual([]);
-  });
-
-  it("refuses a NUL-bearing secret and a multiline file: secret the same way", async () => {
-    const nulEnv = { MCP_REMOTE_TOKEN: "tok\0en" } as unknown as RuntimeEnv;
-    const nulErr = await liveMcpClientFactory
-      .create(row({ secret_ref: "env:MCP_REMOTE_TOKEN" }), { env: nulEnv, allowlist: null })
-      .catch((e: unknown) => e);
-    expect(nulErr).toMatchObject({ _tag: "McpConnectFailed", message: SECRET_NOT_SINGLE_LINE });
-
-    const pemFile = join(dir, "pem");
-    writeFileSync(pemFile, "-----BEGIN KEY-----\nleaky-file-body\n-----END KEY-----\n");
-    const fileErr = await liveMcpClientFactory
-      .create(row({ secret_ref: `file:${pemFile}` }), { env: {}, allowlist: null })
-      .catch((e: unknown) => e);
-    expect(fileErr).toMatchObject({ _tag: "McpConnectFailed" });
-    expect((fileErr as { message?: string }).message).not.toContain("leaky-file-body");
-    expect(sdkMock.calls).toEqual([]);
-  });
-
-  it("logs a refused multiline secret without a single secret byte", async () => {
-    const env = { MCP_REMOTE_TOKEN: "token-head\nleaky-tail\n" } as unknown as RuntimeEnv;
-    const logged: string[] = [];
-    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
-      logged.push(String(chunk));
-      return true;
-    });
-    try {
       const toolset = await buildMcpTools({
-        servers: [row({ secret_ref: "env:MCP_REMOTE_TOKEN" })],
+        servers: [await sealedRow("token-head\nleaky-tail\n")],
         projectId: "p1",
-        env,
+        env: keyedEnv(),
         allowlist: null,
       });
       expect(toolset.tools).toEqual([]);
@@ -763,6 +679,48 @@ describe("remote bearer auth", () => {
     expect(stderr).not.toContain("token-head");
     expect(stderr).not.toContain("leaky-tail");
     expect(stderr).toContain(SECRET_NOT_SINGLE_LINE);
+  });
+
+  it("does not leak the secret through a failed tools/list", async () => {
+    sdkMock.failToolsWith = new Error("tools/list failed");
+    const logged: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      logged.push(String(chunk));
+      return true;
+    });
+    try {
+      const toolset = await buildMcpTools({ servers: [await sealedRow("leaky-secret")], projectId: "p1", env: keyedEnv(), allowlist: null });
+      expect(toolset.tools).toEqual([]);
+      await toolset.close();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(logged.join("\n")).not.toContain("leaky-secret");
+  });
+
+  // A decrypted secret with CR/LF/NUL cannot become a header value: fetch
+  // rejects it with a TypeError whose message quotes the value verbatim, which
+  // would then reach stderr (logMcpSkip) and the test-report body. The value is
+  // refused BEFORE it reaches the factory/SDK, with a message naming no secret.
+  it("refuses a multiline managed secret before the SDK, with no secret in the message", async () => {
+    const pem = "-----BEGIN PRIVATE KEY-----\nleaky-pem-body\n-----END PRIVATE KEY-----";
+    const err = await liveMcpClientFactory
+      .create(await sealedRow(pem), { env: keyedEnv(), allowlist: null })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpConnectFailed" });
+    const message = (err as { message?: string }).message ?? "";
+    expect(message).toBe(SECRET_NOT_SINGLE_LINE);
+    expect(message).not.toContain("leaky-pem-body");
+    expect(message).not.toContain("BEGIN PRIVATE KEY");
+    expect(sdkMock.calls).toEqual([]);
+  });
+
+  it("refuses a NUL-bearing managed secret the same way", async () => {
+    const err = await liveMcpClientFactory
+      .create(await sealedRow("tok\0en"), { env: keyedEnv(), allowlist: null })
+      .catch((e: unknown) => e);
+    expect(err).toMatchObject({ _tag: "McpConnectFailed", message: SECRET_NOT_SINGLE_LINE });
+    expect(sdkMock.calls).toEqual([]);
   });
 });
 
@@ -778,7 +736,7 @@ describe("connect error forwarding (LiveMcpConnector)", () => {
 
   it("replaces third-party Error text with a fixed generic message", async () => {
     sdkMock.failWith = new TypeError("fetch failed: Bearer sk-live-FAKESECRET not allowed\r\n");
-    const err = await liveConnect(row({ secret_ref: "env:MCP_REMOTE_TOKEN" }));
+    const err = await liveConnect(row());
     expect(err).toMatchObject({ _tag: "McpConnectFailed" });
     const message = (err as { message?: string }).message ?? "";
     expect(message).toBe(THIRD_PARTY_CONNECT_FAILURE);
@@ -801,8 +759,7 @@ describe("connect error forwarding (LiveMcpConnector)", () => {
   });
 
   it("passes the refused-multiline-secret message through unchanged", async () => {
-    const env = { MCP_REMOTE_TOKEN: "a\nb" } as unknown as RuntimeEnv;
-    const err = await liveConnect(row({ secret_ref: "env:MCP_REMOTE_TOKEN" }), env);
+    const err = await liveConnect(await sealedRow("a\nb"), keyedEnv());
     expect((err as { message?: string }).message).toBe(SECRET_NOT_SINGLE_LINE);
   });
 });

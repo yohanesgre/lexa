@@ -318,3 +318,6 @@
 2026-09-28 | mcp-managed-secrets | WORKING | Phase 1 done: review MEDs fixed, proof matrix plus routes green; Phase 2 React starting | status/mcp-managed-secrets/plan.md
 2026-09-28 | mcp-managed-secrets | WORKING | Phase 2 done: transcription plus capability flag green; final review starting | status/mcp-managed-secrets/plan.md
 2026-09-28 | mcp-managed-secrets | DONE | all phases complete, 215 files 2095 tests green, report written; uncommitted awaiting review | status/mcp-managed-secrets/report.md
+2026-09-28 | mcp-secrets-managed-only | PLAN | remove reference mode, managed tokens only; branch created carrying declutter WIP | status/mcp-secrets-managed-only/plan.md
+2026-09-28 | mcp-secrets-managed-only | WORKING | backend simplification green; awaiting wireframe commit approval to dispatch P3 React | status/mcp-secrets-managed-only/plan.md
+2026-09-28 | mcp-secrets-managed-only | DONE | reference mode removed end to end, gate green, report written; uncommitted awaiting review | status/mcp-secrets-managed-only/report.md

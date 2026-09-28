@@ -8,7 +8,7 @@ import { Effect, Layer } from "effect";
 import { runMigrations } from "../db/migrate";
 import { createApiHandler } from "./http";
 import { McpConnectFailed } from "./errors";
-import { McpConnector, envSecretRefReason, PROCESS_FIELDS_REJECTED, SECRET_BOTH_SOURCES_REJECTED, SECRET_REQUIRES_MASTER_KEY } from "../services/assistant-mcp.service";
+import { McpConnector, PROCESS_FIELDS_REJECTED, SECRET_CLEAR_CONFLICT_REJECTED, SECRET_REQUIRES_MASTER_KEY } from "../services/assistant-mcp.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "j".repeat(43);
@@ -109,6 +109,11 @@ async function createClient(label: string, transportType: "http" | "sse" = "http
   return (await res.json() as { id: string }).id;
 }
 
+const refOf = (id: string) =>
+  (db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = ?").get(id) as
+    | { secret_ref: string | null }
+    | null)?.secret_ref ?? null;
+
 describe("MCP client registry (superadmin)", () => {
   it("lists registered remote clients, with no seeded row and no secret ref", async () => {
     const empty = await handler(authed("GET", "/api/assistant/mcp-servers"));
@@ -193,12 +198,10 @@ describe("MCP client registry (superadmin)", () => {
     const row = await created.json() as Record<string, unknown>;
     expect(row).toMatchObject({ id: "remote-client", label: "Remote Client", transportType: "http", url: "https://mcp.test/mcp", command: null, args: [], hasSecret: false, enabled: false });
 
-    const patched = await handler(authed("PATCH", "/api/assistant/mcp-servers/remote-client", { label: "Remote 2", secretRef: "env:GITHUB_WEBHOOK_SECRET" }));
+    const patched = await handler(authed("PATCH", "/api/assistant/mcp-servers/remote-client", { label: "Remote 2" }));
     expect(patched.status).toBe(200);
     const patchedBody = await patched.json() as Record<string, unknown>;
-    expect(patchedBody.label).toBe("Remote 2");
-    expect(patchedBody.hasSecret).toBe(true);
-    expect(JSON.stringify(patchedBody)).not.toContain("GITHUB_WEBHOOK_SECRET");
+    expect(patchedBody).toMatchObject({ label: "Remote 2", hasSecret: false, secretSource: "none" });
 
     const removed = await handler(authed("DELETE", "/api/assistant/mcp-servers/remote-client"));
     expect(removed.status).toBe(204);
@@ -250,55 +253,88 @@ describe("MCP client registry (superadmin)", () => {
     expect((await res.json() as { error: { code: string } }).error.code).toBe("MCP_INVALID_TRANSPORT_CONFIG");
   });
 
-  // `env:NAME` resolves only a fixed RuntimeEnv key; an unknown name is refused
-  // at save time (400) instead of being stored and failing at connect.
-  it("create/patch refuse an env: secret name outside the RuntimeEnv snapshot", async () => {
-    const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
-      label: "Linear",
-      transportType: "http",
-      url: "https://mcp.test/mcp",
-      secretRef: "env:LINEAR_TOKEN",
-    }));
-    expect(created.status).toBe(400);
-    expect((await created.json() as { error: { code: string; message: string } }).error).toMatchObject({
-      code: "MCP_INVALID_TRANSPORT_CONFIG",
-      message: envSecretRefReason("LINEAR_TOKEN"),
+  // Managed-only (2026-09-28): `secretRef` stays on the payloads for typed-client
+  // compatibility, is accepted-and-ignored, and logs one structured WARN. It is
+  // never stored, never echoed, and never reported as a credential source.
+  it("a secretRef on create/patch is accepted-and-ignored with one WARN and never echoed", async () => {
+    const logged: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      logged.push(String(chunk));
+      return true;
     });
+    let created: Record<string, unknown>;
+    let patched: Record<string, unknown>;
+    try {
+      const createdRes = await handler(authed("POST", "/api/assistant/mcp-servers", {
+        label: "Ignored",
+        transportType: "http",
+        url: "https://mcp.test/mcp",
+        secretRef: "env:GITHUB_WEBHOOK_SECRET",
+      }));
+      expect(createdRes.status).toBe(201);
+      created = await createdRes.json() as Record<string, unknown>;
 
-    const id = await createClient("Remote");
-    const patched = await handler(authed("PATCH", `/api/assistant/mcp-servers/${id}`, { secretRef: "env:LINEAR_TOKEN" }));
-    expect(patched.status).toBe(400);
-    expect((await patched.json() as { error: { code: string; message: string } }).error).toMatchObject({
-      code: "MCP_INVALID_TRANSPORT_CONFIG",
-      message: envSecretRefReason("LINEAR_TOKEN"),
-    });
+      const patchedRes = await handler(authed("PATCH", "/api/assistant/mcp-servers/ignored", {
+        label: "Ignored 2",
+        secretRef: "env:GITHUB_WEBHOOK_SECRET",
+      }));
+      expect(patchedRes.status).toBe(200);
+      patched = await patchedRes.json() as Record<string, unknown>;
+    } finally {
+      spy.mockRestore();
+    }
 
-    const still = await handler(authed("GET", "/api/assistant/mcp-servers"));
-    expect((await still.json() as { data: Array<Record<string, unknown>> }).data).toMatchObject([
-      { id, hasSecret: false },
-    ]);
+    for (const body of [created, patched]) {
+      expect(body).toMatchObject({ hasSecret: false, secretSource: "none" });
+      expect(body).not.toHaveProperty("secretRef");
+      expect(JSON.stringify(body)).not.toContain("GITHUB_WEBHOOK_SECRET");
+    }
+    expect(patched).toMatchObject({ label: "Ignored 2" });
+    expect(refOf("ignored")).toBeNull();
+
+    // One WARN per request, naming the operation, never the ref.
+    const warns = logged
+      .map((line) => JSON.parse(line) as { level?: string; message?: string })
+      .filter((entry) => entry.level === "WARN");
+    expect(warns).toHaveLength(2);
+    for (const warn of warns) expect(warn.message).toContain("secretRef ignored");
+    expect(logged.join("\n")).not.toContain("GITHUB_WEBHOOK_SECRET");
   });
 
-  // A row stored before the `env:NAME` allowlist existed: PATCH must still edit
-  // it, and only a supplied `secretRef` is allowlist-validated.
-  it("patch does not freeze a row on a pre-existing non-allowlisted secret ref", async () => {
+  it("an oversize secretRef is refused at decode (400), like an oversize managed secret", async () => {
+    const res = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Too Long",
+      transportType: "http",
+      url: "https://mcp.test/mcp",
+      secretRef: "env:" + "x".repeat(4096),
+    }));
+    expect(res.status).toBe(400);
+    // A decode refusal never reaches the handler, so nothing is written.
+    const still = await handler(authed("GET", "/api/assistant/mcp-servers"));
+    expect((await still.json() as { data: unknown[] }).data).toEqual([]);
+  });
+
+  // A row stored before references were removed: `secret_ref` is legacy and is
+  // never a credential. GET hides it; PATCH clears it on write.
+  it("legacy stored secret_ref is hidden by GET and cleared by PATCH", async () => {
     db.exec(
       `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
        VALUES ('legacy-ref', 'Legacy Ref', 'http', 'https://mcp.test/mcp', NULL, '[]', 'env:LINEAR_TOKEN', 0)`
     );
 
+    const list = await handler(authed("GET", "/api/assistant/mcp-servers"));
+    expect(list.status).toBe(200);
+    const listBody = await list.json() as { data: Array<Record<string, unknown>> };
+    expect(listBody.data).toMatchObject([{ id: "legacy-ref", hasSecret: false, secretSource: "none" }]);
+    expect(JSON.stringify(listBody)).not.toContain("LINEAR_TOKEN");
+    expect(JSON.stringify(listBody)).not.toContain("secret_ref");
+
     const renamed = await handler(authed("PATCH", "/api/assistant/mcp-servers/legacy-ref", { label: "Legacy Renamed", enabled: true }));
     expect(renamed.status).toBe(200);
     const body = await renamed.json() as Record<string, unknown>;
-    expect(body).toMatchObject({ id: "legacy-ref", label: "Legacy Renamed", enabled: true, hasSecret: true });
+    expect(body).toMatchObject({ id: "legacy-ref", label: "Legacy Renamed", enabled: true, hasSecret: false, secretSource: "none" });
     expect(JSON.stringify(body)).not.toContain("LINEAR_TOKEN");
-
-    const supplied = await handler(authed("PATCH", "/api/assistant/mcp-servers/legacy-ref", { secretRef: "env:LINEAR_TOKEN" }));
-    expect(supplied.status).toBe(400);
-    expect((await supplied.json() as { error: { code: string; message: string } }).error).toMatchObject({
-      code: "MCP_INVALID_TRANSPORT_CONFIG",
-      message: envSecretRefReason("LINEAR_TOKEN"),
-    });
+    expect(refOf("legacy-ref")).toBeNull();
   });
 
   it("create rejects the legacy stdio payload with MCP_INVALID_TRANSPORT_CONFIG, not a decode 400", async () => {
@@ -423,11 +459,6 @@ describe("managed MCP client secrets over HTTP", () => {
       | { server_id: string; ciphertext: string; iv: string; key_id: string }
       | null;
 
-  const refOf = (id: string) =>
-    (db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = ?").get(id) as
-      | { secret_ref: string | null }
-      | null)?.secret_ref ?? null;
-
   // `secret` is write-only by construction, so the response body is the only
   // place a leaked value could surface, and the raw row is the only place the
   // stored ciphertext can be checked for a plaintext leak.
@@ -484,35 +515,137 @@ describe("managed MCP client secrets over HTTP", () => {
     expect(refOf("clearable")).toBeNull();
   });
 
-  it("PATCH carrying both a secret and a secretRef → 400 MCP_INVALID_TRANSPORT_CONFIG, and nothing is written", async () => {
+  it("PATCH secret + secretRef stores the managed token, ignores the ref, and logs one WARN", async () => {
     process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
 
     const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
-      label: "Both Sources",
+      label: "Ignored Ref",
       transportType: "http",
-      url: "https://mcp.test/both",
+      url: "https://mcp.test/ignored-ref",
     }));
     expect(created.status).toBe(201);
-    expect(refOf("both-sources")).toBeNull();
-    expect(secretRow("both-sources")).toBeNull();
+    expect(secretRow("ignored-ref")).toBeNull();
 
-    const refused = await handler(authed("PATCH", "/api/assistant/mcp-servers/both-sources", {
+    const logged: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      logged.push(String(chunk));
+      return true;
+    });
+    let res: Response;
+    try {
+      res = await handler(authed("PATCH", "/api/assistant/mcp-servers/ignored-ref", {
+        secret: TOKEN,
+        secretRef: "env:CRON_SECRET",
+      }));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ id: "ignored-ref", hasSecret: true, secretSource: "managed" });
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+    expect(JSON.stringify(body)).not.toContain("CRON_SECRET");
+    expect(secretRow("ignored-ref")).toBeDefined();
+    expect(refOf("ignored-ref")).toBeNull();
+
+    const warns = logged
+      .map((line) => JSON.parse(line) as { level?: string; message?: string })
+      .filter((entry) => entry.level === "WARN");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.message).toContain("secretRef ignored");
+    expect(logged.join("\n")).not.toContain("CRON_SECRET");
+  });
+
+  it("PATCH secretRef alone on a managed row is ignored: 200, source managed, ciphertext untouched, stored ref null, one WARN", async () => {
+    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+
+    const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Managed Ref",
+      transportType: "http",
+      url: "https://mcp.test/managed-ref",
+      secret: TOKEN,
+    }));
+    expect(created.status).toBe(201);
+    const before = secretRow("managed-ref");
+    expect(before).toBeDefined();
+
+    const logged: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+      logged.push(String(chunk));
+      return true;
+    });
+    let res: Response;
+    try {
+      res = await handler(authed("PATCH", "/api/assistant/mcp-servers/managed-ref", { secretRef: "env:CRON_SECRET" }));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ id: "managed-ref", hasSecret: true, secretSource: "managed" });
+    expect(JSON.stringify(body)).not.toContain(TOKEN);
+    expect(JSON.stringify(body)).not.toContain("CRON_SECRET");
+
+    // The ignored ref neither rewrites the ref column nor touches the blob: the
+    // managed ciphertext is authoritative and byte-identical after the write.
+    expect(refOf("managed-ref")).toBeNull();
+    expect(secretRow("managed-ref")).toEqual(before);
+
+    const warns = logged
+      .map((line) => JSON.parse(line) as { level?: string; message?: string })
+      .filter((entry) => entry.level === "WARN");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.message).toContain("secretRef ignored");
+    expect(logged.join("\n")).not.toContain("CRON_SECRET");
+  });
+
+  it("PATCH clearSecret + secretRef succeeds; clearSecret + secret is still refused", async () => {
+    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+
+    const created = await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Clearable",
+      transportType: "http",
+      url: "https://mcp.test/clearable-2",
+      secret: TOKEN,
+    }));
+    expect(created.status).toBe(201);
+    expect(secretRow("clearable")).toBeDefined();
+
+    // An ignored ref does not conflict with a clear.
+    const cleared = await handler(authed("PATCH", "/api/assistant/mcp-servers/clearable", {
+      clearSecret: true,
+      secretRef: "env:CRON_SECRET",
+    }));
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json() as Record<string, unknown>).toMatchObject({ hasSecret: false, secretSource: "none" });
+    expect(secretRow("clearable")).toBeNull();
+
+    // A real token does: the conflict is unchanged.
+    const conflict = await handler(authed("PATCH", "/api/assistant/mcp-servers/clearable", {
+      clearSecret: true,
+      secret: TOKEN,
+    }));
+    expect(conflict.status).toBe(400);
+    expect((await conflict.json() as { error: { code: string; message: string } }).error).toMatchObject({
+      code: "MCP_INVALID_TRANSPORT_CONFIG",
+      message: SECRET_CLEAR_CONFLICT_REJECTED,
+    });
+  });
+
+  // The response literal is `managed | none` — a `reference` value must never
+  // come back from any route.
+  it("never reports secretSource reference", async () => {
+    process.env.LXK_MCP_MASTER_KEY = MASTER_KEY;
+    await handler(authed("POST", "/api/assistant/mcp-servers", {
+      label: "Source Check",
+      transportType: "http",
+      url: "https://mcp.test/source",
       secret: TOKEN,
       secretRef: "env:CRON_SECRET",
     }));
-    expect(refused.status).toBe(400);
-    expect((await refused.json() as { error: { code: string; message: string } }).error).toMatchObject({
-      code: "MCP_INVALID_TRANSPORT_CONFIG",
-      message: SECRET_BOTH_SOURCES_REJECTED,
-    });
-
-    // The refused call wrote nothing: still no ciphertext row and no reference,
-    // so the two-source payload can never half-apply over the wire either.
-    expect(secretRow("both-sources")).toBeNull();
-    expect(refOf("both-sources")).toBeNull();
     const list = await handler(authed("GET", "/api/assistant/mcp-servers"));
-    expect((await list.json() as { data: Array<Record<string, unknown>> }).data).toMatchObject([
-      { id: "both-sources", hasSecret: false, secretSource: "none" },
-    ]);
+    const body = await list.text();
+    expect(body).toContain('"secretSource":"managed"');
+    expect(body).not.toContain('"reference"');
   });
 });

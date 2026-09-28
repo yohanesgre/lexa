@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 // Wireframe admin-assistant-providers.html §MCP Clients: remote HTTP/SSE
 // registry with the accurate empty state ("No MCP clients yet"), a
-// two-option transport select defaulting to http, one-line field hints, and
+// two-option transport select defaulting to http, a one-line URL hint, and
 // the test-result states (ok counts / MCP_CONNECT_FAILED).
-// Secret source: the mode select (Reference | Managed), the write-only masked
-// token input, the hasSecret-only masked chip, Clear secret → pending clear,
-// and the disabled managed option when the server has no master key. The
-// capability is tri-state: the warning names the env var only when the server
-// has actually said the key is absent — an unanswered request claims nothing.
+// Managed-only credential: one write-only masked Bearer-token field, the
+// hasSecret-only masked chip, Clear secret → pending clear, and a disabled
+// token field when the server has no master key. The capability is tri-state:
+// the warning names the env var only when the server has actually said the key
+// is absent — an unanswered request claims nothing.
+// Decluttered: the per-field explainer paragraphs and the Secret source select
+// are gone; the load-bearing "empty keeps the stored token" contract rides in
+// the placeholder instead.
 // No section subtitle, no notice panel, no stdio/command/args controls,
 // no MCP_STDIO_UNAVAILABLE.
 import "@testing-library/jest-dom/vitest";
@@ -20,7 +23,7 @@ const h = vi.hoisted(() => ({
   isLoading: false,
   // The server's real capability, reported on the list response. `undefined`
   // is the in-flight state the section must claim nothing about — no notice,
-  // no disabled state beyond the select.
+  // and the token field stays disabled.
   managedSecrets: true as boolean | undefined,
   testResult: null as unknown,
   created: [] as unknown[],
@@ -55,8 +58,7 @@ function server(over: Partial<McpServer> & { id: string; label: string; hasSecre
   };
 }
 
-const LINEAR: McpServer = server({ id: "linear", label: "Linear", hasSecret: true, secretSource: "reference" });
-const MANAGED: McpServer = server({ id: "linear", label: "Linear", hasSecret: true, secretSource: "managed" });
+const HAS_TOKEN: McpServer = server({ id: "linear", label: "Linear", hasSecret: true, secretSource: "managed" });
 const SECRETLESS: McpServer = server({ id: "linear", label: "Linear", hasSecret: false, secretSource: "none" });
 
 function row(name: RegExp): HTMLElement {
@@ -65,11 +67,11 @@ function row(name: RegExp): HTMLElement {
 
 async function openEdit(user: ReturnType<typeof userEvent.setup>) {
   await user.click(within(row(/Linear/)).getByRole("button", { name: "Edit MCP client" }));
-  return screen.findByLabelText("Secret source");
+  return screen.findByLabelText("Bearer token");
 }
 
 beforeEach(() => {
-  h.servers = [LINEAR];
+  h.servers = [HAS_TOKEN];
   h.isLoading = false;
   h.managedSecrets = true;
   h.testResult = null;
@@ -147,11 +149,12 @@ describe("AssistantMcpSection — transport form", () => {
     expect(screen.getByLabelText("URL")).toBeInTheDocument();
   });
 
-  it("keeps one line hints for the URL and secret reference fields", () => {
+  it("trims the URL hint to the scheme rule and keeps the empty-keeps token placeholder", () => {
     render(<AssistantMcpSection />);
-    expect(screen.getByText(/http\(s\) only · no userinfo · SSRF-checked against the URL allowlist at save and connect/)).toBeInTheDocument();
-    expect(screen.getByText(/Bearer token reference, never the token itself/)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("env:NAME or file:/abs/path")).toBeInTheDocument();
+    expect(screen.getByText("http(s) URLs only.")).toBeInTheDocument();
+    expect(screen.queryByText(/no userinfo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/SSRF/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
   });
 
   it("saves a client with label + url and no command/args", async () => {
@@ -164,75 +167,32 @@ describe("AssistantMcpSection — transport form", () => {
   });
 });
 
-describe("AssistantMcpSection — secret source select", () => {
-  it("offers exactly Reference | Managed token and defaults to Reference", () => {
+describe("AssistantMcpSection — one credential field", () => {
+  it("has no Secret source select and no reference field", () => {
     render(<AssistantMcpSection />);
-    const select = screen.getByLabelText("Secret source") as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
-      "Reference (env: / file:)",
-      "Managed token (stored encrypted)",
-    ]);
-    expect(select.value).toBe("reference");
-  });
-
-  it("states the one-source guarantee under the select", () => {
-    render(<AssistantMcpSection />);
-    expect(screen.getByText(/One Bearer secret per client\. Pick where it comes from — either way the value is write-only and never shown back\./)).toBeInTheDocument();
-  });
-
-  it("renders the reference branch by default and the token branch on switch — never both", async () => {
-    const user = userEvent.setup();
-    render(<AssistantMcpSection />);
-    expect(screen.getByLabelText("Secret reference")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Bearer token")).not.toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText("Secret source"), "managed");
-    expect(screen.getByLabelText("Bearer token")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Secret source")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Secret source" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Secret reference")).not.toBeInTheDocument();
+    expect(screen.queryByText("Reference (env: / file:)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Managed token (stored encrypted)")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("env:NAME or file:/abs/path")).not.toBeInTheDocument();
+    expect(screen.queryByText(/One Bearer secret per client/)).not.toBeInTheDocument();
   });
 
-  it("drops the other branch's value locally when the mode switches", async () => {
+  it("renders exactly one write-only Bearer-token field, set or secret-less", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
-    await user.type(screen.getByLabelText("Label"), "Linear");
-    await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
-    await user.type(screen.getByLabelText("Secret reference"), "env:LINEAR_MCP_TOKEN");
-    await user.selectOptions(screen.getByLabelText("Secret source"), "managed");
-    await user.type(screen.getByLabelText("Bearer token"), TOKEN);
-    await user.selectOptions(screen.getByLabelText("Secret source"), "reference");
+    expect(screen.getAllByLabelText("Bearer token")).toHaveLength(1);
 
-    expect(screen.getByLabelText("Secret reference")).toHaveValue("");
-    await user.click(screen.getByRole("button", { name: "Save client" }));
-    expect(h.created[0]).not.toHaveProperty("secret");
-    expect(h.created[0]).not.toHaveProperty("secretRef");
-  });
-
-  it("prefills the mode select from secretSource when editing", async () => {
-    const user = userEvent.setup();
-    h.servers = [MANAGED];
-    render(<AssistantMcpSection />);
-    const select = await openEdit(user);
-    expect(select).toHaveValue("managed");
-    expect(screen.getByLabelText("Bearer token")).toBeInTheDocument();
+    await openEdit(user);
+    expect(screen.getAllByLabelText("Bearer token")).toHaveLength(1);
     expect(screen.queryByLabelText("Secret reference")).not.toBeInTheDocument();
-  });
-
-  it("secretSource 'none' falls back to the Reference branch with no chip", async () => {
-    const user = userEvent.setup();
-    h.servers = [SECRETLESS];
-    render(<AssistantMcpSection />);
-    const select = await openEdit(user);
-    expect(select).toHaveValue("reference");
-    expect(screen.getByLabelText("Secret reference")).toBeInTheDocument();
-    expect(screen.queryByText(/Saved/, { selector: ".chip" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Clear secret/ })).not.toBeInTheDocument();
   });
 });
 
 describe("AssistantMcpSection — masked chip", () => {
   it("marks a stored secret as saved with a fixed-width mask — no value, name, path or prefix", async () => {
     const user = userEvent.setup();
-    h.servers = [MANAGED];
     render(<AssistantMcpSection />);
     await openEdit(user);
     const chip = await screen.findByText(/Saved/, { selector: ".chip" });
@@ -245,7 +205,6 @@ describe("AssistantMcpSection — masked chip", () => {
 
   it("never prefills a secret field with a stored value", async () => {
     const user = userEvent.setup();
-    h.servers = [MANAGED];
     render(<AssistantMcpSection />);
     await openEdit(user);
     expect(screen.getByLabelText("Bearer token")).toHaveValue("");
@@ -267,12 +226,11 @@ describe("AssistantMcpSection — managed token input", () => {
     render(<AssistantMcpSection />);
     await user.type(screen.getByLabelText("Label"), "Linear");
     await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
-    await user.selectOptions(screen.getByLabelText("Secret source"), "managed");
 
     const field = screen.getByLabelText("Bearer token") as HTMLInputElement;
     expect(field).toHaveAttribute("type", "password");
     expect(field).toHaveAttribute("autocomplete", "off");
-    expect(field).toHaveAttribute("placeholder", "Paste the Bearer token");
+    expect(field).toHaveAttribute("placeholder", "Leave empty to keep stored token");
     await user.type(field, TOKEN);
 
     // A password input is not in the accessible text, and the surrounding
@@ -281,12 +239,11 @@ describe("AssistantMcpSection — managed token input", () => {
     expect(screen.queryByText(new RegExp(TOKEN))).not.toBeInTheDocument();
   });
 
-  it("carries the managed token in the write payload as `secret` and never as `secretRef`", async () => {
+  it("carries the token in the write payload as `secret` and never as `secretRef`", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
     await user.type(screen.getByLabelText("Label"), "Linear");
     await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
-    await user.selectOptions(screen.getByLabelText("Secret source"), "managed");
     await user.type(screen.getByLabelText("Bearer token"), TOKEN);
     await user.click(screen.getByRole("button", { name: "Save client" }));
 
@@ -295,12 +252,11 @@ describe("AssistantMcpSection — managed token input", () => {
     expect(body).not.toContain("secretRef");
   });
 
-  it("saving an empty managed field stores a legal secret-less client", async () => {
+  it("saving an empty token stores a legal secret-less client", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
     await user.type(screen.getByLabelText("Label"), "Linear");
     await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
-    await user.selectOptions(screen.getByLabelText("Secret source"), "managed");
     await user.click(screen.getByRole("button", { name: "Save client" }));
 
     expect(h.created).toEqual([{ label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp" }]);
@@ -309,39 +265,40 @@ describe("AssistantMcpSection — managed token input", () => {
     expect(h.created[0]).not.toHaveProperty("clearSecret");
   });
 
-  it("shows the write-only marker and AES-GCM guidance in the unsaved managed branch", async () => {
-    const user = userEvent.setup();
+  it("shows the write-only marker and no encryption prose", () => {
     render(<AssistantMcpSection />);
-    await user.selectOptions(screen.getByLabelText("Secret source"), "managed");
     expect(screen.getByText("write-only")).toBeInTheDocument();
-    expect(screen.getByText(/Encrypted with AES-256-GCM \(fresh 12-byte IV, bound to the client id\)/)).toBeInTheDocument();
-    expect(screen.queryByText(/Saved/, { selector: ".chip" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Encrypted with AES-256-GCM/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/master key lives only in the server environment/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Decrypted only at connect/)).not.toBeInTheDocument();
   });
 
-  // Card 3 of the state catalog: a stored managed token gets its own readback
-  // hint. "Empty keeps the stored token" is the load-bearing sentence — it is
-  // why a masked field can never be a removal route.
-  it("shows the card-3 readback hint when a managed token is stored, never the not-set-yet copy", async () => {
+  // "Empty keeps the stored token" is load-bearing — it is why a masked field
+  // can never be a removal route. It now rides in the placeholder, not in prose.
+  it("carries the empty-keeps contract in the token placeholder, never in a hint paragraph", async () => {
     const user = userEvent.setup();
-    h.servers = [MANAGED];
     render(<AssistantMcpSection />);
     await openEdit(user);
-    expect(screen.getByText(/Read back as/)).toBeInTheDocument();
-    expect(screen.getByText(/Empty keeps the stored token; typing replaces it on Save\./)).toBeInTheDocument();
-    expect(screen.queryByText(/Encrypted with AES-256-GCM \(fresh 12-byte IV, bound to the client id\)/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
+    expect(screen.queryByText(/Read back as/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hasSecret: true/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Encrypted with AES-256-GCM/)).not.toBeInTheDocument();
   });
 
-  it("a pending clear outranks the managed hint in either branch — the clearPending copy wins", async () => {
+  it("a pending clear confirms the arm and drops the keep-the-token claim", async () => {
     const user = userEvent.setup();
-    h.servers = [MANAGED];
     render(<AssistantMcpSection />);
     await openEdit(user);
     await user.click(screen.getByRole("button", { name: /Clear secret/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Clear secret/ }));
 
-    expect(screen.getByText(/Entering a value here cancels the pending clear/)).toBeInTheDocument();
-    expect(screen.queryByText(/Encrypted with AES-256-GCM \(fresh 12-byte IV, bound to the client id\)/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Empty keeps the stored token/)).not.toBeInTheDocument();
+    expect(screen.getByText("Secret will be removed on Save.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Type to cancel the pending clear");
+    // The enabled field keeps its type-to-cancel route; no button is needed
+    // (or offered) while the field can take a keystroke.
+    expect(screen.queryByRole("button", { name: "Keep token" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Leave empty to keep stored token/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Read back as/)).not.toBeInTheDocument();
   });
 });
 
@@ -357,28 +314,27 @@ describe("AssistantMcpSection — clear secret", () => {
     expect(dialog).toHaveTextContent("linear");
     expect(dialog).toHaveTextContent(/connects with no Authorization header/);
     expect(dialog).toHaveTextContent("This cannot be undone.");
-    expect(dialog.textContent).not.toContain("env:");
     expect(dialog.textContent).not.toContain(TOKEN);
   });
 
-  it("drops into the pending-clear state until Save, and never posts a blank secretRef", async () => {
+  it("drops into the pending-clear state until Save, and never posts a blank token", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
     await openEdit(user);
     await user.click(screen.getByRole("button", { name: /Clear secret/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Clear secret/ }));
 
-    // Card 4: chip and trigger gone, field back to its placeholder, danger
+    // Card 3: chip and trigger gone, field back to its placeholder, danger
     // notice held until Save writes clearSecret: true.
     expect(screen.queryByText(/Saved/, { selector: ".chip" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Clear secret/ })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Secret reference")).toHaveAttribute("placeholder", "env:NAME or file:/abs/path");
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Type to cancel the pending clear");
     expect(screen.getByText("Secret will be removed on Save.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save client" }));
     expect(h.updated).toEqual([{ id: "linear", label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp", clearSecret: true }]);
-    expect(h.updated[0]).not.toHaveProperty("secretRef");
     expect(h.updated[0]).not.toHaveProperty("secret");
+    expect(h.updated[0]).not.toHaveProperty("secretRef");
   });
 
   it("cancelling the confirm keeps the secret and the chip", async () => {
@@ -399,28 +355,13 @@ describe("AssistantMcpSection — clear secret", () => {
     await openEdit(user);
     await user.click(screen.getByRole("button", { name: /Clear secret/ }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Clear secret/ }));
-    await user.type(screen.getByLabelText("Secret reference"), "env:LINEAR_MCP_TOKEN");
+    await user.type(screen.getByLabelText("Bearer token"), TOKEN);
 
     expect(screen.queryByText("Secret will be removed on Save.")).not.toBeInTheDocument();
     expect(screen.getByText(/Saved/, { selector: ".chip" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save client" }));
-    expect(h.updated[0]).toMatchObject({ secretRef: "env:LINEAR_MCP_TOKEN" });
+    expect(h.updated[0]).toMatchObject({ secret: TOKEN });
     expect(h.updated[0]).not.toHaveProperty("clearSecret");
-  });
-
-  it("clears a stored managed token through the same route", async () => {
-    const user = userEvent.setup();
-    h.servers = [MANAGED];
-    render(<AssistantMcpSection />);
-    await openEdit(user);
-    await user.click(screen.getByRole("button", { name: /Clear secret/ }));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Clear secret/ }));
-
-    expect(screen.getByText("Secret will be removed on Save.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Bearer token")).toHaveValue("");
-    await user.click(screen.getByRole("button", { name: "Save client" }));
-    expect(h.updated[0]).toMatchObject({ clearSecret: true });
-    expect(h.updated[0]).not.toHaveProperty("secret");
   });
 
   it("a secret-less client offers no Clear trigger at all", async () => {
@@ -433,13 +374,13 @@ describe("AssistantMcpSection — clear secret", () => {
 });
 
 // The capability comes from the list response (useMcpManagedSecrets), never a
-// prop: the server owns whether a token can be encrypted, so the browser never
+// prop: the server owns whether a token can be stored, so the browser never
 // assumes the feature exists. `undefined` is the in-flight answer.
 describe("AssistantMcpSection — master key present", () => {
-  it("shows no warning notice and leaves the managed option selectable", () => {
+  it("shows no warning notice and leaves the token field enabled", () => {
     render(<AssistantMcpSection />);
-    expect(screen.queryByText(/Managed tokens are off/)).not.toBeInTheDocument();
-    expect(within(screen.getByLabelText("Secret source")).getByRole("option", { name: "Managed token (stored encrypted)" })).toBeEnabled();
+    expect(screen.queryByText(/Token storage is off/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toBeEnabled();
   });
 });
 
@@ -448,40 +389,61 @@ describe("AssistantMcpSection — no master key", () => {
     h.managedSecrets = false;
   });
 
-  it("disables the managed option in the select, never hides it", () => {
+  it("disables the token field, never hides it, and names the exact env var", () => {
     render(<AssistantMcpSection />);
-    const select = screen.getByLabelText("Secret source") as HTMLSelectElement;
-    const managed = within(select).getByRole("option", { name: "Managed token (stored encrypted)" }) as HTMLOptionElement;
-    expect(managed).toBeInTheDocument();
-    expect(managed).toBeDisabled();
-    expect(within(select).getByRole("option", { name: "Reference (env: / file:)" })).toBeEnabled();
+    expect(screen.getByLabelText("Bearer token")).toBeDisabled();
+    expect(screen.getByText(/Token storage is off — this server has no/)).toBeInTheDocument();
+    expect(screen.getByText("LXK_MCP_MASTER_KEY")).toBeInTheDocument();
+    expect(screen.getByText(/Set it and restart to enable/)).toBeInTheDocument();
   });
 
-  it("names the exact env var in a warning notice and keeps the reference branch working", async () => {
+  it("still lets a secret-less client save without the key", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
-    expect(screen.getByText(/Managed tokens are off — this server has no/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_MCP_MASTER_KEY")).toBeInTheDocument();
-    expect(screen.getByText(/References work exactly as they do today\./)).toBeInTheDocument();
-
     await user.type(screen.getByLabelText("Label"), "Linear");
     await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
-    await user.type(screen.getByLabelText("Secret reference"), "env:LINEAR_MCP_TOKEN");
     await user.click(screen.getByRole("button", { name: "Save client" }));
-    expect(h.created[0]).toMatchObject({ secretRef: "env:LINEAR_MCP_TOKEN" });
+    expect(h.created).toEqual([{ label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp" }]);
+    expect(h.created[0]).not.toHaveProperty("secret");
   });
 
-  it("a missing key never hides a stored secret — the managed branch stays selected, masked and clearable", async () => {
+  it("never hides a stored token — it keeps its chip and Clear trigger, and clearing works without the key", async () => {
     const user = userEvent.setup();
-    h.servers = [MANAGED];
     render(<AssistantMcpSection />);
-    const select = await openEdit(user);
-    expect(select).toHaveValue("managed");
-    expect(within(select).getByRole("option", { name: "Managed token (stored encrypted)" })).toBeDisabled();
+    await openEdit(user);
+    expect(screen.getByLabelText("Bearer token")).toBeDisabled();
     expect(screen.getByText(/Saved/, { selector: ".chip" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("type", "password");
     expect(screen.getByRole("button", { name: /Clear secret/ })).toBeInTheDocument();
-    expect(screen.getByText(/still decrypts on the next connect/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Clear secret/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Clear secret/ }));
+    await user.click(screen.getByRole("button", { name: "Save client" }));
+    expect(h.updated[0]).toMatchObject({ clearSecret: true });
+  });
+
+  it("a pending clear on the disabled field states the Save outcome and offers Keep token to cancel it", async () => {
+    const user = userEvent.setup();
+    render(<AssistantMcpSection />);
+    await openEdit(user);
+    await user.click(screen.getByRole("button", { name: /Clear secret/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Clear secret/ }));
+
+    // A disabled field cannot be typed into, so it must not promise a
+    // keystroke cancel; the placeholder names what Save does instead, and the
+    // button is the cancel route.
+    const field = screen.getByLabelText("Bearer token");
+    expect(field).toBeDisabled();
+    expect(field).toHaveAttribute("placeholder", "Save removes the stored token");
+    expect(screen.queryByPlaceholderText("Type to cancel the pending clear")).not.toBeInTheDocument();
+    expect(screen.getByText("Secret will be removed on Save.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Keep token" }));
+    expect(screen.queryByText("Secret will be removed on Save.")).not.toBeInTheDocument();
+    expect(screen.getByText(/Saved/, { selector: ".chip" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
+
+    await user.click(screen.getByRole("button", { name: "Save client" }));
+    expect(h.updated[0]).not.toHaveProperty("clearSecret");
   });
 });
 
@@ -493,29 +455,28 @@ describe("AssistantMcpSection — capability unknown (list in flight)", () => {
     h.managedSecrets = undefined;
   });
 
-  it("offers only the reference branch while the capability is unanswered", () => {
+  it("disables the token field and claims nothing: no notice, no env var named", () => {
     render(<AssistantMcpSection />);
-    const select = screen.getByLabelText("Secret source") as HTMLSelectElement;
-    expect(select.value).toBe("reference");
-    expect(within(select).getByRole("option", { name: "Managed token (stored encrypted)" })).toBeDisabled();
-    expect(screen.getByLabelText("Secret reference")).toBeEnabled();
-  });
-
-  it("claims nothing: no notice, no env var named, no managed field offered", () => {
-    render(<AssistantMcpSection />);
-    expect(screen.queryByText(/Managed tokens are off/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toBeDisabled();
+    expect(screen.queryByText(/Token storage is off/)).not.toBeInTheDocument();
     expect(screen.queryByText("LXK_MCP_MASTER_KEY")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Bearer token")).not.toBeInTheDocument();
   });
 
-  it("speaks only once the server answers false → the notice and the disabled option", () => {
+  it("still allows a secret-less save while the capability is unanswered", async () => {
+    const user = userEvent.setup();
+    render(<AssistantMcpSection />);
+    await user.type(screen.getByLabelText("Label"), "Linear");
+    await user.type(screen.getByLabelText("URL"), "https://mcp.linear.example/mcp");
+    await user.click(screen.getByRole("button", { name: "Save client" }));
+    expect(h.created).toEqual([{ label: "Linear", transportType: "http", url: "https://mcp.linear.example/mcp" }]);
+  });
+
+  it("speaks only once the server answers false → the notice and the disabled field", () => {
     h.managedSecrets = false;
     render(<AssistantMcpSection />);
-    expect(screen.getByText(/Managed tokens are off — this server has no/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Bearer token")).toBeDisabled();
+    expect(screen.getByText(/Token storage is off/)).toBeInTheDocument();
     expect(screen.getByText("LXK_MCP_MASTER_KEY")).toBeInTheDocument();
-    expect(
-      within(screen.getByLabelText("Secret source")).getByRole("option", { name: "Managed token (stored encrypted)" })
-    ).toBeDisabled();
   });
 });
 
