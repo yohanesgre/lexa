@@ -83,6 +83,8 @@ import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
 import { AssistantMcpService, McpConnector, type McpUpdateInput } from "../services/assistant-mcp.service";
+import { AssistantJevService, type JevConfigInput } from "../services/assistant-jev.service";
+import { AssistantJevRepo } from "../repos/assistant-jev.repo";
 import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
@@ -1577,6 +1579,56 @@ const ProjectMcpServersPutPayload = Schema.Struct({
   entries: Schema.Array(Schema.Struct({ serverId: Schema.String, enabled: Schema.Boolean })),
 });
 
+// Jev registry. `secret` is write-only by construction: it exists on the PATCH
+// payload and NOT on the response, so a response can never carry it. 4096 chars
+// bounds a key at schema decode (400 before the service), so an oversized body
+// field never reaches the crypto module. `keyMask` is server-provided.
+const AssistantJevMaskedSchema = Schema.Struct({
+  id: Schema.Literal("default"),
+  baseUrl: Schema.String,
+  model: Schema.String,
+  enabled: Schema.Boolean,
+  hasKey: Schema.Boolean,
+  keyMask: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+const AssistantJevConfigResponse = Schema.Struct({
+  config: AssistantJevMaskedSchema,
+  secretsEnabled: Schema.Boolean,
+});
+const JevManagedSecretSchema = Schema.NullOr(Schema.String.pipe(Schema.maxLength(4096)));
+const AssistantJevPatchPayload = Schema.Struct({
+  baseUrl: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  enabled: Schema.optional(Schema.Boolean),
+  secret: Schema.optional(JevManagedSecretSchema),
+  clearSecret: Schema.optional(Schema.Boolean),
+});
+const AssistantJevTestResponse = Schema.Struct({
+  ok: Schema.Literal(true),
+  latencyMs: Schema.Number,
+  models: Schema.Array(Schema.String),
+});
+const AssistantJevProjectSchema = Schema.Struct({
+  projectId: Schema.String,
+  enabled: Schema.Boolean,
+  available: Schema.Boolean,
+  createdAt: Schema.NullOr(Schema.String),
+  updatedAt: Schema.NullOr(Schema.String),
+});
+const AssistantJevProjectPutPayload = Schema.Struct({ enabled: Schema.Boolean });
+const AssistantJevProjectIdPath = Schema.Struct({ id: Schema.String });
+
+// Jev registry: superadmin config + test at /assistant/jev, plus per-project
+// opt-in keyed by project id (member read, project-admin write).
+const assistantJevGroup = HttpApiGroup.make("assistantJev")
+  .add(HttpApiEndpoint.get("getAssistantJev", "/assistant/jev").addSuccess(AssistantJevConfigResponse))
+  .add(HttpApiEndpoint.patch("updateAssistantJev", "/assistant/jev").setPayload(AssistantJevPatchPayload).addSuccess(AssistantJevConfigResponse))
+  .add(HttpApiEndpoint.post("testAssistantJev", "/assistant/jev/test").addSuccess(AssistantJevTestResponse))
+  .add(HttpApiEndpoint.get("getProjectJev", "/projects/:id/assistant/jev").setPath(AssistantJevProjectIdPath).addSuccess(AssistantJevProjectSchema))
+  .add(HttpApiEndpoint.put("putProjectJev", "/projects/:id/assistant/jev").setPath(AssistantJevProjectIdPath).setPayload(AssistantJevProjectPutPayload).addSuccess(AssistantJevProjectSchema));
+
 const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
   .add(HttpApiEndpoint.get("adminAssistantUsage", "/admin/assistant/usage").addSuccess(AssistantUsageResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantUsageCsv", "/admin/assistant/usage.csv").addSuccess(Schema.Void, { status: 200 }))
@@ -1636,6 +1688,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(adminAssistantGroup)
   .add(projectAssistantUsageGroup)
   .add(assistantMcpGroup)
+  .add(assistantJevGroup)
   .add(meGroup)
   .add(teamsGroup)
   .add(workspaceGroup)
@@ -4244,6 +4297,58 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
     )
 );
 
+const assistantJevLive = HttpApiBuilder.group(LexaApi, "assistantJev", (handlers) =>
+  handlers
+    .handle("getAssistantJev", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantJevService;
+        return yield* service.readConfig();
+      }))
+    )
+    .handle("updateAssistantJev", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantJevService;
+        const patch: JevConfigInput = {};
+        if (req.payload.baseUrl !== undefined) patch.baseUrl = req.payload.baseUrl;
+        if (req.payload.model !== undefined) patch.model = req.payload.model;
+        if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;
+        // Carried only when present: an omitted/blank `secret` is "keep".
+        if (req.payload.secret !== undefined && req.payload.secret !== null) patch.secret = req.payload.secret;
+        if (req.payload.clearSecret !== undefined) patch.clearSecret = req.payload.clearSecret;
+        return yield* service.updateConfig(patch);
+      }))
+    )
+    .handle("testAssistantJev", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const service = yield* AssistantJevService;
+        return yield* service.probe();
+      }))
+    )
+    .handle("getProjectJev", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.id);
+        const service = yield* AssistantJevService;
+        const repo = yield* AssistantJevRepo;
+        const [row, available] = yield* Effect.all([repo.getProject(req.path.id), service.projectAvailable()], { concurrency: 2 });
+        return row === null
+          ? { projectId: req.path.id, enabled: false, available, createdAt: null, updatedAt: null }
+          : { projectId: row.project_id, enabled: row.enabled === 1, available, createdAt: row.created_at, updatedAt: row.updated_at };
+      }))
+    )
+    .handle("putProjectJev", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.id);
+        const service = yield* AssistantJevService;
+        const repo = yield* AssistantJevRepo;
+        const [row, available] = yield* Effect.all([repo.setProject(req.path.id, req.payload.enabled), service.projectAvailable()], { concurrency: 2 });
+        return { projectId: row.project_id, enabled: row.enabled === 1, available, createdAt: row.created_at, updatedAt: row.updated_at };
+      }))
+    )
+);
+
 const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
   handlers
     .handle("updateMe", (req) =>
@@ -4339,7 +4444,7 @@ function formatWikiPageRevision<T>(r: T): T {
 
 function routeGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, assistantLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, assistantJevLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }
@@ -4408,6 +4513,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnect
     // MCP connector seam: tests may inject a fake, otherwise the live
     // HTTP/SSE connector backs the registry test endpoint.
     AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? LiveMcpConnector)),
+    AssistantJevRepo.Default, AssistantJevService.Default,
   );
 }
 

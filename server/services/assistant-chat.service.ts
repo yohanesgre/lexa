@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS } from "../assistant/tools";
-import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightEnv, type JevPreflightResult } from "../assistant/jev";
+import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
@@ -14,6 +14,7 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
 import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
 import { AssistantGateway } from "../assistant/gateway.service";
+import { AssistantJevService } from "./assistant-jev.service";
 import { ProviderNotConfigured, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
 import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
 import { executeAssistantWrite } from "../assistant/write-execution";
@@ -35,7 +36,7 @@ import type { ProviderConfig } from "../assistant/provider";
 import { activeChats, tryAcquireChat } from "../assistant/active-chats";
 
 export class AssistantChatService extends Effect.Service<AssistantChatService>()("Lexa/AssistantChatService", {
-  dependencies: [AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
     const settingsRepo = yield* AssistantSettingsRepo;
     const threadRepo = yield* AssistantThreadRepo;
@@ -50,6 +51,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     const dbAll = <T>(sql: string, ...params: SqlParam[]): Promise<T[]> =>
       db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
     const gateway = yield* AssistantGateway;
+    const jevService = yield* AssistantJevService;
     const taskService = yield* TaskService;
     const commentService = yield* CommentService;
     const wikiService = yield* WikiService;
@@ -116,8 +118,13 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     // Jev preflight. Advisory and fail-open by contract: any outcome other than
     // a rendered segment leaves the run untouched, and the catch below keeps
     // even a thrown helper from reaching the stream.
-    const runPreflight = (env: JevPreflightEnv, input: Parameters<typeof buildPreflightState>[0]): Effect.Effect<JevPreflightResult, never> =>
-      Effect.tryPromise(() => runJevPreflight({ state: buildPreflightState(input), env })).pipe(
+    const runPreflight = (config: JevRuntimeConfig | null, input: Parameters<typeof buildPreflightState>[0]): Effect.Effect<JevPreflightResult, never> => {
+      // A null config is the disable switch: no request is attempted, and the
+      // outcome is the documented skip rather than a per-run failure.
+      if (config === null) {
+        return Effect.succeed<JevPreflightResult>({ segment: null, outcome: "skipped", code: "MISSING_KEY", latencyMs: 0 });
+      }
+      return Effect.tryPromise(() => runJevPreflight({ state: buildPreflightState(input), config })).pipe(
         Effect.catchAll(() => Effect.succeed<JevPreflightResult>({ segment: null, outcome: "failed", code: "NETWORK", latencyMs: 0 })),
         // An unconfigured Jev is a deployment state, not a per-run event, so
         // its outcome stands but the log line is dropped: one INFO per run for
@@ -126,9 +133,10 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           if (result.code !== "MISSING_KEY") jevLog("preflight", result);
         }))
       );
+    };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevEnv: JevPreflightEnv) => ({
-      projectId, allowlist, searchApiKey, jevEnv, fetchImpl: fetch,
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null) => ({
+      projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch,
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
@@ -238,10 +246,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         );
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(req.projectId, extractMemoryTerms(req.message, ""));
-        const env = yield* currentEnv;
+        // Resolved ONCE for this run from the DB registry: global enabled +
+        // project opt-in + stored, decryptable key. Total — null is the gate.
+        const jevConfig = yield* jevService.resolveForProject(req.projectId);
         // Preflight runs once per NEW run, never on resume; only inputs this run
         // already loaded are serialized (no history, no attachments, no keys).
-        const preflight = yield* runPreflight(env, {
+        const preflight = yield* runPreflight(jevConfig, {
           runKind: "chat",
           projectId: req.projectId,
           threadId: chatId,
@@ -268,7 +278,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
-            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env), onCitation: (c) => { citations = collectCitation(citations, c); } });
+            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig), onCitation: (c) => { citations = collectCitation(citations, c); } });
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
@@ -314,8 +324,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
         // No preflight on resume: the judgment was made against the original
-        // request. The tool is still offered — its budget is per stream.
-        const env = yield* currentEnv;
+        // request. The tool is still offered — its budget is per stream. The
+        // config is resolved once here too, so a resume gets the same gate.
+        const jevConfig = yield* jevService.resolveForProject(thread.projectId);
         const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, writeTools: enabledWriteTools });
         const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
@@ -325,7 +336,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
-          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
           toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),

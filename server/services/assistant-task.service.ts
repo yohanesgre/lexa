@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { buildAssistantTools, MAX_TOOL_ROUNDS } from "../assistant/tools";
-import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightEnv, type JevPreflightResult } from "../assistant/jev";
+import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
@@ -16,6 +16,7 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
 import { Db, DbError, RowNotFound, queryFirst, run, withTx, ConstraintViolation, type SqlParam } from "../db/db";
 import { AssistantCatalogService } from "./assistant-catalog.service";
+import { AssistantJevService } from "./assistant-jev.service";
 import { loadTaskRepoContent } from "./assistant-repo-content";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { ProviderNotConfigured, AgentNotFound, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantTaskActive, AssistantTaskNotFound, TaskNotFound, WikiPageNotFound, AssistantThreadNotFound, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
@@ -41,7 +42,7 @@ import type { TaskRef } from "../assistant/tools";
 const activeTasks = new Map<string, AbortController>();
 
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
-  dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
     const queueRepo = yield* AssistantTaskRepo;
     const catalogRepo = yield* AssistantCatalogRepo;
@@ -65,6 +66,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     const swimlaneService = yield* SwimlaneService;
     const authz = yield* AuthorizationService;
     const gateway = yield* AssistantGateway;
+    const jevService = yield* AssistantJevService;
 
     // Read-only MCP tools for this project: globally + project enabled servers,
     // discovered fail-open. Undefined when the project has none.
@@ -119,8 +121,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     // Jev preflight. Advisory and fail-open by contract: any outcome other than
     // a rendered segment leaves the run untouched, and the catch below keeps
     // even a thrown helper from reaching the stream.
-    const runPreflight = (env: JevPreflightEnv, input: Parameters<typeof buildPreflightState>[0]): Effect.Effect<JevPreflightResult, never> =>
-      Effect.tryPromise(() => runJevPreflight({ state: buildPreflightState(input), env })).pipe(
+    const runPreflight = (config: JevRuntimeConfig | null, input: Parameters<typeof buildPreflightState>[0]): Effect.Effect<JevPreflightResult, never> => {
+      // A null config is the disable switch: no request is attempted, and the
+      // outcome is the documented skip rather than a per-run failure.
+      if (config === null) {
+        return Effect.succeed<JevPreflightResult>({ segment: null, outcome: "skipped", code: "MISSING_KEY", latencyMs: 0 });
+      }
+      return Effect.tryPromise(() => runJevPreflight({ state: buildPreflightState(input), config })).pipe(
         Effect.catchAll(() => Effect.succeed<JevPreflightResult>({ segment: null, outcome: "failed", code: "NETWORK", latencyMs: 0 })),
         // An unconfigured Jev is a deployment state, not a per-run event, so
         // its outcome stands but the log line is dropped: one INFO per run for
@@ -129,9 +136,10 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           if (result.code !== "MISSING_KEY") jevLog("preflight", result);
         }))
       );
+    };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevEnv: JevPreflightEnv) => ({
-      projectId, allowlist, searchApiKey, jevEnv, fetchImpl: fetch,
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null) => ({
+      projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch,
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
@@ -335,7 +343,9 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const repoContent = yield* loadTaskRepoContent(task).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(task.projectId, extractMemoryTerms(doc.title, doc.context));
-        const env = yield* currentEnv;
+        // Resolved ONCE for this run from the DB registry: global enabled +
+        // project opt-in + stored, decryptable key. Total — null is the gate.
+        const jevConfig = yield* jevService.resolveForProject(task.projectId);
         // The selection/instruction is resolved before the prompt build because
         // it is the preflight's "latest user message": the judgment must see the
         // same text the model will.
@@ -344,7 +354,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const instruction = [effectiveSelection.trim() ? `Selected text:\n"""\n${effectiveSelection}\n"""` : null, task.extraPrompt].filter((s): s is string => !!s && s.trim() !== "").join("\n\n");
         // Preflight runs once per NEW run, never on resume; only inputs this run
         // already loaded are serialized (no history, no attachments, no keys).
-        const preflight = yield* runPreflight(env, {
+        const preflight = yield* runPreflight(jevConfig, {
           runKind: "task",
           projectId: task.projectId,
           threadId: task.documentId,
@@ -356,7 +366,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env));
+        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig));
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];
@@ -386,12 +396,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms(doc.title, doc.context));
         // No preflight on resume: the judgment was made against the original
-        // request. The tool is still offered — its budget is per stream.
-        const env = yield* currentEnv;
+        // request. The tool is still offered — its budget is per stream. The
+        // config is resolved once here too, so a resume gets the same gate.
+        const jevConfig = yield* jevService.resolveForProject(thread.projectId);
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, env));
+        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig));
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];

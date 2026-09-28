@@ -17,8 +17,8 @@ import {
   systemOne,
   type JevAnswer,
   type JevFailureCode,
-  type JevPreflightEnv,
   type JevQuestions,
+  type JevRuntimeConfig,
   type JevUsage,
 } from "./jev";
 
@@ -98,9 +98,10 @@ export interface AssistantToolDeps {
   projectId: string;
   allowlist: string | null;
   searchApiKey: string | null;
-  // Jev advisory config, taken from the RuntimeEnv snapshot. Absent/null (or a
-  // blank key) omits `jev_assess` entirely — the same gate as `searchApiKey`.
-  jevEnv?: JevPreflightEnv | null | undefined;
+  // Jev advisory config, resolved per run from the DB registry. Absent/null
+  // omits `jev_assess` entirely — the service already encodes configured +
+  // per-project opt-in + stored key, so presence is the whole gate.
+  jevConfig?: JevRuntimeConfig | null | undefined;
   fetchImpl: FetchLike;
   storageGet: (key: string) => Promise<Uint8Array>;
   projectOwnsStorageKey: (projectId: string, key: string) => Promise<boolean>;
@@ -242,7 +243,7 @@ const jevQuestionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("score"), instructions: jevContentSchema, criteria: z.array(z.unknown()).min(2).max(10) }),
 ]);
 
-function buildJevAssessTool(cfg: { env: JevPreflightEnv; apiKey: string; fetchImpl: FetchLike }) {
+function buildJevAssessTool(cfg: { config: JevRuntimeConfig; fetchImpl: FetchLike }) {
   let calls = 0;
   // `latencyMs` is optional in the log meta: a budget refusal is decided before
   // any request, so there is no honest latency to report and the field is
@@ -287,9 +288,9 @@ function buildJevAssessTool(cfg: { env: JevPreflightEnv; apiKey: string; fetchIm
       const res = await systemOne({
         state,
         questions: questions as JevQuestions,
-        apiKey: cfg.apiKey,
-        ...(typeof cfg.env.TYPESAFE_BASE_URL === "string" ? { baseUrl: cfg.env.TYPESAFE_BASE_URL } : {}),
-        ...(typeof cfg.env.TYPESAFE_DEFAULT_MODEL === "string" ? { model: cfg.env.TYPESAFE_DEFAULT_MODEL } : {}),
+        apiKey: cfg.config.apiKey,
+        baseUrl: cfg.config.baseUrl,
+        model: cfg.config.model,
         fetchImpl: cfg.fetchImpl,
         timeoutMs: JEV_TOOL_TIMEOUT_MS,
       });
@@ -551,14 +552,13 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
   );
 
   // Jev is advisory-only: the second opinion the model may request on state it
-  // already holds, never a mutation path. Present wherever the key is configured
-  // (new runs AND resumes) — the per-stream call budget lives in the closure
-  // below, and each buildAssistantTools call is one stream invocation. Pushed
-  // last, after the read toolset, so the tools that produce the state it judges
-  // are read first.
-  const jevApiKey = typeof deps.jevEnv?.TYPESAFE_API_KEY === "string" ? deps.jevEnv.TYPESAFE_API_KEY.trim() : "";
-  if (jevApiKey !== "") {
-    tools.push(buildJevAssessTool({ env: deps.jevEnv as JevPreflightEnv, apiKey: jevApiKey, fetchImpl: deps.fetchImpl }));
+  // already holds, never a mutation path. Present whenever the run resolved a
+  // Jev config (new runs AND resumes) — the per-stream call budget lives in the
+  // closure below, and each buildAssistantTools call is one stream invocation.
+  // Pushed last, after the read toolset, so the tools that produce the state it
+  // judges are read first.
+  if (deps.jevConfig !== null && deps.jevConfig !== undefined) {
+    tools.push(buildJevAssessTool({ config: deps.jevConfig, fetchImpl: deps.fetchImpl }));
   }
 
   return tools;
