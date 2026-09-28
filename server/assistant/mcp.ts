@@ -15,10 +15,19 @@ import { isWorkers, resolveSecretRef, type RuntimeEnv } from "../env";
 import {
   MCP_CLIENT_TRANSPORTS,
   type McpClientTransportType,
-  type McpServerRow,
+  type McpServerRowWithSecret,
   type McpTransportType,
 } from "../repos/assistant-mcp.repo";
 import { McpConnector, type McpConnectorShape } from "../services/assistant-mcp.service";
+import {
+  decryptMcpSecret,
+  mcpKeyringFromEnv,
+  MCP_SECRET_DECRYPT_FAILED as SECRET_DECRYPT_FAILED,
+  MCP_SECRET_KEY_ID_ACTIVE,
+  MCP_SECRET_KEY_ID_PREV,
+  MCP_SECRET_REF_DENYLIST,
+  type McpSecretKeyId,
+} from "./mcp-secret";
 import { validateUrl } from "./ssrf";
 
 export const MCP_DISCOVERY_TIMEOUT_MS = 5000;
@@ -28,9 +37,13 @@ export const MCP_TOOL_NAME_MAX = 64;
 const MCP_SERVER_ID_MAX = 24;
 
 // Per-project enablement join: the global `enabled` is the master switch and the
-// absence of a project row means unavailable there (Q3).
-export const ENABLED_MCP_SERVERS_SQL = `SELECT s.* FROM assistant_mcp_servers s
+// absence of a project row means unavailable there (Q3). The secret LEFT JOIN is
+// part of the projection, not a second query: the bridge needs the ciphertext to
+// authenticate, and one statement keeps the row and its secret consistent.
+export const ENABLED_MCP_SERVERS_SQL = `SELECT s.*, sec.ciphertext AS secret_ciphertext, sec.iv AS secret_iv, sec.key_id AS secret_key_id
+  FROM assistant_mcp_servers s
   JOIN assistant_mcp_project_servers p ON p.server_id = s.id
+  LEFT JOIN assistant_mcp_secrets sec ON sec.server_id = s.id
   WHERE s.enabled = 1 AND p.enabled = 1 AND p.project_id = ?
   ORDER BY s.id ASC`;
 
@@ -85,7 +98,7 @@ export interface McpClientHandle {
 }
 
 export interface McpClientFactory {
-  create: (row: McpServerRow, opts: { env: RuntimeEnv; allowlist: string | null }) => Promise<McpClientHandle>;
+  create: (row: McpServerRowWithSecret, opts: { env: RuntimeEnv; allowlist: string | null }) => Promise<McpClientHandle>;
 }
 
 // Default-deny: a tool is exposed only when the server explicitly annotates it
@@ -167,7 +180,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 function wrapMcpTool(
   tool: McpDiscoveredTool,
-  row: McpServerRow,
+  row: McpServerRowWithSecret,
   name: string,
   serverToolName: string,
   sink: McpToolCallSink,
@@ -228,7 +241,7 @@ function wrapMcpTool(
 }
 
 export interface BuildMcpToolsOptions {
-  servers: McpServerRow[];
+  servers: McpServerRowWithSecret[];
   projectId: string;
   env: RuntimeEnv;
   allowlist: string | null;
@@ -259,7 +272,7 @@ export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpTool
   // Only remote http/sse rows are ever handed to a factory: 0010 removed the
   // stored stdio registrations, and a leftover row must not reach a transport
   // builder (let alone a process spawn) on any runtime.
-  const connectable: McpServerRow[] = [];
+  const connectable: McpServerRowWithSecret[] = [];
   for (const row of opts.servers) {
     if (isRemoteMcpTransport(row.transport_type)) connectable.push(row);
     else logMcpSkip(opts.projectId, row.id, `transport '${row.transport_type}' — ${UNSUPPORTED_TRANSPORT_REASON}`, null);
@@ -324,7 +337,7 @@ function logMcpSkip(projectId: string, serverId: string, reason: string, error: 
 }
 
 // SSRF at connect time (authoritative; save time is the fast-feedback pass).
-export async function validateMcpTransportUrl(row: McpServerRow, allowlist: string | null): Promise<void> {
+export async function validateMcpTransportUrl(row: McpServerRowWithSecret, allowlist: string | null): Promise<void> {
   if (row.url === null || row.url === "") throw new McpConnectFailed({ message: `MCP server '${row.id}' has no url` });
   await validateUrl(row.url, allowlist);
 }
@@ -346,18 +359,99 @@ export const UNSUPPORTED_TRANSPORT_REASON = "MCP clients connect to remote http/
 // before the factory or the SDK ever sees it, with a message naming no secret.
 const SECRET_NOT_SINGLE_LINE = "resolved MCP secret cannot be sent in an HTTP header; use a single-line token";
 
+// A stored reference that names a master key is refused again at connect, not
+// only at save: a row written before the denylist existed (or by hand) would
+// otherwise forward the envelope key itself as a Bearer token to a remote
+// server. Fixed message, no echo of the name.
+const SECRET_REF_DENIED = "MCP secret reference names a master key and is refused as a client credential";
+
+// An undecryptable managed blob is a HARD failure, never a silent no-header
+// connect: a client that quietly authenticates as anonymous looks identical to
+// a working one, and the operator has no way to tell the two apart. Wrong key,
+// tampered ciphertext, an unknown `key_id`, a row whose key has been retired —
+// one fixed message for every class, carrying no ciphertext and no plaintext.
+// Imported as SECRET_DECRYPT_FAILED from ./mcp-secret (the module that owns the
+// wording) so the two surfaces cannot drift apart.
+
+// Managed secret present, no master key configured: the disable switch refuses
+// the save, so this is a rotated-away or misconfigured deployment. Still a hard
+// failure — the same silent-anonymous trap.
+const SECRET_KEY_UNAVAILABLE = "MCP managed secret requires LXK_MCP_MASTER_KEY, which is not configured";
+
+function isDenylistedSecretRef(ref: string): boolean {
+  return ref.startsWith("env:") && (MCP_SECRET_REF_DENYLIST as readonly string[]).includes(ref.slice(4));
+}
+
+// The managed blob is decrypted exactly here, at connect — never in the repo,
+// the service, or a public shape. A keyring is built from the same RuntimeEnv
+// snapshot the reference branch reads, so a Workers per-request binding and the
+// Bun process env behave identically.
+async function resolveManagedSecret(row: McpServerRowWithSecret, secret: ManagedSecretCellsOk, env: RuntimeEnv): Promise<string> {
+  const keyring = await mcpKeyringFromEnv(env).catch(() => {
+    // A configured-but-malformed key throws the fixed shape message; it is a
+    // deployment fault, so it is reported as the same hard refusal rather than
+    // a stack trace from the crypto module.
+    throw new McpConnectFailed({ message: SECRET_DECRYPT_FAILED });
+  });
+  if (keyring === null) throw new McpConnectFailed({ message: SECRET_KEY_UNAVAILABLE });
+  try {
+    return await decryptMcpSecret({ serverId: row.id, ...secret }, keyring);
+  } catch {
+    // mcp-secret.ts already reduced every class to one fixed message; this
+    // catch exists so no future error shape (a DOMException, a driver error)
+    // can reach a log line or a report body with material in it.
+    throw new McpConnectFailed({ message: SECRET_DECRYPT_FAILED });
+  }
+}
+
+// The three blob columns, proven present and slot-valid. A half-present row
+// (only a ciphertext, an unknown `key_id`) is NOT a secret-less client: it is a
+// row Lexa cannot authenticate, so it fails hard instead of connecting
+// anonymously. The discriminated result is what separates "no secret row" from
+// "a secret row I cannot open" — collapsing the two is the exact silent-anonymous
+// bug this path exists to prevent.
+type ManagedSecretCells =
+  | { present: false }
+  | { present: true; cells: ManagedSecretCellsOk | null };
+
+interface ManagedSecretCellsOk {
+  ciphertextB64: string;
+  ivB64: string;
+  keyId: McpSecretKeyId;
+}
+
+function managedSecretCells(row: McpServerRowWithSecret): ManagedSecretCells {
+  const { secret_ciphertext, secret_iv, secret_key_id } = row;
+  if (secret_ciphertext === null && secret_iv === null && secret_key_id === null) return { present: false };
+  if (secret_ciphertext === null || secret_iv === null || secret_key_id === null) return { present: true, cells: null };
+  if (secret_key_id !== MCP_SECRET_KEY_ID_ACTIVE && secret_key_id !== MCP_SECRET_KEY_ID_PREV) return { present: true, cells: null };
+  return { present: true, cells: { ciphertextB64: secret_ciphertext, ivB64: secret_iv, keyId: secret_key_id } };
+}
+
 // `secret_ref` names a credential, never one. The resolved value goes out as the
 // single `Authorization: Bearer` header and is never returned or logged; an
-// absent or unresolvable reference connects with no headers at all.
+// absent or unresolvable reference connects with no headers at all. A stored
+// ciphertext is authoritative and short-circuits the reference branch, so a
+// client can never send two credentials.
 async function remoteTransportFor(
-  row: McpServerRow,
+  row: McpServerRowWithSecret,
   opts: { env: RuntimeEnv; allowlist: string | null }
 ): Promise<HttpTransportConfig | SseTransportConfig> {
   if (!isRemoteMcpTransport(row.transport_type)) {
     throw new McpConnectFailed({ message: `MCP server '${row.id}': ${UNSUPPORTED_TRANSPORT_REASON}` });
   }
   await validateMcpTransportUrl(row, opts.allowlist);
-  const secret = resolveSecretRef(row.secret_ref, opts.env);
+  const managed = managedSecretCells(row);
+  let secret: string | null = null;
+  if (managed.present) {
+    if (managed.cells === null) throw new McpConnectFailed({ message: SECRET_DECRYPT_FAILED });
+    secret = await resolveManagedSecret(row, managed.cells, opts.env);
+  } else {
+    if (row.secret_ref !== null && isDenylistedSecretRef(row.secret_ref)) {
+      throw new McpConnectFailed({ message: SECRET_REF_DENIED });
+    }
+    secret = resolveSecretRef(row.secret_ref, opts.env);
+  }
   if (secret !== null && /[\r\n\0]/.test(secret)) throw new McpConnectFailed({ message: SECRET_NOT_SINGLE_LINE });
   const base = {
     url: row.url!,

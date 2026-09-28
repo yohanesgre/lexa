@@ -27,6 +27,26 @@ export interface McpServerRow {
   updated_at: string;
 }
 
+// The bridge read shape: a registry row plus whatever ciphertext row the LEFT
+// JOIN found. Ciphertext lives in `assistant_mcp_secrets` and NEVER enters
+// `McpServerRow`, so a bare `SELECT *` of the registry cannot surface a blob;
+// the three columns below are all-or-nothing (any non-null means managed).
+// `key_id` stays a plain string here — this is the storage boundary, and the
+// slot vocabulary is validated where the blob is opened (server/assistant/
+// mcp.ts), so an unknown slot is a connect-time failure, not a repo one.
+export interface McpServerRowWithSecret extends McpServerRow {
+  secret_ciphertext: string | null;
+  secret_iv: string | null;
+  secret_key_id: string | null;
+}
+
+/** The blob columns of a managed secret, exactly as the secret table stores them. */
+export interface McpSecretStorage {
+  ciphertext: string;
+  iv: string;
+  keyId: string;
+}
+
 export interface ProjectMcpServerRow {
   project_id: string;
   server_id: string;
@@ -43,10 +63,17 @@ export interface McpServerPublic {
   command: string | null;
   args: string[];
   hasSecret: boolean;
+  secretSource: McpSecretSource;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
+
+// Which of the two sources a stored client authenticates with. Exactly-one
+// source is enforced on every write, so a client is managed XOR reference;
+// "none" is a legal, deliberately secret-less client. The managed arm wins when
+// a row somehow holds both, because the ciphertext is authoritative on read.
+export type McpSecretSource = "managed" | "reference" | "none";
 
 export interface ProjectMcpServerPublic {
   projectId: string;
@@ -91,9 +118,14 @@ export function parseArgs(raw: string | null | undefined): string[] {
 }
 
 // Boundary mapper: the raw row never crosses the API. `secret_ref` is dropped
-// entirely and replaced with hasSecret — the secret reference must never be
-// serialized, logged, or echoed.
-export function toPublic(row: McpServerRow): McpServerPublic {
+// entirely and replaced with hasSecret + secretSource — the secret reference
+// must never be serialized, logged, or echoed, and neither may the ciphertext.
+// `hasSecret` is true for EITHER source; `secretSource` says which one, so the
+// UI can render the right branch and a clear affordance without ever being
+// handed a value.
+export function toPublic(row: McpServerRowWithSecret): McpServerPublic {
+  const managed = row.secret_ciphertext !== null;
+  const reference = !managed && row.secret_ref !== null && row.secret_ref !== "";
   return {
     id: row.id,
     label: row.label,
@@ -101,7 +133,8 @@ export function toPublic(row: McpServerRow): McpServerPublic {
     url: row.url,
     command: row.command,
     args: parseArgs(row.args),
-    hasSecret: row.secret_ref !== null && row.secret_ref !== "",
+    hasSecret: managed || reference,
+    secretSource: managed ? "managed" : reference ? "reference" : "none",
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -122,14 +155,22 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
+    // Every read goes through this projection: the registry columns plus the
+    // ciphertext row when one exists. A LEFT JOIN (never INNER) keeps a
+    // secret-less client readable, and the alias names keep the blob out of a
+    // bare `SELECT *` of assistant_mcp_servers.
+    const SELECT_WITH_SECRET = `SELECT s.*, sec.ciphertext AS secret_ciphertext, sec.iv AS secret_iv, sec.key_id AS secret_key_id
+       FROM assistant_mcp_servers s
+       LEFT JOIN assistant_mcp_secrets sec ON sec.server_id = s.id`;
+
     return {
-      list: (): Effect.Effect<McpServerRow[], DbError> =>
-        queryAll<McpServerRow>(db, `SELECT * FROM assistant_mcp_servers ORDER BY id ASC`),
+      list: (): Effect.Effect<McpServerRowWithSecret[], DbError> =>
+        queryAll<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} ORDER BY s.id ASC`),
 
-      getById: (id: string): Effect.Effect<McpServerRow, RowNotFound | DbError> =>
-        queryFirst<McpServerRow>(db, `SELECT * FROM assistant_mcp_servers WHERE id = ?`, id),
+      getById: (id: string): Effect.Effect<McpServerRowWithSecret, RowNotFound | DbError> =>
+        queryFirst<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} WHERE s.id = ?`, id),
 
-      create: (input: CreateMcpServerInput): Effect.Effect<McpServerRow, DbError | ConstraintViolation> =>
+      create: (input: CreateMcpServerInput): Effect.Effect<McpServerRowWithSecret, DbError | ConstraintViolation> =>
         run(
           db,
           `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
@@ -143,13 +184,13 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
           input.secretRef,
           input.enabled ? 1 : 0
         ).pipe(
-          Effect.flatMap(() => queryFirst<McpServerRow>(db, `SELECT * FROM assistant_mcp_servers WHERE id = ?`, input.id)),
+          Effect.flatMap(() => queryFirst<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} WHERE s.id = ?`, input.id)),
           // The row was just inserted in this statement pair; a missing read is
           // a database fault, not a not-found the caller must handle.
           Effect.catchTag("RowNotFound", () => Effect.fail(new DbError({ message: `assistant_mcp_servers row '${input.id}' missing after insert` })))
         ),
 
-      update: (id: string, patch: UpdateMcpServerInput): Effect.Effect<McpServerRow, RowNotFound | DbError | ConstraintViolation> =>
+      update: (id: string, patch: UpdateMcpServerInput): Effect.Effect<McpServerRowWithSecret, RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const sets: string[] = [];
           const params: unknown[] = [];
@@ -161,17 +202,47 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
           if (patch.secretRef !== undefined) { sets.push("secret_ref = ?"); params.push(patch.secretRef); }
           if (patch.enabled !== undefined) { sets.push("enabled = ?"); params.push(patch.enabled ? 1 : 0); }
           if (sets.length === 0) {
-            const current = yield* queryFirst<McpServerRow>(db, `SELECT * FROM assistant_mcp_servers WHERE id = ?`, id);
+            const current = yield* queryFirst<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} WHERE s.id = ?`, id);
             return current;
           }
           sets.push("updated_at = datetime('now')");
           params.push(id);
           yield* run(db, `UPDATE assistant_mcp_servers SET ${sets.join(", ")} WHERE id = ?`, ...params);
-          return yield* queryFirst<McpServerRow>(db, `SELECT * FROM assistant_mcp_servers WHERE id = ?`, id);
+          return yield* queryFirst<McpServerRowWithSecret>(db, `${SELECT_WITH_SECRET} WHERE s.id = ?`, id);
         }),
+
+      // Upsert the managed blob. `ON CONFLICT` keeps a re-save a single
+      // statement pair, and the write always carries a non-null server_id: the
+      // table's bare `TEXT PRIMARY KEY` is NULL-insertable in SQLite practice,
+      // so the repo refuses to hand SQLite a NULL key (the caller passes the id
+      // of a registry row it just read).
+      putSecret: (id: string, secret: McpSecretStorage): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(server_id) DO UPDATE SET
+             ciphertext = excluded.ciphertext, iv = excluded.iv, key_id = excluded.key_id,
+             updated_at = datetime('now')`,
+          id,
+          secret.ciphertext,
+          secret.iv,
+          secret.keyId
+        ).pipe(Effect.asVoid),
+
+      // Pure row delete — no crypto, so it works with no master key configured
+      // (the clear affordance must never depend on a key being present).
+      deleteSecret: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM assistant_mcp_secrets WHERE server_id = ?`, id).pipe(Effect.asVoid),
 
       remove: (id: string): Effect.Effect<void, RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
+          // Migration 0011's ON DELETE CASCADE fires under the Workers/D1
+          // runner, but the Bun runner executes with PRAGMA foreign_keys = OFF
+          // (server/db/migrate.ts), where it never does — so the child row is
+          // deleted explicitly instead of stranding ciphertext whose key_id no
+          // operator can read. Child first, then the not-found check.
+          yield* run(db, `DELETE FROM assistant_mcp_secrets WHERE server_id = ?`, id);
           const changes = yield* run(db, `DELETE FROM assistant_mcp_servers WHERE id = ?`, id);
           if (changes === 0) return yield* Effect.fail(new RowNotFound({ table: "assistant_mcp_servers" }));
         }),

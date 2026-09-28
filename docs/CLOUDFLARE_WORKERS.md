@@ -203,6 +203,33 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   forwards the key as a Bearer token to that client's URL.
 - `GITHUB_PRIVATE_KEY_FILE` (path-based PEM) **impossible** — no filesystem. Use
   inline `GITHUB_PRIVATE_KEY` secret (already supported per `docs/GITHUB_SETUP.md`).
+- **Managed MCP client secrets** (a Bearer token entered in the webapp rather
+  than referenced) work natively here — which is the point, since Workers has no
+  per-client auth path other than a bound secret. Both envelope keys are ordinary
+  Workers secrets:
+  ```bash
+  wrangler secret put LXK_MCP_MASTER_KEY        # base64 of exactly 32 bytes
+  wrangler secret put LXK_MCP_MASTER_KEY_PREV   # optional: rotation read path only
+  ```
+  With no `LXK_MCP_MASTER_KEY` bound, managed tokens are **disabled** — the save
+  is refused with `MCP_INVALID_TRANSPORT_CONFIG` and `env:`/`file:` references
+  behave exactly as before, so this is optional configuration, not a requirement.
+  See `docs/DEPLOYMENT.md` (variable reference, rotation) and `docs/BACKUPS.md`
+  (the key must never be co-located with D1 exports).
+  - **Crypto parity caveat:** encryption is AES-256-GCM through
+    `crypto.subtle` with a 12-byte IV and a 128-bit tag, chosen because it is
+    the only AEAD both Bun and workerd expose (XChaCha20/ChaCha20 are absent on
+    workerd, and no new WASM dependency is wanted). A blob written by the Bun
+    host is therefore readable by the Worker **and vice versa** — same key, same
+    layout — which is what lets a deployment be moved between flavors without
+    re-entering tokens. The subtlety is the *parameter* contract, not the
+    primitive: `additionalData` binds each blob to its client id, the tag length
+    is fixed at 128 bits, and the IV must be a fresh 12 random bytes per write.
+    Any divergence in those three details silently yields the one fixed
+    "could not be decrypted" error (a hard `MCP_CONNECT_FAILED`, never an
+    anonymous connect). `key_id` records only the keyring **slot**
+    (`active`/`prev`) — never a fingerprint — so rotation reads through
+    `LXK_MCP_MASTER_KEY_PREV` with no rewrap.
 - Migrations: `wrangler d1 migrations create/apply`; seed via
   `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it; the

@@ -321,9 +321,14 @@ without a table rebuild; application validation accepts only HTTP/SSE. Remote
 `env:NAME` resolves only keys in the fixed `RuntimeEnv` snapshot built by
 `getEnv()`/`getEnvFromWorkers()` (maintainer decision 2026-09-28: no dedicated
 MCP secret namespace); unknown names fail closed with no header, and save-time
-validation rejects them. Setting `secret_ref` is superadmin-only; naming an
-infrastructure secret key deliberately forwards it as Bearer to the configured
-remote URL.
+validation rejects them. That allowlist is deliberately the whole snapshot, so
+it is narrowed by an explicit **denylist** for the two MCP master-key env names
+(`MCP_SECRET_REF_DENYLIST`, enforced at save **and** at connect — they are
+legitimate `RuntimeEnv` slots, and `env:LXK_MCP_MASTER_KEY` would forward the
+envelope key itself as Bearer). Setting `secret_ref` is superadmin-only; naming
+another infrastructure secret key deliberately forwards it as Bearer to the
+configured remote URL. A token can also be *entered* rather than referenced —
+see "Managed MCP client secrets (envelope encryption)" below.
 
 **Data flow:**
 
@@ -400,6 +405,92 @@ endpoint; local stdio wrappers are host-dependent and not the requested remote
 integration. A callable-only integration leaves Jev use dependent on the model's
 decision; automatic-only removes useful follow-up judgments. Both advisory modes
 are retained.
+
+### Managed MCP client secrets (envelope encryption)
+
+**Status:** Accepted · **Date:** 2026-09-28 · **Decider:** maintainer
+(extends "Jev — System 1 advisory layer + MCP Clients" above and the fixed-key
+`secret_ref` contract from `status/jev-system1-mcp-clients/plan.md`; assessed
+with Jev — worth_cost 0.71, master_key_risk 0.32, security_sound closed at
+level 2).
+
+MCP Bearer tokens could only be **referenced** — `env:NAME` over the fixed
+`RuntimeEnv` snapshot, `file:/abs/path` on the Bun host. They could not be
+entered or managed from the webapp, and Cloudflare Workers had no usable
+per-client auth path at all (no filesystem, and no per-client secret store).
+
+**Decision:** a per-client token may be **entered** and is stored with envelope
+encryption. A new table `assistant_mcp_secrets` (migration
+`0011_mcp_managed_secrets.sql`, additive — `CREATE TABLE` only) holds
+AES-256-GCM ciphertext, a per-write 12-byte IV, and `key_id`; the master key
+lives **only** in the environment (`LXK_MCP_MASTER_KEY`, with
+`LXK_MCP_MASTER_KEY_PREV` as the read-only rotation path). Existing `env:` /
+`file:` references keep working unchanged. A client carries **exactly one**
+source: a managed token XOR a `secret_ref`; carrying neither is a legal,
+deliberately secret-less client, and storing one source deletes the other.
+
+**Data flow:**
+
+```text
+superadmin save {secret} → exactly-one-source normalize → AES-256-GCM encrypt
+  (fresh 12-byte IV, AAD binds the blob to the client id) → assistant_mcp_secrets row
+assistant run → registry + secret row (one LEFT JOIN) → ciphertext? decrypt : resolve ref
+  → single header check → Authorization: Bearer → remote MCP server
+```
+
+- **Ciphertext never enters the registry.** The blob lives only in its own
+  table, so a bare `SELECT *` of `assistant_mcp_servers` can never surface one;
+  the registry and the tool bridge read it through a `LEFT JOIN` and treat the
+  **absence of a row** as "no managed token". A stored row is authoritative on
+  read and short-circuits the reference branch, so a client can never send two
+  credentials.
+- **`key_id` is a keyring slot** (`active` / `prev`), never a fingerprint,
+  counter, or date. That is what makes rotation rewrap-free: set
+  `LXK_MCP_MASTER_KEY_PREV` to the old key, the active key to the new one,
+  restart, and re-enter tokens over time — no outage, no rewrap pass, no data
+  migration. An unfinished rotation is a warning, not a break.
+- **The failure split is the point.** An unresolvable reference still connects
+  with **no header** (unchanged fail-closed behavior). An **undecryptable
+  ciphertext** is a hard `McpConnectFailed` — wrong key, tampered blob, unknown
+  `key_id`, or a stored row on a deployment whose key is gone. A client that
+  quietly authenticates as anonymous is indistinguishable from a working one, so
+  silence is not an option here; every decrypt class reduces to one fixed
+  message that quotes neither plaintext nor ciphertext. **That refusal reaches
+  two different surfaces, and only one of them is a hard failure**: the registry
+  test route reports it as a 502 `MCP_CONNECT_FAILED`, while an assistant run is
+  fail-open (pre-existing bridge behavior) — the server is skipped with a stderr
+  `WARN` and its tools are unavailable for that run.
+- **Write-only, and cleared explicitly.** `secret` exists on the request schema
+  and not on the response schema, so no response can carry a value. An empty
+  `secret`/`secretRef` means **keep** — "empty means keep" is exactly why
+  removal needs its own flag, `clearSecret: true`, which nulls the reference and
+  deletes the blob. Clear is a pure row delete, so a credential can always be
+  revoked even when the master key is gone.
+- **Disabled without a key.** Unset `LXK_MCP_MASTER_KEY` is a documented disable
+  switch: a managed save is refused with `MCP_INVALID_TRANSPORT_CONFIG`,
+  references keep working, and an already-stored token is never dropped. A
+  configured-but-malformed key is an error, never a silent disable.
+- **Implementation boundary.** `server/assistant/mcp-secret.ts` is a **plain
+  assistant-tier module** — not an `Effect.Service`, importing only the
+  `RuntimeEnv` *type* and Web Crypto, with no DB, no Node builtins, and no
+  service edge at all, so **invariant #1 holds without a new rule**. AES-256-GCM
+  is the only AEAD both Bun and workerd expose (no new dependency), keys import
+  as non-extractable, and the master key is never in the DB, a backup, a
+  response, or a log. Secret writes emit no `task_activity` rows (they are not
+  task mutations).
+- **The security claim rests on one operational rule** — see
+  `docs/BACKUPS.md`: backups carry the ciphertext, and the master key must never
+  be co-located with them. Set the key by hand in the environment (or
+  `wrangler secret put` on Workers); it is never committed and never logged.
+
+**Options rejected:** XChaCha20/ChaCha20 (unavailable on workerd, and a new WASM
+dependency is not worth it); a rewrap endpoint (deferred — the `PREV` read path
+ships now, and re-encrypting a row means re-entering the token); encrypting the
+pre-existing plaintext `assistant_providers.api_key` /
+`assistant_settings.search_api_key` (a known asymmetry, kept as a separate
+decision); and a dedicated `LXK_MCP_SECRET_*` namespace for referenced secrets
+(the fixed `RuntimeEnv` snapshot plus a denylist for the master keys was
+approved instead, keeping the existing `secret_ref` contract intact).
 
 ### Removal record — the agent-runtime (Blacksmith) tier
 

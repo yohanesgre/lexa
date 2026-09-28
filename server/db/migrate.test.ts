@@ -122,6 +122,20 @@ const SEED_PRE_0010 = `
     ('p1', 'local-mcp', 1);
 `;
 
+// Pre-0011 MCP registry state: one remote client with a managed secret row, one
+// without, plus a second client. 0011 is pure CREATE TABLE, so every one of
+// these rows must survive the migration untouched.
+const SEED_PRE_0011 = `
+  INSERT INTO assistant_mcp_servers (id, label, transport_type, url, args, enabled) VALUES
+    ('web-mcp',   'Web MCP',   'http', 'https://mcp.test/mcp', '[]', 1),
+    ('sse-mcp',   'SSE MCP',   'sse',  'https://mcp.test/sse', '[]', 1),
+    ('plain-mcp', 'Plain MCP', 'http', 'https://mcp.test/plain', '[]', 0);
+  INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+  INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES
+    ('p1', 'web-mcp', 1),
+    ('p1', 'plain-mcp', 0);
+`;
+
 // End state shared by the FK-OFF (Bun) and FK-ON (D1) paths — they must agree.
 // Parameterized on the thread table + agent identity because the 0005-only
 // path stops at `herald`, while the full chain (0005+0006) ends at `assistant`.
@@ -192,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -203,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -230,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -975,6 +989,222 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
       { server_id: "web-mcp" },
     ]);
     expect(appliedMigrations(dbPath)).not.toContain("0010_remove_stdio_mcp_clients.sql");
+    db.close();
+  });
+
+  // ── 0011 managed MCP secrets ─────────────────────────────────────────────
+  // Ciphertext lives in its own table, never in the registry row, so a plain
+  // SELECT * of assistant_mcp_servers can never surface an encrypted blob.
+  const SECRET_COLUMNS = ["server_id", "ciphertext", "iv", "key_id", "created_at", "updated_at"];
+
+  function assertSecretsTable(db: Database): void {
+    expect(tableExists(db, "assistant_mcp_secrets")).toBe(true);
+    const info = db.prepare("PRAGMA table_info(assistant_mcp_secrets)").all() as { name: string; pk: number; notnull: number }[];
+    expect(info.map((c) => c.name)).toEqual(SECRET_COLUMNS);
+    // server_id is the primary key: one secret per client, no surrogate column.
+    expect(info.filter((c) => c.pk > 0).map((c) => c.name)).toEqual(["server_id"]);
+    // The five payload columns are explicitly NOT NULL. The PK is deliberately
+    // NOT counted here: `TEXT PRIMARY KEY` without a spelled-out NOT NULL is the
+    // repo-wide DDL convention (0001/0002/0009/0011 alike) and SQLite reports
+    // such a column as notnull=0 — its not-null-ness comes from the PK index, so
+    // it is asserted through pk>0 above and through the nullable-set below.
+    expect(info.filter((c) => c.pk === 0 && c.notnull === 1).map((c) => c.name).sort()).toEqual([
+      "ciphertext", "created_at", "iv", "key_id", "updated_at",
+    ]);
+    // And the PK is the ONLY column left non-NOT NULL in the table.
+    expect(info.filter((c) => c.notnull === 0).map((c) => c.name)).toEqual(["server_id"]);
+    // The FK cascades to the registry, and points at assistant_mcp_servers.
+    const fks = db.prepare("PRAGMA foreign_key_list(assistant_mcp_secrets)").all() as Array<{
+      from: string;
+      table: string;
+      on_delete: string;
+    }>;
+    expect(fks.length).toBe(1);
+    expect(fks[0]?.from).toBe("server_id");
+    expect(fks[0]?.table).toBe("assistant_mcp_servers");
+    expect(fks[0]?.on_delete).toBe("CASCADE");
+    // The registry row shape is untouched — no ALTER, no new column there.
+    const registryCols = (db.prepare("PRAGMA table_info(assistant_mcp_servers)").all() as { name: string }[]).map((c) => c.name);
+    expect(registryCols).toEqual(
+      expect.arrayContaining([
+        "id", "label", "transport_type", "url", "command", "args", "secret_ref", "enabled", "created_at", "updated_at",
+      ])
+    );
+    expect(registryCols).not.toContain("ciphertext");
+  }
+
+  it("0011 fresh database: assistant_mcp_secrets exists, empty, with no plaintext column", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    expect(appliedMigrations(dbPath)).toContain("0011_mcp_managed_secrets.sql");
+    assertSecretsTable(db);
+    // No row is created by the migration: there is no data movement at all.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets").get()).toEqual({ n: 0 });
+    db.close();
+  });
+
+  it("0011 applies under the Bun runner with foreign_keys=OFF, preserving the registry untouched", () => {
+    const dir = stageThrough("0010");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0011_mcp_managed_secrets.sql");
+
+    // This is the FK-OFF runner: ON DELETE CASCADE never fires there, which is
+    // why repo.remove deletes the secret row explicitly. Pinned and asserted,
+    // otherwise the test would silently exercise the D1/FK-ON path instead.
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = OFF");
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 0 });
+    db.exec(SEED_PRE_0011);
+
+    const sql = readFileSync(join(MIGRATIONS, "0011_mcp_managed_secrets.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0011_mcp_managed_secrets.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    assertSecretsTable(db);
+    // Every pre-0011 registry row survived, with no data movement.
+    expect(db.prepare("SELECT id, secret_ref FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
+      { id: "plain-mcp", secret_ref: null },
+      { id: "sse-mcp", secret_ref: null },
+      { id: "web-mcp", secret_ref: null },
+    ]);
+    expect(db.prepare("SELECT server_id FROM assistant_mcp_project_servers ORDER BY server_id").all()).toEqual([
+      { server_id: "plain-mcp" },
+      { server_id: "web-mcp" },
+    ]);
+    db.close();
+  });
+
+  it("0011 is FK-safe with foreign_keys=ON (Workers/D1 runner): store, read back, cascade", () => {
+    const dir = stageThrough("0010");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0011_mcp_managed_secrets.sql");
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0011);
+
+    const sql = readFileSync(join(MIGRATIONS, "0011_mcp_managed_secrets.sql"), "utf-8");
+    db.exec("BEGIN");
+    try {
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0011_mcp_managed_secrets.sql");
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    assertSecretsTable(db);
+    // Store a secret row; the timestamps come from their column defaults.
+    db.exec(`INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('web-mcp', 'CT', 'IV', 'active')`);
+    expect(db.prepare("SELECT server_id, ciphertext, iv, key_id FROM assistant_mcp_secrets").get()).toEqual({
+      server_id: "web-mcp",
+      ciphertext: "CT",
+      iv: "IV",
+      key_id: "active",
+    });
+    const stamp = db.prepare("SELECT created_at FROM assistant_mcp_secrets WHERE server_id = 'web-mcp'").get() as {
+      created_at: string;
+    };
+    expect(stamp.created_at).toMatch(/^\d{4}-\d{2}-\d{2} /);
+    // A client without a secret has no row — absence is the "no managed token"
+    // signal, which is why the registry read is a LEFT JOIN.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets WHERE server_id = 'plain-mcp'").get()).toEqual({ n: 0 });
+    // One row per client: a second insert for the same server is a PK violation.
+    expect(() =>
+      db.exec(`INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('web-mcp', 'CT2', 'IV2', 'active')`)
+    ).toThrow(/UNIQUE constraint failed/i);
+    // Unknown client is refused by the FK.
+    expect(() =>
+      db.exec(`INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('ghost', 'C', 'I', 'active')`)
+    ).toThrow(/FOREIGN KEY constraint failed/i);
+    // Deleting the client cascades the secret away (D1 path).
+    db.prepare("DELETE FROM assistant_mcp_servers WHERE id = 'web-mcp'").run();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets").get()).toEqual({ n: 0 });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.close();
+  });
+
+  it("0011 strands a secret row under the Bun runner (FK-OFF), which repo.remove must delete explicitly", () => {
+    // Pins WHY the explicit delete lives in repo.remove: with FKs OFF the
+    // cascade never fires, so a bare parent delete strands the ciphertext.
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = OFF");
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 0 });
+    db.exec(SEED_PRE_0011);
+    db.exec(`INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('web-mcp', 'CT', 'IV', 'active')`);
+
+    db.prepare("DELETE FROM assistant_mcp_servers WHERE id = 'web-mcp'").run();
+    // The row survives — so `foreign_key_check` reports it...
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets").get()).toEqual({ n: 1 });
+    // TWO violations, not one: the seed also attached web-mcp to project p1, so
+    // the same bare parent DELETE strands the junction row. Both children
+    // cascade on the D1/FK-ON runner and neither does here, which is the whole
+    // point of this test. Asserted as a set (order is a pragma implementation
+    // detail) but pinned to exactly these two children of assistant_mcp_servers.
+    const stranded = db.prepare("PRAGMA foreign_key_check").all() as Array<{
+      table: string;
+      rowid: number;
+      parent: string;
+      fkid: number;
+    }>;
+    expect(stranded).toHaveLength(2);
+    expect(stranded.map((v) => v.table).sort()).toEqual([
+      "assistant_mcp_project_servers",
+      "assistant_mcp_secrets",
+    ]);
+    expect(stranded.every((v) => v.parent === "assistant_mcp_servers" && v.fkid === 0)).toBe(true);
+    // ...and only the explicit child DELETE the repo performs clears the secret
+    // one. The junction row lives until its own repo path removes it, so the
+    // pragma is deliberately NOT empty here — an empty expectation would be a
+    // second, accidental claim that this runner cascades.
+    db.prepare("DELETE FROM assistant_mcp_secrets WHERE server_id = 'web-mcp'").run();
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([
+      { table: "assistant_mcp_project_servers", rowid: 1, parent: "assistant_mcp_servers", fkid: 0 },
+    ]);
+    db.close();
+  });
+
+  it("0011 rolls back atomically with foreign_keys=ON (no half-built table)", () => {
+    const dir = stageThrough("0010");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    db.exec(SEED_PRE_0011);
+
+    const sql = readFileSync(join(MIGRATIONS, "0011_mcp_managed_secrets.sql"), "utf-8");
+    // FK-violating statement AFTER the CREATE TABLE, so a non-atomic apply
+    // would leave the table behind for the repo to write into.
+    const broken = `${sql}\nINSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('ghost','C','I','active');\n`;
+    db.exec("BEGIN");
+    let threw = false;
+    try {
+      db.exec(broken);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0011_mcp_managed_secrets.sql");
+      db.exec("COMMIT");
+    } catch {
+      threw = true;
+      db.exec("ROLLBACK");
+    }
+    expect(threw).toBe(true);
+
+    expect(tableExists(db, "assistant_mcp_secrets")).toBe(false);
+    expect(appliedMigrations(dbPath)).not.toContain("0011_mcp_managed_secrets.sql");
     db.close();
   });
 });
