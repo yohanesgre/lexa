@@ -290,90 +290,111 @@ deliberate follow-up (it needs a rebuild migration).
 
 ### Jev — System 1 advisory layer + MCP Clients
 
-**Status:** Accepted · **Date:** 2026-09-27 · **Decider:** maintainer
+**Status:** Accepted · **Date:** 2026-09-27 · **Decider:** maintainer ·
+amended 2026-09-29 (env-only configuration → DB registry, official SDK transport).
 
 Typesafe Jev is a typed System 1 judgment API, not a chat-completion provider or
-an MCP endpoint. Lexa calls `POST https://api.typesafe.ai/v1/systemone` with a
-Bearer key and `{ state, model, questions }`; the API returns typed answers and
-usage, without chat messages or streaming. Jev is configured with
-`TYPESAFE_API_KEY`, optional `TYPESAFE_BASE_URL` (default
-`https://api.typesafe.ai`) and `TYPESAFE_DEFAULT_MODEL` (default `jev-latest`).
-These are server environment values; Jev does not enter `ProviderKind` or the
-MCP registry.
+an MCP endpoint. Lexa calls the official `@typesafe-ai/sdk` (`TypeSafeClient`,
+pinned 0.6.0) against `{baseUrl}/v1/systemone` (default
+`https://api.typesafe.ai`) with a Bearer key and `{ state, model, questions }`;
+the API returns typed answers and usage, without chat messages or streaming.
+
+**Configuration is a DB registry, not env.** The historical env-only Jev
+variables were deleted. Three tables — `assistant_jev_config` (singleton: base
+URL, model, enabled; migration `0013_jev_registry.sql`), `assistant_jev_secrets`
+(the API key as AES-256-GCM ciphertext under the shared secrets keyring, scope
+`jev`, AAD-bound to the config row), and `assistant_jev_projects` (per-project
+opt-in; absence = disabled) — together decide whether Jev runs. The key is
+**write-only** over the API: responses expose `hasKey`/`keyMask` and never the
+blob, and it is opened only at request time by `AssistantJevService`. The project
+read adds an additive `available` boolean (global enabled **and** a stored,
+openable key, deliberately ignoring the project row) so a member without
+superadmin read access can render the disabled toggle and the configure notice
+without any key material. Jev does not enter `ProviderKind` or the MCP registry.
 
 **Decision:** Jev has two advisory paths. Each new chat or task-assistant run
-gets one bounded REST preflight whose fixed typed judgments are added to the
-existing assistant prompt. The assistant can also call a read-only `jev_assess`
-tool for follow-up judgments. Neither path authorizes writes; existing assistant
-tool and approval rules remain authoritative. Preflight fails open, and resumed
-streams do not repeat it. Jev and the main model remain distinct: Jev supplies
-structured judgment; the existing model produces the response and controls the
-tool loop.
+resolves the config once (`AssistantJevService.resolveForProject`) and gets one
+bounded SDK preflight whose fixed typed judgments are added to the existing
+assistant prompt. The assistant can also call a read-only `jev_assess` tool for
+follow-up judgments. Neither path authorizes writes; existing assistant tool and
+approval rules remain authoritative. Preflight fails open, and resumed streams do
+not repeat it. Jev and the main model remain distinct: Jev supplies structured
+judgment; the existing model produces the response and controls the tool loop.
 
 Generic remote MCP integrations remain separate and support HTTP/SSE only.
 Product-facing “MCP Servers” copy becomes “MCP Clients”; API routes and database
 identifiers remain unchanged for compatibility. Local stdio support and the
-seeded Jev MCP row are removed. Migration 0010 deletes all stored stdio clients
-and their project bindings. Legacy `command`/`args` columns and the historical
+seeded Jev MCP row are removed (migration 0010 deletes all stored stdio clients
+and their project bindings). Legacy `command`/`args` columns and the historical
 SQLite transport CHECK remain because the D1 migration path cannot drop columns
-without a table rebuild; application validation accepts only HTTP/SSE. Remote
-`secret_ref` values are sent as Bearer authorization headers after resolution.
-`env:NAME` resolves only keys in the fixed `RuntimeEnv` snapshot built by
-`getEnv()`/`getEnvFromWorkers()` (maintainer decision 2026-09-28: no dedicated
-MCP secret namespace); unknown names fail closed with no header, and save-time
-validation rejects them. That allowlist is deliberately the whole snapshot, so
-it is narrowed by an explicit **denylist** for the two MCP master-key env names
-(`MCP_SECRET_REF_DENYLIST`, enforced at save **and** at connect — they are
-legitimate `RuntimeEnv` slots, and `env:LXK_MCP_MASTER_KEY` would forward the
-envelope key itself as Bearer). Setting `secret_ref` is superadmin-only; naming
-another infrastructure secret key deliberately forwards it as Bearer to the
-configured remote URL. A token can also be *entered* rather than referenced —
-see "Managed MCP client secrets (envelope encryption)" below.
+without a table rebuild; application validation accepts only HTTP/SSE. MCP client
+credentials are envelope-encrypted managed tokens — the historical `env:`/`file:`
+reference source, the fixed-`RuntimeEnv` allowlist, and the master-key denylist
+were removed on 2026-09-28. See “Managed MCP client secrets” below.
 
 **Data flow:**
 
 ```text
-new assistant run → bounded state + fixed questions → Jev REST preflight
+new run → AssistantJevService.resolveForProject (DB config + project opt-in + openable key)
+  → bounded state + fixed questions → Jev SDK preflight (capping fetch)
   → advisory answers in system prompt → existing assistant stream/tool loop
   → optional jev_assess → advisory typed result → existing assistant decides
 ```
 
 Preflight is capped at 3 seconds and 8,000 state characters; the callable tool
 is capped at 3 calls per stream invocation, 10 seconds per request, and 4,000
-state characters. Neither path logs request state or credentials. Missing keys,
-timeouts, rate limits, and upstream errors skip preflight or return a typed tool
-failure without failing the assistant run. No task mutations or
-`task_activity` rows are emitted.
+state characters. Neither path logs request state or credentials. A missing or
+undecryptable key, timeouts, rate limits, and upstream errors skip preflight or
+return a typed tool failure without failing the assistant run. No task mutations
+or `task_activity` rows are emitted.
 
-**Implementation boundary.** Jev is a plain async module in the assistant tier
-(`server/assistant/jev.ts`) plus one tool in the existing read toolset
-(`jev_assess` in `server/assistant/tools.ts`) — deliberately **not** an Effect
-service. It needs no repository, no transaction, and no shared state, so a
-service tag would add a layer edge that carries nothing; the chat and task
-services call it the way they call the MCP bridge. The same reasoning keeps it
-out of the service dependency graph: Jev has no dependency that could point back
-at a service, so **invariant #1 holds without a new rule**.
+**Implementation boundary.** `server/assistant/jev.ts` is a plain async module —
+no Effect, no DB, no service edge — and `AssistantJevService` (over
+`AssistantJevRepo`) is the Effect service that reads the registry and the
+keyring. The chat/task services resolve the config and pass it into the module,
+so **invariant #1 holds without a new rule**: `jev.ts` imports no repo or
+service, and the service never depends on a chat/task service.
 
+- **Registry resolution is total.** `resolveForProject(projectId)` requires
+  global `enabled = 1`, an enabled project row, and a key that decrypts under the
+  master key; any failure returns `null` and every caller fails open (advisory
+  omitted, not an error). `projectAvailable()` is the same minus the project row;
+  it backs the additive `available` on the project read.
+- **Transport.** The SDK owns the request/response cycle, configured with our
+  `cappingFetch`: the 64 KB cap covers **both** ok and non-ok bodies (a declared
+  `content-length` short-circuits; a streaming byte counter cancels the reader at
+  the cap). A 2xx over-cap body throws before the SDK buffers it; a non-ok body is
+  capped and returned — the SDK needs one to build its error — without throwing,
+  because an oversized error body is not a failure of its own. `retry: { maxRetries: 0 }`,
+  a per-attempt `timeout`, and `logLevel: "off"` mirror the old single-attempt,
+  hard-budget contract; the client is rebuilt per call from request-time DB
+  values.
+- **Typed failure vocabulary.** Every thrown SDK/transport error reduces to a
+  fixed `{ ok: false, code }`: `MISSING_KEY | TIMEOUT | NETWORK | AUTH |
+  RATE_LIMITED | INVALID_RESPONSE | HTTP_<status>` (401/403 → `AUTH`, 429/529 →
+  `RATE_LIMITED`, a capping breach → `INVALID_RESPONSE`). No branch reads the
+  error's own text, so upstream content and the key never reach a Lexa message.
+  Every answer is re-validated and every question asked must come back answered.
 - **Preflight flow (once per new run).** Both entry points
-  (`runChatStream`, `runStream`) assemble the state from context the run has
-  *already loaded* — run kind, project/thread identifiers and labels, the latest
-  user message, the task/wiki context, project-memory hits — and await the
-  verdict before `buildStream`, so the advisory is part of the prompt the model
-  actually receives. History, attachments, and credentials are excluded by
-  construction: the state builder's type is a whitelist with a fixed key order.
-  The three fixed questions (write intent, ambiguity/missing fields, memory or
-  prior-decision conflict) render as one clearly labeled non-authoritative
-  block, and a conflict line carries its own deferral — live project data stays
-  authoritative. **Resume** (`resumeChatStream`, `resumeThreadStream`) issues no
-  preflight: the judgment was made against the original request. The
-  `jev_assess` tool is still offered there, because its 3-call budget is per
-  stream invocation, not per run lifetime.
-- **Callable flow.** `jev_assess` is added to the toolset only when a
-  non-blank `TYPESAFE_API_KEY` is present, so an unconfigured Jev leaves the
-  toolset unchanged. It accepts a bounded `state` plus typed `noul`/`choice`/
-  `score` questions and returns typed answers and usage, or a typed
-  `{ ok:false, code }`. It is read-only by construction: it reaches the same
-  judgment endpoint and nothing else.
+  (`runChatStream`, `runStream`) resolve the config and assemble the state from
+  context the run has *already loaded* — run kind, project/thread identifiers and
+  labels, the latest user message, the task/wiki context, project-memory hits —
+  and await the verdict before `buildStream`, so the advisory is part of the
+  prompt the model actually receives. History, attachments, and credentials are
+  excluded by construction: the state builder's type is a whitelist with a fixed
+  key order. The three fixed questions (write intent, ambiguity/missing fields,
+  memory or prior-decision conflict) render as one clearly labeled
+  non-authoritative block, and a conflict line carries its own deferral — live
+  project data stays authoritative. **Resume** (`resumeChatStream`,
+  `resumeThreadStream`) issues no preflight: the judgment was made against the
+  original request. The `jev_assess` tool is still offered there, because its
+  3-call budget is per stream invocation, not per run lifetime.
+- **Callable flow.** `jev_assess` is added to the toolset only when the run
+  resolved a config (a `null`/absent config omits it entirely), so a disabled Jev
+  leaves the toolset unchanged. It accepts a bounded `state` plus typed
+  `noul`/`choice`/`score` questions and returns typed answers and usage, or a
+  typed `{ ok:false, code }`. It is read-only by construction: it reaches the
+  same judgment endpoint and nothing else.
 - **Bounds.** Preflight 3s / 8 000 state chars (ids 128, labels 200, each memory
   item 400, message 2 000, task/wiki context 4 000). Tool 10s per request,
   4 000 state chars, 8 questions, 3 calls per stream. Responses are read under a
@@ -384,27 +405,29 @@ at a service, so **invariant #1 holds without a new rule**.
   lossy path: clipped fields are marked with `…`, but the 8 000-char squeeze
   deletes the context or the message outright when neither fits, and drops
   memory items from the tail unmarked.
-- **Fail-open, uniformly.** A missing key, timeout, transport error, 401/403,
-  429/529, an unreadable body, an oversized response, or an answer that does not
-  match the question set yields no advisory block and no thrown error — the
-  assistant run proceeds exactly as it would with Jev disabled. A failing tool
-  returns a typed failure the model can read and route around. The one-line
-  stderr log records only mode, outcome, failure code, latency, and token usage;
-  a call that never reached the network logs no latency rather than a fabricated
-  0, and an unconfigured Jev (`MISSING_KEY`) logs nothing at all — the disable
-  switch is a deployment state, not a per-run event.
+- **Fail-open, uniformly.** A missing/undecryptable key, a disabled global or
+  project flag, timeout, transport error, 401/403, 429/529, an unreadable body,
+  an oversized response, or an answer that does not match the question set yields
+  no advisory block and no thrown error — the assistant run proceeds exactly as
+  it would with Jev disabled. A failing tool returns a typed failure the model
+  can read and route around. The one-line stderr log records only mode, outcome,
+  failure code, latency, and token usage; a call that never reached the network
+  logs no latency rather than a fabricated 0, and a `MISSING_KEY` preflight logs
+  nothing at all — the disable switch is a deployment state, not a per-run event.
 - **No write path, no cycle.** Jev can neither queue nor apply a write, so it
   emits no `task_activity` row (invariant #12) and cannot bypass the existing
-  approval protocol — the advisory block states that in-band. Because
-  `server/assistant/jev.ts` imports nothing but a `RuntimeEnv` *type*, it holds
-  no service reference at all: there is no edge for a cycle to form.
+  approval protocol — the advisory block states that in-band. `jev.ts` imports
+  no repo or service, and `AssistantJevService` imports only the repo, the
+  secrets module, and the error catalog: there is no edge for a cycle to form.
 
 **Options rejected:** Jev as a chat provider is incompatible with its typed,
 non-streaming API; Jev as an MCP client would require an undocumented hosted MCP
 endpoint; local stdio wrappers are host-dependent and not the requested remote
-integration. A callable-only integration leaves Jev use dependent on the model's
-decision; automatic-only removes useful follow-up judgments. Both advisory modes
-are retained.
+integration. Env-only configuration (the original design) was
+replaced because a Jev key belongs in the same encrypted, webapp-managed store as
+every other provider credential. A callable-only integration leaves Jev use
+dependent on the model's decision; automatic-only removes useful follow-up
+judgments. Both advisory modes are retained.
 
 ### Managed MCP client secrets (envelope encryption)
 
@@ -430,8 +453,8 @@ per-client auth path at all (no filesystem, and no per-client secret store).
 encryption. A new table `assistant_mcp_secrets` (migration
 `0011_mcp_managed_secrets.sql`, additive — `CREATE TABLE` only) holds
 AES-256-GCM ciphertext, a per-write 12-byte IV, and `key_id`; the master key
-lives **only** in the environment (`LXK_MCP_MASTER_KEY`, with
-`LXK_MCP_MASTER_KEY_PREV` as the read-only rotation path). Existing `env:` /
+lives **only** in the environment (`LXK_SECRETS_MASTER_KEY`, with
+`LXK_SECRETS_MASTER_KEY_PREV` as the read-only rotation path). Existing `env:` /
 `file:` references keep working unchanged. A client carries **exactly one**
 source: a managed token XOR a `secret_ref`; carrying neither is a legal,
 deliberately secret-less client, and storing one source deletes the other.
@@ -453,7 +476,7 @@ assistant run → registry + secret row (one LEFT JOIN) → ciphertext? decrypt 
   credentials.
 - **`key_id` is a keyring slot** (`active` / `prev`), never a fingerprint,
   counter, or date. That is what makes rotation rewrap-free: set
-  `LXK_MCP_MASTER_KEY_PREV` to the old key, the active key to the new one,
+  `LXK_SECRETS_MASTER_KEY_PREV` to the old key, the active key to the new one,
   restart, and re-enter tokens over time — no outage, no rewrap pass, no data
   migration. An unfinished rotation is a warning, not a break.
 - **The failure split is the point.** An unresolvable reference still connects
@@ -473,14 +496,17 @@ assistant run → registry + secret row (one LEFT JOIN) → ciphertext? decrypt 
   removal needs its own flag, `clearSecret: true`, which nulls the reference and
   deletes the blob. Clear is a pure row delete, so a credential can always be
   revoked even when the master key is gone.
-- **Disabled without a key.** Unset `LXK_MCP_MASTER_KEY` is a documented disable
+- **Disabled without a key.** Unset `LXK_SECRETS_MASTER_KEY` is a documented disable
   switch: a managed save is refused with `MCP_INVALID_TRANSPORT_CONFIG`,
   references keep working, and an already-stored token is never dropped. A
   configured-but-malformed key is an error, never a silent disable.
-- **Implementation boundary.** `server/assistant/mcp-secret.ts` is a **plain
+- **Implementation boundary.** `server/assistant/secrets.ts` is a **plain
   assistant-tier module** — not an `Effect.Service`, importing only the
   `RuntimeEnv` *type* and Web Crypto, with no DB, no Node builtins, and no
-  service edge at all, so **invariant #1 holds without a new rule**. AES-256-GCM
+  service edge at all, so **invariant #1 holds without a new rule**. It is
+  scope-aware: the same module seals/opens MCP tokens (`mcp`), provider API keys
+  (`provider`), and the Jev API key (`jev`), each bound to its owner through a
+  frozen per-scope AAD prefix. AES-256-GCM
   is the only AEAD both Bun and workerd expose (no new dependency), keys import
   as non-extractable, and the master key is never in the DB, a backup, a
   response, or a log. Secret writes emit no `task_activity` rows (they are not
@@ -492,12 +518,14 @@ assistant run → registry + secret row (one LEFT JOIN) → ciphertext? decrypt 
 
 **Options rejected:** XChaCha20/ChaCha20 (unavailable on workerd, and a new WASM
 dependency is not worth it); a rewrap endpoint (deferred — the `PREV` read path
-ships now, and re-encrypting a row means re-entering the token); encrypting the
-pre-existing plaintext `assistant_providers.api_key` /
-`assistant_settings.search_api_key` (a known asymmetry, kept as a separate
-decision); and a dedicated `LXK_MCP_SECRET_*` namespace for referenced secrets
-(the fixed `RuntimeEnv` snapshot plus a denylist for the master keys was
-approved instead, keeping the existing `secret_ref` contract intact).
+ships now, and re-encrypting a row means re-entering the token); and a dedicated
+`LXK_MCP_SECRET_*` namespace for referenced secrets (the fixed `RuntimeEnv`
+snapshot plus a denylist for the master keys was approved instead, keeping the
+existing `secret_ref` contract intact). The one-time asymmetry this record kept
+— plaintext `assistant_providers.api_key` and `assistant_settings.search_api_key`
+— was **partly closed later**: provider keys moved into the same envelope store
+(migration `0014` + a one-way boot backfill; `assistant_settings.search_api_key`
+remains plaintext, a separate open decision).
 
 ### Managed-only MCP client secrets (2026-09-28)
 
@@ -510,7 +538,7 @@ forced XOR / allowlist / denylist machinery. **Decision:** the managed
 envelope-encrypted token is the **only** credential source. `env:NAME` /
 `file:/abs/path` references, `resolveSecretRef`, the fixed-`RuntimeEnv`
 allowlist check, and the master-key denylist are removed end to end;
-`LXK_MCP_MASTER_KEY` is now **required to store a token** (a secret-less client
+`LXK_SECRETS_MASTER_KEY` is now **required to store a token** (a secret-less client
 remains legal).
 
 - **No reference source, and no anonymous fallback.** Connect deleted the
@@ -536,9 +564,21 @@ remains legal).
   refuses any that somehow remain.
 - **Unchanged from the original decision:** envelope encryption (AES-256-GCM,
   fresh IV, AAD-bound), the `active`/`prev` keyring slot and rewrap-free
-  `LXK_MCP_MASTER_KEY_PREV` rotation, `clearSecret: true` as the only removal
+  `LXK_SECRETS_MASTER_KEY_PREV` rotation, `clearSecret: true` as the only removal
   route (able to clear with no master key), write-only `secret`, ciphertext out
   of the registry, and the redaction rules.
+- **Generalized to provider + Jev secrets (2026-09-29).** The same module, table
+  shape, and keyring now also store **LLM provider API keys**
+  (`assistant_provider_secrets`, migration `0014`, scope `provider`, AAD-bound to
+  the provider id) and the **Jev API key** (`assistant_jev_secrets`, migration
+  `0013`, scope `jev`). Provider keys are migrated by a **one-way boot backfill**
+  (`server/db/provider-secrets-backfill.ts`): every non-empty
+  `assistant_providers.api_key` is encrypted and the legacy column is then
+  written `''`; with no keyring nothing is written and the blocked count is
+  logged, so a credential is never cleared before a usable replacement exists.
+  The backfill runs after the env mirror at Bun boot, and on Workers on the
+  per-isolate first request (`ensureBoot`), idempotently. The legacy column
+  survives this release dead and is dropped in the next.
 
 ### Removal record — the agent-runtime (Blacksmith) tier
 

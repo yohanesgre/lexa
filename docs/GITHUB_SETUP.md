@@ -117,7 +117,7 @@ A bare/systemd host loads the same `.env.toml` from the install directory
 (`systemd` runs `bun server/entry.ts` with the install dir as WorkingDirectory;
 no `--env-file`). Re-running the install script **merges**: it rewrites the
 installer-owned keys and preserves operator-added ones (`GITHUB_*`,
-`LXK_MCP_MASTER_KEY`, …), so there is nothing to re-add. The key file is
+`LXK_SECRETS_MASTER_KEY`, …), so there is nothing to re-add. The key file is
 gitignored (`*.private-key.pem`) and excluded from the Docker build context
 (`.dockerignore`) — never commit it.
 

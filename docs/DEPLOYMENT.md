@@ -13,8 +13,8 @@ wizard (email + password ≥8) — the script never handles passwords.
 
 The canonical config file is **`.env.toml`**. It is structured TOML where the
 sections (`[core]`, `[auth]`, `[github]`, …) are presentation only and every
-leaf key is the env-var name verbatim (`DATABASE_PATH`, `LXK_*`, `GITHUB_*`,
-`TYPESAFE_*`). Working env files are **never committed** — values are generated
+leaf key is the env-var name verbatim (`DATABASE_PATH`, `LXK_*`, `GITHUB_*`).
+Working env files are **never committed** — values are generated
 on the machine by the install script or the setup wizard, and all working
 `.env*` files are gitignored. The tracked `.env.toml.example` (repo root) is the
 dev + reference template; `.env.toml` itself is written by `bun run setup` (0600).
@@ -40,7 +40,7 @@ converts it to `.env.toml` and renames the original to `.env.legacy` (0600).
 > tunnel is configured. An operator-set `COMPOSE_PROJECT_NAME` is preserved but
 > the installer never writes it (setting it would rename the compose project and
 > orphan the `lexa-data` volume). Re-runs **merge** — operator-added keys such as
-> `GITHUB_*`, `LXK_MCP_MASTER_KEY`, and a pinned `LXK_IMAGE_TAG` are preserved
+> `GITHUB_*`, `LXK_SECRETS_MASTER_KEY`, and a pinned `LXK_IMAGE_TAG` are preserved
 > (previously the flat `.env` was truncated). The installer reads the image's
 > own uid:gid (never a hardcode) and re-owns `.env.toml` to
 > `host-uid:<image-gid>` mode 0640 (a root installer uses
@@ -161,7 +161,7 @@ default columns appear when the first project is created.
 `bun run setup` (via `server/env-file.ts`) writes `.env.toml` at 0600, merging
 into any existing file. The loader applies `.env.toml` (or a legacy `.env`) at
 boot and never overwrites a variable already set in the real environment. Setup
-and `--local` CLI writes preserve `GITHUB_*` / `LXK_MCP_MASTER_KEY` across
+and `--local` CLI writes preserve `GITHUB_*` / `LXK_SECRETS_MASTER_KEY` across
 re-runs.
 
 | Variable | Written by | Required |
@@ -176,7 +176,7 @@ re-runs.
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_MCP_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store an MCP token**; unset allows only secret-less MCP clients |
+| `LXK_SECRETS_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store any managed secret** (MCP token, provider key, or Jev API key); unset allows secret-less MCP clients and keyless providers, and leaves Jev disabled |
 
 ## Full variable reference
 
@@ -194,15 +194,16 @@ re-runs.
 | `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
-| `LXK_MCP_MASTER_KEY` | **required to store an MCP client token** — the token is the only credential source since 2026-09-28 (`env:`/`file:` references were removed). Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → token storage is disabled**: a save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, a secret-less client is still legal, and a client with an already-stored token keeps its stored value (never silently dropped). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_MCP_MASTER_KEY_PREV` to the **old** value, `LXK_MCP_MASTER_KEY` to the **new** one, restart, then re-enter tokens in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
-| `LXK_MCP_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_MCP_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any token entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
+| `LXK_SECRETS_MASTER_KEY` | **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → managed secret storage is disabled**: an MCP save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, a provider/Jev save carrying a key with 400 `SECRET_KEY_UNAVAILABLE`; secret-less MCP clients and keyless providers stay legal, an already-stored secret is never silently dropped, and Jev simply stays disabled. Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart, then re-enter secrets in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
+| `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
 | `LXK_TRUSTED_PROXY_CIDRS` | comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when cloudflared or another sidecar connects from this host. Set it when the proxy is a separate container/host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
 | `PORT` | server port (default 3000) |
-| `TYPESAFE_API_KEY` | Typesafe Jev API key for the System 1 advisory layer. **Unset → Jev is disabled**: no Jev request is made and the assistant behaves exactly as before. Hand-set only; never logged, never written into a tool argument, prompt, or response. A set key enables the whole layer (`server/assistant/jev.ts`): one bounded REST preflight per new chat or task-assistant run, plus the read-only `jev_assess` tool for follow-up judgments. Both are advisory and fail open, so a Jev failure leaves the assistant run unchanged. When the key is set, the preflight runs ahead of the provider call and can add up to 3s (`JEV_PREFLIGHT_TIMEOUT_MS`) to first-token latency on a new run. |
-| `TYPESAFE_BASE_URL` | Jev API origin (default `https://api.typesafe.ai`); requests go to `{TYPESAFE_BASE_URL}/v1/systemone`. Only change it for a self-hosted or proxied endpoint. |
-| `TYPESAFE_DEFAULT_MODEL` | Jev model id (default `jev-latest`). |
+
+**Jev is configured in the webapp** (Admin → Assistant → Providers & Models),
+not via env — the API key is stored encrypted like a provider key and the layer
+can be toggled + tested there. No Jev env variables exist.
 
 **Unused by the server:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare
 Access) — the server reads them nowhere. Browsers authenticate via the
@@ -245,7 +246,7 @@ no email transport anywhere.
 - `.env.toml` (and any legacy `.env*`) is gitignored — values are generated on
   the machine, never committed. Re-running the install script **merges** into
   `.env.toml`: installer-owned keys are rewritten, operator-added keys
-  (`GITHUB_*`, `LXK_MCP_MASTER_KEY`, …) are preserved. DB-minted API keys
+  (`GITHUB_*`, `LXK_SECRETS_MASTER_KEY`, …) are preserved. DB-minted API keys
   survive in the data volume / D1.
 - The GitHub App private key is never written to the env file: it is either
   referenced via `GITHUB_PRIVATE_KEY_FILE` or mounted read-only into the
@@ -256,16 +257,18 @@ no email transport anywhere.
   (256-bit), rate-limited per IP, revocable per-named-key (Settings → API
   Keys). Failed logins on `/api/auth/*` are throttled in-process (Better Auth
   rate-limit plugin; ~5 attempts/60s per email, 15 min lockout).
-- `TYPESAFE_API_KEY` is a third-party credential held the same way as the
-  GitHub key: set by hand (or `wrangler secret put` on Workers), never
-  committed, never logged. The Jev client logs nothing itself and returns only
-  a typed outcome — a request's state text and the key are absent from every
-  failure message, and the stderr log line carries only `mode`, `outcome`,
-  `code`, `latencyMs`, and returned `usage` — never state text.
-- `LXK_MCP_MASTER_KEY` (and its read-only `LXK_MCP_MASTER_KEY_PREV`) is the
-  envelope key for managed MCP client tokens — the only credential source since
-  2026-09-28, so the key is **required to store a token** (secret-less clients
-  stay legal). It is set by hand in the server environment (or
+- Managed secrets (MCP client tokens, LLM provider API keys, and the Jev API
+  key) are third-party credentials held the same way as the GitHub key: the
+  plaintext is entered once in the webapp, stored AES-256-GCM encrypted in the
+  DB, and never returned by the API. The Jev client logs nothing itself and
+  returns only a typed outcome — a request's state text and the key are absent
+  from every failure message, and the stderr log line carries only `mode`,
+  `outcome`, `code`, `latencyMs`, and returned `usage` — never state text.
+- `LXK_SECRETS_MASTER_KEY` (and its read-only `LXK_SECRETS_MASTER_KEY_PREV`) is
+  the envelope key for every managed secret — MCP tokens, provider API keys, and
+  the Jev API key. It is **required to store a secret** (secret-less clients and
+  keyless providers stay legal; Jev stays disabled without one). It is set by
+  hand in the server environment (or
   `wrangler secret put` on Workers — see `docs/CLOUDFLARE_WORKERS.md`), **never
   committed, never written into a committed `.env.toml` or into a log line**,
   and it is the one value that must not travel with a backup: the DB stores
@@ -299,7 +302,7 @@ defaults — so existing installs keep booting unchanged.
    `.env.toml` (keeping the original as `.env.legacy`) and then merges its own
    keys in; the container bind-mounts it read-only and a bare host loads it from
    the install directory. No manual conversion needed, and operator-added keys
-   (`GITHUB_*`, `LXK_MCP_MASTER_KEY`, …) plus a pinned `LXK_IMAGE_TAG` are
+   (`GITHUB_*`, `LXK_SECRETS_MASTER_KEY`, …) plus a pinned `LXK_IMAGE_TAG` are
    preserved. Rollback requires re-running the installer: restore `.env.legacy`
    to `.env`, remove `.env.toml`, then re-run so the tooling `.env` and compose
    file are regenerated.
@@ -308,11 +311,49 @@ defaults — so existing installs keep booting unchanged.
    `<image-uid>:<image-gid>`) on docker so the container process can read it; it
    stays gitignored (`.env.toml.example` is the only tracked env file).
 
+## Upgrading across the secrets rename + provider/Jev secrets (2026-09-29)
+
+This release hard-renames the envelope key and moves provider keys and Jev
+configuration into the encrypted, webapp-managed store.
+
+1. **Rename the env var to the same value.** `LXK_MCP_MASTER_KEY` becomes
+   `LXK_SECRETS_MASTER_KEY` (and `LXK_SECRETS_MASTER_KEY_PREV` likewise) — a
+   plain rename, **same value, no aliases**. Stored ciphertext is unaffected: the
+   keyring, the AAD layout, and the `active`/`prev` slots are unchanged, so
+   existing MCP tokens keep decrypting. Set it before the first boot of the new
+   build (on Workers: `wrangler secret put LXK_SECRETS_MASTER_KEY`).
+2. **Jev env keys are gone; configure Jev in the webapp.** The three
+   `TYPESAFE_*` variables are deleted. Open Admin → Assistant → Providers &
+   Models, set the base URL + model, enter the API key, test it, and enable the
+   layer; per-project opt-in is on each project's Assistant card. Until then Jev
+   is simply disabled and the assistant behaves exactly as before.
+3. **Provider keys backfill once, at boot.** With the renamed key present, the
+   first boot of this release encrypts every non-empty
+   `assistant_providers.api_key` into `assistant_provider_secrets` and writes the
+   legacy column to `''`. It is idempotent (Bun: once at server start; Workers:
+   the per-isolate first request). **Blocked without a key:** if the master key
+   is unset, nothing is written and a boot log names the count — providers that
+   still hold a legacy plaintext key then fail calls with 502
+   `PROVIDER_AUTH_FAILED` until the key is set and the server restarts. Never
+   blank the column by hand.
+4. **Gate before the next release.** The dead column is dropped forward-only in
+   Release N+1 (`0015_drop_provider_api_key.sql`). Before upgrading to it, set
+   `LXK_SECRETS_MASTER_KEY`, boot this release at least once on every database
+   (Bun restart; Workers deploy + one request), and verify the backfill is
+   complete on each:
+   ```sql
+   SELECT COUNT(*) FROM assistant_providers WHERE api_key <> '';
+   ```
+   `0` on every DB means the drop is safe; the guard aborts otherwise.
+5. **Forward-only.** After `0015` an older build cannot run (it writes the
+   dropped column); downgrading means restoring a pre-upgrade backup
+   (`docs/BACKUPS.md`).
+
 ## Upgrading across managed-only MCP client secrets (2026-09-28)
 
 MCP client credentials became managed-only: the `env:NAME` / `file:/abs/path`
 reference source and its allowlist/denylist were removed, and
-`LXK_MCP_MASTER_KEY` is now required to store a token (secret-less clients stay
+`LXK_SECRETS_MASTER_KEY` is now required to store a token (secret-less clients stay
 legal). See `docs/ARCHITECTURE.md` §Managed-only MCP client secrets.
 
 1. **Migration ordering matters.** Boot applies
@@ -325,13 +366,13 @@ legal). See `docs/ARCHITECTURE.md` §Managed-only MCP client secrets.
    clears it — never an anonymous connect.
 2. **Stored references stop authenticating.** Any client that used `env:` /
    `file:` must have a Bearer token **entered** in the webapp instead (Settings
-   → Assistant → MCP Clients), which needs `LXK_MCP_MASTER_KEY` set. The token
+   → Assistant → MCP Clients), which needs `LXK_SECRETS_MASTER_KEY` set. The token
    is stored encrypted and the legacy ref is cleared on that write.
 3. **Secret-less clients are unaffected** — they connect with no
    `Authorization` header exactly as before.
 4. **Managed tokens survive** the migration untouched (ciphertext rows are not
    modified); nothing else changes for them.
-5. **`LXK_MCP_MASTER_KEY` is preserved across re-runs** like `GITHUB_*`, so
+5. **`LXK_SECRETS_MASTER_KEY` is preserved across re-runs** like `GITHUB_*`, so
    upgrades do not clobber the key.
 
 ## Upgrading across the agent-runtime removal (2026-09-26)

@@ -19,7 +19,7 @@ function tempDbPath() {
 }
 
 describe("assistant gateway phase 1", () => {
-  it("migration 0017 drops legacy cols, keeps gateway cols, creates 4 new tables + indexes", async () => {
+  it("baseline drops legacy settings cols, keeps gateway cols, creates 4 new tables + indexes", async () => {
     const { dbPath, dir } = tempDbPath();
     try {
       runMigrations(dbPath);
