@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
-import { buildStream, normalizeRunUsage, reconcilePendingBatchStatuses, type StreamRunContext } from "./build-stream";
+import { buildStream, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { QueuedProposal } from "./write-tools";
 
@@ -137,7 +137,15 @@ describe("suspendTurn persisted marker", () => {
 
   it("persists the full chip payload so a reload can rebuild decidable chips", async () => {
     let persisted: unknown[] | null = null;
-    const c = ctx(doneStream);
+    const proposalStream = () =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "" } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "delete_task" } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: JSON.stringify({ ref: "LX-1" }) } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+      })();
+    const c = ctx(proposalStream);
     c.writeDrain = () => [proposal];
     c.writeTools = ["delete_task"];
     c.persist = async (messages) => {
@@ -147,6 +155,7 @@ describe("suspendTurn persisted marker", () => {
     expect(frames.some((f) => f.type === "suspended")).toBe(true);
     const assistantEntry = (persisted as unknown[] | null)!.find((m) => (m as { pendingBatch?: unknown }).pendingBatch !== undefined) as {
       pendingBatch: { batchId: string; approvals: Array<Record<string, unknown>> };
+      toolLog?: Array<{ name: string; detail?: string }>;
     };
     expect(assistantEntry.pendingBatch.batchId).toBe("b1");
     expect(assistantEntry.pendingBatch.approvals[0]).toMatchObject({
@@ -157,6 +166,73 @@ describe("suspendTurn persisted marker", () => {
       detail: "Delete LX-1",
       diff: proposal.diff,
     });
+    // The display log is persisted under `toolLog`, never the @tanstack/ai wire
+    // key `toolCalls` (which would be replayed as real pending tool calls).
+    expect(assistantEntry.toolLog).toHaveLength(1);
+    expect(assistantEntry.toolLog![0]!.name).toBe("delete_task");
+    expect(assistantEntry).not.toHaveProperty("toolCalls");
+  });
+});
+
+describe("sanitizeProviderMessages", () => {
+  it("strips a legacy display toolCalls log from an assistant message", () => {
+    const messages = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: "proposed", toolCalls: [{ name: "create_task", detail: "New task" }], pendingBatch: "b1" },
+    ];
+    const out = sanitizeProviderMessages(messages);
+    const assistant = out[1] as Record<string, unknown>;
+    expect(assistant.toolCalls).toBeUndefined();
+    expect(assistant.pendingBatch).toBe("b1");
+    // input untouched
+    expect((messages[1] as { toolCalls?: unknown }).toolCalls).toEqual([{ name: "create_task", detail: "New task" }]);
+  });
+
+  it("keeps wire-shaped toolCalls untouched", () => {
+    const wire = { id: "call_1", type: "function", function: { name: "create_task", arguments: "{}" } };
+    const messages = [{ role: "assistant", content: "x", toolCalls: [wire] }];
+    const out = sanitizeProviderMessages(messages);
+    expect(out).toBe(messages);
+    expect((out[0] as { toolCalls: unknown[] }).toolCalls[0]).toBe(wire);
+  });
+
+  it("drops only the non-wire entries of a mixed array", () => {
+    const wire = { id: "call_1", function: { name: "create_task", arguments: "{}" } };
+    const messages = [{ role: "assistant", content: "x", toolCalls: [wire, { name: "create_task", detail: "d" }] }];
+    const out = sanitizeProviderMessages(messages);
+    expect((out[0] as { toolCalls: unknown[] }).toolCalls).toEqual([wire]);
+  });
+
+  it("leaves non-assistant messages and toolCalls on tool/user roles untouched", () => {
+    const messages = [
+      { role: "user", content: "go", toolCalls: [{ name: "x" }] },
+      { role: "tool", content: "{}", toolCallId: "call_1" },
+    ];
+    const out = sanitizeProviderMessages(messages);
+    expect(out).toBe(messages);
+  });
+
+  it("returns the input array identity when nothing needs stripping", () => {
+    const messages = [{ role: "assistant", content: "hello" }];
+    expect(sanitizeProviderMessages(messages)).toBe(messages);
+  });
+});
+
+describe("buildStream provider-boundary sanitization", () => {
+  it("never hands a legacy display toolCalls log to the provider", async () => {
+    let seen: Array<Record<string, unknown>> | null = null;
+    const c = ctx((input: unknown) => {
+      seen = (input as { messages: Array<Record<string, unknown>> }).messages;
+      return doneStream();
+    });
+    c.history = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: "proposed", toolCalls: [{ name: "create_task", detail: "New task" }] },
+    ];
+    const frames = await drain(buildStream(c));
+    expect(frames.at(-1)?.type).toBe("done");
+    const assistant = seen!.find((m) => m.role === "assistant")!;
+    expect(assistant.toolCalls).toBeUndefined();
   });
 });
 

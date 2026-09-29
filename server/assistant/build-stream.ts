@@ -52,6 +52,36 @@ export function applyResumeResults(messages: unknown[], resolvedBatchIds: string
   });
 }
 
+// @tanstack/ai treats every assistant `message.toolCalls` array as real wire
+// tool calls and dereferences `toolCall.function.name` when rebuilding pending
+// calls. The persisted transcript also carries a UI display log of the same
+// shape era — `toolLog` since the rename, but legacy threads still hold the
+// colliding key `toolCalls` with `{ name, detail }` entries, which crashes a
+// resumed or fresh run (`tc.function` undefined). Strip anything that is not
+// wire-shaped before the provider call; wire entries (function.name) pass
+// through untouched and the input is never mutated.
+export function sanitizeProviderMessages<T = unknown>(messages: readonly T[]): T[] {
+  let touched = false;
+  const out = messages.map((m) => {
+    if (m === null || typeof m !== "object") return m;
+    const rec = m as Record<string, unknown>;
+    if (rec.role !== "assistant" || !Array.isArray(rec.toolCalls)) return m;
+    const wire = rec.toolCalls.filter((tc) => {
+      const fn = (tc as { function?: { name?: unknown } } | null | undefined)?.function;
+      return fn !== null && typeof fn === "object" && typeof (fn as { name?: unknown }).name === "string";
+    });
+    if (wire.length === rec.toolCalls.length) return m;
+    touched = true;
+    if (wire.length === 0) {
+      const rest: Record<string, unknown> = { ...rec };
+      delete rest.toolCalls;
+      return rest as T;
+    }
+    return { ...rec, toolCalls: wire } as T;
+  });
+  return touched ? out : (messages as T[]);
+}
+
 export type PendingApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 
 // One decision row as read from assistant_pending_writes. `seq`/`name`/`diff`
@@ -223,7 +253,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         }
         const userEntry = { role: "user", content: effectiveUserContent, ts: ctx.userTs };
         const userEntries = ctx.skipUserEntry || isEmptyUserContent(effectiveUserContent as string | unknown[]) ? [] : [userEntry];
-        const toolCallsLog: Array<{ name: string; detail?: string }> = [];
+        const toolLog: Array<{ name: string; detail?: string }> = [];
         const writeToolCallIds: string[] = [];
         let writeQueueDrained = false;
         const drainWrites = (): QueuedProposal[] => {
@@ -239,14 +269,15 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             push({ type: "tool_pending", approvalId: p.approvalId, batchId: p.batchId, seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff });
           }
           const citations = ctx.getCitations();
-          await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolCallsLog.length > 0 ? { toolCalls: toolCallsLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
+          await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
           push({ type: "suspended", batchId: drained[0]!.batchId });
         };
         try {
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
           for (const r of ctx.approvalResults ?? []) push({ type: "approval_result", approvalId: r.approvalId, status: r.status, ...(r.error !== undefined ? { error: r.error } : {}) });
           const { streamChat } = await import("./provider");
-          const prepared = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
+          const hydrated = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
+          const prepared = sanitizeProviderMessages(hydrated);
           let toolRounds = 0;
           let didFinish = false;
           const pendingCalls = new Map<string, { name: string; args: string }>();
@@ -396,7 +427,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 if (shouldEmitToolFrame(name)) {
                   push(detail === undefined ? { type: "tool", phase: "call", name } : { type: "tool", phase: "call", name, detail });
                   push(detail === undefined ? { type: "tool", phase: "result", name } : { type: "tool", phase: "result", name, detail });
-                  toolCallsLog.push(detail === undefined ? { name } : { name, detail });
+                  toolLog.push(detail === undefined ? { name } : { name, detail });
                 }
                 if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
               } else if (chunk.type === "TOOL_CALL_RESULT") {
@@ -494,7 +525,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             const citationsErr = ctx.getCitations();
             const extra: Record<string, unknown> = { error: { code, message } };
             if (citationsErr.length > 0) extra.citations = citationsErr;
-            if (toolCallsLog.length > 0) extra.toolCalls = toolCallsLog;
+            if (toolLog.length > 0) extra.toolLog = toolLog;
             await persistTerminalTurn(extra).catch(() => {});
             await ctx.onFail(message).catch(() => {});
             push({ type: "error", code, message });

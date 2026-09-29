@@ -49,7 +49,7 @@ describe("applyResumeResults", () => {
       role: "assistant",
       content: "proposed writes",
       ts: "2026-08-24T00:00:00Z",
-      toolCalls: [{ name: "create_task" }],
+      toolLog: [{ name: "create_task" }],
       pendingBatch: "b1",
     };
     const out = applyResumeResults([entry], ["b1"]);
@@ -58,7 +58,7 @@ describe("applyResumeResults", () => {
       role: "assistant",
       content: "proposed writes",
       ts: "2026-08-24T00:00:00Z",
-      toolCalls: [{ name: "create_task" }],
+      toolLog: [{ name: "create_task" }],
     });
   });
 
