@@ -13,7 +13,9 @@ import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { ThreadsSidebar } from "./ThreadsSidebar";
 import type { AssistantReasoningEffort } from "../../../shared/assistant";
-import { useChatSidebar, useChatAutoScroll, useSkillsPanelDefault } from "./assistant-chat-hooks";
+import { useChatSidebar, useChatAutoScroll } from "./assistant-chat-hooks";
+import { useChatQueue } from "./useChatQueue";
+import { ChatLanding } from "./ChatLanding";
 import {
   chatPageFlags,
   chatSkillsOf,
@@ -122,6 +124,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // resolves that project's last-visited/head, and is cleared by the next
   // explicit selection (selectThread / New chat).
   const suppressHeadFallbackRef = useRef<string | null>(null);
+  // Which project's thread resolution has settled — the landing must not paint
+  // before the resolve effect has run, or a hard load / deep link flashes the
+  // hero over a project that actually has threads.
+  const [resolutionProject, setResolutionProject] = useState<string | undefined>(undefined);
 
   const resolvedProjectRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -147,6 +153,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     });
     if (next) applyChatId(next);
     else if (projectChanged && chatId) setChatId("");
+    setResolutionProject(projectId);
   }, [projectId, thread, chatId, listQuery.data, applyChatId]);
 
   // Transcript render on load (GET /api/assistant/chat/:chatId). A fresh uuid
@@ -201,14 +208,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // composer annotation). Changing skill mid-thread mints a fresh thread
   // server-side.
   const [skillId, setSkillId] = useState("");
-  // Skills panel collapsed by default on mobile (saves vertical space) and
-  // expanded by default on desktop (chip row is the primary selection UI).
-  // The viewport is read on mount; subsequent resizes keep the current
-  // state — the user can collapse/expand manually and the choice sticks.
-  // Narrow screens start collapsed so the tree never starves the content.
-  // Static default (same on server + client); the viewport is read once on
-  // mount below and the user's manual choice sticks afterwards.
-  const { skillsPanelOpen, setSkillsPanelOpen } = useSkillsPanelDefault();
   // Mobile composer treatment: collapse skills by default, flip dropdowns
   // upward so they don't run off the bottom of the screen. Desktop keeps
   // the original behavior (chips visible, dropdowns below).
@@ -248,7 +247,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     recoverStaleThread({ qc, projectId, chatId, listData: listQuery.data, applyChatId, setChatId, clearThreadParam, clearParam: true });
   }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, qc, applyChatId, setChatId, clearThreadParam, knownChatIdsRef, initialLastRef]);
 
-  const { busy409, attachDisabled, suspendedLock, suspendTally } = chatPageFlags({
+  const { busy409, attachDisabled, suspendedLock, suspendPendingCount } = chatPageFlags({
     settings,
     settingsLoading,
     turns,
@@ -276,14 +275,48 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     ingressInsertedRef,
   });
 
+  // Returns whether the send was accepted — the composer only clears its draft
+  // / held queue + attachments on an accepted send, so a refused flush can
+  // never destroy a held message.
   const send = useCallback(
-    (message: string, imageCount = 0) => {
-      if (!message || streaming || suspendedLock) return;
+    (message: string, imageCount = 0): boolean => {
+      if (!message || streaming || suspendedLock) return false;
       setTurns((prev) => appendEphemeralUserTurn(prev, message, imageCount));
       startStream(message);
+      return true;
     },
     [streaming, suspendedLock, startStream, setTurns]
   );
+
+  // Client-only one-message queue (assistant-chat-deck §3.3): a message typed
+  // while the turn runs is held in page memory and flushed by the clean `done`
+  // transition, or kept held after aborted/error until sent explicitly.
+  const { queued, enqueue, unqueue } = useChatQueue({ chatId, streamStatus: stream.status, send });
+
+  // Zero-turn landing (assistant-chat-deck §3.5): hero + centered Deck + starter
+  // chips, shown only for a SETTLED fresh empty chat with a provider configured.
+  // Gated on the resolution effect having run + settings/list settled + no
+  // ?thread= deep link, so a hard load never paints the hero over a thread that
+  // is still resolving.
+  const threadResolutionSettled = !!projectId && resolutionProject === projectId;
+  const isLanding =
+    !providerMissing &&
+    threadResolutionSettled &&
+    !settingsLoading &&
+    !listQuery.isLoading &&
+    !thread &&
+    (turns?.length ?? 0) === 0 &&
+    !chatId &&
+    !streaming;
+  const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
+
+  // A starter-chip seed prefills the composer draft once. Once a turn exists the
+  // draft is no longer a fresh landing, so drop the seed: otherwise returning to
+  // the landing (chip → send → delete active thread) would remount the composer
+  // and refill the draft with the stale chip text.
+  useEffect(() => {
+    if ((turns?.length ?? 0) > 0) setSeed(null);
+  }, [turns?.length]);
 
   const { handleEditSave, handleRegenerate, handleRetryTurn } = useTurnResend({
     turns,
@@ -356,6 +389,31 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
       {providerMissing ? (
         <ChatProviderMissingPanel projectId={projectId} />
+      ) : isLanding ? (
+        <ChatLanding onPickStarter={(text) => setSeed({ text, nonce: Date.now() })}>
+          <ChatComposerArea
+            skills={assistantSkills}
+            skillId={effectiveSkillId}
+            onSkillChange={setSkillId}
+            busy409={busy409}
+            slug={slug}
+            streaming={streaming}
+            suspendedLock={suspendedLock}
+            suspendCount={suspendPendingCount}
+            attachDisabled={attachDisabled}
+            isMobileComposer={isMobileComposer}
+            effort={effort}
+            projectEffort={settings?.reasoningEffort}
+            onEffortChange={setEffort}
+            onSend={send}
+            onAbort={handleAbort}
+            landing={isLanding}
+            queued={queued}
+            onQueue={(text) => enqueue(text, 0)}
+            onUnqueue={unqueue}
+            seed={seed}
+          />
+        </ChatLanding>
       ) : (
         <>
           <ChatTranscriptArea
@@ -387,9 +445,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
           />
 
           <ChatComposerArea
-            skillsPanelOpen={skillsPanelOpen}
-            onToggleSkills={() => setSkillsPanelOpen((v) => !v)}
-            skillName={skillName}
             skills={assistantSkills}
             skillId={effectiveSkillId}
             onSkillChange={setSkillId}
@@ -397,7 +452,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             slug={slug}
             streaming={streaming}
             suspendedLock={suspendedLock}
-            suspendTally={suspendTally}
+            suspendCount={suspendPendingCount}
             attachDisabled={attachDisabled}
             isMobileComposer={isMobileComposer}
             effort={effort}
@@ -405,6 +460,11 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             onEffortChange={setEffort}
             onSend={send}
             onAbort={handleAbort}
+            landing={isLanding}
+            queued={queued}
+            onQueue={(text) => enqueue(text, 0)}
+            onUnqueue={unqueue}
+            seed={seed}
           />
         </>
       )}

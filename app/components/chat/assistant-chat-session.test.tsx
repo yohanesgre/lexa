@@ -256,21 +256,25 @@ describe("useTurnResend — no sentinel fromIndex", () => {
 });
 
 function renderComposer(overrides: Partial<Parameters<typeof AssistantChatComposer>[0]> = {}) {
-  const onSend = vi.fn();
-  render(
+  const onSend = vi.fn(() => true);
+  const onQueue = vi.fn();
+  const onUnqueue = vi.fn();
+  const utils = render(
     <AssistantChatComposer
       slug="nimbus"
       streaming={false}
       busy409={false}
       suspendedLock={false}
-      suspendTally=""
+      suspendCount={0}
       attachDisabled={false}
       onSend={onSend}
       onAbort={() => {}}
+      onQueue={onQueue}
+      onUnqueue={onUnqueue}
       {...overrides}
     />
   );
-  return { onSend };
+  return { ...utils, onSend, onQueue, onUnqueue };
 }
 
 describe("AssistantChatComposer", () => {
@@ -289,9 +293,90 @@ describe("AssistantChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("hello", 0);
   });
 
-  it("shows the wireframe busy-409 placeholder", () => {
-    renderComposer({ busy409: true });
+  it("shows the wireframe busy-409 placeholder, reason line, and no action button", () => {
+    const { container } = renderComposer({ busy409: true });
     expect(screen.getByPlaceholderText("Waiting for the current reply…")).toBeTruthy();
+    const action = container.querySelector(".deck-action")!;
+    expect(action.textContent).toContain("ANOTHER ASSISTANT RUN IS IN PROGRESS");
+    expect(action.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("renders the deck regions in rail / message / action order", () => {
+    const { container } = renderComposer({ rail: <span className="deck-label">Skill</span> });
+    const deck = container.querySelector(".chat-deck")!;
+    const rail = deck.querySelector(".deck-rail")!;
+    const message = deck.querySelector(".deck-message")!;
+    const action = deck.querySelector(".deck-action")!;
+    expect(rail).toBeTruthy();
+    expect(rail.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(message.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("offers Queue + Review (no Send) while the turn is suspended", () => {
+    const { onSend, onQueue } = renderComposer({ suspendedLock: true, suspendCount: 2 });
+    expect(screen.getByPlaceholderText("Queue your next message…")).toBeTruthy();
+    expect(screen.getByText(/TURN SUSPENDED · 2 PENDING APPROVALS/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Review/ })).toBeTruthy();
+
+    const textarea = screen.getByLabelText("Message Assistant");
+    fireEvent.change(textarea, { target: { value: "next" } });
+    const queue = screen.getByRole("button", { name: /Queue/ });
+    expect(queue).toBeEnabled();
+    fireEvent.click(queue);
+    expect(onQueue).toHaveBeenCalledWith("next");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("renders the attachment strip with name, size and meter — no caps copy", () => {
+    const createObjectURL = vi.fn(() => "blob:preview");
+    Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true });
+    const { container } = renderComposer();
+    const file = new File([new Uint8Array(524288)], "screenshot.png", { type: "image/png" });
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+
+    const item = container.querySelector(".deck-attach-item")!;
+    expect(item).toBeTruthy();
+    expect(item.textContent).toContain("screenshot.png");
+    expect(item.textContent).toContain("0.5MB");
+    expect(item.querySelector(".deck-attach-thumb")).toBeTruthy();
+    expect(container.querySelector(".deck-meter")).toBeTruthy();
+    expect(container.querySelector(".deck-meter-fill")).toBeTruthy();
+    expect(container.textContent).not.toContain("≤");
+  });
+
+  it("prefills and focuses the composer from the landing seed", () => {
+    const { rerender } = render(
+      <AssistantChatComposer
+        slug="nimbus"
+        streaming={false}
+        busy409={false}
+        suspendedLock={false}
+        suspendCount={0}
+        attachDisabled={false}
+        onSend={() => true}
+        onAbort={() => {}}
+        seed={{ text: "Summarize the board", nonce: 1 }}
+      />
+    );
+    const textarea = screen.getByLabelText("Message Assistant") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("Summarize the board");
+    expect(textarea).toHaveFocus();
+
+    rerender(
+      <AssistantChatComposer
+        slug="nimbus"
+        streaming={false}
+        busy409={false}
+        suspendedLock={false}
+        suspendCount={0}
+        attachDisabled={false}
+        onSend={() => true}
+        onAbort={() => {}}
+        seed={{ text: "Find related wiki pages", nonce: 2 }}
+      />
+    );
+    expect(textarea.value).toBe("Find related wiki pages");
+    expect(textarea).toHaveFocus();
   });
 });
 

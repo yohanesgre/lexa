@@ -221,13 +221,6 @@ export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>)
 
 // ── Composer lock / tally ──
 
-export function suspendTallyText(total: number, pending: number, streamPending: number): string {
-  const effectiveTotal = total > 0 ? total : streamPending;
-  const effectivePending = total > 0 ? pending : streamPending;
-  if (effectiveTotal === 0) return "";
-  return effectivePending === effectiveTotal ? `${effectivePending} pending` : `${effectivePending} of ${effectiveTotal} pending`;
-}
-
 // ── Thread resolution ( ?thread= > localStorage last-visited > list head ) ──
 
 // Returns the chat id to apply, or null when the current selection stands
@@ -407,6 +400,8 @@ export function chatPageFlags(args: {
     busy409,
     attachDisabled,
     suspendedLock,
-    suspendTally: suspendTallyText(batchChips.length, pendingCount, streamPendingCount),
+    // The suspended status line names the pending count; a marker-only reload
+    // (no chip payloads) falls back to the stream's own pending count.
+    suspendPendingCount: batchChips.length > 0 ? pendingCount : streamPendingCount,
   };
 }

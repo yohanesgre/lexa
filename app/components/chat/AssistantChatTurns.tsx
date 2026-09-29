@@ -1,19 +1,15 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { ArrowDown, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { AssistantFlameIcon } from "../assistant/panel/AssistantFlameIcon";
-import { SkillPicker } from "../assistant/panel/SkillPicker";
-import { EffortPicker } from "./EffortPicker";
 import { CheckIcon, CopyButton, EditIcon, RegenerateIcon, XIcon } from "./assistant-chat-icons";
 import { AssistantActivity } from "./AssistantActivity";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import { hhmm } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
-import type { LexaSkill } from "../../../shared/types";
-import type { AssistantReasoningEffort } from "../../../shared/assistant";
 
 type Stream = ReturnType<typeof useAssistantStream>;
 
@@ -206,63 +202,5 @@ export function ChatJumpButton({ atBottom, onClick }: { atBottom: boolean; onCli
     >
       <ArrowDown size={14} strokeWidth={1.5} />
     </button>
-  );
-}
-
-export function ChatSkillsPanel({
-  open,
-  skillName,
-  skills,
-  skillId,
-  effort,
-  projectEffort,
-  onEffortChange,
-  disabled,
-  isMobileComposer,
-  onToggle,
-  onSkillChange,
-}: {
-  open: boolean;
-  skillName?: string | undefined;
-  skills: LexaSkill[];
-  skillId: string;
-  effort: AssistantReasoningEffort | "";
-  projectEffort: AssistantReasoningEffort | null | undefined;
-  onEffortChange: (effort: AssistantReasoningEffort | "") => void;
-  disabled: boolean;
-  isMobileComposer: boolean;
-  onToggle: () => void;
-  onSkillChange: (id: string) => void;
-}) {
-  return (
-    <div className="skills-panel">
-      <button type="button" className="skills-panel-toggle" aria-expanded={open} onClick={onToggle}>
-        <span className="prop-label">Skill</span>
-        <span className="skills-panel-current">
-          {skillName ?? "None"}
-        </span>
-        {open ? <ChevronUp size={14} strokeWidth={1.5} /> : <ChevronDown size={14} strokeWidth={1.5} />}
-      </button>
-      {open && (
-        <div className="skills-panel-body">
-          <SkillPicker
-            skills={skills}
-            skillId={skillId}
-            onSkillChange={onSkillChange}
-            layout="inline"
-            allowNoSkill
-            trailing={
-              <EffortPicker
-                effort={effort}
-                projectEffort={projectEffort ?? null}
-                disabled={disabled}
-                align={isMobileComposer ? "up" : "down"}
-                onChange={onEffortChange}
-              />
-            }
-          />
-        </div>
-      )}
-    </div>
   );
 }
