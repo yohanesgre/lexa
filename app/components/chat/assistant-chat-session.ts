@@ -26,6 +26,7 @@ import {
   previousUserTurn,
   resumableBatchId,
   suspendTurnFrame,
+  terminalTranscriptAction,
   touchThreadEntry,
   truncateTurns,
   threadEntry,
@@ -253,7 +254,11 @@ export function useSettledTurns(args: {
     setSyncedKey(syncKey);
     setTurns((prev) => {
       if (transcriptError) {
-        if (stream.status === "error" && stream.hasIngress) return prev;
+        // A live turn (connecting/streaming, or any ingress) means the fresh
+        // thread's write is in flight or landed — the 404 is stale, so the
+        // optimistic turns (the send's ephemeral user turn) must survive. Only
+        // a genuinely dead thread (no stream activity, no ingress) clears.
+        if (stream.hasIngress || streaming) return chatChanged ? null : prev;
         return [];
       }
       if (!transcriptData) return chatChanged ? null : prev;
@@ -279,18 +284,30 @@ export function useTerminalRefetch(args: {
   transcriptError: unknown;
 }) {
   const { stream, chatId, projectId, qc, transcriptError } = args;
+  // One-shot guard for the stale-404 refetch: after ingress the fresh thread
+  // exists, so the transcript must be refetched once. If it keeps 404ing, the
+  // guard stops an invalidate/error/invalidate loop. Keyed by chat id.
+  const refetchedRef = useRef("");
   useEffect(() => {
     if (!chatId) return;
     if (!isTerminalStreamStatus(stream.status)) return;
     const code = (transcriptError as { code?: string } | null)?.code;
-    if (isThreadNotFoundCode(code)) {
+    if (terminalTranscriptAction(code, stream.hasIngress) === "drop") {
       qc.cancelQueries({ queryKey: ["assistant-chat", chatId] });
       qc.removeQueries({ queryKey: ["assistant-chat", chatId] });
+    } else if (isThreadNotFoundCode(code)) {
+      // 404 + ingress: the pre-ingress 404 is stale — the thread now exists, so
+      // refetch the persisted turns (clearing the 404) instead of dropping the
+      // query that would strand the user turn until reload.
+      if (refetchedRef.current !== chatId) {
+        refetchedRef.current = chatId;
+        void qc.invalidateQueries({ queryKey: ["assistant-chat", chatId] });
+      }
     } else {
       void qc.invalidateQueries({ queryKey: ["assistant-chat", chatId] });
     }
     if (projectId) void qc.invalidateQueries({ queryKey: ["assistant-chats", projectId] });
-  }, [stream.status, chatId, projectId, qc, transcriptError]);
+  }, [stream.status, stream.hasIngress, chatId, projectId, qc, transcriptError]);
 }
 
 // First ingress on a thread: seed/touch its row in the cached thread lists.
