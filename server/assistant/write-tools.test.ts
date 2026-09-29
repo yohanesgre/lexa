@@ -4,8 +4,11 @@ import type { TipTapDoc } from "../../shared/types";
 import type { AssistantWriteDiff } from "../../shared/assistant";
 import { executeAssistantWrite, type AssistantWriteExecutionCtx } from "./write-execution";
 import type { AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
+import { RowNotFound } from "../db/driver";
+import { TaskHasChildren } from "../api/errors";
 import {
   MAX_WRITES_PER_TURN,
+  MAX_BULK_TASK_REFS,
   APPROVAL_TTL_HOURS,
   ASSISTANT_WRITE_TOOL_NAMES,
   parseWriteTools,
@@ -21,7 +24,9 @@ import {
   buildMilestoneDeleteDiff,
   buildSprintArchiveDiff,
   buildSprintDeleteDiff,
+  buildAssistantWriteTools,
   createWriteRecorder,
+  type AssistantWriteToolDeps,
   type WriteRecorderInsertRow,
   type WriteTaskSnapshot,
 } from "./write-tools";
@@ -339,5 +344,202 @@ describe("executeAssistantWrite — execution-time project scope", () => {
     expect(out.error).toContain("FORBIDDEN");
     expect(marked).toHaveLength(1);
     expect(updateCalled).toBe(false);
+  });
+});
+
+describe("bulk task refs — archive/restore/delete proposals", () => {
+  const tasks: Record<string, WriteTaskSnapshot> = {
+    "NIM-1": { ...snapshot, id: "t1", key: "NIM-1", title: "Task 1", columnName: "Todo" },
+    "NIM-2": { ...snapshot, id: "t2", key: "NIM-2", title: "Task 2", columnName: "Doing" },
+    "NIM-3": { ...snapshot, id: "t3", key: "NIM-3", title: "Task 3", columnName: "Todo" },
+    "NIM-4": { ...snapshot, id: "t4", key: "NIM-4", title: "Task 4", columnName: "Todo" },
+  };
+
+  interface TestTool {
+    name: string;
+    execute: (args: unknown) => Promise<{ proposed: boolean; approvalId?: string; error?: string }>;
+    inputSchema: { safeParse: (v: unknown) => { success: boolean } };
+  }
+
+  const setup = () => {
+    const recorded: Array<{ name: string; args: unknown; diff: AssistantWriteDiff; detail?: string }> = [];
+    const deps: AssistantWriteToolDeps = {
+      projectId: "p1",
+      findTaskByRef: async (ref) => tasks[ref] ?? null,
+      findColumn: async () => null,
+      findWikiPageBySlug: async () => null,
+      findMilestone: async () => null,
+      countSprints: async () => 0,
+      findSwimlane: async () => null,
+      record: async (p) => {
+        recorded.push(p as { name: string; args: unknown; diff: AssistantWriteDiff; detail?: string });
+        return { approvalId: "ap-1", batchId: "b1", seq: recorded.length - 1 };
+      },
+    };
+    const all = buildAssistantWriteTools(deps) as unknown as TestTool[];
+    return { recorded, tool: (name: string) => all.find((t) => t.name === name)! };
+  };
+
+  it("bulk archive proposes one summary diff and detail", async () => {
+    const { recorded, tool } = setup();
+    const out = await tool("archive_task").execute({ refs: ["NIM-1", "NIM-2", "NIM-3", "NIM-4"] });
+    expect(out).toEqual({ proposed: true, approvalId: "ap-1" });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.diff).toEqual({ type: "task_archive", taskRef: "4 tasks", taskTitle: "NIM-1, NIM-2, NIM-3…" });
+    expect(recorded[0]!.detail).toBe("Archive 4 tasks");
+    expect(recorded[0]!.args).toEqual({ refs: ["NIM-1", "NIM-2", "NIM-3", "NIM-4"] });
+  });
+
+  it("bulk delete proposes one summary diff and detail", async () => {
+    const { recorded, tool } = setup();
+    const out = await tool("delete_task").execute({ refs: ["NIM-1", "NIM-2"] });
+    expect(out.proposed).toBe(true);
+    expect(recorded[0]!.diff).toEqual({ type: "task_delete", taskRef: "2 tasks", taskTitle: "NIM-1, NIM-2" });
+    expect(recorded[0]!.detail).toBe("Delete 2 tasks");
+  });
+
+  it("bulk restore keeps the diff type and summarizes", async () => {
+    const { recorded, tool } = setup();
+    await tool("restore_task").execute({ refs: ["NIM-1", "NIM-2"] });
+    expect(recorded[0]!.diff).toEqual({ type: "task_restore", taskRef: "2 tasks", taskTitle: "NIM-1, NIM-2", toColumn: "Todo" });
+    expect(recorded[0]!.detail).toBe("Restore 2 tasks");
+  });
+
+  it("unknown ref → proposed:false naming it, nothing recorded", async () => {
+    const { recorded, tool } = setup();
+    const out = await tool("archive_task").execute({ refs: ["NIM-1", "NIM-404"] });
+    expect(out).toEqual({ proposed: false, error: "task 'NIM-404' not found" });
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("multiple unknown refs are all named", async () => {
+    const { tool } = setup();
+    const out = await tool("delete_task").execute({ refs: ["X-1", "Y-2"] });
+    expect(out).toEqual({ proposed: false, error: "tasks not found: 'X-1', 'Y-2'" });
+  });
+
+  it("rejects > MAX_BULK_TASK_REFS refs, an empty list, and a missing ref/refs at the schema", () => {
+    const { tool } = setup();
+    const schema = tool("archive_task").inputSchema;
+    const tooMany = Array.from({ length: MAX_BULK_TASK_REFS + 1 }, (_, i) => `NIM-${i + 1}`);
+    expect(schema.safeParse({ refs: tooMany }).success).toBe(false);
+    expect(schema.safeParse({ refs: [] }).success).toBe(false);
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ refs: tooMany.slice(0, MAX_BULK_TASK_REFS) }).success).toBe(true);
+  });
+
+  it("rejects ref together with refs (exactly one)", () => {
+    const { recorded, tool } = setup();
+    const schema = tool("delete_task").inputSchema as { safeParse: (v: unknown) => { success: boolean } };
+    expect(schema.safeParse({ ref: "NIM-1" }).success).toBe(true);
+    expect(schema.safeParse({ refs: ["NIM-1"] }).success).toBe(true);
+    expect(schema.safeParse({ ref: "NIM-1", refs: ["NIM-2"] }).success).toBe(false);
+    expect(recorded).toHaveLength(0);
+  });
+
+  it("dedupes + trims repeated refs before resolving (one summary, one proposal)", async () => {
+    const { recorded, tool } = setup();
+    const out = await tool("archive_task").execute({ refs: ["NIM-1", "NIM-1", " NIM-1 "] });
+    expect(out).toEqual({ proposed: true, approvalId: "ap-1" });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.diff).toEqual({ type: "task_archive", taskRef: "NIM-1", taskTitle: "Task 1" });
+  });
+
+  it("single ref keeps the legacy diff and detail byte-identical", async () => {
+    const { recorded, tool } = setup();
+    await tool("archive_task").execute({ ref: "NIM-1" });
+    expect(recorded[0]!.diff).toEqual({ type: "task_archive", taskRef: "NIM-1", taskTitle: "Task 1" });
+    expect(recorded[0]!.detail).toBe("Archive NIM-1");
+    await tool("delete_task").execute({ ref: "NIM-2" });
+    expect(recorded[1]!.diff).toEqual({ type: "task_delete", taskRef: "NIM-2", taskTitle: "Task 2" });
+    expect(recorded[1]!.detail).toBe('Delete NIM-2 "Task 2"');
+  });
+
+  it("a one-element refs list uses the single-task diff", async () => {
+    const { recorded, tool } = setup();
+    await tool("archive_task").execute({ refs: ["NIM-1"] });
+    expect(recorded[0]!.diff).toEqual({ type: "task_archive", taskRef: "NIM-1", taskTitle: "Task 1" });
+    expect(recorded[0]!.detail).toBe("Archive NIM-1");
+  });
+});
+
+describe("executeAssistantWrite — bulk refs", () => {
+  const tasks: Record<string, { id: string; projectId: string }> = {
+    "NIM-1": { id: "t1", projectId: "p1" },
+    "NIM-2": { id: "t2", projectId: "p1" },
+    "NIM-3": { id: "t3", projectId: "p1" },
+  };
+  const lookup = (ref: string) => tasks[ref] ?? null;
+
+  const makeCtx = (overrides: {
+    archive?: (actor: unknown, id: string) => Effect.Effect<unknown, unknown>;
+    restore?: (actor: unknown, id: string) => Effect.Effect<unknown, unknown>;
+    delete?: (actor: unknown, id: string) => Effect.Effect<unknown, unknown>;
+  } = {}) => {
+    const marked: string[] = [];
+    const ctx = {
+      authz: { projectAccess: () => Effect.succeed({ role: "admin" }) },
+      pendingWritesRepo: { markExecutionError: (id: string, message: string) => Effect.sync(() => { marked.push(`${id}:${message}`); }) },
+      taskRepo: {
+        findById: (id: string) => { const t = lookup(id); return t ? Effect.succeed(t) : Effect.fail(new RowNotFound({ table: "tasks" })); },
+        findByKey: (key: string) => { const t = lookup(key); return t ? Effect.succeed(t) : Effect.fail(new RowNotFound({ table: "tasks" })); },
+      },
+      taskService: {
+        archive: overrides.archive ?? (() => Effect.void),
+        restore: overrides.restore ?? (() => Effect.void),
+        delete: overrides.delete ?? (() => Effect.void),
+      },
+    } as unknown as AssistantWriteExecutionCtx;
+    return { ctx, marked };
+  };
+
+  const rowFor = (tool: string, args: unknown) =>
+    ({ id: "a1", project_id: "p1", owner_user_id: "u1", tool_name: tool, args: JSON.stringify(args) }) as unknown as AssistantPendingWriteRow;
+
+  it("bulk archive applies every ref and reports none failed", async () => {
+    const calls: string[] = [];
+    const { ctx } = makeCtx({ archive: (_actor, id) => Effect.sync(() => { calls.push(id); }) });
+    const out = (await Effect.runPromise(executeAssistantWrite(rowFor("archive_task", { refs: ["NIM-1", "NIM-2", "NIM-3"] }), ctx))) as { ok: boolean; result?: unknown };
+    expect(out.ok).toBe(true);
+    expect(out.result).toEqual({ applied: ["NIM-1", "NIM-2", "NIM-3"], failed: [] });
+    expect(calls).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("dedupes + trims repeated refs so each task runs once", async () => {
+    const calls: string[] = [];
+    const { ctx } = makeCtx({ archive: (_actor, id) => Effect.sync(() => { calls.push(id); }) });
+    const dup = (await Effect.runPromise(executeAssistantWrite(rowFor("archive_task", { refs: ["NIM-1", "NIM-1"] }), ctx))) as { ok: boolean };
+    expect(dup.ok).toBe(true);
+    expect(calls).toEqual(["t1"]);
+    const out = (await Effect.runPromise(executeAssistantWrite(rowFor("archive_task", { refs: ["NIM-1", " NIM-1 ", "NIM-2"] }), ctx))) as { ok: boolean; result?: { applied: string[]; failed: unknown[] } };
+    expect(out.ok).toBe(true);
+    expect(out.result!.applied).toEqual(["NIM-1", "NIM-2"]);
+    expect(out.result!.failed).toEqual([]);
+    expect(calls).toEqual(["t1", "t1", "t2"]);
+  });
+
+  it("bulk delete reports a partial failure (subtask guard on one) honestly", async () => {
+    const { ctx } = makeCtx({ delete: (_actor, id) => (id === "t2" ? Effect.fail(new TaskHasChildren({ taskId: id })) : Effect.void) });
+    const out = (await Effect.runPromise(executeAssistantWrite(rowFor("delete_task", { refs: ["NIM-1", "NIM-2", "NIM-3"] }), ctx))) as { ok: boolean; result?: { applied: string[]; failed: Array<{ ref: string; error: string }>; partial?: boolean } };
+    expect(out.ok).toBe(true);
+    expect(out.result!.applied).toEqual(["NIM-1", "NIM-3"]);
+    expect(out.result!.failed).toEqual([{ ref: "NIM-2", error: expect.stringContaining("TASK_HAS_CHILDREN") }]);
+    expect(out.result!.partial).toBe(true);
+  });
+
+  it("bulk delete with zero applied fails the whole write", async () => {
+    const { ctx, marked } = makeCtx({ delete: (_actor, id) => Effect.fail(new TaskHasChildren({ taskId: id })) });
+    const out = (await Effect.runPromise(executeAssistantWrite(rowFor("delete_task", { refs: ["NIM-1", "NIM-2"] }), ctx))) as { ok: boolean; error?: string };
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("TASK_HAS_CHILDREN");
+    expect(marked).toHaveLength(1);
+  });
+
+  it("a legacy {ref} row still executes as a single task", async () => {
+    const calls: string[] = [];
+    const { ctx } = makeCtx({ archive: (_actor, id) => Effect.sync(() => { calls.push(id); }) });
+    const out = (await Effect.runPromise(executeAssistantWrite(rowFor("archive_task", { ref: "NIM-1" }), ctx))) as { ok: boolean };
+    expect(out.ok).toBe(true);
+    expect(calls).toEqual(["t1"]);
   });
 });

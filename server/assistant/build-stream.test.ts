@@ -285,6 +285,17 @@ describe("buildStream resume results note", () => {
     await drain(buildStream(c));
     expect(seen!.some((m) => String(m.content).includes("[approved write results]"))).toBe(false);
   });
+
+  it("carries partial counts on the approval_result frame", async () => {
+    const c = ctx(doneStream);
+    c.history = [{ role: "user", content: "x" }];
+    c.skipUserEntry = true;
+    c.approvalResults = [{ approvalId: "a1", status: "applied", partial: { applied: 1, failed: 9, errors: ["TASK_HAS_CHILDREN: x"] } }];
+
+    const frames = await drain(buildStream(c));
+    const result = frames.find((f) => f.type === "approval_result");
+    expect(result).toMatchObject({ approvalId: "a1", status: "applied", partial: { applied: 1, failed: 9 } });
+  });
 });
 
 describe("buildStream provider-boundary sanitization", () => {
