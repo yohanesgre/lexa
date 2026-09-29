@@ -266,6 +266,18 @@ export function isThreadNotFoundCode(code: string | undefined): boolean {
   return code === "ASSISTANT_THREAD_NOT_FOUND" || code === "NOT_FOUND";
 }
 
+// Terminal stream frame → transcript action. A not-found that predates ANY
+// ingress means the thread never existed server-side (drop the dead query). The
+// same code AFTER ingress means the fresh UUID's write landed and the thread now
+// exists — the 404 is stale, so the persisted turns must be refetched instead of
+// dropping the query. Every other terminal path refetches/invalidates.
+export type TerminalTranscriptAction = "drop" | "refetch";
+
+export function terminalTranscriptAction(code: string | undefined, hasIngress: boolean): TerminalTranscriptAction {
+  if (isThreadNotFoundCode(code) && !hasIngress) return "drop";
+  return "refetch";
+}
+
 export function isThreadNotFound(error: unknown): boolean {
   const code = (error as { code?: string } | null)?.code;
   if (isThreadNotFoundCode(code)) return true;

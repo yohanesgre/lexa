@@ -2,10 +2,12 @@
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { AssistantChatComposer } from "./AssistantChatComposer";
-import { useSettledTurns, useTurnResend } from "./assistant-chat-session";
+import { appendEphemeralUserTurn, terminalTranscriptAction } from "./assistant-chat-logic";
+import { useSettledTurns, useTerminalRefetch, useTurnResend } from "./assistant-chat-session";
 
 type Stream = ReturnType<typeof useAssistantStream>;
 
@@ -54,6 +56,177 @@ describe("useSettledTurns — per-thread isolation", () => {
 
     rerender({ chatId: "B", messages: [{ role: "user", content: "hi" }] });
     expect(result.current.turns).toEqual([{ role: "user", text: "hi", imageCount: 0, rawIndex: 0 }]);
+  });
+});
+
+const NOT_FOUND = { code: "ASSISTANT_THREAD_NOT_FOUND", message: "not found" };
+
+describe("useSettledTurns — fresh thread 404 keeps the optimistic user turn", () => {
+  it("survives connecting, streaming and terminal while the transcript 404s", () => {
+    const { result, rerender } = renderHook(
+      ({ stream }: { stream: Stream }) =>
+        useSettledTurns({
+          chatId: "N",
+          transcriptData: undefined,
+          transcriptError: NOT_FOUND,
+          streaming: stream.status === "connecting" || stream.status === "streaming",
+          stream,
+        }),
+      { initialProps: { stream: makeStream() } }
+    );
+    expect(result.current.turns).toEqual([]);
+
+    // send()'s optimistic append
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", 0)));
+    const optimistic = [{ role: "user", text: "hello", imageCount: 0, rawIndex: -1 }];
+    expect(result.current.turns).toEqual(optimistic);
+
+    // stream.send flips to connecting (no ingress yet) — must not drop the turn.
+    rerender({ stream: makeStream({ status: "connecting" }) });
+    expect(result.current.turns).toEqual(optimistic);
+
+    // first ingress
+    rerender({ stream: makeStream({ status: "streaming", hasIngress: true }) });
+    expect(result.current.turns).toEqual(optimistic);
+
+    // terminal done with the now-stale 404
+    rerender({ stream: makeStream({ status: "done", hasIngress: true }) });
+    expect(result.current.turns).toEqual(optimistic);
+  });
+
+  it("clears when a genuinely dead thread (404, no ingress) is settled", () => {
+    const { result } = renderHook(() =>
+      useSettledTurns({ chatId: "N", transcriptData: undefined, transcriptError: NOT_FOUND, streaming: false, stream: makeStream() })
+    );
+    expect(result.current.turns).toEqual([]);
+  });
+});
+
+function TerminalHarness({ stream, queryFn }: { stream: Stream; queryFn: () => Promise<unknown> }) {
+  const qc = useQueryClient();
+  const transcript = useQuery({ queryKey: ["assistant-chat", "N"], queryFn, retry: false, staleTime: Infinity });
+  useTerminalRefetch({ stream, chatId: "N", projectId: "p1", qc, transcriptError: transcript.error });
+  const messages = (transcript.data as { messages?: Array<{ content?: string }> } | undefined)?.messages ?? [];
+  return <div data-testid="msgs">{messages.map((m) => m.content ?? "").join("|")}</div>;
+}
+
+describe("useTerminalRefetch — fresh-thread 404 recovery", () => {
+  function renderTerminal() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryFn = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("missing"), NOT_FOUND))
+      .mockResolvedValue({ messages: [{ role: "user", content: "hello" }] });
+    const idle = makeStream();
+    const utils = render(
+      <QueryClientProvider client={qc}>
+        <TerminalHarness stream={idle} queryFn={queryFn} />
+      </QueryClientProvider>
+    );
+    const rerender = (stream: Stream) =>
+      utils.rerender(
+        <QueryClientProvider client={qc}>
+          <TerminalHarness stream={stream} queryFn={queryFn} />
+        </QueryClientProvider>
+      );
+    return { qc, queryFn, rerender };
+  }
+
+  it("refetches (not removes) when the 404 predates ingress and the stream had ingress", async () => {
+    const { qc, queryFn, rerender } = renderTerminal();
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])?.status).toBe("error"));
+
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    await waitFor(() => expect(screen.getByTestId("msgs").textContent).toBe("hello"));
+    expect(queryFn.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("removes the query for a genuinely dead thread (404, no ingress)", async () => {
+    const { qc, rerender } = renderTerminal();
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])?.status).toBe("error"));
+
+    rerender(makeStream({ status: "done", hasIngress: false }));
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])).toBeUndefined());
+  });
+});
+
+function FreshThreadHarness({ stream, queryFn }: { stream: Stream; queryFn: () => Promise<unknown> }) {
+  const qc = useQueryClient();
+  const chatId = "N";
+  const transcript = useQuery({ queryKey: ["assistant-chat", chatId], queryFn, retry: false, staleTime: Infinity });
+  const streaming = stream.status === "connecting" || stream.status === "streaming";
+  const { turns, setTurns } = useSettledTurns({
+    chatId,
+    transcriptData: transcript.data as { messages: unknown[] } | undefined,
+    transcriptError: transcript.error,
+    streaming,
+    stream,
+  });
+  useTerminalRefetch({ stream, chatId, projectId: "p1", qc, transcriptError: transcript.error });
+  return (
+    <>
+      <button onClick={() => setTurns((prev) => appendEphemeralUserTurn(prev, "hello", 0))}>send</button>
+      <div data-testid="turns">{(turns ?? []).map((t) => `${t.role}:${t.text}`).join("|")}</div>
+    </>
+  );
+}
+
+describe("fresh thread — first send stays visible end to end", () => {
+  it("keeps the user bubble through connecting, streaming and the terminal refetch", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryFn = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("missing"), NOT_FOUND))
+      .mockResolvedValue({ messages: [{ role: "user", content: "hello" }] });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <FreshThreadHarness stream={makeStream()} queryFn={queryFn} />
+      </QueryClientProvider>
+    );
+    // fresh UUID 404s
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])?.status).toBe("error"));
+
+    fireEvent.click(screen.getByText("send"));
+    expect(screen.getByTestId("turns").textContent).toBe("user:hello");
+
+    const renderStream = (stream: Stream) =>
+      rerender(
+        <QueryClientProvider client={qc}>
+          <FreshThreadHarness stream={stream} queryFn={queryFn} />
+        </QueryClientProvider>
+      );
+
+    renderStream(makeStream({ status: "connecting" }));
+    expect(screen.getByTestId("turns").textContent).toBe("user:hello");
+
+    renderStream(makeStream({ status: "streaming", hasIngress: true }));
+    expect(screen.getByTestId("turns").textContent).toBe("user:hello");
+
+    renderStream(makeStream({ status: "done", hasIngress: true }));
+    expect(screen.getByTestId("turns").textContent).toBe("user:hello");
+
+    // terminal refetch replaced the stale 404 with the persisted transcript,
+    // without duplicating the user turn.
+    await waitFor(() => expect(queryFn.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByTestId("turns").textContent).toBe("user:hello");
+  });
+});
+
+describe("terminalTranscriptAction — not-found vs ingress", () => {
+  it("drops a not-found that predates any ingress", () => {
+    expect(terminalTranscriptAction("ASSISTANT_THREAD_NOT_FOUND", false)).toBe("drop");
+    expect(terminalTranscriptAction("NOT_FOUND", false)).toBe("drop");
+  });
+
+  it("refetches a not-found once the stream had ingress", () => {
+    expect(terminalTranscriptAction("ASSISTANT_THREAD_NOT_FOUND", true)).toBe("refetch");
+    expect(terminalTranscriptAction("NOT_FOUND", true)).toBe("refetch");
+  });
+
+  it("refetches every other terminal outcome", () => {
+    expect(terminalTranscriptAction("PROVIDER_UNREACHABLE", false)).toBe("refetch");
+    expect(terminalTranscriptAction(undefined, false)).toBe("refetch");
+    expect(terminalTranscriptAction(undefined, true)).toBe("refetch");
   });
 });
 
