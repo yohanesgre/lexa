@@ -60,9 +60,9 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
     const applied = yield* Effect.gen(function* () {
       switch (row.tool_name as AssistantWriteToolName) {
         case "create_task": {
-          const first = (ctx.db as unknown as { prepare(sql: string): { get(...a: unknown[]): unknown } }).prepare(
-            `SELECT id FROM columns WHERE project_id = ? ORDER BY position ASC LIMIT 1`
-          ).get(row.project_id) as { id: string } | undefined;
+          const first = yield* Effect.promise(() =>
+            ctx.db.prepare(`SELECT id FROM columns WHERE project_id = ? ORDER BY position ASC LIMIT 1`).first<{ id: string }>(row.project_id)
+          );
           if (!first) return yield* new InvalidArgs({ reason: "project has no columns" });
           return yield* (ctx.taskService as unknown as { create(a: Actor, b: unknown, c: unknown): Effect.Effect<unknown, unknown> }).create(
             actor,
