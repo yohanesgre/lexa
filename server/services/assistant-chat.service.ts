@@ -28,7 +28,7 @@ import { parseTaskKey } from "../task-key";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
-import { buildStream, findPendingBatch, applyResumeResults, reconcilePendingBatchStatuses } from "../assistant/build-stream";
+import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses } from "../assistant/build-stream";
 import { scanMentionTokens, buildMentionContextBlock, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_IMAGE_CAPS, CHAT_CITATION_CAP, assertAttachmentCaps, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
@@ -192,14 +192,19 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       MAX_CHAT_TOOL_ROUNDS,
       abortChat: (chatId: string): boolean => { activeChats.get(chatId)?.abort(); return activeChats.has(chatId); },
       chatActive: (chatId: string): boolean => activeChats.has(chatId),
-      // Transcript-read reconciliation: attach the live decision status of a
-      // persisted pending batch so another tab's decisions render as terminal
-      // chips here on fetch (no batch-read endpoint — the marker already
-      // carries the approval ids).
+      // Transcript-read reconciliation: attach the live decision status of
+      // every persisted pending batch so another tab's decisions render as
+      // terminal chips here on fetch (no batch-read endpoint — the markers
+      // already carry the approval ids). A thread can hold more than one
+      // marker, so reconcile them all, not just the newest.
       reconcileChatApprovals: (messages: unknown[]) => Effect.gen(function* () {
-        const batchId = findPendingBatch(messages);
-        if (batchId === null) return messages;
-        const rows = yield* pendingWritesRepo.listByBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed([] as AssistantPendingWriteRow[])));
+        const batchIds = findPendingBatches(messages);
+        if (batchIds.length === 0) return messages;
+        const batches = yield* Effect.forEach(batchIds, (batchId) =>
+          pendingWritesRepo.listByBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed([] as AssistantPendingWriteRow[])))
+        );
+        const rows = batches.flat();
+        if (rows.length === 0) return messages;
         const parseDiff = (raw: string): unknown => {
           try {
             return JSON.parse(raw) as unknown;

@@ -161,3 +161,64 @@ change proposed here.
 - No commits; `check:invariants`/full `verify-gate.sh` not run (not required
   without a commit ask) — `tsc` + `test:be` + `test:fe` cover the change.
 - Untouched pre-existing dirty state: `status/TIMELINE.md`, `wireframes` submodule pointer.
+
+## Follow-up 2 (2026-09-29): decided chips re-armed → 409 `APPROVAL_ALREADY_DECIDED` bursts
+
+### Symptom
+After approving a chip batch the client re-armed the decided chips as `pending`
+and re-sent identical decisions; live log showed bursts of
+`409 APPROVAL_ALREADY_DECIDED` (06:17:34 → 06:17:38 → 06:18:00).
+
+### Root causes (verified by background trace, session `ses_f142e49d4ffewgu0PhmAzwA4q3`)
+1. **FE — transcript rebuild drops in-session decisions.**
+   `settleTurns` (`app/components/chat/assistant-chat-turns-state.ts`) kept the
+   optimistic `prev` only while some chip was `pending` or a `suspendedBatchId`
+   existed. The moment the last chip turned terminal, the next settle pass
+   returned `renderTranscript(messages)`; a persisted approval whose `status` was
+   never reconciled maps back to `pending` (`chipFromPendingApproval`), so the
+   decided chips became actionable again and clicks re-POSTed → 409.
+2. **Server — reconciliation covered only the newest marker.**
+   `reconcileChatApprovals` (`server/services/assistant-chat.service.ts`) called
+   `findPendingBatch(messages)`, which returns only the newest marker, so older
+   batch markers on refetch rebuilt as `pending`.
+
+Chip gating, `handleDecide`/`handleApproveAll`, and the server 409 path were
+correct and unchanged.
+
+### Fixes
+**A (FE, primary).** New pure helper `carryKnownDecisions(prev, turns)` overlays
+KNOWN terminal chip decisions from `prev` onto a rebuilt transcript by
+`approvalId` — only terminal states propagate; approvals still pending in `prev`
+or absent from it keep the rebuilt state; chips not present in `prev` are
+untouched. Input never mutated; identity returned when nothing carries.
+`settleTurns` now computes
+`const serverTurns = carryKnownDecisions(prev, renderTranscript(messages))`,
+so a stale marker can never re-arm a chip decided in this session. The
+`liveApproval` retention was not weakened.
+
+**B (server, reinforcing).** New pure helper `findPendingBatches(messages)`
+(all markers, oldest first, deduped). `reconcileChatApprovals` now iterates
+`findPendingBatches`, loads `pendingWritesRepo.listByBatch` per batch, flattens
+the decision rows, and applies them with the existing
+`reconcilePendingBatchStatuses` — every marker gets its statuses, not just the
+newest. Response shape/contract unchanged.
+
+### Tests
+- `app/components/chat/assistant-chat-turns-state.test.ts` (new, 4):
+  `carryKnownDecisions` preserves terminal decisions and leaves unknown/new-batch
+  approvals pending; returns input identity when `prev` has no terminal decision;
+  `settleTurns` keeps an all-terminal batch terminal across a transcript rebuild
+  (no re-arm).
+- `server/services/assistant-chat.service.test.ts` (+1): two markers — older
+  decided (`approved`), newer `pending` — `reconcileChatApprovals` applies both
+  statuses.
+- Existing suites unchanged and green.
+
+### Verification (exact)
+- `./node_modules/.bin/tsc --noEmit` → exit 0, no output.
+- `bun run test:fe` → 95 files passed / 641 tests passed.
+- `bun run test:be` → 142 files passed / 1711 tests passed.
+
+### C (REPORT ONLY, backlog item 4)
+The resumed model re-proposes writes because tool results are never injected
+into the resumed transcript. No tool-result injection built here.
