@@ -9,7 +9,7 @@ import { AssistantProviderDeleteDialog } from "./AssistantProviderDeleteDialog";
 // Workspace → Assistant Providers registry (superadmin-gated). Projects pick a
 // provider + model from this list; keys and base URLs live only here.
 export function AssistantProvidersSection() {
-  const { data: providers = [], isLoading } = useAssistantProviders();
+  const { data: providers = [], isLoading, secretsEnabled } = useAssistantProviders();
   const test = useTestProvider();
   const fetchModels = useFetchModels();
 
@@ -74,7 +74,7 @@ export function AssistantProvidersSection() {
         </div>
       )}
 
-      <AssistantProviderForm key={editingId ?? "new"} editing={editing} onCancel={() => setEditingId(null)} />
+      <AssistantProviderForm key={editingId ?? "new"} editing={editing} secretsEnabled={secretsEnabled} onCancel={() => setEditingId(null)} />
 
       {deleteConfirm && (
         <AssistantProviderDeleteDialog providerId={deleteConfirm} onClose={() => setDeleteConfirm(null)} />
