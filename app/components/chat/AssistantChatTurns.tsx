@@ -158,16 +158,14 @@ export function UserTurnBubble({
 
 export function StreamingBubble({
   stream,
-  skillName,
   renderText,
 }: {
   stream: Stream;
-  skillName?: string | undefined;
   renderText: (text: string) => ReactNode;
 }) {
   return (
     <div className="bubble-ai">
-      <div className="bubble-meta">Assistant · Assistant Agent persona{skillName ? ` · ${skillName}` : ""}</div>
+      <div className="bubble-meta">Assistant · Assistant Agent persona</div>
       <AssistantActivity
         items={stream.items}
         tools={stream.tools}

@@ -525,6 +525,12 @@ describe("mention nodes", () => {
     );
   });
 
+  it("entity refTypes emit the bare label — never a dead board/wiki deep link", () => {
+    expect(docToMarkdown(mentionDoc("milestone", "m1", "Q3 Launch"), opts)).toBe("Q3 Launch");
+    expect(docToMarkdown(mentionDoc("swimlane", "s1", "Design Sprint"), opts)).toBe("Design Sprint");
+    expect(docToMarkdown(mentionDoc("column", "c1", "In Review"), opts)).toBe("In Review");
+  });
+
   it("without baseUrl/projectSlug the bare label is emitted (no broken href)", () => {
     expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"))).toBe("LEX-42");
     expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"), { baseUrl: "https://x" })).toBe("LEX-42");

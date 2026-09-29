@@ -1,29 +1,50 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { fetchMentionItems, isValidMentionQuery, type MentionItem } from "./mention-suggestion";
+import { skillToken } from "../../shared/skill-tokens";
+import type { LexaSkill } from "../../shared/types";
 
 // Chat composer autocomplete (mentions-autocomplete.html, composer variant):
-// plain textarea + caret-positioned dropdown — no TipTap. Same trigger and
-// keyboard model as the editor picker; picking inserts a RAW TOKEN
-// (@LEX-n / @wiki-slug) into the message text at the caret.
+// plain textarea + caret-positioned dropdown — no TipTap. Two sigils share the
+// popup: "@" looks up entity tokens through the mentions endpoint and inserts a
+// RAW token (@LEX-n / @wiki-slug / @milestone|swimlane|column-slug); "$" filters
+// the agent's bound skills locally and inserts `$normalized-name `.
 
-const TRIGGER_RE = /(^|[^A-Za-z0-9-])@([A-Za-z0-9-]*)$/;
+const TRIGGER_RE = /(^|[^A-Za-z0-9-])([@$])([A-Za-z0-9-]*)$/;
 
-export function findActiveTrigger(value: string, caret: number): { query: string; start: number } | null {
+export type MentionSigil = "@" | "$";
+
+export function findActiveTrigger(value: string, caret: number): { sigil: MentionSigil; query: string; start: number } | null {
   const before = value.slice(0, caret);
   const match = TRIGGER_RE.exec(before);
   if (!match) return null;
-  // start = position of "@" (prefix + trigger), so completion replaces it.
-  return { query: match[2]!, start: match.index! + match[1]!.length };
+  // start = position of the sigil (prefix + trigger), so completion replaces it.
+  return { sigil: match[2] as MentionSigil, query: match[3]!, start: match.index! + match[1]!.length };
 }
 
-// Replaces "@query" (trigger through caret) with the completed token.
-export function applyCompletion(value: string, caret: number, start: number, token: string): { value: string; caret: number } {
+// Replaces "{sigil}query" (trigger through caret) with the completed token.
+export function applyCompletion(value: string, caret: number, start: number, token: string, sigil: MentionSigil = "@"): { value: string; caret: number } {
   // Skip the trailing separator when the caret already sits before whitespace.
   const needsSpace = !/\s/.test(value[caret] ?? "");
-  const tokenText = `@${token}${needsSpace ? " " : ""}`;
+  const tokenText = `${sigil}${token}${needsSpace ? " " : ""}`;
   const next = value.slice(0, start) + tokenText + value.slice(caret);
   return { value: next, caret: start + tokenText.length };
+}
+
+// Bound-skill picker rows: filter by display name or its normalized token,
+// ordered by name (wireframe: "ordered by name").
+export function skillMentionItems(skills: LexaSkill[], query: string): MentionItem[] {
+  const q = query.toLowerCase();
+  return [...skills]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .filter((s) => s.name.toLowerCase().includes(q) || skillToken(s.name).includes(q))
+    .map((s) => ({
+      refType: "skill" as const,
+      refId: s.id,
+      label: s.name,
+      sublabel: s.description ?? "",
+      insertToken: skillToken(s.name),
+    }));
 }
 
 // ── Popup placement (user ruling: anchor DIRECTLY ABOVE the text cursor) ──
@@ -159,17 +180,21 @@ interface UseMentionTokensOptions {
   slug: string;
   value: string;
   onChange: (next: string) => void;
+  // Agent-bound skills for the "$" picker. Absent/empty renders the
+  // "No skills attached" empty state.
+  skills?: LexaSkill[] | undefined;
   debounceMs?: number | undefined;
   fetchItems?: typeof fetchMentionItems;
 }
 
-export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetchItems = fetchMentionItems }: UseMentionTokensOptions) {
+export function useMentionTokens({ slug, value, onChange, skills = [], debounceMs = 150, fetchItems = fetchMentionItems }: UseMentionTokensOptions) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<MentionItem[]>([]);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [popupStyle, setPopupStyle] = useState<CSSProperties | null>(null);
+  const [sigil, setSigil] = useState<MentionSigil | null>(null);
 
-  const triggerRef = useRef<{ query: string; start: number } | null>(null);
+  const triggerRef = useRef<{ sigil: MentionSigil; query: string; start: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const debounceRef = useRef<number | null>(null);
   const fetchSeq = useRef(0);
@@ -179,6 +204,7 @@ export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetc
     setOpen(false);
     setItems([]);
     setFocusedIndex(0);
+    setSigil(null);
     if (debounceRef.current !== null) {
       window.clearTimeout(debounceRef.current);
       debounceRef.current = null;
@@ -212,7 +238,22 @@ export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetc
         return;
       }
       triggerRef.current = trigger;
+      setSigil(trigger.sigil);
       textareaRef.current = textarea;
+      // "$" filters the local bound-skill list — no endpoint round trip.
+      if (trigger.sigil === "$") {
+        if (debounceRef.current !== null) {
+          window.clearTimeout(debounceRef.current);
+          debounceRef.current = null;
+        }
+        fetchSeq.current++; // invalidate any in-flight "@" fetch
+        const rows = skillMentionItems(skills, trigger.query);
+        setItems(rows);
+        setFocusedIndex(0);
+        setOpen(true);
+        setPopupStyle(computePopupStyle(textarea, rows.length));
+        return;
+      }
       setPopupStyle(computePopupStyle(textarea, items.length));
       if (!isValidMentionQuery(trigger.query)) {
         setItems([]);
@@ -233,7 +274,7 @@ export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetc
       }, debounceMs);
       setOpen(true);
     },
-    [close, debounceMs, fetchItems, items.length, slug]
+    [close, debounceMs, fetchItems, items.length, skills, slug]
   );
 
   const handleChange = useCallback(
@@ -244,13 +285,15 @@ export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetc
     [evaluate, onChange]
   );
 
+  // `selected` comes from the clicked popup row (mouse path) — the keyboard
+  // Enter path omits it and falls back to the focused row.
   const handleSelect = useCallback(
-    (textarea: HTMLTextAreaElement | null) => {
+    (textarea: HTMLTextAreaElement | null, selected?: MentionItem) => {
       const trigger = triggerRef.current;
-      const item = items[focusedIndex];
+      const item = selected ?? items[focusedIndex];
       if (!trigger || !item || !textarea) return;
-      const token = item.refType === "task" ? item.label : item.sublabel;
-      const next = applyCompletion(textarea.value, textarea.selectionStart ?? textarea.value.length, trigger.start, token);
+      const token = item.insertToken ?? item.refId;
+      const next = applyCompletion(textarea.value, textarea.selectionStart ?? textarea.value.length, trigger.start, token, trigger.sigil);
       onChange(next.value);
       close();
       requestAnimationFrame(() => {
@@ -308,5 +351,5 @@ export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetc
     [close, open]
   );
 
-  return { open, items, focusedIndex, popupStyle, handleChange, handleKeyDown, handleSelect, handleSelectCaret, close };
+  return { open, sigil, items, focusedIndex, popupStyle, handleChange, handleKeyDown, handleSelect, handleSelectCaret, close };
 }

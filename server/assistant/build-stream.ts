@@ -7,6 +7,8 @@ import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../share
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { hydrateImageParts, replaceImageRefsWithPlaceholders, needsSummary, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
 
+// get_skill is deliberately absent: it takes a `name` argument, so empty args
+// are an argument error there (see the empty-args guard below).
 export const ZERO_ARG_TOOLS = new Set(["get_all_tasks", "get_all_wiki_pages", "get_board_structure"]);
 const INTERNAL_TOOL = "analyze_image";
 

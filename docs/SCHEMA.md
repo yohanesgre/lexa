@@ -785,6 +785,10 @@ SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
 -- updated_at DESC). Per-turn metadata (user `ts`, assistant `ts`/`citations`/
 -- `error`/`stopped`) lives INLINE in the messages JSON — no meta table, no
 -- migration churn when the meta shape evolves.
+-- DEPRECATED: `skill_id` is no longer written for chat threads — skills are
+-- invoked per message with `$name` (junction-bound) and discovered via the
+-- `get_skill` tool, never bound to the thread. The column stays nullable and
+-- is dropped in a later migration.
 CREATE TABLE assistant_threads (
   document_type TEXT NOT NULL CHECK (document_type IN ('task','wiki','chat')),
   document_id TEXT NOT NULL,

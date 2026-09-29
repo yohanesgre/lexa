@@ -587,8 +587,20 @@ const TaskLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
 const MentionTaskHitSchema = Schema.Struct({ id: Schema.String, key: Schema.String, title: Schema.String });
 const MentionWikiHitSchema = Schema.Struct({ id: Schema.String, slug: Schema.String, title: Schema.String });
+const MentionEntityHitSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  slug: Schema.String,
+  sublabel: Schema.NullOr(Schema.String),
+});
 const MentionsResponse = Schema.Struct({
-  data: Schema.Struct({ tasks: Schema.Array(MentionTaskHitSchema), wikiPages: Schema.Array(MentionWikiHitSchema) }),
+  data: Schema.Struct({
+    tasks: Schema.Array(MentionTaskHitSchema),
+    wikiPages: Schema.Array(MentionWikiHitSchema),
+    milestones: Schema.Array(MentionEntityHitSchema),
+    swimlanes: Schema.Array(MentionEntityHitSchema),
+    columns: Schema.Array(MentionEntityHitSchema),
+  }),
 });
 
 const taskLinksGroup = HttpApiGroup.make("task-links")  .add(HttpApiEndpoint.get("listTaskLinks", "/projects/:slug/tasks/:id/links")
@@ -717,7 +729,6 @@ const AssistantChatStreamInput = Schema.Struct({
   chatId: Schema.String,
   message: Schema.String,
   agentId: Schema.optional(Schema.String),
-  skillId: Schema.optional(Schema.String),
   attachments: Schema.optional(Schema.Array(AssistantAttachmentRef)),
   fromIndex: Schema.optional(Schema.Number),
   reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
@@ -2697,7 +2708,6 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           chatId: req.payload.chatId,
           message: req.payload.message,
           agentId: req.payload.agentId,
-          skillId: req.payload.skillId,
           ...(req.payload.attachments ? { attachments: [...req.payload.attachments] } : {}),
           ...(req.payload.fromIndex !== undefined ? { fromIndex: req.payload.fromIndex } : {}),
           ...(req.payload.reasoningEffort !== undefined ? { reasoningEffort: req.payload.reasoningEffort } : {}),

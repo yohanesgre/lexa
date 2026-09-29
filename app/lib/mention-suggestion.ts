@@ -7,17 +7,46 @@ import type { MentionOptions } from "@tiptap/extension-mention";
 // "@" for TipTap document editors. Picking a row inserts a mention NODE —
 // documents get a LINK only, never attached context (split model).
 
+export type MentionRefType = "task" | "wiki" | "milestone" | "swimlane" | "column" | "skill";
+
 export interface MentionItem {
-  refType: "task" | "wiki";
+  refType: MentionRefType;
   refId: string;
   label: string;
   sublabel: string;
+  // Raw token the chat composer inserts. Entities use their derived slug; the
+  // TipTap document path links via refId/label and ignores this.
+  insertToken?: string | undefined;
+}
+
+// Section order + copy pinned by mentions-autocomplete.html. Skills are a
+// separate `$` picker and never appear in the `@` sections.
+export const MENTION_SECTIONS: { refType: MentionRefType; label: string }[] = [
+  { refType: "task", label: "Tasks" },
+  { refType: "wiki", label: "Wiki" },
+  { refType: "milestone", label: "Milestones" },
+  { refType: "swimlane", label: "Swimlanes" },
+  { refType: "column", label: "Columns" },
+];
+
+export function mentionChipClass(refType: MentionRefType): string {
+  return refType === "skill" ? "mention-chip-skill" : "mention-chip";
+}
+
+interface MentionEntityHit {
+  id: string;
+  name: string;
+  slug: string;
+  sublabel: string | null;
 }
 
 interface MentionsResponse {
   data?: {
     tasks?: { id: string; key: string; title: string }[];
     wikiPages?: { id: string; slug: string; title: string }[];
+    milestones?: MentionEntityHit[];
+    swimlanes?: MentionEntityHit[];
+    columns?: MentionEntityHit[];
   };
 }
 
@@ -40,15 +69,34 @@ export async function fetchMentionItems(slug: string, query: string): Promise<Me
     refId: t.id,
     label: t.key,
     sublabel: t.title,
+    insertToken: t.key,
   }));
   const wiki = (body.data?.wikiPages ?? []).map((w) => ({
     refType: "wiki" as const,
     refId: w.slug,
     label: w.title,
     sublabel: w.slug,
+    insertToken: w.slug,
   }));
-  // Server orders tasks-first and caps ≤8; the client cap is a backstop.
-  return [...tasks, ...wiki].slice(0, 8);
+  // Milestones/swimlanes/columns have no slug column; the server's derived
+  // `slug` is the mention token and also the popup's right-aligned sublabel.
+  const entities = (rows: MentionEntityHit[] | undefined, refType: MentionRefType): MentionItem[] =>
+    (rows ?? []).map((e) => ({
+      refType,
+      refId: e.id,
+      label: e.name,
+      sublabel: e.slug,
+      insertToken: e.slug,
+    }));
+  // Server caps tasks+wiki at 8 combined and each entity array at 8; the
+  // popup renders only non-empty sections in MENTION_SECTIONS order.
+  return [
+    ...tasks,
+    ...wiki,
+    ...entities(body.data?.milestones, "milestone"),
+    ...entities(body.data?.swimlanes, "swimlane"),
+    ...entities(body.data?.columns, "column"),
+  ];
 }
 
 export function insertMentionAtRange(editor: Editor, range: Range, item: MentionItem): void {
@@ -91,18 +139,16 @@ export function createMentionDropdownRenderer() {
         `<div class="dropdown-item" style="cursor:default;color:var(--lx-text-muted);">No matches for "${escapeHtml(query)}"</div>`;
       return;
     }
-    const firstWiki = items.findIndex((i) => i.refType === "wiki");
-    const taskCount = firstWiki === -1 ? items.length : firstWiki;
+    const sections = MENTION_SECTIONS.map((section) => ({
+      section,
+      rows: items.map((item, index) => ({ item, index })).filter(({ item }) => item.refType === section.refType),
+    })).filter(({ rows }) => rows.length > 0);
     let html = "";
-    if (taskCount > 0) {
-      html += `<div class="dropdown-label">Tasks</div>`;
-      html += items.slice(0, taskCount).map((it, i) => rowHtml(it, i)).join("");
-    }
-    if (firstWiki !== -1) {
-      if (taskCount > 0) html += `<div class="dropdown-separator"></div>`;
-      html += `<div class="dropdown-label">Wiki</div>`;
-      html += items.slice(firstWiki).map((it, i) => rowHtml(it, taskCount + i)).join("");
-    }
+    sections.forEach(({ section, rows }, sectionIndex) => {
+      if (sectionIndex > 0) html += `<div class="dropdown-separator"></div>`;
+      html += `<div class="dropdown-label">${section.label}</div>`;
+      html += rows.map(({ item, index }) => rowHtml(item, index)).join("");
+    });
     popup.innerHTML = html;
   };
 
@@ -250,7 +296,7 @@ export function createMentionExtension(opts: MentionExtensionOptions) {
       return [
         "span",
         {
-          class: "mention-chip",
+          class: mentionChipClass((node.attrs.refType ?? "task") as MentionRefType),
           "data-ref-type": node.attrs.refType ?? "task",
           "data-ref-id": node.attrs.refId ?? "",
         },

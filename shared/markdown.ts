@@ -277,7 +277,10 @@ function renderInlineNode(node: TipTapNode, opts?: DocToMarkdownOptions): string
     const refId = typeof attrs.refId === "string" ? attrs.refId.trim() : "";
     const label = typeof attrs.label === "string" ? attrs.label.trim() : "";
     if (!refId || !label) return "";
-    if (opts?.baseUrl && opts?.projectSlug) {
+    // Only task/wiki mentions have a document route. Entity mentions
+    // (milestone/swimlane/column) carry no linkable view, so the GitHub export
+    // emits the bare label rather than a dead board/wiki deep link.
+    if (opts?.baseUrl && opts?.projectSlug && (attrs.refType === "task" || attrs.refType === "wiki")) {
       const base = `${opts.baseUrl.replace(/\/+$/, "")}/${opts.projectSlug}`;
       const href =
         attrs.refType === "wiki"

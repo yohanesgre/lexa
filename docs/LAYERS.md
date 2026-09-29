@@ -1286,12 +1286,16 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       // enqueue: guard provider configured (ProviderNotConfigured), validate
       //   agent/skill/document/attachments, then queueRepo.createTask (queued).
       //   The assistant lane is the only lane; agentId is always the builtin
-      //   `assistant` agent, skillId must be junction-bound — else SkillNotFound.
+      //   `assistant` agent, and the enqueued skill must be junction-bound
+      //   (`lexa_agent_skills`) — else SkillNotFound.
       // runStream(taskId) → ReadableStream<StreamFrame>: claimAssistantTask
       //   (conditional UPDATE queued→running), assemble prompt, stream chat(),
       //   persist at terminal points; cancel emits no log row.
       // runChatStream(chatId, userId, req): no queue row; one
       //   thread per (project, user); second concurrent stream → AssistantTaskActive.
+      //   No skill is bound to the chat thread — skills are invoked per message
+      //   (`$name`, ≤3, junction-bound at parse time), discovered via the
+      //   bound-skill catalog and the read-only `get_skill` tool.
       // resetThread / testConnection / abortStream / abortChat.
     };
   }),
@@ -1419,9 +1423,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   through `AssistantThreadRepo.loadThread(doc)` / `saveThread(doc, patch)` —
   called directly at the terminal points (post-`done` persist, enqueue-time
   attachment pre-save, reset). A future D1 swap touches the repo only.
-  Continue-vs-fresh: same doc + same agentId+skillId + existing row →
-  continue; anything else → fresh overwrite. Model/provider changes never
-  reset a thread.
+  Continue-vs-fresh: same doc + same agentId + existing row → continue;
+  anything else → fresh overwrite. A chat thread carries no skill binding —
+  `$name` skills are per-message (≤3, junction-bound at parse time, discovered
+  via the catalog + `get_skill`) — so changing one never resets history.
+  Model/provider changes never reset a thread.
 - **No new services for chat upgrades:** edit/regenerate/retry
   (`truncateChatFrom`), pinning/list metadata (`updateChatMeta`, `listChats`)
   and citation collection stay INSIDE `AssistantService` +

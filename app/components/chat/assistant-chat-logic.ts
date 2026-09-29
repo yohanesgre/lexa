@@ -67,7 +67,6 @@ export function chatStreamBody(args: {
   projectId: string | undefined;
   chatId: string;
   message: string;
-  skillId: string;
   effort: string;
   fromIndex?: number | undefined;
 }) {
@@ -75,7 +74,6 @@ export function chatStreamBody(args: {
     projectId: args.projectId,
     chatId: args.chatId,
     message: args.message,
-    skillId: args.skillId || undefined,
     attachments: [],
     ...(args.effort ? { reasoningEffort: args.effort } : {}),
     ...(args.fromIndex !== undefined ? { fromIndex: args.fromIndex } : {}),
@@ -362,15 +360,9 @@ export function dropUnknownThread(args: {
 
 // ── Chat skill selection (mirrors the panel's Assistant-junction filter) ──
 
-export function chatSkillsOf(
-  agents: Array<{ id: string; skillIds?: string[] }>,
-  skills: LexaSkill[],
-  skillId: string
-): { skills: LexaSkill[]; effectiveSkillId: string; skillName: string | undefined } {
+export function chatSkillsOf(agents: Array<{ id: string; skillIds?: string[] }>, skills: LexaSkill[]): LexaSkill[] {
   const assistantSkillIds = new Set(agents.find((a) => a.id === ASSISTANT_AGENT_ID)?.skillIds ?? []);
-  const filtered = skills.filter((s) => assistantSkillIds.has(s.id));
-  const effectiveSkillId = assistantSkillIds.has(skillId) ? skillId : "";
-  return { skills: filtered, effectiveSkillId, skillName: filtered.find((s) => s.id === effectiveSkillId)?.name };
+  return skills.filter((s) => assistantSkillIds.has(s.id));
 }
 
 // ── Derived page flags (pure) ──

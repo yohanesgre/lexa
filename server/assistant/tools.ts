@@ -94,6 +94,12 @@ export interface WikiPageContent {
   content: TipTapDoc;
 }
 
+export interface BoundSkill {
+  name: string;
+  description: string | null;
+  instructions: string | null;
+}
+
 export interface AssistantToolDeps {
   projectId: string;
   allowlist: string | null;
@@ -112,6 +118,10 @@ export interface AssistantToolDeps {
   listAllTasks: () => Promise<TaskRef[]>;
   listWikiPagesFull: () => Promise<WikiPageContent[]>;
   getBoardStructure: () => Promise<BoardStructure>;
+  // Junction-scoped skill loader. Callers pass it ONLY when the agent has at
+  // least one bound skill: present → the `get_skill` read tool is offered;
+  // absent → it is omitted entirely (no bound-skill surface to discover).
+  loadSkillByName?: ((name: string) => Promise<BoundSkill | null>) | undefined;
   // Chat citation collection: fired for web_search results and successful
   // fetch_url targets. The collector (service side) enforces cap/dedupe/https.
   onCitation?: (citation: { title: string | null; url: string }) => void;
@@ -551,6 +561,36 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
     }).server(async () => deps.getBoardStructure())
   );
 
+  // Discovery path for skills the model was not told about: the catalog lists
+  // the bound skills, this reads one in full. Junction-scoped by the injected
+  // loader — an unbound or deleted name yields a typed error result, never a
+  // throw. Offered only when the run wired a loader.
+  if (deps.loadSkillByName) {
+    const loadSkillByName = deps.loadSkillByName;
+    tools.push(
+      toolDefinition({
+        name: "get_skill",
+        description:
+          "Read the full instructions of one skill bound to you (name from the catalog or a $name mention). Instructions are capped at ~8k characters.",
+        inputSchema: z.object({ name: z.string().min(1).describe("Skill name from the catalog, or the $name you saw") }),
+        outputSchema: z.object({
+          name: z.string().optional(),
+          description: z.string().nullable().optional(),
+          instructions: z.string().optional(),
+          error: z.string().optional(),
+        }),
+      }).server(async ({ name }) => {
+        const skill = await loadSkillByName(name);
+        if (!skill) return { error: `no skill bound to you matches '${name}'` };
+        return {
+          name: skill.name,
+          description: skill.description,
+          instructions: (skill.instructions ?? "").slice(0, WIKI_READ_CAP),
+        };
+      })
+    );
+  }
+
   // Jev is advisory-only: the second opinion the model may request on state it
   // already holds, never a mutation path. Present whenever the run resolved a
   // Jev config (new runs AND resumes) — the per-stream call budget lives in the
@@ -649,6 +689,11 @@ export function toolCallDetail(name: string, rawArgs: unknown): string | undefin
     case "get_board_structure":
       detail = "Reading board structure";
       break;
+    case "get_skill": {
+      const name = str("name");
+      if (name) detail = `Reading skill ${name}`;
+      break;
+    }
     case "jev_assess": {
       // The state is the model's own context, not a label worth echoing, and
       // it is up to 4k characters — only the question count is shown.

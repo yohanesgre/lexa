@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { buildAssistantTools, MAX_TOOL_ROUNDS } from "../assistant/tools";
+import { buildAssistantTools, MAX_TOOL_ROUNDS, type BoundSkill } from "../assistant/tools";
 import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
@@ -36,7 +36,7 @@ import type { TipTapDoc, Task, WikiPage, Actor, AssistantTask, ActivityType } fr
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import { buildStream, findPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
 import { collectResumeResults } from "../assistant/resume-results";
-import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64 } from "./assistant-helpers";
+import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import type { ProviderConfig } from "../assistant/provider";
 import type { TaskRef } from "../assistant/tools";
 
@@ -139,8 +139,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       );
     };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null) => ({
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[]) => ({
       projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch,
+      // get_skill can only discover skills the agent actually has bound, so the
+      // loader (and with it the tool) is omitted when there are none.
+      ...(boundSkills.length > 0 ? { loadSkillByName: async (name: string): Promise<BoundSkill | null> => matchBoundSkillByName(boundSkills, name) } : {}),
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
@@ -300,7 +303,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           yield* validateAttachments(input.projectId, attachments, DOC_IMAGE_CAPS);
           if (resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null }) === "none") return yield* new VisionNotConfigured();
           const existing = yield* threadRepo.loadThread(input.documentType, input.documentId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
-          const verdict = resolveAssistantThread(existing, input.agentId, input.skillId);
+          const verdict = resolveAssistantThread(existing, input.agentId);
           yield* threadRepo.saveThread(input.documentType, input.documentId, { projectId: input.projectId, agentId: input.agentId, skillId: input.skillId, messages: [...verdict.messages, { role: "user", content: attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType })) }], summary: verdict.summary, summarizedCount: verdict.summarizedCount });
         }
         return yield* queueRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId: input.skillId, extraPrompt: input.prompt, selection: input.selection ?? "" });
@@ -315,7 +318,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const settingsRow = yield* getSettingsOrFail(task.projectId);
         const config = configFromRow(settingsRow);
         const existing = yield* threadRepo.loadThread(task.documentType, task.documentId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
-        const verdict = resolveAssistantThread(existing, task.agentId, task.skillId);
+        const verdict = resolveAssistantThread(existing, task.agentId);
         if (opts?.userId !== undefined) {
           yield* Effect.try({
             try: () => {
@@ -359,10 +362,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           taskWikiContext: doc.context,
           memoryHits,
         });
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: [skill.instructions], repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig));
+        const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, task.agentId));
+        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];
@@ -395,10 +399,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // request. The tool is still offered — its budget is per stream. The
         // config is resolved once here too, so a resume gets the same gate.
         const jevConfig = yield* jevService.resolveForProject(thread.projectId);
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdown: skill.instructions, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: [skill.instructions], repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig));
+        const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, thread.agentId ?? ""));
+        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];

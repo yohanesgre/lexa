@@ -76,10 +76,10 @@ describe("assistant chat a11y", () => {
 
   it("renders a single wireframe meta line while streaming", () => {
     const stream = { items: [], tools: [], reasoningActive: false, reasoningMs: null, pending: [] } as unknown as Stream;
-    const { container } = render(<StreamingBubble stream={stream} skillName="Requirements" renderText={noopRenderText} />);
+    const { container } = render(<StreamingBubble stream={stream} renderText={noopRenderText} />);
     const metas = container.querySelectorAll(".bubble-meta");
     expect(metas).toHaveLength(1);
-    expect(metas[0]!.textContent).toBe("Assistant · Assistant Agent persona · Requirements");
+    expect(metas[0]!.textContent).toBe("Assistant · Assistant Agent persona");
   });
 
   it("renders the token usage line under the done reply", () => {

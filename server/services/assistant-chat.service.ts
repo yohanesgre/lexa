@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS } from "../assistant/tools";
+import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS, type BoundSkill } from "../assistant/tools";
 import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
 import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
@@ -15,7 +15,7 @@ import { Storage } from "../storage/storage";
 import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { AssistantJevService } from "./assistant-jev.service";
-import { ProviderNotConfigured, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
+import { ProviderNotConfigured, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
 import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
 import { executeAssistantWrite } from "../assistant/write-execution";
 import { TaskService } from "./task.service";
@@ -25,12 +25,14 @@ import { MilestoneService } from "./milestone.service";
 import { SwimlaneService } from "./swimlane.service";
 import { AuthorizationService } from "./authorization.service";
 import { parseTaskKey } from "../task-key";
+import { parseSkillTokens } from "../../shared/skill-tokens";
+import { columnMentionSublabel, mentionSlug, milestoneMentionSublabel, swimlaneMentionSublabel } from "../../shared/mention-entities";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
 import { collectResumeResults } from "../assistant/resume-results";
-import { scanMentionTokens, buildMentionContextBlock, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_IMAGE_CAPS, CHAT_CITATION_CAP, assertAttachmentCaps, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex } from "./assistant-helpers";
+import { scanMentionTokens, buildMentionContextBlock, MENTION_CAPS, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_IMAGE_CAPS, CHAT_CITATION_CAP, assertAttachmentCaps, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
@@ -76,7 +78,32 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
     const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
     const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
-    const skillJunctionBound = async (agentId: string, skillId: string): Promise<boolean> => (await dbFirst(`SELECT 1 FROM lexa_agent_skills WHERE agent_id = ? AND skill_id = ? LIMIT 1`, agentId, skillId)) !== null;
+    const loadBoundSkills = (agentId: string): Promise<BoundSkill[]> => dbAll<BoundSkill>(BOUND_SKILLS_SQL, agentId);
+    // Per-message skill context: the ≤3 `$mentioned` skills bound to the agent,
+    // injected under `## Skill: {name}`, plus the compact catalog of every bound
+    // skill (≤20 with descriptions, the rest counted). Catalog is null when the
+    // agent has nothing bound.
+    const buildSkillPromptParts = (message: string, boundSkills: BoundSkill[]): { skillMarkdowns: string[]; skillCatalog: string | null } => {
+      const mentioned = parseSkillTokens(message)
+        .map((t) => matchBoundSkillByName(boundSkills, t))
+        .filter((s): s is BoundSkill => s !== null)
+        .slice(0, 3);
+      const skillMarkdowns = mentioned
+        .filter((s) => (s.instructions ?? "").trim() !== "")
+        .map((s) => `## Skill: ${s.name}\n${s.instructions}`);
+      const skillCatalog = boundSkills.length === 0 ? null
+        : `Available skills — invoke with $name, or call get_skill for details:\n` +
+          boundSkills.slice(0, 20).map((s) => { const d = (s.description ?? "").trim(); return d ? `- ${s.name} — ${d}` : `- ${s.name}`; }).join("\n") +
+          (boundSkills.length > 20 ? `\n… and ${boundSkills.length - 20} more` : "");
+      return { skillMarkdowns, skillCatalog };
+    };
+    const lastUserText = (messages: readonly unknown[]): string => {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i] as { role?: unknown; content?: unknown } | null;
+        if (m && m.role === "user" && typeof m.content === "string") return m.content;
+      }
+      return "";
+    };
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
     const loadImageBase64 = (key: string): Promise<string | null> => Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
     const resolveMentionContext = (projectId: string, message: string): Effect.Effect<string, DbError> => Effect.gen(function* () {
@@ -84,24 +111,72 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       if (tokens.length === 0) return "";
       const seen = new Set<string>();
       const resolved: ResolvedMention[] = [];
+      // One token may match SEVERAL kinds — a wiki page and a milestone/column
+      // can share a derived slug — so a hit never consumes the token: every
+      // kind is tried for every token, dedupe is by `kind:id`, and the overall
+      // cap stays at MENTION_CAPS.maxMentions.
+      const add = (m: ResolvedMention): void => {
+        const key = `${m.kind}:${m.id}`;
+        if (seen.has(key) || resolved.length >= MENTION_CAPS.maxMentions) return;
+        seen.add(key);
+        resolved.push(m);
+      };
+      // Milestones/swimlanes/columns have no `slug` column, so a token is
+      // matched against the derived slug (mentionSlug) of each name. Loaded
+      // lazily and once per message; archived milestones/swimlanes are skipped
+      // for matching but kept in the list so a swimlane's owning milestone name
+      // still resolves.
+      let entities: {
+        milestones: Array<{ id: string; name: string; due_at: string | null; archived_at: string | null; sprint_count: number }>;
+        swimlanes: Array<{ id: string; name: string; kind: "backlog" | "sprint"; due_at: string | null; archived_at: string | null; milestone_id: string | null }>;
+        columns: Array<{ id: string; name: string; position: number; github_state: "open" | "closed" | null; is_done: number }>;
+      } | null = null;
+      const loadEntities = () => Effect.gen(function* () {
+        const rows = <T>(sql: string): Effect.Effect<T[], DbError> =>
+          Effect.tryPromise({ try: () => dbAll<T>(sql, projectId), catch: () => new DbError({ message: "failed to load mention entities" }) })
+            .pipe(Effect.catchAll(() => Effect.succeed([] as T[])));
+        const milestones = yield* rows<{ id: string; name: string; due_at: string | null; archived_at: string | null; sprint_count: number }>(
+          `SELECT m.id, m.name, m.due_at, m.archived_at,
+                  (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id) AS sprint_count
+           FROM milestones m WHERE m.project_id = ? ORDER BY m.position`
+        );
+        const swimlanes = yield* rows<{ id: string; name: string; kind: "backlog" | "sprint"; due_at: string | null; archived_at: string | null; milestone_id: string | null }>(
+          `SELECT id, name, kind, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`
+        );
+        const columns = yield* rows<{ id: string; name: string; position: number; github_state: "open" | "closed" | null; is_done: number }>(
+          `SELECT id, name, position, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`
+        );
+        return { milestones, swimlanes, columns };
+      });
       for (const token of tokens) {
-        if (resolved.length >= 5) break;
+        if (resolved.length >= MENTION_CAPS.maxMentions) break;
         const parsed = parseTaskKey(token);
         if (parsed) {
-          const dedupeKey = `task:${parsed.prefix}-${parsed.number}`;
-          if (seen.has(dedupeKey)) continue;
           const t = yield* taskRepo.findByKey(`${parsed.prefix}-${parsed.number}`).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)), Effect.catchAll(() => Effect.succeed(null)));
           if (!t || (t as unknown as { projectId: string }).projectId !== projectId) continue;
-          seen.add(dedupeKey);
-          resolved.push({ kind: "task", id: (t as unknown as { id: string }).id, label: `${(t as unknown as { key: string }).key} — ${(t as unknown as { title: string }).title}`, text: extractText((t as unknown as { description: TipTapDoc }).description as TipTapDoc) });
+          add({ kind: "task", id: (t as unknown as { id: string }).id, label: `${(t as unknown as { key: string }).key} — ${(t as unknown as { title: string }).title}`, text: extractText((t as unknown as { description: TipTapDoc }).description as TipTapDoc) });
         } else {
           const slug = token.toLowerCase();
-          const dedupeKey = `wiki:${slug}`;
-          if (seen.has(dedupeKey)) continue;
           const page = yield* wikiRepo.findBySlug(projectId, token).pipe(Effect.catchTag("RowNotFound", () => wikiRepo.findBySlug(projectId, slug).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)), Effect.catchAll(() => Effect.succeed(null)))), Effect.catchAll(() => Effect.succeed(null)));
-          if (!page) continue;
-          seen.add(dedupeKey);
-          resolved.push({ kind: "wiki", id: (page as unknown as { id: string }).id, label: (page as unknown as { title: string }).title, text: extractText((page as unknown as { content: TipTapDoc }).content as TipTapDoc) });
+          if (page) {
+            add({ kind: "wiki", id: (page as unknown as { id: string }).id, label: (page as unknown as { title: string }).title, text: extractText((page as unknown as { content: TipTapDoc }).content as TipTapDoc) });
+          }
+          if (entities === null) entities = yield* loadEntities();
+          const target = mentionSlug(token);
+          if (target === "") continue;
+          const milestone = entities.milestones.find((m) => m.archived_at === null && mentionSlug(m.name) === target);
+          if (milestone) {
+            add({ kind: "milestone", id: milestone.id, label: milestone.name, text: milestoneMentionSublabel({ dueAt: milestone.due_at, archivedAt: milestone.archived_at, sprintCount: milestone.sprint_count }) });
+          }
+          const swimlane = entities.swimlanes.find((l) => l.archived_at === null && mentionSlug(l.name) === target);
+          if (swimlane) {
+            const owningMilestone = swimlane.milestone_id !== null ? entities.milestones.find((m) => m.id === swimlane.milestone_id)?.name ?? null : null;
+            add({ kind: "swimlane", id: swimlane.id, label: swimlane.name, text: swimlaneMentionSublabel({ kind: swimlane.kind, dueAt: swimlane.due_at, archivedAt: swimlane.archived_at }, owningMilestone) });
+          }
+          const column = entities.columns.find((c) => mentionSlug(c.name) === target);
+          if (column) {
+            add({ kind: "column", id: column.id, label: column.name, text: columnMentionSublabel({ position: column.position, isDone: column.is_done !== 0, githubState: column.github_state }) });
+          }
         }
       }
       return buildMentionContextBlock(resolved);
@@ -136,8 +211,11 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       );
     };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null) => ({
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[]) => ({
       projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch,
+      // get_skill can only discover skills the agent actually has bound, so the
+      // loader (and with it the tool) is omitted when there are none.
+      ...(boundSkills.length > 0 ? { loadSkillByName: async (name: string): Promise<BoundSkill | null> => matchBoundSkillByName(boundSkills, name) } : {}),
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
@@ -239,26 +317,24 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         return yield* Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(req.projectId);
         const config = configFromRow(settingsRow);
-        if (req.skillId !== undefined) {
-          const skillId = req.skillId;
-          if (!(yield* Effect.promise(() => skillJunctionBound("assistant", skillId)))) return yield* new SkillNotFound({ id: skillId });
-        }
         const attachments = req.attachments ?? [];
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         yield* validateAttachments(req.projectId, attachments, CHAT_IMAGE_CAPS);
         if (attachments.length > 0 && imageMode === "none") return yield* new VisionNotConfigured();
         const mentionContext = yield* resolveMentionContext(req.projectId, req.message);
+        const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
+        const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(req.message, boundSkills);
         yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
         const existing = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
         if (existing && existing.projectId !== req.projectId) return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: chatId });
-        let verdict = resolveAssistantThread(existing, req.agentId ?? null, req.skillId ?? null);
+        let verdict = resolveAssistantThread(existing, req.agentId ?? null);
         const title = resolveChatTitle(existing, req.message);
         if (req.fromIndex !== undefined) {
           const fromIndex = req.fromIndex;
           yield* Effect.try({ try: () => { validateChatFromIndex(verdict.messages, fromIndex); }, catch: (e) => e as InvalidArgs });
           if (fromIndex < verdict.messages.length) {
             const truncated = yield* threadRepo.truncateChatFrom(chatId, userId, fromIndex);
-            verdict = resolveAssistantThread(truncated, req.agentId ?? null, req.skillId ?? null);
+            verdict = resolveAssistantThread(truncated, req.agentId ?? null);
             const orphanBatch = findPendingBatch(verdict.messages);
             if (orphanBatch !== null) return yield* new ApprovalsPending({ batchId: orphanBatch, remaining: 0 });
           }
@@ -289,7 +365,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           taskWikiContext: mentionContext,
           memoryHits,
         });
-        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, mentionContext, writeTools: enabledWriteTools, advisory: preflight.segment });
+        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, mentionContext, writeTools: enabledWriteTools, advisory: preflight.segment });
         const refs: unknown[] = attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType }));
         const userContent: string | unknown[] = refs.length > 0 ? [{ type: "text", content: req.message }, ...refs] : req.message;
         let citations: import("../../shared/assistant").Citation[] = [];
@@ -307,13 +383,13 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
-            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig), onCitation: (c) => { citations = collectCitation(citations, c); } });
+            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } });
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
             return imageMode === "delegate" && attachments.length > 0 ? [...base, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: chatId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
           })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode: attachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
-          persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: req.skillId ?? null, messages, summary, summarizedCount })).then(() => {}),
+          persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
         }).pipe(Effect.tapError(() => Effect.sync(() => { activeChats.delete(chatId); })));
@@ -345,6 +421,10 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row, ctx as unknown as never));
         const resumeResultsNote = buildResumeResultsNote(noteLines);
         const history = applyResumeResults(thread.messages, [batchId]);
+        // Resume continues the same user turn, so the `$mentioned` skills are
+        // re-injected with the same catalog the original run carried.
+        const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
+        const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(lastUserText(history), boundSkills);
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
@@ -352,7 +432,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         // request. The tool is still offered — its budget is per stream. The
         // config is resolved once here too, so a resume gets the same gate.
         const jevConfig = yield* jevService.resolveForProject(thread.projectId);
-        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdown: null, writeTools: enabledWriteTools });
+        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, writeTools: enabledWriteTools });
         const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
@@ -361,9 +441,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
-          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
           toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
-          persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
+          persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
         }).pipe(Effect.tapError(() => Effect.sync(() => { activeChats.delete(chatId); })));

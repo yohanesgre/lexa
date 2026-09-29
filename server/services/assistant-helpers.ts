@@ -1,5 +1,6 @@
 import { deriveChatTitle } from "../../shared/assistant";
 import type { Citation } from "../../shared/assistant";
+import { skillToken } from "../../shared/skill-tokens";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
 import { InvalidArgs } from "../api/errors";
 
@@ -11,7 +12,7 @@ export const CHAT_IMAGE_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 10
 export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 export const MENTION_CAPS = { maxMentions: 5, maxPerDocumentChars: 4000, maxTotalChars: 20000 };
 export function scanMentionTokens(text: string): string[] { const out: string[] = []; for (const m of text.matchAll(/(?<![A-Za-z0-9])@([A-Za-z0-9][A-Za-z0-9_-]*)/g)) out.push(m[1]!); return out; }
-export interface ResolvedMention { kind: "task" | "wiki"; id: string; label: string; text: string; }
+export interface ResolvedMention { kind: "task" | "wiki" | "milestone" | "swimlane" | "column"; id: string; label: string; text: string; }
 export function buildMentionContextBlock(resolved: ResolvedMention[]): string {
   if (resolved.length === 0) return "";
   const lines: string[] = ["Referenced by the user just now:"];
@@ -28,10 +29,20 @@ export function buildMentionContextBlock(resolved: ResolvedMention[]): string {
 export interface StoredImageRef { type: "image-ref"; storageKey: string; mimeType: string; }
 export function isStoredImageRef(part: unknown): part is StoredImageRef { return typeof part === "object" && part !== null && (part as { type?: unknown }).type === "image-ref" && typeof (part as { storageKey?: unknown }).storageKey === "string"; }
 export type ThreadVerdict = { mode: "continue"; messages: unknown[]; summary: string | null; summarizedCount: number } | { mode: "fresh"; messages: unknown[]; summary: null; summarizedCount: number };
-export function resolveAssistantThread(existing: AssistantThread | null, agentId: string | null, skillId: string | null): ThreadVerdict {
-  if (existing && existing.agentId === agentId && existing.skillId === skillId) return { mode: "continue", messages: existing.messages, summary: existing.summary, summarizedCount: existing.summarizedCount };
+// Continue-vs-fresh keys on the agent only: skills are invoked per message
+// (`$name`), never bound to the thread, so a skill change never resets history.
+export function resolveAssistantThread(existing: AssistantThread | null, agentId: string | null): ThreadVerdict {
+  if (existing && existing.agentId === agentId) return { mode: "continue", messages: existing.messages, summary: existing.summary, summarizedCount: existing.summarizedCount };
   return { mode: "fresh", messages: [], summary: null, summarizedCount: 0 };
 }
+// Junction-scoped lookup: `name` (a catalog entry or a `$name` token) resolves
+// against the agent's bound skills by normalized token, first match wins.
+export function matchBoundSkillByName<T extends { name: string }>(bound: readonly T[], name: string): T | null {
+  const target = skillToken(name);
+  return bound.find((s) => skillToken(s.name) === target) ?? null;
+}
+export const BOUND_SKILLS_SQL =
+  "SELECT s.name, s.description, s.instructions FROM lexa_skills s JOIN lexa_agent_skills j ON j.skill_id = s.id WHERE j.agent_id = ? ORDER BY s.name ASC";
 export function resolveChatTitle(existing: AssistantThread | null, message: string): string | null { if (existing?.title) return existing.title; return deriveChatTitle(message) || null; }
 export const CHAT_SNIPPET_WINDOW = 40;
 export const CHAT_CITATION_CAP = 10;

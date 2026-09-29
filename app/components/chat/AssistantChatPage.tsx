@@ -54,7 +54,7 @@ import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantCha
 // brand-new deep-linked thread from a known one. No queue row — streams are
 // direct SSE.
 // No agent picker: the persona mirrors the project's configured Assistant Agent
-// (read-only); only the optional skill is picked per message. Transcript
+// (read-only); skills are invoked per message with `$name`. Transcript
 // affordances (hover copy/edit/regenerate, citation chips,
 // failed/interrupted treatments) transcribe assistant-chat-upgrades.html.
 
@@ -194,14 +194,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const { data: agents = [] } = useAgents();
   const { data: skills = [] } = useSkills();
-  // Skill stays OPTIONAL per message — chat starts with none selected and
-  // messages go out without one unless picked here (assistant-chat.html
-  // composer annotation). Changing skill mid-thread mints a fresh thread
-  // server-side.
-  const [skillId, setSkillId] = useState("");
-  // Mobile composer treatment: collapse skills by default, flip dropdowns
-  // upward so they don't run off the bottom of the screen. Desktop keeps
-  // the original behavior (chips visible, dropdowns below).
+  // Mobile composer treatment: collapse the rail to the effort summary chip
+  // and flip dropdowns upward so they don't run off the bottom of the screen.
+  // Desktop keeps the original behavior (labels visible, dropdowns below).
   const isMobileComposer = isNarrowViewport();
   // Per-turn thinking effort override (assistant-chat.html composer): ""
   // follows the project default; an explicit level rides the next stream
@@ -215,8 +210,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     [chatId]
   );
   // Chips filter to the Assistant Agent junction list — chat ALWAYS runs the
-  // assistant lane, regardless of the project engine.
-  const { skills: assistantSkills, effectiveSkillId, skillName } = chatSkillsOf(agents, skills, skillId);
+  // assistant lane, regardless of the project engine. The `$` popup consumes
+  // this bound list.
+  const assistantSkills = useMemo(() => chatSkillsOf(agents, skills), [agents, skills]);
 
   const pendingTitleRef = useRef<string | null>(null);
   const ingressInsertedRef = useRef<Set<string>>(new Set());
@@ -260,7 +256,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     applyChatId,
     openThreadParam,
     qc,
-    effectiveSkillId,
     effort,
     setEffort,
     pendingTitleRef,
@@ -398,8 +393,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         <ChatLanding onPickStarter={(text) => setSeed({ text, nonce: Date.now() })}>
           <ChatComposerArea
             skills={assistantSkills}
-            skillId={effectiveSkillId}
-            onSkillChange={setSkillId}
             busy409={busy409}
             slug={slug}
             streaming={streaming}
@@ -426,7 +419,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             slug={slug}
             streaming={streaming}
             renderText={renderText}
-            skillName={skillName}
             projectId={projectId}
             streamActivity={streamActivity}
             batchBusy={batchBusy}
@@ -451,8 +443,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
           <ChatComposerArea
             skills={assistantSkills}
-            skillId={effectiveSkillId}
-            onSkillChange={setSkillId}
             busy409={busy409}
             slug={slug}
             streaming={streaming}

@@ -107,16 +107,16 @@ function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
 
 describe("resolveAssistantThread", () => {
   it("null existing → fresh", () => {
-    const v = resolveAssistantThread(null, "a1", "s1");
+    const v = resolveAssistantThread(null, "a1");
     expect(v.mode).toBe("fresh");
     expect(v.messages).toEqual([]);
     expect(v.summary).toBeNull();
     expect(v.summarizedCount).toBe(0);
   });
 
-  it("same doc + same agent+skill → continue with history", () => {
+  it("same doc + same agent → continue with history", () => {
     const t = thread();
-    const v = resolveAssistantThread(t, "a1", "s1");
+    const v = resolveAssistantThread(t, "a1");
     expect(v.mode).toBe("continue");
     expect(v.messages).toBe(t.messages);
     expect(v.summary).toBe("prior summary");
@@ -124,17 +124,17 @@ describe("resolveAssistantThread", () => {
   });
 
   it("agent mismatch → fresh", () => {
-    expect(resolveAssistantThread(thread(), "a2", "s1").mode).toBe("fresh");
+    expect(resolveAssistantThread(thread(), "a2").mode).toBe("fresh");
   });
 
-  it("skill mismatch → fresh", () => {
-    expect(resolveAssistantThread(thread(), "a1", "s2").mode).toBe("fresh");
+  it("a stored skill id no longer affects the verdict (skills are per-message)", () => {
+    expect(resolveAssistantThread(thread({ skillId: "other" }), "a1").mode).toBe("continue");
   });
 
-  it("null stored ids vs provided ids → fresh; both null → continue", () => {
+  it("null stored id vs provided id → fresh; both null → continue", () => {
     const t = thread({ agentId: null, skillId: null });
-    expect(resolveAssistantThread(t, "a1", "s1").mode).toBe("fresh");
-    expect(resolveAssistantThread(t, null, null).mode).toBe("continue");
+    expect(resolveAssistantThread(t, "a1").mode).toBe("fresh");
+    expect(resolveAssistantThread(t, null).mode).toBe("continue");
   });
 });
 
@@ -160,7 +160,7 @@ describe("resolveChatTitle", () => {
     expect(resolveChatTitle(null, "")).toBeNull();
   });
 
-  it("agent/skill change wipes messages but keeps the title", () => {
+  it("agent change wipes messages but keeps the title", () => {
     const t = thread({
       documentType: "chat",
       documentId: "c1",
@@ -171,7 +171,7 @@ describe("resolveChatTitle", () => {
       messages: [{ role: "user", content: "old conversation" }],
     });
     // Mismatched agent → fresh verdict (history gone)…
-    const verdict = resolveAssistantThread(t, "a2", "s1");
+    const verdict = resolveAssistantThread(t, "a2");
     expect(verdict.mode).toBe("fresh");
     expect(verdict.messages).toEqual([]);
     // …but the list label survives.
@@ -354,7 +354,6 @@ describe("@-mention chat resolution", () => {
       identity: "i",
       memoryBlock: null,
       agentMarkdown: null,
-      skillMarkdown: null,
       mentionContext,
     });
     // userContent would be exactly `message` (no injected block anywhere).
@@ -363,7 +362,7 @@ describe("@-mention chat resolution", () => {
     expect(systemPrompts[systemPrompts.length - 1]!.content).toContain("[task] LEX-42 — T");
     expect(systemPrompts[systemPrompts.length - 1]!.content).toContain("Referenced by the user just now:");
     // No mentionContext → no extra segment (existing behavior unchanged).
-    const without = buildSystemPrompts({ identity: "i", memoryBlock: null, agentMarkdown: null, skillMarkdown: null });
+    const without = buildSystemPrompts({ identity: "i", memoryBlock: null, agentMarkdown: null });
     expect(without.length).toBe(2);
   });
 });

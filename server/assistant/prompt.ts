@@ -60,7 +60,12 @@ export interface SystemPromptInput {
   identity: string;
   memoryBlock: string | null;
   agentMarkdown: string | null;
-  skillMarkdown: string | null;
+  // Per-message `$skill` instructions, in mention order. Absent/empty means no
+  // skill segment is emitted.
+  skillMarkdowns?: string[];
+  // Bound-skill catalog appended to the cached identity segment, after the
+  // write policy. Null/blank omits the segment entirely.
+  skillCatalog?: string | null;
   repoContent?: RepoContentEntry[];
   docContext?: string;
   // Ephemeral @-mention context (chat only) — resolved at send, NEVER
@@ -81,12 +86,13 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
   const segments: string[] = [input.identity, MARKDOWN_STYLE];
   if (input.memoryBlock) segments.push(input.memoryBlock);
   if (input.writeTools && input.writeTools.length > 0) segments.push(WRITE_POLICY);
+  if (input.skillCatalog && input.skillCatalog.trim() !== "") segments.push(input.skillCatalog);
 
   const prompts: CacheablePrompt[] = [
     { content: segments.join("\n\n"), cache_control: { type: "ephemeral" } },
   ];
 
-  const rules = [input.agentMarkdown, input.skillMarkdown].filter((s): s is string => !!s && s.trim() !== "");
+  const rules = [input.agentMarkdown, ...(input.skillMarkdowns ?? [])].filter((s): s is string => !!s && s.trim() !== "");
   prompts.push({
     content:
       rules.length > 0

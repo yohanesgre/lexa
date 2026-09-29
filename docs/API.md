@@ -823,10 +823,18 @@ entries appear on the next slideover open (documented).
 ```
 GET    /api/projects/:slug/mentions?q=
 → 200 { data: { tasks: [{ id, key, title }],
-                wikiPages: [{ id, slug, title }] } }
+                wikiPages: [{ id, slug, title }],
+                milestones: [{ id, name, slug, sublabel }],
+                swimlanes: [{ id, name, slug, sublabel }],
+                columns: [{ id, name, slug, sublabel }] } }
   Case-insensitive substring match on task key + title and wiki title +
   slug. Archived tasks are excluded (task-link search precedent). Tasks
   come first; ~8 results total (wiki fills the remainder after tasks).
+  milestones / swimlanes / columns match on name + derived slug and each
+  carry their own cap of 8 results (so an exact entity match is never
+  squeezed out by task hits); archived milestones and swimlanes are
+  excluded. These three have no `slug` column — `slug` is the derived
+  mention token and `sublabel` is the popup's one-line hint.
   Empty q → empty arrays (no unbounded listing).
   | 404 PROJECT_ACCESS_DENIED
 ```
@@ -1932,7 +1940,7 @@ DELETE /api/assistant/threads/:documentType/:documentId
   Resets the document thread — next run starts fresh.
 
 POST   /api/assistant/chat/stream           (freeform chat — no queue row)
-body { projectId*, chatId*, message*, agentId?, skillId?,
+body { projectId*, chatId*, message*, agentId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
        fromIndex?: number }
   Freeform chat ALWAYS runs the assistant lane (in-process).
@@ -1978,6 +1986,18 @@ body { projectId*, chatId*, message*, agentId?, skillId?,
   ≤20000 chars total context. Task-key grammar wins on ambiguity (a token
   that parses as a task key is never tried as a wiki slug); duplicate
   references to the same task/page resolve once; unknown tokens are ignored.
+
+  $-skill resolution (chat send contract): the message may contain `$name`
+  tokens (grammar: `$` followed by `[A-Za-z][A-Za-z0-9-]*`, so `$5`/`$PATH`
+  never parse). Each token is normalized (lowercase, non-alphanumerics → `-`)
+  and matched against the agent's junction-bound skills (`lexa_agent_skills`);
+  a match injects that skill's instructions as an EPHEMERAL `## Skill: {name}`
+  block in the system prompts for that request only — never into the persisted
+  message. Order of appearance, ≤3 skills per message (the 4th+ stays literal
+  text); an unbound/deleted token stays literal with nothing injected and no
+  error. The run also carries the agent's bound-skill catalog; the model may
+  read a skill in full with the read-only `get_skill` tool. Task/document run
+  bodies are unchanged (they still bind `agentId` + `skillId`).
 
 GET    /api/assistant/chat/:chatId
 → 200 { chatId, projectId, ownerUserId, agentId, skillId, messages, summary,

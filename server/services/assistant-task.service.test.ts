@@ -280,6 +280,20 @@ describe("task preflight — new run", () => {
     await drain(await runStream("at1"));
     expect(toolNames(providerMock.calls[0]!)).toContain("jev_assess");
   });
+
+  it("offers get_skill only when the agent has bound skills", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    queueRun("at1");
+    await drain(await runStream("at1"));
+    expect(toolNames(providerMock.calls[0]!)).toContain("get_skill");
+
+    providerMock.calls.length = 0;
+    db.exec("DELETE FROM lexa_agent_skills");
+    queueRun("at2");
+    await drain(await runStream("at2"));
+    expect(toolNames(providerMock.calls[0]!)).not.toContain("get_skill");
+  });
 });
 
 describe("task preflight — resume", () => {
