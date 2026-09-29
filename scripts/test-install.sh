@@ -210,14 +210,14 @@ assert_eq "migration skips when .env.toml exists" "absent" "$([ -f "${mdir}/.env
 # SEV1: a legacy .env carrying keys outside the installer whitelist must migrate,
 # not abort the install. These are loader-valid RuntimeEnv keys.
 migdir="$(mktemp -d)"
-printf 'LXK_SECRETS_MASTER_KEY=AAAA\nLOG_LEVEL=debug\nTYPESAFE_API_KEY=tf-key\nLXK_S3_BUCKET=bucket\nPORT="3100"\nLXK_API_KEY=dead\n' > "${migdir}/.env"
+printf 'LXK_SECRETS_MASTER_KEY=AAAA\nLOG_LEVEL=debug\nTANSTACK_AI_DEBUG=1\nLXK_S3_BUCKET=bucket\nPORT="3100"\nLXK_API_KEY=dead\n' > "${migdir}/.env"
 mig_rc=0
 lib_call migrate_legacy_deploy_env "${migdir}" >/dev/null 2>&1 || mig_rc=$?
 assert_rc "migration with non-whitelist keys does not die" 0 "$mig_rc"
 mig_body="$(cat "${migdir}/.env.toml" 2>/dev/null)"
 assert_grep "migration carries LXK_SECRETS_MASTER_KEY" '^LXK_SECRETS_MASTER_KEY = "AAAA"$' "$mig_body"
 assert_grep "migration carries LOG_LEVEL" '^LOG_LEVEL = "debug"$' "$mig_body"
-assert_grep "migration carries TYPESAFE_API_KEY" '^TYPESAFE_API_KEY = "tf-key"$' "$mig_body"
+assert_grep "migration carries TANSTACK_AI_DEBUG" '^TANSTACK_AI_DEBUG = "1"$' "$mig_body"
 assert_grep "migration carries storage key" '^LXK_S3_BUCKET = "bucket"$' "$mig_body"
 assert_grep "migration carries PORT=3100" '^PORT = "3100"$' "$mig_body"
 assert_eq "migration still drops dead key" "0" "$(grep -c 'LXK_API_KEY' "${migdir}/.env.toml" || true)"

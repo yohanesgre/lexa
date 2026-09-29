@@ -26,11 +26,14 @@ backups/lexa-<stamp>-blobs/<sha256>
 
 S3 buckets hold their own object copies — no `-blobs/` companions there.
 
-**A backup carries the CIPHERTEXT of managed MCP client tokens, never the
-master key.** A client credential entered in the webapp is stored AES-256-GCM
-encrypted in the `assistant_mcp_secrets` table, so every snapshot taken after
-migration `0011_mcp_managed_secrets.sql` includes those rows; the envelope key
-(`LXK_MCP_MASTER_KEY`, and its read-only `LXK_MCP_MASTER_KEY_PREV`) lives only in
+**A backup carries the CIPHERTEXT of managed secrets, never the master key.**
+Credentials entered in the webapp — MCP client tokens
+(`assistant_mcp_secrets`, migration `0011`), the Jev API key
+(`assistant_jev_secrets`, migration `0013`), and LLM provider API keys
+(`assistant_provider_secrets`, migration `0014`) — are stored AES-256-GCM
+encrypted, so a snapshot taken after the corresponding migration includes those
+rows; the envelope key
+(`LXK_SECRETS_MASTER_KEY`, and its read-only `LXK_SECRETS_MASTER_KEY_PREV`) lives only in
 the server environment and is never written to a backup, a D1 export, or any
 other artifact this process produces. **Keep the two apart: the master key must
 never be co-located with the backups** — not in the same bucket, volume, host,
@@ -38,9 +41,9 @@ or encrypted archive. Restoring a database elsewhere, or copying a snapshot to a
 third-party store, therefore hands over ciphertext that nobody but a holder of
 the key can open. This is the whole basis of the security claim behind managed
 secrets: it holds **only** under that separation, so a backup set plus its key
-is exactly as sensitive as the plaintext tokens it replaces, and must be guarded
-accordingly. Losing the key with no `LXK_MCP_MASTER_KEY_PREV` fallback is
-permanent loss of every stored token (they can be re-entered; nothing else can
+is exactly as sensitive as the plaintext secrets it replaces, and must be guarded
+accordingly. Losing the key with no `LXK_SECRETS_MASTER_KEY_PREV` fallback is
+permanent loss of every stored secret (they can be re-entered; nothing else can
 recover them). See `docs/DEPLOYMENT.md` for the variable reference and rotation.
 
 ## 2. Enable
@@ -93,12 +96,11 @@ Behavior when enabled (`server/entry.ts`):
    companion set from §1). Skip for s3 — objects never left the bucket.
 6. **Restart the server.** Migrations run at boot and are a no-op — the
    snapshot already carries the current schema. The restoring host must have
-   `LXK_MCP_MASTER_KEY` (and `LXK_MCP_MASTER_KEY_PREV`, if the snapshot predates a
+   `LXK_SECRETS_MASTER_KEY` (and `LXK_SECRETS_MASTER_KEY_PREV`, if the snapshot predates a
    finished rotation) set in **its own** environment — the key is not in the
-   snapshot (§1), so a restore onto a host without it brings back MCP clients
-   whose stored tokens cannot be opened (they fail with
-   `MCP_CONNECT_FAILED` until each token is re-entered; everything else is
-   unaffected).
+   snapshot (§1), so a restore onto a host without it brings back stored secrets
+   that cannot be opened (MCP tokens and provider/Jev keys fail until each is
+   re-entered; everything else is unaffected).
 7. **Verify**: `curl http://localhost:3000/api/health` → `{"ok":true}`, then
    spot-check boards/attachments in the UI.
 

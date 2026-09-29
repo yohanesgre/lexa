@@ -69,7 +69,7 @@ All non-2xx responses share one shape:
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
-| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant provider settings first save without an apiKey (`apiKey required on first save`); Assistant attachment scope/cap violations |
+| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant attachment scope/cap violations |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (one shared bucket; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
@@ -83,6 +83,10 @@ All non-2xx responses share one shape:
 | 409 | `ASSISTANT_TASK_ACTIVE` | Thread reset or second chat stream while an Assistant stream is running |
 | 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row |
 | 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
+| 400 | `SECRET_KEY_UNAVAILABLE` | A managed provider key or Jev key was submitted but `LXK_SECRETS_MASTER_KEY` is unset or malformed (an MCP token save is refused as `MCP_INVALID_TRANSPORT_CONFIG` instead) |
+| 400 | `JEV_INVALID_CONFIG` | Jev registry payload refused: `clearSecret` + `secret`, invalid base URL, or model length (details: `{ reason }`) |
+| 502 | `JEV_AUTH_FAILED` | Jev rejected the stored API key (upstream 401/403) |
+| 502 | `JEV_UNREACHABLE` | Any non-401/403 Jev failure — network/timeout/5xx, rate limit, or an unreadable response |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
@@ -1447,31 +1451,63 @@ body same as test
 
 ### Assistant Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
 
-Global provider registry. `assistant_providers` holds the credentials/base URLs;
+Global provider registry. `assistant_providers` holds the label/base URL;
 `assistant_models` holds per-model kind/priority/enabled; `assistant_call_logs` is
 append-only; `assistant_model_prices` is the OpenRouter price cache. Gateway
 streams with cross-kind fallback (≤3, priority-ordered), fresh adapter per
 attempt, cost via `assistant_model_prices` (OpenRouter fetch).
 
+Provider API keys are **managed secrets**, not columns: a key is entered here,
+stored AES-256-GCM encrypted in `assistant_provider_secrets` (scope `provider`,
+AAD-bound to the provider id), and never serialized. Responses expose `hasKey`
+and `keyMask` and never a value; `apiKey` is **write-only by construction** (it
+exists on the request schemas and not on the response shape). The legacy
+`assistant_providers.api_key` column is **dead** in this release (writes `''`;
+only the one-way boot backfill reads it) and is dropped in the next release.
+Storing a key needs `LXK_SECRETS_MASTER_KEY`; without it the save is refused with
+400 `SECRET_KEY_UNAVAILABLE` and stores nothing (a keyless provider stays legal).
+
 ```
 GET    /api/admin/assistant/providers   (superadmin)
-→ 200 { data: AssistantProviderMasked[] }   AssistantProviderMasked = { id, label, baseUrl, hasKey, keyMask, createdAt, updatedAt }
+→ 200 { data: AssistantProviderMasked[], secretsEnabled: boolean }
+  AssistantProviderMasked = { id, label, baseUrl, hasKey, keyMask, createdAt, updatedAt }
   | 403 FORBIDDEN
+  `secretsEnabled` is additive and read-only: `true` when an
+  `LXK_SECRETS_MASTER_KEY` is configured (a malformed one still reports `true`,
+  so the save path's 400 names the required shape). Clients
+  gate the key UI on it; it never exposes the key or any ciphertext.
 
 POST   /api/admin/assistant/providers   (superadmin)
 body { label*, baseUrl*, apiKey* }   // baseUrl = provider base URL, apiKey = provider secret
-→ 200 AssistantProviderMasked (masked view of the created row) | 403 FORBIDDEN
+  An **empty** `apiKey` string registers a keyless provider (the field is
+  required and must be present). Supplying one encrypts
+  it; without a master key → 400 SECRET_KEY_UNAVAILABLE and nothing is created.
+→ 200 AssistantProviderMasked (masked view of the created row)
+  | 400 SECRET_KEY_UNAVAILABLE | 403 FORBIDDEN
 
 PATCH  /api/admin/assistant/providers/:id   (superadmin)
-body { label?, baseUrl?, apiKey? }   // patch — omitted fields unchanged; updated_at = datetime('now')
-→ 200 AssistantProviderMasked | 403 FORBIDDEN | 404 (RowNotFound → NOT_FOUND)
+body { label?, baseUrl?, apiKey?, clearKey? }   // patch — omitted fields unchanged; updated_at = datetime('now')
+  Secret intent is read from the REQUEST only: an omitted or empty `apiKey`
+  means **keep** the stored key (an empty string never clears anything), and
+  `clearKey: true` is the only removal route — it deletes the ciphertext row,
+  works even with no master key configured, and is refused when combined with a
+  non-empty `apiKey`. A non-empty `apiKey` replaces the stored key and needs the master key.
+→ 200 AssistantProviderMasked
+  | 400 SECRET_KEY_UNAVAILABLE (unset or malformed master key on a key write)
+  | 422 INVALID_ARGS (clearKey + non-empty apiKey in the same request)
+  | 403 FORBIDDEN | 404 (RowNotFound → NOT_FOUND)
 
 DELETE /api/admin/assistant/providers/:id   (superadmin)
-→ 204 | 403 FORBIDDEN | 404
+→ 204 | 403 FORBIDDEN | 404 | 409 HAS_CHILDREN (models still referenced by a project's fallback set)
 
 POST   /api/admin/assistant/providers/:id/test   (superadmin)
-→ 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404 | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
+→ 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404
+  | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
   Live probe: listModels against the stored provider row (kind openai_compatible, model "test").
+  A stored key that cannot be opened with the configured master key is a hard
+  502 PROVIDER_AUTH_FAILED with the fixed message
+  `stored provider key could not be decrypted with the configured master key — re-enter the key`
+  (never a silent empty credential).
 
 POST   /api/admin/assistant/providers/:id/models   (superadmin)
 → 200 { data: AssistantModelRow[] }   AssistantModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
@@ -1552,7 +1588,7 @@ GET    /api/assistant/mcp-servers   (superadmin)
 → 200 { data: McpServer[], managedSecretsEnabled: boolean }   // every registered remote client; empty until one is created
   | 403 FORBIDDEN
   `managedSecretsEnabled` is additive and read-only: `true` when the server holds
-  a usable `LXK_MCP_MASTER_KEY`, so a client can store a managed token. Clients
+  a usable `LXK_SECRETS_MASTER_KEY`, so a client can store a managed token. Clients
   gate the managed-token UI on it — an absent key disables the option and any
   managed save is refused with MCP_INVALID_TRANSPORT_CONFIG. It never exposes the
   key or any ciphertext.
@@ -1568,7 +1604,7 @@ body { label*, transportType*, url?, command?, args?, secretRef?, secret?, enabl
   (or empty) stores a secret-less client. `secretRef` is deprecated and
   accepted-and-ignored — a non-empty value emits one structured `WARN` on stderr
   and has no effect on the created row (an older client's payload still decodes
-  rather than 400ing). Storing a token requires `LXK_MCP_MASTER_KEY`; without it
+  rather than 400ing). Storing a token requires `LXK_SECRETS_MASTER_KEY`; without it
   the save is refused with 400 MCP_INVALID_TRANSPORT_CONFIG and nothing is
   stored, while a secret-less client is still legal.
 → 201 McpServer | 400 MCP_INVALID_TRANSPORT_CONFIG | 404 MCP_SERVER_NOT_FOUND
@@ -1625,8 +1661,8 @@ Notes:
   so no response can carry a value).
   - `secret` is a managed Bearer token, stored AES-256-GCM encrypted in
     `assistant_mcp_secrets` (migration `0011_mcp_managed_secrets.sql`); the
-    master key lives only in the environment (`LXK_MCP_MASTER_KEY`, with
-    `LXK_MCP_MASTER_KEY_PREV` as the rotation read path). Plaintext exists only
+    master key lives only in the environment (`LXK_SECRETS_MASTER_KEY`, with
+    `LXK_SECRETS_MASTER_KEY_PREV` as the rotation read path). Plaintext exists only
     in the request and in the encrypt call — never in a registry row, a log line,
     or a response. At connect it becomes the single header
     `Authorization: Bearer <secret>`; a genuinely secret-less client sends no
@@ -1647,7 +1683,7 @@ Notes:
     ("empty means keep" is exactly why clear needs its own flag). It is a pure
     row delete, so it works with **no master key configured** — a credential can
     always be revoked, including on a deployment whose key is gone.
-  - **Required to store, disabled without it:** when `LXK_MCP_MASTER_KEY` is
+  - **Required to store, disabled without it:** when `LXK_SECRETS_MASTER_KEY` is
     unset, a save carrying `secret` is refused with 400
     `MCP_INVALID_TRANSPORT_CONFIG` and stores nothing; a secret-less client is
     still legal, and a client that already has a stored token keeps
@@ -1665,7 +1701,7 @@ Notes:
     the **assistant run** the same refusal is fail-open bridge behavior — the
     server is skipped with a `WARN` line on stderr and its tools are simply
     unavailable for that run, while the rest of the session continues. Rotation is
-    rewrap-free: `LXK_MCP_MASTER_KEY_PREV` keeps old rows readable, and
+    rewrap-free: `LXK_SECRETS_MASTER_KEY_PREV` keeps old rows readable, and
     re-encrypting a row means re-entering the token in the webapp.
 - **Legacy compatibility:** a stored `secret_ref` is **dead** — a connect
   refuses it with `MCP_CONNECT_FAILED` (never an anonymous connect) until any
@@ -1682,6 +1718,70 @@ Notes:
   shape for compatibility; clients created through the API always store
   `command = null` and `args = []`, and a payload that supplies either is
   rejected rather than stripped.
+
+### Assistant Jev (superadmin config + per-project opt-in)
+
+Typesafe Jev is a typed System 1 judgment API, not a chat provider and not an MCP
+client. Its configuration lives in the DB registry, not in env:
+`assistant_jev_config` (singleton base URL / model / enabled),
+`assistant_jev_secrets` (the envelope-encrypted API key), and
+`assistant_jev_projects` (per-project opt-in, absence = disabled). The API key is
+**write-only by construction** — it exists on the PATCH payload and never on a
+response — and responses expose `hasKey` / `keyMask` only.
+
+```
+GET    /api/assistant/jev   (superadmin → 403 FORBIDDEN otherwise)
+→ 200 { config, secretsEnabled }
+  AssistantJevMasked = { id: "default", baseUrl, model, enabled, hasKey,
+                         keyMask: string|null, createdAt, updatedAt }
+  | 403 FORBIDDEN
+  `secretsEnabled` is additive and read-only: `true` when an
+  `LXK_SECRETS_MASTER_KEY` is configured (a malformed one still reports `true`,
+  so the save path's 400 names the required shape), which lets a Jev key be
+  stored. It never exposes the key or any ciphertext.
+
+PATCH  /api/assistant/jev   (superadmin)
+body { baseUrl?, model?, enabled?, secret?, clearSecret? }
+  `secret` is write-only, at most 4096 characters; an omitted or empty `secret`
+  means **keep** (an empty string never clears anything), and `clearSecret: true`
+  is the only removal route — a pure row delete that works with **no master key**
+  configured, and is refused when combined with a non-empty `secret`. `baseUrl`
+  must be an absolute http(s) URL with no userinfo;
+  `model` is 1–120 characters.
+→ 200 { config, secretsEnabled }
+  | 400 JEV_INVALID_CONFIG (clearSecret + non-empty secret; invalid baseUrl; bad model)
+  | 400 SECRET_KEY_UNAVAILABLE (a secret with unset or malformed master key)
+  | 403 FORBIDDEN
+
+POST   /api/assistant/jev/test   (superadmin)
+→ 200 { ok: true, latencyMs: number, models: string[] }
+  | 400 JEV_INVALID_CONFIG (no stored, openable key: "Jev is not configured — add an API key first")
+  | 403 FORBIDDEN
+  | 502 JEV_AUTH_FAILED (upstream 401/403) | 502 JEV_UNREACHABLE (network/timeout/5xx/unreadable)
+  Probes the config before it is switched on: the enabled flags are ignored, but
+  a stored, openable key is required. No API response body is echoed.
+
+GET    /api/projects/:id/assistant/jev   (project member — requireProjectReadById)
+→ 200 { projectId, enabled, available, createdAt: string|null, updatedAt: string|null }
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+  `available` is additive: `true` when Jev is usable for projects at all (global
+  config enabled AND a stored, openable key). It deliberately ignores this
+  project's own row, so a member without superadmin read access can render the
+  disabled toggle + "configure Jev" notice. Never key material. `enabled` is this
+  project's opt-in; a project with no row reads `enabled: false` with null
+  timestamps.
+
+PUT    /api/projects/:id/assistant/jev   (project admin — requireProjectAdminById)
+body { enabled: boolean }
+→ 200 { projectId, enabled, available, createdAt, updatedAt }
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+```
+
+Jev is advisory and fails open: an absent/undecryptable key makes per-run
+resolution return `null`, so the preflight is simply not attempted and the
+assistant run proceeds unchanged. Storing a key is refused with 400
+`SECRET_KEY_UNAVAILABLE` when the master key is unset or malformed; clearing one
+never needs it.
 
 GET    /api/admin/assistant/runs?status=&projectId=&limit=&cursor=   (superadmin)
 → 200 { data: AssistantRunRow[], nextCursor: string|null,

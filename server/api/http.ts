@@ -3528,7 +3528,7 @@ function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): 
 
 // test/models take UNSAVED submitted values; an omitted apiKey falls back to
 // the stored one so testing a saved config doesn't require re-entering the key.
-// After 0017 legacy kind/baseUrl/model/apiKey columns are gone — payload is optional and fallback is gateway.
+// The baseline migration dropped the legacy kind/baseUrl/model/apiKey settings columns — payload is optional and fallback is gateway.
 // Unsaved providerId/modelId (assistant-project.tsx Test) resolves to the same ProviderConfig as the persisted binding.
 const resolveProviderConfig = (
   projectId: string,

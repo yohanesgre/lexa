@@ -415,7 +415,7 @@ write_env_toml() {
 # write_env_toml_loader <path> <key=value...>
 # Migration write path: accepts every key the loader can represent
 # (^[A-Z][A-Z0-9_]*$), not just the installer whitelist, so a legacy `.env`
-# carrying LXK_SECRETS_MASTER_KEY / LOG_LEVEL / TYPESAFE_* / storage keys survives.
+# carrying LXK_SECRETS_MASTER_KEY / LOG_LEVEL / TANSTACK_AI_* / storage keys survives.
 write_env_toml_loader() {
   local path="$1"
   shift

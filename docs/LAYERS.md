@@ -1038,20 +1038,29 @@ Wiring: `AssistantChatService` (stream + resume) and `AssistantTaskService`
 tool), and pass `onDispose: toolset.close`. The live connector is the API-layer
 default (`createApiHandler(..., { mcpConnector })` still overrides for tests).
 
-### Managed MCP client secrets — `server/assistant/mcp-secret.ts`
+### Managed secrets module — `server/assistant/secrets.ts`
 
-A client credential is **entered** in the webapp (managed-only since
-2026-09-28 — the env:/file: reference source is gone). It is envelope-encrypted
-with AES-256-GCM and stored in `assistant_mcp_secrets`; the master key lives
-only in the environment. Prose-only (no invariant registration), consistent
-with the other MCP rules above.
+One plain assistant-tier module envelope-encrypts every credential the webapp
+manages — MCP client tokens (`mcp`), LLM provider API keys (`provider`), and the
+Jev API key (`jev`). A credential is **entered** in the webapp and stored
+AES-256-GCM encrypted in the scope's table
+(`assistant_mcp_secrets` / `assistant_provider_secrets` / `assistant_jev_secrets`);
+the master key lives only in the environment. Prose-only (no invariant
+registration), consistent with the other MCP rules above.
 
 ```typescript
-// server/assistant/mcp-secret.ts — PLAIN module, not an Effect.Service.
-export async function mcpKeyringFromEnv(env): Promise<McpKeyring | null>  // null = no active key
+// server/assistant/secrets.ts — PLAIN module, not an Effect.Service, no DB, no
+// Node builtins (Web Crypto + atob/btoa only), so it runs on Bun and workerd.
+export const SECRET_AAD_PREFIXES: Record<SecretScope, string>
+//   mcp: "lexa-mcp-v1" (FROZEN — stored MCP blobs authenticate against it)
+//   provider: "lexa-provider-v1" | jev: "lexa-jev-v1"
+export async function secretsKeyringFromEnv(env): Promise<SecretKeyring | null>  // null = no active key
+export async function secretsManagedEnabled(env): Promise<boolean>
 export async function parseMasterKey(raw: string | null | undefined): Promise<CryptoKey>
-export async function encryptMcpSecret(plaintext, serverId, key, keyring?): Promise<McpEncryptedSecret>
-export async function decryptMcpSecret(row: McpSecretRow, keyring: McpKeyring): Promise<string>
+export async function encryptSecret(plaintext, scope, ownerId, key, keyring?): Promise<EncryptedSecret>
+export async function decryptSecret(row: SecretRow, keyring: SecretKeyring): Promise<string>
+export function keyIdFor(key): SecretKeyId | null
+export function keyringFromKeys(active, prev?): SecretKeyring
 ```
 - **Key handling.** `parseMasterKey` imports as **non-extractable**
   (`extractable: false`), so the raw bytes cannot be read back out of the
@@ -1061,20 +1070,70 @@ export async function decryptMcpSecret(row: McpSecretRow, keyring: McpKeyring): 
   `WeakMap` keyed by the `CryptoKey` object, so a key imported twice re-registers
   under the same slot rather than colliding, and an unregistered key is refused
   rather than mislabelled.
+- **Scope + owner are authenticated, not just stored.** The AAD is
+  `<prefix>:<ownerId>` with a frozen prefix per scope, so a blob copied onto
+  another row or another scope fails to decrypt. Scope names and prefixes are a
+  closed vocabulary (`mcp` / `provider` / `jev`); `lexa-mcp-v1` must never
+  change.
+- **`key_id` is the keyring slot** (`active` / `prev`), never a fingerprint,
+  counter, or date. `decryptSecret` tries the active key first and falls back to
+  `prev`, so a rotation demotes the active key without a rewrap; an unknown slot
+  is refused before any key is tried. Every failure class (wrong key, tampered
+  blob, foreign owner/scope, unknown slot) is one fixed message —
+  `SECRET_DECRYPT_FAILED` — so nothing about the row leaks.
+- **Unset vs malformed.** `secretsKeyringFromEnv` returns `null` for an unset
+  key (the documented disable switch: a managed save is refused and secret-less
+  use keeps working); a configured-but-malformed key is an error, never a silent
+  disable. `secretsManagedEnabled` reads the same env snapshot the save path
+  reads (unset → `false`, malformed → `true`) so the rendered capability and the
+  enforced one cannot drift, and it never throws.
 
-### Jev advisory boundary — `server/assistant/jev.ts` + `jev_assess`
+### Provider secrets — `AssistantProvidersService`
+
+Provider API keys use the shared envelope module scoped `provider`, AAD-bound to
+the provider id. `AssistantProvidersRepo` keeps the blob out of the registry
+(LEFT-JOIN aliases `secret_ciphertext` / `secret_iv` / `secret_key_id`);
+`AssistantProvidersService` seals on create/update (`clearKey: true` is the only
+removal route and is crypto-free), and `resolveApiKey` / `resolveApiKeyForRow`
+open a stored key for the test/probe endpoints and the gateway. A stored but
+unopenable key is a hard `ProviderAuthFailed` with the fixed
+`PROVIDER_KEY_UNDECRYPTABLE` message — never a silent empty header.
+
+- **Boot backfill (`server/db/provider-secrets-backfill.ts`).** One-way and
+  idempotent: every non-empty `assistant_providers.api_key` is encrypted into
+  `assistant_provider_secrets` (scope `provider`) and the legacy column is then
+  written `''`. No keyring → nothing is written and the blocked count is logged;
+  a credential is never cleared before a usable replacement is stored. It runs
+  after the env mirror at Bun boot (`server/entry.ts`) and, on Workers, on the
+  per-isolate first request inside `ensureBoot` (`server/workers-entry.ts`) —
+  concurrent cold starts share one boot promise, and re-running is a no-op. The
+  legacy column is dead in Release N and dropped in Release N+1.
+
+### Jev advisory boundary — `server/assistant/jev.ts` + `AssistantJevService` + `jev_assess`
 
 Typesafe Jev is a **typed System 1 judgment REST API**, not a chat-completion
-provider, a text-generation model, or an MCP endpoint. There is **no
-`Effect.Service` and no service-layer dependency for it**: `jev.ts` is a plain
-async module in the assistant tier, exactly like `mcp.ts`, and the chat/task
-services *call* it — nothing calls *it*.
+provider, a text-generation model, or an MCP endpoint. `server/assistant/jev.ts`
+stays a **plain assistant-tier module** — no `Effect.Service`, no DB, no service
+edge — and the chat/task services *call* it; nothing calls *it*. Configuration is
+no longer env: it lives in the DB registry (`assistant_jev_config` /
+`assistant_jev_secrets` / `assistant_jev_projects`, migration 0013) and is
+resolved per request by `AssistantJevService` over `AssistantJevRepo`.
 
 ```typescript
-// server/assistant/jev.ts — plain module, no Effect, no tags, no deps.
+// server/services/assistant-jev.service.ts — Effect.Service over AssistantJevRepo.
+resolveForProject(projectId): Effect<JevRuntimeConfig | null>
+//   global enabled=1 AND the project row enabled=1 AND a stored, openable key.
+projectAvailable(): Effect<boolean>
+//   global enabled=1 AND a stored, openable key — this project's row is ignored,
+//   so a member can render the disabled toggle without superadmin read access.
+readConfig(): Effect<{ config, secretsEnabled }>   // masked: hasKey/keyMask only
+updateConfig(input): Effect<...>                   // baseUrl/model/enabled/secret/clearSecret
+probe(): Effect<{ ok, latencyMs, models }>         // backing POST /assistant/jev/test
+
+// server/assistant/jev.ts — plain module, no Effect, no tags, no deps, no DB.
+export interface JevRuntimeConfig { apiKey: string; baseUrl: string; model: string }
 export async function systemOne(params: SystemOneParams): Promise<JevResult>
-//   POST {baseUrl}/v1/systemone, Bearer auth, { state, model, questions }.
-//   Total: every failure is a typed { ok:false, code } — it never throws.
+export async function listJevModels(params): Promise<JevModelsResult>
 export function buildPreflightState(input: PreflightStateInput): string
 export const PREFLIGHT_QUESTIONS: JevQuestions
 export function buildAdvisorySegment(answers: Record<string, JevAnswer> | null | undefined): string
@@ -1082,21 +1141,46 @@ export async function runJevPreflight(params: JevPreflightParams): Promise<JevPr
 export function jevLog(mode: "preflight" | "assess", result: JevLogMeta): void
 ```
 
-- **Transport (`systemOne`)** is total and typed. Failure codes:
-  `MISSING_KEY | TIMEOUT | NETWORK | AUTH | RATE_LIMITED | INVALID_RESPONSE |
-  HTTP_<status>`; 401/403 → `AUTH`, 429/529 → `RATE_LIMITED` (529 is Typesafe's
-  overload signal), anything else non-ok → `HTTP_<status>`. **No retry** — a
-  retry cannot fit the 3s preflight budget and the caller fails open on one
-  attempt. A missing/blank key returns `MISSING_KEY` before any request, so
-  Jev can never send an anonymous `Bearer " "`. The response body is read under
-  a hard 64 KB cap (`content-length` short-circuit + a streaming byte counter
-  that cancels the reader), so an oversized or endless body is never
-  materialized. Every answer is re-validated (`noul`/`choice`/`score` shapes,
-  `noul ∈ [0,1]`) and **every question asked must come back answered**, or the
-  whole call is `INVALID_RESPONSE`. Upstream text never reaches a Lexa message:
-  transport errors are reported as a fixed catalog string.
+- **The registry is the disable switch; the env keys are gone.** The historical
+  Jev env-only variables no longer exist. Jev runs only when the singleton config
+  row is `enabled = 1`, the project has an enabled `assistant_jev_projects` row,
+  and a key is stored and openable under the shared master key
+  (`LXK_SECRETS_MASTER_KEY`, scope `jev`, AAD-bound to `config_id`).
+  `resolveForProject` is total — any failure (row missing, flags off, key absent,
+  keyring unset, blob undecryptable) yields `null`, and every caller fails open.
+  The project read's additive `available` is that same resolution minus the
+  project row, so a non-superadmin can render the disabled toggle + configure
+  notice without ever touching key material.
+- **Transport is the official SDK under our cap.** `jev.ts` uses
+  `@typesafe-ai/sdk` (`TypeSafeClient`, pinned `0.6.0`) with `cappingFetch` as
+  its `fetch`. `cappingFetch` owns the 64 KB cap on **both** ok and non-ok
+  bodies: a declared `content-length` short-circuits the read, otherwise a
+  streaming byte counter cancels the reader at the cap. On a 2xx an over-cap body
+  throws before the SDK can materialize it; on a non-ok response the body is
+  capped and returned (the SDK reads it to build its error) **without** throwing —
+  an oversized error body is not a failure of its own, the recorded status is.
+  Client options are `retry: { maxRetries: 0 }`, a per-attempt `timeout`, and
+  `logLevel: "off"`; the client is rebuilt per call because base URL / model /
+  key are request-time DB values, never process constants.
+- **Failure is a closed, typed vocabulary that never quotes upstream.** Every
+  thrown SDK/transport error reduces to `MISSING_KEY | TIMEOUT | NETWORK | AUTH |
+  RATE_LIMITED | INVALID_RESPONSE | HTTP_<status>`: a capping breach →
+  `INVALID_RESPONSE`, an abort/timeout error name → `TIMEOUT`, 401/403 → `AUTH`,
+  429/529 → `RATE_LIMITED` (529 is Typesafe's overload signal), any other status
+  the transport saw → `HTTP_<status>`, no status → `NETWORK`. No branch reads the
+  error's own message — it can quote the key or the response body; failures are
+  reported as a fixed catalog string. A missing/blank key returns `MISSING_KEY`
+  before any request, so Jev never sends an anonymous `Bearer " "`. Every answer
+  is re-validated (`noul`/`choice`/`score` shapes, `noul ∈ [0,1]`) and **every
+  question asked must come back answered**, or the whole call is
+  `INVALID_RESPONSE`.
+- **No retry, fail-open.** A retry cannot fit the 3s preflight budget, and both
+  paths fail open on one attempt: the preflight yields no block and no throw, the
+  tool returns a typed failure the model can read and route around.
 - **Preflight flow (once per NEW run).** `AssistantChatService.runChatStream`
-  and `AssistantTaskService.runStream` build the state from inputs the run has
+  and `AssistantTaskService.runStream` resolve the config once per run through
+  `AssistantJevService` (the service already encodes global-enabled + project
+  opt-in + a usable key), then build the state from inputs the run has
   *already loaded* — run kind, project/thread ids + labels, the latest user
   message, the task/wiki context, project-memory hits — and await the verdict
   **before** `buildStream` (so the advisory is in the prompt the model gets).
@@ -1107,7 +1191,8 @@ export function jevLog(mode: "preflight" | "assess", result: JevLogMeta): void
   2 000, task/wiki context 4 000, serialized state 8 000 — the total closed by a
   deterministic squeeze (context first, then message, then the memory tail).
   `clip()` marks a shortened field with `…`; see **lossy paths** below for what
-  the squeeze drops without a marker.
+  the squeeze drops without a marker. A `null` config is the documented disable
+  switch: `runJevPreflight` returns `skipped` without attempting a request.
 - **Fixed questions** (`PREFLIGHT_QUESTIONS`, stable ids — changing one is a
   behavior change): `write_intent` (choice `none|read|write`), `ambiguity`
   (noul), `memory_conflict` (noul). The advisory segment
@@ -1118,10 +1203,10 @@ export function jevLog(mode: "preflight" | "assess", result: JevLogMeta): void
   choice is filtered against the closed option set so upstream text can never
   reach the prompt verbatim.
 - **`jev_assess` tool** (`server/assistant/tools.ts`, `buildJevAssessTool`) is
-  added to the toolset **only when `TYPESAFE_API_KEY` is a non-blank string** —
-  the same gate shape as `web_search`'s Exa key, so an unconfigured Jev leaves
-  the toolset byte-identical. Input is a bounded `state` plus a
-  `z.discriminatedUnion` mirror of the `noul`/`choice`/`score` contract (a
+  added to the toolset **only when the run resolved a config** (`jevConfig`
+  absent/null omits it entirely) — the same gate shape as `web_search`'s Exa key,
+  so a disabled Jev leaves the toolset byte-identical. Input is a bounded `state`
+  plus a `z.discriminatedUnion` mirror of the `noul`/`choice`/`score` contract (a
   malformed question never reaches the wire). Result is typed: `{ ok:true,
   answers, usage }` or `{ ok:false, code, message }` — a failure never throws
   into the stream, so the model can read it and continue.
@@ -1149,12 +1234,13 @@ export function jevLog(mode: "preflight" | "assess", result: JevLogMeta): void
   request — but the `jev_assess` tool **is** still offered, because its budget
   is per stream invocation. The tools are therefore assembled on both paths;
   only the preflight is new-run-only.
-- **Env is read at call time.** `currentEnv` (`server/runtime-env.ts`) is
-  resolved when a service *method* runs, not when its layer is built, so the
+- **Env and DB are read at call time.** `currentEnv` (`server/runtime-env.ts`)
+  is resolved when a service *method* runs, not when its layer is built, so the
   `RuntimeEnv` snapshot must be provided to the effect (the same place
   `server/api/http.ts` provides it per request) and not only to the built
-  layer. Missing that is a `Service not found` defect at run time, not a typed
-  error.
+  layer — this is what lets the master key be read per save/resolve. The Jev
+  config row is likewise read per request, never cached at layer build. Missing
+  the env is a `Service not found` defect at run time, not a typed error.
 - **Logging is bounded by type.** `jevLog` takes `(mode, result)` and the meta is
   declared field by field, so a rendered advisory segment cannot ride along in a
   log line. One stderr line: `mode`, `outcome`, `code?`, `latencyMs?`,
@@ -1162,19 +1248,22 @@ export function jevLog(mode: "preflight" | "assess", result: JevLogMeta): void
   caller's own typed code (`JevFailureCode` for the preflight,
   `JevAssessFailureCode` for the tool); `latencyMs` is omitted when the call
   never reached the network (e.g. the per-stream budget refusal) rather than
-  logged as a fabricated 0. A `MISSING_KEY` preflight — an unconfigured Jev, a
-  deployment state rather than a run event — logs no line at all, so the
-  `skipped` outcome is returned but not written once per run.
-- **No cycle (invariant #1), no write (invariant #12).** `jev.ts` imports only
-  a `RuntimeEnv` *type* — never a repo, a service, or `GitHubService`; the
-  assistant services depend on it, never the reverse. Jev is advisory text: it
-  cannot queue a write, apply a pending row, or emit `task_activity`. Writes
-  still go through the existing approval protocol, and the advisory footer says
-  so to the model in-band.
+  logged as a fabricated 0. A `MISSING_KEY` preflight — Jev disabled or
+  unconfigured, a deployment state rather than a run event — logs no line at all,
+  so the `skipped` outcome is returned but not written once per run.
+- **No cycle (invariant #1), no write (invariant #12).** `jev.ts` imports nothing
+  from a repo or service — only the SDK and its own types; the assistant services
+  depend on it, never the reverse. `AssistantJevService` sits beside the chat/task
+  services and imports the repo, the secrets module, and the error catalog, never
+  a chat/task service. Jev is advisory text: it cannot queue a write, apply a
+  pending row, or emit `task_activity`. Writes still go through the existing
+  approval protocol, and the advisory footer says so to the model in-band.
 
-Tests: `server/assistant/jev.test.ts` (state caps, exclusions, advisory
-rendering, preflight fail-open/disable, log shape) + the service-level suites
-`server/services/assistant-chat.service.test.ts` and
+Tests: `server/assistant/jev.test.ts` (SDK fake-fetch transport, status mapping,
+caps, no-retry, invalid answers, preflight fail-open/disable, log shape),
+`server/services/assistant-jev.service.test.ts` / `assistant-jev.repo.test.ts`
+(seeding, secret upsert/rotate, intent + resolution matrices), and the
+service-level suites `server/services/assistant-chat.service.test.ts` and
 `assistant-task.service.test.ts`, which fake `fetch` and prove the advisory
 reaches the real prompt, resume makes zero Jev calls, every failure mode leaves
 the run intact, and Jev emits no `task_activity` of its own.

@@ -693,6 +693,9 @@ CREATE TABLE assistant_settings (
 );
 
 -- Assistant Gateway: global providers (no project_id) — superadmin-only.
+-- `api_key` is a DEAD column in Release N: it stays NOT NULL, every write stores
+-- '' (the empty string), and only the one-way boot backfill reads it. Release N+1
+-- drops it (migration 0015). The live credential is `assistant_provider_secrets`.
 CREATE TABLE assistant_providers (
   id TEXT PRIMARY KEY,
   label TEXT NOT NULL,
@@ -893,7 +896,7 @@ CREATE TABLE assistant_mcp_project_servers (
 --
 -- A client credential entered in the webapp is stored here as AES-256-GCM
 -- ciphertext; the master key never leaves the environment
--- (LXK_MCP_MASTER_KEY, with LXK_MCP_MASTER_KEY_PREV as the rotation read
+-- (LXK_SECRETS_MASTER_KEY, with LXK_SECRETS_MASTER_KEY_PREV as the rotation read
 -- path). `key_id` records the keyring SLOT the blob was encrypted under
 -- ('active' | 'prev') — never a fingerprint, counter, or date — so a rotation
 -- keeps existing rows readable through the PREV slot and needs no rewrap.
@@ -926,6 +929,61 @@ CREATE TABLE assistant_mcp_secrets (
 -- again (the repo nulls it on every write). Ciphertext rows are untouched, so a
 -- managed token stays usable across the migration.
 UPDATE assistant_mcp_servers SET secret_ref = NULL WHERE secret_ref IS NOT NULL;
+
+-- 0013_jev_registry.sql — Jev (Typesafe System 1) moves out of env into a DB
+-- registry. New tables only: no ALTER, no rebuild, no data movement.
+--
+-- Jev's three historical env keys are deleted; base URL + model become config
+-- columns and the API key is stored as
+-- AES-256-GCM ciphertext in `assistant_jev_secrets` under the shared secrets
+-- keyring (LXK_SECRETS_MASTER_KEY), scoped 'jev' and AAD-bound to the config row.
+-- `assistant_jev_projects` is opt-in per project. `INSERT OR IGNORE` seeds the
+-- singleton so `getConfig`'s LEFT JOIN always has a row to hang a secret on.
+CREATE TABLE assistant_jev_config (
+  id TEXT PRIMARY KEY CHECK (id = 'default'),
+  base_url TEXT NOT NULL DEFAULT 'https://api.typesafe.ai',
+  model TEXT NOT NULL DEFAULT 'jev-latest',
+  enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO assistant_jev_config (id) VALUES ('default');
+
+CREATE TABLE assistant_jev_secrets (
+  config_id TEXT PRIMARY KEY REFERENCES assistant_jev_config(id) ON DELETE CASCADE,
+  ciphertext TEXT NOT NULL,   -- base64, AES-256-GCM (ciphertext||128-bit tag)
+  iv TEXT NOT NULL,           -- base64, 12 random bytes per write
+  key_id TEXT NOT NULL,       -- 'active' | 'prev' — the keyring slot
+  key_hint TEXT NOT NULL,     -- last 4 chars of the entered key, display only
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE assistant_jev_projects (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 0014_provider_secrets.sql — LLM provider credentials move from the plaintext
+-- `assistant_providers.api_key` column into envelope-encrypted rows. New table
+-- only (no ALTER, no rebuild).
+--
+-- Release N ships this file plus the one-way boot backfill
+-- (server/db/provider-secrets-backfill.ts), which encrypts every non-empty
+-- `api_key` into this table and then writes '' (the column is NOT NULL). All
+-- writes store '' from here on; only the backfill reads the legacy column. The
+-- live credential is scoped 'provider' and AAD-bound to the provider id.
+CREATE TABLE assistant_provider_secrets (
+  provider_id TEXT PRIMARY KEY REFERENCES assistant_providers(id) ON DELETE CASCADE,
+  ciphertext TEXT NOT NULL,
+  iv TEXT NOT NULL,
+  key_id TEXT NOT NULL,
+  key_hint TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/assistant (no CHECK in DDL).
@@ -1026,8 +1084,11 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- new `assistant_mcp_secrets` table, CREATE TABLE only, ciphertext only),
 -- 0012_remove_mcp_secret_refs.sql (managed-only MCP client secrets — clears
 -- every legacy `secret_ref` with one UPDATE, no DDL; the column stays legacy and
--- is never written again). Future
--- migrations continue at 0013_*.sql.
+-- is never written again), 0013_jev_registry.sql (Jev moves out of env into
+-- `assistant_jev_config` / `assistant_jev_secrets` / `assistant_jev_projects`),
+-- 0014_provider_secrets.sql (provider credentials move into
+-- `assistant_provider_secrets`; the legacy plaintext column stays dead for
+-- Release N). Future migrations continue at 0015_*.sql.
 ```
 
 ## Design Notes
@@ -1107,42 +1168,60 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
 - **Id rebind consequence (one-time, history):** threads keyed on the pre-squash
   agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 
-### Managed MCP client secrets (`assistant_mcp_secrets`)
-`assistant_mcp_secrets` is the **only** credential store. A credential entered
-in the webapp is envelope-encrypted and stored here (0011), keyed by
-`server_id`. The legacy `assistant_mcp_servers.secret_ref` **reference** column
-is no longer a credential source: it is legacy, cleared by
-`0012_remove_mcp_secret_refs.sql`, and never written again (any repo write nulls
-it); a stale value is ignored by the public mapper.
+### Managed secrets (`assistant_mcp_secrets` / `assistant_provider_secrets` / `assistant_jev_secrets`)
+One plain assistant-tier module, `server/assistant/secrets.ts`, envelope-encrypts
+every webapp-managed credential — MCP client tokens, LLM provider API keys, and
+the Jev API key. Each scope stores its blob in its own table, keyed by its owner
+(`server_id` / `provider_id` / `config_id`); the master key lives only in the
+environment (`LXK_SECRETS_MASTER_KEY`, with `LXK_SECRETS_MASTER_KEY_PREV` as the
+rotation read path). Scopes are `mcp | provider | jev`, and a blob is bound to
+its scope **and** owner through the AAD `<prefix>:<ownerId>` using a frozen
+per-scope prefix (`lexa-mcp-v1` | `lexa-provider-v1` | `lexa-jev-v1`), so a blob
+copied onto another row or another scope fails to decrypt. `lexa-mcp-v1` is
+frozen: stored MCP blobs authenticate against `lexa-mcp-v1:<serverId>` and must
+keep opening.
 
-- **One row per client.** `server_id` is the PRIMARY KEY, so a client has at
-  most one stored blob. Upsert (`ON CONFLICT(server_id) DO UPDATE`) is the write,
-  so re-entering a token replaces the blob and rotates the IV in one statement
-  pair.
-- **Ciphertext never enters the registry.** The blob lives only in this table —
-  a bare `SELECT *` of `assistant_mcp_servers` can never surface one. The
-  registry (and the assistant tool bridge) reads it through a `LEFT JOIN`
-  aliased to `secret_ciphertext` / `secret_iv` / `secret_key_id`; **absence of a
-  row means no managed token**, which is how a secret-less client is
-  represented. A stored legacy `secret_ref` with no blob is **not** a secret —
-  it hard-fails at connect until a write clears it.
-- **Legacy ref clearance (0012).** A single `UPDATE` nulls every non-null
-  `secret_ref`; it is D1-safe (no DDL, no FK interaction) and idempotent. Rows
-  in this table are untouched, so managed tokens survive the migration.
+- **One row per owner.** The owner id is the PRIMARY KEY in every table, so an
+  owner has at most one stored blob. Upsert (`ON CONFLICT(...) DO UPDATE`) is
+  the write, so re-entering a credential replaces the blob and rotates the IV in
+  one statement pair.
+- **Ciphertext never enters the registry.** Each blob lives only in its own
+  table — a bare `SELECT *` of `assistant_mcp_servers` / `assistant_providers` /
+  `assistant_jev_config` can never surface one. The registries read it through a
+  `LEFT JOIN` aliased to `secret_ciphertext` / `secret_iv` / `secret_key_id`;
+  **absence of a row means no credential**, which is how a secret-less client,
+  a keyless provider, and an unconfigured Jev are represented.
+- **MCP (0011).** `assistant_mcp_secrets` holds the client token. The legacy
+  `assistant_mcp_servers.secret_ref` **reference** column is no longer a
+  credential source: it is legacy, cleared by `0012_remove_mcp_secret_refs.sql`,
+  and never written again (any repo write nulls it); a stale value is ignored by
+  the public mapper and a stored legacy `secret_ref` with no blob hard-fails at
+  connect until a write clears it.
+- **Provider (0014).** `assistant_provider_secrets` holds the provider key,
+  AAD-bound to the provider id. Release N ships the one-way boot backfill
+  (`server/db/provider-secrets-backfill.ts`), which encrypts every non-empty
+  `assistant_providers.api_key` into this table and then writes `''`. The legacy
+  column is dead in Release N (only the backfill reads it) and is dropped in
+  Release N+1 by `0015_drop_provider_api_key.sql`.
+- **Jev (0013).** `assistant_jev_secrets` holds the API key as a singleton
+  (`config_id = 'default'`, FK to `assistant_jev_config`), AAD-bound to that
+  row; `key_hint` is the last 4 characters, display only. The config registry
+  surfaces `hasKey` / `keyMask` and never the blob.
+  `assistant_jev_projects` is the per-project opt-in (absence = disabled).
 - **FK cascade + explicit delete.** `ON DELETE CASCADE` fires under the
   Workers/D1 runner, but the Bun runner runs with `PRAGMA foreign_keys = OFF`
-  (`server/db/migrate.ts`), where it does not. `repo.remove` therefore deletes
-  the secret row explicitly before the parent `DELETE` (same lesson as 0010) —
+  (`server/db/migrate.ts`), where it does not. The MCP repo therefore deletes the
+  secret row explicitly before the parent `DELETE` (same lesson as 0010) —
   otherwise a deleted client would strand ciphertext no operator can read.
 - **Columns are envelope, not credential.** `ciphertext` (base64 of
   `ciphertext || 128-bit tag`), `iv` (base64, 12 random bytes per write), and
   `key_id` — the **keyring slot** (`'active'` | `'prev'`), never a fingerprint,
   counter, or date. Slot naming is what makes rotation rewrap-free: an
-  existing `prev` row keeps resolving through `LXK_MCP_MASTER_KEY_PREV`.
+  existing `prev` row keeps resolving through `LXK_SECRETS_MASTER_KEY_PREV`.
 - **No plaintext column, ever.** The master key lives only in the environment
-  (`LXK_MCP_MASTER_KEY`); the table is written exclusively by the encrypt path
-  and read exclusively at connect. Redaction rules exclude both plaintext and
-  ciphertext from logs, reports, and error bodies.
+  (`LXK_SECRETS_MASTER_KEY`); each table is written exclusively by the encrypt
+  path and read exclusively when opening a credential. Redaction rules exclude
+  both plaintext and ciphertext from logs, reports, and error bodies.
 - **Delete is crypto-free.** `deleteSecret` is a plain row delete, so the
   clear-a-secret affordance works on a deployment whose master key is gone.
 
