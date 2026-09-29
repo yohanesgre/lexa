@@ -4075,6 +4075,218 @@ button.history-item {
   border-top: 1px solid var(--lx-border-subtle);
 }
 
+/* ---- Assistant chat Deck (assistant-chat.html) ---- */
+.chat-deck {
+  margin-top: 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  background: var(--lx-surface-elevated);
+  transition: border-color 100ms, box-shadow 100ms;
+}
+.chat-deck:focus-within {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+.deck-rail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-wrap: wrap;
+}
+.deck-label {
+  font-family: var(--lx-font-micro);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lx-text-muted);
+}
+.deck-chip {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  font-family: var(--lx-font-body);
+  font-size: 10px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+.deck-chip[aria-expanded="true"],
+.deck-chip.is-set {
+  border-color: var(--lx-border-focus);
+  color: var(--lx-text-primary);
+  background: var(--lx-bg-accent-subtle);
+}
+.deck-rail-spacer { margin-left: auto; }
+.deck-rail--borderless { border-bottom: none; }
+/* Deck regions — the app lane ports these hooks; both must shrink inside the
+   deck's flex column so long content never pushes the composer wider. */
+.deck-message { min-width: 0; }
+.deck-action { min-width: 0; }
+.deck-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+.deck-summary-chip[aria-expanded="true"] {
+  border-color: var(--lx-border-focus);
+  color: var(--lx-text-primary);
+  background: var(--lx-bg-accent-subtle);
+}
+.deck-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 200px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.deck-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  width: 100%;
+}
+.deck-option:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.deck-option[aria-selected="true"] {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+}
+
+/* ---- Deck: queue chip + attachment strip ---- */
+.deck-queued { padding: 8px 10px 0; }
+.deck-queued-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px dashed var(--lx-border-focus);
+  border-radius: 4px;
+  background: var(--lx-bg-accent-subtle);
+  font-size: 10px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* The chip is inline-flex, so the ellipsis must live on this inner child — a
+   text-overflow on the chip itself never produces one. The ✕ stays outside. */
+.deck-queued-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-queued-chip.is-held { border-style: solid; border-color: var(--lx-border-default); background: transparent; color: var(--lx-text-secondary); }
+.deck-queued-chip.is-flushing { border-style: solid; border-color: var(--lx-border-focus); }
+.deck-attach { display: flex; align-items: center; gap: 8px; padding: 0 10px 8px; }
+.deck-attach-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  background: var(--lx-surface-input);
+  font-size: 10px;
+  color: var(--lx-text-secondary);
+}
+.deck-attach-thumb { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; }
+.deck-meter { flex: 1; height: 3px; border-radius: 2px; background: var(--lx-border-subtle); position: relative; }
+.deck-meter-fill { position: absolute; left: 0; top: 0; height: 3px; border-radius: 2px; background: var(--lx-border-focus); }
+.deck-meter.is-over .deck-meter-fill { background: var(--lx-text-danger); }
+.deck-warn {
+  display: block;
+  padding: 0 10px 8px;
+  font-size: 10px;
+  color: var(--lx-text-danger);
+}
+.deck-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--lx-font-micro);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lx-text-warning);
+}
+
+/* Mobile sheet rows carry the ≥32px tap target (M1). */
+.wiki-sheet .deck-option { height: 40px; font-size: 13px; }
+
+/* ---- Assistant chat landing (zero-turn new chat) ---- */
+.chat-landing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 18px;
+  gap: 4px;
+}
+.chat-landing-title {
+  font-family: var(--lx-font-display);
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  color: var(--lx-text-primary);
+}
+.chat-landing-hero {
+  display: flex;
+  color: var(--lx-text-link);
+  margin-bottom: 8px;
+}
+.chat-landing-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+.chat-landing-chip {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  font-family: var(--lx-font-body);
+  font-size: 10px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  color: var(--lx-text-secondary);
+  background: transparent;
+}
+.chat-landing-chip:hover { border-color: var(--lx-border-strong); color: var(--lx-text-primary); }
+.chat-composer.is-landing .chat-composer-inner { max-width: 430px; }
+@media (max-width: 767px) {
+  .chat-landing-title { font-size: 16px; }
+  .chat-landing { padding: 16px 12px; }
+}
+
 /* =========================================================
    Tasks List (tasks.html)
    Per-project flat task list: header, filter bar, rows,
