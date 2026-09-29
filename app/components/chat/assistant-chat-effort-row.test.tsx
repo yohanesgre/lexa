@@ -194,6 +194,14 @@ describe("chat rail placement", () => {
     expect((screen.getByRole("listbox", { name: "Skill" }) as HTMLElement).style.bottom).toBe("calc(100% + 4px)");
   });
 
+  it("stretches the landing composer to the dock width", () => {
+    const landing = renderComposerArea({ landing: true });
+    expect((landing.container.querySelector(".chat-composer") as HTMLElement).style.width).toBe("100%");
+
+    const docked = renderComposerArea({ landing: false });
+    expect((docked.container.querySelector(".chat-composer") as HTMLElement).style.width).toBe("");
+  });
+
   it("opens the rail menus downward on the centered landing", () => {
     renderComposerArea({ landing: true });
 

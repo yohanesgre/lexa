@@ -179,7 +179,7 @@ export function ChatComposerArea({
   // must open UPWARD; the landing centers the Deck and keeps them below.
   const menuAlign: "up" | "down" = landing ? "down" : "up";
   return (
-    <div className={landing ? "chat-composer is-landing" : "chat-composer"}>
+    <div className={landing ? "chat-composer is-landing" : "chat-composer"} style={landing ? { width: "100%" } : undefined}>
       <div className="chat-composer-inner">
         <AssistantChatComposer
           slug={slug}
