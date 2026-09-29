@@ -98,3 +98,57 @@ bun run test:fe                         → 98 test files passed, 680 tests pass
   out of this lane's scope; left as-is.
 - `.agents/memory/swe.md` is not covered by `.gitignore` (repo hygiene, not
   touched here).
+
+## Addendum: guard lane (2026-09-29)
+
+Live bug after the intent-regex fix: "can you remove all tasks?" → model read
+the tasks and asked a legitimate confirmation ("there are 52 tasks… Are you
+sure?") → the guard replaced that text with
+`Maaf, saya belum memanggil tool yang diminta…` and pushed an ERROR frame, so
+the confirmation never reached the user.
+
+**Fix** (`server/assistant/build-stream.ts`):
+- Replaced the blanket `writeIntent` trigger with
+  `isWriteIntentClaim(text)` (new exported predicate): a write-intent turn is
+  replaced only when the reply asserts the action is/was being taken. The
+  predicate returns false for questions/confirmations (`?`, `are you sure`,
+  `confirm`, `yakin`, `apakah`, `let me know`, …) and for read-first plans
+  ("let me first fetch the list", "I'll read the board before removing"), and
+  true for assertions ("I'll archive them now", "archiving now",
+  "I have archived…", "saya akan menghapus…", "sudah saya hapus").
+- `hallucinated` (`HALLUCINATION_RE`) keeps its unconditional replace, and
+  short-circuits the new predicate, so the existing behavior and tests stand.
+- Pass-through now emits an INFO line
+  `ASSISTANT_WRITE_INTENT_GUARD — write intent awaiting user confirmation; text
+  passed through`; no error frame, no replacement.
+- KEPT the WARN
+  `ASSISTANT_WRITE_HALLUCINATION_GUARD — …` line (observability); its `reason`
+  for the intent case is now `write intent asserted without tool call`.
+
+**Copy**: both Indonesian dev-facing strings (and the third English
+approval-mechanics fallback) are replaced by the single user-facing
+`WRITE_NOT_EXECUTED_COPY`: "I wasn't able to carry that out — nothing was
+changed. Please try again." No test required the milestone variant, so it was
+dropped. This copy is locally generated and is **not** in the wireframes —
+flagged for backlog item 5 "client-facing error-copy policy"
+(`status/deferred-backlog/plan.md`); no design invented here. Note the copy is
+English-only, while the pass-through path preserves the model's own language.
+
+**Tests** (`server/assistant/build-stream.test.ts`): new `isWriteIntentClaim`
+unit cases (5 pass-through + 5 assert) and a `write-intent no-tool-call guard`
+buildStream suite: (a) confirmation question → text preserved + no guard error
+frame + INFO reason logged; (b) "I'll archive them now." → replaced with the
+copy; (c) hallucinated success → replaced; (d) non-write reply → untouched.
+
+**Verification (exact)**:
+```
+./node_modules/.bin/tsc --noEmit → exit 0 (no output)
+bun run test:be                  → 143 test files passed, 1731 tests passed
+bun run test:fe                  → 98 test files passed, 680 tests passed
+```
+First `test:fe` run flaked (2 failures) with no frontend change in this lane;
+two subsequent full runs passed 680/680. Flake, not a regression.
+
+**Deviations**: unified all three replacement strings to one copy (task allowed
+keeping the milestone variant only if tests required it — none did); no
+commits.
