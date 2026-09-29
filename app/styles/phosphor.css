@@ -6277,22 +6277,100 @@
   width: 100%;
   align-self: center;
 }
+/* Bubbles hug their text, cap at the column, accent user side. Short messages
+   stay narrow; long ones cap at the full transcript column. The accent pairing
+   matches the selected Deck chip; the radius tail stays the side cue. */
 .bubble-user {
-  align-self: stretch;
+  align-self: flex-end;
+  width: fit-content;
   max-width: 100%;
-  background: var(--lx-surface-card);
-  border: 1px solid var(--lx-border-default);
+  background: var(--lx-bg-accent-subtle);
+  border: 1px solid var(--lx-border-focus);
   border-radius: 12px 12px 4px 12px;
   padding: 10px 14px;
 }
 .bubble-ai {
-  align-self: stretch;
+  align-self: flex-start;
+  width: fit-content;
   max-width: 100%;
   background: var(--lx-surface-card);
   border: 1px solid var(--lx-border-default);
   border-radius: 12px 12px 12px 4px;
   padding: 10px 14px;
   overflow: hidden;
+}
+/* Thread-led header — the thread's own title (inline rename) over
+   `{project} · updated {relative}`; pin / rename / delete live here only. */
+.chat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 24px 0;
+}
+.chat-header-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chat-header-glyph { color: var(--lx-text-link); flex-shrink: 0; }
+.chat-header-titles { display: flex; flex-direction: column; min-width: 0; }
+.chat-header-title {
+  font-family: var(--lx-font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-header-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  font-family: var(--lx-font-body);
+  font-size: 14px;
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-focus);
+  border-radius: 6px;
+  outline: none;
+}
+.chat-header-sub {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.chat-header-actions .icon-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lx-text-secondary);
+}
+.chat-header-actions .icon-btn:hover { color: var(--lx-text-primary); background: var(--lx-surface-card-hover); }
+.chat-header-actions .icon-btn.is-pinned { color: var(--lx-text-link); }
+.chat-header-actions .icon-btn:disabled { color: var(--lx-text-muted); cursor: not-allowed; }
+@media (max-width: 767.98px) {
+  .chat-header { padding: 12px 12px 0; }
+  .chat-header-title { font-size: 16px; }
+}
+/* Top fade — the mirror of the composer's bottom scrim: scrolled ink dissolves
+   under the header instead of clipping at its edge. */
+.chat-header-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: linear-gradient(180deg, var(--lx-surface-app), transparent);
+  pointer-events: none;
+  z-index: 2;
 }
 .bubble-meta {
   font-family: var(--lx-font-micro);
@@ -6843,19 +6921,6 @@
   letter-spacing: 0.04em;
   color: var(--lx-text-muted);
   line-height: 14px;
-}
-/* Hover-revealed inline actions; focus-within keeps them keyboard-reachable */
-.thread-row-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-.thread-row:hover .thread-row-actions,
-.thread-row:focus-within .thread-row-actions {
-  opacity: 1;
 }
 .thread-row-main:focus-visible {
   outline: none;
