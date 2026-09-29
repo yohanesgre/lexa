@@ -5,14 +5,15 @@ import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/e
 import type { AssistantReasoningEffort, StreamFrame } from "../../shared/assistant";
 import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../shared/assistant";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
-import { hydrateImageParts, replaceImageRefsWithPlaceholders, needsSummary } from "../services/assistant-helpers";
+import { hydrateImageParts, replaceImageRefsWithPlaceholders, needsSummary, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
 
 export const ZERO_ARG_TOOLS = new Set(["get_all_tasks", "get_all_wiki_pages", "get_board_structure"]);
 const INTERNAL_TOOL = "analyze_image";
 
 export const HALLUCINATION_RE = /(sudah dibuat|berhasil dibuat|successfully created|has been created|created successfully)/i;
-export const WRITE_INTENT_RE =
-  /\b(bikin|buat|tambah|create|update|archive|edit|hapus)\b.*\b(milestone|sprint|task|wiki|page|comment)\b|\b(bikin|buat)\s+(milestone|sprint|task)\b|\bcreate\s+(milestone|sprint|task|wiki)\b/i;
+// Single-sourced from ../services/assistant-helpers so the tool_choice gate and
+// this no-tool-call guard can never drift apart.
+export const WRITE_INTENT_RE = ASSISTANT_WRITE_INTENT_RE;
 function extractUserText(content: string | unknown[]): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -557,13 +558,18 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 });
               } else {
                 try {
+                  const offeredToolNames = ctx.tools
+                    .map((t) => (t as { name?: unknown }).name)
+                    .filter((n): n is string => typeof n === "string");
                   const line = JSON.stringify({
                     level: "INFO",
                     service: "assistant-build-stream",
-                    message: "write tools offered but no tool called",
+                    message: "assistant answered without a tool call (read and write tools were offered)",
                     meta: {
                       threadId: ctx.threadId,
                       writeTools: ctx.writeTools ?? null,
+                      offeredTools: offeredToolNames.length,
+                      readTools: offeredToolNames.filter((n) => !isAssistantWriteTool(n) && n !== INTERNAL_TOOL).length,
                       drained: drained.length,
                       userText: userText.slice(0, 300),
                       text: text.slice(0, 300),

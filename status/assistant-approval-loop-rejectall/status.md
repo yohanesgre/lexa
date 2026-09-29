@@ -1,3 +1,3 @@
 state: DONE
-ts: 1790669900
-msg: closed — loop summary + reject all + nav persistence + carousel all landed; gate GREEN 238 files / 2358 tests; wireframes uncommitted
+ts: 1790672400
+msg: re-closed — carousel back-nav fixed (focus preventScroll + settle stability, FE 680) + write-intent fix (delete/remove, honest log, docs); gate GREEN 239 files / 2367 tests
