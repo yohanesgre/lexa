@@ -2,10 +2,9 @@ import type { Editor } from "@tiptap/core";
 import { markdownToDoc, docToMarkdown } from "../../../../shared/markdown";
 import type { Attachment, LexaAgent, LexaSkill, TipTapDoc } from "../../../../shared/types";
 import { ASSISTANT_AGENT_ID } from "../../../lib/assistant-agent";
-import type { AssistantSettingsMasked } from "../../../../shared/assistant";
 
 // Embedded /api/attachments/<uuid> image nodes in the open document are the
-// only image source for an Assistant run (assistant-popover.html State 1/5) — same
+// only image source for an Assistant run (herald-popover.html State 1/5) — same
 // exact-shape uuid rule as shared/markdown.ts safeImageSrc.
 const ATTACHMENT_SRC_RE = /^\/api\/attachments\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 
@@ -139,30 +138,4 @@ export function resolveRunSelection(
 export function insertMarkdown(editor: Editor, text: string): void {
   const doc = markdownToDoc(text);
   editor.chain().focus().insertContent(doc.content ?? []).run();
-}
-
-export function monoBox(maxHeight: number): React.CSSProperties {
-  return {
-    background: "var(--lx-surface-input)",
-    border: "1px solid var(--lx-border-default)",
-    borderRadius: 6,
-    padding: "10px 12px",
-    fontFamily: "var(--lx-font-mono)",
-    fontSize: 11,
-    lineHeight: "18px",
-    color: "var(--lx-text-secondary)",
-    maxHeight,
-    overflowY: "auto",
-    whiteSpace: "pre-wrap",
-  };
-}
-
-export function providerLine(settings: AssistantSettingsMasked | null | undefined): string {
-  let host = "";
-  try {
-    if (settings?.baseUrl) host = `${new URL(settings.baseUrl).host} · `;
-  } catch {
-    host = "";
-  }
-  return `${host}assistant · ${settings?.kind ?? ""}`;
 }

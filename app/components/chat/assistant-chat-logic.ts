@@ -138,6 +138,9 @@ export function pendingChipTargets(chips: ApprovalChip[]): ApprovalChip[] {
 // terminal state instead of surfacing as toasts (null → toast path).
 export function chipStateFromError(err: Error & { code?: string | undefined; details?: unknown }): ApprovalChip["state"] | null {
   if (err.code === "APPROVAL_EXPIRED") return "expired";
+  // The decision row is gone (deleted/swept): the chip can never be decided,
+  // so retire it instead of leaving it pending and locking the composer.
+  if (err.code === "APPROVAL_NOT_FOUND") return "expired";
   if (err.code === "APPROVAL_ALREADY_DECIDED") {
     const prev = (err.details as { status?: string } | undefined)?.status;
     return prev === "approved" ? "approved" : prev === "rejected" ? "rejected" : "expired";
@@ -223,6 +226,26 @@ export function suspendTallyText(total: number, pending: number, streamPending: 
   const effectivePending = total > 0 ? pending : streamPending;
   if (effectiveTotal === 0) return "";
   return effectivePending === effectiveTotal ? `${effectivePending} pending` : `${effectivePending} of ${effectiveTotal} pending`;
+}
+
+// ── Thread resolution ( ?thread= > localStorage last-visited > list head ) ──
+
+// Returns the chat id to apply, or null when the current selection stands
+// (already-resolved thread, no source). An explicit ?thread= always wins over
+// the active selection; the last-visited map and the history list head only
+// resolve the INITIAL selection, so stale-recovery fallbacks and locally minted
+// threads are never clobbered by a stale localStorage read.
+export function resolveChatId(args: {
+  projectId: string | undefined;
+  thread: string | undefined;
+  currentChatId: string;
+  last: string | null;
+  head: string | undefined;
+}): string | null {
+  if (!args.projectId) return null;
+  if (args.thread) return args.thread === args.currentChatId ? null : args.thread;
+  if (args.currentChatId) return null;
+  return args.last ?? args.head ?? null;
 }
 
 // ── Stale-thread recovery predicates ──
@@ -320,10 +343,16 @@ export function recoverStaleThread(args: {
   const { qc, projectId, chatId, listData, applyChatId, setChatId, clearThreadParam, clearParam } = args;
   qc.cancelQueries({ queryKey: ["assistant-chat", chatId] });
   qc.removeQueries({ queryKey: ["assistant-chat", chatId] });
+  // Evict the dead id from every cached list variant so the resolution
+  // effect's head fallback cannot re-pick it (one extra 404/recovery cycle, or
+  // a permanent loop when the list refetch fails).
+  qc.setQueriesData<AssistantChatThreadSummary[]>({ queryKey: ["assistant-chats", projectId] }, (old) =>
+    old ? old.filter((t) => t.chatId !== chatId) : old
+  );
   try { window.localStorage.removeItem(`lexa-chat-last:${projectId}`); } catch {}
   if (clearParam) clearThreadParam();
-  const head = listData?.[0]?.chatId;
-  if (head && head !== chatId) applyChatId(head);
+  const head = listData?.find((t) => t.chatId !== chatId)?.chatId;
+  if (head) applyChatId(head);
   else setChatId("");
 }
 

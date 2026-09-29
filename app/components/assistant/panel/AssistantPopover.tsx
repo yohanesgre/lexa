@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncEx
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/core";
 import { AssistantPanel } from "./AssistantPanel";
+import { assistantPanelSessionKey } from "./assistant-panel-store";
 import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
 
 // The editor Generate popover is the assistant-only surface
@@ -25,7 +26,13 @@ export interface AssistantPopoverProps {
   // state, so the result isn't re-offered when the popover reopens.
   rejectedTaskId?: string | null | undefined;
   anchorRect: DOMRect | null;
+  // The button that toggles the popover — an outside mousedown on it must not
+  // close the popover before the click handler gets to toggle it.
+  triggerRef?: React.RefObject<HTMLElement | null> | undefined;
 }
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 // Prefer anchoring below the button; flip above when it doesn't fit there;
 // as a last resort pin it inside the viewport so the controls stay reachable
@@ -41,21 +48,36 @@ function computePopoverTop(anchorRect: DOMRect | null, height: number): number {
 }
 
 function computePopoverStyle(anchorRect: DOMRect | null, popoverTop: number): React.CSSProperties {
-  if (!anchorRect) return {};
+  const viewportWidth = typeof window !== "undefined" ? window.innerWidth : 0;
+  // No anchor (e.g. an anchor detached mid-render): still pin to a clamped
+  // fixed position rather than dropping back to static layout.
+  const left = anchorRect ? Math.min(Math.max(8, anchorRect.left), viewportWidth - 348) : 8;
   return {
     position: "fixed",
     top: popoverTop,
-    left: Math.min(Math.max(8, anchorRect.left), (typeof window !== "undefined" ? window.innerWidth : 0) - 348),
+    left,
     zIndex: 80,
     width: 340,
   };
 }
 
-// Document-level outside click + Escape dismiss for the open popover.
-function useOutsideDismiss(open: boolean, onClose: () => void, containerRef: React.RefObject<HTMLDivElement | null>) {
+// Document-level outside click + Escape dismiss for the open popover. A
+// mousedown on the trigger is ignored here: the trigger's own click handler
+// toggles the popover, and closing on the mousedown would race it into a
+// remount (state loss).
+function useOutsideDismiss(
+  open: boolean,
+  onClose: () => void,
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  triggerRef?: React.RefObject<HTMLElement | null> | undefined,
+  onOutsideDismiss?: (() => void) | undefined
+) {
   const onOutsideClick = useEffectEvent((e: MouseEvent) => {
-    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-      onClose();
+    const target = e.target as Node | null;
+    if (triggerRef?.current && target && triggerRef.current.contains(target)) return;
+    if (target instanceof Element && target.closest("[data-assistant-trigger]")) return;
+    if (containerRef.current && target && !containerRef.current.contains(target)) {
+      (onOutsideDismiss ?? onClose)();
     }
   });
   const onDocumentKeyDown = useEffectEvent((e: KeyboardEvent) => {
@@ -86,7 +108,7 @@ function usePopoverPosition(open: boolean, anchorRect: DOMRect | null, container
   return popoverTop;
 }
 
-export function AssistantPopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect }: AssistantPopoverProps) {
+export function AssistantPopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect, triggerRef }: AssistantPopoverProps) {
   // Hydration-safe portal target: SSR and the first client render both see
   // null, the browser switches to document.body after hydration.
   const portalTarget = useSyncExternalStore(
@@ -95,14 +117,74 @@ export function AssistantPopover({ editor, slug, documentType, documentId, open,
     () => null,
   );
   const containerRef = useRef<HTMLDivElement>(null);
-  useOutsideDismiss(open, onClose, containerRef);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const restoreFocusRef = useRef(true);
+  // Light dismiss (outside mousedown) must not yank focus back from wherever
+  // the user just clicked; Escape and unmount still restore the opener.
+  const dismissOnOutside = () => {
+    restoreFocusRef.current = false;
+    onClose();
+  };
+  useOutsideDismiss(open, onClose, containerRef, triggerRef, dismissOnOutside);
   const popoverTop = usePopoverPosition(open, anchorRect, containerRef);
+
+  // Dialog focus management: remember the opener, move focus into the panel
+  // (the idle textarea autofocuses itself), restore the opener on close.
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = true;
+    const container = containerRef.current;
+    const active = document.activeElement as HTMLElement | null;
+    // A child effect (AssistantPanelIdle autofocus) may already have moved
+    // focus inside the portal — passive effects run child-first, so only a
+    // focus that arrived from outside is the opener worth restoring.
+    if (active && !(container && container.contains(active))) {
+      previouslyFocusedRef.current = active;
+    }
+    if (container && !(active && container.contains(active))) container.focus();
+    return () => {
+      // Fall back to the trigger: the captured opener can be inside the
+      // portal (already removed) when the idle form autofocused.
+      const previous = previouslyFocusedRef.current ?? triggerRef?.current ?? null;
+      previouslyFocusedRef.current = null;
+      if (restoreFocusRef.current && previous && document.contains(previous)) previous.focus();
+    };
+  }, [open]);
 
   if (!open || !portalTarget) return null;
 
+  // Keep Tab inside the non-modal popover while it is open.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const container = containerRef.current;
+    if (!container) return;
+    const focusables = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+    if (focusables.length === 0) return;
+    const first = focusables[0]!;
+    const last = focusables[focusables.length - 1]!;
+    const active = document.activeElement as HTMLElement | null;
+    if (e.shiftKey && (active === first || active === container)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
   return createPortal(
-    <div ref={containerRef} className="menu-popover" data-assistant-popover style={computePopoverStyle(anchorRect, popoverTop)}>
+    <div
+      ref={containerRef}
+      role="dialog"
+      aria-label="Assistant"
+      tabIndex={-1}
+      className="menu-popover"
+      data-assistant-popover
+      style={computePopoverStyle(anchorRect, popoverTop)}
+      onKeyDown={onKeyDown}
+    >
       <AssistantPanel
+        key={assistantPanelSessionKey(slug, documentType, documentId)}
         editor={editor}
         slug={slug}
         documentType={documentType}

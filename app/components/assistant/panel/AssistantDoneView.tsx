@@ -11,7 +11,7 @@ export function AssistantDoneView({
   stream,
   documentTitle,
   skillName,
-  provider,
+  providerLabel,
   taskId,
   appliedTaskId,
   rejectedTaskId,
@@ -24,7 +24,7 @@ export function AssistantDoneView({
   stream: Stream;
   documentTitle: string | undefined;
   skillName: string;
-  provider: string | null;
+  providerLabel: string | null;
   taskId: string | null;
   appliedTaskId?: string | null | undefined;
   rejectedTaskId?: string | null | undefined;
@@ -36,7 +36,8 @@ export function AssistantDoneView({
 }) {
   if (!taskId) return null;
 
-  const alreadyHandled = appliedTaskId === taskId || rejectedTaskId === taskId;
+  const applied = appliedTaskId === taskId;
+  const rejected = rejectedTaskId === taskId;
   const resolvedSkillName = skillName || "Assistant";
 
   const handleInsert = () => {
@@ -51,7 +52,7 @@ export function AssistantDoneView({
       onReview(stream.text, {
         skillName: resolvedSkillName,
         agentName: ASSISTANT_AGENT_NAME,
-        provider,
+        provider: providerLabel,
         taskId,
       });
       onClose();
@@ -59,6 +60,8 @@ export function AssistantDoneView({
       handleInsert();
     }
   };
+
+  const terminalLabel = applied ? "Applied to document" : rejected ? "Result rejected" : "In review in editor";
 
   return (
     <div style={{ padding: 12 }}>
@@ -69,13 +72,13 @@ export function AssistantDoneView({
           <Check size={14} strokeWidth={2.5} className="text-lx-text-success shrink-0" />
           <span className="text-xs font-medium text-lx-text-primary truncate flex-1 min-w-0" style={{ fontFamily: "var(--lx-font-body)" }}>{documentTitle || "Document"}</span>
         </div>
-        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ letterSpacing: "0.04em" }}>
+        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
           {resolvedSkillName} — ready to review
         </span>
       </div>
       <div className="flex items-center justify-end gap-2 mt-3">
-        {reviewActive || alreadyHandled ? (
-          <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
+        {reviewActive || applied || rejected ? (
+          <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">{terminalLabel}</span>
         ) : (
           <>
             <button type="button" className="btn btn-ghost" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={onDismiss}>Reject</button>

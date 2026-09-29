@@ -189,13 +189,15 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
       <textarea
         ref={composerRef}
         className="composer-editor w-full"
+        aria-label="Message Assistant"
         rows={streaming || suspendedLock ? 1 : 2}
-        placeholder={streaming ? "Assistant is responding…" : suspendedLock ? "Decide the pending changes above…" : "Ask Assistant anything about this project…"}
+        placeholder={streaming ? "Assistant is responding…" : suspendedLock ? "Decide the pending changes above…" : busy409 ? "Waiting for the current reply…" : "Ask Assistant anything about this project…"}
         value={draft}
         onChange={mention.handleChange}
         onPaste={pasteIntoComposer}
         onSelect={mention.handleSelectCaret}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
           if (mention.handleKeyDown(e)) return;
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();

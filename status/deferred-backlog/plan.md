@@ -22,6 +22,12 @@ Record the deferred DB/backend review follow-ups so they are not lost, with enou
 | `PREFIX-n` payload alias | extend_code (0.63) | vs narrow invariant (0.30) |
 | `cf-connecting-ip` trust | loopback_only (0.82) | proposal: loopback default + configurable trusted proxies |
 
+## Assistant chat FE follow-ups (2026-09-29, from `assistant-chat-fixes`)
+Close-out of `status/assistant-chat-fixes/` fixed all review severities; these remain deferred:
+1. Chat image attachments — decide: document a document-less upload path (endpoint in `docs/API.md` + storage) and wire it, or wireframe the attach affordance away. Until then the composer collects/previews and silently drops `File`s (`chatStreamBody` sends `attachments: []`). No endpoint was invented.
+2. Designer pass — (a) reconcile wireframe self-conflict: `wireframes/src/herald-chat-upgrades.html:243` says `.bubble-actions` hover-hidden while the page rule `:13` + annotation `:29` say always visible (code follows the page rule); (b) bless copy/styling for panel states the wireframe does not draw: settings-fetch error state (reuses `notice-danger`), terminal labels `Applied to document` / `Result rejected` / `In review in editor`.
+3. Legacy approval markers — suspensions persisted before the chip-payload fix lack `seq/name/diff`; GET reconciliation backfills from `assistant_pending_writes` and missing rows resolve to `expired` on decision. Low priority: audit for stranded threads.
+
 ## Graph A
 ```ts
 user says go → open one plan per item → implement → gate → PR

@@ -2750,13 +2750,15 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
+        const service = yield* AssistantService;
+        const messages = yield* service.reconcileChatApprovals(t.messages);
         return {
           chatId: t.documentId,
           projectId: t.projectId,
           ownerUserId: t.ownerUserId,
           agentId: t.agentId,
           skillId: t.skillId,
-          messages: t.messages,
+          messages,
           summary: t.summary,
           summarizedCount: t.summarizedCount,
           createdAt: t.createdAt,
