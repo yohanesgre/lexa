@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantWriteDiff } from "../../../shared/assistant";
@@ -60,6 +60,17 @@ function paintLayout(container: HTMLElement, trackOffsetLeft: number, slideOffse
 }
 
 describe("AssistantApprovalBatch — carousel", () => {
+  // jsdom has no layout/scroll: give every element a scrollTo, then let
+  // paintLayout shadow it per-track where a test needs to capture the target.
+  beforeEach(() => {
+    Object.defineProperty(Element.prototype, "scrollTo", { value: vi.fn(), configurable: true, writable: true });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (Element.prototype as { scrollTo?: unknown }).scrollTo;
+  });
+
   it("renders seq-ordered slides with one active card and an N / M counter", () => {
     const { container, counter } = renderBatch(threeChips());
     const slides = container.querySelectorAll(".approval-carousel-slide");
@@ -189,5 +200,110 @@ describe("AssistantApprovalBatch — carousel", () => {
     expect(slides[0]!.querySelectorAll("button")).toHaveLength(0);
     expect(slides[0]!.textContent).toContain("Approved");
     expect(slides[1]!.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("pages BACKWARD from the last card onto the previous slide and stays there", () => {
+    const { container, counter } = renderBatch(threeChips());
+    const { track, scrollToLeft } = paintLayout(container, 328, [328, 973, 1618], 1253);
+    const next = screen.getByRole("button", { name: "Next change" });
+    const prev = screen.getByRole("button", { name: "Previous change" });
+
+    fireEvent.click(next);
+    fireEvent.click(next);
+    expect(counter()).toBe("3 / 3");
+    expect(prev).toBeEnabled();
+
+    fireEvent.click(prev);
+    // Non-zero track-relative target: the track really moved off the last card.
+    expect(scrollToLeft()).toBe(645);
+    expect(scrollToLeft()).toBeGreaterThan(0);
+    expect(counter()).toBe("2 / 3");
+
+    // A mid-flight frame must not snap the counter back to the old card.
+    track.scrollLeft = 1253;
+    fireEvent.scroll(track);
+    expect(counter()).toBe("2 / 3");
+
+    track.scrollLeft = 645;
+    fireEvent.scroll(track);
+    fireEvent(track, new Event("scrollend"));
+    expect(counter()).toBe("2 / 3");
+
+    fireEvent.click(prev);
+    expect(counter()).toBe("1 / 3");
+    expect(scrollToLeft()).toBe(0);
+    expect(prev).toBeDisabled();
+  });
+
+  it("focuses the paged card's action with preventScroll so the focus reveal cannot fight the snap", () => {
+    const { container, carousel } = renderBatch(threeChips());
+    const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");
+    paintLayout(container, 328, [328, 973, 1618], 1253);
+
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    focusSpy.mockClear();
+
+    fireEvent.keyDown(carousel(), { key: "ArrowLeft" });
+
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    expect(screen.getByRole("button", { name: "Approve move_task new" })).toBe(document.activeElement);
+  });
+
+  it("focuses the wrapper with preventScroll when the card has no enabled action", () => {
+    const decided = renderBatch([chip({ approvalId: "a1", seq: 0 }), chip({ approvalId: "a2", seq: 1, name: "move_task", state: "approved" })]);
+    const focusSpy = vi.spyOn(HTMLElement.prototype, "focus");
+
+    fireEvent.keyDown(decided.carousel(), { key: "ArrowRight" });
+
+    const slide = decided.container.querySelectorAll(".approval-carousel-slide")[1]!;
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    expect(document.activeElement).toBe(slide);
+  });
+
+  it("settles a rapid double-click on the final card only (no intermediate counter)", () => {
+    const { container, counter } = renderBatch(threeChips());
+    const { track, scrollToLeft } = paintLayout(container, 328, [328, 973, 1618], 1253);
+    const next = screen.getByRole("button", { name: "Next change" });
+
+    fireEvent.click(next);
+    fireEvent.click(next);
+    expect(counter()).toBe("3 / 3");
+    // Two pages issued back to back; the final target wins.
+    expect(scrollToLeft()).toBe(1253);
+
+    // Intermediate frames of the in-flight smooth scroll are ignored.
+    track.scrollLeft = 645;
+    fireEvent.scroll(track);
+    expect(counter()).toBe("3 / 3");
+
+    track.scrollLeft = 1253;
+    fireEvent.scroll(track);
+    fireEvent(track, new Event("scrollend"));
+    expect(counter()).toBe("3 / 3");
+    expect(screen.getByRole("button", { name: "Previous change" })).toBeEnabled();
+  });
+
+  it("settle fallback does not settle on a mid-flight position (stability check)", () => {
+    const { container, counter } = renderBatch(threeChips());
+    const { track } = paintLayout(container, 328, [328, 973, 1618], 1253);
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+
+      track.scrollLeft = 100;
+      act(() => vi.advanceTimersByTime(150));
+      track.scrollLeft = 400;
+      act(() => vi.advanceTimersByTime(100));
+
+      // Still moving: the counter holds the optimistic target, never a middle card.
+      expect(counter()).toBe("2 / 3");
+
+      track.scrollLeft = 645;
+      act(() => vi.advanceTimersByTime(300));
+      expect(counter()).toBe("2 / 3");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

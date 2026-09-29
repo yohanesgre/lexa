@@ -65,9 +65,11 @@ export function AssistantApprovalBatch({
   // naive nearest-card sync would step the N / M counter and the prev/next
   // disabled states through every intermediate card. Suspend scroll sync while
   // a page is in flight and re-sync once it settles (`scrollend`, with a
-  // timeout fallback where that event is unsupported).
+  // stability-checked timeout fallback for engines where that event is missing
+  // or a slow smooth scroll outlives a single fixed delay).
   const scrollingRef = useRef(false);
   const settleTimerRef = useRef<number | null>(null);
+  const scrollEndRef = useRef<(() => void) | null>(null);
 
   function settleScroll() {
     const track = trackRef.current;
@@ -77,26 +79,62 @@ export function AssistantApprovalBatch({
     setActiveIndex((cur) => (cur === best ? cur : best));
   }
 
+  // Drop whichever settle watcher is currently armed (scrollend listener +
+  // fallback timer) so a new page cannot leave the previous listener piled up
+  // on the track.
+  function disarmSettle() {
+    const track = trackRef.current;
+    if (track && scrollEndRef.current) track.removeEventListener("scrollend", scrollEndRef.current);
+    scrollEndRef.current = null;
+    if (settleTimerRef.current !== null) {
+      window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+  }
+
+  function finishSettle() {
+    disarmSettle();
+    if (scrollingRef.current) settleScroll();
+  }
+
   function armScrollSettle() {
     const track = trackRef.current;
     if (!track) return;
+    disarmSettle();
     scrollingRef.current = true;
-    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
-    const finish = () => {
-      track.removeEventListener("scrollend", finish);
-      if (settleTimerRef.current !== null) {
-        window.clearTimeout(settleTimerRef.current);
-        settleTimerRef.current = null;
+
+    const onScrollEnd = () => finishSettle();
+    scrollEndRef.current = onScrollEnd;
+    track.addEventListener("scrollend", onScrollEnd, { once: true });
+
+    // Fallback: settle only once scrollLeft is unchanged across consecutive
+    // checks — a slow smooth scroll can outlive a fixed delay, and settling on
+    // a mid-flight position would ratchet the counter through the middle. Hard
+    // cap keeps a stuck/never-quiet track from suspending sync forever.
+    const startedAt = Date.now();
+    let lastLeft = track.scrollLeft;
+    let stableChecks = 0;
+    const poll = () => {
+      settleTimerRef.current = null;
+      if (!scrollingRef.current) return;
+      const left = track.scrollLeft;
+      if (left === lastLeft) stableChecks += 1;
+      else {
+        stableChecks = 0;
+        lastLeft = left;
       }
-      if (scrollingRef.current) settleScroll();
+      if (stableChecks >= 2 || Date.now() - startedAt >= 2000) {
+        finishSettle();
+        return;
+      }
+      settleTimerRef.current = window.setTimeout(poll, 100);
     };
-    track.addEventListener("scrollend", finish, { once: true });
-    settleTimerRef.current = window.setTimeout(finish, 400);
+    settleTimerRef.current = window.setTimeout(poll, 100);
   }
 
   useEffect(
     () => () => {
-      if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+      disarmSettle();
     },
     []
   );
@@ -133,11 +171,16 @@ export function AssistantApprovalBatch({
     if (focus && slide) {
       // Wireframe (herald-write-approvals.html:238): focus lands on the newly
       // active card's Approve button, not DOM-first (which would be Reject).
+      // preventScroll: the browser's focus reveal must not scroll the track —
+      // under `scroll-snap-type: x mandatory` that reveal can fall short of the
+      // snap midpoint on a BACKWARD page (the Approve button sits right of
+      // centre), so mandatory snap returns the track to the old card and the
+      // page no-ops. Only the explicit track.scrollTo above may move the track.
       const action =
         slide.querySelector<HTMLButtonElement>('button:not([disabled])[aria-label^="Approve "]') ??
         slide.querySelector<HTMLButtonElement>("button:not([disabled])");
-      if (action) action.focus();
-      else slide.focus();
+      if (action) action.focus({ preventScroll: true });
+      else slide.focus({ preventScroll: true });
     }
   }
 
