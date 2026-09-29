@@ -4286,6 +4286,73 @@ button.history-item {
   .chat-landing { padding: 16px 12px; }
 }
 
+/* ---- Assistant chat — floating composer (docked active thread) ----
+   In an active thread the composer leaves the flow and is pinned to the bottom of
+   `.chat-shell` (which is position:relative), so the transcript scrolls the FULL
+   shell height BEHIND it instead of losing layout height to the composer.
+
+   Breakpoint-independent: the float stays bottom-pinned on mobile too — no media
+   query un-pins it — and the same measured clearance covers the mobile card
+   height, which already includes the safe-area padding.
+
+   Clearance contract: `--chat-composer-clearance` is the floating composer's whole
+   footprint — its measured height PLUS the scrim lead (48px, the fade band above
+   the card). The app measures the composer and writes the value on the shell (or
+   root); the 140px fallback here is only a floor, never the real value. */
+.chat-scroll {
+  padding: 24px 24px 8px;
+  /* Rest position: at the bottom of the scrollback the last bubble ends ABOVE the
+     floating composer — never trapped under it. */
+  padding-bottom: var(--chat-composer-clearance, 140px);
+}
+
+.chat-composer-float {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+}
+
+/* Scrim — bubbles fade out (never a hard cut) while they scroll under the composer.
+   Sits above the transcript, behind the composer card. It is never the only thing
+   hiding a bubble: the clearance owns the rest position, the scrim only covers
+   mid-scroll content. Opaque well before the card's top edge, transparent at the
+   clearance line. */
+.chat-composer-scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--chat-composer-clearance, 140px);
+  background: linear-gradient(180deg, transparent 0, var(--lx-surface-app) 30%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* The card paints over the scrim's lower (opaque) half. */
+.chat-composer-float > .chat-composer-inner { position: relative; z-index: 1; }
+
+/* Scroll-to-bottom affordance — canonical .btn.btn-ghost.btn-icon-sm made circular
+   + elevated so it reads as floating over bubbles. It sits ABOVE the floating
+   composer, offset by the SAME clearance var (never a small fixed offset), and
+   z-index 7 keeps it crisp over the scrim. */
+.chat-jump-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: calc(var(--chat-composer-clearance, 140px) + 12px);
+  border-radius: 50%;
+  background: var(--lx-surface-elevated);
+  box-shadow: var(--lx-shadow-md);
+  z-index: 7;
+}
+
+/* Landing (zero-turn) composer NEVER floats: static, centered, in-flow, full width,
+   no float wrapper and no scrim. */
+.chat-composer.is-landing {
+  width: 100%;
+}
+
 /* =========================================================
    Tasks List (tasks.html)
    Per-project flat task list: header, filter bar, rows,
