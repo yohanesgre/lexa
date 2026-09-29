@@ -43,6 +43,17 @@ export function findPendingBatch(messages: unknown[]): string | null {
   }
   return null;
 }
+// Every pendingBatch marker in the transcript, oldest first, deduped. A thread
+// can hold several markers (a batch that was never echoed-resolved plus a newer
+// one); reconciliation must cover all of them, not just the newest.
+export function findPendingBatches(messages: unknown[]): string[] {
+  const out: string[] = [];
+  for (const m of messages) {
+    const id = m && typeof m === "object" ? pendingBatchIdOf((m as { pendingBatch?: unknown }).pendingBatch) : null;
+    if (id !== null && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
 export function applyResumeResults(messages: unknown[], resolvedBatchIds: string[]): unknown[] {
   const done = new Set(resolvedBatchIds);
   return messages.map((m) => {

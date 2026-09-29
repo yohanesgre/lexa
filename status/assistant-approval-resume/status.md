@@ -1,3 +1,3 @@
 state: DONE
-ts: 1790662309
-msg: toolCalls display log renamed to toolLog + pure provider-boundary sanitizer applied to all buildStream paths; tsc + test:be (1710) + test:fe (637) green
+ts: 1790663641
+msg: FOLLOW-UP 2 fixed — decided chips no longer re-arm after transcript rebuild (FE carryKnownDecisions) + GET reconciles every pendingBatch marker; tsc clean, test:fe 95/641, test:be 142/1711 green

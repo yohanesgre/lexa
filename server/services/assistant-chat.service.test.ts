@@ -380,3 +380,38 @@ describe("chat preflight — fail-open and disable", () => {
     expect(jev[0]!.meta.outcome).toBe("failed");
   });
 });
+
+describe("reconcileChatApprovals", () => {
+  it("reconciles every pending batch marker, not just the newest", async () => {
+    setup();
+    // A thread can hold an older decided marker plus a newer pending one; the
+    // newest-only path left the older batch rebuilt as pending (re-armed chip).
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('w-old', 'p1', 'chat', 'c1', 'u1', 'b-old', 0, 'create_task', '{}', '{"type":"task_create","title":"old","fields":{}}', 'approved', '2099-01-01 00:00:00'),
+         ('w-new', 'p1', 'chat', 'c1', 'u1', 'b-new', 0, 'create_task', '{}', '{"type":"task_create","title":"new","fields":{}}', 'pending', '2099-01-01 00:00:00');
+`);
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "old",
+        pendingBatch: { batchId: "b-old", approvals: [{ approvalId: "w-old", seq: 0, name: "create_task", diff: { type: "task_create", title: "old", fields: {} } }] },
+      },
+      {
+        role: "assistant",
+        content: "new",
+        pendingBatch: { batchId: "b-new", approvals: [{ approvalId: "w-new", seq: 0, name: "create_task", diff: { type: "task_create", title: "new", fields: {} } }] },
+      },
+    ];
+    const out = (await run(service.reconcileChatApprovals(messages))) as Array<{
+      pendingBatch?: { approvals: Array<{ approvalId: string; status?: string }> };
+    }>;
+    const statusOf = (id: string) =>
+      out.flatMap((m) => m.pendingBatch?.approvals ?? []).find((a) => a.approvalId === id)?.status;
+    expect(statusOf("w-old")).toBe("approved");
+    expect(statusOf("w-new")).toBe("pending");
+  });
+});
