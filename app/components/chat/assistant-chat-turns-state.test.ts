@@ -132,4 +132,63 @@ describe("settleTurns — decided batch survives a transcript rebuild", () => {
     expect(chips[0]!.state).toBe("approved");
     expect(chips.some((c) => c.state === "pending")).toBe(false);
   });
+
+  it("applies reconciled server decisions over cached pending chips (remount reconciliation)", () => {
+    // Cache held the pre-decision marker → chips pending in the optimistic view.
+    const prev: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: {
+          batchId: "b1",
+          chips: [chip({ approvalId: "a1" }), chip({ approvalId: "a2", seq: 1 })],
+        },
+      },
+    ];
+    // The refetched transcript reconciled the decisions (same message count —
+    // only the marker status fields changed).
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: {
+          batchId: "b1",
+          approvals: [
+            { approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" },
+            { approvalId: "a2", seq: 1, name: "create_task", diff: DIFF, status: "rejected" },
+          ],
+        },
+      },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "idle", hasIngress: false });
+    expect(out).not.toBeNull();
+    const chips = out!.find((t) => t.batch)!.batch!.chips;
+    expect(chips.find((c) => c.approvalId === "a1")!.state).toBe("approved");
+    expect(chips.find((c) => c.approvalId === "a2")!.state).toBe("rejected");
+    expect(chips.some((c) => c.state === "pending")).toBe(false);
+  });
+
+  it("keeps the optimistic view when the server transcript still shows the batch pending", () => {
+    const prev: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1" })] },
+      },
+    ];
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: { batchId: "b1", approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }] },
+      },
+    ];
+    expect(settleTurns({ prev, messages, streaming: false, streamStatus: "idle", hasIngress: false })).toBe(prev);
+  });
 });

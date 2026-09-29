@@ -185,6 +185,7 @@ export function StreamingBubble({
           locked
           onDecide={() => {}}
           onApproveAll={() => {}}
+          onRejectAll={() => {}}
         />
       )}
     </div>

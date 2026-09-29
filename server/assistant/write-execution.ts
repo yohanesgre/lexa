@@ -180,5 +180,5 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
       yield* ctx.pendingWritesRepo.markExecutionError(row.id, message);
       return { approvalId: row.id, ok: false as const, error: message };
     }
-    return { approvalId: row.id, ok: true as const };
+    return { approvalId: row.id, ok: true as const, result: applied.right };
   });

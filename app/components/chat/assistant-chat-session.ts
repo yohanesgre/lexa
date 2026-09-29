@@ -80,8 +80,8 @@ function settleStreamFrame(args: {
 }
 
 
-// Chip decisions + "Approve all" (one POST per approvalId; 409s flip the
-// chip's terminal state instead of surfacing as toasts).
+// Chip decisions + "Approve all" / "Reject all" (one POST per approvalId; 409s
+// flip the chip's terminal state instead of surfacing as toasts).
 export function useApprovalDecisions(args: { setTurns: React.Dispatch<React.SetStateAction<ChatTurn[] | null>> }) {
   const { setTurns } = args;
   const toast = useToast();
@@ -109,15 +109,17 @@ export function useApprovalDecisions(args: { setTurns: React.Dispatch<React.SetS
     [updateChip, toast]
   );
 
-  const handleApproveAll = useCallback(
-    (chips: ApprovalChip[]) => {
+  // Batch decision: one POST per pending chip, sequentially (each response is
+  // authoritative for its own chip). Shared by Approve all / Reject all.
+  const decideAll = useCallback(
+    (chips: ApprovalChip[], verdict: "approve" | "reject") => {
       const targets = pendingChipTargets(chips);
       if (targets.length === 0) return;
       setBatchBusy(true);
       void (async () => {
         try {
           await targets.reduce(
-            (chain, chip) => chain.then(() => handleDecide(chip, "approve")),
+            (chain, chip) => chain.then(() => handleDecide(chip, verdict)),
             Promise.resolve() as Promise<void>
           );
         } finally {
@@ -128,7 +130,10 @@ export function useApprovalDecisions(args: { setTurns: React.Dispatch<React.SetS
     [handleDecide]
   );
 
-  return { updateChip, handleDecide, handleApproveAll, batchBusy };
+  const handleApproveAll = useCallback((chips: ApprovalChip[]) => decideAll(chips, "approve"), [decideAll]);
+  const handleRejectAll = useCallback((chips: ApprovalChip[]) => decideAll(chips, "reject"), [decideAll]);
+
+  return { updateChip, handleDecide, handleApproveAll, handleRejectAll, batchBusy };
 }
 
 type Stream = ReturnType<typeof useAssistantStream>;
@@ -239,15 +244,21 @@ export function useSettledTurns(args: {
   transcriptError: unknown;
   streaming: boolean;
   stream: Stream;
+  // Timestamp of the last successful transcript read (React Query
+  // dataUpdatedAt). Reconciliation backfills decision statuses without changing
+  // the message count, so the sync key below must also react to a new read —
+  // otherwise a remount's GET is swallowed and cached pending chips stay
+  // pending. Omitted by callers that don't care about status-only refetches.
+  transcriptUpdatedAt?: number | undefined;
 }) {
-  const { chatId, transcriptData, transcriptError, streaming, stream } = args;
+  const { chatId, transcriptData, transcriptError, streaming, stream, transcriptUpdatedAt } = args;
   const [turns, setTurns] = useState<ChatTurn[] | null>(null);
   const [syncedKey, setSyncedKey] = useState("");
   const chatRef = useRef("");
   // chatId is part of the key: two threads can share a message count and stream
   // status, and without it the previous thread's turns (including a frozen
   // approval batch) would leak into the new one.
-  const syncKey = `chat:${chatId}:${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:${stream.status}:${stream.hasIngress}:${streaming}`;
+  const syncKey = `chat:${chatId}:${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:rev${transcriptUpdatedAt ?? 0}:${stream.status}:${stream.hasIngress}:${streaming}`;
   if (syncedKey !== syncKey) {
     const chatChanged = chatRef.current !== chatId;
     chatRef.current = chatId;

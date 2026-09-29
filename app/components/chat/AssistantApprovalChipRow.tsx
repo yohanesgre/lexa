@@ -84,37 +84,27 @@ function ChipDiffArea({ chip }: { chip: ApprovalChip }) {
 
 export function ApprovalChipRow({
   chip,
-  total,
-  mixedBatch,
   disabled,
   onDecide,
 }: {
   chip: ApprovalChip;
-  total: number;
-  mixedBatch: boolean;
   disabled: boolean;
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
 }) {
   const decided = chip.state !== "pending";
   const terminal = decided ? (chip.state as Exclude<ApprovalChipState, "pending">) : null;
+  // The per-chip seq badge is folded into the carousel's N / M counter, so a
+  // card carries only its tool · target · (terminal status).
   return (
     <div className={`approval-chip${STATE_CLASS[chip.state]}`}>
       <div className="flex items-center gap-2">
         <span className="approval-tool">{chip.name}</span>
         <span className="color-muted text-xs text-lx-text-muted">·</span>
         <span className="approval-target">{targetFor(chip.diff)}</span>
-        {terminal ? (
+        {terminal && (
           <span className={`approval-status ${STATE_COLOR[terminal]}`} style={{ marginLeft: "auto" }}>
             {STATE_ICON[terminal]}
             {STATE_LABEL[terminal]}
-          </span>
-        ) : mixedBatch ? (
-          <span className="approval-seq" style={{ marginLeft: "auto" }}>
-            pending
-          </span>
-        ) : (
-          <span className="approval-seq" style={{ marginLeft: "auto" }}>
-            {chip.seq + 1} / {total}
           </span>
         )}
       </div>

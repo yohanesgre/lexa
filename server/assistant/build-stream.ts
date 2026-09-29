@@ -147,6 +147,46 @@ export function reconcilePendingBatchStatuses(
   return touched ? next : messages;
 }
 
+// Compact, provider-context-only description of what a resumed run actually
+// did with the batch the user decided on. Fed to the model as an extra message
+// (never persisted as a transcript turn) so it does not re-propose writes that
+// were already applied, failed, or rejected.
+export interface ResumeResultLine {
+  tool: string;
+  target?: string | undefined;
+  created?: string | undefined;
+  status: "applied" | "failed" | "denied";
+  error?: string | undefined;
+}
+
+const NOTE_TARGET_CAP = 120;
+
+// Model-facing note text: collapse whitespace to single spaces and drop quotes
+// so a crafted title / error can neither forge extra summary lines nor fake the
+// quoting of another line.
+function noteText(value: string): string {
+  return value.replace(/\s+/g, " ").replace(/"/g, "").trim();
+}
+
+export function buildResumeResultsNote(lines: readonly ResumeResultLine[]): string {
+  if (lines.length === 0) return "";
+  const out = ["[approved write results]"];
+  if (!lines.some((l) => l.status === "applied")) out.push("None of the proposed writes were executed.");
+  for (const l of lines) {
+    const parts = [l.tool];
+    const target = l.target === undefined ? "" : noteText(l.target);
+    if (target !== "") parts.push(`"${target.slice(0, NOTE_TARGET_CAP)}"`);
+    if (l.created !== undefined && l.created.trim() !== "") parts.push(`[${l.created.trim()}]`);
+    const label = parts.join(" ");
+    if (l.status === "applied") out.push(`- ${label}: applied`);
+    else if (l.status === "failed") {
+      const error = l.error === undefined ? "" : noteText(l.error);
+      out.push(`- ${label}: failed (not executed)${error !== "" ? `: ${error}` : ""}`);
+    } else out.push(`- ${label}: rejected (not executed)`);
+  }
+  return out.join("\n");
+}
+
 export interface StreamRunContext {
   keyId: string;
   idField: "taskId" | "chatId";
@@ -170,6 +210,9 @@ export interface StreamRunContext {
   onCancel: () => Promise<void>;
   skipUserEntry?: boolean | undefined;
   approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }> | undefined;
+  // Provider-context-only note describing the executed batch. Appended to the
+  // messages handed to the provider; never added to ctx.history or persisted.
+  resumeResultsNote?: string | undefined;
   writeDrain?: (() => QueuedProposal[]) | undefined;
   writeTools?: string[] | undefined;
   modelOptions?: Record<string, unknown> | undefined;
@@ -288,7 +331,10 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           for (const r of ctx.approvalResults ?? []) push({ type: "approval_result", approvalId: r.approvalId, status: r.status, ...(r.error !== undefined ? { error: r.error } : {}) });
           const { streamChat } = await import("./provider");
           const hydrated = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
-          const prepared = sanitizeProviderMessages(hydrated);
+          let prepared = sanitizeProviderMessages(hydrated);
+          if (ctx.resumeResultsNote !== undefined && ctx.resumeResultsNote.trim() !== "") {
+            prepared = [...prepared, { role: "user", content: ctx.resumeResultsNote }];
+          }
           let toolRounds = 0;
           let didFinish = false;
           const pendingCalls = new Map<string, { name: string; args: string }>();

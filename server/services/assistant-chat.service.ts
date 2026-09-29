@@ -28,7 +28,8 @@ import { parseTaskKey } from "../task-key";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
-import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses } from "../assistant/build-stream";
+import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
+import { collectResumeResults } from "../assistant/resume-results";
 import { scanMentionTokens, buildMentionContextBlock, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_IMAGE_CAPS, CHAT_CITATION_CAP, assertAttachmentCaps, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
@@ -340,13 +341,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const rows = yield* pendingWritesRepo.listByBatch(batchId);
         const remaining = rows.filter((r) => r.status === "pending").length;
         if (remaining > 0) return yield* new ApprovalsPending({ batchId, remaining });
-        const results: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }> = [];
         const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };
-        const executeApprovedRow = (row: (typeof rows)[number]) => executeAssistantWrite(row, ctx as unknown as never);
-        for (const row of rows) {
-          if (row.status === "approved") { const outcome = yield* executeApprovedRow(row); results.push(outcome.ok ? { approvalId: row.id, status: "applied" as const } : { approvalId: row.id, status: "failed" as const, ...(outcome.error !== undefined ? { error: outcome.error } : {}) }); }
-          else if (row.status === "rejected") results.push({ approvalId: row.id, status: "denied" as const });
-        }
+        const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row, ctx as unknown as never));
+        const resumeResultsNote = buildResumeResultsNote(noteLines);
         const history = applyResumeResults(thread.messages, [batchId]);
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
@@ -363,7 +360,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         return buildStream({
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          userContent: "", skipUserEntry: true, approvalResults: results, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
+          userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
           toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),

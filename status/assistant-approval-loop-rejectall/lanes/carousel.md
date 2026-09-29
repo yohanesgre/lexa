@@ -1,0 +1,3 @@
+state: DONE
+ts: 1790669577
+msg: wave-5 — SEV focus-follow now prefers the active card's Approve button (aria-label^="Approve ") then any enabled action then wrapper (wireframe herald-write-approvals.html:238); test asserts "Approve move_task new" + decided-card wrapper case kept. NIT counter/prev-next no longer ratchet through intermediate cards: scroll sync suspended while a programmatic page is in flight (scrollingRef + armScrollSettle on scrollend with 400ms timeout fallback, timer cleared on unmount). NIT offset invariant documented in app/styles/phosphor.css beside .approval-carousel-track (must stay position: static; offsets normalised against track.offsetLeft). tsc rc=0; bun run test:fe 98 files/675 tests passed; bun run test:be 142 files/1721 tests passed.

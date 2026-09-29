@@ -162,6 +162,25 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   });
   const rawMessages = useMemo(() => transcript.data?.messages ?? [], [transcript.data]);
 
+  // A cached transcript must be re-read whenever its thread becomes active:
+  // GET /assistant/chat/:chatId reconciles persisted approval markers against
+  // live decisions (terminal chip statuses only the read carries). chatId
+  // resolves in an effect AFTER mount, so the query observer mounts disabled and
+  // `refetchOnMount` cannot fire on the enabled flip; without this explicit read
+  // an SPA round trip (leave the chat, come back) re-renders the cached
+  // pre-decision marker as pending chips, and approving then 409s
+  // APPROVAL_ALREADY_DECIDED. Fresh threads (no cached data) are left to the
+  // mount fetch; a fetch already in flight is not duplicated.
+  const reconciledChatRef = useRef("");
+  useEffect(() => {
+    if (!chatId) return;
+    if (reconciledChatRef.current === chatId) return;
+    reconciledChatRef.current = chatId;
+    const state = qc.getQueryState(["assistant-chat", chatId]);
+    if (!state || state.data === undefined || state.fetchStatus === "fetching") return;
+    void qc.refetchQueries({ queryKey: ["assistant-chat", chatId], exact: true, type: "active" });
+  }, [chatId, qc]);
+
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
   const stream = useAssistantStream(streamKey);
   const streaming = stream.status === "connecting" || stream.status === "streaming";
@@ -172,6 +191,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     transcriptError: transcript.error,
     streaming,
     stream,
+    transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
 
   const { data: agents = [] } = useAgents();
@@ -307,7 +327,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     reasoningText: stream.reasoningText,
   });
 
-  const { handleDecide, handleApproveAll, batchBusy } = useApprovalDecisions({ setTurns });
+  const { handleDecide, handleApproveAll, handleRejectAll, batchBusy } = useApprovalDecisions({ setTurns });
 
   useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef });
 
@@ -349,6 +369,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             batchBusy={batchBusy}
             onDecide={handleDecide}
             onApproveAll={handleApproveAll}
+            onRejectAll={handleRejectAll}
             onRetryTurn={handleRetryTurn}
             scrollRef={scrollRef}
             onScroll={handleTranscriptScroll}
