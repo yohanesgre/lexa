@@ -24,6 +24,12 @@ vi.mock("../lib/queries/assistant-admin", () => ({
   useUpdateMcpServer: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteMcpServer: () => ({ mutate: vi.fn(), isPending: false }),
   useTestMcpServer: () => ({ mutate: vi.fn(), isPending: false }),
+  useAssistantJevConfig: () => ({
+    data: { config: { id: "default", baseUrl: "https://api.typesafe.ai", model: "jev-latest", enabled: false, hasKey: false, keyMask: null, createdAt: "t", updatedAt: "t" }, secretsEnabled: true },
+    isLoading: false,
+  }),
+  useUpdateAssistantJevConfig: () => ({ mutate: vi.fn(), isPending: false }),
+  useTestAssistantJev: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { AssistantProvidersTab } from "./admin.assistant.providers";
@@ -33,6 +39,7 @@ describe("admin assistant providers tab", () => {
     render(<AssistantProvidersTab />);
     expect(screen.getByRole("heading", { name: "Assistant Providers" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "MCP Clients" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Jev" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save client" })).toBeInTheDocument();
   });
 

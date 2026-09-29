@@ -8,13 +8,37 @@ function toastMessage(err: unknown): string {
   return e.message || "Something went wrong";
 }
 
-export function useAssistantProviders() {
-  return useQuery({
-    queryKey: ["assistant-providers"],
-    queryFn: () => api.listAssistantProviders().then((r) => r.data),
+// The registry cache holds the whole list BODY, not just the rows, because the
+// body also carries `secretsEnabled` — the server's real capability for managed
+// provider keys. The section reads both from one query, so the flag can never
+// disagree with the rows it describes.
+type ProviderList = { data: AssistantProvider[]; secretsEnabled: boolean | undefined };
+
+function providersQuery() {
+  return {
+    queryKey: ["assistant-providers"] as const,
+    queryFn: (): Promise<ProviderList> => api.listAssistantProviders(),
     retry: false,
     staleTime: 30_000,
-  });
+  };
+}
+
+export function useAssistantProviders() {
+  const query = useQuery(providersQuery());
+  // Rows stay the hook's `data` for existing callers; the capability rides
+  // alongside. `undefined` while the list is in flight — the caller must treat
+  // that as "capability not known yet", never as "off".
+  return { ...query, data: query.data?.data, secretsEnabled: query.data?.secretsEnabled };
+}
+
+// Mutations write the list body, preserving the capability from the old entry.
+// A cold cache leaves it `undefined` — unknown, never a fabricated `false`,
+// which the UI would render as a definitive "key storage is off".
+function withProvider(
+  old: ProviderList | undefined,
+  next: (rows: AssistantProvider[]) => AssistantProvider[]
+): ProviderList {
+  return { data: next(old?.data ?? []), secretsEnabled: old?.secretsEnabled };
 }
 
 export function useAssistantProvidersHealth(providerIds: string[]) {
@@ -49,7 +73,7 @@ export function useCreateProvider() {
   return useMutation({
     mutationFn: (input: { label: string; baseUrl: string; apiKey: string }) => api.createAssistantProvider(input),
     onSuccess: (provider) => {
-      qc.setQueryData<AssistantProvider[]>(["assistant-providers"], (old) => (old ? [...old, provider] : [provider]));
+      qc.setQueryData<ProviderList>(["assistant-providers"], (old) => withProvider(old, (rows) => [...rows, provider]));
       toast.push("success", "Provider created");
     },
     onError: (err) => {
@@ -62,9 +86,9 @@ export function useUpdateProvider() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }) => api.updateAssistantProvider(id, input),
+    mutationFn: ({ id, ...input }: { id: string; label?: string | undefined; baseUrl?: string | undefined; apiKey?: string | undefined; clearKey?: boolean | undefined }) => api.updateAssistantProvider(id, input),
     onSuccess: (provider) => {
-      qc.setQueryData<AssistantProvider[]>(["assistant-providers"], (old) => (old ?? []).map((p) => (p.id === provider.id ? provider : p)));
+      qc.setQueryData<ProviderList>(["assistant-providers"], (old) => withProvider(old, (rows) => rows.map((p) => (p.id === provider.id ? provider : p))));
       toast.push("success", "Provider updated");
     },
     onError: (err) => {
@@ -79,7 +103,7 @@ export function useDeleteProvider() {
   return useMutation({
     mutationFn: (id: string) => api.deleteAssistantProvider(id),
     onSuccess: (_v, id) => {
-      qc.setQueryData<AssistantProvider[]>(["assistant-providers"], (old) => (old ?? []).filter((p) => p.id !== id));
+      qc.setQueryData<ProviderList>(["assistant-providers"], (old) => withProvider(old, (rows) => rows.filter((p) => p.id !== id)));
       toast.push("success", "Provider deleted");
     },
     onError: (err) => {
@@ -106,11 +130,10 @@ export function useFetchModels() {
   return useMutation({
     mutationFn: (id: string) => api.fetchAssistantProviderModels(id),
     onSuccess: (res, id) => {
-      qc.setQueryData<AssistantProvider[]>(["assistant-providers"], (old) => {
-        if (!old) return old;
+      qc.setQueryData<ProviderList>(["assistant-providers"], (old) => withProvider(old, (rows) => {
         const nextModels = (res.data ?? []) as unknown as AssistantProviderModel[];
-        return old.map((p) => (p.id === id ? { ...p, models: nextModels } : p));
-      });
+        return rows.map((p) => (p.id === id ? { ...p, models: nextModels } : p));
+      }));
       toast.push("success", "Models fetched");
     },
     onError: (err) => {
@@ -242,6 +265,74 @@ export function useSetProjectMcpServers(projectId: string) {
   });
 }
 
+// ── Jev advisory registry ──
+
+// The cache holds the whole GET body (`{ config, secretsEnabled }`): the
+// section renders the key-storage warning from the same read that produced the
+// config, so the two can never disagree.
+export function useAssistantJevConfig() {
+  return useQuery({
+    queryKey: ["assistant-jev"],
+    queryFn: () => api.getAssistantJevConfig(),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateAssistantJevConfig() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: api.AssistantJevPatch) => api.updateAssistantJevConfig(input),
+    onSuccess: (res) => {
+      qc.setQueryData(["assistant-jev"], res);
+      toast.push("success", "Jev configuration saved");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save Jev configuration", toastMessage(err));
+    },
+  });
+}
+
+// Expected Jev test failures (auth / unreachable / invalid config / no key) are
+// outcomes the section renders from the error body — only unexpected failures
+// toast.
+export function useTestAssistantJev() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: () => api.testAssistantJev(),
+    onError: (err) => {
+      const code = (err as { code?: string }).code;
+      if (code === "JEV_AUTH_FAILED" || code === "JEV_UNREACHABLE" || code === "JEV_INVALID_CONFIG" || code === "SECRET_KEY_UNAVAILABLE") return;
+      toast.push("error", "Test failed", toastMessage(err));
+    },
+  });
+}
+
+export function useProjectJev(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["project-jev", projectId],
+    queryFn: () => api.getProjectJev(projectId!),
+    enabled: !!projectId,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export function useSetProjectJev(projectId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { enabled: boolean }) => api.putProjectJev(projectId, input),
+    onSuccess: (res) => {
+      qc.setQueryData(["project-jev", projectId], res);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update Jev advisory", toastMessage(err));
+    },
+  });
+}
+
 export { useAssistantUsage } from "../assistant-usage.query";
 
 export function useAssistantCalls(params?: { projectId?: string | undefined; limit?: number }) {
@@ -304,14 +395,11 @@ export function useUpdateProviderModel(providerId: string) {
     mutationFn: ({ modelId, ...patch }: { modelId: string; enabled?: boolean | undefined; priority?: number }) =>
       api.updateAssistantProviderModel(providerId, modelId, patch),
     onSuccess: (model) => {
-      qc.setQueryData<AssistantProvider[]>(["assistant-providers"], (old) => {
-        if (!old) return old;
-        return old.map((p) => {
-          if (p.id !== providerId) return p;
-          const models = (p.models ?? []).map((m) => (m.modelId === model.modelId || m.id === model.id ? model as unknown as AssistantProviderModel : m));
-          return { ...p, models };
-        });
-      });
+      qc.setQueryData<ProviderList>(["assistant-providers"], (old) => withProvider(old, (rows) => rows.map((p) => {
+        if (p.id !== providerId) return p;
+        const models = (p.models ?? []).map((m) => (m.modelId === model.modelId || m.id === model.id ? model as unknown as AssistantProviderModel : m));
+        return { ...p, models };
+      })));
     },
     onError: (err) => {
       toast.push("error", "Failed to update model", toastMessage(err));
@@ -327,10 +415,7 @@ export function useReorderProviderModels() {
       api.reorderAssistantProviderModels(providerId, orderedIds),
     onSuccess: (res, vars) => {
       const nextModels = (res.data ?? []) as unknown as AssistantProviderModel[];
-      qc.setQueryData<AssistantProvider[]>(["assistant-providers"], (old) => {
-        if (!old) return old;
-        return old.map((p) => (p.id === vars.providerId ? { ...p, models: nextModels } : p));
-      });
+      qc.setQueryData<ProviderList>(["assistant-providers"], (old) => withProvider(old, (rows) => rows.map((p) => (p.id === vars.providerId ? { ...p, models: nextModels } : p))));
     },
     onError: (err) => {
       toast.push("error", "Failed to reorder models", toastMessage(err));

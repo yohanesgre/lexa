@@ -393,7 +393,7 @@ describe("AssistantMcpSection — no master key", () => {
     render(<AssistantMcpSection />);
     expect(screen.getByLabelText("Bearer token")).toBeDisabled();
     expect(screen.getByText(/Token storage is off — this server has no/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_MCP_MASTER_KEY")).toBeInTheDocument();
+    expect(screen.getByText("LXK_SECRETS_MASTER_KEY")).toBeInTheDocument();
     expect(screen.getByText(/Set it and restart to enable/)).toBeInTheDocument();
   });
 
@@ -459,7 +459,7 @@ describe("AssistantMcpSection — capability unknown (list in flight)", () => {
     render(<AssistantMcpSection />);
     expect(screen.getByLabelText("Bearer token")).toBeDisabled();
     expect(screen.queryByText(/Token storage is off/)).not.toBeInTheDocument();
-    expect(screen.queryByText("LXK_MCP_MASTER_KEY")).not.toBeInTheDocument();
+    expect(screen.queryByText("LXK_SECRETS_MASTER_KEY")).not.toBeInTheDocument();
   });
 
   it("still allows a secret-less save while the capability is unanswered", async () => {
@@ -476,7 +476,7 @@ describe("AssistantMcpSection — capability unknown (list in flight)", () => {
     render(<AssistantMcpSection />);
     expect(screen.getByLabelText("Bearer token")).toBeDisabled();
     expect(screen.getByText(/Token storage is off/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_MCP_MASTER_KEY")).toBeInTheDocument();
+    expect(screen.getByText("LXK_SECRETS_MASTER_KEY")).toBeInTheDocument();
   });
 });
 

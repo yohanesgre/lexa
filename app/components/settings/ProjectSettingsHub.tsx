@@ -13,6 +13,7 @@ import { MembersTableHead } from "./TeamSettings";
 import { AssistantProjectProviderSection } from "./assistant-project";
 import { AssistantWriteToolsSection } from "./assistant/AssistantWriteToolsSection";
 import { AssistantProjectMcpSection } from "./AssistantProjectMcpSection";
+import { AssistantProjectJevSection } from "./AssistantProjectJevSection";
 import { AgentSkillAvailabilitySection } from "./assistant/AssistantAgentSkills";
 import { ProjectMemorySection } from "./assistant/AssistantProjectMemory";
 import type { Project } from "../../../shared/types";
@@ -65,6 +66,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
       <AssistantProjectProviderSection key={project.id} project={project} />
       <AssistantWriteToolsSection key={project.id} project={project} />
       <AssistantProjectMcpSection key={project.id} project={project} />
+      <AssistantProjectJevSection key={project.id} project={project} />
       <AgentSkillAvailabilitySection projectId={project.id} />
       <ProjectMemorySection projectId={project.id} />
       <ProjectMembersSection slug={project.slug} />

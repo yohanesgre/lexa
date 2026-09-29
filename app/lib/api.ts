@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
-import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantProjectSettings } from "../../shared/assistant";
+import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantProjectSettings, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
 
 const BASE = "/api";
 
@@ -636,7 +636,10 @@ export function listAssistantModels(projectId: string, input: AssistantSettingsI
   return request(`${BASE}/assistant/settings/${projectId}/models`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function listAssistantProviders(): Promise<{ data: AssistantProvider[] }> {
+// The list body carries `secretsEnabled` — the server's real capability for
+// managed provider keys (a master key is configured) — so the flag and the rows
+// always describe the same read.
+export function listAssistantProviders(): Promise<{ data: AssistantProvider[]; secretsEnabled: boolean }> {
   return request(`${BASE}/admin/assistant/providers`);
 }
 
@@ -644,11 +647,12 @@ export function createAssistantProvider(input: { label: string; baseUrl: string;
   return request(`${BASE}/admin/assistant/providers`, { method: "POST", body: JSON.stringify({ label: input.label, baseUrl: input.baseUrl, apiKey: input.apiKey }) });
 }
 
-export function updateAssistantProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }): Promise<AssistantProvider> {
-  const body: Record<string, string> = {};
+export function updateAssistantProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string | undefined; clearKey?: boolean | undefined }): Promise<AssistantProvider> {
+  const body: Record<string, string | boolean> = {};
   if (input.label !== undefined) body.label = input.label;
   if (input.baseUrl !== undefined) body.baseUrl = input.baseUrl;
   if (input.apiKey !== undefined) body.apiKey = input.apiKey;
+  if (input.clearKey !== undefined) body.clearKey = input.clearKey;
   return request(`${BASE}/admin/assistant/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
@@ -784,6 +788,50 @@ export function listProjectMcpServers(projectId: string): Promise<{ data: McpPro
 
 export function putProjectMcpServers(projectId: string, entries: Array<{ serverId: string; enabled: boolean }>): Promise<{ data: McpProjectServer[] }> {
   return request(`${BASE}/projects/${encodeURIComponent(projectId)}/assistant/mcp-servers`, { method: "PUT", body: JSON.stringify({ entries }) });
+}
+
+// ── Jev advisory registry (Typesafe System 1) ──
+// Jev is a direct REST advisory backend, not an MCP client. The config row is
+// workspace-wide and superadmin-gated; per-project opt-in lives in
+// AssistantProjectJevSection. `secret` is write-only by construction and never
+// appears on a response.
+export type AssistantJevConfig = { config: AssistantJevMasked; secretsEnabled: boolean };
+
+export interface AssistantJevPatch {
+  baseUrl?: string;
+  model?: string;
+  enabled?: boolean;
+  // Write-only. Omitted or empty means "keep the stored key" — a blank value is
+  // NEVER a removal, so there is no null form here.
+  secret?: string;
+  // The one explicit removal route; deletes the stored ciphertext row server-side.
+  clearSecret?: boolean;
+}
+
+export interface AssistantJevTestResult {
+  ok: true;
+  latencyMs: number;
+  models: string[];
+}
+
+export function getAssistantJevConfig(): Promise<AssistantJevConfig> {
+  return request(`${BASE}/assistant/jev`);
+}
+
+export function updateAssistantJevConfig(input: AssistantJevPatch): Promise<AssistantJevConfig> {
+  return request(`${BASE}/assistant/jev`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function testAssistantJev(): Promise<AssistantJevTestResult> {
+  return request(`${BASE}/assistant/jev/test`, { method: "POST" });
+}
+
+export function getProjectJev(projectId: string): Promise<AssistantJevProjectPublic> {
+  return request(`${BASE}/projects/${encodeURIComponent(projectId)}/assistant/jev`);
+}
+
+export function putProjectJev(projectId: string, input: { enabled: boolean }): Promise<AssistantJevProjectPublic> {
+  return request(`${BASE}/projects/${encodeURIComponent(projectId)}/assistant/jev`, { method: "PUT", body: JSON.stringify(input) });
 }
 
 export function getAssistantUsage(): Promise<AssistantUsage> {

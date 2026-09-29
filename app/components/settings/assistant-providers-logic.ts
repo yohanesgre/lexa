@@ -8,15 +8,12 @@ export function providerBaseUrl(p: AssistantProvider | null): string {
 
 export type ProviderFormState = { label: string; baseUrl: string; apiKey: string };
 
-// Edit keeps the stored key unless a new one is typed; create requires one.
+// Edit keeps the stored key unless a new one is typed; a key-less create is
+// legal and deliberate, so an empty apiKey simply omits the field.
 export function providerFormPayload(state: ProviderFormState): { label: string; baseUrl: string; apiKey?: string } | null {
   const label = state.label.trim();
   const baseUrl = state.baseUrl.trim();
   if (!label || !baseUrl) return null;
   if (state.apiKey.trim()) return { label, baseUrl, apiKey: state.apiKey.trim() };
   return { label, baseUrl };
-}
-
-export function canSubmitProviderForm(state: ProviderFormState, editing: boolean): boolean {
-  return !!state.label.trim() && !!state.baseUrl.trim() && (editing || !!state.apiKey.trim());
 }
