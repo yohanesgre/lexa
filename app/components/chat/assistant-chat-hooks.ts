@@ -49,6 +49,35 @@ export function useChatSidebar() {
   return { sidebarOpen, setSidebarOpen, toggleSidebar };
 }
 
+// Floating-composer clearance (assistant-chat.html): the docked composer is
+// pinned over the transcript, so the app measures its height and writes
+// --chat-composer-clearance (measured height + the 48px scrim lead) onto the
+// .chat-shell containing block. 140px stays the CSS fallback floor while the
+// composer is unmeasurable (SSR / no ResizeObserver).
+export function useChatComposerClearance() {
+  const composerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const shell = el.closest<HTMLElement>(".chat-shell");
+    if (!shell) return;
+    const apply = () => {
+      const height = el.getBoundingClientRect().height;
+      if (height <= 0) return;
+      shell.style.setProperty("--chat-composer-clearance", `${Math.round(height) + 48}px`);
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      shell.style.removeProperty("--chat-composer-clearance");
+    };
+  }, []);
+  return composerRef;
+}
+
 // Scroll-to-bottom affordance (assistant-chat.html): auto-follow keeps the
 // view pinned to new deltas while at bottom; scrolling up releases the pin
 // until a jump back (button click or manual scroll to bottom).

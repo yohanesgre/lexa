@@ -7,6 +7,7 @@ import { AssistantBubble } from "./AssistantBubble";
 import { AssistantChatComposer } from "./AssistantChatComposer";
 import { EffortPicker } from "./EffortPicker";
 import { DeckRailSummary, SkillSelect } from "./SkillSelect";
+import { useChatComposerClearance } from "./assistant-chat-hooks";
 import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
 import type { QueuedMessage } from "./useChatQueue";
 import type { LexaSkill } from "../../../shared/types";
@@ -175,11 +176,20 @@ export function ChatComposerArea({
   seed?: { text: string; nonce: number } | null | undefined;
 }) {
   const railDisabled = streaming || busy409 || suspendedLock;
+  // The docked composer floats over the transcript (chat-composer-float);
+  // measure it and publish the clearance var on the shell. Landing never
+  // attaches the ref — it stays static and in-flow.
+  const composerRef = useChatComposerClearance();
   // The docked Deck sits at the bottom of a 100vh layout, so its rail menus
   // must open UPWARD; the landing centers the Deck and keeps them below.
   const menuAlign: "up" | "down" = landing ? "down" : "up";
   return (
-    <div className={landing ? "chat-composer is-landing" : "chat-composer"} style={landing ? { width: "100%" } : undefined}>
+    <div
+      ref={landing ? undefined : composerRef}
+      className={landing ? "chat-composer is-landing" : "chat-composer chat-composer-float"}
+      style={landing ? { width: "100%" } : undefined}
+    >
+      {!landing && <div className="chat-composer-scrim" aria-hidden="true" />}
       <div className="chat-composer-inner">
         <AssistantChatComposer
           slug={slug}
