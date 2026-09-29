@@ -11,6 +11,12 @@ export const MAX_WRITES_PER_TURN = 8;
 // Approval TTL (assistant_pending_writes.expires_at) — lazy sweep only.
 export const APPROVAL_TTL_HOURS = 24;
 
+// Max task refs per bulk call on the single-task write tools (archive/restore/
+// delete). A bulk call still occupies one proposal slot (MAX_WRITES_PER_TURN,
+// below) and one approval; it avoids only the per-task proposal cost, not the
+// per-turn write budget or the tool-round budget.
+export const MAX_BULK_TASK_REFS = 100;
+
 const DIFF_TEXT_CAP = 2000;
 const COMMENT_BODYTEXT_CAP = 2000;
 const COMMENT_BODY_BYTES = 64 * 1024;
@@ -343,8 +349,70 @@ const tipTapDoc = z
     content: z.array(z.looseObject({ type: z.string() })).optional(),
   }) as unknown as z.ZodType<TipTapDoc, TipTapDoc>;
 
+// Single-task ref in two shapes: exactly one of `ref` (one task, legacy) or
+// `refs` (1..MAX_BULK_TASK_REFS tasks in one call). Passing both is rejected —
+// the refine message is the clear validation error surfaced to the model.
+const taskRefsSchema = z
+  .object({
+    ref: z.string().min(1).describe("Task id or PREFIX-n key (one task)").optional(),
+    refs: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(MAX_BULK_TASK_REFS)
+      .describe(`Task ids or PREFIX-n keys — pass many tasks in one call (max ${MAX_BULK_TASK_REFS})`)
+      .optional(),
+  })
+  .refine((v) => (v.ref === undefined) !== (v.refs === undefined), {
+    message: "provide exactly one of 'ref' or 'refs'",
+  });
+
+type TaskRefArgs = { ref?: string | undefined; refs?: string[] | undefined };
+
+// Bulk diffs reuse the existing diff types; the chip target copy is summary
+// text, never a new diff kind.
+const bulkRefSummary = (n: number): string => `${n} tasks`;
+const bulkTitleSummary = (keys: string[]): string => {
+  const head = keys.slice(0, 3).join(", ");
+  return keys.length > 3 ? `${head}…` : head;
+};
+
+// A repeated/whitespace ref must neither inflate the summary nor run twice
+// (double delete yields a spurious TASK_NOT_FOUND). Trimmed + deduped in
+// first-seen order.
+const taskRefListOf = (args: TaskRefArgs): string[] => {
+  const raw = args.refs !== undefined ? args.refs : args.ref !== undefined ? [args.ref] : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of raw) {
+    if (typeof r !== "string") continue;
+    const ref = r.trim();
+    if (ref === "" || seen.has(ref)) continue;
+    seen.add(ref);
+    out.push(ref);
+  }
+  return out;
+};
+
 export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
   const tools = [];
+
+  // Resolve every ref; all-or-nothing at proposal time so a bulk proposal can
+  // never half-exist. Unknown refs are named in the error.
+  const resolveTaskRefs = async (args: TaskRefArgs): Promise<Step<WriteTaskSnapshot[]>> => {
+    const tasks: WriteTaskSnapshot[] = [];
+    const unknown: string[] = [];
+    const refs = taskRefListOf(args);
+    if (refs.length === 0) return { ok: false, error: "provide at least one task ref" };
+    for (const ref of refs) {
+      const t = await resolveOrError(deps.findTaskByRef(ref), `task '${ref}' not found`);
+      if (t.ok) tasks.push(t.value);
+      else unknown.push(ref);
+    }
+    if (unknown.length === 1) return { ok: false, error: `task '${unknown[0]}' not found` };
+    if (unknown.length > 1) return { ok: false, error: `tasks not found: ${unknown.map((r) => `'${r}'`).join(", ")}` };
+    return { ok: true, value: tasks };
+  };
+
 
   tools.push(
     toolDefinition({
@@ -477,17 +545,29 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
     tools.push(
       toolDefinition({
         name,
-        description: `Propose ${verb.toLowerCase()}ing a task. Requires user approval.`,
-        inputSchema: z.object({ ref: z.string().min(1).describe("Task id or PREFIX-n key") }),
+        description: `Propose ${verb.toLowerCase()}ing a task. Pass \`refs\` to act on many tasks in one call (max ${MAX_BULK_TASK_REFS}) — prefer this over repeated calls. Requires user approval.`,
+        inputSchema: taskRefsSchema,
         outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
-      }).server(async (args: { ref: string }) => {
-        const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
-        if (!task.ok) return { proposed: false, error: task.error };
+      }).server(async (args: TaskRefArgs) => {
+        const resolved = await resolveTaskRefs(args);
+        if (!resolved.ok) return { proposed: false, error: resolved.error };
+        const tasks = resolved.value;
+        const single = tasks.length === 1 ? tasks[0]! : null;
         const diff: AssistantWriteDiff =
-          name === "archive_task"
-            ? { type: "task_archive", taskRef: task.value.key, taskTitle: task.value.title }
-            : buildTaskRestoreDiff(task.value);
-        const r = await record(deps, { name, args, diff, detail: `${verb} ${task.value.key}` });
+          single !== null
+            ? name === "archive_task"
+              ? { type: "task_archive", taskRef: single.key, taskTitle: single.title }
+              : buildTaskRestoreDiff(single)
+            : name === "archive_task"
+              ? { type: "task_archive", taskRef: bulkRefSummary(tasks.length), taskTitle: bulkTitleSummary(tasks.map((t) => t.key)) }
+              : {
+                  type: "task_restore",
+                  taskRef: bulkRefSummary(tasks.length),
+                  taskTitle: bulkTitleSummary(tasks.map((t) => t.key)),
+                  toColumn: tasks[0]!.columnName,
+                };
+        const detail = single !== null ? `${verb} ${single.key}` : `${verb} ${tasks.length} tasks`;
+        const r = await record(deps, { name, args, diff, detail });
         if (!r.ok) return { proposed: false, error: r.error };
         return { proposed: true, approvalId: r.value.approvalId };
       })
@@ -680,14 +760,20 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
   tools.push(
     toolDefinition({
       name: "delete_task",
-      description: "Propose deleting a task (hard delete — fails if it has subtasks). Requires user approval.",
-      inputSchema: z.object({ ref: z.string().min(1).describe("Task id or PREFIX-n key") }),
+      description: `Propose deleting a task (hard delete — fails if it has subtasks). Pass \`refs\` to act on many tasks in one call (max ${MAX_BULK_TASK_REFS}) — prefer this over repeated calls. Requires user approval.`,
+      inputSchema: taskRefsSchema,
       outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
-    }).server(async (args) => {
-      const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
-      if (!task.ok) return { proposed: false, error: task.error };
-      const diff = buildTaskDeleteDiff(task.value);
-      const r = await record(deps, { name: "delete_task", args, diff, detail: `Delete ${task.value.key} "${cap(task.value.title, 40)}"` });
+    }).server(async (args: TaskRefArgs) => {
+      const resolved = await resolveTaskRefs(args);
+      if (!resolved.ok) return { proposed: false, error: resolved.error };
+      const tasks = resolved.value;
+      const single = tasks.length === 1 ? tasks[0]! : null;
+      const diff: AssistantWriteDiff =
+        single !== null
+          ? buildTaskDeleteDiff(single)
+          : { type: "task_delete", taskRef: bulkRefSummary(tasks.length), taskTitle: bulkTitleSummary(tasks.map((t) => t.key)) };
+      const detail = single !== null ? `Delete ${single.key} "${cap(single.title, 40)}"` : `Delete ${tasks.length} tasks`;
+      const r = await record(deps, { name: "delete_task", args, diff, detail });
       if (!r.ok) return { proposed: false, error: r.error };
       return { proposed: true, approvalId: r.value.approvalId };
     })

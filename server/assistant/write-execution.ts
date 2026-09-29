@@ -30,6 +30,25 @@ export type AssistantWriteExecutionCtx = {
 const assistantActor = (ownerUserId: string): Actor => ({ kind: "agent", label: "assistant", userId: ownerUserId });
 const str = (v: unknown): string => String(v);
 
+// Persisted args may carry `ref` (legacy single) or `refs` (bulk). Both are
+// accepted forever — pending rows created before bulk support must still run.
+// Trimmed and deduped (first-seen order) so a repeated ref can neither inflate
+// the summary nor run twice.
+const taskRefsFromArgs = (args: Record<string, unknown>): string[] => {
+  const refs = args["refs"];
+  const raw = Array.isArray(refs) ? refs : [args["ref"]];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of raw) {
+    if (typeof r !== "string") continue;
+    const ref = r.trim();
+    if (ref === "" || seen.has(ref)) continue;
+    seen.add(ref);
+    out.push(ref);
+  }
+  return out;
+};
+
 export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: AssistantWriteExecutionCtx) =>
   Effect.gen(function* () {
     const access = yield* ctx.authz.projectAccess(row.owner_user_id, row.project_id);
@@ -57,6 +76,37 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
             : Effect.succeed(t)
         )
       );
+    // Bulk variant: run the per-item op for every ref, keeping the per-item
+    // semantics (a subtask guard on one task must not abort the rest). Partial
+    // success is allowed; zero applied fails the whole write so the row is
+    // recorded as an error.
+    const runBulkTaskOp = (refs: string[], op: (id: string) => Effect.Effect<unknown, unknown>) =>
+      Effect.gen(function* () {
+        const appliedRefs: string[] = [];
+        const failed: Array<{ ref: string; error: string }> = [];
+        let firstError: { _tag?: string; message?: string } | undefined;
+        for (const ref of refs) {
+          const outcome = yield* Effect.gen(function* () {
+            const t = yield* resolveTaskRefRow(ref);
+            yield* op((t as unknown as { id: string }).id);
+            return ref;
+          }).pipe(Effect.either);
+          if (outcome._tag === "Right") {
+            appliedRefs.push(outcome.right);
+          } else {
+            const e = outcome.left as { _tag?: string; message?: string };
+            if (firstError === undefined) firstError = e;
+            failed.push({ ref, error: `${errorCodeMap[e._tag ?? ""] ?? "ASSISTANT_WRITE_FAILED"}: ${str(e.message ?? "write failed")}` });
+          }
+        }
+        if (appliedRefs.length === 0) {
+          return yield* Effect.fail((firstError ?? { _tag: "InvalidArgs", message: "write failed" }) as never);
+        }
+        // `partial` flags a batch with at least one failure so the resume note
+        // and approval_result frame report the real counts, never a bare
+        // "applied".
+        return { applied: appliedRefs, failed, ...(failed.length > 0 ? { partial: true as const } : {}) };
+      });
     const applied = yield* Effect.gen(function* () {
       switch (row.tool_name as AssistantWriteToolName) {
         case "create_task": {
@@ -112,12 +162,20 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
           );
         }
         case "archive_task": {
-          const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
-          return yield* (ctx.taskService as unknown as { archive(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).archive(actor, (t as unknown as { id: string }).id, { viaAssistant: true });
+          const refs = taskRefsFromArgs(args);
+          if (refs.length <= 1) {
+            const t = yield* resolveTaskRefRow(refs[0] ?? "");
+            return yield* (ctx.taskService as unknown as { archive(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).archive(actor, (t as unknown as { id: string }).id, { viaAssistant: true });
+          }
+          return yield* runBulkTaskOp(refs, (id) => (ctx.taskService as unknown as { archive(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).archive(actor, id, { viaAssistant: true }));
         }
         case "restore_task": {
-          const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
-          return yield* (ctx.taskService as unknown as { restore(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).restore(actor, (t as unknown as { id: string }).id, { viaAssistant: true });
+          const refs = taskRefsFromArgs(args);
+          if (refs.length <= 1) {
+            const t = yield* resolveTaskRefRow(refs[0] ?? "");
+            return yield* (ctx.taskService as unknown as { restore(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).restore(actor, (t as unknown as { id: string }).id, { viaAssistant: true });
+          }
+          return yield* runBulkTaskOp(refs, (id) => (ctx.taskService as unknown as { restore(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).restore(actor, id, { viaAssistant: true }));
         }
         case "add_comment": {
           const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
@@ -168,8 +226,12 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
           return undefined as unknown as never;
         }
         case "delete_task": {
-          const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
-          return yield* (ctx.taskService as unknown as { delete(a: Actor, b: string): Effect.Effect<unknown, unknown> }).delete(actor, (t as unknown as { id: string }).id);
+          const refs = taskRefsFromArgs(args);
+          if (refs.length <= 1) {
+            const t = yield* resolveTaskRefRow(refs[0] ?? "");
+            return yield* (ctx.taskService as unknown as { delete(a: Actor, b: string): Effect.Effect<unknown, unknown> }).delete(actor, (t as unknown as { id: string }).id);
+          }
+          return yield* runBulkTaskOp(refs, (id) => (ctx.taskService as unknown as { delete(a: Actor, b: string): Effect.Effect<unknown, unknown> }).delete(actor, id));
         }
       }
     }).pipe(Effect.either);

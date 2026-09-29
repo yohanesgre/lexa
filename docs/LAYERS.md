@@ -1335,9 +1335,19 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   apply a write directly; each validates refs and
   persists a pending row via `createWriteRecorder` (per-turn budget:
   `MAX_WRITES_PER_TURN=8`; over-budget proposals return a tool error).
+  `archive_task` / `restore_task` / `delete_task` also accept
+  `refs: string[]` (1..`MAX_BULK_TASK_REFS=100`) as an alternative to the
+  single `ref`, so a bulk operation is one proposal and one approval instead
+  of one per task — the resolver is all-or-nothing at propose time (any
+  unknown ref → `proposed:false` naming it), and the executor applies per
+  item, aggregating `{ applied, failed }` (partial success allowed — e.g. the
+  delete subtask guard on one task does not abort the rest; zero applied →
+  error). Placement on the provider tools nudges `refs` for many tasks.
   Diffs are server-computed plain-text projections (`AssistantWriteDiff` in
   `shared/assistant.ts`, TipTap-aware text extraction, capped) — what the
-  approver sees; raw args ride the row for execution.
+  approver sees; raw args ride the row for execution. Bulk reuses the existing
+  diff type with summary strings (`taskRef: "52 tasks"`, `taskTitle` = first
+  up-to-3 keys), so the approval chip target copy stays text, not a new kind.
 - **Approval protocol:** when a turn queued write proposals, the stream ends
   at the suspend checkpoint instead of `done`: every pending row is emitted
   as a `tool_pending` frame (seq order), the assistant transcript entry is

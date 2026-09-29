@@ -2,7 +2,7 @@ import { translateRunError, clientFacingErrorMessage } from "./provider";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail } from "./tools";
 import { isAssistantWriteTool, type QueuedProposal } from "./write-tools";
 import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/errors";
-import type { AssistantReasoningEffort, StreamFrame } from "../../shared/assistant";
+import type { AssistantReasoningEffort, StreamFrame, ApprovalPartial } from "../../shared/assistant";
 import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../shared/assistant";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { hydrateImageParts, replaceImageRefsWithPlaceholders, needsSummary, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
@@ -182,9 +182,12 @@ export interface ResumeResultLine {
   created?: string | undefined;
   status: "applied" | "failed" | "denied";
   error?: string | undefined;
+  partial?: ApprovalPartial | undefined;
 }
 
 const NOTE_TARGET_CAP = 120;
+// Partial-result lines show this many distinct failure strings, then an ellipsis.
+const NOTE_PARTIAL_ERRORS_CAP = 3;
 
 // Model-facing note text: collapse whitespace to single spaces and drop quotes
 // so a crafted title / error can neither forge extra summary lines nor fake the
@@ -203,7 +206,17 @@ export function buildResumeResultsNote(lines: readonly ResumeResultLine[]): stri
     if (target !== "") parts.push(`"${target.slice(0, NOTE_TARGET_CAP)}"`);
     if (l.created !== undefined && l.created.trim() !== "") parts.push(`[${l.created.trim()}]`);
     const label = parts.join(" ");
-    if (l.status === "applied") out.push(`- ${label}: applied`);
+    if (l.status === "applied") {
+      const p = l.partial;
+      if (p === undefined) out.push(`- ${label}: applied`);
+      else {
+        const total = p.applied + p.failed;
+        const errs = (p.errors ?? []).map((e) => noteText(e)).filter((e) => e !== "");
+        const shown = errs.slice(0, NOTE_PARTIAL_ERRORS_CAP).join("; ");
+        const suffix = shown === "" ? "" : `: ${shown.slice(0, NOTE_TARGET_CAP)}${errs.length > NOTE_PARTIAL_ERRORS_CAP ? "…" : ""}`;
+        out.push(`- ${label}: applied (${p.failed} of ${total} failed${suffix})`);
+      }
+    }
     else if (l.status === "failed") {
       const error = l.error === undefined ? "" : noteText(l.error);
       out.push(`- ${label}: failed (not executed)${error !== "" ? `: ${error}` : ""}`);
@@ -234,7 +247,7 @@ export interface StreamRunContext {
   onFail: (message: string) => Promise<void>;
   onCancel: () => Promise<void>;
   skipUserEntry?: boolean | undefined;
-  approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }> | undefined;
+  approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string; partial?: ApprovalPartial }> | undefined;
   // Provider-context-only note describing the executed batch. Appended to the
   // messages handed to the provider; never added to ctx.history or persisted.
   resumeResultsNote?: string | undefined;
@@ -353,7 +366,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         };
         try {
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
-          for (const r of ctx.approvalResults ?? []) push({ type: "approval_result", approvalId: r.approvalId, status: r.status, ...(r.error !== undefined ? { error: r.error } : {}) });
+          for (const r of ctx.approvalResults ?? []) push({ type: "approval_result", approvalId: r.approvalId, status: r.status, ...(r.error !== undefined ? { error: r.error } : {}), ...(r.partial !== undefined ? { partial: r.partial } : {}) });
           const { streamChat } = await import("./provider");
           const hydrated = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
           let prepared = sanitizeProviderMessages(hydrated);

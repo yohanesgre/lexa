@@ -125,6 +125,15 @@ export interface AssistantModelPriceInput {
   cachedWritePrice: number;
 }
 
+// A bulk write that partially applied: counts cover the whole batch, `errors`
+// carries the per-item failure strings (deduped, first-seen order). Only set on
+// an "applied" result whose batch had at least one failing item.
+export interface ApprovalPartial {
+  applied: number;
+  failed: number;
+  errors?: string[];
+}
+
 export type StreamFrame =
   | { type: "start"; taskId?: string; chatId?: string; threadId: string }
   | { type: "delta"; text: string }
@@ -140,7 +149,7 @@ export type StreamFrame =
       diff: AssistantWriteDiff;
     }
   | { type: "error"; code: string; message: string }
-  | { type: "approval_result"; approvalId: string; status: "applied" | "failed" | "denied"; error?: string }
+  | { type: "approval_result"; approvalId: string; status: "applied" | "failed" | "denied"; error?: string; partial?: ApprovalPartial }
   | { type: "done"; taskId?: string; chatId?: string; text: string; usage: { in: number; out: number } }
   | { type: "suspended"; batchId: string };
 
