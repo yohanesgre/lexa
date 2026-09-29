@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { TipTapDoc } from "../../shared/types";
-import { renderDoc, SHARE_OUTSIDE_SUBTREE, type ShareRenderContext } from "./tiptap-render";
+import { renderDoc, renderMention, SHARE_OUTSIDE_SUBTREE, type ShareRenderContext } from "./tiptap-render";
 
 const ATTACHMENT_ID = "11111111-1111-1111-1111-111111111111";
 
@@ -79,5 +79,40 @@ describe("renderDoc share path", () => {
   it("leaves an existing share link untouched", () => {
     renderShare(docWithLink("/share/tok?page=w2"));
     expect(screen.getByRole("link", { name: "target" })).toHaveAttribute("href", "/share/tok?page=w2");
+  });
+});
+
+function renderMentionChip(refType: string, refId: string, label: string, slug?: string) {
+  return render(<div>{renderMention({ refType, refId, label }, "k", slug, "task")}</div>);
+}
+
+describe("renderMention — mention chips", () => {
+  it("links a task mention to the board deep-link", () => {
+    const { container } = renderMentionChip("task", "t1", "EG-1", "demo");
+    const link = container.querySelector("a.mention-chip");
+    expect(link).toHaveAttribute("href", "/demo/board?task=t1");
+    expect(link!.querySelector(".task-key")?.textContent).toBe("@EG-1");
+  });
+
+  it("links a wiki mention to the wiki page", () => {
+    const { container } = renderMentionChip("wiki", "home", "Home", "demo");
+    expect(container.querySelector("a.mention-chip")).toHaveAttribute("href", "/demo/wiki/home");
+  });
+
+  it("renders entity refTypes as plain chips with no link", () => {
+    for (const refType of ["milestone", "swimlane", "column"]) {
+      const { container, unmount } = renderMentionChip(refType, "m1", "Q3 Launch", "demo");
+      expect(container.querySelector("a")).toBeNull();
+      const chip = container.querySelector("span.mention-chip");
+      expect(chip).toBeTruthy();
+      expect(chip!.textContent).toBe("@Q3 Launch");
+      unmount();
+    }
+  });
+
+  it("renders a chip with no link when there is no project context", () => {
+    const { container } = renderMentionChip("task", "t1", "EG-1");
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("span.mention-chip")).toBeTruthy();
   });
 });

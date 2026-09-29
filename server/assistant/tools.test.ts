@@ -14,6 +14,7 @@ import {
   type WikiPageContent,
   type WikiSearchHit,
 } from "./tools";
+import { ZERO_ARG_TOOLS } from "./build-stream";
 import type { JevQuestions, JevRuntimeConfig } from "./jev";
 import type { TipTapDoc } from "../../shared/types";
 
@@ -118,6 +119,58 @@ describe("get_all_wiki_pages", () => {
     const out = await exec({});
     expect(out.truncated).toBe(true);
     expect((out.pages as unknown[]).length).toBeLessThan(10);
+  });
+});
+
+describe("get_skill", () => {
+  const loader = async (name: string) =>
+    name === "Status Report" ? { name: "Status Report", description: "rank work", instructions: "## Status\nrank" } : null;
+
+  it("is absent without a loader, present with one, and never zero-arg", () => {
+    expect(buildAssistantTools(deps()).map((t) => t.name)).not.toContain("get_skill");
+    expect(buildAssistantTools(deps({ loadSkillByName: loader })).map((t) => t.name)).toContain("get_skill");
+    expect(ZERO_ARG_TOOLS.has("get_skill")).toBe(false);
+  });
+
+  it("returns the bound skill's name, description and instructions", async () => {
+    const exec = tool({ loadSkillByName: loader }, "get_skill");
+    expect(await exec({ name: "Status Report" })).toEqual({
+      name: "Status Report",
+      description: "rank work",
+      instructions: "## Status\nrank",
+    });
+  });
+
+  it("caps the instructions at WIKI_READ_CAP characters", async () => {
+    const exec = tool(
+      { loadSkillByName: async () => ({ name: "Big", description: null, instructions: "x".repeat(WIKI_READ_CAP + 500) }) },
+      "get_skill"
+    );
+    const out = await exec({ name: "Big" });
+    expect((out.instructions as string).length).toBe(WIKI_READ_CAP);
+  });
+
+  it("returns a typed error result for an unbound name — never a throw", async () => {
+    const exec = tool({ loadSkillByName: loader }, "get_skill");
+    const out = await exec({ name: "nope" });
+    expect(out.error).toContain("nope");
+    expect(out.instructions).toBeUndefined();
+  });
+
+  it("reads nothing but the skill loader", async () => {
+    const exec = tool(
+      {
+        loadSkillByName: loader,
+        storageGet: async () => {
+          throw new Error("unexpected read");
+        },
+        findTaskByRef: async () => {
+          throw new Error("unexpected read");
+        },
+      },
+      "get_skill"
+    );
+    expect(await exec({ name: "Status Report" })).toMatchObject({ name: "Status Report" });
   });
 });
 
@@ -266,6 +319,7 @@ describe("toolCallDetail", () => {
     expect(toolCallDetail("analyze_image", { storageKey: "blobs/img9.png", question: "what" })).toBe(
       "Reading attachment img9.png"
     );
+    expect(toolCallDetail("get_skill", { name: "Status" })).toBe("Reading skill Status");
   });
 
   it("unknown tools or missing fields yield undefined", () => {

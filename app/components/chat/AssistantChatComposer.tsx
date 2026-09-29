@@ -1,7 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Image, Send, Square } from "lucide-react";
 import { ALLOWED_TYPES, acceptImageFiles, type AssistantImage } from "../../lib/assistant-image";
+import { MENTION_SECTIONS, type MentionItem } from "../../lib/mention-suggestion";
 import { useMentionTokens } from "../../lib/useMentionTokens";
+import type { LexaSkill } from "../../../shared/types";
 
 const CHAT_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 1024 * 1024) };
 const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Assistant.";
@@ -44,54 +46,95 @@ function useElapsedSeconds(streaming: boolean): number {
   return seconds;
 }
 
-// @-mention popup above the composer (tasks + wiki pages).
+// Composer autocomplete popup: "@" renders the five entity sections in order
+// (non-empty only); "$" renders the bound-skill list with its own header and
+// empty/no-match states (mentions-autocomplete.html / herald-chat.html).
 function ComposerMentionPopup({
   mention,
+  hasBoundSkills,
   composerRef,
 }: {
   mention: ReturnType<typeof useMentionTokens>;
+  hasBoundSkills: boolean;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
+  const skillMode = mention.sigil === "$";
+  const empty = mention.items.length === 0;
+  const sections = MENTION_SECTIONS.map((section) => ({
+    section,
+    rows: mention.items.map((item, index) => ({ item, index })).filter(({ item }) => item.refType === section.refType),
+  })).filter(({ rows }) => rows.length > 0);
+
+  const row = (item: MentionItem, index: number) => (
+    <div
+      key={`${item.refType}-${item.refId}`}
+      role="option"
+      tabIndex={-1}
+      aria-selected={index === mention.focusedIndex}
+      className={index === mention.focusedIndex ? "dropdown-item focused" : "dropdown-item"}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        mention.handleSelect(composerRef.current, item);
+      }}
+    >
+      {item.refType === "task" ? (
+        <>
+          <span className="task-key" style={{ fontSize: 13 }}>
+            {item.label}
+          </span>
+          <span className="truncate flex-1 min-w-0">{item.sublabel}</span>
+        </>
+      ) : (
+        <>
+          <span className="truncate flex-1 min-w-0">{item.label}</span>
+          <span className="font-mono text-xs text-lx-text-muted">{item.sublabel}</span>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
-      {mention.items.length === 0 ? (
+      {skillMode ? (
+        <>
+          <div className="dropdown-label">Skills — invoke with $</div>
+          {empty ? (
+            <div className="dropdown-item" style={{ cursor: "default", color: "var(--lx-text-muted)" }}>
+              {hasBoundSkills ? "No matches" : "No skills attached — add them in Settings"}
+            </div>
+          ) : (
+            mention.items.map((it, idx) => (
+              <div
+                key={it.refId}
+                role="option"
+                tabIndex={-1}
+                aria-selected={idx === mention.focusedIndex}
+                className={idx === mention.focusedIndex ? "dropdown-item focused" : "dropdown-item"}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  mention.handleSelect(composerRef.current, it);
+                }}
+              >
+                <span className="truncate flex-1 min-w-0">
+                  {it.label}
+                  {it.sublabel ? ` — ${it.sublabel}` : ""}
+                </span>
+              </div>
+            ))
+          )}
+        </>
+      ) : empty ? (
         <div className="dropdown-item" style={{ cursor: "default", color: "var(--lx-text-muted)" }}>
           No matches
         </div>
       ) : (
-        <>
-          {mention.items.some((it) => it.refType === "task") && <div className="dropdown-label">Tasks</div>}
-          {mention.items.map((it, idx) =>
-            idx > 0 && mention.items[idx - 1]!.refType !== it.refType ? <div key={`sep-${idx}`} className="dropdown-separator" /> : null
-          )}
-          {mention.items.map((it, idx) => (
-            <div
-              key={`${it.refType}-${it.refId}`}
-              role="option"
-              tabIndex={-1}
-              aria-selected={idx === mention.focusedIndex}
-              className={idx === mention.focusedIndex ? "dropdown-item focused" : "dropdown-item"}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                mention.handleSelect(composerRef.current);
-              }}
-            >
-              {it.refType === "task" ? (
-                <>
-                  <span className="task-key" style={{ fontSize: 13 }}>
-                    {it.label}
-                  </span>
-                  <span className="truncate flex-1 min-w-0">{it.sublabel}</span>
-                </>
-              ) : (
-                <>
-                  <span className="truncate flex-1 min-w-0">{it.label}</span>
-                  <span className="font-mono text-xs text-lx-text-muted">{it.sublabel}</span>
-                </>
-              )}
-            </div>
-          ))}
-        </>
+        sections.map(({ section, rows }, sectionIndex) => (
+          <Fragment key={section.refType}>
+            {sectionIndex > 0 && <div className="dropdown-separator" />}
+            <div className="dropdown-label">{section.label}</div>
+            {rows.map(({ item, index }) => row(item, index))}
+          </Fragment>
+        ))
       )}
     </div>
   );
@@ -159,6 +202,7 @@ function AttachmentStrip({ images, onRemove }: { images: AssistantImage[]; onRem
 
 export const AssistantChatComposer = memo(function AssistantChatComposer({
   slug,
+  skills,
   streaming,
   busy409,
   suspendedLock,
@@ -174,6 +218,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   initialImages,
 }: {
   slug: string;
+  skills?: LexaSkill[] | undefined;
   streaming: boolean;
   busy409: boolean;
   suspendedLock: boolean;
@@ -192,7 +237,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const [images, setImages] = useState<AssistantImage[]>(() => initialImages ?? []);
   const [rejection, setRejection] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const mention = useMentionTokens({ slug, value: draft, onChange: setDraft });
+  const mention = useMentionTokens({ slug, value: draft, onChange: setDraft, skills });
   const queueMode = streaming || suspendedLock;
   const elapsed = useElapsedSeconds(streaming);
 
@@ -305,7 +350,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   return (
     <div className="chat-deck" style={composerStyle}>
-      {mention.open && <ComposerMentionPopup mention={mention} composerRef={composerRef} />}
+      {mention.open && <ComposerMentionPopup mention={mention} hasBoundSkills={(skills?.length ?? 0) > 0} composerRef={composerRef} />}
       {rail && (
         <div className="deck-rail" style={busy409 || queueMode ? { opacity: 0.55 } : undefined}>
           {rail}

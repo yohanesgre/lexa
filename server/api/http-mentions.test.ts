@@ -50,8 +50,13 @@ INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', '${memberHash}', 'u2');
 -- p1: mention search fixtures.
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 3);
-INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0), ('c2', 'p1', 'Done', 1);
+INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0), ('c2', 'p1', 'Done', 1), ('c3', 'p1', 'In Review', 2);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog');
+-- Milestone/swimlane/column fixtures for the widened @-autocomplete.
+INSERT INTO milestones (id, project_id, name, description, position, due_at) VALUES ('m1', 'p1', 'Q3 Launch', '', 0, '2026-09-30');
+INSERT INTO milestones (id, project_id, name, description, position, due_at, archived_at) VALUES ('m-arch', 'p1', 'Q3 Archived Goal', '', 1, NULL, '2026-01-01 00:00:00');
+INSERT INTO swimlanes (id, project_id, name, position, kind, due_at, milestone_id) VALUES ('s-q3', 'p1', 'Q3 Sprint', 1, 'sprint', '2026-09-15', 'm1');
+INSERT INTO swimlanes (id, project_id, name, position, kind, due_at, archived_at) VALUES ('s-arch', 'p1', 'Q3 Archived Sprint', 2, 'sprint', NULL, '2026-01-01 00:00:00');
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'Onboarding flow', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t2', 'p1', 'c1', 's-backlog', 'Payment retry logic', 'a1', '2026-01-01 10:00:00', 'EG-2', 2);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at, created_at, key, number) VALUES ('t-arch', 'p1', 'c2', 's-backlog', 'Onboarding archived', 'a0', '2026-02-01 10:00:00', '2026-01-01 10:00:00', 'EG-9', 9);
@@ -70,8 +75,10 @@ INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, posi
 INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w5', 'p1', 'Capfill w5', 'capfill-w5', '{"type":"doc","content":[]}', '', 6);
 -- Second project: its rows must never leak into p1 results.
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p2', 'Q', 'p2', 'ZZ', 1);
-INSERT INTO columns (id, project_id, name, position) VALUES ('c2-1', 'p2', 'Todo', 0);
+INSERT INTO columns (id, project_id, name, position) VALUES ('c2-1', 'p2', 'Todo', 0), ('c2-3', 'p2', 'In Review', 2);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2-backlog', 'p2', 'Backlog', 0, 'backlog');
+INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2-q3', 'p2', 'Q3 Sprint elsewhere', 1, 'sprint');
+INSERT INTO milestones (id, project_id, name, description, position, due_at) VALUES ('m2-zz', 'p2', 'Q3 Launch elsewhere', '', 0, NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t2-zz', 'p2', 'c2-1', 's2-backlog', 'Onboarding elsewhere', 'a0', '2026-01-01 10:00:00', 'ZZ-1', 1);
 INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w2-zz', 'p2', 'Roadmap elsewhere', 'roadmap-elsewhere', '{"type":"doc","content":[]}', '', 0);
 `);
@@ -87,14 +94,14 @@ describe("GET /api/projects/:slug/mentions", () => {
   it("empty q → empty arrays", async () => {
     const res = await handler(authed("GET", "/api/projects/p1/mentions?q="));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { tasks: [], wikiPages: [] } });
+    expect(await res.json()).toEqual({ data: { tasks: [], wikiPages: [], milestones: [], swimlanes: [], columns: [] } });
   });
 
   it("matches a task by key case-insensitively", async () => {
     const res = await handler(authed("GET", "/api/projects/p1/mentions?q=eg-1"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      data: { tasks: [{ id: "t1", key: "EG-1", title: "Onboarding flow" }], wikiPages: [] },
+      data: { tasks: [{ id: "t1", key: "EG-1", title: "Onboarding flow" }], wikiPages: [], milestones: [], swimlanes: [], columns: [] },
     });
   });
 
@@ -108,6 +115,54 @@ describe("GET /api/projects/:slug/mentions", () => {
     expect((await byTitle.json()).data.wikiPages).toEqual([{ id: "w1", slug: "roadmap", title: "Roadmap" }]);
     const bySlug = await handler(authed("GET", "/api/projects/p1/mentions?q=unrel"));
     expect((await bySlug.json()).data.wikiPages).toEqual([{ id: "w2", slug: "unrelated", title: "Unrelated page" }]);
+  });
+
+  it("matches live milestones by partial name and excludes archived ones", async () => {
+    const res = await handler(authed("GET", "/api/projects/p1/mentions?q=launch"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.milestones).toEqual([
+      { id: "m1", name: "Q3 Launch", slug: "q3-launch", sublabel: "due 2026-09-30 · 1 sprint" },
+    ]);
+    const q3 = await handler(authed("GET", "/api/projects/p1/mentions?q=q3"));
+    expect((await q3.json()).data.milestones.map((m: { id: string }) => m.id)).toEqual(["m1"]);
+  });
+
+  it("matches live swimlanes by partial name, with the owning milestone, excluding archived", async () => {
+    const res = await handler(authed("GET", "/api/projects/p1/mentions?q=q3+sprint"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.swimlanes).toEqual([
+      { id: "s-q3", name: "Q3 Sprint", slug: "q3-sprint", sublabel: "sprint · milestone Q3 Launch · due 2026-09-15" },
+    ]);
+    const q3 = await handler(authed("GET", "/api/projects/p1/mentions?q=q3"));
+    expect((await q3.json()).data.swimlanes.map((l: { id: string }) => l.id)).toEqual(["s-q3"]);
+  });
+
+  it("matches columns by partial name with a position/state sublabel", async () => {
+    const res = await handler(authed("GET", "/api/projects/p1/mentions?q=review"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.columns).toEqual([
+      { id: "c3", name: "In Review", slug: "in-review", sublabel: "position 3" },
+    ]);
+  });
+
+  it("never leaks milestone/swimlane/column rows from another project", async () => {
+    const p1 = await handler(authed("GET", "/api/projects/p1/mentions?q=q3"));
+    const p1Body = await p1.json();
+    expect(p1Body.data.milestones.map((m: { id: string }) => m.id)).toEqual(["m1"]);
+    expect(p1Body.data.swimlanes.map((l: { id: string }) => l.id)).toEqual(["s-q3"]);
+    expect(JSON.stringify(p1Body)).not.toContain("m2-zz");
+    expect(JSON.stringify(p1Body)).not.toContain("s2-q3");
+
+    const p2 = await handler(authed("GET", "/api/projects/p2/mentions?q=q3"));
+    const p2Body = await p2.json();
+    expect(p2Body.data.milestones.map((m: { id: string }) => m.id)).toEqual(["m2-zz"]);
+    expect(p2Body.data.swimlanes.map((l: { id: string }) => l.id)).toEqual(["s2-q3"]);
+    expect(JSON.stringify(p2Body)).not.toContain('"m1"');
+
+    const p2Review = await handler(authed("GET", "/api/projects/p2/mentions?q=review"));
+    expect((await p2Review.json()).data.columns).toEqual([
+      { id: "c2-3", name: "In Review", slug: "in-review", sublabel: "position 3" },
+    ]);
   });
 
   it("excludes archived tasks even when they match", async () => {

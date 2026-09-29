@@ -6,8 +6,7 @@ import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
 import { AssistantBubble } from "./AssistantBubble";
 import { AssistantChatComposer } from "./AssistantChatComposer";
-import { EffortPicker } from "./EffortPicker";
-import { DeckRailSummary, SkillSelect } from "./SkillSelect";
+import { EffortPicker, DeckRailSummary } from "./EffortPicker";
 import { useChatComposerClearance } from "./assistant-chat-hooks";
 import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
 import type { QueuedMessage } from "./useChatQueue";
@@ -246,7 +245,6 @@ export function ChatTranscriptArea({
   slug,
   streaming,
   renderText,
-  skillName,
   projectId,
   streamActivity,
   batchBusy,
@@ -272,7 +270,6 @@ export function ChatTranscriptArea({
   slug: string;
   streaming: boolean;
   renderText: (text: string) => ReactNode;
-  skillName?: string | undefined;
   projectId?: string | undefined;
   streamActivity: ActivityView | undefined;
   batchBusy: boolean;
@@ -321,7 +318,6 @@ export function ChatTranscriptArea({
               <AssistantBubble
                 key={pos}
                 turn={turn}
-                skillName={skillName}
                 projectId={projectId}
                 streaming={streaming}
                 renderText={renderText}
@@ -336,7 +332,7 @@ export function ChatTranscriptArea({
             )
           )}
 
-          {streaming && <StreamingBubble stream={stream} skillName={skillName} renderText={renderText} />}
+          {streaming && <StreamingBubble stream={stream} renderText={renderText} />}
         </div>
       </div>
       <ChatJumpButton atBottom={atBottom} onClick={onJump} />
@@ -346,8 +342,6 @@ export function ChatTranscriptArea({
 
 export function ChatComposerArea({
   skills,
-  skillId,
-  onSkillChange,
   busy409,
   slug,
   streaming,
@@ -367,8 +361,6 @@ export function ChatComposerArea({
   seed,
 }: {
   skills: LexaSkill[];
-  skillId: string;
-  onSkillChange: (id: string) => void;
   busy409: boolean;
   slug: string;
   streaming: boolean;
@@ -405,6 +397,7 @@ export function ChatComposerArea({
       <div className="chat-composer-inner">
         <AssistantChatComposer
           slug={slug}
+          skills={skills}
           streaming={streaming}
           busy409={busy409}
           suspendedLock={suspendedLock}
@@ -420,11 +413,8 @@ export function ChatComposerArea({
             isMobileComposer ? (
               <>
                 <DeckRailSummary
-                  skills={skills}
-                  skillId={skillId}
                   effort={effort}
                   projectEffort={projectEffort ?? null}
-                  onSkillChange={onSkillChange}
                   onEffortChange={onEffortChange}
                   disabled={railDisabled}
                 />
@@ -432,8 +422,6 @@ export function ChatComposerArea({
               </>
             ) : (
               <>
-                <span className="deck-label">Skill</span>
-                <SkillSelect skills={skills} skillId={skillId} onSkillChange={onSkillChange} align={menuAlign} disabled={railDisabled} />
                 <span className="deck-rail-spacer" />
                 <span className="deck-label">Effort</span>
                 <EffortPicker effort={effort} projectEffort={projectEffort ?? null} disabled={railDisabled} align={menuAlign} onChange={onEffortChange} />

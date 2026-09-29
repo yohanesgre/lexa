@@ -206,7 +206,6 @@ export interface AssistantChatStreamRequest {
   chatId: string;
   message: string;
   agentId?: string | undefined;
-  skillId?: string | undefined;
   attachments?: AssistantChatAttachment[] | undefined;
   fromIndex?: number | undefined;
   reasoningEffort?: AssistantReasoningEffort | null | undefined;

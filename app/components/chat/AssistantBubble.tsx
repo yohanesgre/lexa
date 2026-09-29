@@ -152,7 +152,6 @@ function CitationsRow({ citations }: { citations: ChatTurn["citations"] }) {
 
 export function AssistantBubble({
   turn,
-  skillName,
   projectId,
   streaming,
   renderText,
@@ -165,7 +164,6 @@ export function AssistantBubble({
   onRetry,
 }: {
   turn: ChatTurn;
-  skillName?: string | undefined;
   projectId?: string | undefined;
   streaming: boolean;
   renderText: (text: string) => ReactNode;
@@ -180,7 +178,8 @@ export function AssistantBubble({
   const time = hhmm(turn.ts);
   // Persona label mirrors the project's configured agent (read-only — chat
   // always runs the Assistant lane, so it is always the Assistant Agent).
-  const meta = `Assistant · Assistant Agent persona${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
+  // Skills ride `$name` per message, so the meta names no skill.
+  const meta = `Assistant · Assistant Agent persona${turn.stopped ? " · stopped" : ""}`;
 
   return (
     <div className="bubble-ai">

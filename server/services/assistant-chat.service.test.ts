@@ -467,3 +467,167 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     expect(statusOf("w-new")).toBe("pending");
   });
 });
+
+// The chat harness is reused as-is: real migrations seed the `assistant` agent
+// with six junction-bound skills (Status/Review/Polish/Requirements/…), so the
+// `$name` path can be exercised end-to-end without touching the DB schema.
+describe("chat — per-message $skills", () => {
+  function userContentOf(call: { messages: unknown }): unknown {
+    return (call.messages as Array<Record<string, unknown>>).find((m) => m.role === "user")?.content;
+  }
+
+  it("injects a mentioned bound skill under `## Skill: {name}`", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "give me a $Status update"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("## Skill: Status");
+    expect(text).toContain("Be honest; flag risks early.");
+  });
+
+  it("injects only the first three mentions; the fourth stays literal", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "$Status $Review $Polish $Requirements"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("## Skill: Status");
+    expect(text).toContain("## Skill: Review");
+    expect(text).toContain("## Skill: Polish");
+    expect(text).not.toContain("## Skill: Requirements");
+    // The user's message is handed to the model untouched — the dropped token
+    // is still literal text, not rewritten or removed.
+    expect(userContentOf(providerMock.calls[0]!)).toBe("$Status $Review $Polish $Requirements");
+  });
+
+  it("leaves an unbound `$name` literal with nothing injected", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "please $nope that"));
+
+    expect(promptText(providerMock.calls[0]!)).not.toContain("## Skill:");
+    expect(userContentOf(providerMock.calls[0]!)).toBe("please $nope that");
+  });
+
+  it("carries the bound-skill catalog when skills are bound", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "hi"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("Available skills");
+    expect(text).toContain("- Status — ");
+  });
+
+  it("omits the catalog when no skills are bound", async () => {
+    setup({ jev: "no-secret" });
+    db.exec("DELETE FROM lexa_agent_skills");
+    await drain(await runStream("c1", "hi"));
+
+    expect(promptText(providerMock.calls[0]!)).not.toContain("Available skills");
+  });
+
+  it("omits the trailing dash for a catalog skill with no description", async () => {
+    setup({ jev: "no-secret" });
+    db.exec("DELETE FROM lexa_agent_skills");
+    db.exec(`INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('sk-nodesc', 'NoDesc', '', '');
+            INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('assistant', 'sk-nodesc');`);
+    await drain(await runStream("c1", "hi"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("- NoDesc");
+    expect(text).not.toContain("- NoDesc —");
+  });
+
+  it("offers get_skill only when the agent has bound skills", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "hi"));
+    expect(toolNames(providerMock.calls[0]!)).toContain("get_skill");
+
+    providerMock.calls.length = 0;
+    db.exec("DELETE FROM lexa_agent_skills");
+    await drain(await runStream("c2", "hi"));
+    expect(toolNames(providerMock.calls[0]!)).not.toContain("get_skill");
+  });
+
+  it("describes at most 20 catalog skills and counts the rest", async () => {
+    setup({ jev: "no-secret" });
+    db.exec("DELETE FROM lexa_agent_skills");
+    const seed = Array.from({ length: 25 }, (_, i) => {
+      const n = String(i + 1).padStart(2, "0");
+      return `INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('sk${n}', 'Skill ${n}', 'does ${n}', '');
+              INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('assistant', 'sk${n}');`;
+    }).join("\n");
+    db.exec(seed);
+    await drain(await runStream("c1", "hi"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("- Skill 01 — does 01");
+    expect(text).toContain("… and 5 more");
+  });
+
+  it("changing the `$skill` between turns does not mint a fresh thread", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "$Status first turn"));
+    await drain(await runStream("c1", "$Review second turn"));
+
+    expect(providerMock.calls).toHaveLength(2);
+    const secondText = promptText(providerMock.calls[1]!);
+    expect(secondText).toContain("## Skill: Review");
+    expect(secondText).not.toContain("## Skill: Status");
+    // History survived: the earlier user turn rides the second request.
+    const handed = providerMock.calls[1]!.messages as Array<Record<string, unknown>>;
+    expect(handed.some((m) => m.role === "user" && m.content === "$Status first turn")).toBe(true);
+    const count = db.prepare("SELECT COUNT(*) AS c FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { c: number };
+    expect(count.c).toBe(1);
+  });
+});
+
+describe("chat — @mention resolution", () => {
+  // Milestones/swimlanes/columns have no `slug` column, so the token is the
+  // derived slug of the name (mentionSlug = shared/skill-tokens#skillToken).
+  function seedEntities(): void {
+    db.exec(`
+INSERT INTO milestones (id, project_id, name, description, position, due_at) VALUES ('m1', 'p1', 'Q3 Launch', '', 0, '2026-09-30');
+INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-design', 'p1', 'Design Sprint', 1, 'sprint');
+INSERT INTO columns (id, project_id, name, position) VALUES ('c-review', 'p1', 'In Review', 2);
+`);
+  }
+
+  it("resolves one @token per entity type into the ephemeral context block", async () => {
+    setup({ jev: "no-secret" });
+    seedEntities();
+    await drain(await runStream("c1", "@q3-launch @design-sprint @in-review please"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("- [milestone] Q3 Launch\ndue 2026-09-30");
+    expect(text).toContain("- [swimlane] Design Sprint\nsprint");
+    expect(text).toContain("- [column] In Review\nposition 3");
+  });
+
+  it("skips an unknown slug with nothing injected", async () => {
+    setup({ jev: "no-secret" });
+    await drain(await runStream("c1", "@nope please"));
+
+    expect(promptText(providerMock.calls[0]!)).not.toContain("Referenced by the user just now:");
+  });
+
+  it("resolves a swimlane's owning milestone name in its context line", async () => {
+    setup({ jev: "no-secret" });
+    seedEntities();
+    db.exec(`UPDATE swimlanes SET milestone_id = 'm1' WHERE id = 's-design'`);
+    await drain(await runStream("c1", "@design-sprint"));
+
+    expect(promptText(providerMock.calls[0]!)).toContain("- [swimlane] Design Sprint\nsprint · milestone Q3 Launch");
+  });
+
+  it("resolves every kind a slug matches — a wiki page and a column collide, both contribute", async () => {
+    setup({ jev: "no-secret" });
+    db.exec(`
+INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('w-rev', 'p1', 'In Review', 'in-review', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"How review works."}]}]}');
+INSERT INTO columns (id, project_id, name, position) VALUES ('c-rev', 'p1', 'In Review', 3);
+`);
+    await drain(await runStream("c1", "@in-review"));
+
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain("- [wiki] In Review");
+    expect(text).toContain("- [column] In Review");
+  });
+});

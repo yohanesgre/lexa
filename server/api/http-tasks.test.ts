@@ -272,7 +272,7 @@ describe("board route", () => {
   it("GET /api/projects/:slug/mentions matches task key + title, wiki title/slug; empty q → empty", async () => {
     const byKey = await handler(json("GET", "/api/projects/p1/mentions?q=eg-1"));
     expect(byKey.status).toBe(200);
-    expect(await byKey.json()).toEqual({ data: { tasks: [{ id: "t1", key: "EG-1", title: "Renamed" }], wikiPages: [] } });
+    expect(await byKey.json()).toEqual({ data: { tasks: [{ id: "t1", key: "EG-1", title: "Renamed" }], wikiPages: [], milestones: [], swimlanes: [], columns: [] } });
 
     const byTitle = await handler(json("GET", "/api/projects/p1/mentions?q=renamed"));
     expect((await byTitle.json()).data.tasks.map((t: { id: string }) => t.id)).toEqual(["t1"]);
@@ -281,6 +281,6 @@ describe("board route", () => {
     expect((await byWiki.json()).data.wikiPages).toEqual([{ id: "w1", slug: "roadmap", title: "Roadmap" }]);
 
     const empty = await handler(json("GET", "/api/projects/p1/mentions?q="));
-    expect(await empty.json()).toEqual({ data: { tasks: [], wikiPages: [] } });
+    expect(await empty.json()).toEqual({ data: { tasks: [], wikiPages: [], milestones: [], swimlanes: [], columns: [] } });
   });
 });

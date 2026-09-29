@@ -198,13 +198,12 @@ export function useChatStartStream(args: {
   applyChatId: (id: string) => void;
   openThreadParam: (threadId: string) => void;
   qc: QueryClient;
-  effectiveSkillId: string;
   effort: string;
   setEffort: (e: "") => void;
   pendingTitleRef: React.RefObject<string | null>;
   ingressInsertedRef: React.RefObject<Set<string>>;
 }) {
-  const { stream, projectId, chatId, applyChatId, openThreadParam, qc, effectiveSkillId, effort, setEffort, pendingTitleRef, ingressInsertedRef } = args;
+  const { stream, projectId, chatId, applyChatId, openThreadParam, qc, effort, setEffort, pendingTitleRef, ingressInsertedRef } = args;
   return useCallback(
     (message: string, fromIndex?: number) => {
       let threadId = chatId;
@@ -222,7 +221,7 @@ export function useChatStartStream(args: {
       } else {
         ingressInsertedRef.current?.delete(threadId);
       }
-      const body = chatStreamBody({ projectId, chatId: threadId, message, skillId: effectiveSkillId, effort, fromIndex });
+      const body = chatStreamBody({ projectId, chatId: threadId, message, effort, fromIndex });
       if (isNewThread) {
         assistantSendForKey(`assistant-chat:${threadId}`, "/api/assistant/chat/stream", body);
       } else {
@@ -230,7 +229,7 @@ export function useChatStartStream(args: {
       }
       setEffort("");
     },
-    [stream, projectId, chatId, effectiveSkillId, effort, applyChatId, openThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
+    [stream, projectId, chatId, effort, applyChatId, openThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
   );
 }
 

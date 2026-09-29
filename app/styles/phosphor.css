@@ -4810,6 +4810,17 @@
     font-weight: 500;
   }
 
+  /* Skill chip — render-time highlight over an invoked $skill-name token */
+  .mention-chip-skill {
+    display: inline;
+    background: var(--lx-bg-accent-subtle);
+    border: 1px solid var(--lx-border-focus);
+    border-radius: 4px;
+    padding: 0 4px;
+    color: var(--lx-text-primary);
+    font-weight: 500;
+  }
+
   /* Composer — compact TipTap box pinned at the bottom of the timeline */
   .composer {
     margin-top: 12px;

@@ -71,7 +71,10 @@ export function mentionHref(refType: string | null | undefined, refId: unknown, 
   if (!slug || typeof refId !== "string" || !refId || !MENTION_REF_RE.test(refId)) return null;
   const s = encodeURIComponent(slug);
   if (refType === "wiki") return `/${s}/wiki/${encodeURIComponent(refId)}`;
-  return `/${s}/board?task=${encodeURIComponent(refId)}`;
+  if (refType === "task") return `/${s}/board?task=${encodeURIComponent(refId)}`;
+  // Entity mentions (milestone/swimlane/column) have no document route — a
+  // chip without a link, never a wrong board/wiki deep link.
+  return null;
 }
 
 export function renderMention(

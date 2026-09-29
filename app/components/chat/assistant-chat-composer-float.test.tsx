@@ -13,8 +13,6 @@ function renderComposerArea(landing: boolean) {
     <main className="chat-shell">
       <ChatComposerArea
         skills={[]}
-        skillId=""
-        onSkillChange={() => {}}
         busy409={false}
         slug="nimbus"
         streaming={false}
