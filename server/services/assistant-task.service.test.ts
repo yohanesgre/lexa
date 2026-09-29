@@ -314,6 +314,26 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     await drain(await run(service.resumeThreadStream("task", "t1")));
     expect(toolNames(providerMock.calls[0]!)).toContain("jev_assess");
   });
+
+  it("applies an approved create_task on the task path and streams the follow-up (no Die)", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    db.exec(`
+INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
+INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'approved', '2099-01-01 00:00:00');
+`);
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
+    expect(applied.map((f) => f.status)).toContain("applied");
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    const created = db.prepare("SELECT title FROM tasks WHERE project_id = 'p1'").all() as Array<{ title: string }>;
+    expect(created.map((c) => c.title)).toContain("New task");
+  });
 });
 
 describe("task preflight — fail-open and disable", () => {
