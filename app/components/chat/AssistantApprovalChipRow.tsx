@@ -89,7 +89,9 @@ export function ApprovalChipRow({
 }: {
   chip: ApprovalChip;
   disabled: boolean;
-  onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
+  // Settle contract: a thenable return is awaited by the batch's auto-advance
+  // arm; plain `void` leaves the arm unresolved.
+  onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void | Promise<void>;
 }) {
   const decided = chip.state !== "pending";
   const terminal = decided ? (chip.state as Exclude<ApprovalChipState, "pending">) : null;

@@ -1,0 +1,3 @@
+state: DONE
+ts: 1790677803
+msg: wave 2 reviewer fixes in AssistantApprovals.tsx + AssistantApprovalChipRow.tsx + assistant-chat-carousel.test.tsx — arm tokenised by object identity (stale .then cannot resolve a superseded retry), non-active-card click no longer nulls an in-flight arm, onDecide/onApproveAll/onRejectAll typed void | Promise<void> (settle contract noted), orderedRef written in a layout effect declared before the settle effect, test holes closed (batch-exclusion leaves another pending, resolved-disarm exercised via a controllable promise, reduced-motion instant path) + 2 regression tests for the identity/non-active fixes; tsc clean, test:fe 98 files / 690 tests green
