@@ -65,6 +65,93 @@ No contract/endpoint/schema change; client resume triggering untouched.
 - `bun run test:be` → 142 files passed / 1704 tests passed (+2 new).
 - `bun run test:fe` → 94 files passed / 637 tests passed.
 
+## Follow-up (2026-09-29): non-wire `toolCalls` crashed the provider run
+
+### Root cause
+`@tanstack/ai` 0.61.0 `getPendingToolCallsFromMessages` treats **every**
+assistant `message.toolCalls` array as real wire tool calls, then
+`checkForPendingToolCalls` → `resolveExecutableTools` dereferences
+`tc.function.name`. Lexa persisted the UI display log under that exact key
+(`build-stream.ts:242`/`:497`, entries `{ name, detail? }`), so resume (and any
+fresh send over a legacy thread) crashed with
+`TypeError: undefined is not an object (evaluating 'tc.function.name')`.
+
+### Docs decision
+`docs/API.md` GET-transcript and `docs/LAYERS.md` approval-protocol document the
+persisted assistant meta (`ts`, `citations`, `error`, `stopped`, `pendingBatch`)
+but **never** `toolCalls`, and no reader in `app/`, `server/`, `shared/`, or
+`cli/` consumes it. Renaming an undocumented, unread internal display field is
+docs-safe, so both paths were taken:
+1. **Rename** the persisted display log `toolCalls` → `toolLog` at both write
+   sites (`build-stream.ts:242` suspend, `:497` fail path); the wire key can no
+   longer be written by Lexa.
+2. **Boundary sanitizer** (mandatory) for legacy threads and any malformed
+   entry: `sanitizeProviderMessages` strips assistant `toolCalls` entries
+   lacking `function.name` and drops the field when the whole array was the
+   display log; wire-shaped entries and non-assistant messages pass through
+   untouched (input never mutated).
+
+Applied once at the single provider funnel, right after hydration and before
+`gatewayStream`/`streamChat` (`build-stream.ts`: `hydrated` → `prepared`), so all
+four services (chat send + resume, task/wiki send + resume) are covered.
+`provider.ts` remains the only importer of `chat()`, so no other path reaches
+the library. `node_modules` untouched.
+
+### Tests
+- `server/assistant/build-stream.test.ts` — 5 unit tests for
+  `sanitizeProviderMessages` (legacy display log stripped; wire-shaped kept by
+  identity; mixed array keeps only wire entries; non-assistant roles untouched;
+  no-op returns input identity) + a provider-boundary test asserting a legacy
+  `toolCalls` history entry is gone from the messages handed to `gatewayStream`
+  + the suspend test now asserts the persisted display log is `toolLog` and the
+  entry has no `toolCalls`.
+- `server/services/assistant-chat.service.test.ts` — the approved `create_task`
+  resume test seeds the realistic legacy shape
+  (`toolCalls:[{name:"create_task",detail:"New task"}]` + `pendingBatch`),
+  asserts no `ASSISTANT_GENERATION_FAILED` frame and that the assistant message
+  handed to the provider has no `toolCalls`.
+- `server/services/assistant-task.service.test.ts` — same seed/assertions on the
+  task/wiki resume path.
+- `server/services/assistant-resume.test.ts` — fixture display-log key aligned
+  to `toolLog`.
+- **Mock seam (explicit):** both service suites `vi.mock("../assistant/provider")`,
+  so the real `chat()` never runs there; the hermetic guard is the sanitizer
+  unit test plus the assertion on the exact `messages` handed to the stubbed
+  `streamChat` (captured in `providerMock.calls`). Proven to catch the
+  regression: with the sanitizer call removed, the chat resume test fails on
+  `expect(assistantHanded.toolCalls).toBeUndefined()`.
+- Point 4 (no re-execution): resume still executes only the resolved batch's
+  approved rows via `executeAssistantWrite`; the sanitized history carries no
+  `toolCallId`-bearing wire `toolCalls`, so the library finds zero pending calls
+  and never re-runs the batch. Asserted by the existing "task row actually
+  created" checks + the new no-error-frame checks.
+- A real-`chat()` provider-boundary test was not added (optional) — the mock +
+  unit-test seam above is the guard.
+
+### Design gap (REPORT ONLY)
+The resumed model run is **not** told the executed tool results. `approvalResults`
+are SSE frames only (`build-stream.ts:247`); they are never injected as
+`role:"tool"` messages, and `applyResumeResults` just drops the `pendingBatch`
+marker. After sanitization the model resumes from a transcript whose suspended
+assistant turn has no tool-call/tool-result pair, so it has no context that the
+approved writes executed — it may acknowledge without knowing, or re-propose.
+The library's own `role:"tool"` + `toolCallId` result-message path exists and
+would be the place to carry them, but that is a separate design decision; no
+change proposed here.
+
+### Verification (exact)
+- `./node_modules/.bin/tsc --noEmit` → exit 0, no output.
+- `bun run test:be` → 142 files passed / 1710 tests passed (+6 new).
+- `bun run test:fe` → 94 files passed / 637 tests passed.
+
+### Deviations
+- Renamed the persisted display key (step 3 authorized this as docs-safe); the
+  sanitizer still covers legacy `toolCalls` threads, so both fixes coexist.
+- No client change: `runChatStream` receives only the raw message string, so the
+  persisted field rename is server-internal and invisible to clients.
+- No commits; `check:invariants`/`verify-gate.sh` not run (not required without a
+  commit ask).
+
 ## Deviations / notes
 - Scope: fix landed in `server/assistant/write-execution.ts`, not the client
   resume trigger (client works as designed; plan Scope In amended for this).

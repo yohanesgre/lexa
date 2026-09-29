@@ -23,7 +23,7 @@ const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 // other export of the module stays real so the gateway's own resolution,
 // normalization and logging paths are exercised.
 const providerMock = vi.hoisted(() => ({
-  calls: [] as Array<{ systemPrompts: unknown; tools: unknown }>,
+  calls: [] as Array<{ systemPrompts: unknown; tools: unknown; messages: unknown }>,
 }));
 vi.mock("../assistant/provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../assistant/provider")>();
@@ -33,8 +33,8 @@ vi.mock("../assistant/provider", async (importOriginal) => {
     // these suites exercise Jev preflight/gateway resolution, not adapter
     // wiring, so the snapshot build is stubbed (streamChat is stubbed too).
     buildAdapter: () => ({}) as never,
-    streamChat: (input: { systemPrompts: unknown; tools?: unknown }) => {
-      providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [] });
+    streamChat: (input: { systemPrompts: unknown; tools?: unknown; messages?: unknown }) => {
+      providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [], messages: input.messages ?? [] });
       return (async function* () {
         yield { type: "TEXT_MESSAGE_CONTENT", delta: "ok" };
         yield { type: "RUN_FINISHED", usage: { input: 1, output: 1 } };
@@ -278,7 +278,7 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
 INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
 INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
 INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"create it"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
+  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"create it"},{"role":"assistant","content":"proposed","toolCalls":[{"name":"create_task","detail":"New task"}],"pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
 INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
   VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'pending', '2099-01-01 00:00:00');
 `);
@@ -290,8 +290,14 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
     expect(applied.map((f) => f.status)).toContain("applied");
     expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect(frames.some((f) => f.type === "error" && (f as { code?: string }).code === "ASSISTANT_GENERATION_FAILED")).toBe(false);
     const created = db.prepare("SELECT title FROM tasks WHERE project_id = 'p1'").all() as Array<{ title: string }>;
     expect(created.map((c) => c.title)).toContain("New task");
+    // Mock seam: provider.streamChat is stubbed, so this assertion on the exact
+    // messages handed to it (not the library) is the hermetic boundary guard.
+    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
+    const assistantHanded = handed.find((m) => m.role === "assistant")!;
+    expect(assistantHanded.toolCalls).toBeUndefined();
   });
 });
 
