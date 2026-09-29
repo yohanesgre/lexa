@@ -154,6 +154,7 @@ export function AssistantBubble({
   streaming,
   renderText,
   activity,
+  usage,
   batchBusy,
   onDecide,
   onApproveAll,
@@ -165,6 +166,7 @@ export function AssistantBubble({
   streaming: boolean;
   renderText: (text: string) => ReactNode;
   activity?: ActivityView | undefined;
+  usage?: { in: number; out: number } | null | undefined;
   batchBusy: boolean;
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
   onApproveAll: (chips: ApprovalChip[]) => void;
@@ -199,6 +201,11 @@ export function AssistantBubble({
             />
           )}
           <AssistantSegments text={turn.text} renderText={renderText} />
+          {usage && (
+            <div className="font-micro text-2xs text-lx-text-muted mt-2" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              ↑ {usage.in.toLocaleString("en-US")} · ↓ {usage.out.toLocaleString("en-US")} tokens
+            </div>
+          )}
           <AssistantBatch
             batch={turn.batch}
             suspendedBatchId={turn.suspendedBatchId}

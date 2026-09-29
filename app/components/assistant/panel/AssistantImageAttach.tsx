@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImagePlus, Plus, X } from "lucide-react";
 import { ALLOWED_TYPES, acceptImageFiles } from "../../../lib/assistant-image";
 import type { AssistantImage, AssistantImageCaps } from "../../../lib/assistant-image";
@@ -8,7 +8,7 @@ function extLabel(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "img";
 }
 
-// Image attach affordance (assistant-popover.html State 1 + State 5 detail,
+// Image attach affordance (herald-popover.html State 1 + State 5 detail,
 // assistant-chat.html composer): pick or paste, thumbnails with remove ×,
 // dashed add tile, caps enforced client-side with inline rejection. When
 // `disabled` (VISION_NOT_CONFIGURED resolution), the attach button renders
@@ -26,6 +26,23 @@ export function AssistantImageAttach({ images, onChange, caps, hint, compact, di
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [rejection, setRejection] = useState<string | null>(null);
+  // Object URLs outlive the list when a parent clears it (send) or the host
+  // unmounts — revoke any URL that dropped out of the list, and all of them
+  // on unmount, so previews don't leak.
+  const prevImagesRef = useRef<AssistantImage[]>([]);
+  useEffect(() => {
+    const currentUrls = new Set(images.map((img) => img.previewUrl));
+    for (const img of prevImagesRef.current) {
+      if (!currentUrls.has(img.previewUrl)) URL.revokeObjectURL(img.previewUrl);
+    }
+    prevImagesRef.current = images;
+  }, [images]);
+  useEffect(
+    () => () => {
+      for (const img of prevImagesRef.current) URL.revokeObjectURL(img.previewUrl);
+    },
+    []
+  );
 
   const acceptFiles = (files: FileList | File[]) => {
     if (disabled) return;
@@ -35,8 +52,6 @@ export function AssistantImageAttach({ images, onChange, caps, hint, compact, di
   };
 
   const removeImage = (id: string) => {
-    const target = images.find((img) => img.id === id);
-    if (target) URL.revokeObjectURL(target.previewUrl);
     onChange(images.filter((img) => img.id !== id));
   };
 

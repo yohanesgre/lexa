@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
-import { AssistantActivity } from "./AssistantActivity";
 import { ChatJumpButton, ChatSkillsPanel, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
 import { AssistantBubble } from "./AssistantBubble";
 import { AssistantChatComposer } from "./AssistantChatComposer";
@@ -78,10 +77,11 @@ export function ChatTranscriptArea({
   atBottom: boolean;
   onJump: () => void;
 }) {
+  const lastAssistantPos = turns.findLastIndex((turn) => turn.role === "assistant");
   return (
     <div className="chat-transcript">
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
-        <div className="chat-column">
+        <div className="chat-column" role="log" aria-live="polite">
           {turns.map((turn, pos) =>
             turn.role === "user" ? (
               <UserTurnBubble
@@ -108,6 +108,7 @@ export function ChatTranscriptArea({
                 streaming={streaming}
                 renderText={renderText}
                 activity={turn.activity ?? (streamActivity && pos === turns.length - 1 ? streamActivity : undefined)}
+                usage={stream.status === "done" && pos === lastAssistantPos ? stream.usage : undefined}
                 batchBusy={batchBusy}
                 onDecide={onDecide}
                 onApproveAll={onApproveAll}

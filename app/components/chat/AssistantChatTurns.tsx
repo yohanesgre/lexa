@@ -171,7 +171,7 @@ export function StreamingBubble({
 }) {
   return (
     <div className="bubble-ai">
-      <div className="bubble-meta">Assistant Agent{skillName ? ` · ${skillName}` : ""}</div>
+      <div className="bubble-meta">Assistant · Assistant Agent persona{skillName ? ` · ${skillName}` : ""}</div>
       <AssistantActivity
         items={stream.items}
         tools={stream.tools}
@@ -199,6 +199,7 @@ export function ChatJumpButton({ atBottom, onClick }: { atBottom: boolean; onCli
       title="Jump to latest"
       aria-label="Jump to latest"
       aria-hidden={atBottom ? "true" : "false"}
+      tabIndex={atBottom ? -1 : 0}
       style={atBottom ? { opacity: 0, pointerEvents: "none" } : undefined}
       onClick={onClick}
     >

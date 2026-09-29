@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { LexaSkill } from "../../../../shared/types";
 
-// Skill chip row (runtime-popover.html + assistant-chat.html composer). The agent
+// Skill chip row (herald-popover.html + assistant-chat.html composer). The agent
 // is NEVER picked here — the persona is the project's active engine agent,
 // resolved server-side; callers pass only that agent's attached skills.
 // Chat allows no skill (starts with none); document runs reset to the first
@@ -9,14 +9,18 @@ import type { LexaSkill } from "../../../../shared/types";
 
 const CHIP_MAX = 6;
 
-function ChipRow({ items, selectedId, onSelect, height, fontSize }: {
+function ChipRow({ items, selectedId, onSelect, height, fontSize, labelId }: {
   items: LexaSkill[];
   selectedId: string;
   onSelect: (id: string) => void;
   height: number;
   fontSize: number;
+  labelId: string;
 }) {
   const [restOpen, setRestOpen] = useState(false);
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const visible = items.length > CHIP_MAX ? items.slice(0, CHIP_MAX) : items;
   const rest = items.length > CHIP_MAX ? items.slice(CHIP_MAX) : [];
   const chipStyle = (selected: boolean): React.CSSProperties => ({
@@ -27,13 +31,64 @@ function ChipRow({ items, selectedId, onSelect, height, fontSize }: {
       ? { borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" }
       : {}),
   });
+
+  const closeMenu = (restoreFocus: boolean) => {
+    setRestOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+
+  // Escape must close the menu without reaching the popover's document
+  // listener (which would close the whole panel); register in capture so it
+  // runs first.
+  useEffect(() => {
+    if (!restOpen) return;
+    const onDocumentMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (target && (menuRef.current?.contains(target) || triggerRef.current?.contains(target))) return;
+      closeMenu(false);
+    };
+    const onDocumentKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenu(true);
+    };
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    document.addEventListener("keydown", onDocumentKeyDown, true);
+    return () => {
+      document.removeEventListener("mousedown", onDocumentMouseDown);
+      document.removeEventListener("keydown", onDocumentKeyDown, true);
+    };
+  }, [restOpen]);
+
+  useEffect(() => {
+    if (!restOpen) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [restOpen]);
+
+  const onMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const menuItems = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    if (menuItems.length === 0) return;
+    const index = menuItems.indexOf(document.activeElement as HTMLElement);
+    let next = index < 0 ? 0 : index;
+    if (e.key === "ArrowDown") next = index < 0 ? 0 : (index + 1) % menuItems.length;
+    else if (e.key === "ArrowUp") next = index < 0 ? menuItems.length - 1 : (index - 1 + menuItems.length) % menuItems.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = menuItems.length - 1;
+    menuItems[next]?.focus();
+  };
+
   return (
-    <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+    <div role="group" aria-labelledby={labelId} className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
       {visible.map((item) => (
         <button
           key={item.id}
           type="button"
           className="btn btn-ghost"
+          aria-pressed={selectedId === item.id}
           style={chipStyle(selectedId === item.id)}
           onClick={() => onSelect(item.id)}
         >
@@ -43,26 +98,38 @@ function ChipRow({ items, selectedId, onSelect, height, fontSize }: {
       {rest.length > 0 && (
         <div style={{ position: "relative" }}>
           <button
+            ref={triggerRef}
             type="button"
             className="btn btn-ghost"
             style={chipStyle(false)}
-            aria-label="More options"
+            aria-label="More skills"
+            aria-haspopup="menu"
             aria-expanded={restOpen}
-            onClick={() => setRestOpen(!restOpen)}
+            aria-controls={restOpen ? menuId : undefined}
+            onClick={() => setRestOpen((open) => !open)}
           >
             ⋯
           </button>
           {restOpen && (
-            <div className="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+            <div
+              ref={menuRef}
+              id={menuId}
+              role="menu"
+              aria-labelledby={labelId}
+              className="menu"
+              style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}
+              onKeyDown={onMenuKeyDown}
+            >
               {rest.map((item) => (
                 <button
                   key={item.id}
                   type="button"
+                  role="menuitem"
                   className="menu-item"
                   style={{ fontSize: 12, color: selectedId === item.id ? "var(--lx-text-primary)" : undefined }}
                   onClick={() => {
                     onSelect(item.id);
-                    setRestOpen(false);
+                    closeMenu(true);
                   }}
                 >
                   {item.name}
@@ -89,23 +156,26 @@ export function SkillPicker({ skills, skillId, onSkillChange, layout = "stacked"
   // the Effort picker shares the row per assistant-chat.html).
   trailing?: ReactNode;
 }) {
+  const labelId = useId();
+
   if (layout === "inline") {
     return (
       <div className="flex items-center gap-2 mb-2" style={{ flexWrap: "wrap" }}>
-        <span className="prop-label" style={{ marginRight: 2 }}>Skill</span>
+        <span id={labelId} className="prop-label" style={{ marginRight: 2 }}>Skill</span>
         {skills.length > 0 ? (
           <>
             {allowNoSkill && (
               <button
                 type="button"
                 className="btn btn-ghost"
+                aria-pressed={skillId === ""}
                 style={{ height: 24, padding: "0 9px", fontSize: 11, ...(skillId === "" ? { borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" } : {}) }}
                 onClick={() => onSkillChange("")}
               >
                 None
               </button>
             )}
-            <ChipRow items={skills} selectedId={skillId} onSelect={onSkillChange} height={24} fontSize={11} />
+            <ChipRow items={skills} selectedId={skillId} onSelect={onSkillChange} height={24} fontSize={11} labelId={labelId} />
           </>
         ) : (
           <span className="text-xs text-lx-text-muted">No skills attached — add them in Settings.</span>
@@ -122,9 +192,9 @@ export function SkillPicker({ skills, skillId, onSkillChange, layout = "stacked"
 
   return (
     <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-      <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
+      <span id={labelId} className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
       {skills.length > 0 ? (
-        <ChipRow items={skills} selectedId={skillId} onSelect={onSkillChange} height={26} fontSize={12} />
+        <ChipRow items={skills} selectedId={skillId} onSelect={onSkillChange} height={26} fontSize={12} labelId={labelId} />
       ) : (
         <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 10px" }}>
           <span className="text-xs text-lx-text-muted">No skills attached — add them in Settings.</span>

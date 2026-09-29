@@ -149,13 +149,21 @@ export function useStreamFrameFreeze(args: {
   const frozeBatchRef = useRef<string | null>(null);
   const frozeErrorRef = useRef<string | null>(null);
   const resumedBatchesRef = useRef<Set<string>>(new Set());
+  const chatRef = useRef("");
 
   // One settling effect (not a chain): freezes the terminal stream frame
   // (suspension or error) into the transcript view, then re-opens any frozen
   // batch whose chips have all reached a terminal state. The freeze setState
   // and the resume pass live in the SAME effect so freezing a frame never
-  // spawns a downstream effect — the refs make each branch idempotent.
+  // spawns a downstream effect — the refs make each branch idempotent. Freeze
+  // bookkeeping is per-thread: switching chats resets it first.
   useEffect(() => {
+    if (chatRef.current !== chatId) {
+      chatRef.current = chatId;
+      frozeBatchRef.current = null;
+      frozeErrorRef.current = null;
+      resumedBatchesRef.current = new Set();
+    }
     settleStreamFrame({
       stream,
       setTurns,
@@ -170,9 +178,6 @@ export function useStreamFrameFreeze(args: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per terminal frame; snapshot fields are read at flip time
   }, [stream.status, stream.suspendedBatchId, stream.pending, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText, stream.hasIngress, turns, chatId, streaming]);
 
-  useEffect(() => {
-    frozeErrorRef.current = null;
-  }, [chatId]);
   useEffect(() => {
     if (stream.status === "connecting" || stream.status === "streaming") frozeErrorRef.current = null;
   }, [stream.status]);
@@ -228,25 +233,32 @@ export function useChatStartStream(args: {
 // keyed on transcript/stream identity) instead of an effect — the stream
 // guards make pure derivation impossible, but the merge stays idempotent.
 export function useSettledTurns(args: {
+  chatId: string;
   transcriptData: { messages: unknown[] } | undefined;
   transcriptError: unknown;
   streaming: boolean;
   stream: Stream;
 }) {
-  const { transcriptData, transcriptError, streaming, stream } = args;
+  const { chatId, transcriptData, transcriptError, streaming, stream } = args;
   const [turns, setTurns] = useState<ChatTurn[] | null>(null);
   const [syncedKey, setSyncedKey] = useState("");
-  const syncKey = `${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:${stream.status}:${stream.hasIngress}:${streaming}`;
+  const chatRef = useRef("");
+  // chatId is part of the key: two threads can share a message count and stream
+  // status, and without it the previous thread's turns (including a frozen
+  // approval batch) would leak into the new one.
+  const syncKey = `chat:${chatId}:${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:${stream.status}:${stream.hasIngress}:${streaming}`;
   if (syncedKey !== syncKey) {
+    const chatChanged = chatRef.current !== chatId;
+    chatRef.current = chatId;
     setSyncedKey(syncKey);
     setTurns((prev) => {
       if (transcriptError) {
         if (stream.status === "error" && stream.hasIngress) return prev;
         return [];
       }
-      if (!transcriptData) return prev;
+      if (!transcriptData) return chatChanged ? null : prev;
       return settleTurns({
-        prev,
+        prev: chatChanged ? null : prev,
         messages: transcriptData.messages,
         streaming,
         streamStatus: stream.status,
@@ -314,7 +326,11 @@ export function useTurnResend(args: {
   const handleEditSave = (target: ChatTurn, draft: string) => {
     const message = draft.trim();
     if (!message || streaming) return;
-    const idx = resendIndex(rawMessages, "edit", target.rawIndex) ?? target.rawIndex;
+    // No valid raw target (e.g. the edited turn is still optimistic, rawIndex
+    // -1) → wait for the transcript; never emit a sentinel index the server
+    // rejects with INVALID_ARGS.
+    const idx = resendIndex(rawMessages, "edit", target.rawIndex);
+    if (idx === null) return;
     setTurns((prev) => truncateTurns(prev, target, message));
     startStream(message, idx);
   };
@@ -323,7 +339,8 @@ export function useTurnResend(args: {
   // replaces the trailing assistant reply.
   const handleRegenerate = (target: ChatTurn) => {
     if (streaming) return;
-    const idx = resendIndex(rawMessages, "regenerate") ?? target.rawIndex;
+    const idx = resendIndex(rawMessages, "regenerate");
+    if (idx === null) return;
     setTurns((prev) => truncateTurns(prev, target));
     startStream(target.text, idx);
   };
@@ -334,7 +351,8 @@ export function useTurnResend(args: {
     if (streaming) return;
     const trigger = previousUserTurn(turns, assistantTurn);
     if (!trigger) return;
-    const idx = resendIndex(rawMessages, "edit", trigger.rawIndex) ?? trigger.rawIndex;
+    const idx = resendIndex(rawMessages, "edit", trigger.rawIndex);
+    if (idx === null) return;
     setTurns((prev) => truncateTurns(prev, trigger));
     startStream(trigger.text, idx);
   };
@@ -348,13 +366,15 @@ export function useTurnResend(args: {
 export function useChatThreadActions(args: {
   projectId: string | undefined;
   chatId: string;
+  applyChatId: (id: string) => void;
   setChatId: (id: string) => void;
+  suppressHeadFallbackRef: React.RefObject<string | null>;
   streaming: boolean;
   abort: () => void;
   clearThreadParam: () => void;
   openThreadParam: (threadId: string) => void;
 }) {
-  const { projectId, chatId, setChatId, streaming, abort, clearThreadParam, openThreadParam } = args;
+  const { projectId, chatId, applyChatId, setChatId, suppressHeadFallbackRef, streaming, abort, clearThreadParam, openThreadParam } = args;
   const renameChat = useRenameAssistantChat(projectId);
   const deleteChat = useDeleteAssistantChat(projectId);
   const metaChat = useUpdateAssistantChatMeta(projectId);
@@ -364,6 +384,10 @@ export function useChatThreadActions(args: {
     (id: string) =>
       deleteChat.mutateAsync({ chatId: id }).then(() => {
         if (id === chatId) {
+          // Latch the intentional-empty state so the resolution effect does not
+          // fall back to the next list head (herald-chat.html: the view lands
+          // on a fresh empty chat).
+          suppressHeadFallbackRef.current = projectId ?? null;
           try {
             window.localStorage.removeItem(`lexa-chat-last:${projectId}`);
           } catch {}
@@ -371,14 +395,19 @@ export function useChatThreadActions(args: {
           clearThreadParam();
         }
       }),
-    [deleteChat, chatId, projectId, clearThreadParam, setChatId]
+    [deleteChat, chatId, projectId, clearThreadParam, setChatId, suppressHeadFallbackRef]
   );
   const selectThread = useCallback(
     (id: string) => {
       if (streaming) abort();
+      // Any explicit selection releases the intentional-empty latch.
+      suppressHeadFallbackRef.current = null;
+      // Apply immediately (state + last-visited) — the deep link alone only
+      // changes the URL and would leave the transcript on the old thread.
+      applyChatId(id);
       openThreadParam(id);
     },
-    [streaming, abort, openThreadParam]
+    [streaming, abort, applyChatId, openThreadParam, suppressHeadFallbackRef]
   );
   const startNewChat = useCallback(() => {
     selectThread(crypto.randomUUID());
@@ -389,12 +418,19 @@ export function useChatThreadActions(args: {
 // Inline message editing state (user turns): one editor at a time, draft
 // scoped to the edited position.
 export function useChatEditing(args: {
+  chatId: string;
   turns: ChatTurn[] | null;
   onEditSave: (target: ChatTurn, draft: string) => void;
 }) {
-  const { turns, onEditSave } = args;
+  const { chatId, turns, onEditSave } = args;
   const [editingPos, setEditingPos] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  // An editor belongs to one thread — switching chats must not carry a draft
+  // (or editing position) into the next transcript.
+  useEffect(() => {
+    setEditingPos(null);
+    setEditDraft("");
+  }, [chatId]);
   const beginEdit = useCallback(
     (pos: number) => {
       setEditingPos(pos);

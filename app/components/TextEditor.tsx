@@ -199,9 +199,10 @@ export function Toolbar({
         <button
           ref={runtimeBtnRef}
           type="button"
+          data-assistant-trigger
           className={cn("toolbar-btn", runtimeOpen && "active")}
           title={runtime ? "AI project assistant" : "AI writing assistant (coming soon)"}
-          aria-label="AI writing assistant"
+          aria-label={runtime ? "AI project assistant" : "AI writing assistant (coming soon)"}
           disabled={!runtime}
           onClick={() => {
             setRuntimeAnchor(runtimeBtnRef.current?.getBoundingClientRect() ?? null);
@@ -209,7 +210,7 @@ export function Toolbar({
           }}
         >
           <Flame size={16} strokeWidth={1.5} />
-          AI
+          Assistant
         </button>
       </div>
       </div>
@@ -229,6 +230,7 @@ export function Toolbar({
           appliedTaskId={appliedTaskId}
           rejectedTaskId={rejectedTaskId}
           anchorRect={runtimeAnchor}
+          triggerRef={runtimeBtnRef}
         />
       )}
     </>

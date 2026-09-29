@@ -31,6 +31,7 @@ export class AssistantService extends Effect.Service<AssistantService>()("Lexa/A
       resumeChatStream: chat.resumeChatStream,
       resumeThreadStream: task.resumeThreadStream,
       listChats: chat.listChats,
+      reconcileChatApprovals: chat.reconcileChatApprovals,
       updateChatMeta: chat.updateChatMeta,
     };
   }),

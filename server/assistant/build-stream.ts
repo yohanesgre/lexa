@@ -52,6 +52,60 @@ export function applyResumeResults(messages: unknown[], resolvedBatchIds: string
   });
 }
 
+export type PendingApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+
+// One decision row as read from assistant_pending_writes. `seq`/`name`/`diff`
+// let a legacy marker (persisted before chip payloads existed) be enriched on
+// fetch so its chips still rebuild.
+export interface PendingApprovalDecisionRow {
+  id: string;
+  status: PendingApprovalStatus;
+  seq?: number;
+  name?: string;
+  diff?: unknown;
+}
+
+// Reconcile a persisted pendingBatch marker with live decision rows so a
+// transcript fetch reflects decisions made in another tab (wireframe
+// herald-write-approvals.html behavior rail: "decisions made in another tab
+// surface here on fetch"). Matching approvals gain a `status`, and legacy
+// approvals missing seq/name/diff are backfilled from the decision row (which
+// stores them). Rows not found keep the marker's persisted shape. Never
+// mutates the input.
+export function reconcilePendingBatchStatuses(
+  messages: unknown[],
+  rows: ReadonlyArray<PendingApprovalDecisionRow>
+): unknown[] {
+  if (rows.length === 0) return messages;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  let touched = false;
+  const next = messages.map((m) => {
+    const pb = (m as { pendingBatch?: unknown } | null)?.pendingBatch;
+    if (!pb || typeof pb !== "object") return m;
+    const approvals = (pb as { approvals?: unknown }).approvals;
+    if (!Array.isArray(approvals)) return m;
+    let changed = false;
+    const nextApprovals = approvals.map((a) => {
+      const id = (a as { approvalId?: unknown } | null)?.approvalId;
+      if (typeof id !== "string") return a;
+      const row = byId.get(id);
+      if (!row) return a;
+      const patch: Record<string, unknown> = {};
+      if (row.status !== (a as { status?: unknown }).status) patch.status = row.status;
+      if ((a as { seq?: unknown }).seq === undefined && typeof row.seq === "number") patch.seq = row.seq;
+      if ((a as { name?: unknown }).name === undefined && typeof row.name === "string") patch.name = row.name;
+      if ((a as { diff?: unknown }).diff === undefined && row.diff !== undefined) patch.diff = row.diff;
+      if (Object.keys(patch).length === 0) return a;
+      changed = true;
+      return { ...(a as object), ...patch };
+    });
+    if (!changed) return m;
+    touched = true;
+    return { ...(m as object), pendingBatch: { ...(pb as object), approvals: nextApprovals } };
+  });
+  return touched ? next : messages;
+}
+
 export interface StreamRunContext {
   keyId: string;
   idField: "taskId" | "chatId";
@@ -185,7 +239,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             push({ type: "tool_pending", approvalId: p.approvalId, batchId: p.batchId, seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff });
           }
           const citations = ctx.getCitations();
-          await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolCallsLog.length > 0 ? { toolCalls: toolCallsLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "" })) } }], ctx.historySummary(), ctx.historySummarizedCount());
+          await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolCallsLog.length > 0 ? { toolCalls: toolCallsLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
           push({ type: "suspended", batchId: drained[0]!.batchId });
         };
         try {

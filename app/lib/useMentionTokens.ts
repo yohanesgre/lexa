@@ -263,6 +263,10 @@ export function useMentionTokens({ slug, value, onChange, debounceMs = 150, fetc
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+      // IME composition: Enter commits the candidate, it must not select a
+      // mention (nor should arrows drive the list). keyCode 229 is the legacy
+      // signal some IMEs send on the composing keystroke.
+      if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return false;
       if (!open) return false;
       if (event.key === "ArrowDown" && items.length > 0) {
         event.preventDefault();

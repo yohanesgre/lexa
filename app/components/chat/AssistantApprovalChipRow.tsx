@@ -123,10 +123,10 @@ export function ApprovalChipRow({
 
       {!decided && (
         <div className="flex items-center justify-end gap-2" style={{ marginTop: 10 }}>
-          <button type="button" className="btn btn-danger btn-sm" disabled={disabled} onClick={() => onDecide(chip, "reject")}>
+          <button type="button" className="btn btn-danger btn-sm" aria-label={`Reject ${chip.name} ${targetFor(chip.diff)}`} disabled={disabled} onClick={() => onDecide(chip, "reject")}>
             Reject
           </button>
-          <button type="button" className="btn btn-primary btn-sm" disabled={disabled} onClick={() => onDecide(chip, "approve")}>
+          <button type="button" className="btn btn-primary btn-sm" aria-label={`Approve ${chip.name} ${targetFor(chip.diff)}`} disabled={disabled} onClick={() => onDecide(chip, "approve")}>
             Approve
           </button>
         </div>

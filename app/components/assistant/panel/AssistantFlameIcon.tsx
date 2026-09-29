@@ -1,5 +1,5 @@
-// Runtime header flame glyph (assistant-popover.html / runtime-popover.html
-// headers) — shared with the popover shell.
+// Runtime header flame glyph (herald-popover.html) — shared with the popover
+// shell.
 export function AssistantFlameIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>

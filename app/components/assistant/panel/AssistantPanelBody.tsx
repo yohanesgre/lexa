@@ -1,26 +1,25 @@
-import { Check, RefreshCw, Square } from "lucide-react";
+import { RefreshCw, Square } from "lucide-react";
 import type { Editor } from "@tiptap/core";
-import type { AssistantSettingsMasked } from "../../../../shared/assistant";
 import type { useAssistantStream } from "../../../lib/use-assistant-stream";
 import { AssistantToolChips } from "./AssistantToolChips";
 import { AssistantProviderMissing } from "./AssistantProviderMissing";
 import { AssistantStreamingPreview } from "./AssistantStreamingPreview";
 import { AssistantDoneView } from "./AssistantDoneView";
 import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
-import { providerLine } from "./assistant-panel-utils";
 
 type Stream = ReturnType<typeof useAssistantStream>;
 
-// Assistant tier panel body — one phase per branch (assistant-popover.html
+// Assistant tier panel body — one phase per branch (herald-popover.html
 // States 1–7); the idle phase renders `children`.
 export function AssistantPanelBody({
   stream,
-  settings,
   providerMissing,
+  settingsError,
+  onRetrySettings,
   projectId,
   documentTitle,
   skillName,
-  provider,
+  providerLabel,
   taskId,
   appliedTaskId,
   rejectedTaskId,
@@ -34,12 +33,13 @@ export function AssistantPanelBody({
   children,
 }: {
   stream: Stream;
-  settings: AssistantSettingsMasked | null | undefined;
   providerMissing: boolean;
+  settingsError: boolean;
+  onRetrySettings: () => void;
   projectId: string | undefined;
   documentTitle: string | undefined;
   skillName: string;
-  provider: string | null;
+  providerLabel: string | null;
   taskId: string | null;
   appliedTaskId?: string | null | undefined;
   rejectedTaskId?: string | null | undefined;
@@ -60,16 +60,36 @@ export function AssistantPanelBody({
   const done = stream.status === "done";
   const failed = stream.status === "error";
 
+  // A settings fetch failure is not a missing provider — say so and offer a
+  // retry instead of a silently disabled form.
+  if (settingsError && !running && !done && !failed) {
+    return (
+      <div style={{ padding: 12 }}>
+        <div className="notice notice-danger" role="alert" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+          <span className="text-xs font-medium">Could not load Assistant settings</span>
+          <span className="text-xs" style={{ lineHeight: "16px" }}>Retry to reload the provider settings.</span>
+        </div>
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <button type="button" className="btn btn-primary" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={onRetrySettings}>
+            <RefreshCw size={12} strokeWidth={1.5} />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (running) {
     return (
       <>
-        <div style={{ padding: "10px 12px 0" }}>
-          <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Tools</span>
-          <AssistantToolChips tools={stream.tools} />
-        </div>
+        {stream.tools.length > 0 && (
+          <div style={{ padding: "10px 12px 0" }}>
+            <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Tools</span>
+            <AssistantToolChips tools={stream.tools} />
+          </div>
+        )}
         <AssistantStreamingPreview text={stream.text} />
-        <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderTop: "1px solid var(--lx-border-default)" }}>
-          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{providerLine(settings)}</span>
+        <div className="flex items-center justify-end" style={{ padding: "10px 12px", borderTop: "1px solid var(--lx-border-default)" }}>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -90,7 +110,7 @@ export function AssistantPanelBody({
         stream={stream}
         documentTitle={documentTitle}
         skillName={skillName}
-        provider={provider}
+        providerLabel={providerLabel}
         taskId={taskId}
         appliedTaskId={appliedTaskId}
         rejectedTaskId={rejectedTaskId}
@@ -106,7 +126,7 @@ export function AssistantPanelBody({
   if (failed) {
     return (
       <div style={{ padding: 12 }}>
-        <div className="notice notice-danger" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+        <div className="notice notice-danger" role="alert" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
           <div className="flex items-center gap-2">
             <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
               <circle cx="12" cy="12" r="10" />

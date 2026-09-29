@@ -147,6 +147,16 @@ export type StreamFrame =
 export interface PendingBatchApproval {
   approvalId: string;
   toolCallId: string;
+  // Full chip payload persisted with the marker so a reload mid-suspension can
+  // rebuild the decidable chips from the transcript fetch (no batch-read
+  // endpoint). Absent on legacy markers → marker-only waiting indicator.
+  seq?: number;
+  name?: string;
+  detail?: string;
+  diff?: AssistantWriteDiff;
+  // Live decision status, reconciled by the transcript read so another tab's
+  // decisions surface on fetch. Absent → treated as pending.
+  status?: "pending" | "approved" | "rejected" | "expired";
 }
 
 export interface PendingBatchMarker {

@@ -88,14 +88,11 @@ export function AssistantActivity({ items, tools, reasoningActive, reasoningMs, 
   // visibly alive instead of rendering empty space while STREAMING runs.
   if (items.length === 0) {
     return (
-      <>
-        <div className="bubble-meta">Assistant · Assistant Agent persona</div>
-        <div className="bubble-md">
-          <span className="assistant-stream-caret" aria-hidden="true">
-            ▍
-          </span>
-        </div>
-      </>
+      <div className="bubble-md">
+        <span className="assistant-stream-caret" aria-hidden="true">
+          ▍
+        </span>
+      </div>
     );
   }
   const lastReasoningItem = items.findLast((it) => it.kind === "reasoning");
@@ -109,7 +106,7 @@ export function AssistantActivity({ items, tools, reasoningActive, reasoningMs, 
               <MarkdownContent
                 md={item.text}
                 renderText={renderText}
-                trailing={isLatest ? <span className="assistant-stream-caret">▍</span> : undefined}
+                trailing={isLatest ? <span className="assistant-stream-caret" aria-hidden="true">▍</span> : undefined}
               />
             </div>
           );

@@ -7,7 +7,7 @@ import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, CHAT_IDENTITY } from "../assistant/prompt";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
-import { AssistantPendingWritesRepo } from "../repos/assistant-pending-writes.repo";
+import { AssistantPendingWritesRepo, type AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
@@ -28,7 +28,7 @@ import { parseTaskKey } from "../task-key";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
-import { buildStream, findPendingBatch, applyResumeResults } from "../assistant/build-stream";
+import { buildStream, findPendingBatch, applyResumeResults, reconcilePendingBatchStatuses } from "../assistant/build-stream";
 import { scanMentionTokens, buildMentionContextBlock, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_IMAGE_CAPS, CHAT_CITATION_CAP, assertAttachmentCaps, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
@@ -192,6 +192,29 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       MAX_CHAT_TOOL_ROUNDS,
       abortChat: (chatId: string): boolean => { activeChats.get(chatId)?.abort(); return activeChats.has(chatId); },
       chatActive: (chatId: string): boolean => activeChats.has(chatId),
+      // Transcript-read reconciliation: attach the live decision status of a
+      // persisted pending batch so another tab's decisions render as terminal
+      // chips here on fetch (no batch-read endpoint — the marker already
+      // carries the approval ids).
+      reconcileChatApprovals: (messages: unknown[]) => Effect.gen(function* () {
+        const batchId = findPendingBatch(messages);
+        if (batchId === null) return messages;
+        const rows = yield* pendingWritesRepo.listByBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed([] as AssistantPendingWriteRow[])));
+        const parseDiff = (raw: string): unknown => {
+          try {
+            return JSON.parse(raw) as unknown;
+          } catch {
+            return undefined;
+          }
+        };
+        return reconcilePendingBatchStatuses(
+          messages,
+          rows.map((r) => {
+            const diff = parseDiff(r.diff);
+            return { id: r.id, status: r.status, seq: r.seq, name: r.tool_name, ...(diff !== undefined ? { diff } : {}) };
+          })
+        );
+      }),
       listChats: (projectId: string, userId: string, opts: { q?: string | undefined } = {}) =>
         pendingWritesRepo.sweepExpired().pipe(
           Effect.flatMap(() => threadRepo.listChats(projectId, userId, { ...(opts.q !== undefined ? { q: opts.q } : {}) })),

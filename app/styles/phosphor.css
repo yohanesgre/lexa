@@ -6693,14 +6693,15 @@
 .hljs-theme .hljs-emphasis { font-style: italic; }
 .hljs-theme .hljs-strong { font-weight: 600; }
 
-/* ---- Assistant chat upgrades (assistant-chat-upgrades.html) ---- *//* Hover affordance row under user bubbles — pointer-only (hidden until
-   hover/focus-within so icon buttons are never focus-invisible). */
+/* ---- Assistant chat upgrades (assistant-chat-upgrades.html) ---- *//* User bubble affordance row — copy · edit · regenerate icons always
+   visible (wireframe page rule, assistant-chat-upgrades.html). */
 .bubble-actions {
   display: flex;
   align-items: center;
   gap: 2px;
   justify-content: flex-end;
   margin-top: 6px;
+  opacity: 1;
 }
 /* Assistant copy icon floats right inside the meta row; always visible. */
 .bubble-meta-copy {

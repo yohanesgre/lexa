@@ -1,3 +1,4 @@
+import type { AssistantWriteDiff } from "../../../shared/assistant";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
 
@@ -25,11 +26,39 @@ export interface ChatTurn {
   activity?: ActivityView | undefined;
   // Frozen write-approval batch (assistant-write-approvals.html): chips live in
   // session memory from the tool_pending frames; decisions mutate them here.
+  // Reload mid-suspension rebuilds the chips from the persisted pendingBatch
+  // marker (assistant-write-approvals.html: "chips + waiting indicator are
+  // persisted state"), so the same batch is decidable after a reload.
   batch?: { batchId: string; chips: ApprovalChip[] };
-  // Reload mid-suspension: the transcript entry carries the pendingBatch
-  // marker but NOT the chip payloads (no batch-read endpoint) — render the
-  // waiting indicator only.
+  // Legacy pendingBatch markers (or entries persisted before chip payloads
+  // existed) carry no reconstructable chips — render the waiting indicator
+  // only. New suspensions carry the full approvals payload and render chips.
   suspendedBatchId?: string | undefined;
+}
+
+// A persisted pendingBatch approval rebuilds into a decidable chip only when it
+// carries the full payload (seq/name/diff); older markers yield null and fall
+// back to the marker-only waiting indicator.
+export function chipFromPendingApproval(raw: unknown, batchId: string): ApprovalChip | null {
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as { approvalId?: unknown; seq?: unknown; name?: unknown; detail?: unknown; diff?: unknown; status?: unknown };
+  if (typeof a.approvalId !== "string" || a.approvalId === "") return null;
+  if (typeof a.name !== "string" || a.name === "") return null;
+  if (typeof a.seq !== "number" || !Number.isFinite(a.seq)) return null;
+  if (!a.diff || typeof a.diff !== "object") return null;
+  // A reconciled status (another tab decided this approval) renders the chip
+  // terminal instead of pending.
+  const state: ApprovalChip["state"] =
+    a.status === "approved" || a.status === "rejected" || a.status === "expired" ? a.status : "pending";
+  return {
+    approvalId: a.approvalId,
+    batchId,
+    seq: a.seq,
+    name: a.name,
+    ...(typeof a.detail === "string" && a.detail !== "" ? { detail: a.detail } : {}),
+    diff: a.diff as AssistantWriteDiff,
+    state,
+  };
 }
 
 // Post-stream activity summary shown on the trailing done turn — sourced from
@@ -142,7 +171,8 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       }
     }
     // Suspended-turn marker (legacy string batchId or PendingBatchMarker
-    // object) — chip payloads are NOT in the transcript; the waiting
+    // object). When the marker carries the full approvals payload the chips
+    // are rebuilt so a reload mid-approval is decidable; otherwise the waiting
     // indicator renders without them.
     const pendingBatchId =
       typeof msg.pendingBatch === "string"
@@ -152,6 +182,16 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
           ? (msg.pendingBatch as { batchId: string }).batchId
           : null;
     if (!text && !imageCount && !msg.error && !msg.stopped && pendingBatchId === null) continue;
+    let batch: { batchId: string; chips: ApprovalChip[] } | undefined;
+    let suspendedBatchId: string | undefined;
+    if (pendingBatchId !== null) {
+      const rawApprovals = (msg.pendingBatch as { approvals?: unknown }).approvals;
+      const chips = Array.isArray(rawApprovals)
+        ? rawApprovals.map((a) => chipFromPendingApproval(a, pendingBatchId)).filter((c): c is ApprovalChip => c !== null)
+        : [];
+      if (chips.length > 0) batch = { batchId: pendingBatchId, chips };
+      else suspendedBatchId = pendingBatchId;
+    }
     const citations = msg.role === "assistant" ? safeCitations(msg.citations) : [];
     const err = isErrorMeta(msg.error);
     out.push({
@@ -163,7 +203,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       ...(citations.length > 0 ? { citations } : {}),
       ...(err ? { error: err } : {}),
       ...(msg.stopped === true ? { stopped: true } : {}),
-      ...(pendingBatchId !== null ? { suspendedBatchId: pendingBatchId } : {}),
+      ...(batch ? { batch } : suspendedBatchId !== undefined ? { suspendedBatchId } : {}),
     });
   }
   return out;

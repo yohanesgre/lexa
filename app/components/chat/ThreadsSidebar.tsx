@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { matchMedia } from "../../lib/viewport";
 import type { AssistantChatThreadSummary } from "../../lib/api";
@@ -98,6 +98,41 @@ export function ThreadsSidebar({
   const [confirmTarget, setConfirmTarget] = useState<AssistantChatThreadSummary | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+
+  // Modal focus contract: focus Cancel on open, restore the invoking row
+  // action on close. Tab is trapped inside the dialog; Escape closes it
+  // (unless a delete is in flight) — the sidebar's own Esc listener skips
+  // while a confirm is open.
+  useEffect(() => {
+    if (!confirmTarget) return;
+    cancelRef.current?.focus();
+    return () => triggerRef.current?.focus();
+  }, [confirmTarget]);
+
+  const onDialogKeyDown = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (!deleting) setConfirmTarget(null);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusables || focusables.length === 0) return;
+    const first = focusables[0]!;
+    const last = focusables[focusables.length - 1]!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   // Drawer Esc-dismiss (<900px). Skipped while an inline edit or the delete
   // dialog owns Escape.
@@ -221,7 +256,8 @@ export function ThreadsSidebar({
             className="icon-btn"
             title="Delete"
             aria-label={`Delete ${title}`}
-            onClick={() => {
+            onClick={(e) => {
+              triggerRef.current = e.currentTarget;
               setConfirmTarget(thread);
               setConfirmError(null);
             }}
@@ -308,7 +344,7 @@ export function ThreadsSidebar({
         <>
           <button type="button" className="slideover-overlay" style={{ zIndex: 90 }} aria-label="Close" onClick={() => !deleting && setConfirmTarget(null)} />
           <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, pointerEvents: "none" }}>
-            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Delete this chat?">
+            <dialog ref={dialogRef} open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Delete this chat?" onKeyDown={onDialogKeyDown}>
               <div className="flex items-center justify-between mb-2">
                 <span className="font-display text-base font-semibold text-lx-text-primary">Delete this chat?</span>
                 <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Cancel delete" disabled={deleting} onClick={() => setConfirmTarget(null)}>
@@ -316,7 +352,7 @@ export function ThreadsSidebar({
                 </button>
               </div>
               <p className="text-xs text-lx-text-secondary" style={{ lineHeight: "18px" }}>
-                Deletes "<span className="font-mono">{confirmTarget.title ?? "New chat"}</span>" — both turns and attachments. This cannot be undone.
+                Deletes "<span className="font-mono">{confirmTarget.title ?? "New chat"}</span>" — both turns and attachments. The view lands on a fresh empty chat. This cannot be undone.
               </p>
               {confirmError && (
                 <div className="notice notice-danger mt-3">
@@ -324,7 +360,7 @@ export function ThreadsSidebar({
                 </div>
               )}
               <div className="flex items-center justify-end gap-2 mt-4">
-                <button type="button" className="btn btn-ghost btn-sm" disabled={deleting} onClick={() => setConfirmTarget(null)}>Cancel</button>
+                <button ref={cancelRef} type="button" className="btn btn-ghost btn-sm" disabled={deleting} onClick={() => setConfirmTarget(null)}>Cancel</button>
                 <button type="button" className="btn btn-danger-solid btn-sm" disabled={deleting} onClick={() => void confirmDelete()}>
                   {deleting ? "Deleting…" : "Delete chat"}
                 </button>

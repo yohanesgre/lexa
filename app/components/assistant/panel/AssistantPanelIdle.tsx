@@ -1,9 +1,10 @@
+import { useEffect, useRef } from "react";
 import type { Attachment, LexaSkill } from "../../../../shared/types";
 import type { AssistantSettingsMasked } from "../../../../shared/assistant";
 import { SkillPicker } from "./SkillPicker";
 import { AssistantFlameIcon } from "./AssistantFlameIcon";
 
-// Idle phase (assistant-popover.html States 1–2): skill pick, additional
+// Idle phase (herald-popover.html States 1–2): skill pick, additional
 // prompt, document images, selection line, Generate.
 export function AssistantPanelIdle({
   agentSkills,
@@ -28,18 +29,34 @@ export function AssistantPanelIdle({
   createPending: boolean;
   onGenerate: () => void;
 }) {
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // The popover focuses its panel on open; when the idle form is what lands,
+  // the prompt is the thing to type into.
+  useEffect(() => {
+    promptRef.current?.focus();
+  }, []);
+
   return (
     <>
-      <SkillPicker skills={agentSkills} skillId={skillId} onSkillChange={onSkillChange} />          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
+      <SkillPicker skills={agentSkills} skillId={skillId} onSkillChange={onSkillChange} />
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>
           Additional prompt <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 4 }}>Optional</span>
         </span>
         <textarea
+          ref={promptRef}
           className="prop-input w-full"
           rows={3}
           aria-label="Additional prompt"
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              if (!createPending && settings && skillId) onGenerate();
+            }
+          }}
           placeholder="What should Assistant write?"
           style={{ fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
         />

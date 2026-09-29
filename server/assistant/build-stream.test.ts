@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
-import { buildStream, normalizeRunUsage, type StreamRunContext } from "./build-stream";
+import { buildStream, normalizeRunUsage, reconcilePendingBatchStatuses, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
+import type { QueuedProposal } from "./write-tools";
 
 vi.mock("./provider", () => ({
   streamChat: async function* () {
@@ -120,5 +121,98 @@ describe("normalizeRunUsage", () => {
   it("falls back for absent or empty usage", () => {
     expect(normalizeRunUsage(undefined, fallback)).toEqual(fallback);
     expect(normalizeRunUsage([], fallback)).toEqual(fallback);
+  });
+});
+
+describe("suspendTurn persisted marker", () => {
+  const proposal: QueuedProposal = {
+    approvalId: "a1",
+    batchId: "b1",
+    seq: 0,
+    name: "delete_task",
+    detail: "Delete LX-1",
+    diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" },
+    args: { ref: "LX-1" },
+  };
+
+  it("persists the full chip payload so a reload can rebuild decidable chips", async () => {
+    let persisted: unknown[] | null = null;
+    const c = ctx(doneStream);
+    c.writeDrain = () => [proposal];
+    c.writeTools = ["delete_task"];
+    c.persist = async (messages) => {
+      persisted = messages;
+    };
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(true);
+    const assistantEntry = (persisted as unknown[] | null)!.find((m) => (m as { pendingBatch?: unknown }).pendingBatch !== undefined) as {
+      pendingBatch: { batchId: string; approvals: Array<Record<string, unknown>> };
+    };
+    expect(assistantEntry.pendingBatch.batchId).toBe("b1");
+    expect(assistantEntry.pendingBatch.approvals[0]).toMatchObject({
+      approvalId: "a1",
+      toolCallId: "",
+      seq: 0,
+      name: "delete_task",
+      detail: "Delete LX-1",
+      diff: proposal.diff,
+    });
+  });
+});
+
+describe("reconcilePendingBatchStatuses", () => {
+  const messages = [
+    { role: "user", content: "go" },
+    {
+      role: "assistant",
+      content: "proposed",
+      pendingBatch: {
+        batchId: "b1",
+        approvals: [
+          { approvalId: "a1", toolCallId: "", seq: 0, name: "delete_task", diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" } },
+          { approvalId: "a2", toolCallId: "", seq: 1, name: "create_task", diff: { type: "task_create", title: "t", fields: {} } },
+        ],
+      },
+    },
+  ];
+
+  it("applies live decision statuses from another tab", () => {
+    const out = reconcilePendingBatchStatuses(messages, [
+      { id: "a1", status: "approved" },
+      { id: "a2", status: "rejected" },
+    ]);
+    const marker = out[1] as { pendingBatch: { approvals: Array<Record<string, unknown>> } };
+    expect(marker.pendingBatch.approvals[0]!.status).toBe("approved");
+    expect(marker.pendingBatch.approvals[1]!.status).toBe("rejected");
+    // input untouched
+    const original = messages[1] as { pendingBatch: { approvals: Array<Record<string, unknown>> } };
+    expect(original.pendingBatch.approvals[0]!.status).toBeUndefined();
+  });
+
+  it("leaves the array identical when there are no rows", () => {
+    expect(reconcilePendingBatchStatuses(messages, [])).toBe(messages);
+  });
+
+  it("ignores rows whose approval is not in the marker", () => {
+    const out = reconcilePendingBatchStatuses(messages, [{ id: "other", status: "expired" }]);
+    expect(out).toBe(messages);
+  });
+
+  it("backfills a legacy marker's chip payload from the decision rows", () => {
+    const legacy = [
+      { role: "assistant", content: "proposed", pendingBatch: { batchId: "b1", approvals: [{ approvalId: "a1", toolCallId: "call_1" }] } },
+    ];
+    const out = reconcilePendingBatchStatuses(legacy, [
+      { id: "a1", status: "pending", seq: 2, name: "delete_task", diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" } },
+    ]);
+    const approval = (out[0] as { pendingBatch: { approvals: Array<Record<string, unknown>> } }).pendingBatch.approvals[0]!;
+    expect(approval).toMatchObject({
+      approvalId: "a1",
+      toolCallId: "call_1",
+      seq: 2,
+      name: "delete_task",
+      status: "pending",
+      diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" },
+    });
   });
 });

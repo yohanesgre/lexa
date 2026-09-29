@@ -1,43 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowDown, ChevronDown, ChevronUp } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import * as api from "../../lib/api";
 import {
-  useProjects,
   useAgents,
   useSkills,
-  useAssistantSettings,
   useAssistantChatList,
-  useRenameAssistantChat,
-  useDeleteAssistantChat,
-  useUpdateAssistantChatMeta,
 } from "../../lib/queries";
-import { useToast } from "../ui/Toast";
-import { assistantSendForKey, useAssistantStream } from "../../lib/use-assistant-stream";
+import { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
-import { resendIndex } from "../../lib/resendIndex";
-import { isNarrowViewport, hasMatchMedia, matchMedia } from "../../lib/viewport";
+import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { ThreadsSidebar } from "./ThreadsSidebar";
-import { SkillPicker } from "../assistant/panel/SkillPicker";
-import { AssistantFlameIcon } from "../assistant/panel/AssistantFlameIcon";
-import { AssistantActivity } from "./AssistantActivity";
-import { deriveChatTitle, type AssistantReasoningEffort } from "../../../shared/assistant";
-import type { AssistantChatThreadSummary } from "../../lib/api";
-import { hhmm } from "./assistant-chat-utils";
-import { settleTurns } from "./assistant-chat-turns-state";
+import type { AssistantReasoningEffort } from "../../../shared/assistant";
 import { useChatSidebar, useChatAutoScroll, useSkillsPanelDefault } from "./assistant-chat-hooks";
 import {
   chatPageFlags,
   chatSkillsOf,
   lastUserIndex,
   streamDoneActivity,
-  suspendTallyText,
-  truncateTurns,
   appendEphemeralUserTurn,
   orphanThreadNeedsRecovery,
   recoverStaleThread,
+  resolveChatId,
   staleThreadNeedsRecovery,
 } from "./assistant-chat-logic";
 import {
@@ -53,9 +38,6 @@ import {
   useChatProjectQueries,
   useThreadKnowledge,
 } from "./assistant-chat-session";
-import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
-import { AssistantChatComposer } from "./AssistantChatComposer";
-import { AssistantApprovalBatch, type ApprovalChip } from "./AssistantApprovals";
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
 
@@ -129,6 +111,44 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const clearThreadParam = useCallback(() => void navigate({ search: {}, replace: true }), [navigate]);
   const openThreadParam = useCallback((threadId: string) => void navigate({ search: { thread: threadId }, replace: true }), [navigate]);
 
+  // Resolve the active thread once its sources settle: ?thread= > last-visited
+  // > history list head > "" (fresh empty state). Re-reads localStorage at
+  // effect time so a selection written by this session (or removed by delete)
+  // is respected, and never clobbers an already-active selection — except on a
+  // project switch, where the previous project's thread must not leak.
+  // Intentional-empty latch: deleting the ACTIVE thread lands on a fresh empty
+  // chat (herald-chat.html "The view lands on a fresh empty chat"), NOT the
+  // next list head. The latch is keyed by project so a project switch still
+  // resolves that project's last-visited/head, and is cleared by the next
+  // explicit selection (selectThread / New chat).
+  const suppressHeadFallbackRef = useRef<string | null>(null);
+
+  const resolvedProjectRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!projectId) return;
+    const projectChanged = resolvedProjectRef.current !== projectId;
+    resolvedProjectRef.current = projectId;
+    // A project switch resolves the NEW project's last/head — drop any latch
+    // left by a delete in the project we just left.
+    if (projectChanged) suppressHeadFallbackRef.current = null;
+    let last: string | null = null;
+    try {
+      last = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
+    } catch {
+      // non-fatal
+    }
+    const suppressFallback = suppressHeadFallbackRef.current === projectId;
+    const next = resolveChatId({
+      projectId,
+      thread,
+      currentChatId: projectChanged ? "" : chatId,
+      last: suppressFallback ? null : last,
+      head: suppressFallback ? undefined : listQuery.data?.[0]?.chatId,
+    });
+    if (next) applyChatId(next);
+    else if (projectChanged && chatId) setChatId("");
+  }, [projectId, thread, chatId, listQuery.data, applyChatId]);
+
   // Transcript render on load (GET /api/assistant/chat/:chatId). A fresh uuid
   // 404s — that IS the empty-thread state, not an error. ASSISTANT_THREAD_NOT_FOUND
   // is handled silently (no retry, no throw, no console spam) and falls back.
@@ -147,6 +167,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const streaming = stream.status === "connecting" || stream.status === "streaming";
 
   const { turns, setTurns } = useSettledTurns({
+    chatId,
     transcriptData: transcript.data,
     transcriptError: transcript.error,
     streaming,
@@ -258,7 +279,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const { handlePinToggle, handleRename, handleDelete, selectThread, startNewChat } = useChatThreadActions({
     projectId,
     chatId,
+    applyChatId,
     setChatId,
+    suppressHeadFallbackRef,
     streaming,
     abort: handleAbort,
     clearThreadParam,
@@ -290,7 +313,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const { scrollRef, atBottom, handleTranscriptScroll, scrollToBottom } = useChatAutoScroll({ turns, stream });
 
-  const { editingPos, editDraft, setEditDraft, beginEdit, cancelEdit, commitEdit } = useChatEditing({ turns, onEditSave: handleEditSave });
+  const { editingPos, editDraft, setEditDraft, beginEdit, cancelEdit, commitEdit } = useChatEditing({ chatId, turns, onEditSave: handleEditSave });
 
   return (
     <div className="chat-layout">
