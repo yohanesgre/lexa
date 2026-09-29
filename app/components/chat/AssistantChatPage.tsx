@@ -338,7 +338,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     openThreadParam,
   });
 
-  const headerSub = `${resolved?.name ?? ""} · thread with Assistant — not tied to any document`;
+  const activeThread = useMemo(() => threads.find((t) => t.chatId === chatId) ?? null, [threads, chatId]);
 
   // Stable markdown text-leaf hook (mention chips) — identity must hold
   // across stream deltas or the memoized renderer re-lexes every frame.
@@ -374,15 +374,23 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         onSearchChange={setChatSearch}
         onSelect={selectThread}
         onNewChat={startNewChat}
-        onPinToggle={handlePinToggle}
-        onRename={handleRename}
-        onDelete={handleDelete}
         open={sidebarOpen}
         onToggle={toggleSidebar}
         onClose={() => setSidebarOpen(false)}
       />
       <main className="chat-shell">
-      <ChatHeader sub={headerSub} />
+      <ChatHeader
+        landing={isLanding}
+        loading={listQuery.isLoading || transcript.isLoading}
+        title={activeThread?.title ?? null}
+        projectName={resolved?.name ?? ""}
+        updatedAt={activeThread?.updatedAt ?? null}
+        pinned={!!activeThread?.pinned}
+        actionsDisabled={streaming || suspendedLock || listQuery.isLoading}
+        onRename={(next) => void handleRename(chatId, next)}
+        onPinToggle={() => void handlePinToggle(chatId, !(activeThread?.pinned ?? false))}
+        onDelete={() => handleDelete(chatId)}
+      />
 
       {providerMissing ? (
         <ChatProviderMissingPanel projectId={projectId} />

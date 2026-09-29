@@ -6,8 +6,7 @@ import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import { AssistantBubble } from "./AssistantBubble";
 import { ChatJumpButton, StreamingBubble } from "./AssistantChatTurns";
-import { ThreadsSidebar } from "./ThreadsSidebar";
-import type { AssistantChatThreadSummary } from "../../lib/api";
+import { ChatHeader } from "./AssistantChatShell";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import type { ChatTurn } from "./assistant-chat-utils";
 
@@ -27,13 +26,24 @@ function chip(overrides: Partial<ApprovalChip> = {}): ApprovalChip {
   };
 }
 
-const THREAD: AssistantChatThreadSummary = {
-  chatId: "c1",
-  title: "Sprint notes",
-  pinned: false,
-  createdAt: "2026-01-01T00:00:00Z",
-  updatedAt: "2026-01-01T00:00:00Z",
-};
+const THREAD_TITLE = "Sprint notes";
+
+function renderHeader(onDelete: () => void | Promise<unknown> = () => {}) {
+  render(
+    <ChatHeader
+      landing={false}
+      loading={false}
+      title={THREAD_TITLE}
+      projectName="Project 1"
+      updatedAt="2026-01-01T00:00:00Z"
+      pinned={false}
+      actionsDisabled={false}
+      onRename={() => {}}
+      onPinToggle={() => {}}
+      onDelete={onDelete}
+    />
+  );
+}
 
 describe("assistant chat a11y", () => {
   it("names each approval button after its chip target", () => {
@@ -91,20 +101,8 @@ describe("assistant chat a11y", () => {
   });
 
   it("traps focus in the delete dialog, closes on Escape, and restores the trigger", async () => {
-    render(
-      <ThreadsSidebar
-        threads={[THREAD]}
-        activeChatId="c1"
-        search=""
-        onSearchChange={() => {}}
-        onSelect={() => {}}
-        onNewChat={() => {}}
-        onPinToggle={() => {}}
-        onRename={() => {}}
-        onDelete={() => {}}
-      />
-    );
-    const trigger = screen.getByRole("button", { name: "Delete Sprint notes" });
+    renderHeader();
+    const trigger = screen.getByLabelText("Delete thread");
     fireEvent.click(trigger);
 
     expect(screen.getByText(/The view lands on a fresh empty chat\./)).toBeTruthy();
@@ -125,20 +123,8 @@ describe("assistant chat a11y", () => {
   it("does not close the delete dialog on Escape while deleting", async () => {
     let resolveDelete: (() => void) | undefined;
     const onDelete = vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve; }));
-    render(
-      <ThreadsSidebar
-        threads={[THREAD]}
-        activeChatId="c1"
-        search=""
-        onSearchChange={() => {}}
-        onSelect={() => {}}
-        onNewChat={() => {}}
-        onPinToggle={() => {}}
-        onRename={() => {}}
-        onDelete={onDelete}
-      />
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Delete Sprint notes" }));
+    renderHeader(onDelete);
+    fireEvent.click(screen.getByLabelText("Delete thread"));
     fireEvent.click(screen.getByRole("button", { name: "Delete chat" }));
     await waitFor(() => expect(onDelete).toHaveBeenCalled());
 

@@ -114,7 +114,12 @@ vi.mock("../../lib/use-assistant-stream", () => ({
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ push: vi.fn() }) }));
 
 vi.mock("./AssistantChatShell", () => ({
-  ChatHeader: () => null,
+  ChatHeader: (props: { landing: boolean; onDelete: () => void }) =>
+    props.landing ? null : (
+      <button type="button" aria-label="Delete thread" onClick={props.onDelete}>
+        Delete thread
+      </button>
+    ),
   ChatTranscriptArea: (props: { turns: unknown }) => {
     shellCapture.turns = props.turns;
     return null;
@@ -216,8 +221,7 @@ function renderPage(
 }
 
 function deleteThreadA() {
-  fireEvent.click(screen.getByLabelText("Delete Thread A"));
-  fireEvent.click(screen.getByRole("button", { name: "Delete chat" }));
+  fireEvent.click(screen.getByLabelText("Delete thread"));
 }
 
 beforeEach(() => {
@@ -322,7 +326,7 @@ describe("AssistantChatPage thread selection", () => {
     getAssistantChatMock.mockClear();
 
     deleteThreadA();
-    await waitFor(() => expect(screen.queryByText("Delete this chat?")).not.toBeInTheDocument());
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
     // The list head is now "B" (the deleted row was evicted, mirroring the real
     // hook), yet the view must stay empty: no fallback fetch, landing restored.
     expect(getAssistantChatMock).not.toHaveBeenCalled();
