@@ -1327,11 +1327,12 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
 - **Write tools** (`server/assistant/write-tools.ts`) are a second toolset,
   gated by `assistant_settings.write_tools` (comma-separated names, parsed by
   `parseWriteTools` — unknown names dropped, duplicates collapse; empty →
-  read-only turn). 13 proposal-only tools (`create_task`, `update_task`,
-  `move_task`, `archive_task`, `restore_task`, `add_comment`,
-  `create_wiki_page`, `edit_wiki_page`, `create_milestone`,
-  `update_milestone`, `archive_milestone`, `create_sprint`,
-  `update_sprint`) — none apply a write directly; each validates refs and
+  read-only turn). 19 proposal-only tools (`create_task`, `update_task`,
+  `move_task`, `archive_task`, `restore_task`, `delete_task`, `add_comment`,
+  `create_wiki_page`, `edit_wiki_page`, `delete_wiki_page`, `create_milestone`,
+  `update_milestone`, `archive_milestone`, `delete_milestone`, `create_sprint`,
+  `update_sprint`, `archive_sprint`, `delete_sprint`, `move_swimlane`) — none
+  apply a write directly; each validates refs and
   persists a pending row via `createWriteRecorder` (per-turn budget:
   `MAX_WRITES_PER_TURN=8`; over-budget proposals return a tool error).
   Diffs are server-computed plain-text projections (`AssistantWriteDiff` in

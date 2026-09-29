@@ -118,8 +118,11 @@ export function resolveReasoningEffort(rowEffort: import("../../shared/assistant
 export function modelOptionsForEffort(effort: import("../../shared/assistant").AssistantReasoningEffort | null): Record<string, unknown> | undefined { return effort === null ? undefined : { reasoning_effort: effort }; }
 
 export const ASSISTANT_HALLUCINATION_RE = /(sudah dibuat|berhasil dibuat|successfully created|has been created|created successfully)/i;
+// Single-sourced: `server/assistant/build-stream.ts` re-exports this as
+// WRITE_INTENT_RE for the no-tool-call guard. Verbs cover delete/remove (both
+// English forms) and the noun group tolerates plurals ("remove all tasks").
 export const ASSISTANT_WRITE_INTENT_RE =
-  /\b(bikin|buat|tambah|create|update|archive|edit|hapus)\b.*\b(milestone|sprint|task|wiki|page|comment)\b|\b(bikin|buat)\s+(milestone|sprint|task)\b|\bcreate\s+(milestone|sprint|task|wiki)\b/i;
+  /\b(bikin|buat|tambah|create|update|archive|edit|hapus|delete|remove)\b.*\b(milestone|sprint|task|wiki|page|comment)s?\b|\b(bikin|buat|create|delete|remove)\s+(milestone|sprint|task|wiki)s?\b/i;
 export function hasAssistantWriteIntent(message: string): boolean {
   if (!message || !message.trim()) return false;
   return ASSISTANT_WRITE_INTENT_RE.test(message);
