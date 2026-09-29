@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { AssistantWriteDiff } from "../../../shared/assistant";
 import { ApprovalChipRow } from "./AssistantApprovalChipRow";
@@ -38,9 +38,13 @@ export function AssistantApprovalBatch({
 }: {
   chips: ApprovalChip[];
   locked: boolean;
-  onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
-  onApproveAll: () => void;
-  onRejectAll: () => void;
+  // Settle contract: when onDecide returns a thenable, the auto-advance arm's
+  // `resolved` flag flips once that thenable settles — a chip still pending
+  // afterwards (the non-terminal error/toast path) disarms instead of
+  // advancing. A plain `void` return leaves the arm unresolved.
+  onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void | Promise<void>;
+  onApproveAll: () => void | Promise<void>;
+  onRejectAll: () => void | Promise<void>;
 }) {
   const ordered = chips.toSorted((a, b) => a.seq - b.seq);
   const total = ordered.length;
@@ -60,6 +64,23 @@ export function AssistantApprovalBatch({
 
   const trackRef = useRef<HTMLDivElement>(null);
   const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
+
+  // Auto-advance arm (herald-write-approvals.html State 3b): set only when the
+  // ACTIVE card's own Reject / Approve is pressed, keyed by that chip's
+  // approvalId, and consumed the moment that chip leaves `pending`. `resolved`
+  // records that the decision call settled, so a chip still pending after that
+  // — the non-terminal error path — disarms instead of advancing. The arm is
+  // tokenised by object identity so a retry's fresh arm cannot be marked
+  // resolved by the previous attempt's late `.then`.
+  const armRef = useRef<{ id: string; resolved: boolean } | null>(null);
+  const orderedRef = useRef(ordered);
+
+  // Refresh the scan input before the settle effect reads it: a layout effect
+  // declared here runs ahead of the passive effect below, so the settle scan
+  // never sees a stale `ordered` (writing the ref during render is forbidden).
+  useLayoutEffect(() => {
+    orderedRef.current = ordered;
+  });
 
   // A smooth programmatic page emits a scroll frame per animation tick, so a
   // naive nearest-card sync would step the N / M counter and the prev/next
@@ -184,6 +205,57 @@ export function AssistantApprovalBatch({
     }
   }
 
+  // Auto-advance settle (herald-write-approvals.html State 3b): once the armed
+  // chip leaves `pending` — success or a terminal error mapping — page to the
+  // next still-pending card. The target is derived from CHIP IDENTITY (a
+  // decided chip can re-render and slide indices shift), scanning forward for
+  // the first pending chip and wrapping to the earliest pending when none sits
+  // after it. Zero pending chips → no movement (the carousel stays put).
+  useEffect(() => {
+    const arm = armRef.current;
+    if (!arm) return;
+    const cards = orderedRef.current;
+    const at = cards.findIndex((c) => c.approvalId === arm.id);
+    if (at < 0) {
+      armRef.current = null;
+      return;
+    }
+    if (cards[at]!.state === "pending") {
+      // Decision settled without a terminal state (toast path): disarm so a
+      // later unrelated chip change cannot fire this stale arm.
+      if (arm.resolved) armRef.current = null;
+      return;
+    }
+    armRef.current = null;
+    let target = -1;
+    for (let i = at + 1; i < cards.length && target < 0; i += 1) {
+      if (cards[i]!.state === "pending") target = i;
+    }
+    for (let i = 0; i < at && target < 0; i += 1) {
+      if (cards[i]!.state === "pending") target = i;
+    }
+    if (target >= 0) goTo(target, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chips]);
+
+  // Per-card decision: only the active card's own button arms the advance
+  // (batch actions take their own path and never arm). A click on a
+  // non-active card's button must not drop an in-flight arm.
+  function handleCardDecide(chip: ApprovalChip, verdict: "approve" | "reject") {
+    if (ordered[active]?.approvalId !== chip.approvalId) {
+      void onDecide(chip, verdict);
+      return;
+    }
+    const marker = { id: chip.approvalId, resolved: false };
+    armRef.current = marker;
+    const result = onDecide(chip, verdict);
+    if (result && typeof result.then === "function") {
+      void result.then(() => {
+        if (armRef.current === marker) marker.resolved = true;
+      });
+    }
+  }
+
   // Track the snapped card for swipes; skipped mid-page so the counter does not
   // ratchet through intermediate cards (see armScrollSettle above).
   function handleScroll() {
@@ -215,13 +287,13 @@ export function AssistantApprovalBatch({
         </div>
         {pendingCount > 0 && (
           <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-            <button type="button" className="btn btn-danger btn-sm" disabled={locked} onClick={onRejectAll}>
+            <button type="button" className="btn btn-danger btn-sm" disabled={locked} onClick={() => { armRef.current = null; onRejectAll(); }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
               Reject all
             </button>
-            <button type="button" className="btn btn-ghost-accent btn-sm" disabled={locked} onClick={onApproveAll}>
+            <button type="button" className="btn btn-ghost-accent btn-sm" disabled={locked} onClick={() => { armRef.current = null; onApproveAll(); }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M20 6L9 17l-5-5" />
               </svg>
@@ -253,7 +325,7 @@ export function AssistantApprovalBatch({
                 aria-label={`${i + 1} of ${total}`}
                 tabIndex={-1}
               >
-                <ApprovalChipRow chip={chip} disabled={locked} onDecide={onDecide} />
+                <ApprovalChipRow chip={chip} disabled={locked} onDecide={handleCardDecide} />
               </div>
             ))}
           </div>

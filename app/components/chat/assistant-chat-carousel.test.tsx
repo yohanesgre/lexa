@@ -28,14 +28,22 @@ function threeChips(): ApprovalChip[] {
   ];
 }
 
-function renderBatch(chips: ApprovalChip[], locked = false) {
-  const onDecide = vi.fn();
-  const utils = render(
-    <AssistantApprovalBatch chips={chips} locked={locked} onDecide={onDecide} onApproveAll={() => {}} onRejectAll={() => {}} />
+function renderBatch(
+  chips: ApprovalChip[],
+  locked = false,
+  decide?: (chip: ApprovalChip, verdict: "approve" | "reject") => void | Promise<void>
+) {
+  const onDecide = vi.fn(decide);
+  const onApproveAll = vi.fn();
+  const onRejectAll = vi.fn();
+  const tree = (next: ApprovalChip[]) => (
+    <AssistantApprovalBatch chips={next} locked={locked} onDecide={onDecide} onApproveAll={onApproveAll} onRejectAll={onRejectAll} />
   );
+  const utils = render(tree(chips));
   const counter = () => utils.container.querySelector(".approval-carousel-count")!.textContent;
   const carousel = () => utils.container.querySelector(".approval-carousel")!;
-  return { ...utils, onDecide, counter, carousel };
+  const rerenderChips = (next: ApprovalChip[]) => utils.rerender(tree(next));
+  return { ...utils, onDecide, onApproveAll, onRejectAll, counter, carousel, rerenderChips };
 }
 
 // jsdom has no layout: paint the reviewer-observed geometry onto the real
@@ -305,5 +313,177 @@ describe("AssistantApprovalBatch — carousel", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ── Auto-advance (herald-write-approvals.html State 3b) ──
+
+  it("advances to the next pending card after approving the active card", () => {
+    const chips = threeChips();
+    const { counter, rerenderChips } = renderBatch(chips);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+
+    expect(counter()).toBe("2 / 3");
+    expect(document.activeElement).toHaveAttribute("aria-label", "Approve move_task new");
+  });
+
+  it("advances to the next pending card after rejecting the active card", () => {
+    const chips = threeChips();
+    const { counter, rerenderChips } = renderBatch(chips);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reject create_task new" }));
+    rerenderChips([{ ...chips[0]!, state: "rejected" }, chips[1]!, chips[2]!]);
+
+    expect(counter()).toBe("2 / 3");
+  });
+
+  it("stays put when the decision leaves no pending card", () => {
+    const chips = [
+      chip({ approvalId: "a1", seq: 0, state: "approved" }),
+      chip({ approvalId: "a2", seq: 1, name: "move_task", state: "rejected" }),
+      chip({ approvalId: "a3", seq: 2, name: "add_comment" }),
+    ];
+    const { counter, rerenderChips } = renderBatch(chips);
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    expect(counter()).toBe("3 / 3");
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve add_comment new" }));
+    rerenderChips([chips[0]!, chips[1]!, { ...chips[2]!, state: "approved" }]);
+
+    expect(counter()).toBe("3 / 3");
+  });
+
+  it("wraps to the earliest pending card when none remains after the decided one", () => {
+    const chips = [
+      chip({ approvalId: "a1", seq: 0 }),
+      chip({ approvalId: "a2", seq: 1, name: "move_task" }),
+      chip({ approvalId: "a3", seq: 2, name: "add_comment", state: "rejected" }),
+    ];
+    const { counter, rerenderChips } = renderBatch(chips);
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    expect(counter()).toBe("2 / 3");
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve move_task new" }));
+    rerenderChips([chips[0]!, { ...chips[1]!, state: "approved" }, chips[2]!]);
+
+    expect(counter()).toBe("1 / 3");
+    expect(document.activeElement).toHaveAttribute("aria-label", "Approve create_task new");
+  });
+
+  it("does not move on Approve all / Reject all even with a per-card decision pending", () => {
+    const chips = threeChips();
+    const { counter, rerenderChips, onApproveAll, onRejectAll } = renderBatch(chips);
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve all" }));
+    expect(onApproveAll).toHaveBeenCalledTimes(1);
+    // The batch path clears the arm; the armed chip going terminal while a2/a3
+    // stay pending must NOT advance (a retained arm would land on 2 / 3).
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+    expect(counter()).toBe("1 / 3");
+
+    rerenderChips(chips);
+    fireEvent.click(screen.getByRole("button", { name: "Reject create_task new" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject all" }));
+    expect(onRejectAll).toHaveBeenCalledTimes(1);
+    rerenderChips([{ ...chips[0]!, state: "rejected" }, chips[1]!, chips[2]!]);
+    expect(counter()).toBe("1 / 3");
+  });
+
+  it("advances on a terminal error mapping (self-heal to expired)", () => {
+    const chips = threeChips();
+    const { counter, rerenderChips } = renderBatch(chips);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    rerenderChips([{ ...chips[0]!, state: "expired" }, chips[1]!, chips[2]!]);
+
+    expect(counter()).toBe("2 / 3");
+  });
+
+  it("a superseded attempt's late settle cannot resolve the retry's arm", async () => {
+    const chips = threeChips();
+    const resolvers: Array<() => void> = [];
+    const { counter, rerenderChips } = renderBatch(chips, false, () => new Promise<void>((resolve) => { resolvers.push(resolve); }));
+
+    // Two clicks in flight on the same (still pending) card: the retry re-arms.
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    expect(resolvers).toHaveLength(2);
+
+    // The FIRST call settles late: its stale `.then` must not mark the retry's
+    // arm resolved (identity mismatch), so the chip still pending does not
+    // disarm it.
+    await act(async () => {
+      resolvers[0]!();
+    });
+    rerenderChips(chips.map((c) => ({ ...c })));
+
+    // The retry settles; the armed chip then goes terminal and advances.
+    await act(async () => {
+      resolvers[1]!();
+    });
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+
+    expect(counter()).toBe("2 / 3");
+  });
+
+  it("a click on a non-active card's button leaves an in-flight arm intact", () => {
+    const chips = [
+      chip({ approvalId: "a1", seq: 0 }),
+      chip({ approvalId: "a2", seq: 1, name: "move_task" }),
+      chip({ approvalId: "a3", seq: 2, name: "add_comment", state: "rejected" }),
+    ];
+    const { counter, rerenderChips } = renderBatch(chips);
+
+    // Arm the active card, then page away so a1 is no longer the active card.
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next change" }));
+    expect(counter()).toBe("3 / 3");
+
+    // A click on the NON-active a1 must not drop the arm; a1 going terminal
+    // still advances to a2.
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+
+    expect(counter()).toBe("2 / 3");
+  });
+
+  it("does not advance when the decision fails non-terminally (chip stays pending) and disarms", async () => {
+    const chips = threeChips();
+    let settleDecision: (() => void) | undefined;
+    const decision = new Promise<void>((resolve) => {
+      settleDecision = resolve;
+    });
+    const { counter, rerenderChips } = renderBatch(chips, false, () => decision);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+
+    // The call settles while the armed chip is still pending — the disarm
+    // point: the resolved arm is consumed, an unrelated chip change does not
+    // advance the carousel.
+    await act(async () => {
+      settleDecision!();
+    });
+    rerenderChips([chips[0]!, { ...chips[1]!, state: "approved" }, chips[2]!]);
+    expect(counter()).toBe("1 / 3");
+
+    // The armed chip going terminal later must not fire the disarmed (stale)
+    // arm either.
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+    expect(counter()).toBe("1 / 3");
+  });
+
+  it("still advances under prefers-reduced-motion: reduce (instant path)", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    const chips = threeChips();
+    const { counter, rerenderChips } = renderBatch(chips);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+
+    expect(counter()).toBe("2 / 3");
   });
 });
