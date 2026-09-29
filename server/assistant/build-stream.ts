@@ -14,6 +14,30 @@ export const HALLUCINATION_RE = /(sudah dibuat|berhasil dibuat|successfully crea
 // Single-sourced from ../services/assistant-helpers so the tool_choice gate and
 // this no-tool-call guard can never drift apart.
 export const WRITE_INTENT_RE = ASSISTANT_WRITE_INTENT_RE;
+// User-facing copy for a replaced turn. Locally generated (not in the wireframes);
+// tracked by the "client-facing error-copy policy" backlog item.
+export const WRITE_NOT_EXECUTED_COPY = "I wasn't able to carry that out — nothing was changed. Please try again.";
+// A reply that asks, confirms, or defers to the user is honest narration: the
+// write-intent guard must pass it through, never replace it.
+const CONFIRMATION_OR_QUESTION_RE =
+  /\?|\b(are you sure|confirm|confirmation|would you like|do you want|shall i|should i|let me know|please confirm|yakin|apakah|konfirmasi|setuju|maukah|silakan konfirmasi|harap konfirmasi)\b/i;
+// A reply that says it will read/fetch first is a plan, not a claim the write
+// happened.
+const READ_FIRST_RE =
+  /\b(let me|i'?ll|i will|allow me to|saya akan|izinkan saya|saya cek|saya lihat)\b[^.!?\n]{0,80}\b(fetch|read|get|grab|check|look|retrieve|pull|list|scan|ambil|mengambil|membaca|baca|melihat|lihat|cek|mengecek|menampilkan|tampilkan)\b/i;
+// A reply that asserts the write is being or has been taken (without a tool call).
+const WRITE_ASSERTION_RE =
+  /\b(i'?ll|i will|i'?m|i am|let me|i'?ve|i have|we'?ll|we will|we'?re|we are|saya akan|akan saya|saya sudah|sudah saya|saya sedang|sedang saya|saya hapus|saya buat)\b[^.!?\n]{0,80}\b(archive|archiving|archived|delete|deleting|deleted|remove|removing|removed|create|creating|created|update|updating|updated|edit|editing|edited|proceed|proceeding|hapus|menghapus|terhapus|buat|membuat|dibuat|tambah|menambah|arsip|mengarsipkan|ubah|mengubah)\b/i;
+const WRITE_PROGRESSIVE_RE =
+  /\b(archiving|deleting|removing|creating|updating|editing|menghapus|membuat|menambah|mengarsipkan|mengubah)\b[^.!?\n]{0,30}\b(now|them|it|all|these|those|everything|sekarang|semuanya|ini)\b/i;
+// True only for a reply that claims the write action is being/ was taken rather
+// than asking, confirming, or stating it will read first.
+export function isWriteIntentClaim(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  if (CONFIRMATION_OR_QUESTION_RE.test(text)) return false;
+  if (READ_FIRST_RE.test(text)) return false;
+  return WRITE_ASSERTION_RE.test(text) || WRITE_PROGRESSIVE_RE.test(text);
+}
 function extractUserText(content: string | unknown[]): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -524,16 +548,11 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               const userText = extractUserText(ctx.userContent as string | unknown[]);
               const hallucinated = HALLUCINATION_RE.test(text);
               const writeIntent = WRITE_INTENT_RE.test(userText);
-              if (hallucinated || writeIntent) {
+              const writeIntentClaim = !hallucinated && writeIntent && isWriteIntentClaim(text);
+              if (hallucinated || writeIntentClaim) {
                 const prev = text.slice(0, 500);
-                if (writeIntent && /milestone/i.test(userText)) {
-                  text = "Maaf, saya belum memanggil tool create_milestone. Silakan coba lagi atau periksa write_tools.";
-                } else if (writeIntent) {
-                  text = "Maaf, saya belum memanggil tool yang diminta. Silakan coba lagi atau periksa write_tools.";
-                } else {
-                  text = "I haven't created it yet — the write is gated by approval. I'll propose the creation now; please approve to proceed.";
-                }
-                const reason = hallucinated ? "hallucinated success without tool call" : "write intent without tool call";
+                text = WRITE_NOT_EXECUTED_COPY;
+                const reason = hallucinated ? "hallucinated success without tool call" : "write intent asserted without tool call";
                 try {
                   const line = JSON.stringify({
                     level: "WARN",
@@ -556,6 +575,23 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                   code: "ASSISTANT_WRITE_HALLUCINATION_GUARD",
                   message: `Replaced ${reason}; write tool not called`,
                 });
+              } else if (writeIntent) {
+                try {
+                  const line = JSON.stringify({
+                    level: "INFO",
+                    service: "assistant-build-stream",
+                    message: "ASSISTANT_WRITE_INTENT_GUARD — write intent awaiting user confirmation; text passed through",
+                    meta: {
+                      threadId: ctx.threadId,
+                      writeTools: ctx.writeTools ?? null,
+                      drained: drained.length,
+                      userText: userText.slice(0, 300),
+                      text: text.slice(0, 300),
+                    },
+                    timestamp: new Date().toISOString(),
+                  });
+                  process.stdout.write(line + "\n");
+                } catch {}
               } else {
                 try {
                   const offeredToolNames = ctx.tools

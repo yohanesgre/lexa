@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
-import { buildStream, buildResumeResultsNote, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, type StreamRunContext } from "./build-stream";
+import { buildStream, buildResumeResultsNote, isWriteIntentClaim, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { QueuedProposal } from "./write-tools";
 
@@ -359,5 +359,79 @@ describe("reconcilePendingBatchStatuses", () => {
       status: "pending",
       diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" },
     });
+  });
+});
+
+function replyStream(reply: string): AsyncIterable<StreamChunk> {
+  return (async function* () {
+    yield { type: "TEXT_MESSAGE_CONTENT", delta: reply } as unknown as StreamChunk;
+    yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+  })();
+}
+
+function writesCtx(reply: string, userContent: string): StreamRunContext {
+  const c = ctx(() => replyStream(reply));
+  c.writeTools = ["delete_task"];
+  c.userContent = userContent;
+  return c;
+}
+
+describe("isWriteIntentClaim", () => {
+  it("passes questions, confirmations and read-first plans", () => {
+    for (const text of [
+      "There are 52 tasks in this project. Are you sure you want to remove all of them?",
+      "I can remove all 52 tasks, but this cannot be undone. Please confirm.",
+      "Let me first fetch the list of tasks.",
+      "I'll read the board before removing anything.",
+      "Let me know if you want me to remove them.",
+    ]) expect(isWriteIntentClaim(text), text).toBe(false);
+  });
+
+  it("flags asserted actions that were not called", () => {
+    for (const text of [
+      "I'll archive them now.",
+      "Archiving now.",
+      "I have archived all 52 tasks.",
+      "saya akan menghapus semuanya",
+      "sudah saya hapus",
+    ]) expect(isWriteIntentClaim(text), text).toBe(true);
+  });
+});
+
+describe("write-intent no-tool-call guard", () => {
+  it("passes through a confirmation question and logs the pass-through", async () => {
+    const reply = "There are 52 tasks in this project. Are you sure you want to remove all of them?";
+    const stdout: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    let frames: StreamFrame[];
+    try {
+      frames = await drain(buildStream(writesCtx(reply, "can you remove all tasks?")));
+    } finally { spy.mockRestore(); }
+    expect(frames.some((f) => f.type === "error" && f.code === "ASSISTANT_WRITE_HALLUCINATION_GUARD")).toBe(false);
+    expect((frames.at(-1) as { text?: string }).text).toBe(reply);
+    expect(stdout.join("")).toContain("ASSISTANT_WRITE_INTENT_GUARD");
+    expect(stdout.join("")).toContain("awaiting user confirmation");
+  });
+
+  it("replaces a write claim made without a tool call", async () => {
+    const frames = await drain(buildStream(writesCtx("I'll archive them now.", "can you remove all tasks?")));
+    expect(frames.some((f) => f.type === "error" && f.code === "ASSISTANT_WRITE_HALLUCINATION_GUARD")).toBe(true);
+    expect((frames.at(-1) as { text: string }).text).toBe(WRITE_NOT_EXECUTED_COPY);
+  });
+
+  it("still replaces a hallucinated success claim", async () => {
+    const frames = await drain(buildStream(writesCtx("successfully created the task", "create a task")));
+    expect(frames.some((f) => f.type === "error" && f.code === "ASSISTANT_WRITE_HALLUCINATION_GUARD")).toBe(true);
+    expect((frames.at(-1) as { text: string }).text).toBe(WRITE_NOT_EXECUTED_COPY);
+  });
+
+  it("leaves a non-write reply untouched", async () => {
+    const reply = "There are 42 tasks in this project.";
+    const frames = await drain(buildStream(writesCtx(reply, "how many tasks are there?")));
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    expect((frames.at(-1) as { text?: string }).text).toBe(reply);
   });
 });
