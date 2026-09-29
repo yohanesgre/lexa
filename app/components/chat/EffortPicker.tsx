@@ -6,12 +6,18 @@ import type { AssistantReasoningEffort } from "../../../shared/assistant";
 // "" = following the project default — trigger reads muted "default (N)";
 // an explicit level tints the chip with the selected treatment and rides
 // the next stream payload only. Locked while a stream is in flight.
-const LEVELS: { value: AssistantReasoningEffort; label: string }[] = [
+export const LEVELS: { value: AssistantReasoningEffort; label: string }[] = [
   { value: "minimal", label: "Minimal" },
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
 ];
+
+// Trigger/summary copy for an unset effort: the resolved project default reads
+// inline so members see what actually ships without leaving chat.
+export function effortLabel(effort: AssistantReasoningEffort | "", projectEffort: AssistantReasoningEffort | null): string {
+  return effort || `default${projectEffort ? ` (${projectEffort})` : ""}`;
+}
 
 const ITEM_BASE_STYLE: React.CSSProperties = {
   height: 28,
@@ -83,15 +89,7 @@ export function EffortPicker({ effort, projectEffort, disabled = false, align = 
     <div ref={rootRef} style={{ position: "relative", display: "inline-flex" }}>
       <button
         type="button"
-        className="btn btn-ghost"
-        style={{
-          height: 24,
-          padding: "0 9px",
-          fontSize: 11,
-          ...(effort
-            ? { borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" }
-            : { color: "var(--lx-text-secondary)" }),
-        }}
+        className={`deck-chip${effort ? " is-set" : ""}`}
         title="Thinking effort applied to the next message"
         aria-label="Thinking effort"
         aria-haspopup="listbox"
@@ -99,13 +97,13 @@ export function EffortPicker({ effort, projectEffort, disabled = false, align = 
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
       >
-        {effort || `default${projectEffort ? ` (${projectEffort})` : ""}`}
+        {effortLabel(effort, projectEffort)}
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginLeft: 4 }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
       {open && (
-        <div className="menu" role="listbox" aria-label="Thinking effort" style={{ position: "absolute", ...(align === "up" ? { top: "auto", bottom: "calc(100% + 4px)" } : { top: "calc(100% + 4px)", bottom: "auto" }), left: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2, minWidth: 200 }}>
+        <div className="menu deck-menu" role="listbox" aria-label="Thinking effort" style={align === "up" ? { top: "auto", bottom: "calc(100% + 4px)" } : undefined}>
           <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ padding: "4px 8px" }}>Thinking effort</div>
           <button type="button" role="option" aria-selected={!effort} tabIndex={0} className="menu-item" style={itemStyle(!effort)} onClick={() => { onChange(""); setOpen(false); }} onKeyDown={(e) => handleOptionKeyDown(e, 0)}>
             <span>Default{projectEffort ? ` · project (${projectEffort})` : " · none set"}</span>

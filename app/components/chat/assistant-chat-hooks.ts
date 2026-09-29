@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { hasMatchMedia, isNarrowViewport, matchMedia } from "../../lib/viewport";
+import { hasMatchMedia, matchMedia } from "../../lib/viewport";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 
 // Small self-contained hooks for the Assistant chat page. The page-level
@@ -82,13 +82,4 @@ export function useChatAutoScroll(args: {
     // changes whenever ANY timeline element mounts, not just text deltas.
   }, [turns, stream.text, stream.reasoningText, stream.items, scrollToBottom]);
   return { scrollRef, atBottom, handleTranscriptScroll, scrollToBottom };
-}
-
-// Narrow-screen default for the skills panel: collapsed on mobile so the
-// tree never starves the content; the choice sticks after first paint.
-export function useSkillsPanelDefault() {
-  // Narrow screens start collapsed so the tree never starves the content
-  // (route is client-only, so reading the viewport at init is safe).
-  const [skillsPanelOpen, setSkillsPanelOpen] = useState<boolean>(() => !isNarrowViewport());
-  return { skillsPanelOpen, setSkillsPanelOpen };
 }

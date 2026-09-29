@@ -2,10 +2,13 @@ import type { ReactNode } from "react";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
-import { ChatJumpButton, ChatSkillsPanel, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
+import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
 import { AssistantBubble } from "./AssistantBubble";
 import { AssistantChatComposer } from "./AssistantChatComposer";
+import { EffortPicker } from "./EffortPicker";
+import { DeckRailSummary, SkillSelect } from "./SkillSelect";
 import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
+import type { QueuedMessage } from "./useChatQueue";
 import type { LexaSkill } from "../../../shared/types";
 import type { AssistantReasoningEffort } from "../../../shared/assistant";
 
@@ -128,21 +131,7 @@ export function ChatTranscriptArea({
   );
 }
 
-function WarnBanner({ code, message }: { code: string; message: string }) {
-  return (
-    <div className="banner-warning mb-2">
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
-        <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
-      </svg>
-      <span><span className="font-mono font-medium">{code}</span> — {message}</span>
-    </div>
-  );
-}
-
 export function ChatComposerArea({
-  skillsPanelOpen,
-  onToggleSkills,
-  skillName,
   skills,
   skillId,
   onSkillChange,
@@ -150,7 +139,7 @@ export function ChatComposerArea({
   slug,
   streaming,
   suspendedLock,
-  suspendTally,
+  suspendCount,
   attachDisabled,
   isMobileComposer,
   effort,
@@ -158,10 +147,12 @@ export function ChatComposerArea({
   onEffortChange,
   onSend,
   onAbort,
+  landing,
+  queued,
+  onQueue,
+  onUnqueue,
+  seed,
 }: {
-  skillsPanelOpen: boolean;
-  onToggleSkills: () => void;
-  skillName?: string | undefined;
   skills: LexaSkill[];
   skillId: string;
   onSkillChange: (id: string) => void;
@@ -169,50 +160,64 @@ export function ChatComposerArea({
   slug: string;
   streaming: boolean;
   suspendedLock: boolean;
-  suspendTally: string;
+  suspendCount: number;
   attachDisabled: boolean;
   isMobileComposer: boolean;
   effort: AssistantReasoningEffort | "";
   projectEffort: AssistantReasoningEffort | null | undefined;
   onEffortChange: (e: AssistantReasoningEffort | "") => void;
-  onSend: (message: string, imageCount: number) => void;
+  onSend: (message: string, imageCount: number) => boolean;
   onAbort: () => void;
+  landing?: boolean | undefined;
+  queued?: QueuedMessage | null | undefined;
+  onQueue?: ((text: string) => void) | undefined;
+  onUnqueue?: (() => void) | undefined;
+  seed?: { text: string; nonce: number } | null | undefined;
 }) {
+  const railDisabled = streaming || busy409 || suspendedLock;
+  // The docked Deck sits at the bottom of a 100vh layout, so its rail menus
+  // must open UPWARD; the landing centers the Deck and keeps them below.
+  const menuAlign: "up" | "down" = landing ? "down" : "up";
   return (
-    <div className="chat-composer">
+    <div className={landing ? "chat-composer is-landing" : "chat-composer"}>
       <div className="chat-composer-inner">
-        {/* Skill picker — collapsed by default to a one-line summary
-            (skill name + chevron). Tapping expands the chip row. */}
-        <ChatSkillsPanel
-          open={skillsPanelOpen}
-          skillName={skillName}
-          skills={skills}
-          skillId={skillId}
-          effort={effort}
-          projectEffort={projectEffort}
-          onEffortChange={onEffortChange}
-          disabled={streaming}
-          isMobileComposer={isMobileComposer}
-          onToggle={onToggleSkills}
-          onSkillChange={onSkillChange}
-        />
-
-        {busy409 && (
-          <WarnBanner
-            code="ASSISTANT_TASK_ACTIVE"
-            message="Assistant is already responding in this thread. Stop the current reply to send something new."
-          />
-        )}
-
         <AssistantChatComposer
           slug={slug}
           streaming={streaming}
           busy409={busy409}
           suspendedLock={suspendedLock}
-          suspendTally={suspendTally}
+          suspendCount={suspendCount}
           attachDisabled={attachDisabled}
           onSend={onSend}
           onAbort={onAbort}
+          queued={queued}
+          onQueue={onQueue}
+          onUnqueue={onUnqueue}
+          seed={seed}
+          rail={
+            isMobileComposer ? (
+              <>
+                <DeckRailSummary
+                  skills={skills}
+                  skillId={skillId}
+                  effort={effort}
+                  projectEffort={projectEffort ?? null}
+                  onSkillChange={onSkillChange}
+                  onEffortChange={onEffortChange}
+                  disabled={railDisabled}
+                />
+                <span className="deck-rail-spacer" />
+              </>
+            ) : (
+              <>
+                <span className="deck-label">Skill</span>
+                <SkillSelect skills={skills} skillId={skillId} onSkillChange={onSkillChange} align={menuAlign} disabled={railDisabled} />
+                <span className="deck-rail-spacer" />
+                <span className="deck-label">Effort</span>
+                <EffortPicker effort={effort} projectEffort={projectEffort ?? null} disabled={railDisabled} align={menuAlign} onChange={onEffortChange} />
+              </>
+            )
+          }
         />
       </div>
     </div>
