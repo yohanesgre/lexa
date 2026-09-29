@@ -396,13 +396,12 @@ export function useChatThreadActions(args: {
   chatId: string;
   applyChatId: (id: string) => void;
   setChatId: (id: string) => void;
-  suppressHeadFallbackRef: React.RefObject<string | null>;
   streaming: boolean;
   abort: () => void;
   clearThreadParam: () => void;
   openThreadParam: (threadId: string) => void;
 }) {
-  const { projectId, chatId, applyChatId, setChatId, suppressHeadFallbackRef, streaming, abort, clearThreadParam, openThreadParam } = args;
+  const { projectId, chatId, applyChatId, setChatId, streaming, abort, clearThreadParam, openThreadParam } = args;
   const renameChat = useRenameAssistantChat(projectId);
   const deleteChat = useDeleteAssistantChat(projectId);
   const metaChat = useUpdateAssistantChatMeta(projectId);
@@ -412,10 +411,8 @@ export function useChatThreadActions(args: {
     (id: string) =>
       deleteChat.mutateAsync({ chatId: id }).then(() => {
         if (id === chatId) {
-          // Latch the intentional-empty state so the resolution effect does not
-          // fall back to the next list head (herald-chat.html: the view lands
-          // on a fresh empty chat).
-          suppressHeadFallbackRef.current = projectId ?? null;
+          // Land on the fresh empty chat (herald-chat.html: the view lands on a
+          // fresh empty chat).
           try {
             window.localStorage.removeItem(`lexa-chat-last:${projectId}`);
           } catch {}
@@ -423,19 +420,17 @@ export function useChatThreadActions(args: {
           clearThreadParam();
         }
       }),
-    [deleteChat, chatId, projectId, clearThreadParam, setChatId, suppressHeadFallbackRef]
+    [deleteChat, chatId, projectId, clearThreadParam, setChatId]
   );
   const selectThread = useCallback(
     (id: string) => {
       if (streaming) abort();
-      // Any explicit selection releases the intentional-empty latch.
-      suppressHeadFallbackRef.current = null;
       // Apply immediately (state + last-visited) — the deep link alone only
       // changes the URL and would leave the transcript on the old thread.
       applyChatId(id);
       openThreadParam(id);
     },
-    [streaming, abort, applyChatId, openThreadParam, suppressHeadFallbackRef]
+    [streaming, abort, applyChatId, openThreadParam]
   );
   const startNewChat = useCallback(() => {
     selectThread(crypto.randomUUID());

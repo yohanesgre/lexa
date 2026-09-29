@@ -70,9 +70,9 @@ vi.mock("../../lib/queries", () => ({
   useRenameAssistantChat: () => ({ mutateAsync: vi.fn(async () => {}) }),
   useUpdateAssistantChatMeta: () => ({ mutateAsync: vi.fn(async () => {}) }),
   useDeleteAssistantChat: () => ({
-    // Mirror the real hook's onSuccess cache eviction (queries.ts): without it
-    // the list keeps the deleted id and a missing latch would re-apply the
-    // cached transcript instead of falling back to an uncached head.
+    // Mirror the real hook's onSuccess cache eviction (queries.ts), so a deleted
+    // thread's cached transcript is not re-applied when the list snapshot no
+    // longer contains it — the page must stay on the fresh landing.
     mutateAsync: vi.fn(async ({ chatId }: { chatId: string }) => {
       for (const key of Object.keys(fx.lists)) {
         fx.lists[key] = (fx.lists[key] as Array<{ chatId: string }>).filter((t) => t.chatId !== chatId);
@@ -231,7 +231,21 @@ beforeEach(() => {
 });
 
 describe("AssistantChatPage thread selection", () => {
-  it("resolves ?thread= and switches the transcript query when a sidebar row is clicked", async () => {
+  it("opens the new-chat landing on a project with existing threads when no ?thread= is given", () => {
+    // fx.lists.p1 already holds threads "A" and "B", and lexa-chat-last points
+    // at "A" — neither may auto-select: the last-visited memory never drives the
+    // default selection, and the landing must not fall back to the list head.
+    window.localStorage.setItem("lexa-chat-last:p1", "A");
+    const { container } = renderPage();
+
+    expect(container.querySelector(".chat-landing")).toBeTruthy();
+    expect(screen.getByText("Thread A")).toBeTruthy();
+    expect(screen.getByText("Thread B")).toBeTruthy();
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+    expect(container.querySelector(".thread-row.active")).toBeNull();
+  });
+
+  it("opens a ?thread= deep link and switches the transcript query when a sidebar row is clicked", async () => {
     getAssistantChatMock.mockResolvedValue(TRANSCRIPT);
     renderPage({ thread: "A" });
 
@@ -242,45 +256,94 @@ describe("AssistantChatPage thread selection", () => {
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("B"));
   });
 
+  it("lands fresh on reload when a ?thread= 404s while it is the last-visited (never opens a list head)", async () => {
+    // Reload shape: the URL carries a fresh uuid, lexa-chat-last points at it
+    // (so it is NOT an "untracked" deep link → recovery applies), the list
+    // snapshot holds OTHER threads, and the transcript 404s for the unknown id.
+    const fresh = "11111111-1111-4111-8111-111111111111";
+    window.localStorage.setItem("lexa-chat-last:p1", fresh);
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container } = renderPage({ thread: fresh });
+
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(fresh));
+
+    // The dead uuid must NOT resolve to the list head "A": landing, no active
+    // row, and no other thread's transcript is ever fetched.
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(3);
+    expect(container.querySelector(".thread-row.active")).toBeNull();
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith({ search: {}, replace: true }));
+    expect(getAssistantChatMock.mock.calls.map((c) => c[0])).toEqual([fresh]);
+  });
+
+  it("lands fresh for a dead ?thread= that no list snapshot contains", async () => {
+    const ghost = "22222222-2222-4222-8222-222222222222";
+    window.localStorage.setItem("lexa-chat-last:p1", ghost);
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container } = renderPage({ thread: ghost });
+
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(ghost));
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(3);
+    expect(container.querySelector(".thread-row.active")).toBeNull();
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith({ search: {}, replace: true }));
+    expect(getAssistantChatMock.mock.calls.map((c) => c[0])).toEqual([ghost]);
+  });
+
+  it("keeps a deep-linked thread on a transient (non-404) transcript error", async () => {
+    const transient = "33333333-3333-4333-8333-333333333333";
+    window.localStorage.setItem("lexa-chat-last:p1", transient);
+    const qc = makeQueryClient();
+    // The id is present in a cached list variant: a transient read failure is
+    // not dead-link evidence, so it must not be evicted from the cache nor have
+    // ?thread= cleared, and it must not paint the hero over the failed read.
+    qc.setQueryData(["assistant-chats", "p1"], [
+      { chatId: transient, title: "Transient", pinned: false, snippet: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+    ]);
+    getAssistantChatMock.mockRejectedValue(new Error("500 Internal Server Error"));
+    const { container } = renderPage({ thread: transient }, qc);
+
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(transient));
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", transient])?.status).toBe("error"));
+
+    expect(navigateMock).not.toHaveBeenCalledWith({ search: {}, replace: true });
+    expect(qc.getQueryState(["assistant-chat", transient])).toBeTruthy();
+    expect((qc.getQueryData(["assistant-chats", "p1"]) as Array<{ chatId: string }>).some((t) => t.chatId === transient)).toBe(true);
+    expect(container.querySelector(".chat-landing")).toBeNull();
+  });
+
   it("lands on a fresh empty chat after deleting the active thread (no head fallback)", async () => {
     getAssistantChatMock.mockResolvedValue(TRANSCRIPT);
     const { container } = renderPage();
 
-    // Initial resolution falls back to the history list head ("A").
+    // The landing is the default; a thread is opened explicitly via the sidebar.
+    fireEvent.click(screen.getByText("Thread A"));
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
     getAssistantChatMock.mockClear();
 
     deleteThreadA();
     await waitFor(() => expect(screen.queryByText("Delete this chat?")).not.toBeInTheDocument());
     // The list head is now "B" (the deleted row was evicted, mirroring the real
-    // hook), yet the latch must keep the view empty: no fallback fetch, no
-    // active row.
+    // hook), yet the view must stay empty: no fallback fetch, landing restored.
     expect(getAssistantChatMock).not.toHaveBeenCalled();
     expect(container.querySelector(".thread-row.active")).toBeNull();
+    expect(container.querySelector(".chat-landing")).toBeTruthy();
   });
 
-  it("clears the intentional-empty latch on a project round trip (A→B→A)", async () => {
+  it("does not leak the active thread across a project switch", async () => {
     getAssistantChatMock.mockResolvedValue(TRANSCRIPT);
     const { container, rerenderPage } = renderPage();
 
+    fireEvent.click(screen.getByText("Thread A"));
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
     getAssistantChatMock.mockClear();
 
-    deleteThreadA();
-    await waitFor(() => expect(screen.queryByText("Delete this chat?")).not.toBeInTheDocument());
+    // Switch to project B: its list must NOT auto-select a thread, and the
+    // previous project's active thread must not leak through.
+    rerenderPage({ slug: "other" });
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
     expect(getAssistantChatMock).not.toHaveBeenCalled();
     expect(container.querySelector(".thread-row.active")).toBeNull();
-
-    // Switch to project B: its own head resolves.
-    rerenderPage({ slug: "other" });
-    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("C"));
-
-    // Back to project A: the latch was cleared on the switch, so A re-resolves
-    // to its (now only) remaining thread "B" instead of staying empty.
-    rerenderPage({ slug: "nimbus" });
-    await waitFor(() =>
-      expect(screen.getByText("Thread B").closest(".thread-row")?.className).toContain("active")
-    );
   });
 });
 
@@ -335,13 +398,25 @@ describe("AssistantChatPage — approval reconciliation on remount", () => {
     expect(first.container.querySelector(".thread-row.active")).toBeNull();
     first.unmount();
 
-    // Remount with the 404 still in play: refetchOnMount re-runs the GET and
-    // still resolves to the empty state — no stale-thread recovery redirect.
+    // Remount with the 404 still in play: refetchOnMount re-runs the GET. Hold
+    // that read open so the pre-settle window is deterministic — the fresh uuid
+    // is still a zero-turn chat (no hero flashing over it, no recovery redirect).
+    let failRead!: (error: unknown) => void;
     getAssistantChatMock.mockClear();
-    renderPage({ thread: "NEW" }, qc);
+    getAssistantChatMock.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failRead = reject;
+      })
+    );
+    const second = renderPage({ thread: "NEW" }, qc);
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("NEW"));
+    expect(second.container.querySelector(".chat-landing")).toBeNull();
     expect(shellCapture.turns).toEqual([]);
     expect(navigateMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      failRead(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    });
   });
 });
 
@@ -388,9 +463,41 @@ describe("AssistantChatPage — zero-turn landing", () => {
     await waitFor(() => expect(composerCapture.seed).toBeNull());
   });
 
+  it("keeps the landing after New chat mints a fresh ?thread= uuid that 404s", async () => {
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(
+      Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" })
+    );
+    const { container, rerenderPage } = renderPage();
+    expect(container.querySelector(".chat-landing")).toBeTruthy();
+
+    // New chat mints a fresh uuid and deep-links it as ?thread=<uuid>.
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    const freshId = navigateMock.mock.calls.at(-1)?.[0]?.search?.thread as string;
+    expect(freshId).toBeTruthy();
+
+    // The route applies the uuid as the ?thread= param.
+    rerenderPage({ thread: freshId });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(freshId));
+
+    // A settled zero-turn uuid IS the new-chat landing — not an empty docked
+    // transcript — so the hero and its starter chips come back.
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(3);
+  });
+
+  it("shows the landing for a settled existing thread that has zero turns", async () => {
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [] });
+    const { container } = renderPage({ thread: "A" });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(3);
+  });
+
   it("hides the hero once the thread has turns", async () => {
     getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
-    const { container } = renderPage();
+    const { container } = renderPage({ thread: "A" });
     await waitFor(() => expect(shellCapture.turns).not.toBeNull());
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
@@ -409,9 +516,22 @@ describe("AssistantChatPage — zero-turn landing", () => {
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
 
-  it("does not paint the hero for a ?thread= deep link before the thread resolves", () => {
-    fx.lists.p1 = [];
+  it("does not flash the hero on a ?thread= deep link while the transcript still loads", async () => {
+    let resolveTranscript!: (value: unknown) => void;
+    getAssistantChatMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTranscript = resolve;
+      })
+    );
     const { container } = renderPage({ thread: "A" });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+
+    // The real thread's GET is in flight and turns are still empty: the hero
+    // must not paint over it.
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    resolveTranscript({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    await waitFor(() => expect(shellCapture.turns ?? []).toHaveLength(1));
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
 });

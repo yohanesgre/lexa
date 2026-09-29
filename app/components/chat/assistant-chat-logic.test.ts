@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { renderTranscript } from "./assistant-chat-utils";
-import { chipStateFromError, recoverStaleThread, resolveChatId } from "./assistant-chat-logic";
+import { chipStateFromError, dropUnknownThread, resolveChatId } from "./assistant-chat-logic";
 
 const DIFF = { type: "task_delete", taskRef: "LX-1", taskTitle: "old" } as const;
 
@@ -61,72 +61,73 @@ describe("resolveChatId", () => {
     projectId: "p1",
     thread: undefined as string | undefined,
     currentChatId: "",
-    last: null as string | null,
-    head: undefined as string | undefined,
   };
 
-  it("prefers ?thread= over last-visited and the list head", () => {
-    expect(resolveChatId({ ...base, thread: "t1", last: "t2", head: "t3" })).toBe("t1");
+  it("prefers ?thread= over the active selection", () => {
+    expect(resolveChatId({ ...base, thread: "t1", currentChatId: "t2" })).toBe("t1");
   });
 
-  it("falls back to last-visited, then the history list head", () => {
-    expect(resolveChatId({ ...base, last: "t2", head: "t3" })).toBe("t2");
-    expect(resolveChatId({ ...base, head: "t3" })).toBe("t3");
+  it("treats a ?thread= equal to the active selection as already applied", () => {
+    expect(resolveChatId({ ...base, thread: "t1", currentChatId: "t1" })).toBeNull();
   });
 
-  it("returns null for the fresh empty state", () => {
+  it("opens the fresh landing when there is no ?thread= and no active selection", () => {
     expect(resolveChatId(base)).toBeNull();
   });
 
-  it("does not clobber an active selection from a stale fallback", () => {
-    expect(resolveChatId({ ...base, currentChatId: "active", last: "t2", head: "t3" })).toBeNull();
-    expect(resolveChatId({ ...base, currentChatId: "active", thread: "active" })).toBeNull();
+  it("does not clobber an active selection", () => {
+    expect(resolveChatId({ ...base, currentChatId: "active" })).toBeNull();
   });
 
-  it("honors an explicit ?thread= switch away from the active selection", () => {
-    expect(resolveChatId({ ...base, currentChatId: "a", thread: "b" })).toBe("b");
+  it("returns null without a resolved project", () => {
+    expect(resolveChatId({ ...base, projectId: undefined, thread: "t1" })).toBeNull();
   });
 });
 
-describe("recoverStaleThread — dead-head eviction", () => {
+describe("dropUnknownThread — fresh landing, never a list head", () => {
   const thread = (chatId: string) => ({ chatId, title: chatId, pinned: false, snippet: null, createdAt: "x", updatedAt: "x" });
 
-  it("evicts the dead id from cached lists and falls back to the next live head", () => {
+  it("clears the selection, evicts the dead id and never applies the next live head", () => {
     const qc = new QueryClient();
+    qc.setQueryData(["assistant-chat", "dead"], { messages: [] });
     qc.setQueryData(["assistant-chats", "p1", null], [thread("dead"), thread("live")]);
     qc.setQueryData(["assistant-chats", "p1", "q"], [thread("dead"), thread("other")]);
     const applied: string[] = [];
-    recoverStaleThread({
+    let cleared = false;
+    dropUnknownThread({
       qc,
       projectId: "p1",
       chatId: "dead",
-      listData: [thread("dead"), thread("live")],
-      applyChatId: (id) => applied.push(id),
       setChatId: (id) => applied.push(`set:${id}`),
-      clearThreadParam: () => {},
+      clearThreadParam: () => {
+        cleared = true;
+      },
       clearParam: true,
     });
-    expect(applied).toEqual(["live"]);
+    // The live head "live" must NOT be applied — only the fresh empty state.
+    expect(applied).toEqual(["set:"]);
+    expect(cleared).toBe(true);
+    expect(qc.getQueryState(["assistant-chat", "dead"])).toBeUndefined();
     expect(qc.getQueryData(["assistant-chats", "p1", null])).toEqual([thread("live")]);
     expect(qc.getQueryData(["assistant-chats", "p1", "q"])).toEqual([thread("other")]);
   });
 
-  it("clears the selection when the dead id was the only entry", () => {
+  it("keeps the param when the URL no longer carries the dead thread", () => {
     const qc = new QueryClient();
-    qc.setQueryData(["assistant-chats", "p1", null], [thread("dead")]);
+    let cleared = false;
     const applied: string[] = [];
-    recoverStaleThread({
+    dropUnknownThread({
       qc,
       projectId: "p1",
       chatId: "dead",
-      listData: [thread("dead")],
-      applyChatId: (id) => applied.push(id),
       setChatId: (id) => applied.push(`set:${id}`),
-      clearThreadParam: () => {},
-      clearParam: true,
+      clearThreadParam: () => {
+        cleared = true;
+      },
+      clearParam: false,
     });
     expect(applied).toEqual(["set:"]);
-    expect(qc.getQueryData(["assistant-chats", "p1", null])).toEqual([]);
+    expect(cleared).toBe(false);
   });
 });
 
