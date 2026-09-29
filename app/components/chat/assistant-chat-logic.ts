@@ -221,24 +221,23 @@ export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>)
 
 // ── Composer lock / tally ──
 
-// ── Thread resolution ( ?thread= > localStorage last-visited > list head ) ──
+// ── Thread resolution ( ?thread= deep link | in-session selection ) ──
 
-// Returns the chat id to apply, or null when the current selection stands
-// (already-resolved thread, no source). An explicit ?thread= always wins over
-// the active selection; the last-visited map and the history list head only
-// resolve the INITIAL selection, so stale-recovery fallbacks and locally minted
-// threads are never clobbered by a stale localStorage read.
+// Returns the chat id to apply, or null when the current selection stands. The
+// ONLY sources that select an existing thread are an explicit ?thread= deep
+// link and the already-applied in-session selection; everything else resolves
+// to null — the /$slug/chat default is the new-chat landing (herald-chat.html
+// "Open behavior"). The last-visited memory is never a default; it is kept for
+// stale-thread recovery only. An explicit ?thread= always wins over the active
+// selection.
 export function resolveChatId(args: {
   projectId: string | undefined;
   thread: string | undefined;
   currentChatId: string;
-  last: string | null;
-  head: string | undefined;
 }): string | null {
   if (!args.projectId) return null;
   if (args.thread) return args.thread === args.currentChatId ? null : args.thread;
-  if (args.currentChatId) return null;
-  return args.last ?? args.head ?? null;
+  return null;
 }
 
 // ── Stale-thread recovery predicates ──
@@ -278,7 +277,7 @@ export function isThreadNotFound(error: unknown): boolean {
 }
 
 // Transcript 404 on a thread that cannot be a fresh deep link → stale
-// selection: drop the cache entry, clear ?thread=, fall back to list head.
+// selection: drop the cache entry, clear ?thread=, land on the fresh chat.
 export function staleThreadNeedsRecovery(args: {
   projectId: string | undefined;
   chatId: string;
@@ -300,8 +299,9 @@ export function staleThreadNeedsRecovery(args: {
   return true;
 }
 
-// ?thread= that never appears in any list snapshot while the transcript
-// errors (and the stream is idle) → dead deep link, recover to list head.
+// ?thread= that never appears in any list snapshot while the transcript 404s
+// (and the stream is idle) → dead deep link, land on the fresh chat. A transient
+// read failure is not evidence of a dead link and must not evict the thread.
 export function orphanThreadNeedsRecovery(args: {
   projectId: string | undefined;
   chatId: string;
@@ -315,7 +315,8 @@ export function orphanThreadNeedsRecovery(args: {
   const { projectId, chatId, transcriptError, hasIngress, streaming, listLoading, listData, meta } = args;
   if (!projectId || !chatId || !listData || listLoading) return false;
   if (isUntrackedDeepLink(chatId, meta)) return false;
-  return !!meta.thread && listData.length > 0 && !listData.some((t) => t.chatId === chatId) && !hasIngress && !streaming && !!transcriptError;
+  if (!isThreadNotFound(transcriptError)) return false;
+  return !!meta.thread && listData.length > 0 && !listData.some((t) => t.chatId === chatId) && !hasIngress && !streaming;
 }
 
 // Post-stream activity summary (done only) — attached to the trailing
@@ -333,32 +334,30 @@ export function streamDoneActivity(stream: {
 }
 
 // Recovery execution shared by both stale-thread predicates: drop the dead
-// transcript cache, clear ?thread=, fall back to the list head (or the
-// fresh empty state when the list has none).
-export function recoverStaleThread(args: {
+// transcript cache, evict the dead id from every cached list variant, clear the
+// ?thread= param and land on the fresh empty chat. The destination is ALWAYS
+// the fresh landing — a settled 404 for a thread that is not in the list
+// snapshot must never jump to a list head, or a reload re-opens the
+// latest/previous thread.
+export function dropUnknownThread(args: {
   qc: QueryClient;
   projectId: string | undefined;
   chatId: string;
-  listData: AssistantChatThreadSummary[] | undefined;
-  applyChatId: (id: string) => void;
   setChatId: (id: string) => void;
   clearThreadParam: () => void;
   clearParam: boolean;
 }): void {
-  const { qc, projectId, chatId, listData, applyChatId, setChatId, clearThreadParam, clearParam } = args;
+  const { qc, projectId, chatId, setChatId, clearThreadParam, clearParam } = args;
   qc.cancelQueries({ queryKey: ["assistant-chat", chatId] });
   qc.removeQueries({ queryKey: ["assistant-chat", chatId] });
-  // Evict the dead id from every cached list variant so the resolution
-  // effect's head fallback cannot re-pick it (one extra 404/recovery cycle, or
-  // a permanent loop when the list refetch fails).
+  // Evict the dead id from every cached list variant so no list render can
+  // re-open it.
   qc.setQueriesData<AssistantChatThreadSummary[]>({ queryKey: ["assistant-chats", projectId] }, (old) =>
     old ? old.filter((t) => t.chatId !== chatId) : old
   );
   try { window.localStorage.removeItem(`lexa-chat-last:${projectId}`); } catch {}
   if (clearParam) clearThreadParam();
-  const head = listData?.find((t) => t.chatId !== chatId)?.chatId;
-  if (head) applyChatId(head);
-  else setChatId("");
+  setChatId("");
 }
 
 // ── Chat skill selection (mirrors the panel's Assistant-junction filter) ──

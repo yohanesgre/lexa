@@ -23,9 +23,10 @@ import {
   streamDoneActivity,
   appendEphemeralUserTurn,
   orphanThreadNeedsRecovery,
-  recoverStaleThread,
+  dropUnknownThread,
   resolveChatId,
   staleThreadNeedsRecovery,
+  isThreadNotFound,
 } from "./assistant-chat-logic";
 import {
   useApprovalDecisions,
@@ -46,8 +47,12 @@ import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantCha
 // Assistant Chat — dedicated /$slug/chat route (assistant-chat.html +
 // assistant-chat-upgrades.html). Multi-thread per (project, user): the History
 // dropdown lists threads (?thread= deep link), each thread keeps a client
-// uuid in document_id; "last visited" persists in localStorage
-// lexa-chat-last:<projectId>. No queue row — streams are direct SSE.
+// uuid in document_id. /$slug/chat opens the NEW-CHAT landing by default
+// (herald-chat.html "Open behavior"): resuming a thread is explicit — a
+// sidebar row or a ?thread= deep link. The "last visited" key
+// lexa-chat-last:<projectId> is kept only so stale-thread recovery can tell a
+// brand-new deep-linked thread from a known one. No queue row — streams are
+// direct SSE.
 // No agent picker: the persona mirrors the project's configured Assistant Agent
 // (read-only); only the optional skill is picked per message. Transcript
 // affordances (hover copy/edit/regenerate, citation chips,
@@ -94,9 +99,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const listQuery = useAssistantChatList(projectId, debouncedSearch);
   const threads = useMemo(() => listQuery.data ?? [], [listQuery.data]);
 
-  // chatId resolution order: ?thread= > localStorage lexa-chat-last >
-  // history list head > "" (fresh empty state). Every applied selection is
-  // written back to localStorage.
+  // chatId resolution: ?thread= deep link or an already-applied in-session
+  // selection; everything else is the fresh landing. Every applied selection is
+  // written back to localStorage (lexa-chat-last:<projectId>) for stale-thread
+  // recovery — it never drives the default selection.
   const [chatId, setChatId] = useState("");
   const applyChatId = useCallback(
     (id: string) => {
@@ -113,17 +119,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const clearThreadParam = useCallback(() => void navigate({ search: {}, replace: true }), [navigate]);
   const openThreadParam = useCallback((threadId: string) => void navigate({ search: { thread: threadId }, replace: true }), [navigate]);
 
-  // Resolve the active thread once its sources settle: ?thread= > last-visited
-  // > history list head > "" (fresh empty state). Re-reads localStorage at
-  // effect time so a selection written by this session (or removed by delete)
-  // is respected, and never clobbers an already-active selection — except on a
+  // Resolve the active thread from the two EXPLICIT sources only: a ?thread=
+  // deep link or an already-applied in-session selection. Everything else
+  // resolves to "" — the /$slug/chat default is the new-chat landing
+  // (herald-chat.html "Open behavior"); the last-visited memory never selects a
+  // thread. An already-active selection is never clobbered — except on a
   // project switch, where the previous project's thread must not leak.
-  // Intentional-empty latch: deleting the ACTIVE thread lands on a fresh empty
-  // chat (herald-chat.html "The view lands on a fresh empty chat"), NOT the
-  // next list head. The latch is keyed by project so a project switch still
-  // resolves that project's last-visited/head, and is cleared by the next
-  // explicit selection (selectThread / New chat).
-  const suppressHeadFallbackRef = useRef<string | null>(null);
+  // Deleting the ACTIVE thread lands on a fresh empty chat (herald-chat.html
+  // "The view lands on a fresh empty chat"), NOT the next list head.
   // Which project's thread resolution has settled — the landing must not paint
   // before the resolve effect has run, or a hard load / deep link flashes the
   // hero over a project that actually has threads.
@@ -134,27 +137,15 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     if (!projectId) return;
     const projectChanged = resolvedProjectRef.current !== projectId;
     resolvedProjectRef.current = projectId;
-    // A project switch resolves the NEW project's last/head — drop any latch
-    // left by a delete in the project we just left.
-    if (projectChanged) suppressHeadFallbackRef.current = null;
-    let last: string | null = null;
-    try {
-      last = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
-    } catch {
-      // non-fatal
-    }
-    const suppressFallback = suppressHeadFallbackRef.current === projectId;
     const next = resolveChatId({
       projectId,
       thread,
       currentChatId: projectChanged ? "" : chatId,
-      last: suppressFallback ? null : last,
-      head: suppressFallback ? undefined : listQuery.data?.[0]?.chatId,
     });
     if (next) applyChatId(next);
     else if (projectChanged && chatId) setChatId("");
     setResolutionProject(projectId);
-  }, [projectId, thread, chatId, listQuery.data, applyChatId]);
+  }, [projectId, thread, chatId, applyChatId]);
 
   // Transcript render on load (GET /api/assistant/chat/:chatId). A fresh uuid
   // 404s — that IS the empty-thread state, not an error. ASSISTANT_THREAD_NOT_FOUND
@@ -232,20 +223,21 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   // Stale-thread recovery (predicates in assistant-chat-logic.ts): a 404
   // transcript that cannot be a fresh deep link, or an orphan ?thread= that
-  // never shows up in any list snapshot while the stream is idle.
+  // never shows up in any list snapshot while the stream is idle. Either way
+  // the destination is the fresh chat landing — never a list head.
   const { knownChatIdsRef, initialLastRef } = useThreadKnowledge({ projectId, listData: listQuery.data });
 
   useEffect(() => {
     const meta = { thread, knownChatIds: knownChatIdsRef.current, initialLast: initialLastRef.current };
     if (!staleThreadNeedsRecovery({ projectId, chatId, transcriptLoading: transcript.isLoading, transcriptError: transcript.error, hasIngress: stream.hasIngress, streaming, listData: listQuery.data, meta })) return;
-    recoverStaleThread({ qc, projectId, chatId, listData: listQuery.data, applyChatId, setChatId, clearThreadParam, clearParam: !!thread });
-  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, qc, listQuery.data, applyChatId, setChatId, stream.hasIngress, streaming, clearThreadParam, knownChatIdsRef, initialLastRef]);
+    dropUnknownThread({ qc, projectId, chatId, setChatId, clearThreadParam, clearParam: !!thread });
+  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, qc, listQuery.data, setChatId, stream.hasIngress, streaming, clearThreadParam, knownChatIdsRef, initialLastRef]);
 
   useEffect(() => {
     const meta = { thread, knownChatIds: knownChatIdsRef.current, initialLast: initialLastRef.current };
     if (!orphanThreadNeedsRecovery({ projectId, chatId, transcriptError: transcript.error, hasIngress: stream.hasIngress, streaming, listLoading: listQuery.isLoading, listData: listQuery.data, meta })) return;
-    recoverStaleThread({ qc, projectId, chatId, listData: listQuery.data, applyChatId, setChatId, clearThreadParam, clearParam: true });
-  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, qc, applyChatId, setChatId, clearThreadParam, knownChatIdsRef, initialLastRef]);
+    dropUnknownThread({ qc, projectId, chatId, setChatId, clearThreadParam, clearParam: true });
+  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, qc, setChatId, clearThreadParam, knownChatIdsRef, initialLastRef]);
 
   const { busy409, attachDisabled, suspendedLock, suspendPendingCount } = chatPageFlags({
     settings,
@@ -294,19 +286,25 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const { queued, enqueue, unqueue } = useChatQueue({ chatId, streamStatus: stream.status, send });
 
   // Zero-turn landing (assistant-chat-deck §3.5): hero + centered Deck + starter
-  // chips, shown only for a SETTLED fresh empty chat with a provider configured.
-  // Gated on the resolution effect having run + settings/list settled + no
-  // ?thread= deep link, so a hard load never paints the hero over a thread that
-  // is still resolving.
+  // chips, shown for a SETTLED, zero-turn chat with a provider configured — with
+  // or without a thread id. "New chat" mints a fresh ?thread=<uuid> and a fresh
+  // uuid deep link is the same empty thread (transcript 404s), so the landing
+  // must not depend on the id being absent; a real thread with turns docks
+  // instead. Gated on the resolution effect having run + settings/list settled +
+  // the transcript not loading (and, if it errored, that error being a clean
+  // not-found rather than a transient read failure), so a hard load / deep link
+  // never paints the hero over a thread that is still resolving or that failed
+  // to load for a reason other than absence. `transcript.isLoading` is false when
+  // the query is disabled for an empty chatId.
   const threadResolutionSettled = !!projectId && resolutionProject === projectId;
   const isLanding =
     !providerMissing &&
     threadResolutionSettled &&
     !settingsLoading &&
     !listQuery.isLoading &&
-    !thread &&
+    !transcript.isLoading &&
+    (!transcript.error || isThreadNotFound(transcript.error)) &&
     (turns?.length ?? 0) === 0 &&
-    !chatId &&
     !streaming;
   const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
 
@@ -334,7 +332,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     chatId,
     applyChatId,
     setChatId,
-    suppressHeadFallbackRef,
     streaming,
     abort: handleAbort,
     clearThreadParam,
