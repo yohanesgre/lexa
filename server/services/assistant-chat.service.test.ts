@@ -298,6 +298,58 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
     const assistantHanded = handed.find((m) => m.role === "assistant")!;
     expect(assistantHanded.toolCalls).toBeUndefined();
+    // The resumed provider context carries the executed-writes note (tool +
+    // created ticket key + status) so the model does not re-propose it...
+    const note = handed.find((m) => m.role === "user" && String(m.content).includes("[approved write results]"))!;
+    expect(note).toBeDefined();
+    expect(String(note.content)).toContain("create_task");
+    expect(String(note.content)).toContain("[EG-2]");
+    expect(String(note.content)).toContain("applied");
+    // ...while the persisted transcript never gains it as a turn.
+    const persisted = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
+    expect(persisted.messages).not.toContain("[approved write results]");
+  });
+
+  it("tells the resumed model an all-rejected batch was not executed", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"delete_task"}]}}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'delete_task', '{"ref":"EG-1"}', '{}', 'rejected', '2099-01-01 00:00:00');
+`);
+
+    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
+    const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
+    expect(applied.map((f) => f.status)).toEqual(["denied"]);
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+
+    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
+    const note = handed.find((m) => String(m.content).includes("[approved write results]"))!;
+    expect(String(note.content)).toContain("None of the proposed writes were executed.");
+    expect(String(note.content)).toContain("rejected (not executed)");
+  });
+
+  it("notes a failed write with its error in the resumed context", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"update_task"}]}}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'update_task', '{"ref":"EG-999","title":"t"}', '{}', 'approved', '2099-01-01 00:00:00');
+`);
+
+    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
+    const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
+    expect(applied.map((f) => f.status)).toEqual(["failed"]);
+
+    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
+    const note = handed.find((m) => String(m.content).includes("[approved write results]"))!;
+    expect(String(note.content)).toContain("update_task");
+    expect(String(note.content)).toContain("failed (not executed)");
+    expect(String(note.content)).toMatch(/failed \(not executed\): /);
   });
 });
 

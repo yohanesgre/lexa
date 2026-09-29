@@ -101,12 +101,14 @@ function AssistantBatch({
   batchBusy,
   onDecide,
   onApproveAll,
+  onRejectAll,
 }: {
   batch: ChatTurn["batch"];
   suspendedBatchId: string | undefined;
   batchBusy: boolean;
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
   onApproveAll: (chips: ApprovalChip[]) => void;
+  onRejectAll: (chips: ApprovalChip[]) => void;
 }) {
   return (
     <>
@@ -116,6 +118,7 @@ function AssistantBatch({
           locked={batchBusy}
           onDecide={onDecide}
           onApproveAll={() => onApproveAll(batch.chips)}
+          onRejectAll={() => onRejectAll(batch.chips)}
         />
       )}
       {(batch ? batch.chips.some((c) => c.state === "pending") : !!suspendedBatchId) && <SuspendedIndicator />}
@@ -158,6 +161,7 @@ export function AssistantBubble({
   batchBusy,
   onDecide,
   onApproveAll,
+  onRejectAll,
   onRetry,
 }: {
   turn: ChatTurn;
@@ -170,6 +174,7 @@ export function AssistantBubble({
   batchBusy: boolean;
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
   onApproveAll: (chips: ApprovalChip[]) => void;
+  onRejectAll: (chips: ApprovalChip[]) => void;
   onRetry: () => void;
 }) {
   const time = hhmm(turn.ts);
@@ -212,6 +217,7 @@ export function AssistantBubble({
             batchBusy={batchBusy}
             onDecide={onDecide}
             onApproveAll={onApproveAll}
+            onRejectAll={onRejectAll}
           />
           <CitationsRow citations={turn.citations} />
           {turn.stopped && (

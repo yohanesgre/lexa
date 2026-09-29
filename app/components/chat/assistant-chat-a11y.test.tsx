@@ -43,6 +43,7 @@ describe("assistant chat a11y", () => {
         locked={false}
         onDecide={() => {}}
         onApproveAll={() => {}}
+        onRejectAll={() => {}}
       />
     );
     expect(screen.getByRole("button", { name: "Approve wiki_create setup" })).toBeTruthy();
@@ -82,6 +83,7 @@ describe("assistant chat a11y", () => {
         batchBusy={false}
         onDecide={() => {}}
         onApproveAll={() => {}}
+        onRejectAll={() => {}}
         onRetry={() => {}}
       />
     );

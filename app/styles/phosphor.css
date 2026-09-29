@@ -6925,12 +6925,6 @@
   font-size: 12px;
   color: var(--lx-text-primary);
 }
-.approval-seq {
-  font-family: var(--lx-font-micro);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--lx-text-muted);
-}
 
 /* Diff bodies */
 .approval-diff {
@@ -7011,6 +7005,57 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Approval carousel — one chip card active, the neighbour peeking. Paging is
+   native horizontal scroll-snap; the React layer adds ArrowLeft / ArrowRight
+   paging and the focused-card follow. */
+.approval-carousel {
+  --approval-slide-inset: 36px;
+  --approval-gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.approval-carousel-track {
+  /* Must stay position: static. The React paging measures each slide's
+     offsetLeft and normalises it against this track's offsetLeft
+     (assistant-approval-carousel.ts, carouselOffsets) — the maths is only
+     correct while track and slides share an offsetParent. Positioning the
+     track would silently break paging and the N / M counter. */
+  display: flex;
+  gap: var(--approval-gap);
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.approval-carousel-track::-webkit-scrollbar {
+  display: none;
+}
+.approval-carousel-slide {
+  flex: 0 0 calc(100% - var(--approval-slide-inset));
+  scroll-snap-align: start;
+  min-width: 0;
+}
+.approval-carousel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.approval-carousel-count {
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .approval-carousel-track {
+    scroll-behavior: smooth;
+  }
 }
 
 /* Suspended-turn indicator — distinct from streaming: static warm dot +

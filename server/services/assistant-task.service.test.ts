@@ -338,6 +338,30 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     const assistantHanded = handed.find((m) => m.role === "assistant")!;
     expect(assistantHanded.toolCalls).toBeUndefined();
   });
+
+  it("hands the executed-writes note to the provider but never persists it", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    db.exec(`
+INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
+INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'approved', '2099-01-01 00:00:00');
+`);
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+
+    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
+    const note = handed.find((m) => m.role === "user" && String(m.content).includes("[approved write results]"));
+    expect(note).toBeDefined();
+    expect(String(note!.content)).toContain('create_task "New task" [EG-2]: applied');
+
+    const persisted = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { messages: string };
+    expect(persisted.messages).not.toContain("[approved write results]");
+  });
 });
 
 describe("task preflight — fail-open and disable", () => {

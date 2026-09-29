@@ -37,6 +37,7 @@ export function ChatTranscriptArea({
   batchBusy,
   onDecide,
   onApproveAll,
+  onRejectAll,
   onRetryTurn,
   scrollRef,
   onScroll,
@@ -62,6 +63,7 @@ export function ChatTranscriptArea({
   batchBusy: boolean;
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
   onApproveAll: (chips: ApprovalChip[]) => void;
+  onRejectAll: (chips: ApprovalChip[]) => void;
   onRetryTurn: (turn: ChatTurn) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onScroll: () => void;
@@ -112,6 +114,7 @@ export function ChatTranscriptArea({
                 batchBusy={batchBusy}
                 onDecide={onDecide}
                 onApproveAll={onApproveAll}
+                onRejectAll={onRejectAll}
                 onRetry={() => onRetryTurn(turn)}
               />
             )

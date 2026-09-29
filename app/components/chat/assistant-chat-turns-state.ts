@@ -15,19 +15,22 @@ const TERMINAL_CHIP_STATES: ReadonlySet<ApprovalChip["state"]> = new Set([
   "failed",
 ]);
 
-// A transcript rebuild loses this session's chip decisions: a persisted
-// approval whose `status` was never reconciled maps back to pending
-// (chipFromPendingApproval), re-arming a chip we already decided and re-POSTing
-// it (409 burst). Overlay KNOWN terminal decisions from the optimistic view by
-// approvalId. Only terminal states propagate — an approval still pending in
-// `prev`, or absent from it, keeps the rebuilt state. Never mutates the input.
-export function carryKnownDecisions(prev: ChatTurn[] | null, turns: ChatTurn[]): ChatTurn[] {
+// Terminal chip decisions sourced from a turn list, keyed by approvalId.
+function terminalDecisions(turns: ChatTurn[] | null): Map<string, ApprovalChip["state"]> {
   const decided = new Map<string, ApprovalChip["state"]>();
-  for (const t of prev ?? []) {
+  for (const t of turns ?? []) {
     for (const c of t.batch?.chips ?? []) {
       if (TERMINAL_CHIP_STATES.has(c.state)) decided.set(c.approvalId, c.state);
     }
   }
+  return decided;
+}
+
+// Overlay terminal decisions onto a turn list by approvalId. Only terminal
+// states propagate — an approval still pending or absent in the source keeps
+// the target's state. Never mutates the input; returns the target identity
+// when nothing changed.
+function overlayDecisions(turns: ChatTurn[], decided: Map<string, ApprovalChip["state"]>): ChatTurn[] {
   if (decided.size === 0) return turns;
   let touched = false;
   const out = turns.map((t) => {
@@ -46,6 +49,15 @@ export function carryKnownDecisions(prev: ChatTurn[] | null, turns: ChatTurn[]):
   return touched ? out : turns;
 }
 
+// A transcript rebuild loses this session's chip decisions: a persisted
+// approval whose `status` was never reconciled maps back to pending
+// (chipFromPendingApproval), re-arming a chip we already decided and re-POSTing
+// it (409 burst). Overlay KNOWN terminal decisions from the optimistic view by
+// approvalId. Never mutates the input.
+export function carryKnownDecisions(prev: ChatTurn[] | null, turns: ChatTurn[]): ChatTurn[] {
+  return overlayDecisions(turns, terminalDecisions(prev));
+}
+
 export function settleTurns(args: {
   prev: ChatTurn[] | null;
   messages: unknown[];
@@ -58,7 +70,15 @@ export function settleTurns(args: {
   const liveApproval = (prev ?? []).some(
     (t) => t.batch?.chips.some((c) => c.state === "pending") || t.suspendedBatchId
   );
-  if (liveApproval) return prev;
+  if (liveApproval) {
+    // The optimistic view must not mask a decision the server already made: a
+    // cached pre-decision marker refetched with reconciled terminal statuses
+    // (another tab / this session before remount) must flip its chips terminal
+    // instead of staying pending. Overlay only the server's terminal states
+    // over prev — every still-pending chip and the suspension structure stay
+    // optimistic.
+    return overlayDecisions(prev ?? [], terminalDecisions(serverTurns));
+  }
   const ephemeralUsers = (prev ?? []).filter((t) => t.role === "user" && t.rawIndex === -1);
   if (ephemeralUsers.length > 0 && (streaming || hasIngress || streamStatus === "suspended")) {
     const toAdd = ephemeralUsers.filter((e) => !serverTurns.some((s) => s.role === "user" && s.text === e.text));

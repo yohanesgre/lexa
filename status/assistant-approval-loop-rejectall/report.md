@@ -1,0 +1,13 @@
+# Report: assistant-approval-loop-rejectall
+created: 2026-09-29
+sessions: design ses_f1401e512ffeIfeXFHJIoAWVuB, ses_f13efad23ffecccG0z1QOtsEAF; loop ses_f1401e511ffeFbJNqcen4rBki7; persist ses_f1401e509ffeV2GM5sO25wFPfH; rejectall ses_f13f779b2ffeu6RfmaoJgblkIu; carousel ses_f13e732d1ffevni51aMZu1bMT1; wave4 ses_f13da34e7ffeFlO9pQtAA331Iq; wave5 ses_f13c9c390ffeeF5gpUO1aODSqW; reviews ses_f13e1b31dffextvNDEH8s2OprZ, ses_f13d190fffferZShTKgWZzDNcG; gates /tmp/opencode/gate-20260929-144337.log, -151318.log
+result: all four issues closed — (1) create_task re-proposal loop: resumed provider call now carries a compact executed-writes summary (`buildResumeResultsNote`, provider-only, never persisted; chat + task/wiki parity via shared `resume-results.ts`); (2) Reject all added (wireframe + UI, mirror of approve-all via `decideAll`); (3) approval chips survive navigation (activation-time transcript reconciliation + `transcriptUpdatedAt` settle key + terminal-decision overlay, so returning no longer re-arms pending chips); (4) approval batch is a horizontal carousel (wireframe-first; classes ported to `phosphor.css`; paging/counter math rebased track-relative with pure tests, focus follows the active card's Approve, scroll sync waits for settle).
+tests:
+- `bash scripts/verify-gate.sh` → GREEN: tsc 0; 238 files / 2358 tests; invariants 14/14; secrets clean (log /tmp/opencode/gate-20260929-151318.log)
+- lane suites: FE 675 / BE 1721 green; pure carousel math tests pin the 328px-offset symptom (track 328 / slides [328,973,1618] / maxScroll 1253) and the 1920px no-skip case
+deviations:
+- Reviewer's live browser checklist (snap at ~720px and ~390px, counter settle, focus target, reduced motion) not run — jsdom cannot paint snap/scroll; recommend a live pass before heavy use.
+- Earlier gate run RED on a load-induced `TeamSettings.test.tsx` timeout (passes isolated in ~2s); rerun green; not touched by this plan.
+- Wireframes submodule has uncommitted src+dist changes (carousel + Reject all) — commit/push inside the submodule is required before a parent pointer bump; nothing committed yet.
+- `docs/architecture-assistant-chat.html` (viz) and `status/TIMELINE.md` remain uncommitted by user choice; backlog item 4 (tool results) is now implemented for resume, wire-shaped protocol still deferred.
+- Deferred (reviewer nits, not needed for correctness): none open except optional live-pass items.

@@ -34,7 +34,8 @@ import { extractText } from "../../shared/tiptap-text";
 import * as msg from "../activity-messages";
 import type { TipTapDoc, Task, WikiPage, Actor, AssistantTask, ActivityType } from "../../shared/types";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
-import { buildStream, findPendingBatch, applyResumeResults } from "../assistant/build-stream";
+import { buildStream, findPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
+import { collectResumeResults } from "../assistant/resume-results";
 import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64 } from "./assistant-helpers";
 import type { ProviderConfig } from "../assistant/provider";
 import type { TaskRef } from "../assistant/tools";
@@ -191,7 +192,6 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       return tools.length === 0 ? { tools: [], drain: undefined } : { tools, drain: () => recorder.drain() };
     };
     const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };
-    const executeApprovedRow = (row: { id: string; project_id: string; owner_user_id: string; tool_name: string; args: string; batch_id: string }) => executeAssistantWrite(row as never, ctx as never);
     const prepareResume = (thread: AssistantThread) => Effect.gen(function* () {
       yield* pendingWritesRepo.sweepExpired();
       const batchId = findPendingBatch(thread.messages);
@@ -199,12 +199,8 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       const rows = yield* pendingWritesRepo.listByBatch(batchId);
       const remaining = rows.filter((r) => r.status === "pending").length;
       if (remaining > 0) return yield* new ApprovalsPending({ batchId, remaining });
-      const results: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }> = [];
-      for (const row of rows) {
-        if (row.status === "approved") { const outcome = yield* executeApprovedRow(row); results.push(outcome.ok ? { approvalId: row.id, status: "applied" as const } : { approvalId: row.id, status: "failed" as const, ...(outcome.error !== undefined ? { error: outcome.error } : {}) }); }
-        else if (row.status === "rejected") results.push({ approvalId: row.id, status: "denied" as const });
-      }
-      return { messages: applyResumeResults(thread.messages, [batchId]), results };
+      const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row as never, ctx as never));
+      return { messages: applyResumeResults(thread.messages, [batchId]), results, resumeResultsNote: buildResumeResultsNote(noteLines) };
     });
 
     // Terminal transitions. Local so the stream callbacks (onDone/onFail/
@@ -387,7 +383,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const tasks = yield* queueRepo.listTasksForDocument(thread.projectId, documentType, documentId);
         if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
-        const { messages: history, results: approvalResults } = yield* prepareResume(thread);
+        const { messages: history, results: approvalResults, resumeResultsNote } = yield* prepareResume(thread);
         if (!thread.agentId || !thread.skillId) return yield* new AgentNotFound({ id: "" });
         const agent = yield* catalogRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
         const skill = yield* catalogRepo.findSkillById(thread.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" })));
@@ -410,7 +406,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         return buildStream({
           keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          userContent: "", skipUserEntry: true, approvalResults, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+          userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
