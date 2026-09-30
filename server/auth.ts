@@ -321,6 +321,13 @@ export function buildAuthOptions(env: RuntimeEnv) {
       },
       additionalFields: { role: { type: "string" as const, required: false } },
     },
+    // freshAge 0 is better-auth 1.6.27's documented off-switch for the
+    // fresh-session gate (list-sessions/revoke would FORBIDDEN past 24h
+    // otherwise). Its only other freshAge consumers here are unlink-account
+    // (blocked: no social providers + last-account guard) and delete-user
+    // without password (disabled: user.deleteUser.enabled unset → 404).
+    // Re-verify on any better-auth bump.
+    session: { freshAge: 0 },
     // tanstackStartCookies is Bun/Start-SSR only: the real subpath imports
     // Vite-virtual modules unresolvable in a direct workerd bundle (hence
     // the B4 shim), and its only job is mirroring Set-Cookie into Start's
