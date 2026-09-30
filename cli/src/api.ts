@@ -88,6 +88,45 @@ export interface ProjectInfo {
   description: string | null;
 }
 
+export interface FieldOptionInfo {
+  id: string;
+  label: string;
+  color: string;
+  position: number;
+}
+
+export interface FieldConfigInfo {
+  priorities: FieldOptionInfo[];
+  types: FieldOptionInfo[];
+}
+
+export interface FieldOptionInput {
+  id?: string;
+  label: string;
+  color?: string;
+  position?: number;
+}
+
+export interface FieldConfigInput {
+  priorities: FieldOptionInput[];
+  types: FieldOptionInput[];
+}
+
+export interface RateLimitInfo {
+  max: number;
+  windowMs: number;
+  envOverride: boolean;
+}
+
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  ownerEmail?: string;
+  ownerName?: string;
+}
+
 // Server-side GitHub sync settings. The server's settings DB is the single
 // source of truth; `source` tells where the effective values came from
 // (e.g. "db" after bootstrap, "env" before first boot).
@@ -315,6 +354,89 @@ export class LexaClient {
     return this.request<DeviceLoginPollResult>(`/api/device-login/requests/${encodeURIComponent(id)}`, {
       headers: { "x-device-token": token },
     });
+  }
+
+  // ── Project admin (admin-gated: superadmin session OR bare/server key; a
+  // member-bound key → 403 FORBIDDEN "Admin role required") ──
+  // create/update return the project directly (no envelope); 201 | 200 |
+  // 403 | 404 TEAM_NOT_FOUND | 409 SLUG_TAKEN.
+  createProject(input: { name: string; slug?: string; description?: string; teamId?: string | null }): Effect.Effect<ProjectInfo, ApiError, never> {
+    return this.request<ProjectInfo>("/api/projects", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateProject(slug: string, input: { name?: string; description?: string }): Effect.Effect<ProjectInfo, ApiError, never> {
+    return this.request<ProjectInfo>(`/api/projects/${slug}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  // 204 | 403 | 404 | 409 SLUG_TAKEN (constraint fallback).
+  deleteProject(slug: string): Effect.Effect<void, ApiError, never> {
+    return this.request<void>(`/api/projects/${slug}`, { method: "DELETE" });
+  }
+
+  // ── Column admin ──
+  // create/update return the column directly; 201 | 200 | 403 | 404.
+  createColumn(slug: string, input: { name: string; position?: number; color?: string; wipLimit?: number | null; requiredFields?: string[]; githubState?: "open" | "closed" | null }): Effect.Effect<ColumnInfo, ApiError, never> {
+    return this.request<ColumnInfo>(`/api/projects/${slug}/columns`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateColumn(slug: string, id: string, input: { name?: string; position?: number; color?: string; wipLimit?: number | null; requiredFields?: string[]; githubState?: "open" | "closed" | null; isDone?: boolean }): Effect.Effect<ColumnInfo, ApiError, never> {
+    return this.request<ColumnInfo>(`/api/projects/${slug}/columns/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  // 204 | 403 | 409 HAS_CHILDREN { count } (tasks must be migrated first).
+  deleteColumn(slug: string, id: string): Effect.Effect<void, ApiError, never> {
+    return this.request<void>(`/api/projects/${slug}/columns/${id}`, { method: "DELETE" });
+  }
+
+  // ── Swimlane admin ──
+  createSwimlane(slug: string, input: { name: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<SwimlaneInfo, ApiError, never> {
+    return this.request<SwimlaneInfo>(`/api/projects/${slug}/swimlanes`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateSwimlane(slug: string, id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<SwimlaneInfo, ApiError, never> {
+    return this.request<SwimlaneInfo>(`/api/projects/${slug}/swimlanes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  // 204 | 403 | 409 HAS_CHILDREN { count } | 409 BACKLOG_PROTECTED.
+  deleteSwimlane(slug: string, id: string): Effect.Effect<void, ApiError, never> {
+    return this.request<void>(`/api/projects/${slug}/swimlanes/${id}`, { method: "DELETE" });
+  }
+
+  // ── Field config (priorities & types, per project) ──
+  getFieldConfig(slug: string): Effect.Effect<FieldConfigInfo, ApiError, never> {
+    return this.request<FieldConfigInfo>(`/api/projects/${slug}/field-config`);
+  }
+
+  // Wholesale { priorities, types } — no client-side option validation.
+  putFieldConfig(slug: string, input: FieldConfigInput): Effect.Effect<FieldConfigInfo, ApiError, never> {
+    return this.request<FieldConfigInfo>(`/api/projects/${slug}/field-config`, { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  // ── Settings: rate limit ──
+  getRateLimit(): Effect.Effect<RateLimitInfo, ApiError, never> {
+    return this.request<RateLimitInfo>("/api/settings/rate-limit");
+  }
+
+  // 200 | 403 | 422 INVALID_RATE_LIMIT.
+  putRateLimit(input: { max: number; windowMs: number }): Effect.Effect<RateLimitInfo, ApiError, never> {
+    return this.request<RateLimitInfo>("/api/settings/rate-limit", { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  // ── Settings: admin API keys ──
+  // list unwraps { data }; the payload never carries rawKey (masked).
+  listSettingsApiKeys(): Effect.Effect<ApiKeyInfo[], ApiError, never> {
+    return Effect.map(this.request<{ data: ApiKeyInfo[] }>("/api/settings/api-keys"), (r) => r.data);
+  }
+
+  // 201 { key, rawKey } (rawKey shown once) | 403 FORBIDDEN | 403 NO_USER_CONTEXT
+  // (bare/server key has no user to bind the key to).
+  createSettingsApiKey(input: { name: string }): Effect.Effect<{ key: ApiKeyInfo; rawKey: string }, ApiError, never> {
+    return this.request<{ key: ApiKeyInfo; rawKey: string }>("/api/settings/api-keys", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  // 204 | 403 | 404.
+  revokeSettingsApiKey(id: string): Effect.Effect<void, ApiError, never> {
+    return this.request<void>(`/api/settings/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 }
 

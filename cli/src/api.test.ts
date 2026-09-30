@@ -46,6 +46,36 @@ const wikiPage = {
   updatedAt: "2026-01-01T00:00:00Z",
 };
 
+const columnFixture = {
+  id: "c1",
+  projectId: "p1",
+  name: "Todo",
+  position: 0,
+  color: null,
+  wipLimit: null,
+  requiredFields: [],
+  githubState: null,
+  isDone: false,
+};
+
+const swimlaneFixture = {
+  id: "l1",
+  projectId: "p1",
+  name: "Sprint A",
+  description: "",
+  position: 0,
+  dueAt: "2026-06-01",
+  archivedAt: null,
+  startAt: "2026-05-01",
+  kind: "sprint",
+  milestoneId: "ms1",
+};
+
+const fieldConfigFixture = {
+  priorities: [{ id: "pr1", label: "High", color: "#f00", position: 0 }],
+  types: [{ id: "ty1", label: "Bug", color: "#00f", position: 0 }],
+};
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
     let data = "";
@@ -65,7 +95,23 @@ beforeAll(async () => {
     seen.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers, body });
     const url = req.url ?? "";
     if (url === "/api/health") return json(res, 200, { ok: true });
-    if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
+    if (url === "/api/projects" && req.method === "GET") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
+    if (url === "/api/projects" && req.method === "POST") return json(res, 201, { id: "p2", slug: "new", name: "New", description: "d" });
+    if (url === "/api/projects/demo" && req.method === "PATCH") return json(res, 200, { id: "p1", slug: "demo", name: "Demo 2", description: null });
+    if (url === "/api/projects/demo" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
+    if (url === "/api/projects/demo/columns" && req.method === "POST") return json(res, 201, columnFixture);
+    if (url === "/api/projects/demo/columns/c1" && req.method === "PATCH") return json(res, 200, columnFixture);
+    if (url === "/api/projects/demo/columns/c1" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
+    if (url === "/api/projects/demo/swimlanes" && req.method === "POST") return json(res, 201, swimlaneFixture);
+    if (url === "/api/projects/demo/swimlanes/l1" && req.method === "PATCH") return json(res, 200, { ...swimlaneFixture, dueAt: null, milestoneId: null });
+    if (url === "/api/projects/demo/swimlanes/l1" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
+    if (url === "/api/projects/demo/field-config" && req.method === "GET") return json(res, 200, fieldConfigFixture);
+    if (url === "/api/projects/demo/field-config" && req.method === "PUT") return json(res, 200, fieldConfigFixture);
+    if (url === "/api/settings/rate-limit" && req.method === "GET") return json(res, 200, { max: 6000, windowMs: 600000, envOverride: false });
+    if (url === "/api/settings/rate-limit" && req.method === "PUT") return json(res, 200, { max: 100, windowMs: 120000, envOverride: false });
+    if (url === "/api/settings/api-keys" && req.method === "GET") return json(res, 200, { data: [{ id: "k1", name: "ci", createdAt: "2026-01-01T00:00:00Z", lastUsedAt: null }] });
+    if (url === "/api/settings/api-keys" && req.method === "POST") return json(res, 201, { key: { id: "k2", name: "ci", createdAt: "2026-01-01T00:00:00Z", lastUsedAt: null }, rawKey: "lxk_" + "a".repeat(43) });
+    if (url === "/api/settings/api-keys/k1" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
     if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
     if (url === "/api/projects/demo/tasks/t2/github-link" && req.method === "POST") return json(res, 200, { data: linkedTask, activity: [] });
     if (url === "/api/projects/demo/tasks/t2/github-link-existing" && req.method === "POST") return json(res, 200, { data: linkedTask, activity: [] });
@@ -381,5 +427,129 @@ describe("LexaClient error mapping", () => {
     const err = await failureOf(client().listSwimlanes("nope"));
     expect(err.status).toBe(404);
     expect(err.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("LexaClient admin + settings", () => {
+  it("createProject POSTs the payload to /api/projects", async () => {
+    const before = seen.length;
+    const project = await Effect.runPromise(client().createProject({ name: "New", slug: "new", description: "d", teamId: "t1" }));
+    expect(project.slug).toBe("new");
+    const req = seen.slice(before).find((r) => r.method === "POST" && r.url === "/api/projects");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ name: "New", slug: "new", description: "d", teamId: "t1" });
+  });
+
+  it("updateProject PATCHes /api/projects/:slug", async () => {
+    const before = seen.length;
+    const project = await Effect.runPromise(client().updateProject("demo", { name: "Demo 2" }));
+    expect(project.name).toBe("Demo 2");
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(req?.url).toBe("/api/projects/demo");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ name: "Demo 2" });
+  });
+
+  it("deleteProject DELETEs .../:slug and resolves undefined on 204", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().deleteProject("demo"));
+    expect(out).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo");
+  });
+
+  it("createColumn POSTs the payload including explicit nulls", async () => {
+    const before = seen.length;
+    const column = await Effect.runPromise(client().createColumn("demo", { name: "Todo", wipLimit: null, githubState: null }));
+    expect(column.id).toBe("c1");
+    const req = seen.slice(before).find((r) => r.method === "POST");
+    expect(req?.url).toBe("/api/projects/demo/columns");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ name: "Todo", wipLimit: null, githubState: null });
+  });
+
+  it("updateColumn PATCHes .../columns/:id with wipLimit:null", async () => {
+    const before = seen.length;
+    await Effect.runPromise(client().updateColumn("demo", "c1", { wipLimit: null }));
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(req?.url).toBe("/api/projects/demo/columns/c1");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ wipLimit: null });
+  });
+
+  it("deleteColumn DELETEs .../columns/:id", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().deleteColumn("demo", "c1"));
+    expect(out).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo/columns/c1");
+  });
+
+  it("createSwimlane POSTs the payload to .../swimlanes", async () => {
+    const before = seen.length;
+    const lane = await Effect.runPromise(client().createSwimlane("demo", { name: "Sprint A", milestoneId: "ms1" }));
+    expect(lane.id).toBe("l1");
+    const req = seen.slice(before).find((r) => r.method === "POST");
+    expect(req?.url).toBe("/api/projects/demo/swimlanes");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ name: "Sprint A", milestoneId: "ms1" });
+  });
+
+  it("updateSwimlane PATCHes .../swimlanes/:id with dueAt:null and milestoneId:null", async () => {
+    const before = seen.length;
+    await Effect.runPromise(client().updateSwimlane("demo", "l1", { dueAt: null, milestoneId: null }));
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(req?.url).toBe("/api/projects/demo/swimlanes/l1");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ dueAt: null, milestoneId: null });
+  });
+
+  it("deleteSwimlane DELETEs .../swimlanes/:id", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().deleteSwimlane("demo", "l1"));
+    expect(out).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo/swimlanes/l1");
+  });
+
+  it("putFieldConfig PUTs the wholesale payload", async () => {
+    const before = seen.length;
+    const input = { priorities: [{ label: "Low", color: "#0f0", position: 0 }], types: [] };
+    const out = await Effect.runPromise(client().putFieldConfig("demo", input));
+    expect(out.priorities.length).toBe(1);
+    const req = seen.slice(before).find((r) => r.method === "PUT");
+    expect(req?.url).toBe("/api/projects/demo/field-config");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual(input);
+  });
+
+  it("getRateLimit GETs /api/settings/rate-limit", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().getRateLimit());
+    expect(out).toEqual({ max: 6000, windowMs: 600000, envOverride: false });
+    expect(seen.slice(before).some((r) => r.method === "GET" && r.url === "/api/settings/rate-limit")).toBe(true);
+  });
+
+  it("putRateLimit PUTs { max, windowMs }", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().putRateLimit({ max: 100, windowMs: 120000 }));
+    expect(out.max).toBe(100);
+    const req = seen.slice(before).find((r) => r.method === "PUT" && r.url === "/api/settings/rate-limit");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ max: 100, windowMs: 120000 });
+  });
+
+  it("listSettingsApiKeys unwraps the data envelope", async () => {
+    const out = await Effect.runPromise(client().listSettingsApiKeys());
+    expect(out.map((k) => k.id)).toEqual(["k1"]);
+    expect((out[0] as { rawKey?: unknown }).rawKey).toBeUndefined();
+  });
+
+  it("createSettingsApiKey POSTs { name } and returns key + rawKey", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().createSettingsApiKey({ name: "ci" }));
+    expect(out.rawKey).toMatch(/^lxk_/);
+    const req = seen.slice(before).find((r) => r.method === "POST" && r.url === "/api/settings/api-keys");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ name: "ci" });
+  });
+
+  it("revokeSettingsApiKey DELETEs .../api-keys/:id", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().revokeSettingsApiKey("k1"));
+    expect(out).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/settings/api-keys/k1");
   });
 });
