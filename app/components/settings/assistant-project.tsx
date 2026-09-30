@@ -84,7 +84,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Assistant provider</h2>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Assistant (the writing assistant in the AI popover) runs against a provider from the workspace registry. Base URLs and keys live on the provider registry (Workspace → Assistant Providers); this project picks a primary provider + model and an optional ordered fallback chain.
+        Assistant (the writing assistant in the AI popover) runs against a provider managed by your admin. Base URLs and keys are set by your admin (Workspace → Assistant Providers); this project picks a primary provider + model and an optional ordered fallback chain.
       </p>
 
       <div className="card-panel card-panel--elevated">
@@ -95,7 +95,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
         )}
 
         <div className="field">
-          <label className="field-label" htmlFor="assistant-primary-provider">Primary provider <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>from registry</span></label>
+          <label className="field-label" htmlFor="assistant-primary-provider">Primary provider <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>set by admin</span></label>
           <select
             id="assistant-primary-provider"
             className="prop-input w-full"
@@ -108,7 +108,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
             {providers.map((p) => <option key={p.id} value={p.id}>{providerOptionLabel(p)}</option>)}
             {providers.length === 0 && <option disabled>— No providers — add one in Workspace settings → Assistant Providers —</option>}
           </select>
-          <div className="field-hint">Registry-owned providers only. Base URL + key live in Workspace settings; this project just picks one.</div>
+          <div className="field-hint">Only providers managed by your admin. Base URL + key are set in Workspace settings; this project just picks one.</div>
         </div>
 
         <div className="field">

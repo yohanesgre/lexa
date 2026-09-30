@@ -306,7 +306,7 @@ function McpClientForm({ editing, managedSecretsEnabled, onCancel }: { editing: 
               ? tokenEnabled
                 ? "Type to cancel the pending clear"
                 : "Save removes the stored token"
-              : "Leave empty to keep stored token"
+              : "Leave empty to keep the stored token"
           }
           autoComplete="off"
           disabled={!tokenEnabled}

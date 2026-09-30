@@ -31,7 +31,7 @@ function LinkCopyModal({ title, link, onDone }: { title: string; link: string; o
         <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label={title} style={{ maxWidth: 460, width: "calc(100vw - 48px)" }}>
           <h2 className="font-display text-lg font-medium text-lx-text-primary">{title}</h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Share this link out-of-band (no email transport is configured). Single-use, expires after 7 days.
+            Share this link out-of-band (no email is configured for this workspace). Single-use, expires after 7 days.
           </p>
           <div className="key-display mt-3">
             <code>{link}</code>

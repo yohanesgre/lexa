@@ -56,7 +56,7 @@ export function AgentSkillAvailabilitySection({ projectId }: { projectId: string
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Agent skill availability</h2>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Which skills the builtin assistant agent offers. Availability is junction rows only — no JSON columns on the agent rows. Popover and chat skill chips filter to the assistant agent&apos;s list.
+        Which skills the builtin assistant agent offers. Availability is links only — nothing is copied onto the agent. Popover and chat skill chips filter to the assistant agent&apos;s list.
       </p>
 
       <div className="card-panel card-panel--elevated">

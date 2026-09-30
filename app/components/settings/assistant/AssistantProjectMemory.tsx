@@ -22,7 +22,7 @@ export function ProjectMemorySection({ projectId }: { projectId: string }) {
         <span className="text-xs text-lx-text-muted">Per project</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Curated facts Assistant should always know: decisions, constraints, preferences. At enqueue time the top terms of the task title + description FTS-match up to 5 entries (2000-char cap) into the system prompt. Task data does not belong here.
+        Curated facts Assistant should always know: decisions, constraints, preferences. At enqueue time the top terms of the task title + description match up to 5 entries — up to 2,000 characters — into the system prompt. Task data does not belong here.
       </p>
 
       <div className="card-panel card-panel--elevated">

@@ -101,7 +101,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
           </svg>
         </div>
         <div className="empty-state-title">Nothing to schedule yet</div>
-        <div className="empty-state-desc">Create a milestone or set sprint dates to see the timeline.</div>
+        <div className="empty-state-desc">Add a milestone or set sprint dates to see the timeline.</div>
       </div>
     );
   }

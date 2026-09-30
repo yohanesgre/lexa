@@ -102,7 +102,7 @@ function SkillsAttachField({ allSkills, attachedSkillIds, setAttachedSkillIds }:
       <span className="field-label">Attached skills</span>
       <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
         {allSkills.length === 0 ? (
-          <span className="text-xs text-lx-text-muted">No skills yet — create one in the Skills section.</span>
+          <span className="text-xs text-lx-text-muted">No skills yet.</span>
         ) : (
           allSkills.map((s) => (
             <label key={s.id} className="flex items-center gap-2" style={{ cursor: "pointer", fontSize: 12, color: "var(--lx-text-secondary)" }}>
@@ -116,7 +116,7 @@ function SkillsAttachField({ allSkills, attachedSkillIds, setAttachedSkillIds }:
           ))
         )}
       </div>
-      <div className="field-hint">The AI popover only offers skills attached here. An agent with none can't generate.</div>
+      <div className="field-hint">The <strong>Assistant</strong> popover only offers skills attached here. An agent with none can't generate.</div>
     </div>
   );
 }
@@ -135,7 +135,7 @@ function UsedByField({ allAgents, skillId }: { allAgents: LexaAgent[]; skillId: 
           ))
         )}
       </div>
-      <div className="field-hint">Read-only — bindings are managed from the agent editor.</div>
+      <div className="field-hint">Read-only. Edit an agent to change this.</div>
     </div>
   );
 }

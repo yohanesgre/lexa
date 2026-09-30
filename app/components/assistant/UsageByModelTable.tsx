@@ -79,7 +79,7 @@ function EmptyRow({ showHint, hasFilters, onRetry }: { showHint: boolean; hasFil
             <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>Try clearing filters</div>
           )
         ) : showHint ? (
-          <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>No gateway calls recorded yet — Send first Assistant request</div>
+          <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>No calls yet — send an Assistant request.</div>
         ) : null}
       </td>
     </tr>
