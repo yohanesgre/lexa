@@ -60,7 +60,9 @@ export function isValidMentionQuery(query: string): boolean {
 }
 
 export async function fetchMentionItems(slug: string, query: string): Promise<MentionItem[]> {
-  if (!query || !isValidMentionQuery(query)) return [];
+  // Empty query (bare "@") is allowed through: the server returns default
+  // suggestions (recent tasks + wiki). Only invalid characters bail out.
+  if (!isValidMentionQuery(query)) return [];
   const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/mentions?q=${encodeURIComponent(query)}`);
   if (!res.ok) return [];
   const body = (await res.json()) as MentionsResponse;

@@ -102,6 +102,43 @@ describe("chat composer — $ skill mentions", () => {
     expect(screen.getByText("No matches")).toBeTruthy();
   });
 
+  it("bare @ (empty query) renders default suggestions, never the No matches row", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          tasks: [{ id: "t1", key: "NIM-1", title: "Task one" }],
+          wikiPages: [{ id: "w1", slug: "setup", title: "Setup" }],
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { textarea } = renderComposer();
+    fireEvent.change(textarea, { target: { value: "@" } });
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /NIM-1/ })).toBeTruthy());
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/nimbus/mentions?q=");
+    expect(screen.queryByText("No matches")).toBeNull();
+    expect(screen.getByText("Tasks")).toBeTruthy();
+    expect(screen.getByText("Wiki")).toBeTruthy();
+  });
+
+  it("typing after @ fetches with the query (filtering stays server-side)", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ data: { tasks: [{ id: "t2", key: "NIM-2", title: "Payments" }], wikiPages: [] } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { textarea } = renderComposer();
+    fireEvent.change(textarea, { target: { value: "@pay" } });
+
+    await waitFor(() => expect(screen.getByRole("option", { name: /NIM-2/ })).toBeTruthy());
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects/nimbus/mentions?q=pay");
+    expect(screen.queryByText("No matches")).toBeNull();
+  });
+
   it("renders the five @ entity sections from the mentions response", async () => {
     vi.stubGlobal(
       "fetch",

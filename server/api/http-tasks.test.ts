@@ -269,7 +269,7 @@ describe("board route", () => {
     expect(body.swimlanes.map((l: { id: string }) => l.id)).toEqual(["sb"]);
   });
 
-  it("GET /api/projects/:slug/mentions matches task key + title, wiki title/slug; empty q → empty", async () => {
+  it("GET /api/projects/:slug/mentions matches task key + title, wiki title/slug; bare @ → defaults", async () => {
     const byKey = await handler(json("GET", "/api/projects/p1/mentions?q=eg-1"));
     expect(byKey.status).toBe(200);
     expect(await byKey.json()).toEqual({ data: { tasks: [{ id: "t1", key: "EG-1", title: "Renamed" }], wikiPages: [], milestones: [], swimlanes: [], columns: [] } });
@@ -281,6 +281,12 @@ describe("board route", () => {
     expect((await byWiki.json()).data.wikiPages).toEqual([{ id: "w1", slug: "roadmap", title: "Roadmap" }]);
 
     const empty = await handler(json("GET", "/api/projects/p1/mentions?q="));
-    expect(await empty.json()).toEqual({ data: { tasks: [], wikiPages: [], milestones: [], swimlanes: [], columns: [] } });
+    const emptyBody = await empty.json();
+    // bare "@" → default suggestions: live tasks first, wiki filling the cap.
+    expect(emptyBody.data.tasks.length).toBeGreaterThan(0);
+    expect(emptyBody.data.tasks.length + emptyBody.data.wikiPages.length).toBeLessThanOrEqual(8);
+    expect(emptyBody.data.milestones).toEqual([]);
+    expect(emptyBody.data.swimlanes).toEqual([]);
+    expect(emptyBody.data.columns).toEqual([]);
   });
 });

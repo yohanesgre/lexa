@@ -70,11 +70,29 @@ export class MentionService extends Effect.Service<MentionService>()("Lexa/Menti
     // columns each carry their own MENTION_RESULTS_CAP budget instead of
     // sharing the tasks+wiki remainder, so an exact entity match is never
     // squeezed out by task hits. Archived milestones and swimlanes are
-    // excluded (archived-task precedent). Empty q → empty arrays.
+    // excluded (archived-task precedent). Empty q (bare "@") → default
+    // suggestions instead of nothing: most recently updated live tasks (≤ cap,
+    // archived excluded) with wiki pages filling the remainder; milestones /
+    // swimlanes / columns are searched, not defaulted, so they stay empty
+    // until a query is typed (mentions-autocomplete.html state 1 / Behavior).
     const search = (projectId: string, q: string): Effect.Effect<MentionSearchResult, DbError> =>
       Effect.gen(function* () {
         const query = q.trim();
-        if (query === "") return { tasks: [], wikiPages: [], milestones: [], swimlanes: [], columns: [] };
+        if (query === "") {
+          const tasks = yield* taskRepo.listRecent(projectId, MENTION_RESULTS_CAP);
+          const remaining = MENTION_RESULTS_CAP - tasks.length;
+          const wikiPages =
+            remaining > 0
+              ? (yield* wikiRepo.listRecent(projectId, remaining)).map((p) => ({ id: p.id, slug: p.slug, title: p.title }))
+              : [];
+          return {
+            tasks: tasks.map((t) => ({ id: t.id, key: t.key ?? "", title: t.title })),
+            wikiPages,
+            milestones: [],
+            swimlanes: [],
+            columns: [],
+          };
+        }
 
         const tasks = yield* taskRepo.searchByKeyOrTitle(projectId, query, MENTION_RESULTS_CAP);
         const remaining = MENTION_RESULTS_CAP - tasks.length;
