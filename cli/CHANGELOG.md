@@ -12,6 +12,8 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.5.0] - 2026-09-30
+
 ### Removed
 
 - **machine/runtime commands** — `lx machine *` (install/listen/start/stop/
@@ -28,6 +30,15 @@ release the app image. The version lives in `cli/package.json` —
 - External harness contract documented: read/write work items through
   `lx task …` / `lx wiki …` only; `--json`, TipTap→Markdown, `PREFIX-N`
   aliases.
+
+### Fixed
+
+- **GitHub link envelope** — `lx github` unwraps the link envelope and the
+  request timeout is bounded instead of hanging.
+- **Tag parsing** — `cli-v*` tag parsing is tightened so a malformed tag can
+  no longer resolve to a wrong release.
+- **`lx task move`** — the task's swimlane is preserved on move and id
+  resolution is delegated to the API.
 
 ## [2026.4.0] - 2026-09-11
 
