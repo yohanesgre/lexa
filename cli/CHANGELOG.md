@@ -21,6 +21,11 @@ release the app image. The version lives in `cli/package.json` —
   removed AI-runtime (Blacksmith) tier. `lx login` no longer registers a
   machine. The CLI is operator-only: `login|logout|status|upgrade|project|
   task|wiki|github`.
+- **Migration** — the removed commands have no replacement; drop `lx machine *`
+  and `lx runtime *` from any scripts or CI that called them. Upgrade with
+  `lx upgrade` (installed binary only — it resolves the newest `cli-v*`
+  release and replaces itself in place); from a source checkout run
+  `bun run install:cli-dev` for a dev shim instead.
 
 ### Changed
 
