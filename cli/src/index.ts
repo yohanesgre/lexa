@@ -22,12 +22,13 @@
  * exit(1). The only exit the program path takes is via the boundary.
  */
 import { Effect, Data } from "effect";
-import { LexaClient, ApiError } from "./api";
+import { LexaClient, ApiError, type ColumnInfo, type SwimlaneInfo } from "./api";
 import { CliConfigService, groupDir, migrateFlavorRootsSync, type CliConfig } from "./config";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
 import { hostname as osHostname } from "node:os";
+import { readFile } from "node:fs/promises";
 
 const ENV_URL = process.env.LEXA_URL ?? "";
 const ENV_KEY = process.env.LEXA_API_KEY ?? "";
@@ -125,6 +126,52 @@ function printTable(rows: Record<string, string>[]): void {
 }
 
 // ── commands ──
+
+// Date-only fields (dueAt / startAt) share one shape across the CLI.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The literal token "none" means "send JSON null" — only on the NullOr fields
+// that advertise it (wipLimit / githubState / dueAt / startAt / milestoneId).
+function noneIf(v: string | undefined): string | null | undefined {
+  if (v === undefined) return undefined;
+  return v === "none" ? null : v;
+}
+
+// Strict boolean flag body: "true" | "false", anything else (bare flag, empty,
+// typo) is undefined so callers can treat it as a usage error.
+function parseBool(v: string | undefined): boolean | undefined {
+  if (v === "true") return true;
+  if (v === "false") return false;
+  return undefined;
+}
+
+// A value-taking flag written bare (`--color`, no `=` and no following value)
+// parses to boolean true and would otherwise be silently dropped — a usage
+// error. Mirrors the W2 badAnchor pattern.
+function bareValueFlag(flags: Record<string, string | boolean>, names: string[]): boolean {
+  return names.some((n) => flags[n] === true);
+}
+
+// Read a JSON payload argument: "-" reads stdin (pipes / non-TTY safe), any
+// other value is a file path. The promise rejects on read failure.
+function readJsonFile(pathOrDash: string): Promise<string> {
+  if (pathOrDash === "-") {
+    return new Promise((resolve) => {
+      let data = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => (data += chunk));
+      process.stdin.on("end", () => resolve(data));
+    });
+  }
+  return readFile(pathOrDash, "utf8");
+}
+
+function readJsonFileSafe(pathOrDash: string): Promise<{ ok: true; text: string } | { ok: false; msg: string }> {
+  return readJsonFile(pathOrDash).then(
+    (text) => ({ ok: true as const, text }),
+    (e: unknown) => ({ ok: false as const, msg: (e as Error).message })
+  );
+}
 
 // Interactive prompts — only ever used when stdin is a TTY and the login
 // flags were omitted. Scripts and pipes never prompt.
@@ -317,10 +364,10 @@ function cmdProjectList(flags: Record<string, string | boolean>): Effect.Effect<
   });
 }
 
-// Resolve a column/swimlane/milestone name (or id) → id for the target
+// Resolve a column/swimlane/milestone name (or id) → the entity for the target
 // project. Exact id match wins, else case-insensitive exact name; a miss
 // prints the available names (existing style) and exits.
-function resolveColumn(client: LexaClient, slug: string, name: string): Effect.Effect<string, unknown, never> {
+function resolveColumn(client: LexaClient, slug: string, name: string): Effect.Effect<ColumnInfo, unknown, never> {
   return Effect.gen(function* () {
     const cols = yield* client.listColumns(slug);
     const found = cols.find((c) => c.id === name) ?? cols.find((c) => c.name.toLowerCase() === name.toLowerCase());
@@ -328,10 +375,10 @@ function resolveColumn(client: LexaClient, slug: string, name: string): Effect.E
       console.error(`  Column "${name}" not found. Available: ${cols.map((c) => c.name).join(", ")}`);
       process.exit(1);
     }
-    return found.id;
+    return found;
   });
 }
-function resolveSwimlane(client: LexaClient, slug: string, name: string): Effect.Effect<string, unknown, never> {
+function resolveSwimlane(client: LexaClient, slug: string, name: string): Effect.Effect<SwimlaneInfo, unknown, never> {
   return Effect.gen(function* () {
     const lanes = yield* client.listSwimlanes(slug);
     const found = lanes.find((l) => l.id === name) ?? lanes.find((l) => l.name.toLowerCase() === name.toLowerCase());
@@ -339,7 +386,7 @@ function resolveSwimlane(client: LexaClient, slug: string, name: string): Effect
       console.error(`  Swimlane "${name}" not found. Available: ${lanes.map((l) => l.name).join(", ")}`);
       process.exit(1);
     }
-    return found.id;
+    return found;
   });
 }
 function resolveMilestone(client: LexaClient, slug: string, ref: string): Effect.Effect<string, unknown, never> {
@@ -397,14 +444,14 @@ function cmdTaskCreate(flags: Record<string, string | boolean>): Effect.Effect<v
       console.error("  Usage: lx task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <markdown>]");
       process.exit(1);
     }
-    const columnId = yield* resolveColumn(client, slug, column);
-    const swimlaneId = yield* resolveSwimlane(client, slug, swimlane);
+    const columnInfo = yield* resolveColumn(client, slug, column);
+    const swimlaneInfo = yield* resolveSwimlane(client, slug, swimlane);
     let descriptionDoc: unknown;
     if (description) {
       const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
       descriptionDoc = markdownToDoc(description);
     }
-    const task = yield* client.createTask(slug, { columnId, swimlaneId, title, description: descriptionDoc });
+    const task = yield* client.createTask(slug, { columnId: columnInfo.id, swimlaneId: swimlaneInfo.id, title, description: descriptionDoc });
     console.log(`  Created task ${task.id} — ${task.title}`);
   });
 }
@@ -426,13 +473,13 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
       console.error("  Usage: lx task move <id> --project <slug> --column <name|id> [--swimlane <name|id>] [--before <id|PREFIX-N>] [--after <id|PREFIX-N>] [--clear-due]");
       process.exit(1);
     }
-    const columnId = yield* resolveColumn(client, slug, column);
+    const columnId = (yield* resolveColumn(client, slug, column)).id;
     const taskId = yield* resolveTaskId(id);
     // Every task belongs to a swimlane (swimlane_id NOT NULL) — only a
     // user-supplied --swimlane changes it; otherwise keep the task's current
     // lane. Sending "" would fail the FK.
     const swimlaneId = swimlane
-      ? yield* resolveSwimlane(client, slug, swimlane)
+      ? (yield* resolveSwimlane(client, slug, swimlane)).id
       : (yield* client.getTask(slug, taskId)).swimlaneId;
     // --before / --after pass through verbatim (server resolves PREFIX-N too).
     const target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean } = { columnId, swimlaneId };
@@ -805,6 +852,356 @@ function cmdGithubUnlink(flags: Record<string, string | boolean>, args: string[]
   });
 }
 
+// ── Project admin ──
+
+function cmdProjectCreate(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const name = typeof flags.name === "string" ? flags.name : "";
+    const slug = typeof flags.slug === "string" ? flags.slug : undefined;
+    const description = typeof flags.description === "string" ? flags.description : undefined;
+    const teamId = typeof flags.team === "string" ? flags.team : undefined;
+    const emptyFlag = flags.slug === "" || flags.description === "" || flags.team === "";
+    const bare = bareValueFlag(flags, ["slug", "description", "team"]);
+    if (!name || bare || emptyFlag) {
+      console.error("  Usage: lx project create --name <n> [--slug <s>] [--description <s>] [--team <teamId>]");
+      process.exit(1);
+    }
+    const project = yield* client.createProject({
+      name,
+      ...(slug !== undefined ? { slug } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(teamId !== undefined ? { teamId } : {}),
+    });
+    console.log(`  Created project ${project.slug} — ${project.name}`);
+  });
+}
+
+function cmdProjectUpdate(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = args[0]! || "";
+    const name = typeof flags.name === "string" ? flags.name : undefined;
+    const description = typeof flags.description === "string" ? flags.description : undefined;
+    const usageMsg = "  Usage: lx project update <slug> [--name <n>] [--description <s>]";
+    const bad = !slug || name === "" || bareValueFlag(flags, ["name", "description"]) || (name === undefined && description === undefined);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const input: { name?: string; description?: string } = {};
+    if (name !== undefined) input.name = name;
+    if (description !== undefined) input.description = description;
+    const project = yield* client.updateProject(slug, input);
+    console.log(`  Updated project ${project.slug} — ${project.name}`);
+  });
+}
+
+function cmdProjectDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = args[0]! || "";
+    if (!slug || flags.yes !== true) {
+      console.error("  Usage: lx project delete <slug> --yes");
+      process.exit(1);
+    }
+    yield* client.deleteProject(slug);
+    console.log(`  Deleted project ${slug}`);
+  });
+}
+
+// ── Column admin ──
+
+// Shared parse of the `--required-fields` flag: undefined = absent, true =
+// bare flag (bad), [] = cleared (`--required-fields=`), else comma-split.
+function parseRequiredFields(raw: string | boolean | undefined): { bad: boolean; value: string[] | undefined } {
+  if (raw === undefined) return { bad: false, value: undefined };
+  if (typeof raw !== "string") return { bad: true, value: undefined };
+  if (raw === "") return { bad: false, value: [] };
+  return { bad: false, value: raw.split(",").map((s) => s.trim()).filter((s) => s !== "") };
+}
+
+function cmdColumnCreate(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const name = typeof flags.name === "string" ? flags.name : "";
+    const color = typeof flags.color === "string" ? flags.color : undefined;
+    const hasWip = flags["wip-limit"] !== undefined;
+    const wipRaw = flags["wip-limit"];
+    const wipLimit = typeof wipRaw === "string" && /^\d+$/.test(wipRaw) ? Number(wipRaw) : undefined;
+    const hasPosition = flags.position !== undefined;
+    const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
+    const githubRaw = flags["github-state"];
+    const githubState = githubRaw === "open" || githubRaw === "closed" ? githubRaw : undefined;
+    const rf = parseRequiredFields(flags["required-fields"]);
+    const usageMsg = "  Usage: lx column create --project <slug> --name <n> [--color <hex>] [--wip-limit <n>] [--required-fields <a,b,c>] [--github-state open|closed] [--position <n>]";
+    const bad =
+      !slug || !name || color === "" || color === "none" ||
+      bareValueFlag(flags, ["name", "color", "wip-limit", "required-fields", "github-state", "position"]) ||
+      (hasWip && wipLimit === undefined) ||
+      (hasPosition && position === undefined) ||
+      (flags["github-state"] !== undefined && githubState === undefined) ||
+      rf.bad;
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const column = yield* client.createColumn(slug, {
+      name,
+      ...(color !== undefined ? { color } : {}),
+      ...(wipLimit !== undefined ? { wipLimit } : {}),
+      ...(rf.value !== undefined ? { requiredFields: rf.value } : {}),
+      ...(githubState !== undefined ? { githubState } : {}),
+      ...(position !== undefined ? { position } : {}),
+    });
+    console.log(`  Created column ${column.id} — ${column.name}`);
+  });
+}
+
+function cmdColumnUpdate(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const ref = args[0]! || "";
+    const name = typeof flags.name === "string" ? flags.name : undefined;
+    const color = typeof flags.color === "string" ? flags.color : undefined;
+    const hasWip = flags["wip-limit"] !== undefined;
+    const wipRaw = flags["wip-limit"];
+    const wipNone = wipRaw === "none";
+    const wipLimit = wipNone || (typeof wipRaw === "string" && /^\d+$/.test(wipRaw))
+      ? (wipNone ? null : Number(wipRaw))
+      : undefined;
+    const hasPosition = flags.position !== undefined;
+    const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
+    const githubRaw = flags["github-state"];
+    const githubState = githubRaw === "none" ? null : githubRaw === "open" || githubRaw === "closed" ? githubRaw : undefined;
+    const rf = parseRequiredFields(flags["required-fields"]);
+    const hasDone = flags.done !== undefined;
+    const done = parseBool(typeof flags.done === "string" ? flags.done : undefined);
+    const usageMsg = "  Usage: lx column update <ref> --project <slug> [--name <n>] [--color <hex>] [--wip-limit <n|none>] [--required-fields <a,b,c>|--required-fields=] [--github-state open|closed|none] [--done true|false] [--position <n>]";
+    const bad =
+      !slug || !ref || name === "" || color === "" || color === "none" ||
+      bareValueFlag(flags, ["name", "color", "wip-limit", "required-fields", "github-state", "position"]) ||
+      (hasWip && wipLimit === undefined) ||
+      (flags["github-state"] !== undefined && githubState === undefined) ||
+      rf.bad ||
+      (hasPosition && position === undefined) ||
+      (hasDone && done === undefined) ||
+      (name === undefined && color === undefined && !hasWip && flags["required-fields"] === undefined && flags["github-state"] === undefined && !hasDone && !hasPosition);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const input: { name?: string; position?: number; color?: string; wipLimit?: number | null; requiredFields?: string[]; githubState?: "open" | "closed" | null; isDone?: boolean } = {};
+    if (name !== undefined) input.name = name;
+    if (color !== undefined) input.color = color;
+    if (hasWip) input.wipLimit = wipLimit!;
+    if (rf.value !== undefined) input.requiredFields = rf.value;
+    if (githubState !== undefined) input.githubState = githubState;
+    if (done !== undefined) input.isDone = done;
+    if (position !== undefined) input.position = position;
+    const column = yield* resolveColumn(client, slug, ref);
+    const updated = yield* client.updateColumn(slug, column.id, input);
+    console.log(`  Updated column ${updated.id} — ${updated.name}`);
+  });
+}
+
+function cmdColumnDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const ref = args[0]! || "";
+    if (!slug || !ref) { console.error("  Usage: lx column delete <ref> --project <slug>"); process.exit(1); }
+    const column = yield* resolveColumn(client, slug, ref);
+    yield* client.deleteColumn(slug, column.id);
+    console.log(`  Deleted column ${column.id} — ${column.name}`);
+  });
+}
+
+// ── Swimlane admin ──
+
+function cmdSwimlaneCreate(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const name = typeof flags.name === "string" ? flags.name : "";
+    const description = typeof flags.description === "string" && flags.description ? flags.description : undefined;
+    const hasDue = flags.due !== undefined;
+    const due = typeof flags.due === "string" ? flags.due : undefined;
+    const hasStart = flags.start !== undefined;
+    const start = typeof flags.start === "string" ? flags.start : undefined;
+    const msRef = typeof flags.milestone === "string" ? flags.milestone : undefined;
+    const hasPosition = flags.position !== undefined;
+    const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
+    const usageMsg = "  Usage: lx swimlane create --project <slug> --name <n> [--description <s>] [--due <date>] [--start <date>] [--milestone <id|name>] [--position <n>]";
+    const bad =
+      !slug || !name ||
+      bareValueFlag(flags, ["name", "description", "due", "start", "milestone", "position"]) ||
+      (hasDue && (due === undefined || !DATE_RE.test(due))) ||
+      (hasStart && (start === undefined || !DATE_RE.test(start))) ||
+      flags.milestone === true || msRef === "" ||
+      (hasPosition && position === undefined);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const milestoneId = msRef !== undefined ? yield* resolveMilestone(client, slug, msRef) : undefined;
+    const lane = yield* client.createSwimlane(slug, {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(due !== undefined ? { dueAt: due } : {}),
+      ...(start !== undefined ? { startAt: start } : {}),
+      ...(milestoneId !== undefined ? { milestoneId } : {}),
+      ...(position !== undefined ? { position } : {}),
+    });
+    console.log(`  Created swimlane ${lane.id} — ${lane.name}`);
+  });
+}
+
+function cmdSwimlaneUpdate(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const ref = args[0]! || "";
+    const name = typeof flags.name === "string" ? flags.name : undefined;
+    const hasDescription = typeof flags.description === "string";
+    const hasDue = flags.due !== undefined;
+    const dueRaw = typeof flags.due === "string" ? flags.due : undefined;
+    const due = noneIf(dueRaw);
+    const hasStart = flags.start !== undefined;
+    const startRaw = typeof flags.start === "string" ? flags.start : undefined;
+    const start = noneIf(startRaw);
+    const msRaw = typeof flags.milestone === "string" ? flags.milestone : undefined;
+    const ms = noneIf(msRaw);
+    const hasPosition = flags.position !== undefined;
+    const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
+    const usageMsg = "  Usage: lx swimlane update <ref> --project <slug> [--name <n>] [--description <s>] [--due <date|none>] [--start <date|none>] [--milestone <id|name|none>] [--position <n>]";
+    const bad =
+      !slug || !ref || name === "" ||
+      bareValueFlag(flags, ["name", "description", "due", "start", "milestone", "position"]) ||
+      (hasDue && !(due === null || (typeof due === "string" && DATE_RE.test(due)))) ||
+      (hasStart && !(start === null || (typeof start === "string" && DATE_RE.test(start)))) ||
+      flags.milestone === true || msRaw === "" ||
+      (hasPosition && position === undefined) ||
+      (name === undefined && !hasDescription && !hasDue && !hasStart && flags.milestone === undefined && !hasPosition);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const input: { name?: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null } = {};
+    if (name !== undefined) input.name = name;
+    if (hasDescription) input.description = flags.description as string;
+    if (hasDue) input.dueAt = due!;
+    if (hasStart) input.startAt = start!;
+    if (ms !== undefined) input.milestoneId = ms === null ? null : yield* resolveMilestone(client, slug, ms);
+    if (position !== undefined) input.position = position;
+    const lane = yield* resolveSwimlane(client, slug, ref);
+    const updated = yield* client.updateSwimlane(slug, lane.id, input);
+    console.log(`  Updated swimlane ${updated.id} — ${updated.name}`);
+  });
+}
+
+function cmdSwimlaneDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const ref = args[0]! || "";
+    if (!slug || !ref) { console.error("  Usage: lx swimlane delete <ref> --project <slug>"); process.exit(1); }
+    const lane = yield* resolveSwimlane(client, slug, ref);
+    yield* client.deleteSwimlane(slug, lane.id);
+    console.log(`  Deleted swimlane ${lane.id} — ${lane.name}`);
+  });
+}
+
+// ── Field config ──
+
+function cmdFieldConfigGet(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    if (!slug) { console.error("  Usage: lx field-config get --project <slug> [--json]"); process.exit(1); }
+    const config = yield* client.getFieldConfig(slug);
+    if (flags.json === true) { console.log(JSON.stringify(config, null, 2)); return; }
+    console.log("Priorities:");
+    printTable(config.priorities.map((p) => ({ POS: String(p.position), LABEL: p.label, COLOR: p.color, ID: p.id })));
+    console.log("Types:");
+    printTable(config.types.map((t) => ({ POS: String(t.position), LABEL: t.label, COLOR: t.color, ID: t.id })));
+  });
+}
+
+function cmdFieldConfigPut(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const file = typeof flags.file === "string" ? flags.file : "";
+    if (!slug || !file || bareValueFlag(flags, ["file"])) { console.error("  Usage: lx field-config put --project <slug> --file <path|->"); process.exit(1); }
+    const read = yield* Effect.promise(() => readJsonFileSafe(file));
+    if (!read.ok) {
+      console.error(`  Failed to read ${file}: ${read.msg}`);
+      process.exit(1);
+    }
+    const parsed = ((): { ok: true; value: import("./api").FieldConfigInput } | { ok: false; msg: string } => {
+      try {
+        return { ok: true, value: JSON.parse(read.text) as import("./api").FieldConfigInput };
+      } catch (e) {
+        return { ok: false, msg: (e as Error).message };
+      }
+    })();
+    if (!parsed.ok) {
+      console.error(`  Invalid JSON in ${file}: ${parsed.msg}`);
+      process.exit(1);
+    }
+    const config = yield* client.putFieldConfig(slug, parsed.value);
+    console.log(`  Updated field-config (priorities: ${config.priorities.length}, types: ${config.types.length})`);
+  });
+}
+
+// ── Settings ──
+
+function cmdSettingsRateLimit(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const action = args[0]! || "";
+    if (action === "get") {
+      const r = yield* client.getRateLimit();
+      console.log(`  max:      ${r.max}`);
+      console.log(`  windowMs: ${r.windowMs}`);
+      return;
+    }
+    if (action === "set") {
+      const maxRaw = typeof flags.max === "string" ? flags.max : undefined;
+      const winRaw = typeof flags["window-min"] === "string" ? flags["window-min"] : undefined;
+      const max = maxRaw !== undefined && /^\d+$/.test(maxRaw) ? Number(maxRaw) : undefined;
+      const windowMin = winRaw !== undefined && /^\d+$/.test(winRaw) ? Number(winRaw) : undefined;
+      if (max === undefined || windowMin === undefined || bareValueFlag(flags, ["max", "window-min"])) {
+        console.error("  Usage: lx settings rate-limit set --max <n> --window-min <m>");
+        process.exit(1);
+      }
+      const r = yield* client.putRateLimit({ max, windowMs: windowMin * 60_000 });
+      console.log(`  Updated rate-limit (max: ${r.max}, windowMs: ${r.windowMs})`);
+      return;
+    }
+    console.error("  Usage: lx settings rate-limit <get|set> [--max <n> --window-min <m>]");
+    process.exit(1);
+  });
+}
+
+function cmdSettingsApiKeys(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const action = args[0]! || "";
+    if (action === "list") {
+      const keys = yield* client.listSettingsApiKeys();
+      if (keys.length === 0) { console.log("  No API keys."); return; }
+      printTable(keys.map((k) => ({ ID: k.id, NAME: k.name, CREATED: k.createdAt, LAST_USED: k.lastUsedAt ?? "—" })));
+      return;
+    }
+    if (action === "create") {
+      const name = typeof flags.name === "string" ? flags.name : "";
+      if (!name || bareValueFlag(flags, ["name"])) { console.error("  Usage: lx settings api-keys create --name <n>"); process.exit(1); }
+      const result = yield* client.createSettingsApiKey({ name });
+      console.log(`  Created API key ${result.key.id} — ${result.key.name}`);
+      console.log(`  Raw key (shown once): ${result.rawKey}`);
+      return;
+    }
+    if (action === "revoke") {
+      const id = args[1]! || "";
+      if (!id) { console.error("  Usage: lx settings api-keys revoke <id>"); process.exit(1); }
+      yield* client.revokeSettingsApiKey(id);
+      console.log(`  Revoked API key ${id}`);
+      return;
+    }
+    console.error("  Usage: lx settings api-keys <list|create|revoke> [--name <n>|<id>]");
+    process.exit(1);
+  });
+}
+
 // ── main ──
 
 const HELP = `lx — Lexa operator CLI
@@ -831,11 +1228,33 @@ Tasks:
 
 Planning:
   column list      --project <slug> [--json]
+  column create    --project <slug> --name <n> [--color <hex>] [--wip-limit <n>]
+                   [--required-fields <a,b,c>] [--github-state open|closed] [--position <n>]
+  column update    <ref> --project <slug> [--name <n>] [--color <hex>] [--wip-limit <n|none>]
+                   [--required-fields <a,b,c>|--required-fields=] [--github-state open|closed|none]
+                   [--done true|false] [--position <n>]
+  column delete    <ref> --project <slug>
   swimlane list    --project <slug> [--json]
+  swimlane create  --project <slug> --name <n> [--description <s>] [--due <date>] [--start <date>]
+                   [--milestone <id|name>] [--position <n>]
+  swimlane update  <ref> --project <slug> [--name <n>] [--description <s>] [--due <date|none>]
+                   [--start <date|none>] [--milestone <id|name|none>] [--position <n>]
+  swimlane delete  <ref> --project <slug>
   milestone list   --project <slug> [--json]
   milestone create --project <slug> --name <n> [--description <s>] [--due <YYYY-MM-DD>]
   milestone update <ref> --project <slug> [--name <n>] [--description <s>]
                    [--due <YYYY-MM-DD>|--clear-due] [--position <n>]
+
+Field config:
+  field-config get --project <slug> [--json]
+  field-config put --project <slug> --file <path|->
+
+Settings (admin):
+  settings rate-limit get
+  settings rate-limit set --max <n> --window-min <m>
+  settings api-keys list
+  settings api-keys create --name <n>
+  settings api-keys revoke <id>
 
 Wiki:
   wiki list   --project <slug> [--json]
@@ -847,6 +1266,9 @@ Wiki:
 
 Projects:
   project list [--json]
+  project create --name <n> [--slug <s>] [--description <s>] [--team <teamId>]
+  project update <slug> [--name <n>] [--description <s>]
+  project delete <slug> --yes
 
 GitHub sync (optional integration):
   github status [--local] [--env-file <path>]
@@ -892,7 +1314,10 @@ Env fallbacks: LEXA_URL, LEXA_API_KEY. Flags override saved login.
 
 const GROUP_HELP: Record<string, string> = {
   project: `Projects:
-  project list [--json]`,
+  project list [--json]
+  project create --name <n> [--slug <s>] [--description <s>] [--team <teamId>]
+  project update <slug> [--name <n>] [--description <s>]
+  project delete <slug> --yes`,
   task: `Tasks:
   task list    --project <slug> [--limit N] [--json]
   task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
@@ -903,9 +1328,29 @@ const GROUP_HELP: Record<string, string> = {
                [--assignees <a,b> | --assignees=] [--due <YYYY-MM-DD>] [--clear-due]
   task delete  <id> --project <slug>`,
   column: `Planning:
-  column list --project <slug> [--json]`,
+  column list   --project <slug> [--json]
+  column create --project <slug> --name <n> [--color <hex>] [--wip-limit <n>]
+                [--required-fields <a,b,c>] [--github-state open|closed] [--position <n>]
+  column update <ref> --project <slug> [--name <n>] [--color <hex>] [--wip-limit <n|none>]
+                [--required-fields <a,b,c>|--required-fields=] [--github-state open|closed|none]
+                [--done true|false] [--position <n>]
+  column delete <ref> --project <slug>`,
   swimlane: `Planning:
-  swimlane list --project <slug> [--json]`,
+  swimlane list   --project <slug> [--json]
+  swimlane create --project <slug> --name <n> [--description <s>] [--due <date>] [--start <date>]
+                  [--milestone <id|name>] [--position <n>]
+  swimlane update <ref> --project <slug> [--name <n>] [--description <s>] [--due <date|none>]
+                  [--start <date|none>] [--milestone <id|name|none>] [--position <n>]
+  swimlane delete <ref> --project <slug>`,
+  "field-config": `Field config:
+  field-config get --project <slug> [--json]
+  field-config put --project <slug> --file <path|->`,
+  settings: `Settings (admin):
+  settings rate-limit get
+  settings rate-limit set --max <n> --window-min <m>
+  settings api-keys list
+  settings api-keys create --name <n>
+  settings api-keys revoke <id>`,
   milestone: `Planning:
   milestone list   --project <slug> [--json]
   milestone create --project <slug> --name <n> [--description <s>] [--due <YYYY-MM-DD>]
@@ -1025,8 +1470,14 @@ async function main(): Promise<void> {
       break;
 
     case "project":
-      if (sub === "list") { program = cmdProjectList(flags); break; }
-      usage("project", sub);
+      switch (sub) {
+        case "list": program = cmdProjectList(flags); break;
+        case "create": program = cmdProjectCreate(flags); break;
+        case "update": program = cmdProjectUpdate(flags, rest); break;
+        case "delete": program = cmdProjectDelete(flags, rest); break;
+        default: usage("project", sub);
+      }
+      break;
 
     case "task":
       switch (sub) {
@@ -1041,12 +1492,40 @@ async function main(): Promise<void> {
       break;
 
     case "column":
-      if (sub === "list") { program = cmdColumnList(flags); break; }
-      usage("column", sub);
+      switch (sub) {
+        case "list": program = cmdColumnList(flags); break;
+        case "create": program = cmdColumnCreate(flags); break;
+        case "update": program = cmdColumnUpdate(flags, rest); break;
+        case "delete": program = cmdColumnDelete(flags, rest); break;
+        default: usage("column", sub);
+      }
+      break;
 
     case "swimlane":
-      if (sub === "list") { program = cmdSwimlaneList(flags); break; }
-      usage("swimlane", sub);
+      switch (sub) {
+        case "list": program = cmdSwimlaneList(flags); break;
+        case "create": program = cmdSwimlaneCreate(flags); break;
+        case "update": program = cmdSwimlaneUpdate(flags, rest); break;
+        case "delete": program = cmdSwimlaneDelete(flags, rest); break;
+        default: usage("swimlane", sub);
+      }
+      break;
+
+    case "field-config":
+      switch (sub) {
+        case "get": program = cmdFieldConfigGet(flags); break;
+        case "put": program = cmdFieldConfigPut(flags); break;
+        default: usage("field-config", sub);
+      }
+      break;
+
+    case "settings":
+      switch (sub) {
+        case "rate-limit": program = cmdSettingsRateLimit(flags, rest); break;
+        case "api-keys": program = cmdSettingsApiKeys(flags, rest); break;
+        default: usage("settings", sub);
+      }
+      break;
 
     case "milestone":
       switch (sub) {
