@@ -1236,14 +1236,12 @@ wrangler_secret_put() {
 #   absent   no such secret — safe to mint
 #   unknown  the check could not run (wrangler error, or an existing deploy
 #            whose config is unreadable) — never mint on unknown
-# Dry-run reports absent (the plan mints/puts).
+# The `secret list` read is read-only, so it also runs under dry-run (same
+# precedent as workers_prune_legacy_secret) — a resumed deploy's real state is
+# reported instead of a hardcoded `absent`.
 workers_secret_present() {
   local workdir="$1" name="$2"
   local cfg="deploy-${FLAVOR_NAME:-lexa}/wrangler.${FLAVOR_NAME:-lexa}.json"
-  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf 'absent\n'
-    return 0
-  fi
   if [ ! -r "${workdir}/${cfg}" ]; then
     # No config: a first deploy (nothing remote to preserve) reads absent; a
     # resumed deploy without its config is unknowable.
@@ -1264,6 +1262,36 @@ workers_secret_present() {
     printf 'present\n'
   else
     printf 'absent\n'
+  fi
+}
+
+# workers_resolve_master_key <workdir> — resolve the envelope master key and
+# set the global _WORKERS_MASTER_KEY. Preserve order: local custody
+# (cf-workers/.env.toml, 0600) → remote presence → mint. Never rotate; never
+# mint when the remote state can't be read (better to leave it than to rotate).
+# Dry-run is pure: it prints the mint plan and a placeholder, never mints or
+# writes. workers_secret_present is the override seam (tests shadow it).
+workers_resolve_master_key() {
+  local workdir="$1"
+  _WORKERS_MASTER_KEY="$(env_file_value "${workdir}/.env.toml" LXK_SECRETS_MASTER_KEY || true)"
+  if [ -z "${_WORKERS_MASTER_KEY}" ]; then
+    case "$(workers_secret_present "${workdir}" "LXK_SECRETS_MASTER_KEY")" in
+      present)
+        : # already on the remote worker — leave it, do not mint or overwrite
+        ;;
+      absent)
+        if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+          printf '[dry-run] mint LXK_SECRETS_MASTER_KEY → %s\n' "${workdir}/.env.toml"
+          _WORKERS_MASTER_KEY="dry-run-placeholder"
+        else
+          _WORKERS_MASTER_KEY="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
+          write_env_toml "${workdir}/.env.toml" "LXK_SECRETS_MASTER_KEY=${_WORKERS_MASTER_KEY}"
+        fi
+        ;;
+      *)
+        echo "  (couldn't read the master key on the worker — leaving it untouched; re-run to retry)"
+        ;;
+    esac
   fi
 }
 
