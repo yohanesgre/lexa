@@ -66,7 +66,10 @@ CLI asset.
    Nothing embed-related is committed (the daemon/compose embed tier was
    removed 2026-09-26); `bin/` stays untracked.
 4. **Gate.** `tsc --noEmit`, full `vitest run`, and `bash wireframes/build.sh`
-   green before tagging.
+   green before tagging. A push to the release-prep branch (`chore/release-*`
+   / `release/*`) runs the full release CI (`.github/workflows/ci.yml`); a
+   manual `workflow_dispatch` runs it on demand. PRs and main merges are gated
+   by `bash scripts/verify-gate.sh` + review only.
 5. **Tag the release commit.** Annotated only:
    `git tag -a v2026.1.0 -m "<one-line summary>"` and
    `git tag -a cli-v2026.1.0 -m "<one-line summary>"` (substitute the

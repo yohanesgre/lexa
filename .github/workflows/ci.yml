@@ -1,9 +1,15 @@
+# Release-prep only: the full validation runs on a push to a release-prep
+# branch (`chore/release-*`, `release/*`) or a manual `workflow_dispatch`.
+# PRs and main merges rely on the local gate (`bash scripts/verify-gate.sh`)
+# plus review.
 name: ci
 
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches:
+      - 'chore/release-*'
+      - 'release/*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,33 +34,14 @@ jobs:
         continue-on-error: true
         run: git submodule update --init --recursive || echo "wireframes submodule unavailable (private) - skipping wireframes checks"
 
-      - name: Detect changed paths (PR gate)
+      - name: Detect changed paths
         id: changes
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "docker=true" >> "$GITHUB_OUTPUT"
-            echo "mobile=true" >> "$GITHUB_OUTPUT"
-            echo "coverage=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git fetch origin main:refs/remotes/origin/main --quiet
-          CHANGED=$(git diff --name-only origin/main...HEAD)
-          echo "$CHANGED"
-          if echo "$CHANGED" | grep -qE '^(Dockerfile|docker-compose[^/]*\.yml|package\.json|bun\.lock|server/|migrations/|scripts/(setup|seed))'; then
-            echo "docker=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "docker=false" >> "$GITHUB_OUTPUT"
-          fi
-          if echo "$CHANGED" | grep -qE '^(app/|vite\.config\.ts|package\.json|bun\.lock|scripts/check-mobile\.mjs)'; then
-            echo "mobile=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "mobile=false" >> "$GITHUB_OUTPUT"
-          fi
-          if echo "$CHANGED" | grep -qE '^(server/|shared/|vitest\.config\.ts|vitest\.setup\.ts)'; then
-            echo "coverage=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "coverage=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Release-prep only: every run performs the full validation, so the
+          # docker/mobile/coverage steps below always execute.
+          echo "docker=true" >> "$GITHUB_OUTPUT"
+          echo "mobile=true" >> "$GITHUB_OUTPUT"
+          echo "coverage=true" >> "$GITHUB_OUTPUT"
 
       - name: Install native build deps (better-sqlite3)
         run: |
@@ -81,12 +68,7 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Tests (critical — PR fast gate)
-        if: github.event_name == 'pull_request'
-        run: bun run test:critical
-
-      - name: Tests (full — main/tag)
-        if: github.event_name != 'pull_request'
+      - name: Tests (full)
         run: bun run test:full
 
       - name: Invariant compliance
@@ -344,15 +326,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect install-script changes (PR gate)
+      - name: Detect install-script changes
         id: changes
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
+          # Path-conditioned on push: compare this push against its base commit;
+          # a manual dispatch (or an unresolvable base) runs the full suite.
+          BASE="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" != "push" ] || [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git diff --name-only "$BASE" HEAD > /tmp/changed.txt 2>/dev/null; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git fetch origin main:refs/remotes/origin/main --quiet
-          CHANGED=$(git diff --name-only origin/main...HEAD)
+          CHANGED="$(cat /tmp/changed.txt)"
           echo "$CHANGED"
           if echo "$CHANGED" | grep -qE '^scripts/(install|uninstall|test-install)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"

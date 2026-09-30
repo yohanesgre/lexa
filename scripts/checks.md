@@ -1,11 +1,12 @@
 # Gate checks — detail
 
-Parity with CI (`.github/workflows/*`) and AGENTS.md phase gates.
+Parity with the release CI (`.github/workflows/ci.yml`, release-prep only) and AGENTS.md phase gates.
 
 ## When to run
 
 - Before every `git commit`
 - Before every PR create / tag
+- Before every release-prep push (`chore/release-*` / `release/*`) — the only points CI runs
 - Before `status/<lane>.md` → DONE
 
 ## Commands
@@ -72,7 +73,11 @@ pre-merge only.
 
 ## CI parity
 
-CI runs: `typecheck` → `vitest` (coverage 60%) → `check:invariants` → `docker smoke` → `gitleaks` → `lint warn`.
+CI runs **only at release preparation** — a push to `chore/release-*` / `release/*`
+or a manual `workflow_dispatch`; PRs and main merges rely on the local gate below
+plus review. On those runs CI executes the full validation:
+`typecheck` → `test:full` → `check:invariants` → build → `docker smoke` →
+coverage 60% → `gitleaks` → `lint warn`.
 Local `verify-gate.sh` covers the fast subset (first 3 + secrets + wireframes);
 its test step is scoped by default — use `--full` for the complete suite. Full
 docker smoke only in CI.

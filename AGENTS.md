@@ -168,7 +168,7 @@ Lane-scoped tests for iteration (pick your lane — `test`/`test:full` stay for 
 | app-only | `bun run test:app` | `app/` (fastest frontend loop) |
 | cli | `bun run test:cli` | `cli/src/` |
 
-Full suite (`bun run test` / `test:full`) + `check:invariants` run only at the final gate / CI (PR runs `test:critical`, main runs `test:full` — see `.github/workflows/ci.yml`).
+Full suite (`bun run test` / `test:full`) + `check:invariants` run at the final gate / release CI. CI runs only at release preparation — a push to `chore/release-*` / `release/*` or a manual `workflow_dispatch`; PRs and main merges rely on the local gate (`bash scripts/verify-gate.sh`) plus review (see `.github/workflows/ci.yml`).
 
 **Quick gate** — `bash scripts/verify-gate.sh` runs typecheck first, then
 **scopes the test step to the changed areas**: `app/**` → fe (`test:fe`),

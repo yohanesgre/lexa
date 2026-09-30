@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# ci-local — local mirror of .github/workflows/ci.yml
+# ci-local — local mirror of the release CI (.github/workflows/ci.yml). CI runs
+# only at release preparation (push to chore/release-* / release/* or manual
+# workflow_dispatch); PR/main merges rely on this + verify-gate.sh + review.
 # Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli]  |  CRITICAL=1 bash scripts/ci-local.sh
-# Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only.
+# Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only;
+# `--critical` is a local-only fast mode (no CI counterpart) — the default full path mirrors release CI.
 # Missing optional tools (docker, gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
 set -euo pipefail
