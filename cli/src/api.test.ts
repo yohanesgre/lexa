@@ -76,6 +76,10 @@ beforeAll(async () => {
     if (url === "/api/projects/demo/wiki" && req.method === "POST") return json(res, 201, { ...wikiPage, title: "New Page", slug: "new-page", parentId: "w0" });
     if (url === "/api/projects/demo/wiki/old-slug" && req.method === "PATCH") return json(res, 200, { ...wikiPage, slug: "new-slug", title: "Renamed" });
     if (url === "/api/projects/demo/wiki/old-slug" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
+    if (url === "/api/projects/demo/milestones" && req.method === "GET") return json(res, 200, { data: [{ id: "ms1", projectId: "p1", name: "v1", description: "", position: 0, dueAt: "2026-10-01", archivedAt: null, sprintCount: 0, archivedSprintCount: 0 }] });
+    if (url === "/api/projects/demo/milestones" && req.method === "POST") return json(res, 201, { id: "ms1", projectId: "p1", name: "v1", description: "", position: 0, dueAt: "2026-10-01", archivedAt: null, sprintCount: 0, archivedSprintCount: 0 });
+    if (url === "/api/projects/demo/milestones/ms1" && req.method === "PATCH") return json(res, 200, { id: "ms1", projectId: "p1", name: "v1", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 });
+    if (url === "/api/projects/demo/tasks/t4/move" && req.method === "POST") return json(res, 200, { data: { id: "t4", title: "Moved" }, activity: [] });
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
     if (url === "/api/projects/demo/wiki/p1") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end("not json {{{"); }
     if (url === "/api/settings/github" && req.method === "GET") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
@@ -257,6 +261,44 @@ describe("LexaClient lifecycle writes", () => {
     await Effect.runPromise(client().unlinkGithubIssue("demo", "t2", "a/b"));
     const req = seen.slice(before).find((r) => r.method === "DELETE");
     expect(req?.url).toBe("/api/projects/demo/tasks/t2/github-link/a%2Fb");
+  });
+
+  it("listMilestones unwraps the data envelope", async () => {
+    const out = await Effect.runPromise(client().listMilestones("demo"));
+    expect(out.map((m) => m.id)).toEqual(["ms1"]);
+  });
+
+  it("createMilestone POSTs { name, dueAt } to /milestones and returns the milestone directly", async () => {
+    const before = seen.length;
+    const m = await Effect.runPromise(client().createMilestone("demo", { name: "v1", dueAt: "2026-10-01" }));
+    expect(m.id).toBe("ms1");
+    expect((m as { data?: unknown }).data).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "POST" && r.url === "/api/projects/demo/milestones");
+    expect(req?.method).toBe("POST");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ name: "v1", dueAt: "2026-10-01" });
+  });
+
+  it("updateMilestone PATCHes .../milestones/:id and sends dueAt: null to clear", async () => {
+    const before = seen.length;
+    const m = await Effect.runPromise(client().updateMilestone("demo", "ms1", { dueAt: null }));
+    expect(m.id).toBe("ms1");
+    expect((m as { data?: unknown }).data).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(req?.url).toBe("/api/projects/demo/milestones/ms1");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ dueAt: null });
+  });
+
+  it("moveTask sends beforeTaskId / afterTaskId / clearDueAt through verbatim", async () => {
+    const before = seen.length;
+    await Effect.runPromise(client().moveTask("demo", "t4", { columnId: "c1", swimlaneId: "s1", beforeTaskId: "NIM-3", clearDueAt: true }));
+    const req = seen.slice(before).find((r) => r.method === "POST");
+    expect(req?.url).toBe("/api/projects/demo/tasks/t4/move");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ columnId: "c1", swimlaneId: "s1", beforeTaskId: "NIM-3", clearDueAt: true });
+
+    const after = seen.length;
+    await Effect.runPromise(client().moveTask("demo", "t4", { columnId: "c1", swimlaneId: "s1", afterTaskId: "NIM-4" }));
+    const req2 = seen.slice(after).find((r) => r.method === "POST");
+    expect(JSON.parse(req2?.body ?? "{}")).toEqual({ columnId: "c1", swimlaneId: "s1", afterTaskId: "NIM-4" });
   });
 });
 
