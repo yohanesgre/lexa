@@ -182,6 +182,22 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         );
       },
 
+      // @-mention default suggestions for a bare "@": most recently updated
+      // live tasks (archived excluded). Slim projection — id/key/title only.
+      listRecent: (
+        projectId: string,
+        limit = 8
+      ): Effect.Effect<Array<{ id: string; key: string | null; title: string }>, DbError> =>
+        queryAll<{ id: string; key: string | null; title: string }>(
+          db,
+          `SELECT t.id, t.key, t.title FROM tasks t
+           WHERE t.project_id = ? AND t.archived_at IS NULL
+           ORDER BY t.updated_at DESC, t.number ASC
+           LIMIT ?`,
+          projectId,
+          limit
+        ),
+
       findByProject: (
         projectId: string,
         filters?: TaskFilters,

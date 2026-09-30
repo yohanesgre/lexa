@@ -59,6 +59,16 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           projectId
         ).pipe(Effect.map((rows) => rows.map(rowToWikiPageMeta))),
 
+      // @-mention default suggestions: most recently updated pages, filling
+      // whatever remains of the tasks cap for a bare "@".
+      listRecent: (projectId: string, limit = 8): Effect.Effect<WikiPageMeta[], DbError> =>
+        queryAll<WikiPageRow>(
+          db,
+          `SELECT * FROM wiki_pages WHERE project_id = ? ORDER BY updated_at DESC, id ASC LIMIT ?`,
+          projectId,
+          limit
+        ).pipe(Effect.map((rows) => rows.map(rowToWikiPageMeta))),
+
       findFullByProject: (projectId: string): Effect.Effect<WikiPage[], DbError> =>
         queryAll<WikiPageRow>(
           db,

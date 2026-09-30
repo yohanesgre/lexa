@@ -91,10 +91,21 @@ afterAll(() => {
 });
 
 describe("GET /api/projects/:slug/mentions", () => {
-  it("empty q → empty arrays", async () => {
+  it("bare @ (empty q) → default suggestions: recent live tasks, wiki fills the cap, entities empty", async () => {
     const res = await handler(authed("GET", "/api/projects/p1/mentions?q="));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ data: { tasks: [], wikiPages: [], milestones: [], swimlanes: [], columns: [] } });
+    const body = await res.json();
+    // 7 live tasks (t-arch archived → excluded), recency-ordered; one wiki
+    // slot remains under the cap.
+    expect(body.data.tasks.map((t: { id: string }) => t.id)).toEqual([
+      "t1", "t2", "cap-t1", "cap-t2", "cap-t3", "cap-t4", "cap-t5",
+    ]);
+    expect(body.data.wikiPages).toEqual([{ id: "cap-w1", slug: "capfill-w1", title: "Capfill w1" }]);
+    expect(body.data.tasks.length + body.data.wikiPages.length).toBeLessThanOrEqual(8);
+    // Milestones / swimlanes / columns are searched, never defaulted.
+    expect(body.data.milestones).toEqual([]);
+    expect(body.data.swimlanes).toEqual([]);
+    expect(body.data.columns).toEqual([]);
   });
 
   it("matches a task by key case-insensitively", async () => {
