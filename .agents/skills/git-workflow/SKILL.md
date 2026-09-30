@@ -31,7 +31,7 @@ These are never negotiable — report conflict, don't "fix" it yourself:
 5. **No scope creep.** Only files/changes in the brief. If something is missing, report — don't add tables/columns/endpoints/error codes.
 6. **Names exact.** Table/column/error code/route/config key must match `docs/*.md` verbatim.
 7. **The wireframes submodule is commit-inside-first.** See §6.
-8. **No secrets.** Never commit `.env`, `*.pem`, `*.private-key.pem`, `~/.lexa/**/config.json`, or any token. CI runs gitleaks — it will block.
+8. **No secrets.** Never commit `.env`, `*.pem`, `*.private-key.pem`, `~/.lexa/**/config.json`, or any token. Gitleaks runs in the release CI; locally the gate checks staged filenames. A leaked secret is caught at release — never worth committing.
 9. **Gates green before commit/PR/tag.** See §3.2.
 10. **Authorization is per-action, never transitive.** "commit dan push" covers exactly commit + push — never branch create, worktree add, PR open, merge, rebase, or force-push. Each mutating step needs its own explicit ask. Approval envelopes (e.g. `/goal` execution gates) must enumerate every lifecycle step they pre-authorize, including the branch name.
 
@@ -122,7 +122,7 @@ git diff --cached --name-only
   git diff origin/main...HEAD --stat
   ```
 - PR: base = `main` (confirm if the plan says otherwise), title = conventional commit style, description = what/why, docs conflicts (if any), gate outputs (`tsc`, `vitest`, `check:invariants`), testing notes. Use the repo template if present.
-- After PR approved and CI green, merge via GitHub (squash or merge commit per repo setting — never force-push to `main`). After a local merge (only when the user picks option 1), re-run the gate on the merged result before pushing.
+- After PR approved and `bash scripts/verify-gate.sh` green (CI no longer runs on PRs — release-prep only, see `.github/workflows/ci.yml`), merge via GitHub (squash or merge commit per repo setting — never force-push to `main`). After a local merge (only when the user picks option 1), re-run the gate on the merged result before pushing.
 - Never delete a worktree/branch until its PR is merged or the user says `discard`. Keep the worktree for PR feedback.
 
 ## 6. Wireframes submodule
