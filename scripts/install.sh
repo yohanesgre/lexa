@@ -375,6 +375,7 @@ deploy_workers() {
   fi
   (cd "${WORK_DIR}" && step "deploy to Cloudflare" mutate bun scripts/workers-install.ts "${cf_args[@]}")
   workers_apply_secrets "${_ww_dir}"
+  workers_prune_legacy_secret "${_ww_dir}"
 
   if [ "${INSTALL_DRY_RUN:-0}" != "1" ]; then
     deployed_url="$(cat "${_ww_dir}/.deployed-url" 2>/dev/null | tr -d '\n' || true)"

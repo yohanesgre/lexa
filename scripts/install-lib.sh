@@ -1267,6 +1267,37 @@ workers_secret_present() {
   fi
 }
 
+# workers_prune_legacy_secret <workdir> — one-time cleanup of the dead
+# LXK_API_KEY Worker secret. It is no longer provisioned or read, but survives
+# on pre-change installs; after a successful deploy the leftover is deleted.
+# The list is read-only (also under dry-run, so the planned prune is visible);
+# the delete is a mutation, so dry-run logs it instead. Any failure warns and
+# continues — the install must never fail on this cleanup — and only
+# LXK_API_KEY is ever named.
+workers_prune_legacy_secret() {
+  local workdir="$1"
+  local name="${FLAVOR_NAME:-lexa}"
+  local cfg="deploy-${name}/wrangler.${name}.json"
+  [ -r "${workdir}/${cfg}" ] || return 0
+  local out="" rc=0
+  out="$(cd "$workdir" && bun x wrangler secret list --name "$name" --config "$cfg" --format json 2>/dev/null)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  (couldn't read the worker's secrets — skipping the LXK_API_KEY cleanup)"
+    return 0
+  fi
+  printf '%s' "$out" | grep -q '"LXK_API_KEY"' || return 0
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    printf '[dry-run] bun x wrangler secret delete LXK_API_KEY --name %s --config %s\n' "$name" "$cfg"
+    return 0
+  fi
+  if ( cd "$workdir" && bun x wrangler secret delete LXK_API_KEY --name "$name" --config "$cfg" >/dev/null 2>&1 ); then
+    echo "  (removed LXK_API_KEY — it is no longer read)"
+  else
+    echo "  (couldn't remove the dead LXK_API_KEY secret — delete it later with: bun x wrangler secret delete LXK_API_KEY --name ${name} --config ${cfg})"
+  fi
+  return 0
+}
+
 # _tty_available — true only when /dev/tty can actually be OPENED. `test -r
 # /dev/tty` is true even without a controlling terminal (the permission bits
 # pass; open then fails with ENXIO), so prompt guards must probe the open.
