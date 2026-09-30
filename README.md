@@ -57,7 +57,9 @@ bleeding edge). Targets:
 | `dev` | clone the repo, `bun install`, `bun run dev:full` |
 
 Flags: `--ref <tag|branch>`, `--name <name>` (workers), `--port`, `--bind`, `--domain` (workers custom domain), `--systemd`
-(bare), `--image <tag>` (docker version pin).
+(bare), `--image <tag>` (docker version pin), `--no-pull` (docker; use a locally
+built image). For a main snapshot, build locally and install with `--no-pull` —
+see [Snapshot build](docs/DEPLOYMENT.md#snapshot-build-main-no-release).
 
 **First run:** open `http://<host>:<port>/setup` — create the first admin
 (email + password, min 8 chars). The wizard is the **only** provisioning path;

@@ -64,7 +64,7 @@ for a tag, or `main` for the bleeding edge.
 
 | Target | Needs | Layout |
 |---|---|---|
-| `docker` | docker + compose plugin + a running daemon | `dockers/` in the CWD: compose file + canonical `.env.toml` (plus a tooling-only flat `.env` for compose); prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest`; `--image <tag>` writes `LXK_IMAGE_TAG`, e.g. a version tag or `staging` to track main) |
+| `docker` | docker + compose plugin + a running daemon | `dockers/` in the CWD: compose file + canonical `.env.toml` (plus a tooling-only flat `.env` for compose); prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest` = newest release; `--image <tag>` writes `LXK_IMAGE_TAG`, e.g. a version tag, or a locally built `dev` tag with `--no-pull`) |
 | `bare` | curl, tar, bun, `sha256sum` (or `shasum`) | `bare/` in the CWD (release tarball, checksum-verified) + `lexa-start.sh`; manual mode auto-starts the server in the background (`bare/lexa.log`, `bare/lexa.pid`); `--systemd` writes + enables the `lexa` unit |
 | `workers` | curl, tar, bun, `sha256sum` (or `shasum`), Cloudflare credentials | `cf-workers/` in the CWD: D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`); the envelope key is kept in `cf-workers/.env.toml` custody |
 
@@ -81,12 +81,28 @@ Flags: `--ref <tag|branch>` (script + artifact source: a release tag or
 `main`), `--name <name>` (workers deploy name, default `lexa`),
 `--port` (docker, default
 8080), `--bind` (default 127.0.0.1), `--domain` (workers custom domain; skips the prompt),
-`--systemd` (bare), `--image <tag>` (docker), `--secrets-file <path>` (optional
+`--systemd` (bare), `--image <tag>` (docker), `--no-pull` (docker; skip
+`docker compose pull` and use an image already present locally),
+`--secrets-file <path>` (optional
 secrets applied at install; see below), `--from-repo <dir>` (install
 from a local checkout), `--yes`.
 
 The docker target uses direct semantics — host port mapping, no tunnel. Put
 your own reverse proxy in front of `<bind>:<port>` to reach it over TLS.
+
+### Snapshot build (main, no release)
+
+No main snapshot image is published. Build one from a checkout and install it:
+
+```bash
+git clone https://github.com/yohanesgre/lexa && cd lexa
+docker build -t ghcr.io/yohanesgre/lexa:dev .
+scripts/install.sh docker --port 8080 --image dev --no-pull
+```
+
+`--no-pull` skips `docker compose pull` and requires the image to already exist
+locally. Stable installs keep the default `:latest` (newest release) and pull
+normally.
 
 ### Cloudflare Workers target
 

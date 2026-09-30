@@ -2,9 +2,7 @@ name: publish-image
 
 on:
   push:
-    branches: ["main"]
     tags: ["v*"]
-    paths-ignore: ["**.md", "docs/**", "wireframes/**", "status/**", ".agents/**"]
   workflow_dispatch:
 
 permissions:
@@ -16,7 +14,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  guard:
+    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: No tag to publish
+        run: |
+          echo "::warning::non-tag dispatch — nothing to publish; no snapshot image is built"
+
   build:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,19 +44,15 @@ jobs:
 
       - name: Resolve image tags
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VER="${{ github.ref_name }}"
-            VER="${VER#v}"
-            {
-              echo "tags<<EOF"
-              echo "ghcr.io/yohanesgre/lexa:latest"
-              echo "ghcr.io/yohanesgre/lexa:v${VER}"
-              echo "ghcr.io/yohanesgre/lexa:${VER%.*}"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "tags=ghcr.io/yohanesgre/lexa:staging" >> "$GITHUB_OUTPUT"
-          fi
+          VER="${{ github.ref_name }}"
+          VER="${VER#v}"
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/yohanesgre/lexa:latest"
+            echo "ghcr.io/yohanesgre/lexa:v${VER}"
+            echo "ghcr.io/yohanesgre/lexa:${VER%.*}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
         id: tags
 
       - name: Build and push

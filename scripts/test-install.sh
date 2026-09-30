@@ -403,6 +403,48 @@ assert_grep "dry-run logs grant_container_read intent" '\[dry-run\] chmod 640' "
 fake_calls="$(grep -v -e 'compose version' -e 'docker info' "${FAKE_DOCKER_LOG}" || true)"
 assert_eq "no mutating docker calls executed (shim log)" "" "$fake_calls"
 
+echo "== INSTALL_DRY_RUN=1 install.sh docker --no-pull =="
+
+nopulldir="$(mktemp -d)"
+mkdir -p "${nopulldir}/bin"
+export FAKE_DOCKER_LOG="${nopulldir}/docker.log"
+: > "${FAKE_DOCKER_LOG}"
+cat > "${nopulldir}/bin/docker" <<'SHIM'
+#!/usr/bin/env bash
+echo "docker $*" >> "${FAKE_DOCKER_LOG}"
+exit 0
+SHIM
+chmod +x "${nopulldir}/bin/docker"
+
+nopull_rc=0
+nopull_out="$(cd "${nopulldir}" && INSTALL_DRY_RUN=1 PATH="${nopulldir}/bin:${PATH}" bash "$INSTALL" docker --port 9291 --no-pull 2>&1)" || nopull_rc=$?
+assert_rc "--no-pull dry-run install.sh docker completes" 0 "$nopull_rc"
+assert_grep "--no-pull announces the skipped pull" 'skipping image pull \(--no-pull\)' "$nopull_out"
+assert_eq "--no-pull logs no '[dry-run] docker compose pull'" "0" "$(printf '%s' "$nopull_out" | grep -c '\[dry-run\] docker compose pull' || true)"
+assert_grep "--no-pull still logs compose up" '\[dry-run\] docker compose up' "$nopull_out"
+nopull_pull="$(grep -c 'compose pull' "${FAKE_DOCKER_LOG}" || true)"
+assert_eq "--no-pull executes no 'docker compose pull'" "0" "$nopull_pull"
+nopull_inspect="$(grep -c 'image inspect' "${FAKE_DOCKER_LOG}" || true)"
+assert_eq "--no-pull dry-run skips 'docker image inspect'" "0" "$nopull_inspect"
+
+echo "== install.sh docker --no-pull dies on a missing local image =="
+
+missingdir="$(mktemp -d)"
+mkdir -p "${missingdir}/bin"
+cat > "${missingdir}/bin/docker" <<'SHIM'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "image inspect") exit 1 ;;
+esac
+exit 0
+SHIM
+chmod +x "${missingdir}/bin/docker"
+missing_rc=0
+missing_out="$(cd "${missingdir}" && PATH="${missingdir}/bin:${PATH}" bash "$INSTALL" docker --port 9495 --no-pull 2>&1)" || missing_rc=$?
+assert_rc "--no-pull missing image exits non-zero" 1 "$missing_rc"
+assert_grep "--no-pull missing image names the local image" 'ghcr.io/yohanesgre/lexa:latest not found locally' "$missing_out"
+assert_grep "--no-pull missing image gives the fix" 'build it first, or drop --no-pull' "$missing_out"
+
 echo "== installer re-run preserves operator keys =="
 
 presdir="$(mktemp -d)"
@@ -468,10 +510,10 @@ assert_grep "re-run preserves COMPOSE_PROJECT_NAME" '^COMPOSE_PROJECT_NAME=mypro
 assert_grep "re-run preserves pinned LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=v2026.2.9$' "$pin_env"
 
 pin2_rc=0
-(cd "${pindir}" && INSTALL_DRY_RUN=1 PATH="${pindir}/bin:${PATH}" bash "$INSTALL" docker --port 9494 --image staging >/dev/null 2>&1) || pin2_rc=$?
+(cd "${pindir}" && INSTALL_DRY_RUN=1 PATH="${pindir}/bin:${PATH}" bash "$INSTALL" docker --port 9494 --image vtest >/dev/null 2>&1) || pin2_rc=$?
 assert_rc "--image re-run install.sh docker completes" 0 "$pin2_rc"
 pin2_env="$(cat "${pindir}/dockers/.env")"
-assert_grep "--image overrides pinned LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=staging$' "$pin2_env"
+assert_grep "--image overrides pinned LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=vtest$' "$pin2_env"
 assert_grep "--image keeps COMPOSE_PROJECT_NAME" '^COMPOSE_PROJECT_NAME=myproj$' "$pin2_env"
 
 echo "== installer migrates a legacy deploy dir =="
