@@ -40,7 +40,7 @@ export const createSessionsLive = (api: typeof LexaApi) =>
         respond(Effect.gen(function* () {
           const headers = new Headers(req.request.headers);
           const sessions = yield* Effect.tryPromise(() => auth.api.listSessions({ headers })).pipe(
-            Effect.mapError(() => new Error("listSessions failed"))
+            Effect.mapError((cause) => new Error("listSessions failed", { cause }))
           );
           const own = ((sessions ?? []) as Parameters<typeof toSessionInfo>[0][])
             .map(toSessionInfo)
@@ -52,14 +52,14 @@ export const createSessionsLive = (api: typeof LexaApi) =>
         respond(Effect.gen(function* () {
           const headers = new Headers(req.request.headers);
           const sessions = yield* Effect.tryPromise(() => auth.api.listSessions({ headers })).pipe(
-            Effect.mapError(() => new Error("listSessions failed"))
+            Effect.mapError((cause) => new Error("listSessions failed", { cause }))
           );
           const target = (sessions ?? []).find((s) => s.id === req.path.sessionId);
           if (!target) {
             return yield* Effect.fail(new SessionNotFound());
           }
           yield* Effect.tryPromise(() => auth.api.revokeSession({ body: { token: target.token }, headers })).pipe(
-            Effect.mapError(() => new Error("revokeSession failed"))
+            Effect.mapError((cause) => new Error("revokeSession failed", { cause }))
           );
         }))
       )

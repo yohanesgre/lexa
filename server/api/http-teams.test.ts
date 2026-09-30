@@ -336,4 +336,22 @@ describe("teams + workspace + sessions endpoints", () => {
     const after = await withCookie(cookie, "GET", "/api/sessions");
     expect(after.status).toBe(401);
   });
+
+  it("sessions: session older than freshAge still lists and revokes", async () => {
+    const cookie = await signIn("member2@lexa.test");
+    const token = decodeURIComponent(cookie.split("=")[1]!).split(".")[0]!;
+    const db = new Database(dbPath);
+    db.prepare("UPDATE session SET createdAt = ? WHERE token = ?").run(new Date(Date.now() - 3 * 864e5).toISOString(), token);
+    const row = db.prepare("SELECT id FROM session WHERE token = ?").get(token) as { id: string } | null;
+    db.close();
+    expect(row?.id).toBeTruthy();
+    const list = await withCookie(cookie, "GET", "/api/sessions");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { data: { id: string }[] };
+    expect(body.data.some((s) => s.id === row!.id)).toBe(true);
+    const revoked = await withCookie(cookie, "POST", `/api/sessions/${row!.id}/revoke`);
+    expect(revoked.status).toBe(204);
+    const after = await withCookie(cookie, "GET", "/api/sessions");
+    expect(after.status).toBe(401);
+  });
 });
