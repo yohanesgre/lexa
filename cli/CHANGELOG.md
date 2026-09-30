@@ -14,13 +14,34 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [2026.5.0] - 2026-09-30
 
+### Added
+
+- **Lifecycle writes** — `lx task delete`, `lx task update
+  --description/--assignees/--due/--clear-due`, and the full `lx wiki
+  create|update|delete` surface (reparent via `--parent` / `--parent-root`, and
+  slug rename, which reports `old → new`).
+- **GitHub issue linking** — `lx github link` (create an issue from a task and
+  link it), `lx github link-existing`, and `lx github unlink`; `unlink` accepts
+  either `--issue-id <nodeId>` or `--repo <owner/name> --issue <n>`.
+- **Planning reads + milestone writes** — `lx column|swimlane|milestone list`
+  (`column list` surfaces WIP limits, done state, and GitHub state), `lx
+  milestone create|update`, and positional `lx task move --before/--after` plus
+  `lx task move --clear-due`.
+- **Admin surface** — `lx project|column|swimlane` create/update/delete
+  (`project delete` requires `--yes`), `lx milestone create|update`,
+  `lx field-config put` (`--file -` reads stdin; `field-config get` is a plain
+  project read), and `lx settings rate-limit get|set` +
+  `lx settings api-keys list|create|revoke`. These need a superadmin session, a
+  superadmin-bound key, or a server/bare key — except `settings api-keys
+  create`, which needs a user-bound admin (a bare key gets `NO_USER_CONTEXT`).
+
 ### Removed
 
 - **machine/runtime commands** — `lx machine *` (install/listen/start/stop/
   restart/status/logs/delete/workspace) and `lx runtime *` are gone with the
   removed AI-runtime (Blacksmith) tier. `lx login` no longer registers a
   machine. The CLI is operator-only: `login|logout|status|upgrade|project|
-  task|wiki|github`.
+  task|wiki|github|column|swimlane|milestone|field-config|settings`.
 - **Migration** — the removed commands have no replacement; drop `lx machine *`
   and `lx runtime *` from any scripts or CI that called them. Upgrade with
   `lx upgrade` (installed binary only — it resolves the newest `cli-v*`
@@ -35,6 +56,9 @@ release the app image. The version lives in `cli/package.json` —
 - External harness contract documented: read/write work items through
   `lx task …` / `lx wiki …` only; `--json`, TipTap→Markdown, `PREFIX-N`
   aliases.
+- `--json` is a READ-side flag, on read commands (work-item `list`/`get` and
+  `field-config get`); `lx settings *` takes no `--json`. Writes print
+  human-readable confirmations, including the wiki `old → new` slug on rename.
 
 ### Fixed
 
