@@ -97,7 +97,7 @@ function ComposerMentionPopup({
     <div className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
       {skillMode ? (
         <>
-          <div className="dropdown-label">Skills — invoke with $</div>
+          <div className="dropdown-label mention-popup-skill-header">Skills — invoke with $</div>
           {empty ? (
             <div className="dropdown-item" style={{ cursor: "default", color: "var(--lx-text-muted)" }}>
               {hasBoundSkills ? "No matches" : "No skills attached — add them in Settings"}

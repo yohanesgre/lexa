@@ -3740,6 +3740,9 @@
     color: var(--lx-text-muted);
     padding: 6px 10px 2px;
   }
+  .mention-popup-skill-header {
+    padding-bottom: 6px;
+  }
   .dropdown-item {
     display: flex;
     align-items: center;
