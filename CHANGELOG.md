@@ -32,6 +32,10 @@ All notable changes to Lexa are documented here. Format based on
 - **Wiki navigation** — the right sidebar is replaced by an outline pill plus
   page settings, sidebar collapse is unified with mobile overlays, and the
   edit view aligns its title and preview.
+- **Server-rendered share pages** — public share links render on the server
+  instead of the browser, so crawlers and link unfurls get their metadata and
+  the document is no longer empty without JavaScript. Authenticated routes
+  stay client-only.
 
 ### Changed
 
@@ -71,6 +75,9 @@ All notable changes to Lexa are documented here. Format based on
   blocked while runtimes are bound.
 - **Wiki edit view** — the title blends into the editor and the preview is
   aligned.
+- **Bare `@` suggestions** — an empty mention query returned empty arrays, so
+  the popup rendered "No matches" on a bare `@`. It now serves the 8 most
+  recently updated live tasks, with wiki pages filling the remainder.
 
 ## [2026.3.0] - 2026-09-11
 

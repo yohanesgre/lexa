@@ -93,9 +93,12 @@ CLI asset.
   `LXK_ENV=dev` + `LXK_SEED_DEV=1` seeds at boot.
 - Remote deploy uses `scripts/install.sh` (`curl -fsSL …/scripts/install.sh |
   bash -s -- <target> [flags]`). It pulls the image — **no checkout, no
-  build, no git**. Upgrade = re-run with a newer tag (data volume survives;
-  `--purge`/`--clean` recreate from scratch)
-  and removes the `lexa-data` volume — DB wiped, confirmed on a TTY).
+  build, no git**. Upgrade = re-run with a newer tag; the `lexa-data` volume
+  survives because the compose project name and the pinned image tag are
+  preserved.
+- Removing a deploy is `scripts/uninstall.sh`: the `lexa-data` volume is kept
+  by default, and `--purge` deletes it (DB wiped) after a TTY confirmation
+  that requires typing `purge`.
 - The CLI `upgrade` command self-updates only the CLI binary; web app
   upgrades re-run `scripts/install.sh` with a newer tag (there is no
   `lx deploy` — see Deploy state below).
