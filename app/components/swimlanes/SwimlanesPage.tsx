@@ -50,7 +50,7 @@ function buildGroups(activeMilestones: SwimlanesPageMilestone[], filtered: Swiml
   }
   const loose = filtered.filter((l) => !l.milestoneId);
   if (loose.length > 0) {
-    out.push({ key: "none", label: "No milestone", meta: "loose sprints — milestone_id NULL", lanes: loose });
+    out.push({ key: "none", label: "No milestone", meta: "Sprints without a milestone", lanes: loose });
   }
   return out;
 }
@@ -296,7 +296,7 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
                 className="btn btn-ghost btn-sm"
                 style={{ color: "var(--lx-text-danger)" }}
                 disabled={taskCount > 0}
-                title={taskCount > 0 ? "409 HAS_CHILDREN — reassign or remove tasks first" : undefined}
+                title={taskCount > 0 ? "Move its tasks first" : undefined}
                 onClick={onDelete}
               >
                 Delete
@@ -389,7 +389,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
             <div className="sl-group-title">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
               System lane
-              <span className="sl-group-meta">permanent · always visible on Active — never hidden by sprint-empty or milestone filter</span>
+              <span className="sl-group-meta">Always visible on Active — sprint and milestone filters never hide it.</span>
             </div>
             <div className="sl-grid">
               <BacklogRow slug={slug} backlog={backlog} isAdmin={isAdmin} onEdit={() => { setEditing(backlog); setIsFormOpen(true); }} />

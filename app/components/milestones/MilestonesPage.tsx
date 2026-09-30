@@ -340,7 +340,7 @@ function ActiveMilestoneActions({ canDelete, onArchive, onEdit, onDelete }: {
           type="button"
           className="btn btn-ghost btn-sm"
           disabled={!canDelete}
-          title={canDelete ? undefined : "409 HAS_CHILDREN — loosen or archive sprints first"}
+          title={canDelete ? undefined : "Archive its sprints first"}
           onClick={onDelete}
         >
           Delete

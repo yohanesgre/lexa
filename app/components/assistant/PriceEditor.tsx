@@ -100,7 +100,7 @@ export function PriceEditor({
         <PriceSyncButton />
       </div>
       <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>
-        Per-model per-token prices used to derive cost in the summary and by_model table. Prices are stored as USD per 1M tokens (input / output / cached read / cached write). Editing writes immediately; cost is recomputed on the next usage fetch.
+        Per-model per-token prices used to derive cost in the summary and by_model table. Prices are stored as USD per 1M tokens (input / output / cached read / cached write). Editing writes immediately. New prices apply to future usage.
       </p>
       {isError ? <div className="text-sm mb-2" style={{ color: "var(--lx-text-danger)" }}>Failed to load prices</div> : null}
       <div style={{ overflowX: "auto" }}>
@@ -164,7 +164,7 @@ export function PriceEditor({
       <div className="card-panel mt-3" style={{ background: "var(--lx-bg-accent-subtle)", borderColor: "rgba(240,192,64,0.18)", padding: "12px 14px" }}>
         <div className="flex items-center gap-2">
           <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-warning)" strokeWidth={1.5}><circle cx={12} cy={12} r={10} /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>
-          <span className="text-sm weight-500" style={{ color: "var(--lx-text-warning)" }}>Price change affects future cost only — past by_day rows keep the price that was active when they were recorded.</span>
+          <span className="text-sm weight-500" style={{ color: "var(--lx-text-warning)" }}>Price change affects future cost only — past usage keeps the price it was recorded with.</span>
         </div>
       </div>
     </section>

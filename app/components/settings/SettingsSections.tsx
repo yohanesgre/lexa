@@ -163,7 +163,7 @@ export function ApiKeysSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machine authentication for agents and integrations. Keys are hashed with SHA-256 before storage. Every key binds to its creator — rows without an owner are server keys (seeded via <span className="font-mono">LXK_API_KEY</span>). Only the full key is shown once on creation.
+        Machine authentication for agents and integrations. Keys are stored securely — never in plain text. Keys with no owner are server keys. Only the full key is shown once on creation.
       </p>
 
       {isLoading ? (
@@ -261,7 +261,7 @@ export function ApiKeysSection() {
             {createKey.isPending ? "Generating…" : "Generate Key"}
           </button>
         </div>
-        <div className="field-hint" style={{ marginTop: 8 }}>The new key binds to your account — you become its owner (owner column) and it appears in Settings → Me → API keys.</div>
+        <div className="field-hint" style={{ marginTop: 8 }}>The new key binds to your account — you'll own it, and it appears under Settings → Me → API keys.</div>
       </div>
 
       {reveal && (

@@ -142,7 +142,7 @@ export function MilestoneForm({ milestone, isOpen, onClose, onDelete, onSubmit, 
                 </label>
                 <DatePicker value={dueAt} onChange={setDueAt} className="w-full" />
                 <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-                  Stored as milestones.due_at YYYY-MM-DD. Empty = no deadline; the milestone lands in the timeline UNSET DATES section.
+                  The milestone's deadline (YYYY-MM-DD). Leave it empty for no deadline — it then appears under Unset dates on the timeline.
                 </p>
               </div>
             </div>

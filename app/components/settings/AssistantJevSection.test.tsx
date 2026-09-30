@@ -169,12 +169,11 @@ describe("AssistantJevSection — no master key", () => {
     h.secretsEnabled = false;
   });
 
-  it("disables the key field, never hides it, and names the exact env var", () => {
+  it("disables the key field, never hides it, and shows a plain-language notice", () => {
     render(<AssistantJevSection />);
     expect(screen.getByLabelText("API key")).toBeDisabled();
-    expect(screen.getByText(/Key storage is off — this server has no/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_SECRETS_MASTER_KEY")).toBeInTheDocument();
-    expect(screen.getByText(/Set it and restart to enable/)).toBeInTheDocument();
+    expect(screen.getByText(/Key storage is turned off on this server, so Jev API keys can't be saved yet\./)).toBeInTheDocument();
+    expect(screen.getByText(/An admin can turn it on\./)).toBeInTheDocument();
   });
 
   it("still allows a key-less save", async () => {
@@ -227,7 +226,7 @@ describe("AssistantJevSection — test results", () => {
     render(<AssistantJevSection />);
     await user.click(screen.getByRole("button", { name: "Test" }));
     expect(screen.getByText("JEV_AUTH_FAILED")).toBeInTheDocument();
-    expect(screen.getByText(/Jev rejected the API key \(401\/403\)/)).toBeInTheDocument();
+    expect(screen.getByText(/The key was rejected — or Jev couldn't be reached\./)).toBeInTheDocument();
   });
 
   it("renders the JEV_UNREACHABLE copy", async () => {
@@ -254,6 +253,6 @@ describe("AssistantJevSection — test results", () => {
     render(<AssistantJevSection />);
     await user.click(screen.getByRole("button", { name: "Test" }));
     expect(screen.getByText("SECRET_KEY_UNAVAILABLE")).toBeInTheDocument();
-    expect(screen.getByText(/Key storage is off — LXK_SECRETS_MASTER_KEY is not configured\./)).toBeInTheDocument();
+    expect(screen.getByText(/Key storage is turned off on this server\./)).toBeInTheDocument();
   });
 });

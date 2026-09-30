@@ -128,7 +128,7 @@ function WorkspaceMembersSection() {
                     <td className="text-xs text-lx-text-secondary">{m.lastSeen ? formatRelative(m.lastSeen) : <span className="text-lx-text-muted">never</span>}</td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                       {m.role === "superadmin" ? (
-                        <span className="text-xs text-lx-text-muted">env-provisioned — no row actions</span>
+                        <span className="text-xs text-lx-text-muted">Set by your server admin</span>
                       ) : (
                         <>
                           <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} title="Send set-password link" onClick={() => handleSetPassword(m)}>Set password</button>
@@ -310,7 +310,7 @@ function TeamDeleteModal({ name, onCancel, onConfirm }: { name: string; onCancel
   return (
     <ConfirmDialog
       title="Delete team?"
-      body={<>Delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}? Teams owning projects are refused with 409 TEAM_HAS_PROJECTS — re-assign or delete those projects first. Memberships are removed; projects become Global.</>}
+      body={<>Delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}? Move or delete its projects first — without a team, they become Global. Memberships are removed.</>}
       confirmLabel="Delete"
       onCancel={onCancel}
       onConfirm={onConfirm}
@@ -345,7 +345,7 @@ export function WorkspaceSettings() {
     <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
       <p className="text-sm text-lx-text-secondary mb-6" style={{ maxWidth: 560 }}>
-        Superadmin-only surface. Members, invites, teams, API keys, rate limiting, GitHub sync, Assistant providers, agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.
+        Superadmin-only surface. Members, invites, teams, API keys, rate limiting, GitHub sync, Assistant providers, agents &amp; skills. Admins are configured on the server, not from the app.
       </p>
       {isSuperadmin && (
         <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

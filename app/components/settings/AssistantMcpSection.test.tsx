@@ -151,7 +151,7 @@ describe("AssistantMcpSection — transport form", () => {
 
   it("trims the URL hint to the scheme rule and keeps the empty-keeps token placeholder", () => {
     render(<AssistantMcpSection />);
-    expect(screen.getByText("http(s) URLs only.")).toBeInTheDocument();
+    expect(screen.getByText("Enter a web address (http:// or https://).")).toBeInTheDocument();
     expect(screen.queryByText(/no userinfo/)).not.toBeInTheDocument();
     expect(screen.queryByText(/SSRF/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
@@ -379,7 +379,7 @@ describe("AssistantMcpSection — clear secret", () => {
 describe("AssistantMcpSection — master key present", () => {
   it("shows no warning notice and leaves the token field enabled", () => {
     render(<AssistantMcpSection />);
-    expect(screen.queryByText(/Token storage is off/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Token storage is turned off/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Bearer token")).toBeEnabled();
   });
 });
@@ -389,12 +389,11 @@ describe("AssistantMcpSection — no master key", () => {
     h.managedSecrets = false;
   });
 
-  it("disables the token field, never hides it, and names the exact env var", () => {
+  it("disables the token field, never hides it, and shows a plain-language notice", () => {
     render(<AssistantMcpSection />);
     expect(screen.getByLabelText("Bearer token")).toBeDisabled();
-    expect(screen.getByText(/Token storage is off — this server has no/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_SECRETS_MASTER_KEY")).toBeInTheDocument();
-    expect(screen.getByText(/Set it and restart to enable/)).toBeInTheDocument();
+    expect(screen.getByText(/Token storage is turned off on this server/)).toBeInTheDocument();
+    expect(screen.getByText(/A pending removal can still be cancelled/)).toBeInTheDocument();
   });
 
   it("still lets a secret-less client save without the key", async () => {
@@ -458,8 +457,9 @@ describe("AssistantMcpSection — capability unknown (list in flight)", () => {
   it("disables the token field and claims nothing: no notice, no env var named", () => {
     render(<AssistantMcpSection />);
     expect(screen.getByLabelText("Bearer token")).toBeDisabled();
-    expect(screen.queryByText(/Token storage is off/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Token storage is turned off/)).not.toBeInTheDocument();
     expect(screen.queryByText("LXK_SECRETS_MASTER_KEY")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Token storage/)).not.toBeInTheDocument();
   });
 
   it("still allows a secret-less save while the capability is unanswered", async () => {
@@ -475,8 +475,7 @@ describe("AssistantMcpSection — capability unknown (list in flight)", () => {
     h.managedSecrets = false;
     render(<AssistantMcpSection />);
     expect(screen.getByLabelText("Bearer token")).toBeDisabled();
-    expect(screen.getByText(/Token storage is off/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_SECRETS_MASTER_KEY")).toBeInTheDocument();
+    expect(screen.getByText(/Token storage is turned off/)).toBeInTheDocument();
   });
 });
 

@@ -11,7 +11,7 @@ export function AssistantProviderMissing({ projectId }: { projectId: string | un
         </div>
         <div className="text-sm font-medium text-lx-text-primary">No AI provider configured</div>
         <p className="text-xs text-lx-text-secondary mt-1" style={{ maxWidth: 240 }}>
-          Assistant runs against a per-project provider endpoint. Set one up in Project Settings → Assistant provider.
+          Choose an AI provider for this project to get started.
         </p>
         {projectId && (
           <Link
@@ -25,7 +25,7 @@ export function AssistantProviderMissing({ projectId }: { projectId: string | un
         )}
       </div>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderTop: "1px solid var(--lx-border-default)" }}>
-        <span className="font-micro text-2xs text-lx-text-danger uppercase tracking-[0.04em]">PROVIDER_NOT_CONFIGURED · 409</span>
+        <span className="font-micro text-2xs text-lx-text-danger uppercase tracking-[0.04em]">Not set up</span>
         <button type="button" className="btn btn-primary btn-sm" disabled style={{ opacity: 0.45 }}>Generate</button>
       </div>
     </>
