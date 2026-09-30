@@ -165,9 +165,25 @@ Lane-scoped tests for iteration (pick your lane — `test`/`test:full` stay for 
 | shared/pure | `bun run test:shared` | `shared/` (~150 tests, fastest) |
 | backend | `bun run test:be` | `shared/` + `server/` incl. `server/api` |
 | frontend | `bun run test:fe` | `shared/` + `app/` |
+| app-only | `bun run test:app` | `app/` (fastest frontend loop) |
 | cli | `bun run test:cli` | `cli/src/` |
 
 Full suite (`bun run test` / `test:full`) + `check:invariants` run only at the final gate / CI (PR runs `test:critical`, main runs `test:full` — see `.github/workflows/ci.yml`).
+
+**Quick gate** — `bash scripts/verify-gate.sh` runs typecheck first, then
+**scopes the test step to the changed areas**: `app/**` → fe (`test:fe`),
+`server/**`/`shared/**`/`migrations/**` → be (`test:be`), `cli/**` only → cli
+(`test:cli`), cli mixed with app/be or any tooling/unknown path → full (`test`),
+app+be mixed → one deduped `shared+server+app` run, `status/**` or `*.md`-only →
+tests skipped (typecheck still runs), no changes → full. Force the full suite
+with `--full`; override the lane with `--lane=<fe|be|cli|full>` (accepts
+`scripts/ci-local.sh`'s `fe|be|cli` tokens plus `full`; ci-local also has
+`shared` and rejects `full`); print the chosen lane + command without running anything
+with `--print-plan`.
+
+**Iteration contract:** during iteration run only the touched test file(s)
+(`bun run test -- <path>`, ~1s each); run the lane (`test:app`/`test:fe`/
+`test:be`/`test:cli`) at lane close; run the full suite only at pre-merge.
 
 Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them and paste the output.
 

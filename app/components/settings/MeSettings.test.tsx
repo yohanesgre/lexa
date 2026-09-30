@@ -4,8 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ToastProvider } from "../ui/Toast";
+import { createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import * as auth from "../../lib/auth";
 import { PasswordSection } from "./MeSettings";
 
@@ -14,12 +13,7 @@ vi.mock("../../lib/auth", async (importOriginal) => {
   return { ...actual, changePassword: vi.fn() };
 });
 
-function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={qc}><ToastProvider>{children}</ToastProvider></QueryClientProvider>
-  );
-}
+const wrapper = () => createQueryWrapper(createTestQueryClient(), { toast: true });
 
 beforeEach(() => {
   vi.mocked(auth.changePassword).mockReset().mockResolvedValue(undefined);

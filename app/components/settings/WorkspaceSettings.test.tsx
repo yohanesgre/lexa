@@ -7,9 +7,7 @@ import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ToastProvider } from "../ui/Toast";
-import { TeamSelectionProvider } from "../../lib/team-selection";
+import { createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import type { Project } from "../../../shared/types";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
@@ -43,16 +41,7 @@ vi.mock("../../lib/queries", async (importOriginal) => {
 
 import { WorkspaceSettings } from "./WorkspaceSettings";
 
-function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={qc}>
-      <TeamSelectionProvider>
-        <ToastProvider>{children}</ToastProvider>
-      </TeamSelectionProvider>
-    </QueryClientProvider>
-  );
-}
+const wrapper = () => createQueryWrapper(createTestQueryClient(), { toast: true, teamSelection: true });
 
 beforeEach(() => {
   h.state.teams = [];

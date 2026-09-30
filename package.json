@@ -10,6 +10,7 @@
     "test:be": "vitest run shared server",
     "test:fe": "vitest run shared app",
     "test:cli": "vitest run cli/src",
+    "test:app": "vitest run app",
     "prepare": "./scripts/prepare-effect.sh",
     "dev": "vite dev",
     "dev:server": "bun run server/entry.ts",

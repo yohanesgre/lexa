@@ -3,8 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { QueryClient } from "@tanstack/react-query";
+import { createFetchMock, createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import { BoardPage } from "../../components/kanban/BoardPage";
 
 const searchMock = vi.hoisted(() => ({ value: { task: undefined as string | undefined, milestone: undefined as string | undefined } }));
@@ -19,13 +19,12 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-const fetchMock = vi.fn();
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
+const { fetchMock, routes, mockFetch } = createFetchMock();
 
 const MILESTONE = { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 1, archivedSprintCount: 0 };
 
+// Local fixture (keyless project + task) — diverges from the shared makeBoard
+// base, so it stays local to preserve the exact board the page receives.
 function makeBoard() {
   return {
     project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
@@ -44,22 +43,8 @@ function makeBoard() {
   };
 }
 
-const routes = new Map<string, unknown>();
-function mockFetch(): void {
-  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const key = `${init?.method ?? "GET"} ${url}`;
-    const hit = routes.get(key) ?? routes.get(`GET ${url}`);
-    if (hit === undefined) return Promise.reject(new Error(`unmocked: ${key}`));
-    if (hit === 204) return Promise.resolve(new Response(null, { status: 204 }));
-    return Promise.resolve(json(hit));
-  });
-}
-
 let queryClient: QueryClient;
-function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-}
+let wrapper: ReturnType<typeof createQueryWrapper>;
 
 function BoardPageWrapper() {
   return <BoardPage slug="demo" search={searchMock.value} />;
@@ -73,7 +58,8 @@ beforeEach(() => {
   routes.clear();
   mockFetch();
   routes.set("GET /api/projects/demo/board", makeBoard());
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  queryClient = createTestQueryClient();
+  wrapper = createQueryWrapper(queryClient);
 });
 
 afterEach(() => {

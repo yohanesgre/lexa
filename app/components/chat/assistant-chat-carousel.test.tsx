@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
+import { stubMatchMedia } from "../../test-utils";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantWriteDiff } from "../../../shared/assistant";
 
@@ -477,7 +478,7 @@ describe("AssistantApprovalBatch — carousel", () => {
   });
 
   it("still advances under prefers-reduced-motion: reduce (instant path)", () => {
-    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+    stubMatchMedia(true);
     const chips = threeChips();
     const { counter, rerenderChips } = renderBatch(chips);
 

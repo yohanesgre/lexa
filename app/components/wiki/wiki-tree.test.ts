@@ -32,14 +32,6 @@ describe("flattenPages", () => {
       ["w4", 0],
     ]);
   });
-
-  it("terminates on a reachable duplicate-id cycle without duplicating rows", () => {
-    const a = meta("a", "A", null);
-    const b = meta("b", "B", "a");
-    const aDup = meta("a", "A2", "b");
-    const result = flattenPages([a, b, aDup]);
-    expect(result.map((p) => p.id)).toEqual(["a", "b"]);
-  });
 });
 
 describe("collectDescendantIds", () => {
@@ -63,10 +55,14 @@ describe("buildParentOptions", () => {
     ]);
   });
 
+});
+
+describe("cycle safety", () => {
   it("terminates on a reachable duplicate-id cycle without duplicating rows", () => {
     const a = meta("a", "A", null);
     const b = meta("b", "B", "a");
     const aDup = meta("a", "A2", "b");
+    expect(flattenPages([a, b, aDup]).map((p) => p.id)).toEqual(["a", "b"]);
     expect(buildParentOptions([a, b, aDup], new Set()).map((p) => p.id)).toEqual(["a", "b"]);
   });
 });

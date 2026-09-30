@@ -2,8 +2,8 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { QueryClient } from "@tanstack/react-query";
+import { createQueryWrapper, createTestQueryClient } from "../../test-utils";
 
 const navigateMock = vi.hoisted(() => vi.fn());
 const getAssistantChatMock = vi.hoisted(() => vi.fn());
@@ -203,17 +203,11 @@ function batchChips(turns: unknown): ApprovalChip[] {
   return arr.flatMap((t) => t.batch?.chips ?? []);
 }
 
-function makeQueryClient() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
-}
-
 function renderPage(
   initial: { slug?: string; thread?: string } = {},
-  queryClient: QueryClient = makeQueryClient()
+  queryClient: QueryClient = createTestQueryClient()
 ) {
-  const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  );
+  const wrapper = createQueryWrapper(queryClient);
   const utils = render(<AssistantChatPage slug={initial.slug ?? "nimbus"} thread={initial.thread} />, { wrapper });
   const rerenderPage = (next: { slug?: string; thread?: string }) =>
     utils.rerender(<AssistantChatPage slug={next.slug ?? initial.slug ?? "nimbus"} thread={next.thread} />);
@@ -297,7 +291,7 @@ describe("AssistantChatPage thread selection", () => {
   it("keeps a deep-linked thread on a transient (non-404) transcript error", async () => {
     const transient = "33333333-3333-4333-8333-333333333333";
     window.localStorage.setItem("lexa-chat-last:p1", transient);
-    const qc = makeQueryClient();
+    const qc = createTestQueryClient();
     // The id is present in a cached list variant: a transient read failure is
     // not dead-link evidence, so it must not be evicted from the cache nor have
     // ?thread= cleared, and it must not paint the hero over the failed read.
@@ -353,7 +347,7 @@ describe("AssistantChatPage thread selection", () => {
 
 describe("AssistantChatPage — approval reconciliation on remount", () => {
   it("refetches the transcript when the chat remounts and renders reconciled chips terminal", async () => {
-    const qc = makeQueryClient();
+    const qc = createTestQueryClient();
     // Previous visit cached the pre-decision marker (pending chips, no statuses).
     qc.setQueryData(["assistant-chat", "A"], pendingMarkerTranscript());
     getAssistantChatMock.mockResolvedValue(pendingMarkerTranscript());
@@ -393,7 +387,7 @@ describe("AssistantChatPage — approval reconciliation on remount", () => {
   });
 
   it("keeps a fresh-chat 404 remount on the empty state", async () => {
-    const qc = makeQueryClient();
+    const qc = createTestQueryClient();
     getAssistantChatMock.mockRejectedValue(
       Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" })
     );

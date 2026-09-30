@@ -4,9 +4,8 @@
 // on the mutation path).
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
-import { ToastProvider } from "../../components/ui/Toast";
+import type { QueryClient } from "@tanstack/react-query";
+import { createFetchMock, createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import {
   useAssistantJevConfig,
   useUpdateAssistantJevConfig,
@@ -16,22 +15,7 @@ import {
 import type { AssistantJevConfig } from "../api";
 import type { AssistantJevProjectPublic } from "../../../shared/assistant";
 
-const fetchMock = vi.fn();
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
-
-const routes = new Map<string, unknown>();
-function mockFetch(): void {
-  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const key = `${init?.method ?? "GET"} ${url}`;
-    const hit = routes.get(key) ?? routes.get(`GET ${url}`);
-    if (hit === undefined) return Promise.reject(new Error(`unmocked: ${key}`));
-    return Promise.resolve(json(hit));
-  });
-}
+const { fetchMock, routes, mockFetch } = createFetchMock();
 
 const CONFIG: AssistantJevConfig = {
   config: { id: "default", baseUrl: "https://api.typesafe.ai", model: "jev-latest", enabled: false, hasKey: false, keyMask: null, createdAt: "t", updatedAt: "t" },
@@ -44,20 +28,15 @@ const SAVED: AssistantJevConfig = {
 const PROJECT_ROW: AssistantJevProjectPublic = { projectId: "p1", enabled: true, available: true, createdAt: "t", updatedAt: "t" };
 
 let queryClient: QueryClient;
-function wrapper({ children }: { children: ReactNode }) {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>{children}</ToastProvider>
-    </QueryClientProvider>
-  );
-}
+let wrapper: ReturnType<typeof createQueryWrapper>;
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   routes.clear();
   mockFetch();
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  queryClient = createTestQueryClient();
+  wrapper = createQueryWrapper(queryClient, { toast: true });
 });
 
 afterEach(() => {

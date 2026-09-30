@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import type { WikiPageMeta } from "../../../shared/types";
+import { stubMatchMedia } from "../../test-utils";
 import { WikiLayout } from "./WikiLayout";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -33,17 +34,7 @@ const page: WikiPageMeta = {
 };
 
 function stubViewport(isDesktop: boolean) {
-  const mql = {
-    matches: isDesktop,
-    media: "(min-width: 768px)",
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  };
-  vi.stubGlobal("matchMedia", vi.fn(() => mql));
+  stubMatchMedia(isDesktop);
 }
 
 function renderLayout() {

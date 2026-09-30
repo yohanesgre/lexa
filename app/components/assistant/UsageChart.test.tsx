@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UsageChart } from "./UsageChart";
+import { ResizeObserverStub } from "../../test-utils";
 import type { AssistantByDayRow } from "../../lib/assistant-usage.query";
 
 const rows: AssistantByDayRow[] = [
@@ -33,12 +34,6 @@ function makeCtx() {
     textAlign: "left",
     textBaseline: "alphabetic",
   };
-}
-
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
 }
 
 describe("UsageChart", () => {

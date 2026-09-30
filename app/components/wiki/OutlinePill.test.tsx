@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OutlinePill } from "./OutlinePill";
+import { controllableMatchMedia, stubMatchMedia } from "../../test-utils";
 
 const HEADINGS = [
   { level: 1, text: "Home", id: "home" },
@@ -33,59 +34,6 @@ function stubIntersectionObserver() {
       }
     }
   );
-}
-
-function makeMediaStub(options: { narrow: boolean; reducedMotion: boolean }) {
-  return vi.fn((query: string) => ({
-    matches: query.includes("prefers-reduced-motion") ? options.reducedMotion : options.narrow,
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent() {
-      return false;
-    },
-  }));
-}
-
-function controllableMatchMedia(options: { mobile: boolean; reducedMotion?: boolean }) {
-  let mobile = options.mobile;
-  const listeners = new Set<() => void>();
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((query: string) => {
-      const mobileQuery = query.includes("max-width: 767.98px");
-      const motionQuery = query.includes("prefers-reduced-motion");
-      return {
-        get matches() {
-          if (mobileQuery) return mobile;
-          if (motionQuery) return options.reducedMotion ?? false;
-          return false;
-        },
-        media: query,
-        onchange: null,
-        addEventListener: (_type: string, listener: () => void) => {
-          if (mobileQuery) listeners.add(listener);
-        },
-        removeEventListener: (_type: string, listener: () => void) => {
-          if (mobileQuery) listeners.delete(listener);
-        },
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent() {
-          return false;
-        },
-      };
-    })
-  );
-  return {
-    toDesktop() {
-      mobile = false;
-      listeners.forEach((listener) => listener());
-    },
-  };
 }
 
 function interject(id: string) {
@@ -158,7 +106,7 @@ describe("OutlinePill visibility", () => {
 
 describe("OutlinePill desktop popover", () => {
   beforeEach(() => {
-    vi.stubGlobal("matchMedia", makeMediaStub({ narrow: false, reducedMotion: false }));
+    stubMatchMedia(false);
   });
 
   it("opens the popover, selects a row (scroll + close) and dismisses on Escape", () => {
@@ -216,7 +164,7 @@ describe("OutlinePill desktop popover", () => {
 
   it("jumps instantly when prefers-reduced-motion is set", () => {
     mountHeadingElements();
-    vi.stubGlobal("matchMedia", makeMediaStub({ narrow: false, reducedMotion: true }));
+    stubMatchMedia((query) => query.includes("prefers-reduced-motion"));
     render(<OutlinePill headings={HEADINGS} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
@@ -227,7 +175,7 @@ describe("OutlinePill desktop popover", () => {
 
 describe("OutlinePill mobile bottom sheet", () => {
   beforeEach(() => {
-    vi.stubGlobal("matchMedia", makeMediaStub({ narrow: true, reducedMotion: false }));
+    stubMatchMedia((query) => !query.includes("prefers-reduced-motion"));
   });
 
   it("opens as a sheet over a scrim, locks scroll and closes on scrim tap", () => {

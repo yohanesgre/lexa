@@ -5,6 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import type { Board, Swimlane, Task } from "../../../shared/types";
+import { makeBoard as makeBoardFixture } from "../../test-utils";
 
 const h = vi.hoisted(() => ({ milestones: [] as unknown[] }));
 
@@ -54,18 +55,13 @@ function archivedTasks(laneId: string, count: number): Task[] {
 }
 
 function makeBoard(): Board {
-  return {
-    project: { id: "p1", slug: "demo", name: "Demo", key: "DEMO", description: "", repos: [], createdAt: "t", updatedAt: "t" },
-    columns: [],
+  return makeBoardFixture({
     swimlanes: [
       LANE,
       { id: "s2", projectId: "p1", name: "Sprint 4 — Save system", description: "", position: 1, dueAt: null, startAt: null, archivedAt: "2026-07-22", kind: "sprint", milestoneId: null },
     ],
-    milestones: [],
-    fieldConfig: { priorities: [], types: [] },
-    links: [],
     tasks: archivedTasks(LANE.id, 9),
-  };
+  });
 }
 
 beforeEach(() => {
