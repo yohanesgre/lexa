@@ -7,6 +7,32 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.4.0] - 2026-09-30
+
+### Added
+
+- **Assistant chat deck** — the `/chat` surface opens a new-chat landing by
+  default, with a message queue, a composer docked inside the deck, landing
+  and bubbles at the full docked width, and a thread-led header carrying
+  inline rename plus thread actions.
+- **Skills and wider `@` mentions** — `$skill` mentions invoke a skill
+  (<=3 per message), the skill catalog and `get_skill` are exposed, and `@`
+  now widens to milestones, swimlanes and columns alongside tasks and wiki
+  pages.
+- **Secrets management** — provider keys and MCP client tokens are managed in
+  the app and envelope-encrypted at rest; the keyring was generalized with a
+  hard env rename, a DB-managed Jev registry with SDK transport, and an
+  advisory layer for remote-only MCP clients. MCP servers ship with a Jev
+  default and managed tokens only.
+- **Assistant control panel** — `/admin/assistant` for provider and runtime
+  configuration; the agent-runtime (Hearth/Blacksmith) tier was removed.
+- **Approval carousel** — batches auto-advance, back-navigation is fixed,
+  "Reject all" is supported, decisions persist, and archive/delete prompts
+  accept bulk task refs.
+- **Wiki navigation** — the right sidebar is replaced by an outline pill plus
+  page settings, sidebar collapse is unified with mobile overlays, and the
+  edit view aligns its title and preview.
+
 ### Changed
 
 - Renamed Herald to Assistant across the server API, database namespace, and documentation. Migration `0006_assistant_rename.sql` migrates data without compatibility aliases; old `/api/herald/*` clients now receive 404.
@@ -30,6 +56,21 @@ All notable changes to Lexa are documented here. Format based on
 - **Installer release resolution** — the app installer used GitHub's
   `releases/latest`, which can point at a CLI release (`cli-v*`) published
   after the newest app tag; it now resolves the newest `v*` app release.
+- **Approval flow** — decided approval chips stay terminal instead of
+  re-arming after a transcript rebuild, approval resume runs the pending
+  `create_task`, and confirmation questions are kept inside the write guard.
+- **New threads** — the first user bubble renders in a new chat; a
+  deterministic fresh-thread 404 keeps optimistic turns and re-fetches once
+  after ingress.
+- **Tool-call logs** — tool names are sanitized and raw payloads are
+  boundary-filtered before `streamObject`, with display logs renamed to
+  `toolLog` so a provider-boundary collision cannot blank the log.
+- **API and search hardening** — ticket-key aliases are accepted in task
+  payloads, client-IP handling is hardened, multi-assignee search results are
+  deduped, cross-project access gaps are closed, and organization delete is
+  blocked while runtimes are bound.
+- **Wiki edit view** — the title blends into the editor and the preview is
+  aligned.
 
 ## [2026.3.0] - 2026-09-11
 
