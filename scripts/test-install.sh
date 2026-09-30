@@ -506,6 +506,10 @@ BASH_BIN="$(command -v bash)"
 have_bun=0
 command -v bun >/dev/null 2>&1 && have_bun=1
 [ "$have_bun" -eq 0 ] && [ -x "${HOME}/.bun/bin/bun" ] && have_bun=1
+# Workers dry-runs run with a temp HOME (wrangler-config isolation), so the
+# installer there can only resolve bun from PATH — guard them on PATH alone.
+have_bun_path=0
+command -v bun >/dev/null 2>&1 && have_bun_path=1
 
 dirs_docker="$(mktemp -d)"
 mkdir -p "${dirs_docker}/bin"
@@ -522,14 +526,18 @@ assert_eq "T-dirs docker writes no lexa-deploy/" "absent" "$([ -e "${dirs_docker
 assert_eq "T-dirs docker writes no bare/" "absent" "$([ -e "${dirs_docker}/bare" ] && echo present || echo absent)"
 assert_eq "T-dirs docker writes no cf-workers/" "absent" "$([ -e "${dirs_docker}/cf-workers" ] && echo present || echo absent)"
 
-dirs_workers="$(mktemp -d)"
-dirs_workers_home="$(mktemp -d)"
-workers_rc=0
-(cd "${dirs_workers}" && HOME="${dirs_workers_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || workers_rc=$?
-assert_rc "T-dirs workers dry-run completes" 0 "$workers_rc"
-assert_eq "T-dirs workers writes cf-workers/" "present" "$([ -d "${dirs_workers}/cf-workers" ] && echo present || echo absent)"
-assert_eq "T-dirs workers writes no lexa-workers-release/" "absent" "$([ -e "${dirs_workers}/lexa-workers-release" ] && echo present || echo absent)"
-assert_eq "T-dirs workers writes no dockers/" "absent" "$([ -e "${dirs_workers}/dockers" ] && echo present || echo absent)"
+if [ "$have_bun_path" -eq 1 ]; then
+  dirs_workers="$(mktemp -d)"
+  dirs_workers_home="$(mktemp -d)"
+  workers_rc=0
+  (cd "${dirs_workers}" && HOME="${dirs_workers_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || workers_rc=$?
+  assert_rc "T-dirs workers dry-run completes" 0 "$workers_rc"
+  assert_eq "T-dirs workers writes cf-workers/" "present" "$([ -d "${dirs_workers}/cf-workers" ] && echo present || echo absent)"
+  assert_eq "T-dirs workers writes no lexa-workers-release/" "absent" "$([ -e "${dirs_workers}/lexa-workers-release" ] && echo present || echo absent)"
+  assert_eq "T-dirs workers writes no dockers/" "absent" "$([ -e "${dirs_workers}/dockers" ] && echo present || echo absent)"
+else
+  echo "SKIP: bun unavailable — T-dirs workers case needs the runtime"
+fi
 
 if [ "$have_bun" -eq 1 ]; then
   dirs_bare="$(mktemp -d)"
@@ -681,36 +689,44 @@ assert_grep "T-secrets-file malformed line reports its number" 'line 2' "$mal_ou
 assert_eq "T-secrets-file malformed line never echoes the content" "0" "$(printf '%s' "$mal_out" | grep -c 'this line has no equals sign' || true)"
 
 # workers: values are pushed with `wrangler secret put` and written to custody.
-sec_w_tmp="$(mktemp -d)"
-sec_w_home="$(mktemp -d)"
-sec_w_pem="${sec_w_tmp}/key.pem"
-printf -- '-----BEGIN KEY-----\nMIIBWORKERKEY\n-----END KEY-----\n' > "${sec_w_pem}"
-printf 'GITHUB_APP_ID=654321\nGITHUB_WEBHOOK_SECRET=%s\nGITHUB_PRIVATE_KEY_FILE=%s\n' \
-  "${sec_fix_secret}" "${sec_w_pem}" > "${sec_w_tmp}/secrets.env"
-secw_rc=0
-secw_out="$(cd "${sec_w_tmp}" && HOME="${sec_w_home}" INSTALL_DRY_RUN=1 \
-  bash "$INSTALL" workers --cf-token test-token --secrets-file "${sec_w_tmp}/secrets.env" 2>&1)" || secw_rc=$?
-assert_rc "T-secrets-file workers dry-run completes" 0 "$secw_rc"
-assert_grep "T-secrets-file workers plans GITHUB_APP_ID put" 'wrangler secret put GITHUB_APP_ID --name lexa' "$secw_out"
-assert_grep "T-secrets-file workers plans GITHUB_WEBHOOK_SECRET put" 'wrangler secret put GITHUB_WEBHOOK_SECRET --name lexa' "$secw_out"
-assert_grep "T-secrets-file workers plans GITHUB_PRIVATE_KEY put" 'wrangler secret put GITHUB_PRIVATE_KEY --name lexa' "$secw_out"
-secw_custody="$(cat "${sec_w_tmp}/cf-workers/.env.toml" 2>/dev/null)"
-assert_grep "T-secrets-file workers writes custody GITHUB_APP_ID" '^GITHUB_APP_ID = "654321"$' "$secw_custody"
-assert_grep "T-secrets-file workers passes the deploy config to secret put" 'wrangler secret put GITHUB_APP_ID --name lexa --config deploy-lexa/wrangler.lexa.json' "$secw_out"
-assert_eq "T-secrets-file workers never prints the webhook secret" "0" "$(printf '%s' "$secw_out" | grep -c "${sec_fix_secret}" || true)"
+if [ "$have_bun_path" -eq 1 ]; then
+  sec_w_tmp="$(mktemp -d)"
+  sec_w_home="$(mktemp -d)"
+  sec_w_pem="${sec_w_tmp}/key.pem"
+  printf -- '-----BEGIN KEY-----\nMIIBWORKERKEY\n-----END KEY-----\n' > "${sec_w_pem}"
+  printf 'GITHUB_APP_ID=654321\nGITHUB_WEBHOOK_SECRET=%s\nGITHUB_PRIVATE_KEY_FILE=%s\n' \
+    "${sec_fix_secret}" "${sec_w_pem}" > "${sec_w_tmp}/secrets.env"
+  secw_rc=0
+  secw_out="$(cd "${sec_w_tmp}" && HOME="${sec_w_home}" INSTALL_DRY_RUN=1 \
+    bash "$INSTALL" workers --cf-token test-token --secrets-file "${sec_w_tmp}/secrets.env" 2>&1)" || secw_rc=$?
+  assert_rc "T-secrets-file workers dry-run completes" 0 "$secw_rc"
+  assert_grep "T-secrets-file workers plans GITHUB_APP_ID put" 'wrangler secret put GITHUB_APP_ID --name lexa' "$secw_out"
+  assert_grep "T-secrets-file workers plans GITHUB_WEBHOOK_SECRET put" 'wrangler secret put GITHUB_WEBHOOK_SECRET --name lexa' "$secw_out"
+  assert_grep "T-secrets-file workers plans GITHUB_PRIVATE_KEY put" 'wrangler secret put GITHUB_PRIVATE_KEY --name lexa' "$secw_out"
+  secw_custody="$(cat "${sec_w_tmp}/cf-workers/.env.toml" 2>/dev/null)"
+  assert_grep "T-secrets-file workers writes custody GITHUB_APP_ID" '^GITHUB_APP_ID = "654321"$' "$secw_custody"
+  assert_grep "T-secrets-file workers passes the deploy config to secret put" 'wrangler secret put GITHUB_APP_ID --name lexa --config deploy-lexa/wrangler.lexa.json' "$secw_out"
+  assert_eq "T-secrets-file workers never prints the webhook secret" "0" "$(printf '%s' "$secw_out" | grep -c "${sec_fix_secret}" || true)"
+else
+  echo "SKIP: bun unavailable — T-secrets-file workers case needs the runtime"
+fi
 
 echo "== T-custody-preserve: master key survives a re-run =="
 
 cust_tmp="$(mktemp -d)"
 cust_home="$(mktemp -d)"
-(cd "${cust_tmp}" && HOME="${cust_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || true
-cust_key1="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${cust_tmp}/cf-workers/.env.toml" | head -1)"
-assert_eq "T-custody-preserve first run mints a 32-byte key" "32" "$(printf '%s' "${cust_key1}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
-(cd "${cust_tmp}" && HOME="${cust_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || true
-cust_key2="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${cust_tmp}/cf-workers/.env.toml" | head -1)"
-assert_eq "T-custody-preserve re-run keeps the master key (never rotates)" "${cust_key1}" "${cust_key2}"
-assert_eq "T-custody-preserve token from --cf-token is never written to disk" "absent" \
-  "$([ -e "${cust_tmp}/cf-workers/.cf-token" ] && echo present || echo absent)"
+if [ "$have_bun_path" -eq 1 ]; then
+  (cd "${cust_tmp}" && HOME="${cust_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || true
+  cust_key1="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${cust_tmp}/cf-workers/.env.toml" | head -1)"
+  assert_eq "T-custody-preserve first run mints a 32-byte key" "32" "$(printf '%s' "${cust_key1}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+  (cd "${cust_tmp}" && HOME="${cust_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || true
+  cust_key2="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${cust_tmp}/cf-workers/.env.toml" | head -1)"
+  assert_eq "T-custody-preserve re-run keeps the master key (never rotates)" "${cust_key1}" "${cust_key2}"
+  assert_eq "T-custody-preserve token from --cf-token is never written to disk" "absent" \
+    "$([ -e "${cust_tmp}/cf-workers/.cf-token" ] && echo present || echo absent)"
+else
+  echo "SKIP: bun unavailable — T-custody-preserve needs the runtime"
+fi
 
 echo "== T-bare-start: manual start is backgrounded + idempotent =="
 
@@ -751,7 +767,16 @@ assert_eq "T-bare-start writes no ./lexa.pid in the caller CWD" "absent" "$([ -e
 bs_real_pid="$(cat "${bs_real_dir}/lexa.pid" 2>/dev/null || true)"
 if [ -n "${bs_real_pid}" ] && kill -0 "${bs_real_pid}" 2>/dev/null; then
   assert_eq "T-bare-start recorded pid is alive (kill -0)" "alive" "alive"
-  bs_real_cmd="$(ps -o args= -p "${bs_real_pid}" 2>/dev/null || true)"
+  # The pid is recorded immediately, but the nohup→bash→server exec chain
+  # settles a few ms later: poll for the exec'd image (never a bash wrapper).
+  bs_real_cmd=""
+  bs_poll=0
+  while [ "$bs_poll" -lt 20 ]; do
+    bs_real_cmd="$(ps -o args= -p "${bs_real_pid}" 2>/dev/null || true)"
+    case "$bs_real_cmd" in *"sleep 30"*) break ;; esac
+    sleep 0.1
+    bs_poll=$((bs_poll + 1))
+  done
   assert_grep "T-bare-start recorded pid is the exec'd server, not a bash wrapper" 'sleep 30' "${bs_real_cmd}"
   kill "${bs_real_pid}" 2>/dev/null || true
 else
@@ -802,22 +827,31 @@ oauth_rc=0
 HOME="${oauth_absent_home}" lib_call _cf_token_from_wrangler >/dev/null 2>&1 || oauth_rc=$?
 assert_rc "T-oauth-fallback absent login returns non-zero" 1 "$oauth_rc"
 
-oauth_cwd="$(mktemp -d)"
-oauth_out="$(cd "${oauth_cwd}" && HOME="${oauth_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || true
-assert_grep "T-oauth-fallback install uses the login silently" 'using your wrangler login — no token needed' "$oauth_out"
-assert_grep "T-oauth-fallback banner reports the deploy" 'Lexa is deployed to Cloudflare' "$oauth_out"
-assert_grep "T-oauth-fallback banner points at the dashboard" 'Find its address in the Cloudflare dashboard' "$oauth_out"
-assert_eq "T-oauth-fallback never fabricates a workers.dev URL" "0" "$(printf '%s' "$oauth_out" | grep -c 'https://lexa\.workers\.dev' || true)"
-assert_eq "T-oauth-fallback oauth token never written to disk" "absent" \
-  "$([ -e "${oauth_cwd}/cf-workers/.cf-token" ] && echo present || echo absent)"
+if [ "$have_bun_path" -eq 1 ]; then
+  oauth_cwd="$(mktemp -d)"
+  oauth_out="$(cd "${oauth_cwd}" && HOME="${oauth_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || true
+  assert_grep "T-oauth-fallback install uses the login silently" 'using your wrangler login — no token needed' "$oauth_out"
+  assert_grep "T-oauth-fallback banner reports the deploy" 'Lexa is deployed to Cloudflare' "$oauth_out"
+  assert_grep "T-oauth-fallback banner points at the dashboard" 'Find its address in the Cloudflare dashboard' "$oauth_out"
+  assert_eq "T-oauth-fallback never fabricates a workers.dev URL" "0" "$(printf '%s' "$oauth_out" | grep -c 'https://lexa\.workers\.dev' || true)"
+  assert_eq "T-oauth-fallback oauth token never written to disk" "absent" \
+    "$([ -e "${oauth_cwd}/cf-workers/.cf-token" ] && echo present || echo absent)"
+else
+  echo "SKIP: bun unavailable — T-oauth-fallback login dry-run case needs the runtime"
+fi
 
 # No token anywhere: a clear, actionable error instead of a hung prompt.
 oauth_none_cwd="$(mktemp -d)"
 oauth_none_home="$(mktemp -d)"
 oauth_none_rc=0
 oauth_none_out="$(cd "${oauth_none_cwd}" && HOME="${oauth_none_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || oauth_none_rc=$?
+# The rc is 1 either way (preflight without bun); the message needs the runtime.
 assert_rc "T-oauth-fallback no-credentials exits non-zero" 1 "$oauth_none_rc"
-assert_grep "T-oauth-fallback no-credentials message" 'No Cloudflare credentials found — run `wrangler login` once' "$oauth_none_out"
+if [ "$have_bun_path" -eq 1 ]; then
+  assert_grep "T-oauth-fallback no-credentials message" 'No Cloudflare credentials found — run `wrangler login` once' "$oauth_none_out"
+else
+  echo "SKIP: bun unavailable — T-oauth-fallback no-credentials message needs the runtime"
+fi
 
 # Dry-run touches no prior state: a stale .deployed-url must survive the run.
 dw_tmp="$(mktemp -d)"
