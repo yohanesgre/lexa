@@ -317,11 +317,13 @@ function cmdProjectList(flags: Record<string, string | boolean>): Effect.Effect<
   });
 }
 
-// Resolve a column/swimlane name → id for the target project.
+// Resolve a column/swimlane/milestone name (or id) → id for the target
+// project. Exact id match wins, else case-insensitive exact name; a miss
+// prints the available names (existing style) and exits.
 function resolveColumn(client: LexaClient, slug: string, name: string): Effect.Effect<string, unknown, never> {
   return Effect.gen(function* () {
     const cols = yield* client.listColumns(slug);
-    const found = cols.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    const found = cols.find((c) => c.id === name) ?? cols.find((c) => c.name.toLowerCase() === name.toLowerCase());
     if (!found) {
       console.error(`  Column "${name}" not found. Available: ${cols.map((c) => c.name).join(", ")}`);
       process.exit(1);
@@ -332,9 +334,20 @@ function resolveColumn(client: LexaClient, slug: string, name: string): Effect.E
 function resolveSwimlane(client: LexaClient, slug: string, name: string): Effect.Effect<string, unknown, never> {
   return Effect.gen(function* () {
     const lanes = yield* client.listSwimlanes(slug);
-    const found = lanes.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    const found = lanes.find((l) => l.id === name) ?? lanes.find((l) => l.name.toLowerCase() === name.toLowerCase());
     if (!found) {
       console.error(`  Swimlane "${name}" not found. Available: ${lanes.map((l) => l.name).join(", ")}`);
+      process.exit(1);
+    }
+    return found.id;
+  });
+}
+function resolveMilestone(client: LexaClient, slug: string, ref: string): Effect.Effect<string, unknown, never> {
+  return Effect.gen(function* () {
+    const milestones = yield* client.listMilestones(slug);
+    const found = milestones.find((m) => m.id === ref) ?? milestones.find((m) => m.name.toLowerCase() === ref.toLowerCase());
+    if (!found) {
+      console.error(`  Milestone "${ref}" not found. Available: ${milestones.map((m) => m.name).join(", ")}`);
       process.exit(1);
     }
     return found.id;
@@ -403,8 +416,14 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
     const id = args[0]! || "";
     const column = (typeof flags.column === "string" && flags.column) || "";
     const swimlane = (typeof flags.swimlane === "string" && flags.swimlane) || "";
-    if (!slug || !id || !column) {
-      console.error("  Usage: lx task move <id> --project <slug> --column <name> [--swimlane <name>]");
+    const before = typeof flags.before === "string" ? flags.before : undefined;
+    const after = typeof flags.after === "string" ? flags.after : undefined;
+    const clearDue = flags["clear-due"] === true;
+    // Bare (--before) and empty (--before=) anchors are usage errors: the
+    // former would be silently dropped, the latter reaches the server as a 404.
+    const badAnchor = flags.before === true || flags.after === true || before === "" || after === "";
+    if (!slug || !id || !column || badAnchor || (before !== undefined && after !== undefined)) {
+      console.error("  Usage: lx task move <id> --project <slug> --column <name|id> [--swimlane <name|id>] [--before <id|PREFIX-N>] [--after <id|PREFIX-N>] [--clear-due]");
       process.exit(1);
     }
     const columnId = yield* resolveColumn(client, slug, column);
@@ -415,7 +434,12 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
     const swimlaneId = swimlane
       ? yield* resolveSwimlane(client, slug, swimlane)
       : (yield* client.getTask(slug, taskId)).swimlaneId;
-    const task = yield* client.moveTask(slug, taskId, { columnId, swimlaneId });
+    // --before / --after pass through verbatim (server resolves PREFIX-N too).
+    const target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean } = { columnId, swimlaneId };
+    if (before !== undefined) target.beforeTaskId = before;
+    if (after !== undefined) target.afterTaskId = after;
+    if (clearDue) target.clearDueAt = true;
+    const task = yield* client.moveTask(slug, taskId, target);
     console.log(`  Moved ${taskId} → ${column}`);
   });
 }
@@ -490,6 +514,119 @@ function cmdTaskDelete(flags: Record<string, string | boolean>, args: string[]):
     const taskId = yield* resolveTaskId(id);
     yield* client.deleteTask(slug, taskId);
     console.log(`  Deleted ${taskId}`);
+  });
+}
+
+// ── Planning reads (columns / swimlanes / milestones) ──
+
+function cmdColumnList(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    if (!slug) { console.error("  Usage: lx column list --project <slug> [--json]"); process.exit(1); }
+    const columns = yield* client.listColumns(slug);
+    if (flags.json === true) { console.log(JSON.stringify(columns, null, 2)); return; }
+    if (columns.length === 0) { console.log("  No columns."); return; }
+    printTable(columns.map((c) => ({
+      ID: c.id,
+      NAME: c.name,
+      WIP: c.wipLimit != null ? String(c.wipLimit) : "—",
+      DONE: c.isDone ? "yes" : "",
+      GITHUB: c.githubState ?? "—",
+    })));
+  });
+}
+
+function cmdSwimlaneList(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    if (!slug) { console.error("  Usage: lx swimlane list --project <slug> [--json]"); process.exit(1); }
+    const lanes = yield* client.listSwimlanes(slug);
+    if (flags.json === true) { console.log(JSON.stringify(lanes, null, 2)); return; }
+    if (lanes.length === 0) { console.log("  No swimlanes."); return; }
+    printTable(lanes.map((l) => ({
+      ID: l.id,
+      NAME: l.name,
+      KIND: l.kind,
+      MILESTONE: l.milestoneId ?? "—",
+      START: l.startAt ?? "—",
+      DUE: l.dueAt ?? "—",
+      ARCHIVED: l.archivedAt ? "yes" : "",
+    })));
+  });
+}
+
+function cmdMilestoneList(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    if (!slug) { console.error("  Usage: lx milestone list --project <slug> [--json]"); process.exit(1); }
+    const milestones = yield* client.listMilestones(slug);
+    if (flags.json === true) { console.log(JSON.stringify(milestones, null, 2)); return; }
+    if (milestones.length === 0) { console.log("  No milestones."); return; }
+    printTable(milestones.map((m) => ({
+      ID: m.id,
+      NAME: m.name,
+      DUE: m.dueAt ?? "—",
+      ARCHIVED: m.archivedAt ? "yes" : "",
+      SPRINTS: String(m.sprintCount),
+    })));
+  });
+}
+
+function cmdMilestoneCreate(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const name = typeof flags.name === "string" && flags.name ? flags.name : "";
+    const description = typeof flags.description === "string" && flags.description ? flags.description : undefined;
+    const hasDue = flags.due !== undefined;
+    const due = typeof flags.due === "string" ? flags.due : undefined;
+    const bad = !slug || !name || (hasDue && (due === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(due)));
+    if (bad) {
+      console.error("  Usage: lx milestone create --project <slug> --name <n> [--description <s>] [--due <YYYY-MM-DD>]");
+      process.exit(1);
+    }
+    const milestone = yield* client.createMilestone(slug, {
+      name,
+      ...(description !== undefined ? { description } : {}),
+      ...(hasDue && due !== undefined ? { dueAt: due } : {}),
+    });
+    console.log(`  Created milestone ${milestone.id} — ${milestone.name}`);
+  });
+}
+
+function cmdMilestoneUpdate(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const ref = args[0]! || "";
+    const name = typeof flags.name === "string" ? flags.name : undefined;
+    const hasDescription = typeof flags.description === "string";
+    const hasDue = flags.due !== undefined;
+    const due = typeof flags.due === "string" ? flags.due : undefined;
+    const clearDue = flags["clear-due"] === true;
+    const hasPosition = flags.position !== undefined;
+    const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
+    const usageMsg = "  Usage: lx milestone update <ref> --project <slug> [--name <n>] [--description <s>] [--due <YYYY-MM-DD>|--clear-due] [--position <n>]";
+    const bad =
+      !slug || !ref ||
+      name === "" ||
+      (hasDue && (due === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(due))) ||
+      (hasDue && clearDue) ||
+      (hasPosition && position === undefined) ||
+      (name === undefined && !hasDescription && !hasDue && !clearDue && !hasPosition);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const input: { name?: string; description?: string; dueAt?: string | null; position?: number } = {};
+    if (name !== undefined) input.name = name;
+    if (hasDescription) input.description = flags.description as string;
+    if (clearDue) input.dueAt = null;
+    else if (due !== undefined) input.dueAt = due;
+    if (position !== undefined) input.position = position;
+    const milestoneId = yield* resolveMilestone(client, slug, ref);
+    const milestone = yield* client.updateMilestone(slug, milestoneId, input);
+    console.log(`  Updated milestone ${milestone.id} — ${milestone.name}`);
   });
 }
 
@@ -686,10 +823,19 @@ Tasks:
   task list    --project <slug> [--limit N] [--json]
   task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
   task get     <id> --project <slug> [--json]
-  task move    <id> --project <slug> --column <name> [--swimlane <name>]
+  task move    <id> --project <slug> --column <name|id> [--swimlane <name|id>]
+               [--before <id|PREFIX-N>] [--after <id|PREFIX-N>] [--clear-due]
   task update  <id> --project <slug> [--title <t>] [--description <md>] [--priority <id>] [--type <id>]
                [--assignees <a,b> | --assignees=] [--due <YYYY-MM-DD>] [--clear-due]
   task delete  <id> --project <slug>
+
+Planning:
+  column list      --project <slug> [--json]
+  swimlane list    --project <slug> [--json]
+  milestone list   --project <slug> [--json]
+  milestone create --project <slug> --name <n> [--description <s>] [--due <YYYY-MM-DD>]
+  milestone update <ref> --project <slug> [--name <n>] [--description <s>]
+                   [--due <YYYY-MM-DD>|--clear-due] [--position <n>]
 
 Wiki:
   wiki list   --project <slug> [--json]
@@ -751,10 +897,20 @@ const GROUP_HELP: Record<string, string> = {
   task list    --project <slug> [--limit N] [--json]
   task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
   task get     <id> --project <slug> [--json]
-  task move    <id> --project <slug> --column <name> [--swimlane <name>]
+  task move    <id> --project <slug> --column <name|id> [--swimlane <name|id>]
+               [--before <id|PREFIX-N>] [--after <id|PREFIX-N>] [--clear-due]
   task update  <id> --project <slug> [--title <t>] [--description <md>] [--priority <id>] [--type <id>]
                [--assignees <a,b> | --assignees=] [--due <YYYY-MM-DD>] [--clear-due]
   task delete  <id> --project <slug>`,
+  column: `Planning:
+  column list --project <slug> [--json]`,
+  swimlane: `Planning:
+  swimlane list --project <slug> [--json]`,
+  milestone: `Planning:
+  milestone list   --project <slug> [--json]
+  milestone create --project <slug> --name <n> [--description <s>] [--due <YYYY-MM-DD>]
+  milestone update <ref> --project <slug> [--name <n>] [--description <s>]
+                   [--due <YYYY-MM-DD>|--clear-due] [--position <n>]`,
   wiki: `Wiki:
   wiki list   --project <slug> [--json]
   wiki get    <pageSlug> --project <slug> [--json]
@@ -881,6 +1037,23 @@ async function main(): Promise<void> {
         case "update": program = cmdTaskUpdate(flags, rest); break;
         case "delete": program = cmdTaskDelete(flags, rest); break;
         default: usage("task", sub);
+      }
+      break;
+
+    case "column":
+      if (sub === "list") { program = cmdColumnList(flags); break; }
+      usage("column", sub);
+
+    case "swimlane":
+      if (sub === "list") { program = cmdSwimlaneList(flags); break; }
+      usage("swimlane", sub);
+
+    case "milestone":
+      switch (sub) {
+        case "list": program = cmdMilestoneList(flags); break;
+        case "create": program = cmdMilestoneCreate(flags); break;
+        case "update": program = cmdMilestoneUpdate(flags, rest); break;
+        default: usage("milestone", sub);
       }
       break;
 

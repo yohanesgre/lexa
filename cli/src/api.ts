@@ -24,18 +24,39 @@ export class ApiError extends Data.TaggedError("ApiError")<{
 
 export interface ColumnInfo {
   id: string;
+  projectId: string;
   name: string;
   wipLimit: number | null;
   requiredFields: string[] | null;
   color: string | null;
   position: number;
   githubState: "open" | "closed" | null;
+  isDone: boolean;
 }
 
 export interface SwimlaneInfo {
   id: string;
+  projectId: string;
   name: string;
+  description: string;
   position: number;
+  dueAt: string | null;
+  archivedAt: string | null;
+  startAt: string | null;
+  kind: "backlog" | "sprint";
+  milestoneId: string | null;
+}
+
+export interface MilestoneInfo {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  position: number;
+  dueAt: string | null;
+  archivedAt: string | null;
+  sprintCount: number;
+  archivedSprintCount: number;
 }
 
 export interface TaskInfo {
@@ -158,6 +179,21 @@ export class LexaClient {
     return Effect.map(this.request<{ data: SwimlaneInfo[] }>(`/api/projects/${slug}/swimlanes`), (r) => r.data);
   }
 
+  // ── Milestones ──
+  // list unwraps the { data } envelope; create/update return the milestone
+  // directly (no envelope) — 201 | 200 | 403 | 404.
+  listMilestones(slug: string): Effect.Effect<MilestoneInfo[], ApiError, never> {
+    return Effect.map(this.request<{ data: MilestoneInfo[] }>(`/api/projects/${slug}/milestones`), (r) => r.data);
+  }
+
+  createMilestone(slug: string, input: { name: string; description?: string; dueAt?: string | null; position?: number }): Effect.Effect<MilestoneInfo, ApiError, never> {
+    return this.request<MilestoneInfo>(`/api/projects/${slug}/milestones`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  updateMilestone(slug: string, ref: string, input: { name?: string; description?: string; dueAt?: string | null; position?: number }): Effect.Effect<MilestoneInfo, ApiError, never> {
+    return this.request<MilestoneInfo>(`/api/projects/${slug}/milestones/${ref}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
   // ── Tasks ──
   listTasks(slug: string, limit = 20): Effect.Effect<TaskInfo[], ApiError, never> {
     return Effect.map(this.request<{ data: TaskInfo[] }>(`/api/projects/${slug}/tasks?limit=${limit}`), (r) => r.data);
@@ -188,7 +224,7 @@ export class LexaClient {
     return this.request<void>(`/api/projects/${slug}/tasks/${id}`, { method: "DELETE" });
   }
 
-  moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string }): Effect.Effect<TaskInfo, ApiError, never> {
+  moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean }): Effect.Effect<TaskInfo, ApiError, never> {
     return Effect.map(
       this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) }),
       (r) => r.data
