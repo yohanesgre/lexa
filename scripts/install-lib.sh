@@ -46,6 +46,8 @@ Flags:
   --bind <addr>                    bind address (default 127.0.0.1)
   --domain <d>                     custom domain (workers; skips prompt)
   --image <tag>                    container image tag
+  --no-pull                        docker only: skip `docker compose pull` and
+                                   use a locally available image
   --systemd                        bare: write + enable systemd unit
   --secrets-file <path>            optional secrets (KEY=value) applied at install
   --reset-db                       workers: drop the existing D1 database and
@@ -692,13 +694,13 @@ grant_container_read() {
 # ---------------------------------------------------------------------------
 # parse_flags — whitelist-style parser; the ONLY reader of argv.
 # Sets: TARGET REF NAME PORT BIND DOMAIN IMAGE_TAG
-#       SYSTEMD ASSUME_YES PURGE CLEAN FROM_REPO HELP
+#       SYSTEMD ASSUME_YES PURGE CLEAN FROM_REPO HELP NO_PULL
 # Unknown flag -> usage + die. Positional target accepted (first one only).
 # ---------------------------------------------------------------------------
 parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
   TARGET="" REF="" NAME="" PORT=8080 BIND=127.0.0.1 DOMAIN=""
-  IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0
+  IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0 NO_PULL=0
   FROM_REPO="" HELP=0 CF_TOKEN="" SECRETS_FILE=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -743,6 +745,7 @@ parse_flags() {
         IMAGE_TAG=$2
         shift 2
         ;;
+      --no-pull) NO_PULL=1; shift ;;
       --from-repo)
         [ $# -ge 2 ] || die "--from-repo requires a value"
         FROM_REPO=$2

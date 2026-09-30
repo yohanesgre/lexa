@@ -135,7 +135,15 @@ deploy_docker() {
   # Local docker deploy = direct semantics (host port mapping, no tunnel) —
   # the wizard URL must be reachable on the host.
   DEPLOY_DIR="${PWD}" step "generate compose file" compose_render direct "${PORT}" "${BIND}"
-  step "compose pull" retry 3 mutate docker compose pull
+  if [ "${NO_PULL:-0}" = "1" ]; then
+    echo "  skipping image pull (--no-pull)"
+    if [ "${INSTALL_DRY_RUN:-0}" != "1" ] \
+      && ! docker image inspect "ghcr.io/yohanesgre/lexa:${image_tag}" >/dev/null 2>&1; then
+      die "image ghcr.io/yohanesgre/lexa:${image_tag} not found locally — build it first, or drop --no-pull"
+    fi
+  else
+    step "compose pull" retry 3 mutate docker compose pull
+  fi
   # The container runs as uid 1000 (USER bun); when the installer runs as a
   # different uid a 0600 `.env.toml` would be unreadable and crash-loop.
   step "container permissions" grant_container_read "${PWD}/.env.toml" "ghcr.io/yohanesgre/lexa:${image_tag}"

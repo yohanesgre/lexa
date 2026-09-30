@@ -90,7 +90,10 @@ CLI asset.
 
 ## Web app image flow
 
-- `main` pushes publish `ghcr.io/yohanesgre/lexa:staging`.
+- `main` pushes publish nothing. Stable channels are tag-built; a main snapshot
+  is a self-serve local build — `docker build -t ghcr.io/yohanesgre/lexa:dev .`
+  from a checkout, then install with `--image dev --no-pull` (see
+  `docs/DEPLOYMENT.md`).
 - `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` + `ghcr.io/yohanesgre/lexa:<YYYY.MINOR>` (where `<version>` is the tag name, e.g. `v2026.1.0` + floating `2026.1` for patch-auto pins).
 - The web wizard at `/setup` offers sample data on local installs;
   `LXK_ENV=dev` + `LXK_SEED_DEV=1` seeds at boot.

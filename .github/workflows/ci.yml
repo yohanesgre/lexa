@@ -320,7 +320,7 @@ jobs:
     # so e2e cleanup uses `docker compose down -v` + rm -rf directly instead of
     # uninstall --purge.
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -351,14 +351,10 @@ jobs:
       - name: E2E install → health → cleanup
         if: steps.changes.outputs.run == 'true'
         run: |
+          docker build -t ghcr.io/yohanesgre/lexa:ci "$GITHUB_WORKSPACE"
           WORKDIR="$(mktemp -d)"
           cd "$WORKDIR"
-          # The e2e must run an image that actually applies the mounted
-          # .env.toml. The published `:latest` release tag can predate the
-          # loader (the loader landed on main after the last release), so the
-          # e2e tracks `staging` (rebuilt from main on every push). Once a
-          # release ships the loader, `:latest` is equivalent.
-          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191 --image staging
+          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191 --image ci --no-pull
           curl -sf http://127.0.0.1:9191/api/health | grep -q '"ok":true'
           cd dockers
           test -f .env.toml || { echo "::error::installer did not write .env.toml"; exit 1; }
