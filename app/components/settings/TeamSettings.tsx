@@ -336,7 +336,7 @@ function TeamProjectsSection({ teamId }: { teamId: string }) {
           </thead>
           <tbody>
             {teamProjects.length === 0 ? (
-              <tr><td colSpan={4} className="text-xs text-lx-text-muted text-center py-6">No projects in this team yet. Assignment happens in project settings (project switcher → Project settings → team control).</td></tr>
+              <tr><td colSpan={4} className="text-xs text-lx-text-muted text-center py-6">No projects in this team yet.</td></tr>
             ) : (
               teamProjects.map((entry) => {
                 const p = entry.project;

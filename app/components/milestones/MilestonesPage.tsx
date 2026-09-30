@@ -106,7 +106,7 @@ function EmptyMilestones({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => vo
         </svg>
       </div>
       <div className="empty-state-title">No milestones yet</div>
-      <div className="empty-state-desc">Group sprints under a goal milestone — v1.0 launch, beta, or release tracks.</div>
+      <div className="empty-state-desc">Group sprints under a goal milestone.</div>
       {isAdmin && (
         <button type="button" className="btn btn-primary" style={{ marginTop: 16 }} onClick={onNew}>
           <Plus size={14} strokeWidth={1.5} />

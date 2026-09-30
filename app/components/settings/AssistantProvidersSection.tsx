@@ -67,7 +67,7 @@ export function AssistantProvidersSection() {
                 />
               ))}
               {providers.length === 0 && (
-                <tr><td colSpan={4} className="text-sm text-lx-text-muted" style={{ textAlign: "center", padding: 24 }}>No providers yet — add one below.</td></tr>
+                <tr><td colSpan={4} className="text-sm text-lx-text-muted" style={{ textAlign: "center", padding: 24 }}>No providers yet.</td></tr>
               )}
             </tbody>
           </table>

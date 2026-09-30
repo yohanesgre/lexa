@@ -43,7 +43,7 @@ function WikiIndexPage() {
           <div className="wiki-content">
             <div className="flex items-center justify-center h-full text-lx-text-muted">
               <div className="text-center">
-                <p className="text-sm">Select a page from the sidebar to start reading.</p>
+                <p className="text-sm">No page selected.</p>
               </div>
             </div>
           </div>

@@ -84,7 +84,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
 
             <div className="notice notice-warning">
               <AlertTriangle size={16} strokeWidth={1.5} />
-              <span>This key will not be shown again. Copy it now and store it somewhere safe — Lexa stores only a SHA-256 hash.</span>
+              <span>Shown once. Copy it now.</span>
             </div>
           </div>
 

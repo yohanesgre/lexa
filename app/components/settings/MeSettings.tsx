@@ -73,7 +73,7 @@ function ProfileSection() {
             <div className="avatar" style={{ width: 48, height: 48, fontSize: 18 }}>{initial}</div>
           </div>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <Field label="Name" htmlFor="me-name" hint="Initials avatar derives from the name. Save → PATCH /api/me; the user-menu trigger updates from the response." className="field mb-3">
+            <Field label="Name" htmlFor="me-name" hint="Initials avatar derives from the name. Save → PATCH /api/me { name }; the user-menu trigger updates from the response." className="field mb-3">
               <TextInput id="me-name" value={name} onChange={(v) => { setName(v); if (error) setError(null); }} />
             </Field>
             <Field label="Email" htmlFor="me-email" hint="Email is the login identity — changing it is a provisioning-level action (contact your admin)." className="field mb-0">

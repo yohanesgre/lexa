@@ -57,7 +57,7 @@ describe("AssistantProvidersSection — structure", () => {
     render(<AssistantProvidersSection />);
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Label" })).toBeInTheDocument();
-    expect(screen.getByText("No providers yet — add one below.")).toBeInTheDocument();
+    expect(screen.getByText("No providers yet.")).toBeInTheDocument();
   });
 
   it("shows a loading state instead of the table while fetching", () => {

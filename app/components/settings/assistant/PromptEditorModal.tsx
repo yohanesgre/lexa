@@ -328,7 +328,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = []
         <div className="field">
           <label className="field-label" htmlFor="prompt-description">Description</label>
           <input id="prompt-description" className="prop-input w-full" type="text" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <div className="field-hint">Display-only — never sent to the runtime agent.</div>
+          <div className="field-hint">Display-only — never sent to the assistant.</div>
         </div>
 
         <div className="field">
