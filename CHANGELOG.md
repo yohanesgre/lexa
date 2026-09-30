@@ -7,6 +7,51 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.0] - 2026-10-01
+
+### Added
+
+- **Installer rewritten as one script, three targets** — `docker` (compose file
+  plus prebuilt image), `bare` (release tarball with an optional systemd unit),
+  and `workers` (D1 + R2 + KV, migrations, and the prebuilt Worker bundle).
+  Prerequisites are checked per target before any download or mutation: one
+  pass collects every missing tool and stops with a single list (tool → exact
+  fix command), so nothing is installed for you.
+- **Self-describing install dirs** — each target installs into a named folder
+  in the current directory: `dockers/`, `bare/`, `cf-workers/`.
+- **End-to-end Workers install** — Cloudflare authentication falls back to a
+  stored `wrangler login` token (silent read, verified once) before any pasted
+  token. The master key is minted once and kept in `cf-workers/.env.toml`
+  (0600) custody, pushed as a Worker secret without echoing it, and never
+  rotated on re-run — custody first, then remote presence, then mint, and a
+  presence check that cannot run mints nothing and leaves the key untouched.
+- **Optional secrets at install time** — `--secrets-file <path>` applies
+  `KEY=value` lines validated against the installer whitelist; without it, an
+  interactive install offers a fail-closed GitHub-sync wizard (a partial trio
+  is skipped with a warning, never written half-way). Re-runs preserve
+  operator keys and secrets.
+
+### Changed
+
+- **Docker snapshot installs** — `--no-pull` skips the image pull and requires
+  an image already present locally (build one with `docker build -t
+  ghcr.io/yohanesgre/lexa:dev .`, then `scripts/install.sh docker --image dev
+  --no-pull`). No main snapshot image is published; stable installs keep the
+  default `:latest`.
+- **Dead `LXK_API_KEY` Worker secret is auto-pruned** after a successful
+  Workers deploy — best-effort (a failure warns and continues), the dry run
+  prints the plan instead of deleting, and only that secret is ever named.
+  Docker and bare drop it through the env migration.
+- **Installer prompts and output** are rewritten for operator clarity —
+  plainer prompts, named steps, and a final banner that reports where the
+  master key and GitHub credentials live.
+
+### Removed
+
+- **The staging image** — `docker-compose.staging.yml` is deleted and no
+  `staging` tag is published; build `dev` locally for snapshots.
+- **The `dev` install target** — development starts from a clone.
+
 ## [2026.4.0] - 2026-09-30
 
 ### Added
