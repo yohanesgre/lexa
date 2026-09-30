@@ -41,7 +41,13 @@ left checked out on `main` at `e18a4ab`.
 
 - `88b9000` `docs(releasing): fix stale checklist steps`
 - `bd77225` `chore(release): v2026.4.0, cli-v2026.5.0`
-- `chore(status): restore timeline, add plan` (this plan's artifacts)
+- `996fe0f` `chore(status): restore timeline, add plan`
+- `chore(status): finalize release-prep report` (this artifact, final commit)
+
+The branch is pushed to `origin/chore/release-v2026.4.0` and the PR to
+`main` is opened immediately after the push. **No tag is cut and the PR is
+not merged here** — the release cut (`v2026.4.0` / `cli-v2026.5.0`) and the
+merge to `main` are a later, separately approved step.
 
 ## Tests
 
