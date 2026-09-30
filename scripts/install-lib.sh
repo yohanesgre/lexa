@@ -36,7 +36,7 @@ usage() {
   cat <<'EOF'
 Usage: install.sh <target> [flags]
 
-Targets: docker | bare | workers | dev
+Targets: docker | bare | workers
 
 Flags:
   --ref <tag|branch>             script + artifact source (default: newest v* tag;
@@ -47,6 +47,7 @@ Flags:
   --domain <d>                     custom domain (workers; skips prompt)
   --image <tag>                    container image tag
   --systemd                        bare: write + enable systemd unit
+  --secrets-file <path>            optional secrets (KEY=value) applied at install
   --reset-db                       workers: drop the existing D1 database and
                                    start migrations fresh (data is lost)
   --yes                            assume yes for confirmations
@@ -110,8 +111,9 @@ step() {
   fi
   if "$@"; then
     return 0
+  else
+    local rc=$?
   fi
-  local rc=$?
   if [ -n "$FAILURE_HANDLER" ] && declare -F "$FAILURE_HANDLER" >/dev/null 2>&1; then
     "$FAILURE_HANDLER" "$name" "$rc"
   fi
@@ -135,11 +137,14 @@ retry() {
 }
 
 # ---------------------------------------------------------------------------
-# wait_for <url> [tries] — health-wait loop, 1s interval, default 60 tries
+# wait_for <url> [tries] [log_file] — health-wait loop, 1s interval, default 60
+# tries. On timeout a log_file (when given and present) is tailed before the
+# escape, so a bare manual start surfaces its lexa.log.
 # ---------------------------------------------------------------------------
 wait_for() {
   local url="$1"
   local tries="${2:-60}"
+  local log_file="${3:-}"
   if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
     mutate curl -fsS -o /dev/null --max-time 5 "$url"
     return 0
@@ -153,7 +158,15 @@ wait_for() {
     sleep 1
     i=$((i + 1))
   done
-  escape "health check failed after ${tries} tries: ${url} (last error: ${err})"
+  local msg="Lexa didn't respond at ${url} after ${tries} tries (last error: ${err}). Check the log below and re-run."
+  if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+    # The message names the log "below", so it must precede the tail.
+    printf 'install: FATAL: %s\n' "$msg" >&2
+    printf -- '--- last lines of %s ---\n' "$log_file" >&2
+    tail -n 20 "$log_file" >&2 || true
+    exit 2
+  fi
+  escape "$msg"
 }
 
 # ---------------------------------------------------------------------------
@@ -175,14 +188,14 @@ tty_read() {
     fi
   fi
   if [ ! -r /dev/tty ]; then
-    die "headless: pass --flag instead (${prompt})"
+    die "No terminal available — pass the value as a flag instead (${prompt})."
   fi
   local reply=""
   # Prompt on its own line: typed input must not glue onto the label.
   # shellcheck disable=SC2069  # redirect order matters: silence before /dev/tty open
-  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || die "headless: pass --flag instead (${prompt})"
+  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || die "No terminal available — pass the value as a flag instead (${prompt})."
   # shellcheck disable=SC2069
-  IFS= read -r reply 2>/dev/null < /dev/tty || die "headless: pass --flag instead (${prompt})"
+  IFS= read -r reply 2>/dev/null < /dev/tty || die "No terminal available — pass the value as a flag instead (${prompt})."
   if [ -z "$reply" ]; then
     printf '%s\n' "$default"
   else
@@ -202,10 +215,10 @@ verify_checksum() {
   elif command -v shasum >/dev/null 2>&1; then
     actual=$(shasum -a 256 "$file" | awk '{print $1}')
   else
-    die "no sha256 tool available (need sha256sum or shasum)"
+    die "No checksum tool found (need sha256sum or shasum) — install one so downloads can be verified."
   fi
   if [ "$actual" != "$expected" ]; then
-    die "checksum mismatch for ${file}: expected ${expected}, got ${actual}"
+    die "Checksum mismatch for ${file} (expected ${expected}, got ${actual}) — the download looks corrupted; nothing was installed."
   fi
 }
 
@@ -512,7 +525,7 @@ migrate_legacy_deploy_env() {
   [ -f "$legacy" ] || return 0
   [ -f "$toml" ] && return 0
   if [ -e "$dest" ]; then
-    echo "  (${dest} exists — leaving ${legacy} in place)"
+    echo "  (found an existing ${dest} — leaving ${legacy} untouched)"
     return 0
   fi
   local -a lines=() app_entries=() tooling_entries=() skipped=()
@@ -609,7 +622,7 @@ migrate_legacy_deploy_env() {
   if [ "${#tooling_entries[@]}" -gt 0 ]; then
     write_env_file "${dir}/.env" "${tooling_entries[@]}"
   fi
-  echo "  migrated ${legacy} → ${toml} (legacy kept at ${dest})"
+  echo "  migrated ${legacy} to ${toml} (original kept at ${dest})"
   if [ "${#skipped[@]}" -gt 0 ]; then
     printf '  (skipped %d key(s) the loader cannot represent: %s)\n' "${#skipped[@]}" "${skipped[*]}" >&2
   fi
@@ -671,7 +684,7 @@ grant_container_read() {
     chmod 640 "$path" || true
     return 0
   fi
-  echo "  (could not re-own ${path} for uid ${uid}:${gid} — making it world-readable; keep the deploy dir private)"
+  echo "  (couldn't set owners on ${path}; made it world-readable — keep this folder private)"
   chmod 644 "$path" || true
   return 0
 }
@@ -686,7 +699,7 @@ parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
   TARGET="" REF="" NAME="" PORT=8080 BIND=127.0.0.1 DOMAIN=""
   IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0
-  FROM_REPO="" HELP=0 CF_TOKEN=""
+  FROM_REPO="" HELP=0 CF_TOKEN="" SECRETS_FILE=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --ref)
@@ -740,17 +753,22 @@ parse_flags() {
       --yes) ASSUME_YES=1; shift ;;
       --purge) PURGE=1; shift ;;
       --clean) CLEAN=1; shift ;;
+      --secrets-file)
+        [ $# -ge 2 ] || die "--secrets-file requires a value"
+        SECRETS_FILE=$2
+        shift 2
+        ;;
       --help|-h) HELP=1; shift ;;
-      -) die "unknown flag: - (see --help)" ;;
+      -) die "Unknown flag: - — run with --help." ;;
       -*)
         usage >&2
-        die "unknown flag: $1"
+        die "Unknown flag: $1 — run with --help."
         ;;
       *)
         if [ -z "$TARGET" ]; then
           TARGET=$1
         else
-          die "unexpected positional argument: $1 (target already set to ${TARGET})"
+          die "Unexpected argument '$1' — the target is already set to ${TARGET}."
         fi
         shift
         ;;
@@ -880,8 +898,9 @@ fi
 # Preflights (R per target — explicit, per-OS hints, fail-fast)
 # ---------------------------------------------------------------------------
 preflight_docker() {
-  command -v docker >/dev/null 2>&1 || die "docker not found — install Docker (https://docs.docker.com/engine/install/)"
-  docker compose version >/dev/null 2>&1 || die "docker compose plugin not found — install docker-compose-plugin"
+  command -v docker >/dev/null 2>&1 || die "Docker isn't installed — install it, then re-run: https://docs.docker.com/engine/install/"
+  docker compose version >/dev/null 2>&1 || die "Docker Compose isn't installed — add the compose plugin, then re-run: https://docs.docker.com/compose/install/"
+  docker info >/dev/null 2>&1 || die 'Docker Engine isn'"'"'t running — start Docker Desktop (or `sudo systemctl start docker`), then re-run.'
 }
 
 require_bun() {
@@ -893,13 +912,43 @@ require_bun() {
   return 1
 }
 
-preflight_bun() {
-  require_bun || die "bun not found — install: curl -fsSL https://bun.sh/install | bash"
+# _MISSING_TOOLS — aggregate preflight: one pass, one clear list (warn-and-stop,
+# never auto-install). Entries are "<tool> — <fix command>".
+_MISSING_TOOLS=()
+_missing_tool() {
+  _MISSING_TOOLS+=("$1 — $2")
 }
 
-preflight_git_bun() {
-  command -v git >/dev/null 2>&1 || die "git not found — install git first"
-  preflight_bun
+# preflight_common — curl, tar, bun, and a sha256 tool, ALL collected before
+# dying so one run lists every missing prerequisite.
+preflight_common() {
+  _MISSING_TOOLS=()
+  command -v curl >/dev/null 2>&1 || _missing_tool "curl" "usually built in; install your distro's curl package"
+  command -v tar >/dev/null 2>&1 || _missing_tool "tar" "usually built in; install your distro's tar package"
+  require_bun || _missing_tool "bun" "curl -fsSL https://bun.sh/install | bash"
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    _missing_tool "sha256sum (or shasum)" "install your distro's coreutils package"
+  fi
+  if [ "${#_MISSING_TOOLS[@]}" -gt 0 ]; then
+    local msg="Missing prerequisites — fix these, then re-run:"
+    local item
+    for item in "${_MISSING_TOOLS[@]}"; do
+      msg+=$'\n'"  • ${item}"
+    done
+    die "$msg"
+  fi
+}
+
+preflight_workers() {
+  preflight_common
+}
+
+preflight_bare() {
+  preflight_common
+  if [ "${SYSTEMD}" = "1" ]; then
+    [ "$(uname -s)" = "Linux" ] || die "systemd isn't available on this OS — start with: ${INSTALL_DIR:-bare}/lexa-start.sh"
+    [ "$(id -u)" = "0" ] || die "--systemd needs root — run with sudo, or start with: ${INSTALL_DIR:-bare}/lexa-start.sh"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -914,12 +963,10 @@ fetch_release() {
   # (owned by the install-router track — do not duplicate that logic here).
   local want="${REF:-${RELEASE_TAG:-}}"
   if [ "${want}" = "main" ]; then
-    die "--ref main has no release tarballs — pass a release tag (e.g. --ref v2026.2.9) or use the dev target for a main checkout"
+    die "--ref main has no release tarballs — pass a release tag (e.g. --ref v2026.2.9)"
   fi
-  local tag
-  if [ -n "${want}" ] && [ "${want}" != "latest" ]; then
-    tag="${want}"
-  else
+  local tag="${want}"
+  if [ -z "${tag}" ] && [ "${INSTALL_DRY_RUN:-0}" != "1" ]; then
     # Newest web-app release from the list — NOT `releases/latest`, which can
     # point at a CLI release (`cli-v*`) published after the newest app tag.
     # The `v[0-9]` anchor never matches `cli-v...`.
@@ -927,14 +974,18 @@ fetch_release() {
       | grep -o '"tag_name": *"v[0-9][^"]*"' | head -1 | sed 's/.*"tag_name": *"//;s/"//')
     [ -n "${tag}" ] || die "could not resolve latest release of ${LEXA_REPO} (rate limit? pass RELEASE_TAG=vX.Y.Z)"
   fi
+  [ -n "${tag}" ] || tag="dry-run"
   local tarball="lexa-${kind}-${tag}.tar.gz"
-  step "fetch release" curl -fsSL "https://github.com/${LEXA_REPO}/releases/download/${tag}/${tarball}" -o "${dest}/${tarball}"
+  step "fetch release" mutate curl -fsSL "https://github.com/${LEXA_REPO}/releases/download/${tag}/${tarball}" -o "${dest}/${tarball}"
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    return 0
+  fi
   if curl -fsSL "https://github.com/${LEXA_REPO}/releases/download/${tag}/checksums.txt" -o "${dest}/checksums.txt" 2>/dev/null; then
-    local want=""
-    want=$(grep "${tarball}" "${dest}/checksums.txt" | awk '{print $1}')
-    [ -n "${want}" ] && step "verify checksum" verify_checksum "${dest}/${tarball}" "${want}"
+    local want_sha=""
+    want_sha=$(grep "${tarball}" "${dest}/checksums.txt" | awk '{print $1}')
+    [ -n "$want_sha" ] && step "verify checksum" verify_checksum "${dest}/${tarball}" "${want_sha}"
   else
-    echo "  (checksums.txt unavailable for ${tag} — skipped; pin tags in production)"
+    echo "  (no checksums.txt for ${tag} — download NOT verified; prefer a release tag)"
   fi
 }
 
@@ -944,10 +995,14 @@ fetch_release() {
 unpack_release() {
   local fetch_dir="$1" install_dir="$2" kind="$3"
   mkdir -p "${install_dir}"
-  local tarball
-  tarball=$(ls -t "${fetch_dir}"/lexa-"${kind}"-*.tar.gz 2>/dev/null | head -1)
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    printf '[dry-run] tar xzf %s/lexa-%s-*.tar.gz -C %s\n' "$fetch_dir" "$kind" "$install_dir"
+    return 0
+  fi
+  local tarball=""
+  tarball="$(ls -t "${fetch_dir}"/lexa-"${kind}"-*.tar.gz 2>/dev/null | head -1 || true)"
   [ -n "${tarball}" ] || die "no lexa-${kind}-*.tar.gz found in ${fetch_dir}"
-  step "unpack" tar xzf "${tarball}" -C "${install_dir}"
+  step "unpack release" tar xzf "${tarball}" -C "${install_dir}"
 }
 
 # ---------------------------------------------------------------------------
@@ -966,7 +1021,8 @@ START
 
 install_systemd_unit() {
   local dir="$1"
-  [ "$(id -u)" = "0" ] || die "--systemd requires root (sudo). Without root, run ${dir}/lexa-start.sh in tmux/nohup."
+  [ "$(uname -s)" = "Linux" ] || die "systemd isn't available on this OS — start with: ${dir}/lexa-start.sh"
+  [ "$(id -u)" = "0" ] || die "--systemd needs root — run with sudo, or start with: ${dir}/lexa-start.sh"
   cat > /etc/systemd/system/lexa.service <<UNIT
 [Unit]
 Description=Lexa server
@@ -987,21 +1043,99 @@ UNIT
 }
 
 # ---------------------------------------------------------------------------
+# bare helpers — manual start
+# ---------------------------------------------------------------------------
+# bare_start_manual <dir> — nohup the start script from inside the install dir
+# and record its pid. A re-run with a live pid is a no-op (never double-start);
+# a stale pid file is replaced.
+bare_start_manual() {
+  local dir="$1"
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    printf '[dry-run] (cd %s && nohup ./lexa-start.sh > lexa.log 2>&1 & echo $! > lexa.pid)\n' "$dir"
+    return 0
+  fi
+  local pidfile="${dir}/lexa.pid"
+  if [ -f "$pidfile" ]; then
+    local pid
+    pid="$(cat "$pidfile" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  # `exec` replaces the backgrounded subshell with the server itself, so `$!`
+  # is the server's pid (not a bash wrapper). The pid file is written with an
+  # explicit path — `cd` happens inside the backgrounded list only, so a bare
+  # `lexa.pid` would land in the caller's CWD.
+  ( cd "$dir" && exec nohup ./lexa-start.sh > lexa.log 2>&1 ) & echo $! > "${dir}/lexa.pid"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # final_banner <url>
+# Per-target summary: URL, /setup, CLI keys, and the secrets state. Callers set
+# BANNER_MASTER (e.g. `master key ✓ (dockers/.env.toml)`) and BANNER_GITHUB.
+# An empty url means the address was not recorded (workers without a captured
+# .deployed-url) — the banner points at the dashboard instead of inventing one.
 # ---------------------------------------------------------------------------
 final_banner() {
   local url="$1"
+  local master="${BANNER_MASTER:-}"
+  local github="${BANNER_GITHUB:-GitHub sync not configured — add later with --secrets-file}"
   echo ""
   echo "═══════════════════════════════════════════════"
-  echo "  Lexa — running at ${url}"
+  if [ -n "$url" ]; then
+    echo "  Lexa is running at ${url}"
+  else
+    echo "  Lexa is deployed to Cloudflare."
+    echo "  Find its address in the Cloudflare dashboard under Workers & Pages."
+  fi
   echo ""
-  echo "  NEXT → create the first admin (superadmin):"
-  echo "         open ${url}/setup"
-  echo "         (email + password, min 8 chars)"
+  echo "  Next: set up the first admin (superadmin)"
+  if [ -n "$url" ]; then
+    echo "        open ${url}/setup"
+  else
+    echo "        open <your worker URL>/setup"
+  fi
+  echo "        email + password (8+ characters)"
   echo ""
-  echo "  API keys (CLI) are minted post-setup:"
-  echo "         login → Settings → API Keys (or lx login)"
+  echo "  Later: create CLI API keys in Settings → API Keys"
+  echo "         (or run \`lx login\`)"
+  echo ""
+  if [ -n "$master" ]; then
+    echo "  Secrets: ${master}"
+    echo "           ${github}"
+  else
+    echo "  Secrets: ${github}"
+  fi
   echo "═══════════════════════════════════════════════"
+}
+
+# set_banner_github [env_file] — GitHub nudge line from GITHUB_TRIO_OK, falling
+# back to the persisted trio in the target env file on a re-run.
+set_banner_github() {
+  local file="${1:-}"
+  if [ "${GITHUB_TRIO_OK:-0}" = "1" ]; then
+    BANNER_GITHUB="GitHub sync configured"
+    return 0
+  fi
+  if [ -n "$file" ] && _env_file_has_github_trio "$file"; then
+    BANNER_GITHUB="GitHub sync configured"
+  else
+    BANNER_GITHUB="GitHub sync not configured — add later with --secrets-file"
+  fi
+}
+
+# _env_file_has_github_trio <file> — a complete, persisted GitHub trio in an
+# env file (TOML or flat). Empty values count as absent. Lets a re-run banner
+# report the real state even when this run didn't re-supply the secrets.
+_env_file_has_github_trio() {
+  local file="$1" id="" wh="" pk=""
+  [ -f "$file" ] || return 1
+  id="$(env_file_value "$file" GITHUB_APP_ID)"
+  wh="$(env_file_value "$file" GITHUB_WEBHOOK_SECRET)"
+  pk="$(env_file_value "$file" GITHUB_PRIVATE_KEY)"
+  [ -n "$pk" ] || pk="$(env_file_value "$file" GITHUB_PRIVATE_KEY_FILE)"
+  [ -n "$id" ] && [ -n "$wh" ] && [ -n "$pk" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -1055,12 +1189,278 @@ tty_read_secret() {
     fi
   fi
   if [ ! -r /dev/tty ]; then
-    die "headless: pass --flag instead (${prompt})"
+    die "No terminal available — pass the value as a flag instead (${prompt})."
   fi
-  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || die "headless: pass --flag instead (${prompt})"
+  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || die "No terminal available — pass the value as a flag instead (${prompt})."
   local reply=""
   # shellcheck disable=SC2069
-  IFS= read -rs reply 2>/dev/null < /dev/tty || die "headless: pass --flag instead (${prompt})"
+  IFS= read -rs reply 2>/dev/null < /dev/tty || die "No terminal available — pass the value as a flag instead (${prompt})."
   printf '\n' > /dev/tty
   printf '%s\n' "$reply"
+}
+
+# ---------------------------------------------------------------------------
+# Cloudflare credentials + secrets
+# ---------------------------------------------------------------------------
+
+# _cf_token_from_wrangler — read the OAuth token wrangler login stored, so a
+# logged-in operator needs no CF token. Silent; prints nothing on absence.
+_cf_token_from_wrangler() {
+  local cfg="${HOME}/.config/.wrangler/config/default.toml"
+  [ -f "$cfg" ] || return 1
+  local tok
+  tok="$(grep -E '^[[:space:]]*oauth_token[[:space:]]*=' "$cfg" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"//; s/"[[:space:]]*$//')"
+  [ -n "$tok" ] || return 1
+  printf '%s\n' "$tok"
+}
+
+# wrangler_secret_put <workdir> <name> <raw-value-file>
+# The value travels on stdin from a 0600 file — never argv, never stdout. Runs
+# from the workdir with the deploy's wrangler config so the account resolves
+# from the deploy, not from whatever `wrangler` infers elsewhere.
+wrangler_secret_put() {
+  local workdir="$1" name="$2" src="$3"
+  local cfg="deploy-${FLAVOR_NAME:-lexa}/wrangler.${FLAVOR_NAME:-lexa}.json"
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    printf '[dry-run] bun x wrangler secret put %s --name %s --config %s < (stdin)\n' "$name" "${FLAVOR_NAME:-lexa}" "$cfg"
+    return 0
+  fi
+  ( cd "$workdir" && bun x wrangler secret put "$name" --name "${FLAVOR_NAME:-lexa}" --config "$cfg" < "$src" )
+}
+
+# workers_secret_present <workdir> <name> — three-way remote check:
+#   present  the remote worker already carries the secret (never rotate)
+#   absent   no such secret — safe to mint
+#   unknown  the check could not run (wrangler error, or an existing deploy
+#            whose config is unreadable) — never mint on unknown
+# Dry-run reports absent (the plan mints/puts).
+workers_secret_present() {
+  local workdir="$1" name="$2"
+  local cfg="deploy-${FLAVOR_NAME:-lexa}/wrangler.${FLAVOR_NAME:-lexa}.json"
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    printf 'absent\n'
+    return 0
+  fi
+  if [ ! -r "${workdir}/${cfg}" ]; then
+    # No config: a first deploy (nothing remote to preserve) reads absent; a
+    # resumed deploy without its config is unknowable.
+    if [ -d "${workdir}/deploy-${FLAVOR_NAME:-lexa}" ]; then
+      printf 'unknown\n'
+    else
+      printf 'absent\n'
+    fi
+    return 0
+  fi
+  local out="" rc=0
+  out="$(cd "$workdir" && bun x wrangler secret list --config "$cfg" 2>/dev/null)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'unknown\n'
+    return 0
+  fi
+  if printf '%s' "$out" | grep -q "\"${name}\""; then
+    printf 'present\n'
+  else
+    printf 'absent\n'
+  fi
+}
+
+# _tty_available — true only when /dev/tty can actually be OPENED. `test -r
+# /dev/tty` is true even without a controlling terminal (the permission bits
+# pass; open then fails with ENXIO), so prompt guards must probe the open.
+_tty_available() {
+  { : > /dev/tty; } 2>/dev/null
+}
+
+# SECRET_ENTRIES — "KEY=value" pairs collected from --secrets-file or the
+# interactive wizard; applied per target (docker/bare: merged into .env.toml;
+# workers: pushed as Worker secrets + written to custody).
+SECRET_ENTRIES=()
+GITHUB_TRIO_OK=0
+
+# secrets_load_file <path> — KEY=value lines, each key validated against
+# ENV_FILE_ALLOWED_KEYS. Values are dotenv-decoded (quotes / `\n` escapes).
+secrets_load_file() {
+  local path="$1" line key val n=0
+  [ -f "$path" ] || die "Secrets file not found: ${path} — pass an existing file, then re-run."
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line="${line#"${line%%[![:space:]]*}"}"
+    [ -z "$line" ] && continue
+    case "$line" in '#'*) continue ;; esac
+    case "$line" in
+      export[[:space:]]*)
+        line="${line#export}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        ;;
+    esac
+    case "$line" in
+      *=*) ;;
+      *) die "Secrets file: line ${n} isn't a KEY=value pair — fix it to KEY=value, then re-run." ;;
+    esac
+    key="${line%%=*}"
+    key="${key%"${key##*[![:space:]]}"}"
+    _env_key_allowed "$key" || die "Secrets file: key ${key} not allowed — use the installer whitelist keys (see docs/DEPLOYMENT.md), then re-run."
+    val="${line#*=}"
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="$(dotenv_raw_value "$val")"
+    SECRET_ENTRIES+=("${key}=${val}")
+  done < "$path"
+}
+
+# secrets_wizard <target> — interactive optional-secrets entry. Fail-closed:
+# the GitHub trio is only recorded when all three values are present/readable.
+secrets_wizard() {
+  local target="$1" answer app_id webhook pk_path pk
+  answer=$(tty_read "Set up optional secrets now (GitHub sync)? [y/N]" "n")
+  case "$answer" in
+    [Yy]*) ;;
+    *) return 0 ;;
+  esac
+  app_id=$(tty_read "GitHub App ID:" "")
+  webhook=$(tty_read_secret "GitHub webhook secret:")
+  pk_path=$(tty_read "Private key — paste the path to your .pem file:" "")
+  if [ -z "$app_id" ] || [ -z "$webhook" ] || [ -z "$pk_path" ] || [ ! -r "$pk_path" ]; then
+    echo "  GitHub sync needs all three values — skipping it. Add them later with --secrets-file."
+    return 0
+  fi
+  if [ "$target" = "bare" ]; then
+    SECRET_ENTRIES+=("GITHUB_APP_ID=${app_id}" "GITHUB_WEBHOOK_SECRET=${webhook}" "GITHUB_PRIVATE_KEY_FILE=${pk_path}")
+  else
+    pk="$(cat "$pk_path")"
+    SECRET_ENTRIES+=("GITHUB_APP_ID=${app_id}" "GITHUB_WEBHOOK_SECRET=${webhook}" "GITHUB_PRIVATE_KEY=${pk}")
+  fi
+}
+
+# secrets_normalize_for_target <target> — docker/workers have no filesystem
+# (Workers) or take the key inline (docker): a GITHUB_PRIVATE_KEY_FILE entry is
+# read and rewritten as inline GITHUB_PRIVATE_KEY. An unreadable path drops the
+# entry so the trio check fails closed. Bare may keep the path.
+secrets_normalize_for_target() {
+  local target="$1" need_inline=0 kv k pk="" have_pk_file=0
+  [ "${#SECRET_ENTRIES[@]}" -eq 0 ] && return 0
+  if [ "$target" = "docker" ] || [ "$target" = "workers" ]; then
+    need_inline=1
+  fi
+  [ "$need_inline" = "1" ] || return 0
+  for kv in "${SECRET_ENTRIES[@]}"; do
+    k="${kv%%=*}"
+    if [ "$k" = "GITHUB_PRIVATE_KEY_FILE" ]; then
+      have_pk_file=1
+      pk="${kv#*=}"
+    fi
+  done
+  [ "$have_pk_file" = "1" ] || return 0
+  local out=()
+  if [ ! -r "$pk" ]; then
+    for kv in "${SECRET_ENTRIES[@]}"; do
+      k="${kv%%=*}"
+      [ "$k" = "GITHUB_PRIVATE_KEY_FILE" ] && continue
+      out+=("$kv")
+    done
+    SECRET_ENTRIES=(${out[@]+"${out[@]}"})
+    return 0
+  fi
+  local content
+  content="$(cat "$pk")"
+  for kv in "${SECRET_ENTRIES[@]}"; do
+    k="${kv%%=*}"
+    [ "$k" = "GITHUB_PRIVATE_KEY_FILE" ] && continue
+    out+=("$kv")
+  done
+  out+=("GITHUB_PRIVATE_KEY=${content}")
+  SECRET_ENTRIES=(${out[@]+"${out[@]}"})
+}
+
+# secrets_check_trio — GitHub sync needs all three values. None → nothing to do;
+# all three → ok; partial → drop the whole trio with a warning (never write a
+# partial trio). An empty value counts as absent, and a GITHUB_PRIVATE_KEY_FILE
+# must be readable — the path is useless if the file isn't there.
+secrets_check_trio() {
+  GITHUB_TRIO_OK=0
+  local have_id=0 have_wh=0 have_pk=0 kv k v
+  for kv in ${SECRET_ENTRIES[@]+"${SECRET_ENTRIES[@]}"}; do
+    k="${kv%%=*}"
+    v="${kv#*=}"
+    case "$k" in
+      GITHUB_APP_ID)
+        if [ -n "$v" ]; then have_id=1; fi
+        ;;
+      GITHUB_WEBHOOK_SECRET)
+        if [ -n "$v" ]; then have_wh=1; fi
+        ;;
+      GITHUB_PRIVATE_KEY)
+        if [ -n "$v" ]; then have_pk=1; fi
+        ;;
+      GITHUB_PRIVATE_KEY_FILE)
+        if [ -n "$v" ] && [ -r "$v" ]; then have_pk=1; fi
+        ;;
+    esac
+  done
+  [ $((have_id + have_wh + have_pk)) -eq 0 ] && return 0
+  if [ "$have_id" = "1" ] && [ "$have_wh" = "1" ] && [ "$have_pk" = "1" ]; then
+    GITHUB_TRIO_OK=1
+    return 0
+  fi
+  local out=()
+  for kv in "${SECRET_ENTRIES[@]}"; do
+    k="${kv%%=*}"
+    case "$k" in
+      GITHUB_APP_ID|GITHUB_WEBHOOK_SECRET|GITHUB_PRIVATE_KEY|GITHUB_PRIVATE_KEY_FILE) continue ;;
+    esac
+    out+=("$kv")
+  done
+  SECRET_ENTRIES=(${out[@]+"${out[@]}"})
+  echo "  GitHub sync needs all three values — skipping it. Add them later with --secrets-file."
+}
+
+# collect_optional_secrets <target> — populate SECRET_ENTRIES from
+# --secrets-file, else the TTY wizard (skipped with --yes / no terminal), then
+# normalize + fail-closed trio check.
+collect_optional_secrets() {
+  local target="$1"
+  SECRET_ENTRIES=()
+  GITHUB_TRIO_OK=0
+  if [ -n "${SECRETS_FILE:-}" ]; then
+    secrets_load_file "${SECRETS_FILE}"
+  elif [ "${ASSUME_YES:-0}" != "1" ] && _tty_available; then
+    secrets_wizard "${target}"
+  fi
+  secrets_normalize_for_target "${target}"
+  secrets_check_trio
+}
+
+# apply_secrets_to_env <path> — merge collected entries with no value in argv.
+apply_secrets_to_env() {
+  local path="$1"
+  [ "${#SECRET_ENTRIES[@]}" -gt 0 ] || return 0
+  write_env_toml "$path" "${SECRET_ENTRIES[@]}"
+}
+
+# workers_apply_secrets <workdir> — push the master key (from _WORKERS_MASTER_KEY,
+# set by deploy_workers) and any collected GitHub secrets via wrangler, and write
+# them to custody. Values travel on stdin from 0600 temp files.
+workers_apply_secrets() {
+  local workdir="$1" kv k vf
+  if [ -n "${_WORKERS_MASTER_KEY:-}" ]; then
+    vf="$(mktemp)"
+    chmod 600 "$vf"
+    printf '%s' "${_WORKERS_MASTER_KEY}" > "$vf"
+    step "apply secrets" wrangler_secret_put "$workdir" LXK_SECRETS_MASTER_KEY "$vf"
+    rm -f "$vf"
+  fi
+  for kv in ${SECRET_ENTRIES[@]+"${SECRET_ENTRIES[@]}"}; do
+    k="${kv%%=*}"
+    case "$k" in
+      GITHUB_APP_ID|GITHUB_WEBHOOK_SECRET|GITHUB_PRIVATE_KEY) ;;
+      *) continue ;;
+    esac
+    vf="$(mktemp)"
+    chmod 600 "$vf"
+    printf '%s' "${kv#*=}" > "$vf"
+    step "apply secrets" wrangler_secret_put "$workdir" "$k" "$vf"
+    rm -f "$vf"
+  done
+  if [ "${#SECRET_ENTRIES[@]}" -gt 0 ]; then
+    write_env_toml "${workdir}/.env.toml" "${SECRET_ENTRIES[@]}"
+  fi
 }

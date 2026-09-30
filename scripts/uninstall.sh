@@ -25,7 +25,7 @@ case "${TARGET}" in
 esac
 
 if [ "${PURGE}" = "1" ]; then
-  if [ -r /dev/tty ]; then
+  if _tty_available; then
     answer=$(tty_read "This DELETES data (volume/DB). Type 'purge' to confirm" "")
     [ "${answer}" = "purge" ] || die "confirmation did not match — aborted (data intact)"
   else
@@ -35,7 +35,7 @@ fi
 
 case "${TARGET}" in
   docker)
-    DEPLOY_DIR="${DEPLOY_DIR:-lexa-deploy}"
+    DEPLOY_DIR="${DEPLOY_DIR:-dockers}"
     [ -d "${DEPLOY_DIR}" ] || die "deploy dir '${DEPLOY_DIR}' not found — pass DEPLOY_DIR env or cd next to it"
     DEPLOY_DIR="$(cd "${DEPLOY_DIR}" && pwd)"
     (cd "${DEPLOY_DIR}" && step "compose down" mutate docker compose down)
@@ -53,7 +53,7 @@ case "${TARGET}" in
       step "remove unit" rm -f /etc/systemd/system/lexa.service && mutate systemctl daemon-reload
     fi
     pkill -f "server/entry.ts" 2>/dev/null || true
-    INSTALL_DIR="${INSTALL_DIR:-${HOME}/.lexa-server}"
+    INSTALL_DIR="${INSTALL_DIR:-bare}"
     [ -d "${INSTALL_DIR}" ] || die "install dir '${INSTALL_DIR}' not found"
     if [ "${PURGE}" = "1" ]; then
       step "remove install dir + data" rm -rf "${INSTALL_DIR}"
@@ -65,11 +65,16 @@ case "${TARGET}" in
 
   workers)
     require_bun
-    WORK_DIR="${WORK_DIR:-lexa-workers-release}"
+    WORK_DIR="${WORK_DIR:-cf-workers}"
     UNINSTALL_NAME="$(resolve_deploy_name "${WORK_DIR}" "${NAME}")"
     [ -f "${WORK_DIR}/deploy-${UNINSTALL_NAME}/wrangler.${UNINSTALL_NAME}.json" ] || die "no wrangler config at ${WORK_DIR}/deploy-${UNINSTALL_NAME}/ — was workers installed here? (pass --name if several deploys exist)"
     # Worker + route teardown via wrangler; resources (D1/R2/KV) default KEEP.
-    (cd "${WORK_DIR}" && step "wrangler delete" bunx wrangler delete --config "deploy-${UNINSTALL_NAME}/wrangler.${UNINSTALL_NAME}.json" || true)
+    # Tolerate ONLY the delete call itself: an absent worker (or a failed delete)
+    # must not abort the rest of teardown — warn and continue. The steps after
+    # this still run and still fail loudly.
+    if ! (cd "${WORK_DIR}" && step "wrangler delete" bun x wrangler delete --config "deploy-${UNINSTALL_NAME}/wrangler.${UNINSTALL_NAME}.json"); then
+      echo "  (worker not found or delete failed — continuing)"
+    fi
     if [ "${PURGE}" = "1" ]; then
       rm -f "${WORK_DIR}/.cf-token"
       echo "  --purge: D1/R2/KV resources must be deleted from the CF dashboard"

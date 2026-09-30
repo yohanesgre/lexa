@@ -38,6 +38,13 @@ status/
 # Local staging deploy dir (docker-compose + .env with real API keys) — never commit
 lexa-deploy/
 
+# Installer scratch dirs (self-describing CWD targets) — never commit
+/dockers/
+/bare/
+/cf-workers/
+/lexa-workers-release/
+/.deployed-url
+
 # Slim worktrees — local orchestration checkouts, never commit
 .slim/worktrees/
 .worktrees/

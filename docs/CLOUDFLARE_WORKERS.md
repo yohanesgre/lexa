@@ -39,9 +39,9 @@ replaces the other; either or both can be live at any time.
 7. **Deploy surface:** `install.sh workers` is the operator's pick point —
    it fetches the release workers tarball, provisions D1+R2+KV via the
    Cloudflare API, applies D1 migrations, and deploys the prebuilt bundle via
-   `bunx wrangler` (helper: `scripts/workers-install.ts`, `--name` keys the
+   `bun x wrangler` (helper: `scripts/workers-install.ts`, `--name` keys the
    resource names). Repo deploys
-   use `install.sh workers --from-repo <dir>` or `install.sh dev`. The Bun
+   use `install.sh workers --from-repo <dir>`. The Bun
    flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
    targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
 8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup (cron
