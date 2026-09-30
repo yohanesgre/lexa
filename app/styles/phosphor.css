@@ -8698,18 +8698,23 @@
   color: var(--lx-text-link);
   margin-bottom: 8px;
 }
-.chat-landing-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+.chat-landing-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
 .chat-landing-chip {
-  height: 24px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
-  padding: 0 9px;
+  padding: 0 12px;
   font-family: var(--lx-font-body);
-  font-size: 10px;
+  font-size: 11px;
   border: 1px solid var(--lx-border-default);
-  border-radius: 12px;
+  border-radius: 14px;
   color: var(--lx-text-secondary);
   background: transparent;
+}
+@media (min-width: 768px) {
+  .chat-landing .chat-composer {
+    padding-bottom: 4px;
+  }
 }
 .chat-landing-chip:hover { border-color: var(--lx-border-strong); color: var(--lx-text-primary); }
 @media (max-width: 767px) {
