@@ -41,7 +41,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
       <main className="page-frame page-frame-narrow">
         <div className="empty-box">
           <div className="text-sm font-medium text-lx-text-primary">Project not found</div>
-          <p className="text-xs text-lx-text-secondary">It may have been deleted or you don't have access.</p>
+          <p className="text-xs text-lx-text-secondary">This project may have been deleted, or you don't have access.</p>
           <Link to="/" className="btn btn-primary mt-3" style={{ height: 32, padding: "0 14px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Back to projects</Link>
         </div>
       </main>
@@ -300,7 +300,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
       ) : repos.length === 0 ? (
         <div className="empty-box mb-4">
           <div className="text-sm font-medium text-lx-text-primary">No linked repos</div>
-          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let the AI read it and to sync issues with the board.</p>
+          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo so the AI can read it and sync issues to the board.</p>
         </div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>

@@ -114,7 +114,7 @@ export function SetupStepEmail({
       {error && <p className="text-xs text-lx-text-danger mt-2">{error}</p>}
       {isRemote && (
         <p className="text-xs text-lx-text-warning mt-3 leading-4">
-          This account becomes the first superadmin. Keep the password safe — password resets require server access; teammates join via workspace invites and set-password links.
+          This account is the first superadmin. Keep the password safe — resets need server access. Teammates join via workspace invites and set-password links.
         </p>
       )}
       <div className="flex justify-end mt-5">

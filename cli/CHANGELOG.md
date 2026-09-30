@@ -56,8 +56,9 @@ release the app image. The version lives in `cli/package.json` —
 - External harness contract documented: read/write work items through
   `lx task …` / `lx wiki …` only; `--json`, TipTap→Markdown, `PREFIX-N`
   aliases.
-- `--json` is a READ-side flag, on read commands (work-item `list`/`get` and
-  `field-config get`); `lx settings *` takes no `--json`. Writes print
+- `--json` is a READ-side flag: `task`/`wiki` `list` + `get`, the planning
+  `list` reads (`project`, `column`, `swimlane`, `milestone`), and
+  `field-config get`. `lx settings *` takes no `--json`; writes print
   human-readable confirmations, including the wiki `old → new` slug on rename.
 
 ### Fixed

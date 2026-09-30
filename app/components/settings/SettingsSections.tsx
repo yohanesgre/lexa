@@ -319,19 +319,19 @@ export function RateLimitSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Per-client-IP request budget for the API surface. Applies to /api; AI machine surfaces are exempt. Changes apply immediately — no restart needed.
+        Per-client-IP request budget for the API surface. Applies to all API requests; AI machine surfaces are exempt. Changes apply immediately — no restart needed.
       </p>
 
       {data?.envOverride && (
         <p className="text-xs text-lx-text-muted mb-2">
-          Active values come from the <span className="font-mono">LXK_RATE_LIMIT_MAX</span> / <span className="font-mono">LXK_RATE_LIMIT_WINDOW_MS</span> environment variables. Saving new values below overrides them.
+          Server environment variables override these when set. Saving new values below overrides them.
         </p>
       )}
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : isError ? (
-        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load rate limit settings.</div>
+        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load rate limits.</div>
       ) : (
         <div className="card-panel card-panel--elevated">
           <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Request Budget</h3>
@@ -395,19 +395,19 @@ export function GithubSyncSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Two-way issue sync between GitHub and Lexa boards. Configured with GitHub App credentials; webhook deliveries are HMAC-verified against the webhook secret.
+        Two-way issue sync between GitHub and Lexa boards. Configured with GitHub App credentials. Incoming events are verified with your webhook secret.
       </p>
 
       {data?.source === "env" && (
         <p className="text-xs text-lx-text-muted mb-2">
-          Active values come from the <span className="font-mono">GITHUB_APP_ID</span> / <span className="font-mono">GITHUB_PRIVATE_KEY</span> / <span className="font-mono">GITHUB_PRIVATE_KEY_FILE</span> / <span className="font-mono">GITHUB_WEBHOOK_SECRET</span> environment variables. Saving new values below overrides them.
+          Server environment variables override these when set. Saving below overrides them.
         </p>
       )}
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : isError ? (
-        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load GitHub sync settings.</div>
+        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load GitHub sync.</div>
       ) : (
         <GithubSyncCredentialsCard
           onRemove={() => setRemoving(true)}

@@ -46,7 +46,7 @@ export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: 
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Sample data</h2>
       </div>
       <p className="text-sm text-lx-text-secondary leading-5 mb-4">
-        Optional demo data so you can explore Lexa right away. Pick how much to load — you can delete it later.
+        Optional demo data so you can explore Lexa right away. Choose how much to load — you can delete it later.
       </p>
 
       <div role="radiogroup" aria-label="Sample data" className="flex flex-col gap-2 mb-4">

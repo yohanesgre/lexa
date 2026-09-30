@@ -103,7 +103,7 @@ function SwimlaneFormFields({ error, state, set, milestones, isBacklog }: {
           rows={4}
         />
         <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-          Shown as a subtitle under the swimlane header on the board.
+          Plain text. Shown truncated with &quot;read more&quot; in the swimlane header.
         </p>
       </div>
 

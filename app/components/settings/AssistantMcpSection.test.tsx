@@ -154,7 +154,7 @@ describe("AssistantMcpSection — transport form", () => {
     expect(screen.getByText("Enter a web address (http:// or https://).")).toBeInTheDocument();
     expect(screen.queryByText(/no userinfo/)).not.toBeInTheDocument();
     expect(screen.queryByText(/SSRF/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep the stored token");
   });
 
   it("saves a client with label + url and no command/args", async () => {
@@ -230,7 +230,7 @@ describe("AssistantMcpSection — managed token input", () => {
     const field = screen.getByLabelText("Bearer token") as HTMLInputElement;
     expect(field).toHaveAttribute("type", "password");
     expect(field).toHaveAttribute("autocomplete", "off");
-    expect(field).toHaveAttribute("placeholder", "Leave empty to keep stored token");
+    expect(field).toHaveAttribute("placeholder", "Leave empty to keep the stored token");
     await user.type(field, TOKEN);
 
     // A password input is not in the accessible text, and the surrounding
@@ -279,7 +279,7 @@ describe("AssistantMcpSection — managed token input", () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
     await openEdit(user);
-    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep the stored token");
     expect(screen.queryByText(/Read back as/)).not.toBeInTheDocument();
     expect(screen.queryByText(/hasSecret: true/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Encrypted with AES-256-GCM/)).not.toBeInTheDocument();
@@ -297,7 +297,7 @@ describe("AssistantMcpSection — managed token input", () => {
     // The enabled field keeps its type-to-cancel route; no button is needed
     // (or offered) while the field can take a keystroke.
     expect(screen.queryByRole("button", { name: "Keep token" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Leave empty to keep stored token/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Leave empty to keep the stored token/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Read back as/)).not.toBeInTheDocument();
   });
 });
@@ -439,7 +439,7 @@ describe("AssistantMcpSection — no master key", () => {
     await user.click(screen.getByRole("button", { name: "Keep token" }));
     expect(screen.queryByText("Secret will be removed on Save.")).not.toBeInTheDocument();
     expect(screen.getByText(/Saved/, { selector: ".chip" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep stored token");
+    expect(screen.getByLabelText("Bearer token")).toHaveAttribute("placeholder", "Leave empty to keep the stored token");
 
     await user.click(screen.getByRole("button", { name: "Save client" }));
     expect(h.updated[0]).not.toHaveProperty("clearSecret");

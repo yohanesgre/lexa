@@ -100,7 +100,7 @@ export function PriceEditor({
         <PriceSyncButton />
       </div>
       <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>
-        Per-model per-token prices used to derive cost in the summary and by_model table. Prices are stored as USD per 1M tokens (input / output / cached read / cached write). Editing writes immediately. New prices apply to future usage.
+        Per-model per-token prices used to derive cost in the summary and per-model table. Prices are stored as USD per 1M tokens (input / output / cached read / cached write). Editing writes immediately; new prices apply to future usage.
       </p>
       {isError ? <div className="text-sm mb-2" style={{ color: "var(--lx-text-danger)" }}>Failed to load prices</div> : null}
       <div style={{ overflowX: "auto" }}>

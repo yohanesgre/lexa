@@ -97,9 +97,10 @@ The stable integration surface is exactly:
 - **Read/write work items** through `lx task list|get|create|move|update|delete`
   and `lx wiki list|get|create|update|delete`, plus `lx github
   link|link-existing|unlink`.
-- `--json` on read commands only (work-item `list`/`get` and `field-config
-  get`) for machine-readable output; `lx settings *` takes no `--json`. Writes
-  print human-readable confirmations.
+- `--json` on read commands only: `task`/`wiki` `list` + `get`, the planning
+  `list` reads (`project`, `column`, `swimlane`, `milestone`), and
+  `field-config get`. `lx settings *` takes no `--json`; writes print
+  human-readable confirmations.
 - Task and wiki documents are TipTap JSON; the CLI renders them to Markdown
   (`task get`, `wiki get`) and accepts Markdown on writes.
 - Task ids accept the full UUID **or** the ticket key (`PREFIX-N`, e.g.

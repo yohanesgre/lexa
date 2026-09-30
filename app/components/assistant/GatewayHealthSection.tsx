@@ -196,7 +196,7 @@ export function GatewayHealthSection() {
               <div className="health-details-body">
                 <dl className="health-details-kv">
                   <dt>Circuit</dt><dd>{h?.data?.circuitState ?? "—"}</dd>
-                  <dt>Failed checks in a row</dt><dd>{h?.data ? h.data.consecutiveFailures : "—"}</dd>
+                  <dt>Consecutive failures</dt><dd>{h?.data ? h.data.consecutiveFailures : "—"}</dd>
                   <dt>Total failed checks</dt><dd>{h?.data ? h.data.failureCount : "—"}</dd>
                   {h?.data?.openedAt ? (<><dt>Opened at</dt><dd>{h.data.openedAt}</dd></>) : null}
                   <dt>Last breaker event</dt><dd>{h?.data?.lastProbeAt ?? "— (no check recorded)"}</dd>

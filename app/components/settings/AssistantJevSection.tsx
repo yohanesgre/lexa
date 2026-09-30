@@ -244,7 +244,7 @@ function JevConfigForm({ config, secretsEnabled }: { config: AssistantJevMasked;
           title="Clear Jev API key?"
           body={
             <>
-              Remove the Jev API key from the config row. Every preflight and <span className="font-mono">jev_assess</span> call then runs key-less — the advisory is skipped and the tool is not offered. The stored value is deleted, not archived, and it is never shown to you again. This cannot be undone.
+              Remove the Jev API key from your saved settings. Every preflight and <span className="font-mono">jev_assess</span> call then runs key-less — the advisory is skipped and the tool is not offered. The stored value is deleted, not archived, and it is never shown to you again. This cannot be undone.
             </>
           }
           confirmLabel="Clear key"
