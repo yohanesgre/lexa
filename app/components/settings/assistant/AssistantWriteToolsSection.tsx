@@ -109,7 +109,7 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
         </div>
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>
-          <span className="field-hint">Empty selection behaves exactly like master off — Assistant runs read-only. Changes apply from the next turn onward.</span>
+          <span className="field-hint">Empty selection = read-only. Applies from the next turn.</span>
           <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending}>
             {save.isPending ? "Saving…" : "Save"}
           </button>

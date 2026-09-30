@@ -224,7 +224,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
                 <OptionSettingsSection
                   kind="priority"
                   title="Priorities"
-                  description="The priority options available on tasks in this project. Order defines the dropdown order; first option is the create default."
+                  description="The priority options available on tasks in this project. Order defines the dropdown order; first option is the default."
                   options={orderedOptions.priorities}
                   sensors={sensors}
                   onDragEnd={(e) => handleOptionDragEnd(e, "priority")}
@@ -238,7 +238,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
                 <OptionSettingsSection
                   kind="type"
                   title="Types"
-                  description="The type options available on tasks in this project. Order defines the dropdown order; first option is the create default."
+                  description="The type options available on tasks in this project. Order defines the dropdown order; first option is the default."
                   options={orderedOptions.types}
                   sensors={sensors}
                   onDragEnd={(e) => handleOptionDragEnd(e, "type")}
@@ -301,7 +301,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
       {deleteColumnTarget && (
         <ConfirmDeleteDialog
           title={`Delete ‘${deleteColumnTarget.name}’?`}
-          body="This will remove all tasks in this column. This action cannot be undone."
+          body="Remove all tasks in this column? This can't be undone."
           onCancel={() => setDeleteColumnTarget(null)}
           onConfirm={() => { deleteColumn.mutate({ id: deleteColumnTarget.id }); setDeleteColumnTarget(null); }}
         />

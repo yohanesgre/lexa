@@ -91,7 +91,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
       <div className="card-panel card-panel--elevated">
         {notConfigured && (
             <WarningNotice className="mt-0" style={{ marginBottom: 16 }} title="PROVIDER_NOT_CONFIGURED">
-              No provider configured for this project. Save a provider + model to enable Assistant. Until then, Generate returns 409 PROVIDER_NOT_CONFIGURED.
+              No provider configured for this project. Save a provider + model to enable Assistant.
             </WarningNotice>
         )}
 
@@ -161,7 +161,6 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
         </div>
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>
-          <span className="field-hint">Omitted optional fields keep stored values. Uses setQueryData from the mutation response, never invalidate.</span>
           <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending || !hasPrimary(providerId, modelId)}>
             {save.isPending ? "Saving…" : "Save"}
           </button>

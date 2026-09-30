@@ -126,7 +126,7 @@ export function PriceEditor({
               <tr>
                 <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
                   <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No models yet</div>
-                  <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>Prices appear after first gateway call. Add manually via Save (PUT creates row)</div>
+                  <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>Prices appear after the first gateway call. Save to add one manually.</div>
                 </td>
               </tr>
             ) : models.map((model) => {

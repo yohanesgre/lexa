@@ -30,7 +30,7 @@ export function AssistantProviderModelsTable({ providerId, models }: { providerI
             </thead>
             <tbody>
               {models.length === 0 ? (
-                <tr><td colSpan={5} className="text-xs text-lx-text-muted" style={{ textAlign: "center", padding: 16 }}>No models — fetch from provider.</td></tr>
+                <tr><td colSpan={5} className="text-xs text-lx-text-muted" style={{ textAlign: "center", padding: 16 }}>No models yet.</td></tr>
               ) : models.map((m) => (
                 <AssistantSortableModelRow key={m.id} providerId={providerId} model={m} />
               ))}
