@@ -1040,8 +1040,8 @@ body { name* }
   ⚠ rawKey returned ONCE — never stored, never shown again
   The key binds to the creating user (identity.userId required — a bare
   server key cannot mint another key; 403 FORBIDDEN otherwise). Server keys
-  (user_id NULL) are never created through the API — seeded by env
-  LXK_API_KEY only.
+  (`user_id NULL`) are legacy rows from pre-change installs; never created
+  through the API.
 
 DELETE /api/settings/api-keys/:id  (admin)
 → 204 | 404

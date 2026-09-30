@@ -212,14 +212,16 @@ Key facts:
   vite both inherit `.env.toml` values from the process environment, since
   vite is not TOML-aware (it still auto-loads a legacy flat `.env` if one
   exists). Browsers authenticate via the session cookie — no key in the bundle.
-- **Key rotation is safe:** browsers authenticate via the session cookie, so
-  re-running `bun run setup` (which may rotate the key) never breaks the
-  browser — no rebuild required.
+- **Re-running `bun run setup` is safe:** browsers authenticate via the session
+  cookie, and setup mints `LXK_SECRETS_MASTER_KEY` only when the env file lacks
+  one (never rotated on re-run), so a re-run never breaks the browser — no
+  rebuild required.
 - **`bun run dev:server` alone** serves the **built** app from `dist/` on :3000
   (frontend changes require `bun run build` first). Use it only for API work
   or to preview the production build; use `dev:full` for day-to-day development.
 - **Setup wizard** (`scripts/setup-cli.ts` / web wizard `/setup`): prompts for
-  admin email (`LXK_ADMIN_EMAILS`), keeps/generates `LXK_API_KEY`, runs
+  admin email (`LXK_ADMIN_EMAILS`), mints `LXK_SECRETS_MASTER_KEY` once when the
+  env file lacks one (kept verbatim on re-run), runs
   migrations, seeds `scripts/seed-dev.sql` (only when the DB is empty). Sample
   data is **dev + staging**: the wizard seeds in `dev` and `staging`; any
   other `LXK_ENV` (prod) stays empty — the Backlog swimlane and default

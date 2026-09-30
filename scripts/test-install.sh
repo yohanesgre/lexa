@@ -753,6 +753,121 @@ else
   echo "SKIP: bun unavailable — T-secrets-file workers case needs the runtime"
 fi
 
+echo "== T-prune-legacy-secret: workers auto-prune the dead LXK_API_KEY =="
+
+# A `bun` shim answers `x wrangler secret list` from a fixture and logs the
+# `secret delete` argv — no real Cloudflare call, ever.
+prune_tmp="$(mktemp -d)"
+mkdir -p "${prune_tmp}/bin" "${prune_tmp}/cf-workers/deploy-lexa"
+printf '{"name":"lexa","vars":{"LXK_ENV":"production","LXK_PUBLIC_URL":"https://lexa.example.workers.dev"}}\n' \
+  > "${prune_tmp}/cf-workers/deploy-lexa/wrangler.lexa.json"
+cat > "${prune_tmp}/bin/bun" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"wrangler secret list"*)
+    printf '%s\n' "$*" >> "${PRUNE_LIST_LOG:-/dev/null}"
+    printf '%s' "${PRUNE_LIST:-[]}"
+    exit "${PRUNE_LIST_RC:-0}"
+    ;;
+  *"wrangler secret delete"*)
+    printf '%s\n' "$*" >> "${PRUNE_DELETE_LOG:-/dev/null}"
+    exit "${PRUNE_DELETE_RC:-0}"
+    ;;
+esac
+exit 0
+SHIM
+chmod +x "${prune_tmp}/bin/bun"
+prune_present='[{"name":"LXK_SECRETS_MASTER_KEY","type":"secret_text"},{"name":"LXK_API_KEY","type":"secret_text"}]'
+prune_absent='[{"name":"LXK_SECRETS_MASTER_KEY","type":"secret_text"}]'
+prune_prev='[{"name":"LXK_API_KEY_PREV","type":"secret_text"}]'
+
+# Present + dry-run: the planned delete is visible; nothing executes.
+prune_out="$( export PATH="${prune_tmp}/bin:${PATH}" FLAVOR_NAME=lexa INSTALL_DRY_RUN=1 \
+  PRUNE_LIST="${prune_present}" PRUNE_DELETE_LOG="${prune_tmp}/delete.log"
+  lib_call workers_prune_legacy_secret "${prune_tmp}/cf-workers" 2>&1 )" || true
+assert_grep "T-prune-legacy-secret dry-run plans the delete" \
+  '\[dry-run\] bun x wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler\.lexa\.json' "$prune_out"
+assert_eq "T-prune-legacy-secret dry-run executes no delete" "absent" \
+  "$([ -e "${prune_tmp}/delete.log" ] && echo present || echo absent)"
+
+# Absent: nothing to do — no output, no delete.
+prune_out="$( export PATH="${prune_tmp}/bin:${PATH}" FLAVOR_NAME=lexa INSTALL_DRY_RUN=1 \
+  PRUNE_LIST="${prune_absent}"
+  lib_call workers_prune_legacy_secret "${prune_tmp}/cf-workers" 2>&1 )" || true
+assert_eq "T-prune-legacy-secret absent prints nothing" "" "$prune_out"
+
+# A differently-named secret is NOT the dead key — the match is exact, so no
+# output and no delete (a prefix like LXK_API_KEY_PREV must not trip it).
+rm -f "${prune_tmp}/delete.log"
+prune_out="$( export PATH="${prune_tmp}/bin:${PATH}" FLAVOR_NAME=lexa \
+  PRUNE_LIST="${prune_prev}" PRUNE_DELETE_LOG="${prune_tmp}/delete.log"
+  lib_call workers_prune_legacy_secret "${prune_tmp}/cf-workers" 2>&1 )" || true
+assert_eq "T-prune-legacy-secret prefix-only name prints nothing" "" "$prune_out"
+assert_eq "T-prune-legacy-secret prefix-only name executes no delete" "absent" \
+  "$([ -e "${prune_tmp}/delete.log" ] && echo present || echo absent)"
+
+# A successful delete names only LXK_API_KEY, and pins the exact argv.
+: > "${prune_tmp}/delete.log"
+: > "${prune_tmp}/list.log"
+prune_rc=0
+prune_out="$( export PATH="${prune_tmp}/bin:${PATH}" FLAVOR_NAME=lexa \
+  PRUNE_LIST="${prune_present}" PRUNE_DELETE_RC=0 PRUNE_DELETE_LOG="${prune_tmp}/delete.log" \
+  PRUNE_LIST_LOG="${prune_tmp}/list.log"
+  lib_call workers_prune_legacy_secret "${prune_tmp}/cf-workers" 2>&1 )" || prune_rc=$?
+assert_rc "T-prune-legacy-secret successful delete exits 0" 0 "$prune_rc"
+assert_grep "T-prune-legacy-secret prints the removal copy" \
+  '\(removed LXK_API_KEY — it is no longer read\)' "$prune_out"
+prune_log="$(cat "${prune_tmp}/delete.log" 2>/dev/null || true)"
+assert_grep "T-prune-legacy-secret delete pins the full argv" \
+  'wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler\.lexa\.json' "$prune_log"
+assert_eq "T-prune-legacy-secret delete never names another secret" "0" \
+  "$(printf '%s' "$prune_log" | grep -c 'LXK_SECRETS_MASTER_KEY' || true)"
+prune_list_log="$(cat "${prune_tmp}/list.log" 2>/dev/null || true)"
+assert_grep "T-prune-legacy-secret list pins --name lexa" \
+  'wrangler secret list --name lexa' "$prune_list_log"
+assert_grep "T-prune-legacy-secret list pins the deploy config" \
+  'lexa --config deploy-lexa/wrangler\.lexa\.json' "$prune_list_log"
+assert_grep "T-prune-legacy-secret list pins --format json" \
+  'wrangler\.lexa\.json --format json' "$prune_list_log"
+
+# A failed delete warns + continues (rc 0).
+prune_rc=0
+prune_out="$( export PATH="${prune_tmp}/bin:${PATH}" FLAVOR_NAME=lexa \
+  PRUNE_LIST="${prune_present}" PRUNE_DELETE_RC=1 PRUNE_DELETE_LOG="${prune_tmp}/delete.log"
+  lib_call workers_prune_legacy_secret "${prune_tmp}/cf-workers" 2>&1 )" || prune_rc=$?
+assert_rc "T-prune-legacy-secret failed delete still exits 0" 0 "$prune_rc"
+assert_grep "T-prune-legacy-secret failed delete warns + continues" \
+  "couldn't remove the dead LXK_API_KEY secret" "$prune_out"
+
+# An unreadable list warns + skips (never deletes on unknown state).
+prune_out="$( export PATH="${prune_tmp}/bin:${PATH}" FLAVOR_NAME=lexa \
+  PRUNE_LIST="${prune_present}" PRUNE_LIST_RC=1 PRUNE_DELETE_LOG="${prune_tmp}/delete.log"
+  lib_call workers_prune_legacy_secret "${prune_tmp}/cf-workers" 2>&1 )" || true
+assert_grep "T-prune-legacy-secret list failure warns + skips" \
+  "couldn't read the worker's secrets" "$prune_out"
+
+# Wiring: a full workers dry-run reaches the prune step (fixture reports the
+# dead secret present) and still executes nothing.
+if [ "$have_bun_path" -eq 1 ]; then
+  prune_int="$(mktemp -d)"
+  prune_int_home="$(mktemp -d)"
+  mkdir -p "${prune_int}/bin" "${prune_int}/cf-workers/deploy-lexa"
+  printf '{"name":"lexa","vars":{"LXK_ENV":"production","LXK_PUBLIC_URL":"https://lexa.example.workers.dev"}}\n' \
+    > "${prune_int}/cf-workers/deploy-lexa/wrangler.lexa.json"
+  cp "${prune_tmp}/bin/bun" "${prune_int}/bin/bun"
+  prune_int_rc=0
+  prune_int_out="$(cd "${prune_int}" && HOME="${prune_int_home}" INSTALL_DRY_RUN=1 \
+    PATH="${prune_int}/bin:${PATH}" PRUNE_LIST="${prune_present}" PRUNE_DELETE_LOG="${prune_int}/delete.log" \
+    bash "$INSTALL" workers --cf-token test-token 2>&1)" || prune_int_rc=$?
+  assert_rc "T-prune-legacy-secret workers dry-run completes" 0 "$prune_int_rc"
+  assert_grep "T-prune-legacy-secret workers dry-run plans the prune" \
+    '\[dry-run\] bun x wrangler secret delete LXK_API_KEY --name lexa' "$prune_int_out"
+  assert_eq "T-prune-legacy-secret workers dry-run executes no delete" "absent" \
+    "$([ -e "${prune_int}/delete.log" ] && echo present || echo absent)"
+else
+  echo "SKIP: bun unavailable — T-prune-legacy-secret wiring needs the runtime"
+fi
+
 echo "== T-custody-preserve: master key survives a re-run =="
 
 cust_tmp="$(mktemp -d)"

@@ -2,7 +2,8 @@
 # Assistant P5 smoke — exercises the S9/S15 surface against a running server.
 #
 # Usage:
-#   BASE_URL=http://localhost:3000 LXK_API_KEY=<key> ./scripts/assistant-smoke.sh
+#   BASE_URL=http://localhost:3000 LEXA_API_KEY=<key> ./scripts/assistant-smoke.sh
+#   (legacy LXK_API_KEY is accepted as a fallback)
 #
 # Boots a mock OpenAI-compatible provider on MOCK_PROVIDER_PORT (default 18081)
 # that requires `Bearer sk-mock-good`, emits one tool call round then content,
@@ -11,7 +12,8 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:3000}"
-LXK_API_KEY="${LXK_API_KEY:?LXK_API_KEY required}"
+LEXA_API_KEY="${LEXA_API_KEY:-${LXK_API_KEY:-}}"
+LEXA_API_KEY="${LEXA_API_KEY:?LEXA_API_KEY required (or legacy LXK_API_KEY)}"
 MOCK_PORT="${MOCK_PROVIDER_PORT:-18081}"
 MOCK_KEY="sk-mock-good"
 BAD_KEY="sk-wrong"
@@ -67,7 +69,7 @@ sleep 1
 
 api() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
 api_body() { curl -sS "$@"; }
-auth=(-H "Authorization: Bearer $LXK_API_KEY" -H "Content-Type: application/json")
+auth=(-H "Authorization: Bearer $LEXA_API_KEY" -H "Content-Type: application/json")
 json() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(d))' 2>/dev/null || cat; }
 
 fail() { echo "FAIL: $1"; exit 1; }
