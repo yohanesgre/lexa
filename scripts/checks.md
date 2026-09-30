@@ -16,10 +16,17 @@ tsc --noEmit
 # or
 bun run typecheck
 
-# 2. Tests
-vitest run                          # shared/ pure + any touched modules
-# Full suite if schema/service/repo changed:
-bun run test  # alias vitest run
+# 2. Tests — scoped by default (see "Scoped test step" below)
+bash scripts/verify-gate.sh --print-plan   # preview the chosen lane + command
+bash scripts/verify-gate.sh                # typecheck + scoped tests + conditional checks
+bash scripts/verify-gate.sh --full         # force the full suite (pre-merge)
+# lane shortcuts (test:* scripts; ci-local.sh --lane tokens: shared|be|fe|cli)
+bun run test:shared   # shared/ only
+bun run test:be       # shared/ + server/
+bun run test:fe       # shared/ + app/
+bun run test:app      # app/ only (fastest frontend loop)
+bun run test:cli      # cli/src/
+bun run test          # full suite
 
 # 3. Invariants (if touched server/, shared/, docs/SCHEMA.md, scripts/check-invariants.ts)
 bun run check:invariants
@@ -39,10 +46,36 @@ git diff --cached | head -n 200  # spot stray console.log / debug
 npx react-doctor@latest --scope changed  # if React changes
 ```
 
+## Scoped test step (verify-gate.sh)
+
+`bash scripts/verify-gate.sh` picks the test lane from `git status --porcelain`
+(staged + unstaged + untracked):
+
+| Changed               | Lane / command |
+|---|---|
+| `app/**`              | fe — `bun run test:fe` |
+| `server/**` `shared/**` `migrations/**` | be — `bun run test:be` |
+| `cli/**` only         | cli — `bun run test:cli` |
+| app + be mixed        | one deduped `bun run test -- shared server app` |
+| cli mixed with app/be, tooling, unknown | full — `bun run test` |
+| `status/**` or `*.md` only | tests skipped (typecheck still runs) |
+| no changes            | full — `bun run test` |
+
+Flags: `--full` (force full suite), `--lane=<fe|be|cli|full>` (explicit
+override; accepts `scripts/ci-local.sh`'s `fe|be|cli` tokens plus `full` —
+ci-local also has `shared` and rejects `full`), `--print-plan` (print the
+chosen lane + command(s), run nothing, exit 0).
+
+Iteration contract: touched test file(s) during iteration
+(`bun run test -- <path>`, ~1s), the lane at lane close, the full suite at
+pre-merge only.
+
 ## CI parity
 
 CI runs: `typecheck` → `vitest` (coverage 60%) → `check:invariants` → `docker smoke` → `gitleaks` → `lint warn`.
-Local `verify-gate.sh` covers the fast subset (first 3 + secrets + wireframes). Full docker smoke only in CI.
+Local `verify-gate.sh` covers the fast subset (first 3 + secrets + wireframes);
+its test step is scoped by default — use `--full` for the complete suite. Full
+docker smoke only in CI.
 
 ## Failure handling
 

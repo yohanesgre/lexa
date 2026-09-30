@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { ChatComposerArea } from "./AssistantChatShell";
+import { ResizeObserverStub } from "../../test-utils";
 
 // Floating composer (assistant-chat.html): the docked composer is taken out of
 // the flow (chat-composer-float) with a scrim behind the card; the landing
@@ -29,29 +30,6 @@ function renderComposerArea(landing: boolean) {
       />
     </main>
   );
-}
-
-class ResizeObserverStub {
-  static instances: ResizeObserverStub[] = [];
-  readonly callback: ResizeObserverCallback;
-  observed: Element[] = [];
-  disconnected = false;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
-    ResizeObserverStub.instances.push(this);
-  }
-
-  observe(el: Element) {
-    this.observed.push(el);
-  }
-  unobserve() {}
-  disconnect() {
-    this.disconnected = true;
-  }
-  trigger() {
-    this.callback([], this as unknown as ResizeObserver);
-  }
 }
 
 function rect(height: number): DOMRect {

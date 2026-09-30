@@ -2,15 +2,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import { PriceEditor } from "./PriceEditor";
 
-function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
-}
+const wrapper = () => createQueryWrapper(createTestQueryClient());
 
 const prices = {
   data: [

@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createQueryWrapper, createTestQueryClient, makeBoard as makeBoardFixture, ResizeObserverStub } from "../../test-utils";
 import type { ReactNode } from "react";
 import type { Board, Milestone, Task } from "../../../shared/types";
 
@@ -35,12 +35,6 @@ import { MilestoneForm } from "./MilestoneForm";
 const useBoardMock = vi.mocked(useBoard);
 const useMilestonesMock = vi.mocked(useMilestones);
 const useSessionMock = vi.mocked(useSession);
-
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
 
 beforeAll(() => {
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
@@ -78,9 +72,7 @@ function tasksFor(laneId: string, count: number): Task[] {
 }
 
 function makeBoard(): Board {
-  return {
-    project: { id: "p1", slug: "demo", name: "Demo", key: "DEMO", description: "", repos: [], createdAt: "t", updatedAt: "t" },
-    columns: [],
+  return makeBoardFixture({
     swimlanes: [
       { id: "s1", projectId: "p1", name: "Sprint 7 — Core", description: "", position: 0, dueAt: "2026-08-21", startAt: "2026-08-18", archivedAt: null, kind: "sprint", milestoneId: "m1" },
       { id: "s2", projectId: "p1", name: "Sprint 6 — Ash & Bone", description: "", position: 1, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m1" },
@@ -88,10 +80,8 @@ function makeBoard(): Board {
       { id: "s5", projectId: "p1", name: "Backlog", description: "", position: 3, dueAt: null, startAt: null, archivedAt: null, kind: "backlog", milestoneId: null },
     ],
     milestones: MILESTONES,
-    fieldConfig: { priorities: [], types: [] },
-    links: [],
     tasks: [...tasksFor("s1", 12), ...tasksFor("s2", 12), ...tasksFor("s3", 1)],
-  };
+  });
 }
 
 function seedListMocks() {
@@ -157,10 +147,7 @@ describe("MilestoneForm delete footer", () => {
   });
 });
 
-function wrapper({ children }: { children: ReactNode }) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
-}
+const wrapper = createQueryWrapper(createTestQueryClient());
 
 describe("TimelineTab sprint bar tooltip + navigation", () => {
   it("shows title / date+done / milestone on hover and opens the board with the lane", async () => {

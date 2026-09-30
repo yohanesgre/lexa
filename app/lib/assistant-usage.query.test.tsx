@@ -1,17 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createQueryWrapper, createTestQueryClient } from "../test-utils";
 import { useAssistantUsage, exportAssistantUsageCsv, useAssistantPrices, usePutAssistantPrice } from "./assistant-usage.query";
 import { UsageKpiCards } from "../components/assistant/UsageKpiCards";
 import { UsageByModelTable } from "../components/assistant/UsageByModelTable";
 
-function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
-  );
-}
+const wrapper = () => createQueryWrapper(createTestQueryClient());
 
 const mockUsage = {
   summary: { totalTokens: 1482391, promptTokens: 892100, completionTokens: 590291, totalCostCents: 4218, totalCostUsd: 42.18, avgLatencyMs: 1240, p50LatencyMs: 890, p95LatencyMs: 2410, errorRate: 0.008, totalCalls: 1482, errorCalls: 12 },
@@ -61,7 +57,7 @@ describe("usePutAssistantPrice", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ model: "m1", prompt_price: 3, completion_price: 15, cached_read_price: 0.3, cached_write_price: 3.75, updated_at: "t1" }] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => updated });
     vi.stubGlobal("fetch", fetchMock);
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const qc = createTestQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     function Probe() {
       const q = useAssistantPrices();

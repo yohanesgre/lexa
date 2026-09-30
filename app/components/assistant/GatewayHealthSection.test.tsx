@@ -2,8 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ToastProvider } from "../ui/Toast";
+import { createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import { GatewayHealthSection } from "./GatewayHealthSection";
 
 vi.mock("@tanstack/react-router", () => ({
@@ -12,12 +11,7 @@ vi.mock("@tanstack/react-router", () => ({
   ),
 }));
 
-function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={qc}><ToastProvider>{children}</ToastProvider></QueryClientProvider>
-  );
-}
+const wrapper = () => createQueryWrapper(createTestQueryClient(), { toast: true });
 
 const providers = {
   data: [

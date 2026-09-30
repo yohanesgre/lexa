@@ -15,62 +15,13 @@ vi.mock("../../lib/queries", () => ({
 }));
 
 import { PageSettingsPanel } from "./PageSettingsPanel";
+import { controllableMatchMedia, stubMatchMedia } from "../../test-utils";
 
 function rev(id: string, hoursAgo: number, saveType = "autosave") {
   return {
     id,
     createdAt: new Date(Date.now() - hoursAgo * 3600_000).toISOString(),
     saveType,
-  };
-}
-
-function makeMediaStub(mobile: boolean) {
-  return vi.fn((query: string) => ({
-    matches: mobile,
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent() {
-      return false;
-    },
-  }));
-}
-
-function controllableMatchMedia(options: { mobile: boolean }) {
-  let mobile = options.mobile;
-  const listeners = new Set<() => void>();
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((query: string) => {
-      const mobileQuery = query.includes("max-width: 767.98px");
-      return {
-        get matches() {
-          return mobileQuery ? mobile : false;
-        },
-        media: query,
-        onchange: null,
-        addEventListener: (_type: string, listener: () => void) => {
-          if (mobileQuery) listeners.add(listener);
-        },
-        removeEventListener: (_type: string, listener: () => void) => {
-          if (mobileQuery) listeners.delete(listener);
-        },
-        addListener: () => {},
-        removeListener: () => {},
-        dispatchEvent() {
-          return false;
-        },
-      };
-    })
-  );
-  return {
-    toDesktop() {
-      mobile = false;
-      listeners.forEach((listener) => listener());
-    },
   };
 }
 
@@ -102,7 +53,7 @@ beforeEach(() => {
   revisionsState.error = null;
   revisionsState.refetch = vi.fn();
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{}] as unknown as DOMRectList);
-  vi.stubGlobal("matchMedia", makeMediaStub(false));
+  stubMatchMedia(false);
 });
 
 afterEach(() => {
@@ -158,7 +109,7 @@ describe("PageSettingsPanel version history", () => {
   });
 
   it("auto-closes the sheet after selecting a revision on a mobile viewport", () => {
-    vi.stubGlobal("matchMedia", makeMediaStub(true));
+    stubMatchMedia(true);
     revisionsState.data = [rev("r1", 2), rev("r2", 5)];
     const { props } = renderPanel();
     openPanel();

@@ -2,9 +2,10 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { Task } from "../../shared/types";
+import { createQueryWrapper, createTestQueryClient, json } from "../test-utils";
 import { TaskDetail } from "./TaskDetail";
 
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -17,9 +18,6 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 const fetchMock = vi.fn();
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
 
 const TASK: Task = {
   id: "t1",
@@ -41,16 +39,15 @@ const TASK: Task = {
 };
 
 let queryClient: QueryClient;
-function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-}
+let wrapper: ReturnType<typeof createQueryWrapper>;
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   fetchMock.mockImplementation(() => Promise.resolve(json({ data: [] })));
   navigateMock.mockReset();
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  queryClient = createTestQueryClient();
+  wrapper = createQueryWrapper(queryClient);
 });
 
 afterEach(() => {

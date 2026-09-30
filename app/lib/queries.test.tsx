@@ -3,9 +3,9 @@
 // pure helpers (deriveTaskList / selectProjectHealth / prependActivity).
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { QueryClient } from "@tanstack/react-query";
 import type { Board, Task, Project, Swimlane, Column, FieldConfig } from "../../shared/types";
+import { createFetchMock, createQueryWrapper, createTestQueryClient } from "../test-utils";
 import {
   useProjects, useDashboard, useBoard, useTasks, useFieldConfig, useWikiPages, useWikiPage,
   useSearchWikiPages, useRevisions, useColumns, useSwimlanes, useApiKeys, useUsers,
@@ -16,11 +16,7 @@ import {
   deriveTaskList, selectProjectHealth, prependActivity,
 } from "./queries";
 
-const fetchMock = vi.fn();
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
+const { fetchMock, routes, mockFetch } = createFetchMock();
 
 const PROJECT: Project = { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
@@ -38,30 +34,16 @@ const TASK: Task = {
 const BOARD: Board = { project: PROJECT, columns: [COLUMN], swimlanes: [SWIMLANE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 
 // Mock fetch keyed by "METHOD url" (query part included).
-const routes = new Map<string, unknown>();
-function mockFetch(): void {
-  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const key = `${init?.method ?? "GET"} ${url}`;
-    const hit = routes.get(key) ?? routes.get(`GET ${url}`);
-    if (hit === undefined) return Promise.reject(new Error(`unmocked: ${key}`));
-    return Promise.resolve(json(hit));
-  });
-}
-
 let queryClient: QueryClient;
-function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-}
+let wrapper: ReturnType<typeof createQueryWrapper>;
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   routes.clear();
   mockFetch();
-  queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  queryClient = createTestQueryClient();
+  wrapper = createQueryWrapper(queryClient);
 });
 
 afterEach(() => {

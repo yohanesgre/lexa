@@ -2,8 +2,9 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { createQueryWrapper, createTestQueryClient, json } from "../../test-utils";
 import { TaskDetailPage } from "./TaskDetailPage";
 
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -16,9 +17,6 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 const fetchMock = vi.fn();
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
 
 const TASK = {
   id: "t1",
@@ -57,9 +55,7 @@ const BOARD = {
 };
 
 let queryClient: QueryClient;
-function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-}
+let wrapper: ReturnType<typeof createQueryWrapper>;
 
 function defaultFetch(): void {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
@@ -75,7 +71,8 @@ beforeEach(() => {
   fetchMock.mockReset();
   defaultFetch();
   navigateMock.mockReset();
-  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  queryClient = createTestQueryClient();
+  wrapper = createQueryWrapper(queryClient);
 });
 
 afterEach(() => {
