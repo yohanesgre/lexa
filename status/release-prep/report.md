@@ -10,7 +10,7 @@ result: 6 release-prep gaps fixed on `chore/release-v2026.4.0` — RELEASING.md 
 | `docs/RELEASING.md` | checklist item 3 replaced (packed/embed step was dead), new items 7 (push) + 8 (verify), L89-90 upgrade sentence fixed |
 | `package.json:3` | `2026.3.0` → `2026.4.0` |
 | `cli/package.json:3` | `2026.4.0` → `2026.5.0` |
-| `CHANGELOG.md` | `## [Unreleased]` → `## [2026.4.0] - 2026-09-30`; fresh empty `## [Unreleased]` above; 6 Added + 6 Fixed bullets added |
+| `CHANGELOG.md` | `## [Unreleased]` → `## [2026.4.0] - 2026-09-30`; fresh empty `## [Unreleased]` above; 6 Added + 5 Fixed bullets added (11 total) |
 | `cli/CHANGELOG.md` | `## [Unreleased]` → `## [2026.5.0] - 2026-09-30`; fresh empty `## [Unreleased]` above; 3 Fixed bullets added |
 | `status/TIMELINE.md` | restored from HEAD; 112 new 2026-09-29/30 lines appended; 1 release-prep PLAN line; **0 deletions** |
 | `status/release-prep/plan.md`, `status.md`, `report.md` | this plan |
@@ -84,10 +84,14 @@ those, so it was run explicitly to satisfy the AGENTS.md gate.
 
 ## Concerns
 
-- **Changelog coverage is a judgment call.** 76 app commits were reduced to
-  12 added bullets; internal-only work (repo-coverage tests, wireframe-only
-  bumps, `chore(status)` closings, `docs` syncs) was intentionally left out.
-  Anything a user would notice in that remainder is not in the entry.
+- **Changelog coverage is a judgment call.** 76 app commits (67 non-merge)
+  were reduced to 11 added bullets; internal-only work (repo-coverage tests,
+  wireframe-only bumps, `chore(status)` closings, `docs` syncs) was
+  intentionally left out. Anything a user would notice in that remainder is
+  not in the entry. Corrected from "12" after a post-merge recount.
+  Follow-up coverage pass: 2 more bullets added (server-rendered share
+  pages, bare `@` suggestions); the chat-landing spacing tweaks were judged
+  below the changelog threshold and deliberately omitted.
 - **App next version collides with the CLI's current version.** `v2026.4.0`
   and the CLI's released `cli-v2026.4.0` share the number. Independent
   pipelines and distinct tag prefixes keep it unambiguous, but the release
