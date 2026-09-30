@@ -102,7 +102,8 @@ function runCommand<A>(prefix: string, program: Effect.Effect<A, unknown, CliCon
       Effect.catchAll((e) =>
         Effect.sync((): never => {
           const msg = e instanceof Error ? e.message : String(e);
-          console.error(`  ${prefix}: ${msg}`);
+          const code = e instanceof ApiError && e.code ? ` [${e.code}]` : "";
+          console.error(`  ${prefix}: ${msg}${code}`);
           process.exit(1);
         })
       )
@@ -447,13 +448,48 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
     const title = typeof flags.title === "string" ? flags.title : undefined;
     const priority = typeof flags.priority === "string" ? flags.priority : undefined;
     const type = typeof flags.type === "string" ? flags.type : undefined;
-    if (!slug || !id || (title === undefined && priority === undefined && type === undefined)) {
-      console.error("  Usage: lx task update <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]");
-      process.exit(1);
+    const hasDescription = typeof flags.description === "string";
+    const hasAssignees = "assignees" in flags;
+    const assignees = hasAssignees
+      ? (typeof flags.assignees === "string" ? flags.assignees : "").split(",").map((s) => s.trim()).filter((s) => s !== "")
+      : undefined;
+    const hasDue = flags.due !== undefined;
+    const due = typeof flags.due === "string" ? flags.due : undefined;
+    const clearDue = flags["clear-due"] === true;
+    const usageMsg = "  Usage: lx task update <id> --project <slug> [--title <t>] [--description <md>] [--priority <id>] [--type <id>] [--assignees <a,b> | --assignees=] [--due <YYYY-MM-DD>] [--clear-due]";
+    const bad =
+      !slug || !id ||
+      flags.assignees === true ||
+      (hasDue && (due === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(due))) ||
+      (hasDue && clearDue) ||
+      (title === undefined && !hasDescription && priority === undefined && type === undefined && !hasAssignees && !hasDue && !clearDue);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const input: { title?: string; description?: unknown; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null } = {};
+    if (title !== undefined) input.title = title;
+    if (hasDescription) {
+      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
+      input.description = markdownToDoc(flags.description as string);
     }
+    if (priority !== undefined) input.priority = priority;
+    if (type !== undefined) input.type = type;
+    if (assignees !== undefined) input.assignees = assignees;
+    if (clearDue) input.dueAt = null;
+    else if (due !== undefined) input.dueAt = due;
     const taskId = yield* resolveTaskId(id);
-    const t = yield* client.updateTask(slug, taskId, { ...(title !== undefined ? { title } : {}), ...(priority !== undefined ? { priority } : {}), ...(type !== undefined ? { type } : {}) });
+    const t = yield* client.updateTask(slug, taskId, input);
     console.log(`  Updated ${taskId} — ${t.title}`);
+  });
+}
+
+function cmdTaskDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const id = args[0]! || "";
+    if (!slug || !id) { console.error("  Usage: lx task delete <id> --project <slug>"); process.exit(1); }
+    const taskId = yield* resolveTaskId(id);
+    yield* client.deleteTask(slug, taskId);
+    console.log(`  Deleted ${taskId}`);
   });
 }
 
@@ -487,6 +523,151 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
   });
 }
 
+// Resolve a parent page slug → its page id (the API takes parentId, not slug).
+function resolveWikiParent(client: LexaClient, slug: string, pageSlug: string): Effect.Effect<string, unknown, never> {
+  return Effect.gen(function* () {
+    const page = yield* client.getWikiPage(slug, pageSlug);
+    return page.id;
+  });
+}
+
+function cmdWikiCreate(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const title = typeof flags.title === "string" ? flags.title : "";
+    const pageSlug = typeof flags.slug === "string" ? flags.slug : undefined;
+    const hasContent = typeof flags.content === "string";
+    const parent = typeof flags.parent === "string" ? flags.parent : undefined;
+    const emptyFlag = flags.slug === "" || flags.content === "" || flags.parent === "";
+    if (!slug || !title || emptyFlag) {
+      console.error("  Usage: lx wiki create --project <slug> --title <t> [--slug <s>] [--content <md>] [--parent <pageSlug>]");
+      process.exit(1);
+    }
+    let content: unknown;
+    if (hasContent) {
+      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
+      content = markdownToDoc(flags.content as string);
+    }
+    const parentId = parent ? yield* resolveWikiParent(client, slug, parent) : undefined;
+    const page = yield* client.createWikiPage(slug, {
+      title,
+      ...(pageSlug !== undefined ? { slug: pageSlug } : {}),
+      ...(hasContent ? { content } : {}),
+      ...(parentId !== undefined ? { parentId } : {}),
+    });
+    console.log(`  Created page ${page.slug} — ${page.title}`);
+  });
+}
+
+function cmdWikiUpdate(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const pageSlug = args[0]! || "";
+    const title = typeof flags.title === "string" ? flags.title : undefined;
+    const newSlug = typeof flags.slug === "string" ? flags.slug : undefined;
+    const hasContent = typeof flags.content === "string";
+    const parent = typeof flags.parent === "string" ? flags.parent : undefined;
+    const parentRoot = flags["parent-root"] === true;
+    const hasPosition = flags.position !== undefined;
+    const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
+    const usageMsg = "  Usage: lx wiki update <pageSlug> --project <slug> [--title <t>] [--slug <s>] [--content <md>] [--parent <pageSlug> | --parent-root] [--position <n>]";
+    const emptyFlag = flags.title === "" || flags.slug === "" || flags.content === "" || flags.parent === "";
+    const bad =
+      !slug || !pageSlug ||
+      emptyFlag ||
+      (parent !== undefined && parentRoot) ||
+      (hasPosition && position === undefined) ||
+      (title === undefined && newSlug === undefined && !hasContent && parent === undefined && !parentRoot && !hasPosition);
+    if (bad) { console.error(usageMsg); process.exit(1); }
+    const input: { title?: string; slug?: string; content?: unknown; parentId?: string | null; position?: number } = {};
+    if (title !== undefined) input.title = title;
+    if (newSlug !== undefined) input.slug = newSlug;
+    if (hasContent) {
+      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
+      input.content = markdownToDoc(flags.content as string);
+    }
+    if (parentRoot) input.parentId = null;
+    else if (parent !== undefined) input.parentId = yield* resolveWikiParent(client, slug, parent);
+    if (position !== undefined) input.position = position;
+    const page = yield* client.updateWikiPage(slug, pageSlug, input);
+    if (newSlug !== undefined && newSlug !== pageSlug) console.log(`  Updated page ${pageSlug} → ${page.slug} — ${page.title}`);
+    else console.log(`  Updated page ${page.slug} — ${page.title}`);
+  });
+}
+
+function cmdWikiDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const pageSlug = args[0]! || "";
+    if (!slug || !pageSlug) { console.error("  Usage: lx wiki delete <pageSlug> --project <slug>"); process.exit(1); }
+    yield* client.deleteWikiPage(slug, pageSlug);
+    console.log(`  Deleted page ${pageSlug}`);
+  });
+}
+
+function cmdGithubLink(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const id = args[0]! || "";
+    const repo = (typeof flags.repo === "string" && flags.repo) || "";
+    if (!slug || !id || !repo) {
+      console.error("  Usage: lx github link <id> --project <slug> --repo <owner/name>");
+      process.exit(1);
+    }
+    const taskId = yield* resolveTaskId(id);
+    yield* client.linkGithubIssue(slug, taskId, repo);
+    console.log(`  Linked ${taskId} → ${repo}`);
+  });
+}
+
+function cmdGithubLinkExisting(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const id = args[0]! || "";
+    const repo = (typeof flags.repo === "string" && flags.repo) || "";
+    const issueRaw = flags.issue;
+    const issue = typeof issueRaw === "string" && /^\d+$/.test(issueRaw) ? Number(issueRaw) : undefined;
+    if (!slug || !id || !repo || issue === undefined) {
+      console.error("  Usage: lx github link-existing <id> --project <slug> --repo <owner/name> --issue <n>");
+      process.exit(1);
+    }
+    const taskId = yield* resolveTaskId(id);
+    yield* client.linkExistingGithubIssue(slug, taskId, repo, issue);
+    console.log(`  Linked ${taskId} → ${repo}#${issue}`);
+  });
+}
+
+function cmdGithubUnlink(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const { client } = yield* requireClient(flags);
+    const slug = (typeof flags.project === "string" && flags.project) || "";
+    const id = args[0]! || "";
+    const directIssueId = typeof flags["issue-id"] === "string" ? flags["issue-id"] : undefined;
+    const repo = (typeof flags.repo === "string" && flags.repo) || "";
+    const issueRaw = flags.issue;
+    const issue = typeof issueRaw === "string" && /^\d+$/.test(issueRaw) ? Number(issueRaw) : undefined;
+    const usageMsg = "  Usage: lx github unlink <id> --project <slug> ( --issue-id <nodeId> | --repo <owner/name> --issue <n> )";
+    if (!slug || !id) { console.error(usageMsg); process.exit(1); }
+    const taskId = yield* resolveTaskId(id);
+    let issueId = directIssueId;
+    if (!issueId) {
+      if (!repo || issue === undefined) { console.error(usageMsg); process.exit(1); }
+      // Address by repo+issueNumber: resolve the node id via the task's links.
+      const task = yield* client.getTask(slug, taskId);
+      const match = (task.githubs ?? []).find((g) => g.repo === repo && g.issueNumber === issue);
+      if (!match) { console.error(`  No linked issue ${repo}#${issue} on ${id}.`); process.exit(1); }
+      issueId = match.issueId;
+    }
+    yield* client.unlinkGithubIssue(slug, taskId, issueId);
+    console.log(`  Unlinked ${taskId} (${issueId})`);
+  });
+}
+
 // ── main ──
 
 const HELP = `lx — Lexa operator CLI
@@ -506,11 +687,17 @@ Tasks:
   task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
   task get     <id> --project <slug> [--json]
   task move    <id> --project <slug> --column <name> [--swimlane <name>]
-  task update  <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]
+  task update  <id> --project <slug> [--title <t>] [--description <md>] [--priority <id>] [--type <id>]
+               [--assignees <a,b> | --assignees=] [--due <YYYY-MM-DD>] [--clear-due]
+  task delete  <id> --project <slug>
 
 Wiki:
-  wiki list --project <slug> [--json]
-  wiki get  <pageSlug> --project <slug> [--json]
+  wiki list   --project <slug> [--json]
+  wiki get    <pageSlug> --project <slug> [--json]
+  wiki create --project <slug> --title <t> [--slug <s>] [--content <md>] [--parent <pageSlug>]
+  wiki update <pageSlug> --project <slug> [--title <t>] [--slug <s>] [--content <md>]
+              [--parent <pageSlug> | --parent-root] [--position <n>]
+  wiki delete <pageSlug> --project <slug>
 
 Projects:
   project list [--json]
@@ -541,6 +728,15 @@ GitHub sync (optional integration):
   github check <slug> <owner/repo>     acceptance round-trip against the live
                                        server (creates a real issue; needs
                                        login — config source irrelevant)
+  github link <id> --project <slug> --repo <owner/name>
+                                       create a GitHub issue from the task and
+                                       link it (needs login)
+  github link-existing <id> --project <slug> --repo <owner/name> --issue <n>
+                                       link an existing GitHub issue to the task
+                                       (needs login)
+  github unlink <id> --project <slug> ( --issue-id <nodeId> | --repo <owner/name> --issue <n> )
+                                       unlink a GitHub issue from the task
+                                       (needs login)
 
 Upgrade:
   upgrade                                self-update the CLI binary (GitHub release)
@@ -556,10 +752,16 @@ const GROUP_HELP: Record<string, string> = {
   task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
   task get     <id> --project <slug> [--json]
   task move    <id> --project <slug> --column <name> [--swimlane <name>]
-  task update  <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]`,
+  task update  <id> --project <slug> [--title <t>] [--description <md>] [--priority <id>] [--type <id>]
+               [--assignees <a,b> | --assignees=] [--due <YYYY-MM-DD>] [--clear-due]
+  task delete  <id> --project <slug>`,
   wiki: `Wiki:
-  wiki list --project <slug> [--json]
-  wiki get  <pageSlug> --project <slug> [--json]`,
+  wiki list   --project <slug> [--json]
+  wiki get    <pageSlug> --project <slug> [--json]
+  wiki create --project <slug> --title <t> [--slug <s>] [--content <md>] [--parent <pageSlug>]
+  wiki update <pageSlug> --project <slug> [--title <t>] [--slug <s>] [--content <md>]
+              [--parent <pageSlug> | --parent-root] [--position <n>]
+  wiki delete <pageSlug> --project <slug>`,
   github: `GitHub sync (optional integration):
   github status [--local] [--env-file <path>]
                                        read the LIVE server state (default —
@@ -589,7 +791,16 @@ const GROUP_HELP: Record<string, string> = {
   github check <slug> <owner/repo>     Lexa→GitHub acceptance round-trip
                                        against the live server (creates a real
                                        issue; needs login — config source
-                                       irrelevant)`,
+                                       irrelevant)
+  github link <id> --project <slug> --repo <owner/name>
+                                       create a GitHub issue from the task and
+                                       link it (needs login)
+  github link-existing <id> --project <slug> --repo <owner/name> --issue <n>
+                                       link an existing GitHub issue to the task
+                                       (needs login)
+  github unlink <id> --project <slug> ( --issue-id <nodeId> | --repo <owner/name> --issue <n> )
+                                       unlink a GitHub issue from the task
+                                       (needs login)`,
 
   upgrade: `Upgrade:
   upgrade                                        self-update the CLI binary (GitHub release)`,
@@ -650,6 +861,9 @@ async function main(): Promise<void> {
             yield* cmdGithubCheck(client, flags, rest);
           });
           break;
+        case "link": program = cmdGithubLink(flags, rest); break;
+        case "link-existing": program = cmdGithubLinkExisting(flags, rest); break;
+        case "unlink": program = cmdGithubUnlink(flags, rest); break;
         default: usage("github", sub);
       }
       break;
@@ -665,6 +879,7 @@ async function main(): Promise<void> {
         case "get": program = cmdTaskGet(flags, rest); break;
         case "move": program = cmdTaskMove(flags, rest); break;
         case "update": program = cmdTaskUpdate(flags, rest); break;
+        case "delete": program = cmdTaskDelete(flags, rest); break;
         default: usage("task", sub);
       }
       break;
@@ -673,6 +888,9 @@ async function main(): Promise<void> {
       switch (sub) {
         case "list": program = cmdWikiList(flags); break;
         case "get": program = cmdWikiGet(flags, rest); break;
+        case "create": program = cmdWikiCreate(flags); break;
+        case "update": program = cmdWikiUpdate(flags, rest); break;
+        case "delete": program = cmdWikiDelete(flags, rest); break;
         default: usage("wiki", sub);
       }
       break;

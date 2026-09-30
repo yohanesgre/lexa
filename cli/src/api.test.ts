@@ -32,6 +32,20 @@ const linkedTask: TaskInfo = {
   updatedAt: "2026-01-01T00:00:00Z",
 };
 
+const wikiPage = {
+  id: "w1",
+  projectId: "p1",
+  title: "Old Title",
+  slug: "old-slug",
+  content: { type: "doc", content: [] },
+  parentId: null,
+  position: 0,
+  updatedBy: null,
+  updatedByName: null,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
     let data = "";
@@ -54,6 +68,14 @@ beforeAll(async () => {
     if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
     if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
     if (url === "/api/projects/demo/tasks/t2/github-link" && req.method === "POST") return json(res, 200, { data: linkedTask, activity: [] });
+    if (url === "/api/projects/demo/tasks/t2/github-link-existing" && req.method === "POST") return json(res, 200, { data: linkedTask, activity: [] });
+    if (url === "/api/projects/demo/tasks/t2/github-link/i1" && req.method === "DELETE") return json(res, 200, { data: linkedTask, activity: [] });
+    if (url.startsWith("/api/projects/demo/tasks/t2/github-link/") && req.method === "DELETE") return json(res, 200, { data: linkedTask, activity: [] });
+    if (url === "/api/projects/demo/tasks/t3" && req.method === "PATCH") return json(res, 200, { data: { id: "t3", title: "Patched" }, activity: [] });
+    if (url === "/api/projects/demo/tasks/t3" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
+    if (url === "/api/projects/demo/wiki" && req.method === "POST") return json(res, 201, { ...wikiPage, title: "New Page", slug: "new-page", parentId: "w0" });
+    if (url === "/api/projects/demo/wiki/old-slug" && req.method === "PATCH") return json(res, 200, { ...wikiPage, slug: "new-slug", title: "Renamed" });
+    if (url === "/api/projects/demo/wiki/old-slug" && req.method === "DELETE") { res.writeHead(204); return res.end(); }
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
     if (url === "/api/projects/demo/wiki/p1") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end("not json {{{"); }
     if (url === "/api/settings/github" && req.method === "GET") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
@@ -158,6 +180,83 @@ describe("LexaClient request building", () => {
     const req = seen.filter((r) => r.url === "/api/settings/github" && r.method === "PUT");
     const last = req[req.length - 1];
     expect(JSON.parse(last?.body ?? "{}")).toEqual({ appId: "123456" });
+  });
+});
+
+describe("LexaClient lifecycle writes", () => {
+  it("updateTask PATCHes assignees + dueAt", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().updateTask("demo", "t3", { assignees: ["a", "b"], dueAt: "2026-10-01" }));
+    expect(out).toEqual({ id: "t3", title: "Patched" });
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(req?.url).toBe("/api/projects/demo/tasks/t3");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ assignees: ["a", "b"], dueAt: "2026-10-01" });
+  });
+
+  it("updateTask sends dueAt: null to clear the deadline", async () => {
+    const before = seen.length;
+    await Effect.runPromise(client().updateTask("demo", "t3", { dueAt: null }));
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ dueAt: null });
+  });
+
+  it("deleteTask DELETEs and resolves undefined on 204", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().deleteTask("demo", "t3"));
+    expect(out).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo/tasks/t3");
+  });
+
+  it("createWikiPage POSTs { title, parentId } and returns the page", async () => {
+    const before = seen.length;
+    const page = await Effect.runPromise(client().createWikiPage("demo", { title: "New Page", parentId: "w0" }));
+    expect(page.slug).toBe("new-page");
+    const req = seen.slice(before).find((r) => r.method === "POST" && r.url === "/api/projects/demo/wiki");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ title: "New Page", parentId: "w0" });
+  });
+
+  it("updateWikiPage PATCHes a slug rename", async () => {
+    const before = seen.length;
+    const page = await Effect.runPromise(client().updateWikiPage("demo", "old-slug", { slug: "new-slug" }));
+    expect(page.slug).toBe("new-slug");
+    const req = seen.slice(before).find((r) => r.method === "PATCH");
+    expect(req?.url).toBe("/api/projects/demo/wiki/old-slug");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ slug: "new-slug" });
+  });
+
+  it("deleteWikiPage DELETEs and resolves undefined on 204", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().deleteWikiPage("demo", "old-slug"));
+    expect(out).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo/wiki/old-slug");
+  });
+
+  it("linkExistingGithubIssue POSTs { repo, issueNumber } and unwraps data", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().linkExistingGithubIssue("demo", "t2", "owner/repo", 7));
+    expect(out).toEqual(linkedTask);
+    expect((out as { data?: unknown }).data).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "POST");
+    expect(req?.url).toBe("/api/projects/demo/tasks/t2/github-link-existing");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ repo: "owner/repo", issueNumber: 7 });
+  });
+
+  it("unlinkGithubIssue DELETEs .../github-link/:issueId and unwraps data", async () => {
+    const before = seen.length;
+    const out = await Effect.runPromise(client().unlinkGithubIssue("demo", "t2", "i1"));
+    expect(out).toEqual(linkedTask);
+    expect((out as { data?: unknown }).data).toBeUndefined();
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo/tasks/t2/github-link/i1");
+  });
+
+  it("unlinkGithubIssue percent-encodes the issueId in the path", async () => {
+    const before = seen.length;
+    await Effect.runPromise(client().unlinkGithubIssue("demo", "t2", "a/b"));
+    const req = seen.slice(before).find((r) => r.method === "DELETE");
+    expect(req?.url).toBe("/api/projects/demo/tasks/t2/github-link/a%2Fb");
   });
 });
 

@@ -85,6 +85,21 @@ export interface WikiPageMetaInfo {
   hasChildren: boolean;
 }
 
+export interface WikiPageInfo {
+  id: string;
+  projectId: string;
+  title: string;
+  slug: string;
+  content: unknown;
+  contentText?: string;
+  parentId: string | null;
+  position: number;
+  updatedBy: string | null;
+  updatedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class LexaClient {
   constructor(private config: CliConfig) {}
 
@@ -161,11 +176,16 @@ export class LexaClient {
     );
   }
 
-  updateTask(slug: string, id: string, input: { title?: string; description?: unknown; priority?: string; type?: string }): Effect.Effect<TaskInfo, ApiError, never> {
+  updateTask(slug: string, id: string, input: { title?: string; description?: unknown; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }): Effect.Effect<TaskInfo, ApiError, never> {
     return Effect.map(
       this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
       (r) => r.data
     );
+  }
+
+  // 204 | 404 | 409 TASK_HAS_CHILDREN (defensive — subtask links cascade).
+  deleteTask(slug: string, id: string): Effect.Effect<void, ApiError, never> {
+    return this.request<void>(`/api/projects/${slug}/tasks/${id}`, { method: "DELETE" });
   }
 
   moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string }): Effect.Effect<TaskInfo, ApiError, never> {
@@ -187,6 +207,27 @@ export class LexaClient {
     );
   }
 
+  // GitHub sync: link an EXISTING GitHub issue to the task (no issue created).
+  // 200 { data: Task (githubs populated), activity } | 404 | 409 ALREADY_LINKED | 502 GITHUB_API_ERROR
+  linkExistingGithubIssue(slug: string, id: string, repo: string, issueNumber: number): Effect.Effect<TaskInfo, ApiError, never> {
+    return Effect.map(
+      this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}/github-link-existing`, {
+        method: "POST",
+        body: JSON.stringify({ repo, issueNumber }),
+      }),
+      (r) => r.data
+    );
+  }
+
+  // Unlink a specific GitHub issue (issueId = GitHub node_id). Idempotent:
+  // unknown issueId is a no-op. 200 { data: Task, activity } | 404 TASK_NOT_FOUND
+  unlinkGithubIssue(slug: string, id: string, issueId: string): Effect.Effect<TaskInfo, ApiError, never> {
+    return Effect.map(
+      this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}/github-link/${encodeURIComponent(issueId)}`, { method: "DELETE" }),
+      (r) => r.data
+    );
+  }
+
   // ── Settings (GitHub sync) ──
   getGithubSettings(): Effect.Effect<GithubSettingsInfo, ApiError, never> {
     return this.request<GithubSettingsInfo>("/api/settings/github");
@@ -203,6 +244,23 @@ export class LexaClient {
 
   getWikiPage(slug: string, pageSlug: string): Effect.Effect<{ id: string; title: string; slug: string; content: unknown }, ApiError, never> {
     return this.request<{ id: string; title: string; slug: string; content: unknown }>(`/api/projects/${slug}/wiki/${pageSlug}`);
+  }
+
+  // Wiki create/update return the page directly (no { data } envelope):
+  // 201 WikiPage | 404 PROJECT_NOT_FOUND | 409 SLUG_TAKEN. Server slugifies
+  // the title when `slug` is omitted.
+  createWikiPage(slug: string, input: { title: string; slug?: string; content?: unknown; parentId?: string }): Effect.Effect<WikiPageInfo, ApiError, never> {
+    return this.request<WikiPageInfo>(`/api/projects/${slug}/wiki`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  // 200 WikiPage | 404 | 409 SLUG_TAKEN | 422 INVALID_PARENT
+  updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: unknown; parentId?: string | null; position?: number }): Effect.Effect<WikiPageInfo, ApiError, never> {
+    return this.request<WikiPageInfo>(`/api/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
+  }
+
+  // 204 | 404 | 409 HAS_CHILDREN { count }
+  deleteWikiPage(slug: string, pageSlug: string): Effect.Effect<void, ApiError, never> {
+    return this.request<void>(`/api/projects/${slug}/wiki/${pageSlug}`, { method: "DELETE" });
   }
 
   // ── Device login (CLI pairing) ──
