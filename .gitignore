@@ -47,5 +47,6 @@ lexa-deploy/
 # Lane reports + scratch logs (plan status lives in status/, already ignored) — never commit
 .tmp/
 
-# brainstorm-studio working specs (local, uncommitted)
-/.agents/brainstorm-studio/specs/
+# brainstorm-studio + local plan working artifacts (mockups, specs) — never publish
+/.agents/brainstorm-studio/
+/.agents/plans/
