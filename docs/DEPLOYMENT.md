@@ -2,9 +2,10 @@
 
 This doc is the single source of truth for deploying Lexa and configuring its
 environment. Deployment goes through **`scripts/install.sh`** — one script,
-four targets (`docker | bare | workers | dev`), zero clone for the hosted
-targets. The first superadmin is provisioned **only** by the web `/setup`
-wizard (email + password ≥8) — the script never handles passwords.
+three targets (`docker | bare | workers`), zero clone for the hosted targets,
+each installing into a self-describing dir in the current directory. The first
+superadmin is provisioned **only** by the web `/setup` wizard (email + password
+≥8) — the script never handles passwords.
 
 > Removed in cli-v2026.2.0: `lexa-cli deploy` / `lexa-cli undeploy` /
 > `--runtime workers` — hard-remove, no stubs. The install script replaced
@@ -63,16 +64,25 @@ for a tag, or `main` for the bleeding edge.
 
 | Target | Needs | Layout |
 |---|---|---|
-| `docker` | docker + compose plugin | deploy dir with compose file + canonical `.env.toml` (plus a tooling-only flat `.env` for compose); prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest`; `--image <tag>` writes `LXK_IMAGE_TAG`, e.g. a version tag or `staging` to track main) |
-| `bare` | curl, `sha256sum`; bun auto-installed if absent | `~/.lexa-server` (release tarball, checksum-verified) + `lexa-start.sh`; `--systemd` writes + enables the `lexa` unit |
-| `workers` | bun (runs `bunx wrangler`), Cloudflare API token | D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`) |
-| `dev` | git + bun | clones the repo into `./lexa`, `bun install`, `bun run setup`, `bun run dev:full` |
+| `docker` | docker + compose plugin + a running daemon | `dockers/` in the CWD: compose file + canonical `.env.toml` (plus a tooling-only flat `.env` for compose); prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest`; `--image <tag>` writes `LXK_IMAGE_TAG`, e.g. a version tag or `staging` to track main) |
+| `bare` | curl, tar, bun, `sha256sum` (or `shasum`) | `bare/` in the CWD (release tarball, checksum-verified) + `lexa-start.sh`; manual mode auto-starts the server in the background (`bare/lexa.log`, `bare/lexa.pid`); `--systemd` writes + enables the `lexa` unit |
+| `workers` | curl, tar, bun, `sha256sum` (or `shasum`), Cloudflare credentials | `cf-workers/` in the CWD: D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`); the envelope key is kept in `cf-workers/.env.toml` custody |
+
+Prerequisites are checked per target **before any download or mutation**: one
+pass collects every missing tool and exits with a single list (tool → exact fix
+command). Nothing is auto-installed. (The `dev` target is gone — development
+starts from a clone.)
+
+**Development** starts from a clone — `git clone
+https://github.com/yohanesgre/lexa && cd lexa`, then `bun install && bun run
+setup && bun run dev:full`.
 
 Flags: `--ref <tag|branch>` (script + artifact source: a release tag or
 `main`), `--name <name>` (workers deploy name, default `lexa`),
 `--port` (docker, default
 8080), `--bind` (default 127.0.0.1), `--domain` (workers custom domain; skips the prompt),
-`--systemd` (bare), `--image <tag>` (docker), `--from-repo <dir>` (install
+`--systemd` (bare), `--image <tag>` (docker), `--secrets-file <path>` (optional
+secrets applied at install; see below), `--from-repo <dir>` (install
 from a local checkout), `--yes`.
 
 The docker target uses direct semantics — host port mapping, no tunnel. Put
@@ -83,15 +93,37 @@ your own reverse proxy in front of `<bind>:<port>` to reach it over TLS.
 - **Custom domain:** interactive runs always offer the prompt (Enter =
   free `lexa.<account>.workers.dev` subdomain); `--domain lexa.example.com`
   skips it (zone-validated at provision time).
-- **Cloudflare token:** `CF_API_TOKEN` env or prompt (Workers scripts, D1,
-  R2, KV permissions). Provisioning is find-or-create — re-runs reuse the
-  existing D1/R2/KV resources and apply migrations incrementally.
+- **Cloudflare credentials:** `--cf-token` flag, then `CF_API_TOKEN`, then the
+  saved `cf-workers/.cf-token`, then an existing `wrangler login` (silent read;
+  verified once before use), then a hidden TTY prompt. A token read from
+  `wrangler login` needs no pasting. Provisioning is find-or-create — re-runs
+  reuse the existing D1/R2/KV resources and apply migrations incrementally.
+- **Envelope key (custody):** the installer mints `LXK_SECRETS_MASTER_KEY` once
+  and keeps it in `cf-workers/.env.toml` (0600). On re-runs the order is local
+  custody → remote presence (`wrangler secret list`) → mint, so the key is
+  **never rotated**. A presence check that cannot run reports `unknown` and
+  mints nothing — if the key can't be read, nothing is minted and the existing
+  one is left untouched. It is pushed with `wrangler secret put` reading from a
+  0600 file on stdin — never argv, never stdout.
 - No tunnel, no VPS: the Worker route (custom domain or workers.dev) is the
   public entry. See `docs/CLOUDFLARE_WORKERS.md` for runtime details.
 - **Zero-file alternative (DRAFT-UNVERIFIED):** Deploy Button (one click,
   no CLI — see below) or manual dashboard clicks
   (`docs/DEPLOYMENT_DASHBOARD.md`). Same bindings, same migrations,
   no secrets to paste — machine keys are minted post-setup.
+
+### Optional secrets at install
+
+`--secrets-file <path>` applies `KEY=value` lines (keys validated against the
+installer whitelist) at install time. `docker`/`bare` merge them into the
+target `.env.toml`; `workers` pushes them with `wrangler secret put` and writes
+them to `cf-workers/.env.toml` custody. On a terminal, an install without
+`--secrets-file` offers a GitHub-sync wizard instead (`--yes` skips it). The
+GitHub trio (`GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, and a private key) is
+fail-closed: a partial trio is skipped with a warning, never written half-way.
+Workers take the key inline (`GITHUB_PRIVATE_KEY`); bare may keep
+`GITHUB_PRIVATE_KEY_FILE`. Reconfigure later with the same flag, or edit the
+custody file and re-run.
 
 ### Deploy Button — Cloudflare dashboard (DRAFT-UNVERIFIED)
 
@@ -128,8 +160,9 @@ curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/unins
 
 Data is **kept** unless `--purge` (requires typing `purge` on a TTY): docker
 removes the compose project but keeps the `lexa-data` volume; bare keeps the
-install dir; workers keeps D1/R2/KV; dev keeps `data/`. The CLI itself is
-uninstalled manually (`rm $(which lx)`).
+install dir; workers keeps D1/R2/KV. The CLI itself is
+uninstalled manually (`rm $(which lx)`). Pass `DEPLOY_DIR` / `INSTALL_DIR` /
+`WORK_DIR` when the target dir is not `dockers/` / `bare/` / `cf-workers/`.
 
 ## Upgrade
 
@@ -141,13 +174,15 @@ migrations. DB migrations run at server boot. Env writes merge: a legacy flat
 `.env` is converted to `.env.toml` in place (original kept as `.env.legacy`)
 and operator-added keys are preserved, so a pre-P4 install upgrades cleanly.
 
-Workers upgrades resume the previous deploy: run from the same directory,
-and the domain defaults to the last one (Enter keeps it); the token is
-reused from `CF_API_TOKEN`, `--cf-token`, or the saved `.cf-token` file
-(offered after TTY entry, `chmod 600`, never written from env/flag values).
-Only the 2 newest release tarballs are kept; starting in a directory with
-no previous deploy asks for confirmation first. On a shared machine,
-decline the token-save offer.
+Workers upgrades resume the previous deploy: run from the same directory
+(`cf-workers/`), and the domain defaults to the last one (Enter keeps it); the
+credentials are reused from `--cf-token`, `CF_API_TOKEN`, the saved
+`cf-workers/.cf-token` file, or an existing `wrangler login` (offered for saving
+after TTY entry, `chmod 600`, never written from env/flag values), and
+`LXK_SECRETS_MASTER_KEY` is read back from `cf-workers/.env.toml` custody so it
+is never rotated. Only the 2 newest release tarballs are kept; starting in a
+directory with no previous deploy asks for confirmation first. On a shared
+machine, decline the token-save offer.
 
 ## Sample data
 
@@ -171,12 +206,12 @@ re-runs.
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
-| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; preserved across install-script re-runs (the installer merges, never truncates) | only for GitHub sync |
+| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync, or applied at install with `--secrets-file` / the wizard; preserved across install-script re-runs (the installer merges, never truncates) | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_SECRETS_MASTER_KEY` | hand-set (or `wrangler secret put` on Workers); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store any managed secret** (MCP token, provider key, or Jev API key); unset allows secret-less MCP clients and keyless providers, and leaves Jev disabled |
+| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store any managed secret** (MCP token, provider key, or Jev API key); unset allows secret-less MCP clients and keyless providers, and leaves Jev disabled |
 
 ## Full variable reference
 

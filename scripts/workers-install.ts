@@ -7,9 +7,14 @@
 // (the bash side owns /dev/tty); this helper takes everything via flags.
 //
 // Usage:
-//   bun workers-install.ts --cf-token <tok> --name <deploy> \
+//   bun workers-install.ts --name <deploy> \
+//     [--cf-token <tok>]              # else CF_API_TOKEN / CLOUDFLARE_API_TOKEN
 //     [--domain lexa.example.com]     # custom domain; absent = workers.dev
 //     [--dir <unpack dir>]            # default: cwd
+//
+// The CF token is read from --cf-token when present, otherwise from the
+// CF_API_TOKEN / CLOUDFLARE_API_TOKEN environment (the installer passes it via
+// the environment so it never appears in argv).
 //
 // Superadmin provisioning is NOT done here — the web /setup wizard owns it
 // (owner decision: free-choice email + password at first install). API
@@ -30,7 +35,7 @@ function flag(name: string): string {
   return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1]! : "";
 }
 
-const CF_TOKEN = flag("cf-token") || die("--cf-token required");
+const CF_TOKEN = flag("cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || die("no Cloudflare credentials — set CF_API_TOKEN or pass --cf-token");
 // Boolean flag: drops any existing D1 databases matching the deploy name
 // before creating a fresh one (all data in them is gone).
 const RESET_DB = process.argv.includes("--reset-db");
@@ -143,7 +148,7 @@ async function ensureD1(): Promise<string> {
   if (listed.length > 0) {
     let drop = RESET_DB;
     if (!drop && process.stdout.isTTY) {
-      const answer = ttyPrompt(`D1 '${FLAVOR.d1Name}' already exists — drop it and start fresh? All data in it is lost [y/N]`);
+      const answer = ttyPrompt(`The database '${FLAVOR.d1Name}' already exists. Delete it and start over? This erases all data and can't be undone. [y/N]`);
       drop = /^y(es)?$/i.test(answer);
     }
     if (drop) {
@@ -312,7 +317,24 @@ if (CUSTOM_DOMAIN && zone) {
 }
 
 // ── Done: API keys are minted post-setup (login → Settings → API Keys) ──
-console.log(`  ✓ deployed${CUSTOM_DOMAIN ? ` → https://${CUSTOM_DOMAIN}` : ""}`);
+// The installer banner needs a URL. A custom domain is known; otherwise ask
+// the account for its workers.dev subdomain (best-effort — no failure if the
+// endpoint is unavailable).
+let deployedUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
+if (!deployedUrl) {
+  try {
+    const sub = await cfFetch(`/accounts/${account}/workers/subdomain`);
+    const result = sub.json?.result as { subdomain?: string } | null;
+    const subdomain = result?.subdomain ?? "";
+    if (sub.ok && subdomain) deployedUrl = `https://${FLAVOR.workerName}.${subdomain}.workers.dev`;
+  } catch {
+    /* best-effort */
+  }
+}
+if (deployedUrl) {
+  writeFileSync(join(DIR, ".deployed-url"), `${deployedUrl}\n`, { mode: 0o600 });
+}
+console.log(`  ✓ deployed${deployedUrl ? ` → ${deployedUrl}` : ""}`);
 
 // ── Tarball cleanup: keep the 2 newest downloads, drop older ones ──
 // DIR is the tarball work dir in release runs (in --from-repo runs no

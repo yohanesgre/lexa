@@ -376,7 +376,7 @@ jobs:
           # release ships the loader, `:latest` is equivalent.
           bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191 --image staging
           curl -sf http://127.0.0.1:9191/api/health | grep -q '"ok":true'
-          cd lexa-deploy
+          cd dockers
           test -f .env.toml || { echo "::error::installer did not write .env.toml"; exit 1; }
           grep -q 'LXK_PUBLIC_URL' .env.toml || { echo "::error::.env.toml missing app keys"; exit 1; }
           grep -q 'target: /app/.env.toml' docker-compose.yml || { echo "::error::compose does not bind .env.toml"; exit 1; }
@@ -429,4 +429,4 @@ jobs:
           docker rm -f lexa-ci-port >/dev/null 2>&1 || true
           docker compose down -v
           cd "$WORKDIR"
-          rm -rf lexa-deploy
+          rm -rf dockers
