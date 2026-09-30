@@ -73,10 +73,10 @@ function ProfileSection() {
             <div className="avatar" style={{ width: 48, height: 48, fontSize: 18 }}>{initial}</div>
           </div>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <Field label="Name" htmlFor="me-name" hint="Initials avatar derives from the name. Save → PATCH /api/me { name }; the user-menu trigger updates from the response." className="field mb-3">
+            <Field label="Name" htmlFor="me-name" hint="Used for your initials avatar. Updates across the app after you save." className="field mb-3">
               <TextInput id="me-name" value={name} onChange={(v) => { setName(v); if (error) setError(null); }} />
             </Field>
-            <Field label="Email" htmlFor="me-email" hint="Email is the login identity — changing it is a provisioning-level action (contact your admin)." className="field mb-0">
+            <Field label="Email" htmlFor="me-email" hint="The email you sign in with. To change it, ask an admin." className="field mb-0">
               <div className="flex items-center gap-2">
                 <input id="me-email" className="prop-input w-full" value={user.email} disabled style={{ opacity: 0.6 }} />
                 <span className="text-xs text-lx-text-muted">read-only</span>
@@ -168,7 +168,7 @@ function SessionsSection({ currentSessionId }: { currentSessionId: string | null
         <span className="text-xs text-lx-text-muted">Own sessions only</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Every active sign-in on this account. Sessions last 7 days, sliding on activity. Revoking kills a session immediately; the current session can't be revoked from here (log out instead).
+        Every device signed in to your account. Sessions stay active for 7 days and extend as you use them. Revoke to sign a device out right away. For the session you're using now, log out instead.
       </p>
 
       {isLoading ? (

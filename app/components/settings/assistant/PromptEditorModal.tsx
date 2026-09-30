@@ -182,7 +182,7 @@ function DeliveryPreview({ isAgent, kind, name, instructions, skillId, allSkills
           </>
         )}
       </div>
-      <div className="field-hint">Rendered view of what ships in the claim payload when this {kind} runs.</div>
+      <div className="field-hint">Preview of what this {kind} receives.</div>
     </div>
   );
 }

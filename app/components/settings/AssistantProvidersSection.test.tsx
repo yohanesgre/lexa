@@ -92,12 +92,11 @@ describe("AssistantProvidersSection — no master key", () => {
     h.providers = [WITH_KEY];
   });
 
-  it("disables the key field, never hides it, and names the exact env var", () => {
+  it("disables the key field, never hides it, and shows a plain-language notice", () => {
     render(<AssistantProvidersSection />);
     expect(screen.getByLabelText("API key")).toBeDisabled();
-    expect(screen.getByText(/Key storage is off — this server has no/)).toBeInTheDocument();
-    expect(screen.getByText("LXK_SECRETS_MASTER_KEY")).toBeInTheDocument();
-    expect(screen.getByText(/Set it and restart to enable/)).toBeInTheDocument();
+    expect(screen.getByText(/Key storage is turned off on this server, so provider keys can't be saved yet\./)).toBeInTheDocument();
+    expect(screen.getByText(/An admin can turn it on\./)).toBeInTheDocument();
   });
 
   it("never hides a stored key — the edit form keeps its chip and Clear trigger", async () => {

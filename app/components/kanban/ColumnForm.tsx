@@ -287,7 +287,6 @@ export function ColumnForm({ column, isOpen, onClose, onDelete, onSubmit, zIndex
                 >
                   <span className={cn("checkbox", state.isDone && "checked")} />
                   <span className="text-sm text-lx-text-primary font-body">Tasks in this column count as done</span>
-                  <span className="check-meta">stored as columns.is_done</span>
                 </button>
                 <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
                   Multiple done columns allowed (e.g. Done + Released), independent of GitHub state mapping. A task counts as done for sprint progress when it sits in a done column OR is archived.

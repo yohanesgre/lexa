@@ -266,14 +266,14 @@ function McpClientForm({ editing, managedSecretsEnabled, onCancel }: { editing: 
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="mcp-url">URL</label>
           <input id="mcp-url" className="prop-input w-full font-mono" placeholder="https://mcp.linear.example/mcp" value={state.url} onChange={(e) => set("url", e.target.value)} />
-          <div className="field-hint">http(s) URLs only.</div>
+          <div className="field-hint">Enter a web address (http:// or https://).</div>
         </div>
       </div>
 
       {managedSecretsEnabled === false && (
         <div className="notice notice-warning mt-3">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-          <span>Token storage is off — this server has no <span className="font-mono">LXK_SECRETS_MASTER_KEY</span>, so a Bearer token cannot be encrypted. Set it and restart to enable. A pending clear can still be abandoned without the key.</span>
+          <span>Token storage is turned off on this server, so tokens can't be saved yet. A pending removal can still be cancelled.</span>
         </div>
       )}
 

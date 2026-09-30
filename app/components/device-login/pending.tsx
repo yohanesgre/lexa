@@ -29,7 +29,7 @@ export function PendingVariant({ clientName, code, expiresAt, busy, onApprove, o
         </div>
       </div>
       <p className="text-xs text-lx-text-secondary" style={{ textAlign: "center", lineHeight: 1.5, margin: "0 0 16px" }}>
-        A terminal on this machine is requesting a key bound to your account. Approve mints the key once — the CLI prints it, and you can manage it in Settings → Me → API keys.
+        A terminal on this machine is requesting a key bound to your account. Approving creates the key once — your CLI will show it. You can manage it in Settings → Me → API keys.
       </p>
       <div className="flex items-center gap-2">
         <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={onDeny} disabled={busy !== null}>

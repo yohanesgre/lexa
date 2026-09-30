@@ -111,7 +111,7 @@ function SwimlaneFormFields({ error, state, set, milestones, isBacklog }: {
         <FieldShell
           id="swimlane-milestone"
           label="Milestone"
-          hint={<>Stored as swimlanes.milestone_id. &ldquo;None&rdquo; = loose sprint (no milestone).</>}
+          hint={<>&ldquo;None&rdquo; gives a sprint with no milestone.</>}
         >
           <select
             id="swimlane-milestone"
@@ -133,7 +133,7 @@ function SwimlaneFormFields({ error, state, set, milestones, isBacklog }: {
         <FieldShell
           id="swimlane-start"
           label="Start date"
-          hint="Stored as swimlanes.start_at YYYY-MM-DD. Validated start &le; due on save."
+          hint="Format: YYYY-MM-DD. Start must be on or before the due date."
         >
           <DatePicker value={state.startAt} onChange={(v) => set({ startAt: v })} className="w-full" />
         </FieldShell>
@@ -143,7 +143,7 @@ function SwimlaneFormFields({ error, state, set, milestones, isBacklog }: {
         <FieldShell
           id="swimlane-due"
           label="Due date"
-          hint="Stored as swimlanes.due_at YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline."
+          hint="Format: YYYY-MM-DD — date only, no time of day. Empty = lane has no deadline."
         >
           <DatePicker value={state.dueAt} onChange={(v) => set({ dueAt: v })} className="w-full" />
         </FieldShell>

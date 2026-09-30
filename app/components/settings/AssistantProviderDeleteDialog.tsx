@@ -14,7 +14,7 @@ export function AssistantProviderDeleteDialog({ providerId, onClose }: { provide
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
         <div className="dialog dialog-enter pointer-events-auto" style={{ maxWidth: 420 }}>
           <h3 className="font-display text-base font-medium text-lx-text-primary">Delete provider?</h3>
-          <p className="text-sm text-lx-text-secondary mt-2">This will permanently delete the provider. Projects referencing it will fail with 409 until reassigned.</p>
+          <p className="text-sm text-lx-text-secondary mt-2">This will permanently delete the provider. Reassign its projects first, or they'll stop working.</p>
           <div className="flex items-center gap-2 mt-4 justify-end">
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button type="button" className="btn btn-danger-solid" disabled={del.isPending} onClick={() => del.mutate(providerId, { onSuccess: onClose })}><Trash2 size={14} strokeWidth={1.5} /> {del.isPending ? "Deleting…" : "Delete"}</button>

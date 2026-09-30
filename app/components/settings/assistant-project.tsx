@@ -82,7 +82,6 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
     <section className="mb-8 mt-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Assistant provider</h2>
-        <span className="text-xs text-lx-text-muted">GET /api/assistant/settings/:projectId</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
         Assistant (the writing assistant in the AI popover) runs against a provider from the workspace registry. Base URLs and keys live on the provider registry (Workspace → Assistant Providers); this project picks a primary provider + model and an optional ordered fallback chain.
@@ -90,7 +89,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
 
       <div className="card-panel card-panel--elevated">
         {notConfigured && (
-            <WarningNotice className="mt-0" style={{ marginBottom: 16 }} title="PROVIDER_NOT_CONFIGURED">
+            <WarningNotice className="mt-0" style={{ marginBottom: 16 }} title="Assistant not configured">
               No provider configured for this project. Save a provider + model to enable Assistant.
             </WarningNotice>
         )}
@@ -129,7 +128,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
               ))}
             </select>
           </div>
-          <div className="field-hint">Filtered to the primary provider's enabled models — priority order from the registry, but you can still pick any enabled id. Registry manages the catalog (Fetch models lives in Workspace → Assistant Providers, not here).</div>
+          <div className="field-hint">Models are listed in the order your admin set, and you can pick any of them. Fetching new models happens under Workspace &rarr; Assistant Providers.</div>
         </div>
 
         <div className="field">

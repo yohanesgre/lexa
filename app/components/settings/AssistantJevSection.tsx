@@ -16,10 +16,10 @@ type JevTestState =
 
 // Fixed catalog copy — upstream text is never echoed.
 function failureCopy(code: string): string {
-  if (code === "JEV_AUTH_FAILED") return "Jev rejected the API key (401/403). Other outcome: JEV_UNREACHABLE (timeout / network).";
+  if (code === "JEV_AUTH_FAILED") return "The key was rejected — or Jev couldn't be reached.";
   if (code === "JEV_UNREACHABLE") return "Jev could not be reached (timeout / network).";
   if (code === "JEV_INVALID_CONFIG") return "The Jev configuration is invalid.";
-  if (code === "SECRET_KEY_UNAVAILABLE") return "Key storage is off — LXK_SECRETS_MASTER_KEY is not configured.";
+  if (code === "SECRET_KEY_UNAVAILABLE") return "Key storage is turned off on this server.";
   return "Jev test failed.";
 }
 
@@ -120,7 +120,7 @@ function JevConfigForm({ config, secretsEnabled }: { config: AssistantJevMasked;
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="jev-base-url">Base URL</label>
           <input id="jev-base-url" className="prop-input w-full font-mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-          <div className="field-hint">Absolute http(s), no userinfo. Seeded default <span className="font-mono">https://api.typesafe.ai</span>.</div>
+          <div className="field-hint">Full https:// address, no username or password. Defaults to <span className="font-mono">https://api.typesafe.ai</span>.</div>
         </div>
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="jev-model">Model</label>
@@ -132,7 +132,7 @@ function JevConfigForm({ config, secretsEnabled }: { config: AssistantJevMasked;
       {secretsEnabled === false && (
         <div className="notice notice-warning mt-3">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-          <span>Key storage is off — this server has no <span className="font-mono">LXK_SECRETS_MASTER_KEY</span>, so a Jev API key cannot be encrypted. Set it and restart to enable.</span>
+          <span>Key storage is turned off on this server, so Jev API keys can't be saved yet. An admin can turn it on.</span>
         </div>
       )}
 

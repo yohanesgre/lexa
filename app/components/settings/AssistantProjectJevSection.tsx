@@ -63,7 +63,7 @@ export function AssistantProjectJevSection({ project }: { project: Project }) {
             </div>
           )}
 
-          <div className="field-hint">Per-project opt-in for the Jev advisory preflight and the read-only <span className="font-mono">jev_assess</span> tool. Absence of a stored row renders as disabled — opt-in, never opt-out. The toggle is disabled while the global Jev config is missing, disabled, or key-less.</div>
+          <div className="field-hint">Per-project opt-in for the Jev advisory preflight and the read-only <span className="font-mono">jev_assess</span> tool. Off until you turn it on. The toggle is disabled while the global Jev config is missing, disabled, or key-less.</div>
         </div>
       )}
     </section>
