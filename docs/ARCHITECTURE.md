@@ -1,6 +1,6 @@
 # Lexa — Architecture
 
-A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, and GitHub issue sync — running on a Bun standalone server with SQLite.
+A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, and GitHub issue sync — running on Cloudflare Workers or a Bun standalone server with SQLite.
 
 ## Tech Stack
 
@@ -9,7 +9,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Frontend     | React + Vite + TanStack Start | Root route `ssr: true`; every authed/app route declares `ssr: false` and stays client-only (build-time root shell served for them). Public `/share/$token` has no `ssr: false`, so its loader + `head` server-render on both flavors (real title/OG for link unfurlers, rendered content for no-JS). TanStack Router + Query, file-based routing; `server/entry.ts` serves the shell + SPA fallback and routes only `/share/*` through the Start SSR handler; Workers: same model |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
-| Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
+| Runtime      | Cloudflare Workers + D1 + R2 — the only actively developed deploy target (Workers Paid, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`); Bun standalone HTTP server (Docker) / bare metal kept as a frozen flavor | Edge isolates host SSR + REST + webhooks and are the only target receiving new features. The Bun/Docker flavor keeps running at current features — existing installs keep working, no new work lands there (see ADR-0003) |
 | Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
 | Machine auth | API keys (`lxk_` + base62(43B)) | CLI/webhooks/scripts: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
@@ -247,10 +247,18 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 ### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
 
-## Assistant — one in-process AI tier (the agent-runtime tier is removed)
+## Assistant — one AI execution tier (the agent-runtime tier is removed)
 
-Lexa has exactly **one** AI execution tier: the in-process **Assistant**. It
-runs in the server process — server-side TanStack AI `chat()`
+> This section is **superseded by ADR-0003** (accepted 2026-10-01): the assistant becomes
+> Workers-only, running on `@cloudflare/ai-chat` `AIChatAgent` Durable Objects
+> (one DO per conversation thread, WebSocket transport). The Bun/Docker flavor
+> ships without the assistant — routes absent, capability flag false, UI hidden.
+> This section still describes the pre-ADR in-process tier; the DO-based design
+> lives in `status/assistant-workers/adr-0003.md` and is transcribed here in a
+> later phase.
+
+Lexa has exactly **one** AI execution tier: the **Assistant**. In the tier
+described below it runs in the server process — server-side TanStack AI `chat()`
 (`server/assistant/provider.ts`), per-project provider settings
 (`assistant_settings`, custom OpenAI-/Anthropic-compatible endpoints),
 server-side tools v1 (Exa web search, SSRF-guarded `fetch_url`, `read_s3_file`,
@@ -749,19 +757,14 @@ Effect-TS 3.22 on the frontend app routes is limited to **Mid**: Effect lives un
 
 ## Hosting flavors
 
-Two peer-level flavors share the same source tree (no data sync between them;
-migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
+Two flavors share the same source tree, but they are no longer peer-level in
+active development: **Cloudflare Workers is the only actively developed deploy
+target; the Bun standalone flavor is frozen at its current features** (existing
+installs keep running, no new work lands there — see ADR-0003). There is no data
+sync between flavors; migrate Bun→Workers by dumping the Bun DB to SQL and
+replaying on D1:
 
-- **Bun standalone (primary):** `Bun.serve` + `bun:sqlite` (WAL) + cloudflared
-  tunnel. `server/entry.ts` serves the prerendered SPA shell (`_shell.html`)
-  directly for every route except `/api/*`, `/health`, `/assets/*` and
-  `/favicon*` (all handled earlier) and `/share/*`, which runs the Start SSR
-  handler (loader + `head` server-rendered → title/OG/description). A missing
-  `_shell.html` falls through to the legacy `/` landing page /
-  `dist/client/index.html`. Root is `ssr: true`; the authed/app routes declare
-  `ssr: false` and stay client-only. Current live system. Deployed via
-  `scripts/install.sh` (Docker Compose / bare metal) — see docs/DEPLOYMENT.md.
-- **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
+- **Cloudflare Workers (actively developed target, $5/mo):** Workers + D1 + R2 + KV.
   Same model: `/share/*` → the Start SSR handler, with the share lookup backed
   by D1 (`cloudflare:workers` `env.DB` → `DbD1Live` in `app/lib/share.server.ts`);
   other non-API routes → the prerendered shell. The generated worker config has
@@ -774,6 +777,17 @@ migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
   (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
   `createAuth(env)` factory, `wrangler d1 migrations`, `scheduled` prune+backup.
   Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays.
+- **Bun standalone (frozen at current features):** `Bun.serve` + `bun:sqlite` (WAL)
+  + cloudflared tunnel. `server/entry.ts` serves the prerendered SPA shell
+  (`_shell.html`) directly for every route except `/api/*`, `/health`, `/assets/*`
+  and `/favicon*` (all handled earlier) and `/share/*`, which runs the Start SSR
+  handler (loader + `head` server-rendered → title/OG/description). A missing
+  `_shell.html` falls through to the legacy `/` landing page /
+  `dist/client/index.html`. Root is `ssr: true`; the authed/app routes declare
+  `ssr: false` and stay client-only. Frozen at current features (ADR-0003):
+  existing installs keep running, no new work lands there, and the assistant is
+  not part of this flavor. Deployed via `scripts/install.sh` (Docker Compose /
+  bare metal) — see docs/DEPLOYMENT.md.
 
 Vite plugin chain emits two server bundles (Bun entry + Workers entry).
 Dispatch point: `curl -fsSL …/scripts/install.sh | bash -s -- <target>` (docker | bare | workers | dev).

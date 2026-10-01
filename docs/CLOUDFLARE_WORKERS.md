@@ -100,7 +100,7 @@ Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pr
 | GitHub webhook pattern | works natively | S |
 | Env/secrets/migrations | works-with-changes | S–M |
 | R2 storage driver | works-with-changes | M |
-| TanStack AI assistant path | works-with-changes | S–M |
+| TanStack AI assistant path | superseded by ADR-0003 — replaced by `@cloudflare/ai-chat` Durable Objects | M |
 
 ### TanStack Start
 
@@ -258,6 +258,8 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   old `lexa-cli deploy` compose flow is gone (removed in cli-v2026.2.0).
 - The AI path is fully in-process (the agent-runtime tier is removed) — no
   external runner to host; outbound subrequest budget 50/request free, 1000 paid.
+  (superseded by ADR-0003: the assistant runs on `@cloudflare/ai-chat`
+  `AIChatAgent` Durable Objects on this flavor, and does not exist on Bun/Docker.)
 
 ## Object storage (R2)
 
@@ -280,6 +282,12 @@ Fits the agreed `Lexa/Storage` design (fs + s3 drivers):
 - Local dev: `wrangler dev` simulates R2 (miniflare-backed).
 
 ## Assistant path via TanStack AI
+
+> This section is **superseded by ADR-0003** (accepted 2026-10-01): the assistant on this flavor
+> is `@cloudflare/ai-chat` `AIChatAgent` Durable Objects (one DO per conversation
+> thread, WebSocket transport, DO SQLite canonical + D1 `assistant_threads`
+> mirror), and the Bun/Docker flavor ships without the assistant. The TanStack AI
+> tier described below is the pre-ADR state and is transcribed in a later phase.
 
 Current state (Aug 2026): `@tanstack/ai` 0.47.x, MIT, still 0.x (~24 minors in 3
 months; one wire-format break already shipped). Core is web-standard JS — workerd-
@@ -347,7 +355,8 @@ POST /api/assistant/tasks → queue → server-side chat():
 3. **D1 single-writer throughput + 30s batch ceiling.** Sequential execution queues
    under concurrency; kanban drag storms could hit overload errors. Load test before
    committing.
-4. **TanStack AI 0.x churn** — pin versions, contain behind own service.
+4. **TanStack AI 0.x churn** — superseded by ADR-0003 (the assistant moves to
+   `@cloudflare/ai-chat` Durable Objects, which retires this risk).
 5. **Assistant capability scope** — the coding tier (shell, file edits, sandboxes)
    is gone by design; users expecting a coding agent get an explicit explanation
    rather than a degraded mode.

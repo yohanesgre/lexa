@@ -4,6 +4,14 @@ The web app and CLI have **independent versions** and **independent release
 pipelines**. A version bump without its changelog entry is an incomplete
 release.
 
+## Deploy targets — policy
+
+**Cloudflare Workers is the only actively developed deploy target.** New features
+land on the Workers flavor; Docker and bare-metal installs keep running at their
+current features and receive no new work (existing installs keep working, and
+releases continue to ship them). The AI Assistant is Workers-only — Docker/bare
+users should read `docs/DEPLOYMENT.md` → *Deploy targets frozen*.
+
 ## Versioning — CalVer `YYYY.MINOR.MICRO`
 
 Lexa uses Calendar Versioning ([CalVer](https://calver.org/)), scheme
