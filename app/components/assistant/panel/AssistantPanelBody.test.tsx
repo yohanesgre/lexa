@@ -61,6 +61,7 @@ function renderBody(overrides: Partial<BodyProps> = {}) {
       onDismiss={vi.fn()}
       editor={editor}
       onClose={vi.fn()}
+      reconnecting={false}
       {...overrides}
     >
       <div data-testid="idle-form" />
@@ -87,6 +88,7 @@ describe("AssistantPanelBody", () => {
   it("renders the streaming preview and Stop; tools heading only once a chip exists", () => {
     renderBody({ stream: stream({ status: "streaming", text: "partial" }) });
     expect(screen.getByText("partial")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Stop/ })).toBeInTheDocument();
     expect(screen.queryByText("Tools")).not.toBeInTheDocument();
 
     renderBody({
@@ -94,6 +96,21 @@ describe("AssistantPanelBody", () => {
     });
     expect(screen.getByText("Tools")).toBeInTheDocument();
     expect(screen.getByText("Searching web…")).toBeInTheDocument();
+  });
+
+  it("replaces the Stop footer with the reconnect banner while the socket is down", () => {
+    renderBody({ stream: stream({ status: "streaming", text: "partial" }), reconnecting: true });
+    expect(screen.getByText("partial")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Connection lost — reconnecting. The run continues server-side."
+    );
+    expect(screen.queryByRole("button", { name: /Stop/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the reconnect banner over a premature terminal status", () => {
+    renderBody({ stream: stream({ status: "done", text: "result" }), reconnecting: true });
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Review in editor/ })).not.toBeInTheDocument();
   });
 
   it("renders the done view with Review in editor", () => {

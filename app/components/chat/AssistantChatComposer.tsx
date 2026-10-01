@@ -455,6 +455,8 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   attachDisabled,
   attachmentsEnabled = true,
   sendError,
+  reconnecting = false,
+  resumed = false,
   onSend,
   onAbort,
   rail,
@@ -473,6 +475,11 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   busy409: boolean;
   suspendedLock: boolean;
   suspendCount: number;
+  // Transport reconnect (herald-chat.html): the socket is down while the turn
+  // keeps running server-side; the composer stays locked and the footer shows
+  // RECONNECTING. `resumed` is the short-lived confirmation after recovery.
+  reconnecting?: boolean | undefined;
+  resumed?: boolean | undefined;
   // Images disabled (no vision chain) — the picker's image row is disabled.
   attachDisabled: boolean;
   // Kill switch: false hides the attach control entirely.
@@ -498,6 +505,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const mention = useMentionTokens({ slug, value: draft, onChange: setDraft, skills });
   const queueMode = streaming || suspendedLock;
   const elapsed = useElapsedSeconds(streaming);
+  const reconnectSeconds = useElapsedSeconds(reconnecting);
   const uploadsRef = useRef<Map<string, { abort: () => void }>>(new Map());
   const sentIdsRef = useRef<string[]>([]);
   const sentTextRef = useRef<string | null>(null);
@@ -657,7 +665,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   const handleSend = useCallback(() => {
     const msg = draft.trim();
-    if (!msg || streaming || suspendedLock || busy409 || hasExtractionFailure) return;
+    if (!msg || streaming || suspendedLock || busy409 || reconnecting || hasExtractionFailure) return;
     const accepted = onSend(msg, readyRefs());
     if (!accepted) return;
     sentIdsRef.current = attachments.filter((a) => a.status === "ready").map((a) => a.id);
@@ -666,19 +674,19 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     mention.close();
     setRejections([]);
     setWarning(null);
-  }, [draft, streaming, suspendedLock, busy409, hasExtractionFailure, onSend, readyRefs, attachments, mention]);
+  }, [draft, streaming, suspendedLock, busy409, reconnecting, hasExtractionFailure, onSend, readyRefs, attachments, mention]);
 
   const handleQueue = useCallback(() => {
     const msg = draft.trim();
-    if (!msg || busy409) return;
+    if (!msg || busy409 || reconnecting) return;
     onQueue?.(msg);
     setDraft("");
     mention.close();
-  }, [draft, busy409, onQueue, mention]);
+  }, [draft, busy409, reconnecting, onQueue, mention]);
 
   const flushHeld = useCallback(() => {
     if (!queued) return;
-    if (streaming || suspendedLock || busy409 || hasExtractionFailure) return;
+    if (streaming || suspendedLock || busy409 || reconnecting || hasExtractionFailure) return;
     const accepted = onSend(queued.text, readyRefs());
     if (!accepted) return;
     sentIdsRef.current = attachments.filter((a) => a.status === "ready").map((a) => a.id);
@@ -686,7 +694,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     onUnqueue?.();
     setRejections([]);
     setWarning(null);
-  }, [queued, streaming, suspendedLock, busy409, hasExtractionFailure, onSend, readyRefs, attachments, onUnqueue]);
+  }, [queued, streaming, suspendedLock, busy409, reconnecting, hasExtractionFailure, onSend, readyRefs, attachments, onUnqueue]);
 
   // Click the queued chip text to pull the held message back into the draft.
   const editQueuedText = useCallback(() => {
@@ -727,8 +735,8 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     setWarning(null);
   }, [streamStatus, streaming, sendError]);
 
-  const canSend = draft.trim().length > 0 && !busy409 && !streaming && !suspendedLock && !hasExtractionFailure;
-  const canQueue = draft.trim().length > 0 && !busy409;
+  const canSend = draft.trim().length > 0 && !busy409 && !reconnecting && !streaming && !suspendedLock && !hasExtractionFailure;
+  const canQueue = draft.trim().length > 0 && !busy409 && !reconnecting;
 
   const placeholder = busy409
     ? "Waiting for the current reply…"
@@ -800,7 +808,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
               else handleSend();
             }
           }}
-          disabled={busy409}
+          disabled={busy409 || reconnecting}
           style={{ border: "none", background: "transparent" }}
         />
       </div>
@@ -814,8 +822,21 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
           onDismissRejection={dismissRejection}
         />
       )}
+      {resumed && !reconnecting && (
+        <div className="deck-action composer-footer" role="status">
+          <span className="deck-status" style={{ color: "var(--lx-text-success)" }}>
+            ● RESUMED
+          </span>
+          <span className="text-xs color-secondary">Reconnected — stream resumed from the last frame.</span>
+        </div>
+      )}
       <div className="deck-action composer-footer">
-        {busy409 ? (
+        {reconnecting ? (
+          <span className="deck-status" role="status">
+            <span aria-hidden="true" style={STATUS_DOT_STYLE} />
+            RECONNECTING · <span aria-hidden="true">{reconnectSeconds}s</span>
+          </span>
+        ) : busy409 ? (
           <span className="deck-status" style={{ color: "var(--lx-text-secondary)" }}>
             ANOTHER ASSISTANT RUN IS IN PROGRESS
           </span>

@@ -11,7 +11,7 @@ import {
   useWikiAttachments,
   useAssistantTask,
 } from "./queries";
-import { useAssistantStream, assistantGetSnapshot } from "./use-assistant-stream";
+import { useAssistantAgent, type AssistantAgentStream } from "./use-assistant-agent";
 import type { Attachment } from "../../shared/types";
 import {
   attachmentQueryId,
@@ -107,22 +107,38 @@ function useAssistantRun(args: RunArgs) {
   // module stream session alive, so reopening lands on its live/final state.
   const [taskId, setTaskId] = useState<string | null>(() => getAssistantPanelSession(slug, documentType, documentId).taskId);
 
-  // Enqueue → open the SSE stream exactly once per task id. `stream` is
-  // recreated per render, so the ref guard (not dep equality) dedupes sends.
+  // Enqueue → attach to the run's WebSocket thread (`task:<id>`). The server
+  // enqueued the turn via `enqueueRun` when POST /api/assistant/tasks landed;
+  // the client never POSTs to start it, and a dropped socket does not cancel
+  // it (ADR-0003 D5, background-capable). The WS replays an IN-FLIGHT turn on
+  // connect; anything already finished is reconstructed from the task row.
   const streamKey = taskId ? `assistant-task:${taskId}` : null;
-  const stream = useAssistantStream(streamKey);
-  const streamedTaskRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!taskId || !streamKey) return;
-    if (streamedTaskRef.current === taskId) return;
-    streamedTaskRef.current = taskId;
-    // Only a task with no session yet gets a POST. A rehydrated terminal
-    // (done/error) or live session is reattached, never re-streamed —
-    // send() would otherwise start a fresh session and re-POST.
-    if (assistantGetSnapshot(streamKey).status === "idle") {
-      stream.send(`/api/assistant/tasks/${taskId}/stream`, {});
+  const live = useAssistantAgent(streamKey);
+  const { data: assistantTaskData } = useAssistantTask(taskId, !!taskId);
+
+  // A background run that completed (or is still queued/running) while this
+  // client was disconnected has no in-flight WS buffer to replay, so the
+  // popover would sit on Idle. The task row is the authority for those
+  // terminal/pending states (herald-popover.html "background run finished
+  // while disconnected lands on Done on reconnect"). A live WS turn always wins.
+  const stream = useMemo<AssistantAgentStream>(() => {
+    if (live.status !== "idle" || !assistantTaskData) return live;
+    switch (assistantTaskData.status) {
+      case "completed":
+        return { ...live, status: "done", text: live.text || (assistantTaskData.result ?? ""), hasIngress: true };
+      case "failed":
+        return {
+          ...live,
+          status: "error",
+          error: { code: "ASSISTANT_GENERATION_FAILED", message: assistantTaskData.error ?? "Assistant generation failed" },
+        };
+      case "queued":
+      case "running":
+        return { ...live, status: "connecting" };
+      default:
+        return live;
     }
-  }, [taskId, streamKey, stream]);
+  }, [live, assistantTaskData]);
 
   // Selection label updates on editor selection/doc changes; the run reads the
   // selection fresh at click time (never a stale render value).
@@ -141,7 +157,6 @@ function useAssistantRun(args: RunArgs) {
   const running = stream.status === "connecting" || stream.status === "streaming";
   const done = stream.status === "done";
   const failed = stream.status === "error";
-  const { data: assistantTaskData } = useAssistantTask(taskId, !!taskId && done);
 
   const generate = useCallback(() => {
     if (!effectiveSkillId) return;

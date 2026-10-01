@@ -53,6 +53,7 @@ export function AssistantPanel({ editor, slug, documentType, documentId, onClose
         onDismiss={panel.dismiss}
         editor={editor}
         onClose={onClose}
+        reconnecting={panel.stream.reconnecting}
       >
         <AssistantPanelIdle
           agentSkills={panel.agentSkills}

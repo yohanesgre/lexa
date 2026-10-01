@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { ChatComposerArea } from "./AssistantChatShell";
 import { ResizeObserverStub } from "../../test-utils";
 
@@ -9,7 +9,7 @@ import { ResizeObserverStub } from "../../test-utils";
 // the flow (chat-composer-float) with a scrim behind the card; the landing
 // composer stays static and in-flow (is-landing), no float class, no scrim.
 
-function renderComposerArea(landing: boolean) {
+function renderComposerArea(landing: boolean, overrides: Partial<Parameters<typeof ChatComposerArea>[0]> = {}) {
   return render(
     <main className="chat-shell">
       <ChatComposerArea
@@ -27,6 +27,7 @@ function renderComposerArea(landing: boolean) {
         onSend={() => true}
         onAbort={() => {}}
         landing={landing}
+        {...overrides}
       />
     </main>
   );
@@ -91,5 +92,28 @@ describe("ChatComposerArea — floating composer", () => {
     unmount();
     expect(observer.disconnected).toBe(true);
     expect(shell.style.getPropertyValue("--chat-composer-clearance")).toBe("");
+  });
+});
+
+// herald-chat.html "Connection lost → auto-resume" (ADR-0003 WS1): the socket
+// is down while the turn keeps running server-side — a reconnecting banner
+// rides above the composer, the composer locks, and the footer shows
+// RECONNECTING; after recovery a short-lived RESUMED marker confirms continuity.
+describe("ChatComposerArea — transport reconnect states", () => {
+  it("shows the reconnect banner and locks the composer while the socket is down", () => {
+    const { container } = renderComposerArea(false, { reconnecting: true });
+    const banner = container.querySelector(".banner-warning")!;
+    expect(banner.getAttribute("role")).toBe("status");
+    expect(banner.textContent).toContain("Connection lost — reconnecting… Your reply keeps running on the server.");
+    expect(screen.getByText(/RECONNECTING/)).toBeInTheDocument();
+    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).disabled).toBe(true);
+  });
+
+  it("shows the short-lived RESUMED marker without locking the composer", () => {
+    const { container } = renderComposerArea(false, { resumed: true });
+    expect(container.querySelector(".banner-warning")).toBeNull();
+    expect(screen.getByText("● RESUMED")).toBeInTheDocument();
+    expect(screen.getByText("Reconnected — stream resumed from the last frame.")).toBeInTheDocument();
+    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).disabled).toBe(false);
   });
 });

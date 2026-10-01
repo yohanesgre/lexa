@@ -14,16 +14,25 @@ import {
 } from "../components/assistant/panel/assistant-panel-store";
 
 const h = vi.hoisted(() => ({
-  snapshot: { status: "idle" } as { status: string },
+  snapshot: { status: "idle", text: "" } as { status: string; text?: string },
   send: vi.fn(),
   mutate: vi.fn(),
   settings: { model: "gpt", baseUrl: undefined, kind: "openai_compatible" },
   refetch: vi.fn(),
+  task: undefined as { status: string; result?: string; error?: string } | undefined,
 }));
 
-vi.mock("./use-assistant-stream", () => ({
-  useAssistantStream: () => ({ ...h.snapshot, send: h.send, abort: vi.fn(), reset: vi.fn(), subscribe: vi.fn(), getSnapshot: () => h.snapshot }),
-  assistantGetSnapshot: () => h.snapshot,
+vi.mock("./use-assistant-agent", () => ({
+  useAssistantAgent: () => ({
+    ...h.snapshot,
+    send: h.send,
+    abort: vi.fn(),
+    reset: vi.fn(),
+    subscribe: vi.fn(),
+    getSnapshot: () => h.snapshot,
+    reconnecting: false,
+    resumed: false,
+  }),
 }));
 
 vi.mock("./queries", () => ({
@@ -35,7 +44,7 @@ vi.mock("./queries", () => ({
   useCancelAssistantTask: () => ({ mutate: vi.fn() }),
   useTaskAttachments: () => ({ data: undefined }),
   useWikiAttachments: () => ({ data: undefined }),
-  useAssistantTask: () => ({ data: undefined }),
+  useAssistantTask: (taskId: string | null) => ({ data: taskId ? h.task : undefined }),
 }));
 
 type Selection = { from: number; to: number; text: string };
@@ -73,6 +82,7 @@ function Harness({ editor, documentId, slug = "demo", documentType = "task" }: {
     <div>
       <span data-testid="task">{panel.taskId ?? "none"}</span>
       <span data-testid="status">{panel.stream.status}</span>
+      <span data-testid="text">{panel.stream.text}</span>
       <span data-testid="selection">{panel.selectionText}</span>
       <span data-testid="prompt">{panel.prompt}</span>
       <span data-testid="skill">{panel.effectiveSkillId}</span>
@@ -84,7 +94,8 @@ function Harness({ editor, documentId, slug = "demo", documentType = "task" }: {
 
 beforeEach(() => {
   resetAssistantPanelSessions();
-  h.snapshot = { status: "idle" };
+  h.snapshot = { status: "idle", text: "" };
+  h.task = undefined;
   h.send.mockClear();
   h.mutate.mockReset();
 });
@@ -100,16 +111,32 @@ describe("useAssistantPanel", () => {
     expect(h.send).not.toHaveBeenCalled();
   });
 
-  it("starts the stream for a freshly created task", () => {
+  it("synthesizes connecting from the task row for a freshly created task", () => {
+    h.task = { status: "queued" };
     h.mutate.mockImplementation((_input: unknown, opts?: { onSuccess?: (task: { id: string }) => void }) => {
       opts?.onSuccess?.({ id: "t9" });
     });
     const { editor } = makeEditor();
     render(<Harness editor={editor} documentId="t2" />);
+    expect(screen.getByTestId("status")).toHaveTextContent("idle");
     fireEvent.click(screen.getByRole("button", { name: "generate" }));
+    // The server enqueues on POST /api/assistant/tasks; the client attaches to
+    // the WS thread and the pending task row drives the connecting state. No
+    // client-side POST to /stream exists anymore.
     expect(h.mutate).toHaveBeenCalledTimes(1);
-    expect(h.send).toHaveBeenCalledWith("/api/assistant/tasks/t9/stream", {});
+    expect(h.send).not.toHaveBeenCalled();
     expect(screen.getByTestId("task")).toHaveTextContent("t9");
+    expect(screen.getByTestId("status")).toHaveTextContent("connecting");
+  });
+
+  it("reconstructs a background-completed run from the task row", () => {
+    h.task = { status: "completed", result: "final markdown" };
+    patchAssistantPanelSession("demo", "task", "t5", { taskId: "t5" });
+    const { editor } = makeEditor();
+    render(<Harness editor={editor} documentId="t5" />);
+    expect(screen.getByTestId("task")).toHaveTextContent("t5");
+    expect(screen.getByTestId("status")).toHaveTextContent("done");
+    expect(screen.getByTestId("text")).toHaveTextContent("final markdown");
   });
 
   it("tracks the editor selection for the label", () => {
