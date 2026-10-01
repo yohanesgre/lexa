@@ -7,6 +7,21 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.2] - 2026-10-01
+
+### Fixed
+
+- **Workers installer account selection** — a Cloudflare login that covers
+  several accounts could deploy to the wrong one (the installer blindly took
+  the first account listed) and provision a stray database before failing.
+  The account is now resolved deterministically — `--account <id>`,
+  `CLOUDFLARE_ACCOUNT_ID`, the account recorded by the previous deploy (a
+  re-run keeps its account), or a single account on the token. Several
+  accounts prompt on a terminal and refuse headless with the account ids
+  named; a stale explicit id refuses with guidance. Resolution completes
+  before anything is created, so a refusal leaves no resources behind, and
+  the account listing follows pagination. (#170)
+
 ## [2026.5.1] - 2026-10-01
 
 ### Fixed
