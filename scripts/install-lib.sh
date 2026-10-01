@@ -831,6 +831,35 @@ resolve_shell_account() {
 }
 
 # ---------------------------------------------------------------------------
+# deploy_worker_name <workdir> <flavor>
+# Prints the Worker name a wrangler command must target. The deploy config's
+# `name` wins when <workdir>/deploy-<flavor>/wrangler.<flavor>.json exists and
+# its name parses; otherwise the deprecated alias map applies (staging →
+# lexa-staging, prod → lexa), else the flavor itself. The config PATH stays
+# keyed by the flavor (the deploy dir name); only the wrangler --name changes.
+# NOTE: the name is grep'd from the FIRST `"name": "..."` in the file, so this
+# depends on workers-install.ts emitting the top-level name first — a future
+# earlier nested `name` key would win the match instead.
+# ---------------------------------------------------------------------------
+deploy_worker_name() {
+  local workdir="$1" flavor="$2"
+  local cfg="${workdir}/deploy-${flavor}/wrangler.${flavor}.json"
+  if [ -r "$cfg" ]; then
+    local name=""
+    name="$(grep -o '"name": *"[^"]*"' "$cfg" 2>/dev/null | head -1 | sed 's/.*"name": *"//;s/"$//' || true)"
+    if [ -n "$name" ]; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+  fi
+  case "$flavor" in
+    staging) printf 'lexa-staging\n' ;;
+    prod) printf 'lexa\n' ;;
+    *) printf '%s\n' "$flavor" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # compose_render <mode> <port> <bind>
 # Emits docker-compose.yml into ${DEPLOY_DIR} (default: .). Modeled on the
 # repo's docker-compose.yml; mode != direct adds the cloudflared tunnel
@@ -1018,6 +1047,23 @@ fetch_release() {
   else
     echo "  (no checksums.txt for ${tag} — download NOT verified; prefer a release tag)"
   fi
+}
+
+# prune_workdir <workdir>
+# Retry safety: a previous failed run may leave stale extractions (old-tag
+# dist/migrations/scripts mixed with the new tarball's). The dir is
+# installer-owned — keep only the downloads (+ saved token + master-key
+# custody + the deploy-* dirs, whose wrangler config records the account/
+# domain a re-run resumes). workers-install.ts rebuilds deploy-<name>/ each
+# run, so keeping it is safe. Skipped entirely under INSTALL_DRY_RUN=1.
+prune_workdir() {
+  local workdir="$1"
+  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+    return 0
+  fi
+  find "${workdir}" -mindepth 1 -maxdepth 1 \
+    ! -name '*.tar.gz' ! -name 'checksums.txt' ! -name '.cf-token' ! -name '.env.toml' ! -name 'deploy-*' \
+    -exec rm -rf {} +
 }
 
 # unpack_release <fetch_dir> <install_dir> server|workers
@@ -1251,12 +1297,14 @@ _cf_token_from_wrangler() {
 # from the deploy, not from whatever `wrangler` infers elsewhere.
 wrangler_secret_put() {
   local workdir="$1" name="$2" src="$3"
+  local worker
+  worker="$(deploy_worker_name "$workdir" "${FLAVOR_NAME:-lexa}")"
   local cfg="deploy-${FLAVOR_NAME:-lexa}/wrangler.${FLAVOR_NAME:-lexa}.json"
   if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf '[dry-run] bun x wrangler secret put %s --name %s --config %s < (stdin)\n' "$name" "${FLAVOR_NAME:-lexa}" "$cfg"
+    printf '[dry-run] bun x wrangler secret put %s --name %s --config %s < (stdin)\n' "$name" "$worker" "$cfg"
     return 0
   fi
-  ( cd "$workdir" && bun x wrangler secret put "$name" --name "${FLAVOR_NAME:-lexa}" --config "$cfg" < "$src" )
+  ( cd "$workdir" && bun x wrangler secret put "$name" --name "$worker" --config "$cfg" < "$src" )
 }
 
 # workers_secret_present <workdir> <name> — three-way remote check:
@@ -1269,6 +1317,8 @@ wrangler_secret_put() {
 # reported instead of a hardcoded `absent`.
 workers_secret_present() {
   local workdir="$1" name="$2"
+  local worker
+  worker="$(deploy_worker_name "$workdir" "${FLAVOR_NAME:-lexa}")"
   local cfg="deploy-${FLAVOR_NAME:-lexa}/wrangler.${FLAVOR_NAME:-lexa}.json"
   if [ ! -r "${workdir}/${cfg}" ]; then
     # No config: a first deploy (nothing remote to preserve) reads absent; a
@@ -1281,7 +1331,7 @@ workers_secret_present() {
     return 0
   fi
   local out="" rc=0
-  out="$(cd "$workdir" && bun x wrangler secret list --config "$cfg" 2>/dev/null)" || rc=$?
+  out="$(cd "$workdir" && bun x wrangler secret list --name "$worker" --config "$cfg" 2>/dev/null)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf 'unknown\n'
     return 0
@@ -1332,24 +1382,26 @@ workers_resolve_master_key() {
 # LXK_API_KEY is ever named.
 workers_prune_legacy_secret() {
   local workdir="$1"
-  local name="${FLAVOR_NAME:-lexa}"
-  local cfg="deploy-${name}/wrangler.${name}.json"
+  local flavor="${FLAVOR_NAME:-lexa}"
+  local worker
+  worker="$(deploy_worker_name "$workdir" "$flavor")"
+  local cfg="deploy-${flavor}/wrangler.${flavor}.json"
   [ -r "${workdir}/${cfg}" ] || return 0
   local out="" rc=0
-  out="$(cd "$workdir" && bun x wrangler secret list --name "$name" --config "$cfg" --format json 2>/dev/null)" || rc=$?
+  out="$(cd "$workdir" && bun x wrangler secret list --name "$worker" --config "$cfg" --format json 2>/dev/null)" || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "  (couldn't read the worker's secrets — skipping the LXK_API_KEY cleanup)"
     return 0
   fi
   printf '%s' "$out" | grep -q '"LXK_API_KEY"' || return 0
   if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf '[dry-run] bun x wrangler secret delete LXK_API_KEY --name %s --config %s\n' "$name" "$cfg"
+    printf '[dry-run] bun x wrangler secret delete LXK_API_KEY --name %s --config %s\n' "$worker" "$cfg"
     return 0
   fi
-  if ( cd "$workdir" && bun x wrangler secret delete LXK_API_KEY --name "$name" --config "$cfg" >/dev/null 2>&1 ); then
+  if ( cd "$workdir" && bun x wrangler secret delete LXK_API_KEY --name "$worker" --config "$cfg" >/dev/null 2>&1 ); then
     echo "  (removed LXK_API_KEY — it is no longer read)"
   else
-    echo "  (couldn't remove the dead LXK_API_KEY secret — delete it later with: bun x wrangler secret delete LXK_API_KEY --name ${name} --config ${cfg})"
+    echo "  (couldn't remove the dead LXK_API_KEY secret — delete it later with: bun x wrangler secret delete LXK_API_KEY --name ${worker} --config ${cfg})"
   fi
   return 0
 }
