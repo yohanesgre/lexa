@@ -106,6 +106,13 @@ echo "== parse_flags =="
 got="$(lib_eval 'parse_flags --ref v2026.2.9 --name lexa --port 9999; printf "%s:%s:%s" "$REF" "$NAME" "$PORT"')"
 assert_eq "parse_flags --ref --name --port sets REF:NAME:PORT" "v2026.2.9:lexa:9999" "$got"
 
+got="$(lib_eval 'parse_flags --account acct-123; printf "%s" "$ACCOUNT"')"
+assert_eq "parse_flags --account sets ACCOUNT" "acct-123" "$got"
+
+rc=0
+lib_eval 'parse_flags --account' >/dev/null 2>&1 || rc=$?
+assert_rc "parse_flags --account requires a value" 1 "$rc"
+
 rc=0
 lib_eval 'parse_flags --staging' >/dev/null 2>&1 || rc=$?
 assert_rc "parse_flags --staging dies (flavors removed)" 1 "$rc"
@@ -128,6 +135,24 @@ rc=0
 lib_eval "resolve_deploy_name '${namedir}' ''" >/dev/null 2>&1 || rc=$?
 assert_rc "several deploy dirs die" 1 "$rc"
 rm -rf "${namedir}"
+
+echo "== resolve_shell_account =="
+
+acctdir="$(mktemp -d)"
+mkdir -p "${acctdir}/deploy-lexa"
+printf '{\n  "name": "lexa",\n  "account_id": "acct-abc123"\n}\n' > "${acctdir}/deploy-lexa/wrangler.lexa.json"
+got="$(lib_call resolve_shell_account "${acctdir}" lexa)"
+assert_eq "resolve_shell_account reads the prior config account_id" "acct-abc123" "$got"
+
+got="$(lib_call resolve_shell_account "${acctdir}/missing" lexa)"
+assert_eq "resolve_shell_account absent dir is empty" "" "$got"
+
+malformed_dir="$(mktemp -d)"
+mkdir -p "${malformed_dir}/deploy-lexa"
+printf '{ this is not json\n' > "${malformed_dir}/deploy-lexa/wrangler.lexa.json"
+got="$(lib_call resolve_shell_account "${malformed_dir}" lexa)"
+assert_eq "resolve_shell_account malformed JSON is empty" "" "$got"
+rm -rf "${acctdir}" "${malformed_dir}"
 
 rc=0
 lib_eval 'parse_flags --bogus' >/dev/null 2>&1 || rc=$?
@@ -1015,6 +1040,28 @@ SHIM
 else
   echo "SKIP: bun unavailable — T-workers-dry-run-purity needs the runtime"
 fi
+
+echo "== T-workers-account: --account reaches the deploy plan =="
+
+# Hermetic: a fake `bun` satisfies preflight and the read-only secret checks
+# (fresh dir → no config → no bun call); the deploy step is dry-run, so the
+# workers-install.ts argv is printed, never executed. No Cloudflare call.
+acct_tmp="$(mktemp -d)"
+acct_home="$(mktemp -d)"
+mkdir -p "${acct_tmp}/bin"
+cat > "${acct_tmp}/bin/bun" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+chmod +x "${acct_tmp}/bin/bun"
+acct_rc=0
+acct_out="$(cd "${acct_tmp}" && HOME="${acct_home}" PATH="${acct_tmp}/bin:${PATH}" INSTALL_DRY_RUN=1 \
+  bash "$INSTALL" workers --cf-token test-token --account test-account 2>&1)" || acct_rc=$?
+assert_rc "T-workers-account --account dry-run completes" 0 "$acct_rc"
+assert_grep "T-workers-account plan passes --account through" \
+  'bun scripts/workers-install\.ts --name lexa --account test-account' "$acct_out"
+assert_grep "T-workers-account usage documents the flag" \
+  'account <id>' "$(lib_call usage)"
 
 echo "== T-bare-start: manual start is backgrounded + idempotent =="
 

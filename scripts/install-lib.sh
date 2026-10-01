@@ -42,6 +42,8 @@ Flags:
   --ref <tag|branch>             script + artifact source (default: newest v* tag;
                                resolved by the install-router track)
   --name <name>                  workers deploy name (default lexa)
+  --account <id>                 Cloudflare account id (workers; skips the
+                                 account prompt and disambiguates the token)
   --port <n>                       host port (docker, default 8080)
   --bind <addr>                    bind address (default 127.0.0.1)
   --domain <d>                     custom domain (workers; skips prompt)
@@ -701,7 +703,7 @@ parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
   TARGET="" REF="" NAME="" PORT=8080 BIND=127.0.0.1 DOMAIN=""
   IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0 NO_PULL=0
-  FROM_REPO="" HELP=0 CF_TOKEN="" SECRETS_FILE=""
+  FROM_REPO="" HELP=0 CF_TOKEN="" SECRETS_FILE="" ACCOUNT=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --ref)
@@ -712,6 +714,11 @@ parse_flags() {
       --name)
         [ $# -ge 2 ] || die "--name requires a value"
         NAME=$2
+        shift 2
+        ;;
+      --account)
+        [ $# -ge 2 ] || die "--account requires a value"
+        ACCOUNT=$2
         shift 2
         ;;
       --staging|--prod|--flavor)
@@ -800,6 +807,27 @@ resolve_deploy_name() {
     die "multiple previous workers deploys in ${work_dir} — pass --name explicitly"
   fi
   printf 'lexa\n'
+}
+
+# ---------------------------------------------------------------------------
+# resolve_shell_account <workdir> <flavor>
+# Prints the account_id a previous deploy recorded in
+# <workdir>/deploy-<flavor>/wrangler.<flavor>.json, or empty when there is no
+# config or it is unreadable. Read BEFORE the release unpack wipes
+# deploy-<flavor>/ so a re-run keeps the account it deployed to. The
+# composition (--account > CLOUDFLARE_ACCOUNT_ID > this) stays in install.sh.
+# ---------------------------------------------------------------------------
+resolve_shell_account() {
+  local workdir="$1" flavor="$2"
+  local cfg="" acct=""
+  cfg="$(ls "${workdir}/deploy-${flavor}"/wrangler.*.json 2>/dev/null | head -1 || true)"
+  if [ -n "$cfg" ] && [ -f "$cfg" ]; then
+    acct="$(grep -o '"account_id": *"[^"]*"' "$cfg" 2>/dev/null | head -1 | sed 's/.*"account_id": *"//;s/"$//' || true)"
+  fi
+  if [ -n "$acct" ]; then
+    printf '%s\n' "$acct"
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------

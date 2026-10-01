@@ -9,12 +9,20 @@
 // Usage:
 //   bun workers-install.ts --name <deploy> \
 //     [--cf-token <tok>]              # else CF_API_TOKEN / CLOUDFLARE_API_TOKEN
+//     [--account <id>]                # else CLOUDFLARE_ACCOUNT_ID / prior config
 //     [--domain lexa.example.com]     # custom domain; absent = workers.dev
 //     [--dir <unpack dir>]            # default: cwd
 //
 // The CF token is read from --cf-token when present, otherwise from the
 // CF_API_TOKEN / CLOUDFLARE_API_TOKEN environment (the installer passes it via
 // the environment so it never appears in argv).
+//
+// The Cloudflare account is resolved BEFORE any resource is created: an
+// explicit --account / CLOUDFLARE_ACCOUNT_ID, else the previous deploy's
+// wrangler config (read before staging wipes it), else the token's account
+// list (one → use it; several → TTY pick, headless die). A refusal here must
+// create nothing — the incident this guards against used accounts[0] blindly
+// and provisioned resources on the wrong account.
 //
 // Superadmin provisioning is NOT done here — the web /setup wizard owns it
 // (owner decision: free-choice email + password at first install). API
@@ -118,6 +126,128 @@ export function d1AmbiguousMessage(
   names: string[],
 ): string {
   return `multiple D1 databases match deploy '${deployName}': ${names.join(", ")} — remove the stale one, or pass --name <deploy> to start a distinct deployment under that name`;
+}
+
+// A Cloudflare account row. The `/accounts` API names the id `id`; `name` is
+// informational (shown when the operator must pick).
+export interface AccountRow {
+  id: string;
+  name?: string;
+}
+
+// Deterministic account selection. Precedence: explicit --account flag >
+// CLOUDFLARE_ACCOUNT_ID env > the previous deploy config's account_id > the
+// token's account list. Anything explicit is matched against the token's list:
+//   resolved   an account was chosen (present on the token)
+//   ambiguous  no explicit id and the token has several accounts — the caller
+//              must pick (TTY) or refuse (headless); resources must not be
+//              created in this state
+//   none       no explicit id and the token lists no account
+//   stale      an explicit/prior id is NOT on the token — refuse with guidance
+// The account is never guessed: `accounts[0]` is exactly the bug this replaces.
+export type AccountSelection =
+  | { kind: "resolved"; id: string }
+  | { kind: "ambiguous"; accounts: AccountRow[] }
+  | { kind: "none" }
+  | { kind: "stale"; id: string };
+
+export function selectAccount(input: {
+  flag?: string;
+  env?: string;
+  priorConfig?: string;
+  accounts: AccountRow[];
+}): AccountSelection {
+  const explicit = input.flag || input.env || input.priorConfig || "";
+  if (explicit) {
+    const match = input.accounts.find((a) => a.id === explicit);
+    if (match) return { kind: "resolved", id: match.id };
+    return { kind: "stale", id: explicit };
+  }
+  if (input.accounts.length === 1)
+    return { kind: "resolved", id: input.accounts[0]!.id };
+  if (input.accounts.length > 1)
+    return { kind: "ambiguous", accounts: input.accounts };
+  return { kind: "none" };
+}
+
+function accountLabel(a: AccountRow): string {
+  return a.name ? `${a.id} (${a.name})` : a.id;
+}
+
+// The refusal text when the token exposes several accounts and there is no
+// terminal to pick from — names every account so the operator can pass one.
+export function accountAmbiguousMessage(accounts: AccountRow[]): string {
+  const rows = accounts.map(accountLabel).join(", ");
+  return `this token can access ${accounts.length} Cloudflare accounts: ${rows} — pass --account <id> or set CLOUDFLARE_ACCOUNT_ID to choose one`;
+}
+
+// The refusal text when an explicit/prior account id is not on the token —
+// names what the token does see and every way to correct it.
+export function accountStaleMessage(
+  id: string,
+  accounts: AccountRow[],
+): string {
+  if (accounts.length === 0) {
+    return `Cloudflare account ${id} is not on this token, and this token sees no accounts — run \`wrangler login\` to authenticate an account, or pass --account <id> for an account this token can access`;
+  }
+  const known = accounts.map(accountLabel).join(", ");
+  return `Cloudflare account ${id} is not on this token (it sees: ${known}) — pass --account <id> for one of those, set CLOUDFLARE_ACCOUNT_ID, or run \`wrangler login\` for an account that has it`;
+}
+
+// Interactively pick an account (ambiguous selection). Reuses ttyPrompt so the
+// read comes from /dev/tty, never stdin (curl|bash owns stdin). A blank or
+// out-of-range answer refuses — never guess.
+function chooseAccountInteractive(accounts: AccountRow[]): string {
+  const lines = accounts
+    .map((a, i) => `    ${i + 1}) ${accountLabel(a)}`)
+    .join("\n");
+  const answer = ttyPrompt(
+    `Multiple Cloudflare accounts are available:\n${lines}\n  Choose an account [1-${accounts.length}]:`,
+  );
+  const idx = Number.parseInt(answer, 10) - 1;
+  const picked = accounts[idx];
+  if (!picked)
+    die(
+      "no Cloudflare account selected — pass --account <id> or set CLOUDFLARE_ACCOUNT_ID",
+    );
+  return picked.id;
+}
+
+// Turn a pure selection into an account id or a die. Resolution runs before
+// any ensure*/create call, so a refusal creates nothing.
+export function resolveAccountOrDie(
+  selection: AccountSelection,
+  accounts: AccountRow[],
+): string {
+  switch (selection.kind) {
+    case "resolved":
+      console.log(`  ✓ Cloudflare account ${selection.id}`);
+      return selection.id;
+    case "ambiguous":
+      if (process.stdout.isTTY) return chooseAccountInteractive(accounts);
+      die(accountAmbiguousMessage(accounts));
+    case "stale":
+      die(accountStaleMessage(selection.id, accounts));
+    case "none":
+      die("no Cloudflare accounts on this token");
+  }
+}
+
+// Read the account_id a previous deploy recorded. Must run BEFORE staging
+// wipes deploy-<name>/ — otherwise a re-run loses the account it deployed to
+// and falls back to the token's list (which is how the wrong account got
+// provisioned). Absent/unreadable config → "".
+export function readPriorAccount(dir: string, flavorName: string): string {
+  const path = join(dir, `deploy-${flavorName}`, `wrangler.${flavorName}.json`);
+  if (!existsSync(path)) return "";
+  try {
+    const cfg = JSON.parse(readFileSync(path, "utf-8")) as {
+      account_id?: unknown;
+    };
+    return typeof cfg.account_id === "string" ? cfg.account_id : "";
+  } catch {
+    return "";
+  }
 }
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -271,6 +401,24 @@ async function listD1Databases(): Promise<D1Row[]> {
   return rows;
 }
 
+// Cloudflare account list, following pagination exactly like listD1Databases.
+// An explicit page size is requested; `result_info.total_pages` is followed up
+// to a 50-page cap. No `result_info` → behave as before (a single page). The
+// account list feeds selectAccount, so a truncated list would hide an account
+// and misclassify a valid explicit id as stale.
+async function listAccounts(): Promise<AccountRow[]> {
+  const perPage = 50;
+  const rows: AccountRow[] = [];
+  for (let page = 1; page <= 50; page++) {
+    const r = await cfFetch(`/accounts?page=${page}&per_page=${perPage}`);
+    if (!r.ok) dieCf("list CF accounts", r);
+    rows.push(...((r.json?.result ?? []) as AccountRow[]));
+    const totalPages = r.json?.result_info?.total_pages;
+    if (!totalPages || totalPages <= page) break;
+  }
+  return rows;
+}
+
 async function ensureD1(
   flavor: WorkerFlavor,
   resetDb: boolean,
@@ -385,11 +533,19 @@ async function main(): Promise<void> {
   const CUSTOM_DOMAIN = flag("domain"); // absent → workers.dev
   const DIR = flag("dir") || process.cwd();
 
-  const accounts = await cfJson<Array<{ id: string }>>(
-    "list CF accounts",
-    "/accounts",
+  const accounts = await listAccounts();
+  // Resolve the account BEFORE any ensure*/create call, and read the prior
+  // deploy config BEFORE staging wipes deploy-<name>/ — a refusal here must
+  // create nothing.
+  account = resolveAccountOrDie(
+    selectAccount({
+      flag: flag("account"),
+      env: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
+      priorConfig: readPriorAccount(DIR, FLAVOR_NAME),
+      accounts,
+    }),
+    accounts,
   );
-  account = accounts[0]?.id ?? die("no Cloudflare accounts on this token");
 
   let zone = "";
   if (CUSTOM_DOMAIN) {
