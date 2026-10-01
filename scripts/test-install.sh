@@ -154,6 +154,69 @@ got="$(lib_call resolve_shell_account "${malformed_dir}" lexa)"
 assert_eq "resolve_shell_account malformed JSON is empty" "" "$got"
 rm -rf "${acctdir}" "${malformed_dir}"
 
+echo "== prune_workdir =="
+
+prunedir="$(mktemp -d)"
+mkdir -p "${prunedir}/deploy-lexa" "${prunedir}/deploy-staging" \
+  "${prunedir}/dist" "${prunedir}/scripts" "${prunedir}/migrations"
+: > "${prunedir}/.env.toml"
+: > "${prunedir}/x.tar.gz"
+: > "${prunedir}/checksums.txt"
+: > "${prunedir}/.cf-token"
+lib_call prune_workdir "${prunedir}"
+assert_eq "prune_workdir keeps deploy-lexa/" "present" "$([ -d "${prunedir}/deploy-lexa" ] && echo present || echo absent)"
+assert_eq "prune_workdir keeps deploy-staging/" "present" "$([ -d "${prunedir}/deploy-staging" ] && echo present || echo absent)"
+assert_eq "prune_workdir keeps .env.toml custody" "present" "$([ -f "${prunedir}/.env.toml" ] && echo present || echo absent)"
+assert_eq "prune_workdir keeps the release tarball" "present" "$([ -f "${prunedir}/x.tar.gz" ] && echo present || echo absent)"
+assert_eq "prune_workdir keeps checksums.txt" "present" "$([ -f "${prunedir}/checksums.txt" ] && echo present || echo absent)"
+assert_eq "prune_workdir keeps .cf-token" "present" "$([ -f "${prunedir}/.cf-token" ] && echo present || echo absent)"
+assert_eq "prune_workdir removes dist/" "absent" "$([ -e "${prunedir}/dist" ] && echo present || echo absent)"
+assert_eq "prune_workdir removes scripts/" "absent" "$([ -e "${prunedir}/scripts" ] && echo present || echo absent)"
+assert_eq "prune_workdir removes migrations/" "absent" "$([ -e "${prunedir}/migrations" ] && echo present || echo absent)"
+rm -rf "${prunedir}"
+
+prunedry="$(mktemp -d)"
+mkdir -p "${prunedry}/dist"
+INSTALL_DRY_RUN=1 lib_call prune_workdir "${prunedry}" >/dev/null 2>&1
+assert_eq "prune_workdir skips entirely under INSTALL_DRY_RUN=1" "present" "$([ -e "${prunedry}/dist" ] && echo present || echo absent)"
+rm -rf "${prunedry}"
+
+echo "== deploy_worker_name =="
+
+dwdir="$(mktemp -d)"
+mkdir -p "${dwdir}/deploy-prod"
+printf '{"name":"lexa"}\n' > "${dwdir}/deploy-prod/wrangler.prod.json"
+got="$(lib_call deploy_worker_name "${dwdir}" prod)"
+assert_eq "deploy_worker_name reads the config name (prod → lexa)" "lexa" "$got"
+got="$(lib_call deploy_worker_name "${dwdir}/missing" prod)"
+assert_eq "deploy_worker_name missing config maps prod → lexa" "lexa" "$got"
+got="$(lib_call deploy_worker_name "${dwdir}/missing" staging)"
+assert_eq "deploy_worker_name missing config maps staging → lexa-staging" "lexa-staging" "$got"
+got="$(lib_call deploy_worker_name "${dwdir}/missing" acme)"
+assert_eq "deploy_worker_name unknown flavor falls back to itself" "acme" "$got"
+
+dwcustom="$(mktemp -d)"
+mkdir -p "${dwcustom}/deploy-prod"
+printf '{"name":"custom-worker"}\n' > "${dwcustom}/deploy-prod/wrangler.prod.json"
+got="$(lib_call deploy_worker_name "${dwcustom}" prod)"
+assert_eq "deploy_worker_name config name beats the alias map" "custom-worker" "$got"
+
+dwbad="$(mktemp -d)"
+mkdir -p "${dwbad}/deploy-prod"
+printf '{ this is not json\n' > "${dwbad}/deploy-prod/wrangler.prod.json"
+got="$(lib_call deploy_worker_name "${dwbad}" prod)"
+assert_eq "deploy_worker_name unparseable config maps prod → lexa" "lexa" "$got"
+
+# A realistic full workers config (the shape workers-install.ts emits) still
+# resolves to the top-level name, not a nested one.
+dwreal="$(mktemp -d)"
+mkdir -p "${dwreal}/deploy-prod"
+printf '{\n  "name": "lexa",\n  "account_id": "acct-abc123",\n  "main": "dist/index.js",\n  "vars": {\n    "LXK_ENV": "production",\n    "LXK_PUBLIC_URL": "https://lexa.example.workers.dev"\n  },\n  "d1_databases": [\n    { "binding": "DB", "database_name": "lexa-db", "database_id": "abc-123" }\n  ]\n}\n' \
+  > "${dwreal}/deploy-prod/wrangler.prod.json"
+got="$(lib_call deploy_worker_name "${dwreal}" prod)"
+assert_eq "deploy_worker_name realistic config resolves the top-level name" "lexa" "$got"
+rm -rf "${dwdir}" "${dwcustom}" "${dwbad}" "${dwreal}"
+
 rc=0
 lib_eval 'parse_flags --bogus' >/dev/null 2>&1 || rc=$?
 assert_rc "parse_flags --bogus dies" 1 "$rc"
@@ -954,6 +1017,70 @@ else
   echo "SKIP: bun unavailable — T-prune-legacy-secret wiring needs the runtime"
 fi
 
+echo "== T-workers-ambiguous: several deploy-* dirs + no --name die before credentials =="
+
+# Two previous deploy dirs and no --name: resolve_deploy_name dies with the
+# ambiguity message. That die runs above the credential chain, so the run needs
+# no token — INSTALL_DRY_RUN keeps it offline, --yes skips the secrets wizard.
+if [ "$have_bun_path" -eq 1 ]; then
+  amb_tmp="$(mktemp -d)"
+  amb_home="$(mktemp -d)"
+  mkdir -p "${amb_tmp}/cf-workers/deploy-lexa" "${amb_tmp}/cf-workers/deploy-staging"
+  amb_rc=0
+  amb_out="$(cd "${amb_tmp}" && HOME="${amb_home}" INSTALL_DRY_RUN=1 \
+    bash "$INSTALL" workers --yes 2>&1)" || amb_rc=$?
+  assert_rc "T-workers-ambiguous several deploy dirs exit 1" 1 "$amb_rc"
+  assert_grep "T-workers-ambiguous dies with the resolve_deploy_name message" \
+    'multiple previous workers deploys in cf-workers — pass --name explicitly' "$amb_out"
+  rm -rf "${amb_tmp}" "${amb_home}"
+else
+  echo "SKIP: bun unavailable — T-workers-ambiguous needs the runtime"
+fi
+
+echo "== T-worker-alias: wrangler commands target the config worker, not the flavor =="
+
+# A prod-flavor deploy whose config names worker `lexa`: the deprecated alias
+# (--name prod) still reaches workers-install.ts, but every wrangler secret/
+# list/prune call must target `lexa` from the config — never the flavor `prod`.
+if [ "$have_bun_path" -eq 1 ]; then
+  alias_tmp="$(mktemp -d)"
+  alias_home="$(mktemp -d)"
+  mkdir -p "${alias_tmp}/bin" "${alias_tmp}/cf-workers/deploy-prod"
+  printf '{"name":"lexa","vars":{"LXK_PUBLIC_URL":"https://lexa.example.workers.dev"}}\n' \
+    > "${alias_tmp}/cf-workers/deploy-prod/wrangler.prod.json"
+  : > "${alias_tmp}/list.log"
+  cat > "${alias_tmp}/bin/bun" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"wrangler secret list"*)
+    printf '%s\n' "$*" >> "${ALIAS_LIST_LOG:-/dev/null}"
+    printf '%s' "${ALIAS_LIST:-[]}"
+    exit 0
+    ;;
+esac
+exit 0
+SHIM
+  chmod +x "${alias_tmp}/bin/bun"
+  alias_rc=0
+  alias_out="$(cd "${alias_tmp}" && HOME="${alias_home}" PATH="${alias_tmp}/bin:${PATH}" INSTALL_DRY_RUN=1 \
+    ALIAS_LIST='[{"name":"LXK_API_KEY","type":"secret_text"}]' \
+    ALIAS_LIST_LOG="${alias_tmp}/list.log" \
+    bash "$INSTALL" workers --cf-token test-token --name prod 2>&1)" || alias_rc=$?
+  assert_rc "T-worker-alias prod-flavor dry-run completes" 0 "$alias_rc"
+  assert_grep "T-worker-alias master-key put targets config worker lexa" \
+    'wrangler secret put LXK_SECRETS_MASTER_KEY --name lexa --config deploy-prod/wrangler\.prod\.json' "$alias_out"
+  assert_grep "T-worker-alias prune delete targets config worker lexa" \
+    '\[dry-run\] bun x wrangler secret delete LXK_API_KEY --name lexa --config deploy-prod/wrangler\.prod\.json' "$alias_out"
+  alias_list_log="$(cat "${alias_tmp}/list.log" 2>/dev/null || true)"
+  assert_grep "T-worker-alias secret list pins config worker lexa" \
+    'wrangler secret list --name lexa --config deploy-prod/wrangler\.prod\.json' "$alias_list_log"
+  assert_eq "T-worker-alias no wrangler secret call targets the flavor prod" "0" \
+    "$(printf '%s' "$alias_out" | grep -cE 'wrangler secret (put|delete|list)( [A-Za-z_]+)? --name prod' || true)"
+  rm -rf "${alias_tmp}" "${alias_home}"
+else
+  echo "SKIP: bun unavailable — T-worker-alias needs the runtime"
+fi
+
 echo "== T-workers-dry-run-purity: no custody write, no mint =="
 
 if [ "$have_bun_path" -eq 1 ]; then
@@ -1197,6 +1324,13 @@ assert_eq "T-workers-dry-run keeps a prior .deployed-url" "https://prior-deploy.
   "$(cat "${dw_tmp}/cf-workers/.deployed-url" 2>/dev/null | tr -d '\n')"
 assert_eq "T-workers-dry-run never banners the stale URL" "0" \
   "$(printf '%s' "$dw_out" | grep -c 'prior-deploy\.example\.workers\.dev' || true)"
+
+echo "== copy: wrangler login refresh hint =="
+
+assert_grep "copy: verification failure names wrangler whoami refresh" \
+  'wrangler whoami.*to refresh it, or enter a token' "$(cat "$INSTALL")"
+assert_grep "copy: headless credentials die names wrangler whoami refresh" \
+  'wrangler whoami.*once to refresh an expired login, then re-run' "$(cat "$INSTALL")"
 
 echo "== uninstall.sh =="
 

@@ -284,13 +284,13 @@ deploy_workers() {
     # The token travels on curl's stdin config (-K -), never in argv.
     if ! printf 'header = "Authorization: Bearer %s"\n' "${CF_TOKEN}" \
       | curl -fsS -o /dev/null --max-time 10 "https://api.cloudflare.com/client/v4/accounts" -K - 2>/dev/null; then
-      echo "  (the wrangler login could not be verified — enter a token instead)"
+      echo "  (the wrangler login could not be verified — run \`wrangler whoami\` to refresh it, or enter a token)"
       CF_TOKEN=""
       _CF_FROM_OAUTH=0
     fi
   fi
   if [ -z "${CF_TOKEN}" ]; then
-    _tty_available || die "No Cloudflare credentials found — run \`wrangler login\` once, or pass a token via --cf-token / CF_API_TOKEN, then re-run."
+    _tty_available || die "No Cloudflare credentials found — run \`wrangler login\` once, or pass a token via --cf-token / CF_API_TOKEN, or run \`wrangler whoami\` once to refresh an expired login, then re-run."
     CF_TOKEN=$(tty_read_secret "Paste a Cloudflare API token — it needs Workers Scripts, D1, Workers KV, and R2 (Edit), account-scoped. Create one at https://dash.cloudflare.com/profile/api-tokens — or run \`wrangler login\` once and skip this.")
     _save_answer=$(tty_read "Save this token for future upgrades? [y/N]" "n")
     case "${_save_answer}" in
@@ -303,7 +303,7 @@ deploy_workers() {
         ;;
     esac
   fi
-  [ -n "${CF_TOKEN}" ] || die "No Cloudflare credentials found — run \`wrangler login\` once, or pass a token via --cf-token / CF_API_TOKEN, then re-run."
+  [ -n "${CF_TOKEN}" ] || die "No Cloudflare credentials found — run \`wrangler login\` once, or pass a token via --cf-token / CF_API_TOKEN, or run \`wrangler whoami\` once to refresh an expired login, then re-run."
   export CLOUDFLARE_API_TOKEN="${CF_TOKEN}"
   export CF_API_TOKEN="${CF_TOKEN}"
   # Cloudflare account: --account wins; then CLOUDFLARE_ACCOUNT_ID from the
@@ -356,12 +356,10 @@ deploy_workers() {
     fetch_release "workers" "${_ww_dir}"
     WORK_DIR="${_ww_dir}"
     # Retry safety: a previous failed run may have left stale extractions
-    # (old-tag dist/migrations/scripts mixed with the new tarball's). The
-    # dir is installer-owned — keep only the downloads (+ saved token +
-    # master-key custody).
-    if [ "${INSTALL_DRY_RUN:-0}" != "1" ]; then
-      find "${WORK_DIR}" -mindepth 1 -maxdepth 1 ! -name '*.tar.gz' ! -name 'checksums.txt' ! -name '.cf-token' ! -name '.env.toml' -exec rm -rf {} +
-    fi
+    # (old-tag dist/migrations/scripts mixed with the new tarball's). Keep the
+    # downloads (+ saved token + master-key custody + the deploy-* dirs, whose
+    # wrangler config records the account/domain a re-run resumes).
+    prune_workdir "${WORK_DIR}"
     unpack_release "${WORK_DIR}" "${WORK_DIR}" workers
   fi
 
