@@ -40,6 +40,10 @@ status/
 /cf-workers/
 /lexa-workers-release/
 /.deployed-url
+# Deploy/verify scratch: local SQLite copies (with -wal/-shm sidecars) and
+# generated compose files from release verification runs — never commit
+/.staging-data/
+/lexa-deploy/
 
 # Slim worktrees — local orchestration checkouts, never commit
 .slim/worktrees/
