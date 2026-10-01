@@ -1287,6 +1287,15 @@ body { token*, name*, password* }    (password min 8 chars)
   password) and stamps accepted_at. Error body is flat: `{ "code": ... }`
   (native better-auth shape — NOT the `{ error: {...} }` REST envelope).
 
+POST   /api/auth/invite/peek    (keyless, session-less — the token is the auth)
+body { token* }
+→ 200 { valid: true, email } | 200 { valid: false, reason }
+  reason ∈ "used" | "expired" | "unknown". Non-consuming pre-flight for the
+  /invite page: missing row → `unknown`, accepted_at set → `used`, past
+  expires_at → `expired`; the email is returned only when valid. Same guards
+  as accept (whose single `INVALID_TOKEN` is unchanged) — peek only decides
+  the page's render state, it never consumes the invite.
+
 GET    /api/workspace/invites    (superadmin)
 → 200 { data: Array<{ id, email, expiresAt }> }
   Pending invites only (accepted_at IS NULL) — the Members UI renders the

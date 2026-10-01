@@ -1,10 +1,9 @@
-import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { InvalidTokenState } from "../components/auth/SetPasswordForm";
 import { Field } from "../components/ui/Field";
 import { TextInput } from "../components/ui/TextInput";
 import { NoticeDanger } from "../components/ui/NoticeDanger";
-import { useAcceptInvite, useSession, useSignIn } from "../lib/queries";
+import { useAcceptInvite, useInvitePeek, useSession, useSignIn } from "../lib/queries";
 
 // Workspace invitation link ({baseURL}/invite?token=, 7d expiry, single-use).
 // Consumes POST /api/auth/invite/accept { token, name, password } — NOT the
@@ -20,9 +19,10 @@ export const Route = createFileRoute("/invite")({
   component: InvitePage,
 });
 
-function InvitePage() {
+export function InvitePage() {
   const { token } = Route.useSearch();
   const { data: session, isLoading } = useSession();
+  const peek = useInvitePeek(token);
 
   if (isLoading) return null;
   if (session?.user) return <Navigate to="/" replace />;
@@ -32,9 +32,51 @@ function InvitePage() {
       <div style={{ width: "100%", maxWidth: 380 }}>
         <div className="font-display mb-1" style={{ textAlign: "center", fontSize: 24, fontWeight: 600 }}>Lexa</div>
         <p className="text-sm text-lx-text-secondary mb-4" style={{ textAlign: "center" }}>You&apos;re invited to Lexa</p>
-        {token ? <InviteAcceptForm token={token} /> : <InvalidTokenState />}
+        {!token ? (
+          <InviteInvalidState reason="unknown" />
+        ) : peek.isLoading ? (
+          null
+        ) : peek.isError ? (
+          <InviteInvalidState reason="unknown" onRetry={() => void peek.refetch()} />
+        ) : peek.data?.valid ? (
+          <InviteAcceptForm token={token} />
+        ) : (
+          <InviteInvalidState reason={peek.data?.reason ?? "unknown"} />
+        )}
       </div>
     </main>
+  );
+}
+
+// Invalid / spent invite state — the create-account form is withheld because a
+// used, expired, or unknown token cannot create an account. Copy differs per
+// reason (wireframes/dist/invite.html variants C/D); a failed peek (network)
+// renders this same invalid state plus a Retry, never the form (frozen D2).
+function InviteInvalidState({ reason, onRetry }: { reason: "used" | "expired" | "unknown"; onRetry?: (() => void) | undefined }) {
+  const used = reason === "used";
+  return (
+    <div className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
+      <NoticeDanger>
+        {used ? "This invite has already been used." : "This invite link is invalid or has expired."}
+      </NoticeDanger>
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>
+        {used
+          ? "Each invite link works once. If you already created your account, log in instead. If you lost access, ask your admin for a set-password link."
+          : "Invite links are single-use and expire 7 days after they are issued. Ask your admin to send a new one from Workspace settings → Members."}
+      </p>
+      {onRetry && (
+        <button type="button" className="btn btn-ghost w-full mb-3" style={{ height: 36 }} onClick={onRetry}>
+          Retry
+        </button>
+      )}
+      <Link
+        to="/login"
+        className={used ? "btn btn-primary w-full" : "btn btn-ghost w-full"}
+        style={{ height: 36, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+      >
+        Go to login
+      </Link>
+    </div>
   );
 }
 
