@@ -26,6 +26,7 @@ import { buildReadTools, buildWriteTools, type AssistantToolTransport } from "./
 import { ASSISTANT_WRITE_TOOL_NAMES } from "./write-tool-names";
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
+import { withApprovalCarriers } from "./approval-carrier";
 
 // Read tools available without per-project settings resolution (project data +
 // attachments). The optional tools (web_search / get_skill / analyze_image /
@@ -241,7 +242,12 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     excludeBroadcastIds?: string[],
     options?: { _deleteStaleRows?: boolean }
   ): Promise<void> {
-    await super.persistMessages(messages, excludeBroadcastIds, options);
+    // W7b/WS1: append the `data-assistant-approval` carrier to any assistant
+    // message holding successful write proposals, so the DO canonical store and
+    // the D1 mirror both carry the approvals marker (idempotent).
+    const withCarriers = withApprovalCarriers(messages);
+    await super.persistMessages(withCarriers, excludeBroadcastIds, options);
+    this.messages = withCarriers;
     await this.mirrorCurrent();
   }
 

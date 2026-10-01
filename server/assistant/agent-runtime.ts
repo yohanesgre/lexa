@@ -286,9 +286,26 @@ export async function proposeWrite(
         body: JSON.stringify(input),
       });
       if (!res.ok) throw new AssistantInternalUnavailable(`write-tool ${input.name} failed (${res.status})`);
-      const body = (await res.json()) as { proposed?: unknown; approvalId?: unknown; error?: unknown };
+      const body = (await res.json()) as {
+        proposed?: unknown;
+        approvalId?: unknown;
+        batchId?: unknown;
+        name?: unknown;
+        detail?: unknown;
+        diff?: unknown;
+        error?: unknown;
+      };
       if (body.proposed === true && typeof body.approvalId === "string") {
-        return { ok: true, proposed: true, approvalId: body.approvalId, seq: input.seq } satisfies WriteToolResponse;
+        return {
+          ok: true,
+          proposed: true,
+          approvalId: body.approvalId,
+          batchId: typeof body.batchId === "string" ? body.batchId : input.batchId,
+          seq: input.seq,
+          name: typeof body.name === "string" ? body.name : input.name,
+          ...(typeof body.detail === "string" ? { detail: body.detail } : {}),
+          ...(body.diff !== undefined ? { diff: body.diff } : {}),
+        } satisfies WriteToolResponse;
       }
       return {
         ok: false,

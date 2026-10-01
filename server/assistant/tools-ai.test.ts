@@ -15,7 +15,7 @@ type AnyTool = { execute?: (args: unknown) => Promise<unknown> };
 function makeTransport(over: Partial<AssistantToolTransport> = {}): AssistantToolTransport {
   return {
     read: async () => ({ ok: true, result: {} }),
-    propose: async () => ({ ok: true, proposed: true, approvalId: "a1", seq: 0 }),
+    propose: async () => ({ ok: true, proposed: true, approvalId: "a1", batchId: "b1", seq: 0, name: "create_task" }),
     ...over,
   };
 }
@@ -74,13 +74,13 @@ describe("tools-ai write tools", () => {
     const transport = makeTransport({
       propose: async (name, args) => {
         calls.push({ name, args });
-        return { ok: true, proposed: true, approvalId: "appr-1", seq: 2 };
+        return { ok: true, proposed: true, approvalId: "appr-1", batchId: "batch-1", seq: 2, name: "create_task" };
       },
     });
     const tools = buildWriteTools({ transport, enabled: ["create_task"] });
     const out = await (tools["create_task"] as AnyTool).execute!({ title: "Write docs" });
     expect(calls).toEqual([{ name: "create_task", args: { title: "Write docs" } }]);
-    expect(out).toEqual({ ok: true, proposed: true, approvalId: "appr-1", seq: 2 });
+    expect(out).toEqual({ ok: true, proposed: true, approvalId: "appr-1", batchId: "batch-1", seq: 2, name: "create_task" });
   });
 
   it("returns the Worker's refusal unchanged", async () => {

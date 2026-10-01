@@ -11,12 +11,14 @@
 //   - `citations` → `metadata.citations` (sanitized to `{ title, url }`).
 //   - `error` → `metadata.error` (`{ code, message }`).
 //   - `stopped` → `metadata.stopped` (only when truthy).
-//   - `toolLog` / `pendingBatch` / `toolCalls` are NOT mapped (tool detail is
-//     session-memory-only by wireframe contract; approvals live in D1).
+//   - `pendingBatch` → a `data-assistant-approval` carrier part (W7b/WS1) so a
+//     legacy thread's suspended approvals still rebuild on reload.
+//   - `toolLog` / `toolCalls` are NOT mapped (tool detail is session-memory-only
+//     by wireframe contract).
 // A message always carries at least one part so it survives DO persistence.
 
 import type { UIMessage } from "ai";
-import type { Citation } from "../../shared/assistant";
+import { ASSISTANT_APPROVAL_DATA_PART, type Citation } from "../../shared/assistant";
 
 export interface LegacyStoredMessage {
   role?: unknown;
@@ -85,11 +87,47 @@ function sanitizeError(value: unknown): { code: string; message: string } | null
   return { code, message };
 }
 
+// W7b/WS1: a legacy assistant `pendingBatch` marker (string batchId or
+// `{ batchId, approvals[] }`) converts to the D3 carrier data part so the
+// parts-shaped transcript still rebuilds the approvals on reload.
+function approvalCarrierPart(
+  pendingBatch: unknown
+): ConvertedUIMessage["parts"][number] | null {
+  if (typeof pendingBatch === "string" && pendingBatch.length > 0) {
+    return { type: ASSISTANT_APPROVAL_DATA_PART, data: { batchId: pendingBatch, approvals: [] } } as unknown as ConvertedUIMessage["parts"][number];
+  }
+  if (typeof pendingBatch !== "object" || pendingBatch === null) return null;
+  const batchId = (pendingBatch as { batchId?: unknown }).batchId;
+  if (typeof batchId !== "string" || batchId.length === 0) return null;
+  const rawApprovals = (pendingBatch as { approvals?: unknown }).approvals;
+  const approvals: Array<Record<string, unknown>> = [];
+  if (Array.isArray(rawApprovals)) {
+    for (const entry of rawApprovals) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const a = entry as { approvalId?: unknown; seq?: unknown; name?: unknown; detail?: unknown; diff?: unknown; status?: unknown };
+      if (typeof a.approvalId !== "string" || a.approvalId.length === 0) continue;
+      approvals.push({
+        approvalId: a.approvalId,
+        seq: typeof a.seq === "number" && Number.isFinite(a.seq) ? a.seq : approvals.length,
+        ...(typeof a.name === "string" ? { name: a.name } : {}),
+        ...(typeof a.detail === "string" ? { detail: a.detail } : {}),
+        ...(a.diff !== undefined ? { diff: a.diff } : {}),
+        ...(a.status === "pending" || a.status === "approved" || a.status === "rejected" || a.status === "expired"
+          ? { status: a.status }
+          : {}),
+      });
+    }
+  }
+  return { type: ASSISTANT_APPROVAL_DATA_PART, data: { batchId, approvals } } as unknown as ConvertedUIMessage["parts"][number];
+}
+
 export function convertLegacyMessage(message: LegacyStoredMessage, index: number): ConvertedUIMessage | null {
   if (!isConvertibleRole(message.role)) return null;
 
   const parts: ConvertedUIMessage["parts"] = textParts(message.content).map((text) => ({ type: "text", text }));
   if (parts.length === 0) parts.push({ type: "text", text: "" });
+  const carrier = approvalCarrierPart(message.pendingBatch);
+  if (carrier) parts.push(carrier);
 
   const metadata: LegacyConvertMetadata = {};
   if (typeof message.ts === "string" && message.ts.length > 0) metadata.ts = message.ts;
@@ -112,6 +150,24 @@ export function convertLegacyMessages(messages: readonly LegacyStoredMessage[]):
   const out: ConvertedUIMessage[] = [];
   messages.forEach((message, index) => {
     const converted = convertLegacyMessage(message, index);
+    if (converted) out.push(converted);
+  });
+  return out;
+}
+
+// D1 `assistant_threads.messages` is parts-shaped on Workers (the mirror stores
+// UIMessages) and legacy content-shaped on Bun / pre-migration rows. A row that
+// already carries a `parts` array must pass through verbatim — re-converting it
+// through {@link convertLegacyMessage} would drop its `data-attachment` and
+// `data-assistant-approval` parts. Legacy rows convert as before.
+export function convertStoredMessages(messages: readonly unknown[]): unknown[] {
+  const out: unknown[] = [];
+  messages.forEach((message, index) => {
+    if (typeof message === "object" && message !== null && Array.isArray((message as { parts?: unknown }).parts)) {
+      out.push(message);
+      return;
+    }
+    const converted = convertLegacyMessage(message as LegacyStoredMessage, index);
     if (converted) out.push(converted);
   });
   return out;

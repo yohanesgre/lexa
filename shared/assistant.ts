@@ -173,6 +173,29 @@ export interface PendingBatchMarker {
   approvals: PendingBatchApproval[];
 }
 
+// D3 carrier (ADR-0003 §B.3): the pending-batch marker persisted with the
+// assistant UIMessage as a data part. `type` is the wire part type
+// (`data-assistant-approval`); `data` holds the same envelope the legacy
+// `PendingBatchMarker` used, so the P4b adapter's `chipsFromDataPart` reads it
+// unchanged and a reload mid-suspension rebuilds the decidable chips.
+export const ASSISTANT_APPROVAL_DATA_PART = "data-assistant-approval";
+
+export interface AssistantApprovalCarrierApproval {
+  approvalId: string;
+  seq: number;
+  name: string;
+  detail?: string;
+  diff?: AssistantWriteDiff;
+  // Live decision status, reconciled by the transcript read so another tab's
+  // decisions surface on fetch. Absent → treated as pending.
+  status?: "pending" | "approved" | "rejected" | "expired";
+}
+
+export interface AssistantApprovalCarrier {
+  batchId: string;
+  approvals: AssistantApprovalCarrierApproval[];
+}
+
 export type AssistantWriteDiff =
   | { type: "task_create"; title: string; fields: Record<string, string | null> }
   | {

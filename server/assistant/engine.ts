@@ -346,6 +346,43 @@ export async function runAssistantTurn(
     throw turnError;
   }
 
-  const uiStream = toUIMessageStream({ stream: started.stream });
+  // W7b/WS3: the app reads `metadata.usage` (done-state token chip) and
+  // `metadata.reasoningMs` (duration label) off the assistant message. Measure
+  // reasoning wall-time by observing the reasoning part boundaries as the
+  // stream flows past (the SDK only calls `messageMetadata` on `start` and
+  // `finish`), then attach both on the terminal finish part.
+  const now = (): number => input.nowMs?.() ?? Date.now();
+  const reasoning = { startedAt: null as number | null, total: 0 };
+  const observed = started.stream.pipeThrough(
+    new TransformStream<TurnPart, TurnPart>({
+      transform(part, controller) {
+        if (part.type === "reasoning-start") {
+          if (reasoning.startedAt === null) reasoning.startedAt = now();
+        } else if (part.type === "reasoning-end" && reasoning.startedAt !== null) {
+          reasoning.total += Math.max(0, now() - reasoning.startedAt);
+          reasoning.startedAt = null;
+        }
+        controller.enqueue(part);
+      },
+    })
+  );
+  const uiStream = toUIMessageStream({
+    stream: observed,
+    messageMetadata: ({ part }) => {
+      if (part.type !== "finish") return undefined;
+      const inputTokens = part.totalUsage.inputTokens;
+      const outputTokens = part.totalUsage.outputTokens;
+      const metadata: { usage?: { in: number; out: number }; reasoningMs?: number } = {};
+      // Omit `usage` entirely when the provider reported no token counts rather
+      // than fabricating a `{0,0}` chip. A single defined count still surfaces.
+      if (inputTokens !== undefined || outputTokens !== undefined) {
+        metadata.usage = { in: inputTokens ?? 0, out: outputTokens ?? 0 };
+      }
+      const openMs = reasoning.startedAt !== null ? Math.max(0, now() - reasoning.startedAt) : 0;
+      const reasoningMs = reasoning.total + openMs;
+      if (reasoningMs > 0) metadata.reasoningMs = reasoningMs;
+      return Object.keys(metadata).length > 0 ? metadata : undefined;
+    },
+  });
   return createUIMessageStreamResponse({ stream: uiStream });
 }

@@ -1,6 +1,8 @@
-import type { AssistantWriteDiff } from "../../../shared/assistant";
+import type { UIMessage } from "ai";
+import { ASSISTANT_APPROVAL_DATA_PART, type AssistantWriteDiff } from "../../../shared/assistant";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
+import { segmentFromAssistantMessage } from "../../lib/assistant-agent-adapter";
 import type { ChatAttachmentKind, ChatAttachmentRef } from "../../lib/assistant-image";
 
 // Pure helpers + wire-shape types for Assistant chat (assistant-chat.html +
@@ -64,6 +66,28 @@ export function chipFromPendingApproval(raw: unknown, batchId: string): Approval
     diff: a.diff as AssistantWriteDiff,
     state,
   };
+}
+
+// D3 (W7b/WS2): the persisted pending-batch carrier is a
+// `data-assistant-approval` part shaped `{ batchId, approvals[] }` (or a single
+// chip payload). Rebuild the batch from it — an empty `approvals` array keeps
+// the batchId so a marker-only carrier still renders the waiting indicator.
+function carrierBatchOf(parts: readonly unknown[]): { batchId: string; chips: ApprovalChip[] } | undefined {
+  for (const raw of parts) {
+    if (!raw || typeof raw !== "object") continue;
+    const part = raw as { type?: unknown; data?: unknown };
+    if (part.type !== ASSISTANT_APPROVAL_DATA_PART) continue;
+    const data = part.data;
+    if (!data || typeof data !== "object") continue;
+    const envelope = data as { batchId?: unknown; approvals?: unknown };
+    if (typeof envelope.batchId !== "string" || envelope.batchId === "") continue;
+    const rawApprovals = Array.isArray(envelope.approvals) ? envelope.approvals : [data];
+    const chips = rawApprovals
+      .map((a) => chipFromPendingApproval(a, envelope.batchId as string))
+      .filter((c): c is ApprovalChip => c !== null);
+    return { batchId: envelope.batchId, chips };
+  }
+  return undefined;
 }
 
 // Post-stream activity summary shown on the trailing done turn — sourced from
@@ -164,6 +188,8 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
     const msg = messages[rawIndex] as {
       role?: string | undefined;
       content?: unknown;
+      parts?: unknown;
+      metadata?: unknown;
       ts?: unknown;
       citations?: unknown;
       error?: unknown;
@@ -171,6 +197,61 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       pendingBatch?: unknown;
     };
     if (msg.role !== "user" && msg.role !== "assistant") continue;
+
+    // D3 (W7b/WS2): the DO canonical transcript is UIMessage-parts shaped.
+    // Reuse the P4b adapter for text/citations and rebuild the approval batch
+    // from the `data-assistant-approval` carrier data part.
+    if (Array.isArray(msg.parts)) {
+      const parts = msg.parts as unknown[];
+      const segment = msg.role === "assistant" ? segmentFromAssistantMessage(msg as unknown as UIMessage) : undefined;
+      let text = "";
+      let imageCount = 0;
+      const attachments: ChatAttachmentRef[] = [];
+      for (const raw of parts) {
+        if (!raw || typeof raw !== "object") continue;
+        const part = raw as { type?: unknown; text?: unknown; data?: unknown };
+        if (part.type === "text" && typeof part.text === "string") {
+          text += part.text;
+          continue;
+        }
+        if (part.type === "data-attachment" && part.data && typeof part.data === "object") {
+          const d = part.data as { storageKey?: unknown; mimeType?: unknown; name?: unknown };
+          if (typeof d.storageKey !== "string") continue;
+          const mimeType = typeof d.mimeType === "string" ? d.mimeType : "text/plain";
+          attachments.push({ storageKey: d.storageKey, mimeType, name: typeof d.name === "string" ? d.name : "" });
+          if (refKind(mimeType) === "image") imageCount++;
+        }
+      }
+      const metadata = ((msg.metadata ?? {}) as { ts?: unknown; citations?: unknown; error?: unknown; stopped?: unknown });
+      const carrier = carrierBatchOf(parts);
+      if (!text && !imageCount && !metadata.error && metadata.stopped !== true && !carrier) continue;
+      const citations =
+        msg.role === "assistant"
+          ? safeCitations([
+              ...(Array.isArray(metadata.citations) ? metadata.citations : []),
+              ...(segment?.citations ?? []).map((c) => ({ url: c.url, title: c.title })),
+            ])
+          : [];
+      const err = isErrorMeta(metadata.error);
+      out.push({
+        role: msg.role,
+        text,
+        imageCount,
+        rawIndex,
+        ...(attachments.length > 0 ? { attachments } : {}),
+        ...(typeof metadata.ts === "string" ? { ts: metadata.ts } : {}),
+        ...(citations.length > 0 ? { citations } : {}),
+        ...(err ? { error: err } : {}),
+        ...(metadata.stopped === true ? { stopped: true } : {}),
+        ...(carrier
+          ? carrier.chips.length > 0
+            ? { batch: carrier }
+            : { suspendedBatchId: carrier.batchId }
+          : {}),
+      });
+      continue;
+    }
+
     let text = "";
     let imageCount = 0;
     const attachments: ChatAttachmentRef[] = [];

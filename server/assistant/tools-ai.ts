@@ -45,7 +45,20 @@ export interface ReadToolResponse {
 
 /** Write-proposal result from the Worker internal route. */
 export type WriteToolResponse =
-  | { ok: true; proposed: true; approvalId: string; seq: number }
+  | {
+      ok: true;
+      proposed: true;
+      approvalId: string;
+      // W7b/WS1: the persisted carrier needs the batch identity + chip payload
+      // (name/diff/detail) so the DO can append a `data-assistant-approval`
+      // part and the live adapter can rebuild a decidable chip from the tool
+      // output. The Worker returns these on the write-tool response.
+      batchId: string;
+      seq: number;
+      name: string;
+      detail?: string;
+      diff?: unknown;
+    }
   | { ok: false; proposed: false; error: string };
 
 export interface AssistantToolTransport {

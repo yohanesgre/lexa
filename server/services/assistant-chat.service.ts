@@ -33,6 +33,7 @@ import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
+import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
 import { collectResumeResults } from "../assistant/resume-results";
 import { scanMentionTokens, buildMentionContextBlock, MENTION_CAPS, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
@@ -305,7 +306,15 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       // already carry the approval ids). A thread can hold more than one
       // marker, so reconcile them all, not just the newest.
       reconcileChatApprovals: (messages: unknown[]) => Effect.gen(function* () {
+        // W7b/WS2: reconcile BOTH the legacy `pendingBatch` field and the D3
+        // `data-assistant-approval` carrier parts against the live decision
+        // rows, so a parts-shaped transcript rebuilt on reload shows each
+        // approval's live status and a marker-only carrier is backfilled from
+        // its rows. A thread can hold several markers/batches.
         const batchIds = findPendingBatches(messages);
+        for (const id of carrierBatchIds(messages)) {
+          if (!batchIds.includes(id)) batchIds.push(id);
+        }
         if (batchIds.length === 0) return messages;
         const batches = yield* Effect.forEach(batchIds, (batchId) =>
           pendingWritesRepo.listByBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed([] as AssistantPendingWriteRow[])))
@@ -319,13 +328,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             return undefined;
           }
         };
-        return reconcilePendingBatchStatuses(
-          messages,
-          rows.map((r) => {
-            const diff = parseDiff(r.diff);
-            return { id: r.id, status: r.status, seq: r.seq, name: r.tool_name, ...(diff !== undefined ? { diff } : {}) };
-          })
-        );
+        const decisionRows = rows.map((r) => {
+          const diff = parseDiff(r.diff);
+          return { id: r.id, batchId: r.batch_id, status: r.status, seq: r.seq, name: r.tool_name, ...(diff !== undefined ? { diff } : {}) };
+        });
+        const legacyReconciled = reconcilePendingBatchStatuses(messages, decisionRows);
+        return reconcileApprovalCarriers(legacyReconciled, decisionRows);
       }),
       listChats: (projectId: string, userId: string, opts: { q?: string | undefined } = {}) =>
         pendingWritesRepo.sweepExpired().pipe(
