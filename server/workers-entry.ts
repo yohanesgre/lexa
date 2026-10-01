@@ -166,7 +166,7 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
           const mirrored = yield* mirrorSettingsFromEnvAsync(driver, stringEnvFromRuntimeEnv(runtimeEnv));
           if (mirrored.length > 0) console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
           yield* syncRateLimitFromDbAsync(driver);
-          yield* syncGitHubConfigFromDbAsync(driver);
+          yield* syncGitHubConfigFromDbAsync(driver, runtimeEnv);
           // Per-isolate first request is the Workers "boot": the one-way
           // provider-key backfill runs here, after the DB config sync.
           yield* backfillProviderSecrets(driver, runtimeEnv);

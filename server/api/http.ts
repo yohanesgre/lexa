@@ -23,6 +23,8 @@ import { auth } from "../auth";
 import { createApiMiddleware, type MiddlewareSession } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDbAsync } from "./rate-limit";
 import { syncGitHubConfigFromDbAsync, resetGithubCaches } from "../github/client";
+import { deleteGithubSecret, githubSettingsSummary, storeGithubAppCredentials } from "../github/config-store";
+import { buildManifest, createManifestState, consumeManifestState, exchangeManifestCode, assertRequiredPermissions, manifestPostUrl } from "../github/manifest";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -1316,11 +1318,13 @@ const RateLimitInput = Schema.Struct({
 });
 
 // DB is the single source of truth: source is "settings" if any github_*
-// settings row exists (mirrored from env at boot), else "none" — env is never
-// a runtime state. Only appId is returned as a value — the PEM and webhook
-// secret are write-only (booleans only).
+// settings row exists (mirrored from env at boot) or an encrypted
+// github_app_secrets row does, else "none" — env is never a runtime state.
+// `appId` and `appSlug` are returned as values — the PEM and webhook secret are
+// write-only (booleans only).
 const GithubSettingsSchema = Schema.Struct({
   appId: Schema.String,
+  appSlug: Schema.String,
   privateKeySet: Schema.Boolean,
   webhookSecretSet: Schema.Boolean,
   source: Schema.Literal("settings", "none"),
@@ -1331,8 +1335,24 @@ const GithubSettingsSchema = Schema.Struct({
 // webhook secret are write-only — the GET response never carries their values.
 const GithubSettingsInput = Schema.Struct({
   appId: Schema.optional(Schema.String),
+  appSlug: Schema.optional(Schema.String),
   privateKey: Schema.optional(Schema.String),
   webhookSecret: Schema.optional(Schema.String),
+});
+
+// Manifest-connect contract: `manifest` is posted to `url` as a form field by
+// the client; `state` is the single-use CSRF value the callback echoes back.
+const GithubManifestSchema = Schema.Struct({
+  url: Schema.String,
+  state: Schema.String,
+  manifest: Schema.Unknown,
+});
+
+// `code` is absent on a cancelled GitHub consent screen; the state is still
+// consumed (single-use) and nothing is written.
+const GithubSetupInput = Schema.Struct({
+  code: Schema.optional(Schema.String),
+  state: Schema.String,
 });
 
 const apiKeysGroup = HttpApiGroup.make("api-keys")
@@ -1352,6 +1372,11 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
     .addSuccess(GithubSettingsSchema))
   .add(HttpApiEndpoint.put("setGithubSettings", "/settings/github")
     .setPayload(GithubSettingsInput)
+    .addSuccess(GithubSettingsSchema))
+  .add(HttpApiEndpoint.post("createGithubManifest", "/settings/github/manifest")
+    .addSuccess(GithubManifestSchema))
+  .add(HttpApiEndpoint.post("completeGithubSetup", "/settings/github/setup")
+    .setPayload(GithubSetupInput)
     .addSuccess(GithubSettingsSchema))
   .add(HttpApiEndpoint.get("searchGithubRepos", "/settings/github/search-repos")
     .addSuccess(Schema.Struct({ data: Schema.Array(Schema.String) })));
@@ -1964,30 +1989,10 @@ const requireTaskInProject = (slug: string, rawId: string): Effect.Effect<
   });
 
 // Effective GitHub config for the response envelope — DB ONLY (env is a
-// first-boot bootstrap, mirrored into the settings table at boot). source is
-// "settings" if any github_* row exists, else "none". Only appId is returned
-// as a value — the PEM and webhook secret are write-only (booleans only).
-function githubSettingsResponse(driver: DbDriver): Effect.Effect<{
-  appId: string;
-  privateKeySet: boolean;
-  webhookSecretSet: boolean;
-  source: "settings" | "none";
-}, DbError> {
-  return Effect.gen(function* () {
-    const appId = yield* getSettingAsync(driver, "github_app_id");
-    const privateKey = yield* getSettingAsync(driver, "github_private_key");
-    const webhookSecret = yield* getSettingAsync(driver, "github_webhook_secret");
-    const settings = { appId, privateKey, webhookSecret };
-    const nonEmpty = (v: string | null): string => (v !== null && v.trim() !== "" ? v : "");
-    const anySettings = settings.appId !== null || settings.privateKey !== null || settings.webhookSecret !== null;
-    return {
-      appId: nonEmpty(settings.appId),
-      privateKeySet: nonEmpty(settings.privateKey) !== "",
-      webhookSecretSet: nonEmpty(settings.webhookSecret) !== "",
-      source: anySettings ? "settings" : "none",
-    };
-  });
-}
+// first-boot bootstrap, mirrored into the settings table at boot). Encrypted
+// `github_app_secrets` rows count as set; `source` is "settings" when any of
+// the app id / either credential is present, else "none". Only appId + appSlug
+// are returned as values — the PEM and webhook secret are write-only.
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
@@ -3986,16 +3991,18 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
       respond(Effect.gen(function* () {
         yield* requireAdmin;
         const db = yield* Db;
-        return yield* githubSettingsResponse(db);
+        return yield* githubSettingsSummary(db);
       }))
     )
-    .handle("setGithubSettings", (req) =>      respond(Effect.gen(function* () {
+    .handle("setGithubSettings", (req) =>
+      respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const { appId, privateKey, webhookSecret } = req.payload;
+        const { appId, appSlug, privateKey, webhookSecret } = req.payload;
         // Present field = replace; empty string = CLEAR (delete the row → not
         // configured at runtime; env re-imports only at the next boot);
         // omitted = unchanged (appId is required in the body). Non-empty
-        // values validate.
+        // values validate. A manual PUT also deletes the matching encrypted
+        // row, so the last explicit write always wins.
         if (appId === undefined) {
           return yield* Effect.fail(new InvalidGithubSettings({ reason: "appId is required" }));
         }
@@ -4006,19 +4013,64 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
           return yield* Effect.fail(new InvalidGithubSettings({ reason: "privateKey must be a PEM starting with -----BEGIN" }));
         }
         const db = yield* Db;
+        const env = yield* currentEnv;
         if (appId.trim() === "") yield* deleteSettingAsync(db, "github_app_id");
         else yield* setSettingAsync(db, "github_app_id", appId.trim());
+        if (appSlug !== undefined) {
+          if (appSlug.trim() === "") yield* deleteSettingAsync(db, "github_app_slug");
+          else yield* setSettingAsync(db, "github_app_slug", appSlug.trim());
+        }
         if (privateKey !== undefined) {
-          if (privateKey.trim() === "") yield* deleteSettingAsync(db, "github_private_key");
-          else yield* setSettingAsync(db, "github_private_key", privateKey);
+          // Write the plaintext row FIRST, then drop the encrypted one inside
+          // the same transaction: a failed write must never lose the only copy
+          // of the credential.
+          yield* withTx(db, Effect.gen(function* () {
+            if (privateKey.trim() === "") yield* deleteSettingAsync(db, "github_private_key");
+            else yield* setSettingAsync(db, "github_private_key", privateKey);
+            yield* deleteGithubSecret(db, "private_key");
+          }));
         }
         if (webhookSecret !== undefined) {
-          if (webhookSecret.trim() === "") yield* deleteSettingAsync(db, "github_webhook_secret");
-          else yield* setSettingAsync(db, "github_webhook_secret", webhookSecret.trim());
+          yield* withTx(db, Effect.gen(function* () {
+            if (webhookSecret.trim() === "") yield* deleteSettingAsync(db, "github_webhook_secret");
+            else yield* setSettingAsync(db, "github_webhook_secret", webhookSecret.trim());
+            yield* deleteGithubSecret(db, "webhook_secret");
+          }));
         }
-        yield* syncGitHubConfigFromDbAsync(db);
+        yield* syncGitHubConfigFromDbAsync(db, env);
         resetGithubCaches();
-        return yield* githubSettingsResponse(db);
+        return yield* githubSettingsSummary(db);
+      }))
+    )
+    .handle("createGithubManifest", () =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const db = yield* Db;
+        const env = yield* currentEnv;
+        const state = yield* createManifestState(db);
+        return { url: manifestPostUrl(state), state, manifest: buildManifest(resolvePublicUrl(env)) };
+      }))
+    )
+    .handle("completeGithubSetup", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const db = yield* Db;
+        const env = yield* currentEnv;
+        yield* consumeManifestState(db, req.payload.state);
+        const code = (req.payload.code ?? "").trim();
+        // Cancelled consent: the state is consumed above, nothing is written.
+        if (code === "") return yield* githubSettingsSummary(db);
+        const creds = yield* exchangeManifestCode(code);
+        yield* assertRequiredPermissions(creds.permissions);
+        yield* storeGithubAppCredentials(db, env, {
+          appId: creds.appId,
+          slug: creds.slug,
+          privateKey: creds.privateKey,
+          webhookSecret: creds.webhookSecret,
+        });
+        yield* syncGitHubConfigFromDbAsync(db, env);
+        resetGithubCaches();
+        return yield* githubSettingsSummary(db);
       }))
     )
     .handle("searchGithubRepos", (req) =>

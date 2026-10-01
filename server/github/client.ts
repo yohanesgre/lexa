@@ -1,15 +1,18 @@
 import { Context, Effect, Layer } from "effect";
-import type { Database } from "bun:sqlite";
 import { queryFirst, type DbDriver } from "../db/db";
 import { GithubApiError } from "../api/errors";
 import { createAppJwt, verifyWebhookSignature } from "./crypto";
+import { resolveGithubAppSecrets } from "./config-store";
+import type { RuntimeEnv } from "../env";
 
 // ── Config (DB only at runtime) ──
-// The settings table (github_app_id / github_private_key / github_webhook_secret)
-// is the SINGLE source of truth. Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
-// GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a first-boot bootstrap
-// only — mirrorSettingsFromEnv copies it into the DB once at boot, and the
-// runtime never reads env again.
+// The non-secret identifiers are plaintext settings rows (github_app_id /
+// github_app_slug); the PEM and webhook secret resolve ENCRYPTED-FIRST via
+// resolveGithubAppSecrets — github_app_secrets (scope "github") when written by
+// the manifest connect flow, with the legacy plaintext settings rows as a
+// fallback. Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY / GITHUB_PRIVATE_KEY_FILE /
+// GITHUB_WEBHOOK_SECRET) is a first-boot bootstrap only — mirrorSettingsFromEnv
+// copies it into the DB once at boot, and the runtime never reads env again.
 
 export class GitHubConfig extends Context.Tag("GitHubConfig")<
   GitHubConfig,
@@ -34,28 +37,20 @@ const configHolder: { appId: string; privateKey: string; webhookSecret: string }
 
 export const GitHubConfigLive = Layer.effect(GitHubConfig, Effect.sync(() => configHolder));
 
-// Applies the DB-configured values (DB only; empty rows = not configured) to
-// the holder — called at boot (after the env mirror) and after every
-// PUT /api/settings/github.
-export function syncGitHubConfigFromDb(db: Database): void {
-  configHolder.appId = nonEmptySetting(
-    (db.prepare("SELECT value FROM settings WHERE key = ?").get("github_app_id") as { value: string } | null)?.value ?? null
-  );
-  configHolder.privateKey = nonEmptySetting(
-    (db.prepare("SELECT value FROM settings WHERE key = ?").get("github_private_key") as { value: string } | null)?.value ?? null
-  );
-  configHolder.webhookSecret = nonEmptySetting(
-    (db.prepare("SELECT value FROM settings WHERE key = ?").get("github_webhook_secret") as { value: string } | null)?.value ?? null
-  );
-}
-
 function nonEmptySetting(v: string | null): string {
   return v !== null && v.trim() !== "" ? v : "";
 }
 
-// Async port of syncGitHubConfigFromDb over a DbDriver (Workers/D1 path).
-// Same holder, same DB-only semantics — missing rows read as "".
-export function syncGitHubConfigFromDbAsync(driver: DbDriver): Effect.Effect<void, never> {
+// Applies the DB-configured values (DB only; empty rows = not configured) to
+// the live holder — called at boot (after the env mirror) and after every
+// PUT /api/settings/github. Encrypted-first: the private key + webhook secret
+// resolve through resolveGithubAppSecrets (github_app_secrets, legacy
+// plaintext fallback); the app id stays a plain settings row. Async because
+// decrypting suspends.
+export function syncGitHubConfigFromDbAsync(
+  driver: DbDriver,
+  env?: Pick<RuntimeEnv, "LXK_SECRETS_MASTER_KEY" | "LXK_SECRETS_MASTER_KEY_PREV"> | null
+): Effect.Effect<void, never> {
   const read = (key: string): Effect.Effect<string, never> =>
     queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = ?", key).pipe(
       Effect.map((row) => nonEmptySetting(row.value)),
@@ -63,8 +58,9 @@ export function syncGitHubConfigFromDbAsync(driver: DbDriver): Effect.Effect<voi
     );
   return Effect.gen(function* () {
     configHolder.appId = yield* read("github_app_id");
-    configHolder.privateKey = yield* read("github_private_key");
-    configHolder.webhookSecret = yield* read("github_webhook_secret");
+    const secrets = yield* resolveGithubAppSecrets(driver, env);
+    configHolder.privateKey = secrets.privateKey;
+    configHolder.webhookSecret = secrets.webhookSecret;
   });
 }
 

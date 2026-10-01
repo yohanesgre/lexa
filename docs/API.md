@@ -90,6 +90,10 @@ All non-2xx responses share one shape:
 | 400 | `JEV_INVALID_CONFIG` | Jev registry payload refused: `clearSecret` + `secret`, invalid base URL, or model length (details: `{ reason }`) |
 | 502 | `JEV_AUTH_FAILED` | Jev rejected the stored API key (upstream 401/403) |
 | 502 | `JEV_UNREACHABLE` | Any non-401/403 Jev failure — network/timeout/5xx, rate limit, or an unreadable response |
+| 400 | `GITHUB_MANIFEST_STATE_INVALID` | Manifest-connect state unknown, already used, expired, or mismatched — one code for every failure (no existence oracle), and the state row is consumed on every attempt |
+| 422 | `GITHUB_MANIFEST_PERMISSIONS_DENIED` | The App GitHub created reports a required permission missing or at the wrong level (defensive; a report with no permissions is not a denial) |
+| 502 | `GITHUB_MANIFEST_EXCHANGE_FAILED` | The one-time manifest `code` could not be exchanged with GitHub (non-2xx or a payload without credentials) |
+| 500 | `GITHUB_SECRET_WRITE_FAILED` | Encrypted GitHub credential write refused — `LXK_SECRETS_MASTER_KEY` unset/malformed or a DB error (the connect path never falls back to plaintext) |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
@@ -1229,27 +1233,58 @@ body { max*: integer >= 1, windowMs*: integer >= 1000 }
   the defaults; a cleared key is re-imported from env only at the next boot.
 
 GET    /api/settings/github  (admin)
-→ 200 { appId: string, privateKeySet: boolean, webhookSecretSet: boolean,
-        source: "settings" | "none" }
-  Effective GitHub App config: the DB is the single source of truth
-  (settings.github_app_id / settings.github_private_key /
-  settings.github_webhook_secret). Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
-  GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a first-boot bootstrap,
-  mirrored into the DB once at boot. source = "settings" if any github_*
-  settings row exists, else "none" (no "env" state — env is never a runtime
-  source).
+→ 200 { appId: string, appSlug: string, privateKeySet: boolean,
+        webhookSecretSet: boolean, source: "settings" | "none" }
+  Effective GitHub App config. The DB is the single source of truth:
+  settings.github_app_id / settings.github_app_slug (plaintext identifiers) plus
+  the encrypted github_app_secrets rows for the PEM and webhook secret. Legacy
+  plaintext settings.github_private_key / settings.github_webhook_secret rows
+  stay READABLE as a fallback for installs written before the encrypted store
+  existed (an encrypted row, when present, is authoritative — if it cannot be
+  opened, the value reads as unset rather than falling back). Env (GITHUB_APP_ID
+  / GITHUB_PRIVATE_KEY / GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a
+  first-boot bootstrap, mirrored into the DB once at boot. source = "settings"
+  if the app id or either credential is set, else "none" (no "env" state — env
+  is never a runtime source; a slug alone does not flip source).
   ⚠ Write-only secrets: the PEM and webhook secret are never returned —
   only privateKeySet / webhookSecretSet booleans.
 
 PUT    /api/settings/github  (admin)
-body { appId*: string (digits, e.g. "1234567"),
+body { appId*: string (digits, e.g. "1234567"), appSlug?: string,
        privateKey?: string (PEM text), webhookSecret?: string }
 → 200 same shape as GET
   | 422 INVALID_GITHUB_SETTINGS (missing/invalid appId, privateKey not a PEM)
-  Present field = replace; empty string = CLEAR (deletes the settings row so
-  env fallback resumes); omitted field = unchanged. Applies live (holder +
-  cache reset — no restart); webhook verification picks up the new secret
-  immediately.
+  Present field = replace; empty string = CLEAR (deletes the settings row);
+  omitted field = unchanged. Secrets are written PLAINTEXT to the legacy settings
+  rows and the matching encrypted github_app_secrets row is deleted — a manual
+  PUT is the last explicit write and always wins. Applies live (holder + cache
+  reset — no restart); webhook verification picks up the new secret immediately.
+
+POST   /api/settings/github/manifest  (admin)
+→ 200 { url: string, state: string, manifest: GithubAppManifest }
+  Starts the in-app "Connect GitHub App" flow. `url` is the GitHub App-creation
+  form target with the single-use `state` on the query string; POST `manifest` to
+  it as a form field (GitHub creates the App, then redirects to
+  /settings/github/callback). `state` lives in settings.github_manifest_state,
+  is single-use, and expires after 10 minutes. The manifest asks for
+  issues:write, metadata:read, contents:read and the `issues` event; hook +
+  redirect URLs derive from LXK_PUBLIC_URL (resolvePublicUrl).
+
+POST   /api/settings/github/setup  (admin)
+body { code?: string, state*: string }
+→ 200 same shape as GET
+  | 400 GITHUB_MANIFEST_STATE_INVALID
+  | 422 GITHUB_MANIFEST_PERMISSIONS_DENIED
+  | 500 GITHUB_SECRET_WRITE_FAILED
+  | 502 GITHUB_MANIFEST_EXCHANGE_FAILED
+  Completes the flow: consumes `state` (always — match or not), exchanges `code`
+  for the App credentials against GitHub, asserts the reported permissions, then
+  writes the app id + slug plaintext and both secrets encrypted
+  (github_app_secrets; legacy plaintext rows deleted). Applies live. A cancelled
+  consent (no `code`) still consumes the state and writes nothing, returning the
+  current summary.
+  ⚠ Reconnect: this path REPLACES an existing App's credentials; the previous
+  webhook secret is dropped, so the old App's deliveries stop verifying.
 
 GET    /api/settings/github/search-repos?q=  (admin)
 → 200 { data: ["owner/repo", ...] } | 403 FORBIDDEN | 502 GITHUB_API_ERROR

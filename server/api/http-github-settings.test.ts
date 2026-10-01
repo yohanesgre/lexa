@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { Effect } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { createApiHandler } from "./http";
-import { syncGitHubConfigFromDb } from "../github/client";
+import { syncGitHubConfigFromDbAsync } from "../github/client";
+import { resolveGithubAppSecrets } from "../github/config-store";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -54,14 +57,15 @@ INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', 
   handler = createApiHandler(dbPath);
 });
 
-afterAll(() => {
+afterAll(async () => {
   // Restore the shared config holder to its DB-derived state and drop the
   // global settings rows so this file's mutations don't leak anywhere.
   db.exec("DELETE FROM settings WHERE key LIKE 'github_%'");
+  db.exec("DELETE FROM github_app_secrets");
   for (const key of ["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]) {
     if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key]!; else delete process.env[key];
   }
-  syncGitHubConfigFromDb(db);
+  await Effect.runPromise(syncGitHubConfigFromDbAsync(createBunSqliteDriver(db)));
   db.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -83,6 +87,7 @@ describe("settings github endpoints", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       appId: "",
+      appSlug: "",
       privateKeySet: false,
       webhookSecretSet: false,
       source: "none",
@@ -103,6 +108,7 @@ describe("settings github endpoints", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         appId: "",
+        appSlug: "",
         privateKeySet: false,
         webhookSecretSet: false,
         source: "none",
@@ -123,6 +129,7 @@ describe("settings github endpoints", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       appId: "1234567",
+      appSlug: "",
       privateKeySet: true,
       webhookSecretSet: true,
       source: "settings",
@@ -131,6 +138,7 @@ describe("settings github endpoints", () => {
     expect(get.status).toBe(200);
     expect(await get.json()).toEqual({
       appId: "1234567",
+      appSlug: "",
       privateKeySet: true,
       webhookSecretSet: true,
       source: "settings",
@@ -155,6 +163,7 @@ describe("settings github endpoints", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       appId: "",
+      appSlug: "",
       privateKeySet: false,
       webhookSecretSet: false,
       source: "none",
@@ -167,10 +176,32 @@ describe("settings github endpoints", () => {
     const res = await handler(json("PUT", "/api/settings/github", { appId: "555", webhookSecret: "new-secret" }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ appId: "555", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    expect(body).toEqual({ appId: "555", appSlug: "", privateKeySet: true, webhookSecretSet: true, source: "settings" });
     // privateKey row untouched, webhookSecret replaced.
     expect(db.prepare("SELECT value FROM settings WHERE key = 'github_private_key'").get()).toEqual({ value: TEST_PEM });
     expect(db.prepare("SELECT value FROM settings WHERE key = 'github_webhook_secret'").get()).toEqual({ value: "new-secret" });
+  });
+
+  it("PUT clears the matching encrypted row and the plaintext write wins (last explicit write)", async () => {
+    db.prepare("INSERT INTO settings (key, value) VALUES ('github_app_id', '1234567') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('github_private_key', 'legacy-pem') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+    db.prepare(
+      "INSERT INTO github_app_secrets (name, ciphertext, iv, key_id) VALUES ('private_key', 'ct', 'iv', 'k1') ON CONFLICT(name) DO UPDATE SET ciphertext = excluded.ciphertext, iv = excluded.iv, key_id = excluded.key_id"
+    ).run();
+
+    const res = await handler(json("PUT", "/api/settings/github", { appId: "1234567", privateKey: TEST_PEM }));
+    expect(res.status).toBe(200);
+
+    // The encrypted row is gone; the new value lives in the plaintext row.
+    expect(db.prepare("SELECT COUNT(*) c FROM github_app_secrets WHERE name = 'private_key'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'github_private_key'").get()).toEqual({ value: TEST_PEM });
+
+    // Runtime resolution reads the plaintext write.
+    const resolved = await Effect.runPromise(resolveGithubAppSecrets(createBunSqliteDriver(db)));
+    expect(resolved.privateKey).toBe(TEST_PEM);
+
+    db.exec("DELETE FROM github_app_secrets");
+    db.exec("DELETE FROM settings WHERE key LIKE 'github_%'");
   });
 
   it.each([

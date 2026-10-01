@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { Effect, ManagedRuntime } from "effect";
 import { Database } from "bun:sqlite";
 import { setSetting } from "../db/settings";
-import { GitHubConfig, GitHubConfigLive, syncGitHubConfigFromDb } from "./client";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
+import { GitHubConfig, GitHubConfigLive, syncGitHubConfigFromDbAsync } from "./client";
 
 const PEM = "-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----";
 
@@ -20,19 +21,21 @@ async function liveConfig(): Promise<GitHubConfig["Type"]> {
   }
 }
 
-describe("syncGitHubConfigFromDb", () => {
+describe("syncGitHubConfigFromDbAsync", () => {
   const freshDb = () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')))");
     return db;
   };
 
+  const sync = (db: Database) => Effect.runPromise(syncGitHubConfigFromDbAsync(createBunSqliteDriver(db)));
+
   it("applies settings rows to the live config holder", async () => {
     const db = freshDb();
     setSetting(db, "github_app_id", "12345");
     setSetting(db, "github_private_key", PEM);
     setSetting(db, "github_webhook_secret", "whsec");
-    syncGitHubConfigFromDb(db);
+    await sync(db);
     const cfg = await liveConfig();
     expect(cfg).toEqual({ appId: "12345", privateKey: PEM, webhookSecret: "whsec" });
     db.close();
@@ -53,7 +56,7 @@ describe("syncGitHubConfigFromDb", () => {
       setSetting(db, "github_app_id", "111");
       setSetting(db, "github_private_key", PEM);
       setSetting(db, "github_webhook_secret", "db-secret");
-      syncGitHubConfigFromDb(db);
+      await sync(db);
       const cfg = await liveConfig();
       expect(cfg).toEqual({ appId: "111", privateKey: PEM, webhookSecret: "db-secret" });
       db.close();
@@ -78,7 +81,7 @@ describe("syncGitHubConfigFromDb", () => {
     process.env.GITHUB_WEBHOOK_SECRET = "env-secret";
     try {
       const db = freshDb();
-      syncGitHubConfigFromDb(db); // no settings rows
+      await sync(db); // no settings rows
       const cfg = await liveConfig();
       expect(cfg).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
       db.close();
@@ -92,7 +95,7 @@ describe("syncGitHubConfigFromDb", () => {
 
   it("missing settings rows are a no-op (not configured, no throw)", async () => {
     const db = freshDb();
-    expect(() => syncGitHubConfigFromDb(db)).not.toThrow();
+    await expect(sync(db)).resolves.toBeUndefined();
     expect(await liveConfig()).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
     db.close();
   });
