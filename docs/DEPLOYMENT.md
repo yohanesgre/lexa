@@ -114,6 +114,10 @@ normally.
   verified once before use), then a hidden TTY prompt. A token read from
   `wrangler login` needs no pasting. Provisioning is find-or-create — re-runs
   reuse the existing D1/R2/KV resources and apply migrations incrementally.
+  D1 is matched by exact deploy name, otherwise by a single `${name}-`-prefixed
+  database (deploy `lexa` reuses a lone `lexa-prod`); several matches refuse the
+  run rather than guess — remove the stale database, or pass `--name <deploy>`
+  to start a distinct deployment under that name.
 - **Envelope key (custody):** the installer mints `LXK_SECRETS_MASTER_KEY` once
   and keeps it in `cf-workers/.env.toml` (0600). On re-runs the order is local
   custody → remote presence (`wrangler secret list`) → mint, so the key is

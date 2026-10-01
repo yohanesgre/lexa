@@ -330,23 +330,10 @@ deploy_workers() {
   fi
   # Master key custody (cf-workers/.env.toml, 0600). Preserve order:
   # local custody → remote presence → mint. Never rotate; never mint when the
-  # remote state can't be read (better to leave it than to rotate).
+  # remote state can't be read (better to leave it than to rotate). Dry-run is
+  # pure: it prints the mint plan and a placeholder put, never mints or writes.
   _custody="${_ww_dir}/.env.toml"
-  _WORKERS_MASTER_KEY="$(env_file_value "${_custody}" LXK_SECRETS_MASTER_KEY || true)"
-  if [ -z "${_WORKERS_MASTER_KEY}" ]; then
-    case "$(workers_secret_present "${_ww_dir}" "LXK_SECRETS_MASTER_KEY")" in
-      present)
-        : # already on the remote worker — leave it, do not mint or overwrite
-        ;;
-      absent)
-        _WORKERS_MASTER_KEY="$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
-        write_env_toml "${_custody}" "LXK_SECRETS_MASTER_KEY=${_WORKERS_MASTER_KEY}"
-        ;;
-      *)
-        echo "  (couldn't read the master key on the worker — leaving it untouched; re-run to retry)"
-        ;;
-    esac
-  fi
+  workers_resolve_master_key "${_ww_dir}"
 
   if [ -n "${FROM_REPO}" ]; then
     WORK_DIR="${REPO_ROOT}"

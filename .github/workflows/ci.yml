@@ -338,11 +338,16 @@ jobs:
           fi
           CHANGED="$(cat /tmp/changed.txt)"
           echo "$CHANGED"
-          if echo "$CHANGED" | grep -qE '^scripts/(install|uninstall|test-install)'; then
+          if echo "$CHANGED" | grep -qE '^scripts/(install|uninstall|test-install|workers-install)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.changes.outputs.run == 'true'
+        with:
+          bun-version: 1.4
 
       - name: Install script tests (unit + dry-run)
         if: steps.changes.outputs.run == 'true'

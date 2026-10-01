@@ -56,6 +56,22 @@ lib_call() {
   bash -c 'set -euo pipefail; source "$1"; shift; "$@"' _ "$LIB" "$@"
 }
 
+# workers_resolve <stub-status> <dir> — source the lib, shadow the
+# workers_secret_present override seam with a stub returning <stub-status>, then
+# run workers_resolve_master_key <dir>; the resolved key is echoed as the final
+# `MASTER=<value>` line (empty when unset). This exercises the real mint path.
+workers_resolve() {
+  local status="$1" dir="$2"
+  bash -c '
+    set -euo pipefail
+    source "$1"
+    status="$2"
+    workers_secret_present() { printf "%s\n" "$status"; }
+    workers_resolve_master_key "$3"
+    printf "MASTER=%s\n" "${_WORKERS_MASTER_KEY:-}"
+  ' _ "$LIB" "$status" "$dir"
+}
+
 echo "== syntax + lint =="
 
 for f in "$INSTALL" "$LIB" "$UNINSTALL"; do
@@ -72,6 +88,17 @@ if command -v shellcheck >/dev/null 2>&1; then
   done
 else
   echo "SKIP: shellcheck not installed (CI runner has it)"
+fi
+
+echo "== workers-install selector (bun unit) =="
+
+if command -v bun >/dev/null 2>&1; then
+  sel_rc=0
+  sel_out="$(bun test "${SCRIPT_DIR}/workers-install.test.ts" 2>&1)" || sel_rc=$?
+  assert_rc "workers-install unit tests pass (exact/sole/ambiguous/none)" 0 "$sel_rc"
+  assert_grep "workers-install unit tests actually ran" '[0-9]+ pass' "$sel_out"
+else
+  echo "SKIP: bun unavailable — workers-install selector unit tests need the runtime"
 fi
 
 echo "== parse_flags =="
@@ -188,6 +215,40 @@ lib_call write_env_toml "${secretsdir}/.env.toml" "$secrets_entry" >/dev/null 2>
 secrets_again="$(lib_call secrets_master_key_entry "${secretsdir}/.env.toml")"
 assert_eq "secrets key preserved on re-run" "$secrets_entry" "$secrets_again"
 assert_grep "written secrets key lands in .env.toml" '^LXK_SECRETS_MASTER_KEY = ".*"$' "$(cat "${secretsdir}/.env.toml")"
+
+echo "== workers_resolve_master_key =="
+
+# Real mint path (no dry-run): stub the remote presence check to `absent`, then
+# the custody file must be written 0600 with a 32-byte base64 key and the
+# global _WORKERS_MASTER_KEY must carry it.
+mk_dir="$(mktemp -d)"
+mk_out="$(workers_resolve absent "${mk_dir}" 2>&1)"
+mk_val="$(printf '%s' "$mk_out" | sed -n 's/^MASTER=//p' | tail -1)"
+assert_eq "mint (absent): custody file written" "present" "$([ -f "${mk_dir}/.env.toml" ] && echo present || echo absent)"
+assert_eq "mint (absent): custody mode 0600" "600" "$(stat -c %a "${mk_dir}/.env.toml" 2>/dev/null || echo none)"
+assert_eq "mint (absent): key decodes to 32 bytes" "32" "$(printf '%s' "$mk_val" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+assert_eq "mint (absent): _WORKERS_MASTER_KEY set" "yes" "$([ -n "$mk_val" ] && echo yes || echo no)"
+assert_grep "mint (absent): key persisted in custody" '^LXK_SECRETS_MASTER_KEY = ".*"$' "$(cat "${mk_dir}/.env.toml")"
+
+# Second call with the custody file present must reuse the SAME value — the
+# remote check is never consulted and the key is never rotated.
+mk_again="$(workers_resolve absent "${mk_dir}" 2>&1 | sed -n 's/^MASTER=//p' | tail -1)"
+assert_eq "re-run preserves the minted key (never rotated)" "$mk_val" "$mk_again"
+
+# `present`: the remote worker already holds it — no custody write, no mint.
+mk_pres_dir="$(mktemp -d)"
+mk_pres_out="$(workers_resolve present "${mk_pres_dir}" 2>&1)"
+mk_pres_val="$(printf '%s' "$mk_pres_out" | sed -n 's/^MASTER=//p' | tail -1)"
+assert_eq "presence=present: no custody file" "absent" "$([ -f "${mk_pres_dir}/.env.toml" ] && echo present || echo absent)"
+assert_eq "presence=present: _WORKERS_MASTER_KEY empty" "" "$mk_pres_val"
+
+# `unknown`: the check could not run — nothing minted, nothing written, a note.
+mk_unk_dir="$(mktemp -d)"
+mk_unk_out="$(workers_resolve unknown "${mk_unk_dir}" 2>&1)"
+mk_unk_val="$(printf '%s' "$mk_unk_out" | sed -n 's/^MASTER=//p' | tail -1)"
+assert_grep "presence=unknown: warns it couldn't read the master key" "couldn't read the master key" "$mk_unk_out"
+assert_eq "presence=unknown: no custody file (no mint)" "absent" "$([ -f "${mk_unk_dir}/.env.toml" ] && echo present || echo absent)"
+assert_eq "presence=unknown: _WORKERS_MASTER_KEY empty" "" "$mk_unk_val"
 
 echo "== migrate_legacy_deploy_env =="
 
@@ -868,21 +929,91 @@ else
   echo "SKIP: bun unavailable — T-prune-legacy-secret wiring needs the runtime"
 fi
 
-echo "== T-custody-preserve: master key survives a re-run =="
+echo "== T-workers-dry-run-purity: no custody write, no mint =="
 
-cust_tmp="$(mktemp -d)"
-cust_home="$(mktemp -d)"
 if [ "$have_bun_path" -eq 1 ]; then
-  (cd "${cust_tmp}" && HOME="${cust_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || true
-  cust_key1="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${cust_tmp}/cf-workers/.env.toml" | head -1)"
-  assert_eq "T-custody-preserve first run mints a 32-byte key" "32" "$(printf '%s' "${cust_key1}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
-  (cd "${cust_tmp}" && HOME="${cust_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token >/dev/null 2>&1) || true
-  cust_key2="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${cust_tmp}/cf-workers/.env.toml" | head -1)"
-  assert_eq "T-custody-preserve re-run keeps the master key (never rotates)" "${cust_key1}" "${cust_key2}"
-  assert_eq "T-custody-preserve token from --cf-token is never written to disk" "absent" \
-    "$([ -e "${cust_tmp}/cf-workers/.cf-token" ] && echo present || echo absent)"
+  # Fresh dry-run: no deploy config, no custody → mint is planned, nothing written.
+  wpur_tmp="$(mktemp -d)"
+  wpur_home="$(mktemp -d)"
+  wpur_rc=0
+  wpur_out="$(cd "${wpur_tmp}" && HOME="${wpur_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token 2>&1)" || wpur_rc=$?
+  assert_rc "T-workers-dry-run-purity fresh dry-run completes" 0 "$wpur_rc"
+  assert_eq "T-workers-dry-run-purity fresh dry-run writes no cf-workers/.env.toml" "absent" \
+    "$([ -e "${wpur_tmp}/cf-workers/.env.toml" ] && echo present || echo absent)"
+  assert_grep "T-workers-dry-run-purity prints the mint plan" '\[dry-run\] mint LXK_SECRETS_MASTER_KEY' "$wpur_out"
+  assert_eq "T-workers-dry-run-purity generates no key material" "0" \
+    "$(printf '%s' "$wpur_out" | grep -cE 'LXK_SECRETS_MASTER_KEY=[A-Za-z0-9+/]{43}=' || true)"
+  assert_grep "T-workers-dry-run-purity keeps the master-key put plan visible" \
+    'wrangler secret put LXK_SECRETS_MASTER_KEY' "$wpur_out"
+  assert_eq "T-workers-dry-run-purity token from --cf-token is never written to disk" "absent" \
+    "$([ -e "${wpur_tmp}/cf-workers/.cf-token" ] && echo present || echo absent)"
+
+  # A `bun` shim answers `wrangler secret list` (read-only) from a fixture — no
+  # real Cloudflare call.
+  wpur_bin="$(mktemp -d)"
+  cat > "${wpur_bin}/bun" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"wrangler secret list"*)
+    printf '%s' "${SECRET_LIST:-[]}"
+    exit "${SECRET_LIST_RC:-0}"
+    ;;
+esac
+exit 0
+SHIM
+  chmod +x "${wpur_bin}/bun"
+
+  # Config readable + remote already has the key → no mint, no put plan, no write.
+  wstr_tmp="$(mktemp -d)"
+  wstr_home="$(mktemp -d)"
+  mkdir -p "${wstr_tmp}/cf-workers/deploy-lexa"
+  printf '{"name":"lexa","vars":{"LXK_PUBLIC_URL":"https://lexa.example.workers.dev"}}\n' > "${wstr_tmp}/cf-workers/deploy-lexa/wrangler.lexa.json"
+  wstr_rc=0
+  wstr_out="$(cd "${wstr_tmp}" && HOME="${wstr_home}" PATH="${wpur_bin}:${PATH}" INSTALL_DRY_RUN=1 \
+    SECRET_LIST='[{"name":"LXK_SECRETS_MASTER_KEY"}]' \
+    bash "$INSTALL" workers --cf-token test-token 2>&1)" || wstr_rc=$?
+  assert_rc "T-workers-dry-run-purity present-key dry-run completes" 0 "$wstr_rc"
+  assert_eq "T-workers-dry-run-purity present key is not re-minted" "0" \
+    "$(printf '%s' "$wstr_out" | grep -c '\[dry-run\] mint LXK_SECRETS_MASTER_KEY' || true)"
+  assert_eq "T-workers-dry-run-purity present key has no put plan" "0" \
+    "$(printf '%s' "$wstr_out" | grep -c 'wrangler secret put LXK_SECRETS_MASTER_KEY' || true)"
+  assert_eq "T-workers-dry-run-purity present key writes no custody" "absent" \
+    "$([ -e "${wstr_tmp}/cf-workers/.env.toml" ] && echo present || echo absent)"
+
+  # Config readable + remote absent → mint plan, still no file.
+  wabs_tmp="$(mktemp -d)"
+  wabs_home="$(mktemp -d)"
+  mkdir -p "${wabs_tmp}/cf-workers/deploy-lexa"
+  printf '{"name":"lexa","vars":{"LXK_PUBLIC_URL":"https://lexa.example.workers.dev"}}\n' > "${wabs_tmp}/cf-workers/deploy-lexa/wrangler.lexa.json"
+  wabs_rc=0
+  wabs_out="$(cd "${wabs_tmp}" && HOME="${wabs_home}" PATH="${wpur_bin}:${PATH}" INSTALL_DRY_RUN=1 \
+    SECRET_LIST='[]' \
+    bash "$INSTALL" workers --cf-token test-token 2>&1)" || wabs_rc=$?
+  assert_rc "T-workers-dry-run-purity absent-key dry-run completes" 0 "$wabs_rc"
+  assert_grep "T-workers-dry-run-purity absent key plans the mint" '\[dry-run\] mint LXK_SECRETS_MASTER_KEY' "$wabs_out"
+  assert_eq "T-workers-dry-run-purity absent key writes no custody" "absent" \
+    "$([ -e "${wabs_tmp}/cf-workers/.env.toml" ] && echo present || echo absent)"
+
+  # Operator custody value: untouched, not re-minted, put plan uses it.
+  wop_tmp="$(mktemp -d)"
+  wop_home="$(mktemp -d)"
+  mkdir -p "${wop_tmp}/cf-workers/deploy-lexa"
+  printf '{"name":"lexa","vars":{"LXK_PUBLIC_URL":"https://lexa.example.workers.dev"}}\n' > "${wop_tmp}/cf-workers/deploy-lexa/wrangler.lexa.json"
+  printf '[other]\nLXK_SECRETS_MASTER_KEY = "OPERATORKEYVALUE"\n' > "${wop_tmp}/cf-workers/.env.toml"
+  wop_before="$(cat "${wop_tmp}/cf-workers/.env.toml")"
+  wop_rc=0
+  wop_out="$(cd "${wop_tmp}" && HOME="${wop_home}" PATH="${wpur_bin}:${PATH}" INSTALL_DRY_RUN=1 \
+    SECRET_LIST='[]' \
+    bash "$INSTALL" workers --cf-token test-token 2>&1)" || wop_rc=$?
+  assert_rc "T-workers-dry-run-purity operator custody dry-run completes" 0 "$wop_rc"
+  assert_eq "T-workers-dry-run-purity operator custody file untouched" "$wop_before" \
+    "$(cat "${wop_tmp}/cf-workers/.env.toml")"
+  assert_eq "T-workers-dry-run-purity operator custody is not re-minted" "0" \
+    "$(printf '%s' "$wop_out" | grep -c '\[dry-run\] mint LXK_SECRETS_MASTER_KEY' || true)"
+  assert_grep "T-workers-dry-run-purity operator custody keeps the put plan" \
+    'wrangler secret put LXK_SECRETS_MASTER_KEY' "$wop_out"
 else
-  echo "SKIP: bun unavailable — T-custody-preserve needs the runtime"
+  echo "SKIP: bun unavailable — T-workers-dry-run-purity needs the runtime"
 fi
 
 echo "== T-bare-start: manual start is backgrounded + idempotent =="
