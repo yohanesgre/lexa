@@ -7,6 +7,31 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.5] - 2026-10-01
+
+### Added
+
+- **Persisted Workers observability by default** — the `wrangler.jsonc`
+  observability block now spells out Workers Logs, Traces, and Issues with
+  `persist: true` and 100% head sampling, so a Workers deployment gets durable
+  logs and traces without a manual config edit. (#176)
+- **Installer transcribes the root `wrangler.jsonc`** — the per-deploy config
+  the Workers installer generates hardcoded observability to the bare
+  `enabled` flag and silently dropped the rest of the root block. The root file
+  is now the single source: `scripts/workers-install.ts` reads it once for both
+  `compatibility_date` and observability, so an installer-provisioned Worker
+  matches a hand-written one. (#176)
+
+### Fixed
+
+- **Query strings redacted from Workers telemetry** —
+  `redact_query_string: true`, so invite and set-password tokens carried in
+  URLs never persist into logs, traces, or issues. (#176)
+- **Installer JSONC parsing hardened** — the comment-strip regex mis-parsed
+  string values containing `//`, block comments, and trailing commas. The
+  parser is now string-aware, and a parse failure refuses through `die` naming
+  the offending file instead of crashing. (#176)
+
 ## [2026.5.4] - 2026-10-01
 
 ### Fixed
