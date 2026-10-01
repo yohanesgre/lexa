@@ -11,10 +11,15 @@ export type AssistantFlavor = "bun" | "workers";
 export interface Capabilities {
   assistant: boolean;
   flavor: AssistantFlavor;
+  // Chat attachments (images + docs) ride the assistant chat stream, so they
+  // need the assistant and are refused outright by the LXK_DISABLE_CHAT_ATTACHMENTS
+  // kill switch. The frontend gate is this flag; the server refuses regardless.
+  chatAttachments: boolean;
 }
 
 export interface CapabilityEnv {
   LXK_SECRETS_MASTER_KEY?: string | undefined;
+  LXK_DISABLE_CHAT_ATTACHMENTS?: string | undefined;
 }
 
 /** The assistant is available only where the master key is resolvable. */
@@ -23,9 +28,15 @@ export function hasSecretsMasterKey(env: CapabilityEnv): boolean {
   return typeof key === "string" && key.length > 0;
 }
 
+/** False only when the operator set the kill switch to exactly "1". */
+export function chatAttachmentsEnabled(env: CapabilityEnv): boolean {
+  return env.LXK_DISABLE_CHAT_ATTACHMENTS !== "1";
+}
+
 /** The `GET /api/capabilities` JSON body for a flavor. */
 export function capabilities(flavor: AssistantFlavor, env: CapabilityEnv): Capabilities {
-  return { assistant: flavor === "workers" && hasSecretsMasterKey(env), flavor };
+  const assistant = flavor === "workers" && hasSecretsMasterKey(env);
+  return { assistant, flavor, chatAttachments: assistant && chatAttachmentsEnabled(env) };
 }
 
 export function capabilitiesFromRuntimeEnv(flavor: AssistantFlavor, env: RuntimeEnv): Capabilities {

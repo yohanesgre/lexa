@@ -10,13 +10,14 @@ import { Sqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
 import { AttachmentService } from "../services/attachment.service";
 import { Storage, StorageConfig } from "../storage/storage";
-import { resolveStorageConfig } from "../storage/config";
+import { resolveStorageConfig, CHAT_ATTACHMENT_MAX_UPLOAD_BYTES } from "../storage/config";
 import { createApiHandler } from "./http";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 const ADMIN_KEY = "lxk_" + "a".repeat(43);
 const MEMBER_KEY = "lxk_" + "b".repeat(43);
+const MEMBER2_KEY = "lxk_" + "c".repeat(43);
 
 async function sha256(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
@@ -35,6 +36,7 @@ const DOOMED_TEXT = "doomed attachment body";
 const SHARE_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2, 2, 2, 15]);
 
 let dir: string;
+let dbPath: string;
 let handler: (req: Request) => Promise<Response>;
 let db: Database;
 
@@ -76,13 +78,14 @@ async function uploadToTask(bytes: Uint8Array | string, filename: string) {
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-attachments-api-"));
-  const dbPath = join(dir, "test.db");
+  dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   // Resolved at createApiHandler time — 1 MB cap keeps the oversize case fast
   // without affecting the small fixtures below.
   process.env.LXK_MAX_UPLOAD_MB = "1";
   const adminHash = await sha256(ADMIN_KEY);
   const memberHash = await sha256(MEMBER_KEY);
+  const member2Hash = await sha256(MEMBER2_KEY);
   db = new Database(dbPath);
   db.exec(`
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'superadmin');
@@ -90,9 +93,14 @@ INSERT INTO users (id, email, name, role) VALUES ('u2', 'bob@lexa.test', 'Bob', 
 -- Real row for task_activity.actor_user_id FK when the service-level guard
 -- test deletes with an admin identity.
 INSERT INTO users (id, email, name, role) VALUES ('u3', 'admin2@lexa.test', 'Admin2', 'member');
+-- Fourth user: project member (explicit grant) but NOT the chat-thread owner —
+-- the cross-user isolation cases below.
+INSERT INTO users (id, email, name, role) VALUES ('u4', 'carol@lexa.test', 'Carol', 'member');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', '${memberHash}', 'u2');
+INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k4', 'test-member2', '${member2Hash}', 'u4');
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 1);
+INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u4', 'member', 'p1');
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'T1', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
@@ -381,5 +389,224 @@ describe("GET /api/share/:token/attachments/:id", () => {
       expect(res.status).toBe(404);
     }
     expect(saw429).toBe(true);
+  });
+});
+
+// Direct service invocation — the middleware rejects member-bound keys before
+// routing, so the removeChat authority rule is exercised on the service itself.
+async function runServiceRemoveChat(
+  attachmentId: string,
+  identity: { keyId: string; keyName: string; userId: string | null; userName: string | null; role: "admin" | "member" }
+): Promise<{ outcome: "Left" | "Right"; errorTag?: string | undefined }> {
+  const result = await Effect.runPromise(
+    Effect.gen(function* () {
+      const svc = yield* AttachmentService;
+      return yield* svc.removeChat(attachmentId, identity);
+    }).pipe(Effect.provide(serviceTestLayer!), Effect.either)
+  );
+  if (result._tag === "Left") {
+    return { outcome: "Left", errorTag: (result.left as { _tag?: string })._tag };
+  }
+  return { outcome: "Right" };
+}
+
+describe("Chat attachments — upload/list/serve/delete", () => {
+  const CHAT = "/api/projects/p1/assistant/chat/c1/attachments";
+  const mdBytes = new TextEncoder().encode("# Notes\n\nhello world");
+  let uploadedId = "";
+  let uploadedSha = "";
+
+  it("uploads a markdown document → 201, server-sniffed text/markdown, thread created lazily", async () => {
+    const activityBefore = (db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n;
+    const res = await handler(uploadReq(CHAT, mdBytes, "notes.md"));
+    expect(res.status).toBe(201);
+    const { data } = await res.json();
+    uploadedId = data.id;
+    uploadedSha = data.sha256;
+    expect(data).toMatchObject({
+      projectId: "p1",
+      chatId: "c1",
+      filename: "notes.md",
+      mimeType: "text/markdown",
+      sizeBytes: mdBytes.byteLength,
+      uploadedBy: "u1",
+      uploadedByLabel: "Maria",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get()).toEqual({ n: 1 });
+    // Chat attachments emit no activity rows.
+    expect((db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n).toBe(activityBefore);
+  });
+
+  it("accepts an image and lists both, oldest-first fields present", async () => {
+    const img = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7, 7]);
+    const up = await handler(uploadReq(CHAT, img, "shot.png"));
+    expect(up.status).toBe(201);
+    expect((await up.json()).data.mimeType).toBe("image/png");
+
+    const list = await handler(authed("GET", CHAT));
+    expect(list.status).toBe(200);
+    const { data } = await list.json();
+    const names = data.map((a: { filename: string }) => a.filename);
+    expect(names).toContain("notes.md");
+    expect(names).toContain("shot.png");
+    expect(data.every((a: { chatId: string }) => a.chatId === "c1")).toBe(true);
+  });
+
+  it("zero-byte file → 422 INVALID_ARGS naming it as empty", async () => {
+    const res = await handler(uploadReq(CHAT, new Uint8Array(0), "empty.txt"));
+    expect(res.status).toBe(422);
+    const { error } = await res.json();
+    expect(error.code).toBe("INVALID_ARGS");
+    expect(error.message).toContain("empty.txt");
+    expect(error.message).toContain("empty");
+  });
+
+  it("sniffed-but-unsupported type (SVG) → 422 INVALID_ARGS", async () => {
+    const res = await handler(uploadReq(CHAT, SVG_TEXT, "logo.svg"));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.code).toBe("INVALID_ARGS");
+  });
+
+  it("per-file oversize → 413 PAYLOAD_TOO_LARGE naming the file (5 MB chat cap)", async () => {
+    const big = new Uint8Array(CHAT_ATTACHMENT_MAX_UPLOAD_BYTES + 1024);
+    const res = await handler(uploadReq(CHAT, big, "big.txt"));
+    expect(res.status).toBe(413);
+    const { error } = await res.json();
+    expect(error.code).toBe("PAYLOAD_TOO_LARGE");
+    expect(error.message).toContain("big.txt");
+  });
+
+  it("GET /api/chat-attachments/:id serves byte-identical bytes; text downloads (not inline)", async () => {
+    const res = await handler(authed("GET", `/api/chat-attachments/${uploadedId}`));
+    expect(res.status).toBe(200);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    expect(Buffer.from(buf).equals(Buffer.from(mdBytes))).toBe(true);
+    expect(res.headers.get("content-type")).toBe("text/markdown");
+    expect((res.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("unknown id → 404 ATTACHMENT_NOT_FOUND", async () => {
+    const res = await handler(authed("GET", "/api/chat-attachments/nope"));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+  });
+
+  it("member-bound key → 403 AttachmentDeleteForbidden; direct service guard agrees", async () => {
+    const mid = await handler(authed("DELETE", `/api/chat-attachments/${uploadedId}`, undefined, MEMBER_KEY));
+    expect(mid.status).toBe(403);
+    expect((await mid.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
+
+    const verdict = await runServiceRemoveChat(uploadedId, {
+      keyId: "k2", keyName: "Bob", userId: "u2", userName: "Bob", role: "member",
+    });
+    expect(verdict.outcome).toBe("Left");
+    expect(verdict.errorTag).toBe("AttachmentDeleteForbidden");
+    expect(db.prepare("SELECT id FROM chat_attachments WHERE id = ?").get(uploadedId)).toBeTruthy();
+  });
+
+  it("uploader delete → 204, blob gone; repeat → 404", async () => {
+    const del = await handler(authed("DELETE", `/api/chat-attachments/${uploadedId}`));
+    expect(del.status).toBe(204);
+    expect(existsSync(join(blobDir(), uploadedSha))).toBe(false);
+    const again = await handler(authed("DELETE", `/api/chat-attachments/${uploadedId}`));
+    expect(again.status).toBe(404);
+    expect((await again.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+  });
+});
+
+describe("Chat attachments — kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1)", () => {
+  it("refuses an upload with 403 CHAT_ATTACHMENTS_DISABLED", async () => {
+    // On the Bun host `currentEnv` resolves from process.env (no RuntimeEnv
+    // layer); set the operator flag for the duration of this one request.
+    process.env.LXK_DISABLE_CHAT_ATTACHMENTS = "1";
+    try {
+      const res = await handler(
+        uploadReq("/api/projects/p1/assistant/chat/c1/attachments", new TextEncoder().encode("x"), "x.txt")
+      );
+      expect(res.status).toBe(403);
+      expect((await res.json()).error.code).toBe("CHAT_ATTACHMENTS_DISABLED");
+    } finally {
+      delete process.env.LXK_DISABLE_CHAT_ATTACHMENTS;
+    }
+  });
+});
+
+// Threads are owner-scoped: knowing a chatId must not grant a project member
+// access to another member's files. u4 is a real project member (explicit
+// grant) but not the owner of chat c1 (owned by u1).
+describe("Chat attachments — cross-user isolation", () => {
+  const CHAT = "/api/projects/p1/assistant/chat/c1/attachments";
+  let victimId = "";
+
+  beforeAll(async () => {
+    const res = await handler(uploadReq(CHAT, new TextEncoder().encode("victim secret"), "victim.txt"));
+    expect(res.status).toBe(201);
+    victimId = (await res.json()).data.id;
+  });
+
+  it("a different project member cannot list another member's thread", async () => {
+    const res = await handler(authed("GET", CHAT, undefined, MEMBER2_KEY));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+  });
+
+  it("a different project member cannot download another member's attachment", async () => {
+    const res = await handler(authed("GET", `/api/chat-attachments/${victimId}`, undefined, MEMBER2_KEY));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+  });
+
+  it("a different project member cannot bind an upload into another member's thread", async () => {
+    const res = await handler(uploadReq(CHAT, new TextEncoder().encode("intruder"), "intruder.txt", MEMBER2_KEY));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+  });
+
+  it("a different project member cannot delete another member's attachment", async () => {
+    const res = await handler(authed("DELETE", `/api/chat-attachments/${victimId}`, undefined, MEMBER2_KEY));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
+  });
+
+  it("a non-member is denied by project access before the thread gate", async () => {
+    const res = await handler(authed("GET", CHAT, undefined, MEMBER_KEY));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+
+  it("the owner still lists and serves their own attachment", async () => {
+    const list = await handler(authed("GET", CHAT));
+    expect(list.status).toBe(200);
+    const serve = await handler(authed("GET", `/api/chat-attachments/${victimId}`));
+    expect(serve.status).toBe(200);
+  });
+});
+
+// Regression for the shared blob refcount: task/wiki remove must count
+// `chat_attachments` too, or deleting a task artifact deletes a blob that a
+// chat message still points at (serve 404 / extraction failure).
+describe("Shared blob refcount (task + chat)", () => {
+  const CHAT = "/api/projects/p1/assistant/chat/c1/attachments";
+  const SHARED = new TextEncoder().encode("shared blob body");
+
+  it("deleting a task attachment keeps a blob still referenced by a chat attachment", async () => {
+    const chatUp = await handler(uploadReq(CHAT, SHARED, "shared-chat.txt"));
+    expect(chatUp.status).toBe(201);
+    const chatAttachmentId = (await chatUp.json()).data.id;
+
+    const taskUp = await handler(uploadReq("/api/projects/p1/tasks/t1/attachments", SHARED, "shared-task.txt"));
+    expect(taskUp.status).toBe(201);
+    const taskBody = await taskUp.json();
+    const sha = taskBody.data.sha256 as string;
+    expect(existsSync(join(blobDir(), sha))).toBe(true);
+
+    const del = await handler(authed("DELETE", `/api/attachments/${taskBody.data.id}`));
+    expect(del.status).toBe(204);
+    expect(existsSync(join(blobDir(), sha))).toBe(true);
+
+    const serve = await handler(authed("GET", `/api/chat-attachments/${chatAttachmentId}`));
+    expect(serve.status).toBe(200);
+    expect(Buffer.from(new Uint8Array(await serve.arrayBuffer())).equals(Buffer.from(SHARED))).toBe(true);
   });
 });

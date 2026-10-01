@@ -7,7 +7,7 @@
 -- non-empty value into assistant_provider_secrets and then writes '' (the
 -- column is NOT NULL). All writes store '' from here on.
 --
--- Release N+1 ships 0015_drop_provider_api_key.sql, which removes the column
+-- Release N+1 ships 0016_drop_provider_api_key.sql, which removes the column
 -- with a guard that aborts while any non-empty api_key remains — so the drop
 -- can never destroy an un-backfilled credential. See Phase 4B.
 CREATE TABLE assistant_provider_secrets (

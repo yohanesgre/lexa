@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1288,5 +1288,57 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     assertPost0012(db);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
+  });
+
+  // ── 0015 chat attachments ────────────────────────────────────────────────
+  it("0015 applies additively on a populated database and cascades with its thread", () => {
+    const dir = stageThrough("0014");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0015_chat_attachments.sql");
+    const pre = new Database(dbPath);
+    expect(tableExists(pre, "chat_attachments")).toBe(false);
+    pre.close();
+
+    // Populated pre-0015 state: a project, a user, and a chat thread that will
+    // own attachments. `attachments` rows must survive untouched.
+    const seed = new Database(dbPath);
+    seed.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+      INSERT INTO users (id, email, name, role) VALUES ('u1', 'u1@x', 'U1', 'superadmin');
+      INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+        VALUES ('chat', 'c1', 'p1', 'u1', '[]');
+    `);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    after.exec("PRAGMA foreign_keys = ON");
+    expect(tableExists(after, "chat_attachments")).toBe(true);
+    // Existing rows are untouched by the additive migration.
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_threads").get()).toEqual({ n: 1 });
+
+    after.prepare(
+      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ('ca1', 'p1', 'chat', 'c1', 'notes.md', 'text/markdown', 5, 'sha-ca1', 'blobs/sha-ca1', 'u1')`
+    ).run();
+    expect(after.prepare("SELECT COUNT(*) AS n FROM chat_attachments").get()).toEqual({ n: 1 });
+
+    // Thread delete cascades the row away.
+    after.prepare("DELETE FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").run();
+    expect(after.prepare("SELECT COUNT(*) AS n FROM chat_attachments").get()).toEqual({ n: 0 });
+
+    // Project delete cascades too.
+    after.exec(`
+      INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+        VALUES ('chat', 'c2', 'p1', 'u1', '[]');
+      INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key)
+        VALUES ('ca2', 'p1', 'chat', 'c2', 'a.txt', 'text/plain', 1, 'sha-ca2', 'blobs/sha-ca2');
+    `);
+    after.prepare("DELETE FROM projects WHERE id = 'p1'").run();
+    expect(after.prepare("SELECT COUNT(*) AS n FROM chat_attachments").get()).toEqual({ n: 0 });
+    expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
   });
 });

@@ -52,3 +52,49 @@ function looksLikeSvg(bytes: Uint8Array): boolean {
 export function isInlineMime(mime: string): boolean {
   return mime === "application/pdf" || (mime.startsWith("image/") && mime !== "image/svg+xml");
 }
+
+// Chat attachment allowlist. Images feed the vision path; PDF/markdown/plain
+// text are extracted to model-visible text (see server/services/assistant-helpers).
+export const CHAT_ATTACHMENT_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "text/markdown",
+  "text/plain",
+] as const;
+
+export function isChatAttachmentMime(mime: string): boolean {
+  return (CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(mime);
+}
+
+export function isChatImageMime(mime: string): boolean {
+  return mime.startsWith("image/");
+}
+
+// Server-side mime resolution for a chat upload. Magic bytes win and are
+// authoritative: a sniffed-but-unsupported type (bmp/ico/svg) is rejected
+// outright rather than falling through to the text probe. Only content with NO
+// magic signature is treated as text — valid UTF-8, no NUL, and then classified
+// by extension (`.md`/`.markdown` → text/markdown, else text/plain). Returns
+// null when the bytes are neither an allowed binary type nor plain text.
+export function resolveChatAttachmentMime(filename: string, bytes: Uint8Array): string | null {
+  const sniffed = sniffMime(bytes);
+  if (sniffed !== null) return isChatAttachmentMime(sniffed) ? sniffed : null;
+  if (!looksLikeUtf8Text(bytes)) return null;
+  return /\.(md|markdown)$/i.test(filename) ? "text/markdown" : "text/plain";
+}
+
+function looksLikeUtf8Text(bytes: Uint8Array): boolean {
+  if (bytes.length === 0) return false;
+  const probe = bytes.subarray(0, Math.min(bytes.length, 8192));
+  if (probe.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+

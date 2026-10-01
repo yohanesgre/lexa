@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isInlineMime, sniffMime } from "./mime";
+import {
+  isChatAttachmentMime,
+  isChatImageMime,
+  isInlineMime,
+  resolveChatAttachmentMime,
+  sniffMime,
+} from "./mime";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
@@ -45,5 +51,47 @@ describe("isInlineMime", () => {
     expect(isInlineMime("text/html")).toBe(false);
     expect(isInlineMime("text/csv")).toBe(false);
     expect(isInlineMime("application/octet-stream")).toBe(false);
+  });
+});
+
+describe("chat attachment mime", () => {
+  const MD = new TextEncoder().encode("# Title\n\nsome body text");
+  const TXT = new TextEncoder().encode("plain words");
+  const NUL_BYTES = new Uint8Array([0x61, 0x00, 0x62, 0x63]);
+
+  it("magic bytes win: allowed images/PDF resolve to their sniffed type", () => {
+    expect(resolveChatAttachmentMime("x.bin", PNG)).toBe("image/png");
+    expect(resolveChatAttachmentMime("x.bin", JPEG)).toBe("image/jpeg");
+    expect(resolveChatAttachmentMime("x.bin", GIF)).toBe("image/gif");
+    expect(resolveChatAttachmentMime("x.bin", WEBP)).toBe("image/webp");
+    expect(resolveChatAttachmentMime("paper.pdf", PDF)).toBe("application/pdf");
+  });
+
+  it("sniffed-but-unsupported types are rejected outright, never text-probed", () => {
+    expect(resolveChatAttachmentMime("lie.png", SVG)).toBeNull();
+    expect(resolveChatAttachmentMime("lie.png", SVG_BARE)).toBeNull();
+    expect(resolveChatAttachmentMime("logo.bmp", new Uint8Array([0x42, 0x4d, 0, 0]))).toBeNull();
+    expect(resolveChatAttachmentMime("book.xlsx", XLSX)).toBeNull();
+  });
+
+  it("unsigned UTF-8 text classifies by extension; binary and empty reject", () => {
+    expect(resolveChatAttachmentMime("notes.md", MD)).toBe("text/markdown");
+    expect(resolveChatAttachmentMime("notes.markdown", MD)).toBe("text/markdown");
+    expect(resolveChatAttachmentMime("readme.MD", MD)).toBe("text/markdown");
+    expect(resolveChatAttachmentMime("notes.txt", TXT)).toBe("text/plain");
+    expect(resolveChatAttachmentMime("no-ext", TXT)).toBe("text/plain");
+    expect(resolveChatAttachmentMime("binary.txt", NUL_BYTES)).toBeNull();
+    expect(resolveChatAttachmentMime("empty.txt", new Uint8Array(0))).toBeNull();
+  });
+
+  it("allowlist and image predicate agree with the resolver", () => {
+    for (const m of ["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf", "text/markdown", "text/plain"]) {
+      expect(isChatAttachmentMime(m), m).toBe(true);
+    }
+    expect(isChatAttachmentMime("image/svg+xml")).toBe(false);
+    expect(isChatAttachmentMime("image/bmp")).toBe(false);
+    expect(isChatImageMime("image/gif")).toBe(true);
+    expect(isChatImageMime("application/pdf")).toBe(false);
+    expect(isChatImageMime("text/markdown")).toBe(false);
   });
 });

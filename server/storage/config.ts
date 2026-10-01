@@ -46,6 +46,11 @@ export const DEFAULT_MAX_UPLOAD_MB = 25;
 // allow this slack so the route-level exact cap is what rejects oversize files.
 export const MULTIPART_SLACK_BYTES = 1024 * 1024;
 
+// Chat attachments carry conversation context, not project artifacts, so they
+// get their own per-file cap independent of LXK_MAX_UPLOAD_MB. The route
+// enforces this exact cap; the body-cap branch below only adds framing slack.
+export const CHAT_ATTACHMENT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
 function parsePositiveMb(raw: string | undefined): number {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_UPLOAD_MB;
@@ -97,15 +102,25 @@ function joinPath(a: string, b: string): string {
 }
 
 const UPLOAD_PATH_RE = /^\/api\/projects\/[^/]+\/(tasks\/[^/]+|wiki\/pages\/[^/]+)\/attachments$/;
+// Chat uploads ride a dedicated per-file cap, so they are matched separately
+// from the task/wiki path even though both raise the body cap.
+const CHAT_UPLOAD_PATH_RE = /^\/api\/projects\/[^/]+\/assistant\/chat\/[^/]+\/attachments$/;
 
 export function isAttachmentUploadPath(path: string): boolean {
   return UPLOAD_PATH_RE.test(path);
+}
+
+export function isChatAttachmentUploadPath(path: string): boolean {
+  return CHAT_UPLOAD_PATH_RE.test(path);
 }
 
 // Body cap for one request path: upload routes get the upload cap + multipart
 // slack (raised above the global JSON cap when larger); everything else keeps
 // MAX_API_BODY. The route enforces the exact per-file cap afterwards.
 export function bodyCapFor(path: string, cfg: StorageConfigShape, maxApiBodyBytes: number): number {
+  if (isChatAttachmentUploadPath(path)) {
+    return Math.max(maxApiBodyBytes, CHAT_ATTACHMENT_MAX_UPLOAD_BYTES + MULTIPART_SLACK_BYTES);
+  }
   if (!isAttachmentUploadPath(path)) return maxApiBodyBytes;
   return Math.max(maxApiBodyBytes, cfg.maxUploadBytes + MULTIPART_SLACK_BYTES);
 }

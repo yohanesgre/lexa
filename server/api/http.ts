@@ -41,8 +41,8 @@ import { WikiShareService } from "../services/wiki-share.service";
 import { WikiShareRepo } from "../repos/wiki-share.repo";
 import type { WikiShareLinkRow } from "../repos/wiki-share.repo";
 import { AttachmentService } from "../services/attachment.service";
-import type { ServeAttachment } from "../services/attachment.service";
 import { AttachmentRepo } from "../repos/attachment.repo";
+import { ChatAttachmentRepo } from "../repos/chat-attachment.repo";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, bodyCapFor, type StorageConfigShape } from "../storage/config";
 import { adminEmailsFrom, currentEnv, storageEnvFrom, RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
@@ -1230,6 +1230,24 @@ const AttachmentMutationResponse = Schema.Struct({
 const AttachmentIdPath = Schema.Struct({ id: Schema.String });
 const TaskAttachmentPath = Schema.Struct({ slug: Schema.String, taskId: Schema.String });
 
+// Chat attachments are thread-scoped conversation context (separate table).
+const ChatAttachmentSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  chatId: Schema.String,
+  filename: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Number,
+  sha256: Schema.String,
+  storageKey: Schema.String,
+  uploadedBy: Schema.NullOr(Schema.String),
+  uploadedByLabel: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+const ChatAttachmentResponse = Schema.Struct({ data: ChatAttachmentSchema });
+const ChatAttachmentListResponse = Schema.Struct({ data: Schema.Array(ChatAttachmentSchema) });
+const ChatAttachmentPath = Schema.Struct({ slug: Schema.String, chatId: Schema.String });
+
 const attachmentsGroup = HttpApiGroup.make("attachments")
   .add(HttpApiEndpoint.post("uploadTaskAttachment", "/projects/:slug/tasks/:taskId/attachments")
     .setPath(TaskAttachmentPath).addSuccess(AttachmentMutationResponse, { status: 201 }))
@@ -1242,6 +1260,14 @@ const attachmentsGroup = HttpApiGroup.make("attachments")
   .add(HttpApiEndpoint.get("getAttachment", "/attachments/:id")
     .setPath(AttachmentIdPath).addSuccess(Schema.Void, { status: 200 }))
   .add(HttpApiEndpoint.del("deleteAttachment", "/attachments/:id")
+    .setPath(AttachmentIdPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("uploadChatAttachment", "/projects/:slug/assistant/chat/:chatId/attachments")
+    .setPath(ChatAttachmentPath).addSuccess(ChatAttachmentResponse, { status: 201 }))
+  .add(HttpApiEndpoint.get("listChatAttachments", "/projects/:slug/assistant/chat/:chatId/attachments")
+    .setPath(ChatAttachmentPath).addSuccess(ChatAttachmentListResponse))
+  .add(HttpApiEndpoint.get("getChatAttachment", "/chat-attachments/:id")
+    .setPath(AttachmentIdPath).addSuccess(Schema.Void, { status: 200 }))
+  .add(HttpApiEndpoint.del("deleteChatAttachment", "/chat-attachments/:id")
     .setPath(AttachmentIdPath).addSuccess(Schema.Void, { status: 204 }));
 
 const ApiKeyPath = Schema.Struct({ id: Schema.String });
@@ -2785,6 +2811,10 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
+        // Attachment rows/blobs die with the conversation: explicit cleanup
+        // BEFORE the thread row drops (the FK cascade would strand the blobs).
+        const attachmentService = yield* AttachmentService;
+        yield* attachmentService.cleanupThreadAttachments("chat", req.path.chatId);
         yield* threadRepo.resetThread("chat", req.path.chatId);
         return undefined;
       }))
@@ -3463,7 +3493,8 @@ function contentDisposition(inline: boolean, filename: string): string {
 }
 
 // Binary response bypasses the JSON encoder (raw HttpServerResponse passthrough).
-function attachmentHttpResponse(serve: ServeAttachment): HttpServerResponse.HttpServerResponse {
+// Structural param: task/wiki and chat serve results share this shape.
+function attachmentHttpResponse(serve: { row: { mime_type: string; filename: string }; bytes: Uint8Array; inline: boolean }): HttpServerResponse.HttpServerResponse {
   return HttpServerResponse.raw(serve.bytes, {
     contentType: serve.row.mime_type,
     headers: { "Content-Disposition": contentDisposition(serve.inline, serve.row.filename) },
@@ -3664,6 +3695,53 @@ const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) 
         const identity = yield* AuthIdentity;
         const attachmentService = yield* AttachmentService;
         yield* attachmentService.remove(req.path.id, identity);
+        return undefined;
+      }))
+    )
+    .handle("uploadChatAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const file = yield* readMultipartFile();
+        const data = yield* attachmentService.uploadChat({
+          projectId: project.id,
+          chatId: req.path.chatId,
+          filename: file.filename,
+          bytes: file.bytes,
+          actor: actorFromIdentity(identity),
+        });
+        return { data };
+      }))
+    )
+    .handle("listChatAttachments", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        const project = yield* requireProjectRead(req.path.slug);
+        return { data: yield* attachmentService.listChat(req.path.chatId, project.id, identity.userId) };
+      }))
+    )
+    .handle("getChatAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        const serve = yield* attachmentService.serveChat(req.path.id, identity);
+        if (identity.role !== "admin" && identity.userId) {
+          const authz = yield* AuthorizationService;
+          const access = yield* authz.projectAccess(identity.userId, serve.row.project_id);
+          if (!access) {
+            return yield* new ProjectAccessDenied({ project: serve.row.project_id, role: "member" });
+          }
+        }
+        return attachmentHttpResponse(serve);
+      }))
+    )
+    .handle("deleteChatAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        yield* attachmentService.removeChat(req.path.id, identity);
         return undefined;
       }))
     )
@@ -4514,7 +4592,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnect
     ActivityRepo.Default, CommentRepo.Default, ActivityService.Default, CommentService.Default,
     WikiRepo.Default, WikiService.Default,
     WikiShareRepo.Default, WikiShareService.Default,
-    AttachmentRepo.Default, AttachmentService.Default.pipe(Layer.provide(storageLayerFor(storageCfg)), Layer.provide(Layer.succeed(StorageConfig, storageCfg))),
+    AttachmentRepo.Default, ChatAttachmentRepo.Default, AttachmentService.Default.pipe(Layer.provide(storageLayerFor(storageCfg)), Layer.provide(Layer.succeed(StorageConfig, storageCfg))),
     ApiKeyRepo.Default, ApiKeyService.Default,
     DeviceLoginRepo.Default, DeviceLoginService.Default,
     UserRepo.Default, UserService.Default,

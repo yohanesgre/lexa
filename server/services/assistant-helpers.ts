@@ -3,12 +3,16 @@ import type { Citation } from "../../shared/assistant";
 import { skillToken } from "../../shared/skill-tokens";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
 import { InvalidArgs } from "../api/errors";
+import { isChatAttachmentMime } from "../storage/mime";
 
 export const SUMMARY_THRESHOLD_MESSAGES = 40;
 export const SUMMARY_THRESHOLD_BYTES = 64 * 1024;
 export const SUMMARY_WINDOW = 8;
 export const DOC_IMAGE_CAPS = { maxCount: 5, maxBytesEach: 5 * 1024 * 1024 };
 export const CHAT_IMAGE_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 1024 * 1024) };
+// Chat attachments are images + documents sharing one count budget (D4):
+// ≤3 per message, ≤5 MB per file, ≤10 MB per message.
+export const CHAT_ATTACHMENT_CAPS = { maxCount: 3, maxBytesEach: 5 * 1024 * 1024, maxTotalBytes: 10 * 1024 * 1024 };
 export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 export const MENTION_CAPS = { maxMentions: 5, maxPerDocumentChars: 4000, maxTotalChars: 20000 };
 export function scanMentionTokens(text: string): string[] { const out: string[] = []; for (const m of text.matchAll(/(?<![A-Za-z0-9])@([A-Za-z0-9][A-Za-z0-9_-]*)/g)) out.push(m[1]!); return out; }
@@ -28,6 +32,10 @@ export function buildMentionContextBlock(resolved: ResolvedMention[]): string {
 }
 export interface StoredImageRef { type: "image-ref"; storageKey: string; mimeType: string; }
 export function isStoredImageRef(part: unknown): part is StoredImageRef { return typeof part === "object" && part !== null && (part as { type?: unknown }).type === "image-ref" && typeof (part as { storageKey?: unknown }).storageKey === "string"; }
+// Document parts persist the file name so a reloaded transcript can label the
+// extracted text; the bytes are read from chat storage at send time.
+export interface StoredDocumentRef { type: "document-ref"; storageKey: string; mimeType: string; name: string; }
+export function isStoredDocumentRef(part: unknown): part is StoredDocumentRef { return typeof part === "object" && part !== null && (part as { type?: unknown }).type === "document-ref" && typeof (part as { storageKey?: unknown }).storageKey === "string"; }
 export type ThreadVerdict = { mode: "continue"; messages: unknown[]; summary: string | null; summarizedCount: number } | { mode: "fresh"; messages: unknown[]; summary: null; summarizedCount: number };
 // Continue-vs-fresh keys on the agent only: skills are invoked per message
 // (`$name`), never bound to the thread, so a skill change never resets history.
@@ -98,6 +106,20 @@ export function assertAttachmentCaps(refs: Array<{ mimeType: string; size: numbe
   }
   if (caps.maxTotalBytes !== undefined && total > caps.maxTotalBytes) throw new InvalidArgs({ reason: `images exceed the ${Math.round(caps.maxTotalBytes / (1024 * 1024))} MB request limit` });
 }
+// Chat caps: shared image+document budget (D4). Every violation names the file
+// and states the limit so the composer can surface it verbatim. Order matters —
+// count first, then per-file (type/empty/size), then the message total.
+export function assertChatAttachmentCaps(refs: Array<{ mimeType: string; size: number; name: string }>): void {
+  if (refs.length > CHAT_ATTACHMENT_CAPS.maxCount) throw new InvalidArgs({ reason: `at most ${CHAT_ATTACHMENT_CAPS.maxCount} attachments per message` });
+  let total = 0;
+  for (const ref of refs) {
+    if (!isChatAttachmentMime(ref.mimeType)) throw new InvalidArgs({ reason: `unsupported file type ${ref.mimeType} for '${ref.name}'` });
+    if (ref.size <= 0) throw new InvalidArgs({ reason: `file '${ref.name}' is empty` });
+    if (ref.size > CHAT_ATTACHMENT_CAPS.maxBytesEach) throw new InvalidArgs({ reason: `file '${ref.name}' exceeds the ${Math.round(CHAT_ATTACHMENT_CAPS.maxBytesEach / (1024 * 1024))} MB limit` });
+    total += ref.size;
+  }
+  if (total > CHAT_ATTACHMENT_CAPS.maxTotalBytes) throw new InvalidArgs({ reason: `attachments exceed the ${Math.round(CHAT_ATTACHMENT_CAPS.maxTotalBytes / (1024 * 1024))} MB request limit` });
+}
 export function bytesToBase64(bytes: Uint8Array): string { let bin = ""; const CHUNK = 0x8000; for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK)); return btoa(bin); }
 export async function hydrateImageParts(messages: unknown[], load: (key: string) => Promise<string | null>): Promise<import("@tanstack/ai").ModelMessage[]> {
   return Promise.all(messages.map(async (message) => {
@@ -112,6 +134,54 @@ export async function hydrateImageParts(messages: unknown[], load: (key: string)
     }))).filter((p) => p !== null);
     return { ...msg, content: parts } as import("@tanstack/ai").ModelMessage;
   }));
+}
+// Document parts become model-visible text (already length-capped by
+// extractDocumentText). `load` returns null when the blob is gone or extraction
+// yields no text; the part is dropped (the service blocks send on a current-turn
+// extraction failure before the stream starts).
+export async function hydrateDocumentParts(messages: unknown[], load: (key: string) => Promise<string | null>): Promise<import("@tanstack/ai").ModelMessage[]> {
+  return Promise.all(messages.map(async (message) => {
+    const msg = message as import("@tanstack/ai").ModelMessage;
+    if (!Array.isArray(msg.content)) return msg;
+    const parts: unknown[] = [];
+    for (const raw of msg.content) {
+      const candidate: unknown = raw;
+      if (!isStoredDocumentRef(candidate)) { parts.push(raw); continue; }
+      const text = await load(candidate.storageKey).catch(() => null);
+      if (text === null || text.trim() === "") continue;
+      parts.push({ type: "text", content: `[attached document: ${candidate.name}]\n${text}` });
+    }
+    return { ...msg, content: parts } as import("@tanstack/ai").ModelMessage;
+  }));
+}
+// Injected document text is capped per document so one large file cannot
+// balloon the prompt. Truncation is explicit and deterministic: the kept
+// prefix plus a marker naming the omitted character count. ~150 KB keeps a
+// 5 MB document from turning into megabytes of model input.
+export const DOCUMENT_TEXT_MAX_CHARS = 150 * 1024;
+export function capDocumentText(text: string): string {
+  if (text.length <= DOCUMENT_TEXT_MAX_CHARS) return text;
+  return `${text.slice(0, DOCUMENT_TEXT_MAX_CHARS)}…[truncated: ${text.length - DOCUMENT_TEXT_MAX_CHARS} chars omitted]`;
+}
+// Text/markdown decode directly; PDFs extract via `unpdf` (already a
+// dependency). Output is capped by capDocumentText (hydrateDocumentParts
+// injects exactly this string). Returns null on any read/parse failure or
+// empty output — the caller surfaces the named AttachmentExtractionFailed.
+export async function extractDocumentText(bytes: Uint8Array, mimeType: string): Promise<string | null> {
+  try {
+    if (mimeType === "text/markdown" || mimeType === "text/plain") {
+      return capDocumentText(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    }
+    if (mimeType === "application/pdf") {
+      const { getDocumentProxy, extractText } = await import("unpdf");
+      const pdf = await getDocumentProxy(bytes);
+      const { text } = await extractText(pdf, { mergePages: true });
+      return capDocumentText(text);
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 export async function replaceImageRefsWithPlaceholders(messages: unknown[]): Promise<import("@tanstack/ai").ModelMessage[]> {
   const out: import("@tanstack/ai").ModelMessage[] = [];

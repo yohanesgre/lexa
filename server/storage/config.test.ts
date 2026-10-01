@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { bodyCapFor, isAttachmentUploadPath, resolveStorageConfig, DEFAULT_MAX_UPLOAD_MB, MULTIPART_SLACK_BYTES } from "./config";
+import {
+  bodyCapFor,
+  isAttachmentUploadPath,
+  isChatAttachmentUploadPath,
+  resolveStorageConfig,
+  CHAT_ATTACHMENT_MAX_UPLOAD_BYTES,
+  DEFAULT_MAX_UPLOAD_MB,
+  MULTIPART_SLACK_BYTES,
+} from "./config";
 
 const MB = 1024 * 1024;
 
@@ -68,5 +76,24 @@ describe("bodyCapFor", () => {
   it("upload path matcher rejects lookalikes", () => {
     expect(isAttachmentUploadPath("/api/projects/p/tasks/t1/attachments/extra")).toBe(false);
     expect(isAttachmentUploadPath("/api/share/tok/attachments/id")).toBe(false);
+  });
+
+  it("chat upload path gets its own 5 MB cap + slack, independent of the task cap", () => {
+    const chatPath = "/api/projects/p/assistant/chat/c1/attachments";
+    expect(isChatAttachmentUploadPath(chatPath)).toBe(true);
+    expect(isAttachmentUploadPath(chatPath)).toBe(false);
+    expect(bodyCapFor(chatPath, cfg, 1 * MB)).toBe(CHAT_ATTACHMENT_MAX_UPLOAD_BYTES + MULTIPART_SLACK_BYTES);
+    // The chat cap is fixed, so a large LXK_MAX_UPLOAD_MB does not move it.
+    const bigCfg = { ...cfg, maxUploadBytes: 100 * MB };
+    expect(bodyCapFor(chatPath, bigCfg, 1 * MB)).toBe(CHAT_ATTACHMENT_MAX_UPLOAD_BYTES + MULTIPART_SLACK_BYTES);
+    // A global body cap already larger than the chat cap wins.
+    expect(bodyCapFor(chatPath, cfg, 16 * MB)).toBe(16 * MB);
+  });
+
+  it("chat upload path matcher rejects lookalikes", () => {
+    expect(isChatAttachmentUploadPath("/api/projects/p/assistant/chat/c1/attachments/extra")).toBe(false);
+    expect(isChatAttachmentUploadPath("/api/projects/p/assistant/chat/c1/attachment")).toBe(false);
+    expect(isChatAttachmentUploadPath("/api/projects/p/tasks/t1/attachments")).toBe(false);
+    expect(isChatAttachmentUploadPath("/api/chat-attachments/ca1")).toBe(false);
   });
 });

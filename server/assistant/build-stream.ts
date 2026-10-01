@@ -5,7 +5,7 @@ import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/e
 import type { AssistantReasoningEffort, StreamFrame, ApprovalPartial } from "../../shared/assistant";
 import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../shared/assistant";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
-import { hydrateImageParts, replaceImageRefsWithPlaceholders, needsSummary, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
+import { hydrateImageParts, hydrateDocumentParts, replaceImageRefsWithPlaceholders, needsSummary, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
 
 // get_skill is deliberately absent: it takes a `name` argument, so empty args
 // are an argument error there (see the empty-args guard below).
@@ -241,6 +241,9 @@ export interface StreamRunContext {
   tools: ReadonlyArray<unknown>;
   toolRoundCap: number;
   loadImageBase64: (key: string) => Promise<string | null>;
+  // Chat document refs → extracted text. Absent on the task lane (no document
+  // parts there); a null result drops the part.
+  loadDocumentText?: ((key: string) => Promise<string | null>) | undefined;
   imageMode: import("./vision").VisionMode;
   historySummary: () => string | null;
   historySummarizedCount: () => number;
@@ -333,6 +336,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             for (const p of c) {
               const part = p as { type?: unknown; content?: unknown; text?: unknown; storageKey?: unknown };
               if (part.type === "image-ref" || part.type === "image") return false;
+              if (part.type === "document-ref") return false;
               if (typeof part.content === "string" && part.content.trim() !== "") return false;
               if (typeof part.text === "string" && part.text.trim() !== "") return false;
             }
@@ -370,7 +374,8 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
           for (const r of ctx.approvalResults ?? []) push({ type: "approval_result", approvalId: r.approvalId, status: r.status, ...(r.error !== undefined ? { error: r.error } : {}), ...(r.partial !== undefined ? { partial: r.partial } : {}) });
           const { streamChat } = await import("./provider");
-          const hydrated = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
+          const withImages = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
+          const hydrated = ctx.loadDocumentText ? await hydrateDocumentParts(withImages, ctx.loadDocumentText) : withImages;
           let prepared = sanitizeProviderMessages(hydrated);
           if (ctx.resumeResultsNote !== undefined && ctx.resumeResultsNote.trim() !== "") {
             prepared = [...prepared, { role: "user", content: ctx.resumeResultsNote }];
