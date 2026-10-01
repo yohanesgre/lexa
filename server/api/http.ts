@@ -10,7 +10,7 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
 import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
-import { ProjectNotFound, WikiPageNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren, TasksBulkDisabled } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -46,6 +46,7 @@ import { ChatAttachmentRepo } from "../repos/chat-attachment.repo";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, bodyCapFor, type StorageConfigShape } from "../storage/config";
 import { adminEmailsFrom, currentEnv, storageEnvFrom, RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
+import { tasksBulkEnabled } from "../capabilities";
 import { getEnv, resolvePublicUrl, resolveTrustedProxyCidrs } from "../env";
 import { resolveApiKeyIdentityAsync } from "./auth-key";
 import { resolveMaxApiBody, X_LEXA_REMOTE_IP } from "./limits";
@@ -1056,6 +1057,28 @@ const MoveTaskPayload = Schema.Struct({
   clearDueAt: Schema.optional(Schema.Boolean),
 });
 
+const BulkTaskPayload = Schema.Struct({
+  ids: Schema.Array(Schema.String),
+  action: Schema.Literal("move", "update", "archive", "restore"),
+  columnId: Schema.optional(Schema.String),
+  swimlaneId: Schema.optional(Schema.String),
+  priority: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
+  assignees: Schema.optional(Schema.Array(Schema.String)),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const BulkTaskFailureSchema = Schema.Struct({
+  id: Schema.String,
+  code: Schema.String,
+  message: Schema.String,
+});
+
+const BulkTaskResponse = Schema.Struct({
+  applied: Schema.Array(Schema.String),
+  failed: Schema.Array(BulkTaskFailureSchema),
+});
+
 const TaskPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
 const GithubLinkPayload = Schema.Struct({ repo: Schema.String });
@@ -1104,6 +1127,8 @@ const tasksGroup = HttpApiGroup.make("tasks")
     .setPath(TaskPath).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.post("restoreTask", "/projects/:slug/tasks/:id/restore")
     .setPath(TaskPath).addSuccess(TaskMutationResponse))
+  .add(HttpApiEndpoint.post("bulkTasks", "/projects/:slug/tasks/bulk")
+    .setPath(SlugPath).setPayload(BulkTaskPayload).addSuccess(BulkTaskResponse))
   .add(HttpApiEndpoint.get("taskActivity", "/projects/:slug/tasks/:id/activity")
     .setPath(TaskPath).addSuccess(ActivityPageSchema))
   .add(HttpApiEndpoint.post("createComment", "/projects/:slug/tasks/:id/comments")
@@ -3180,6 +3205,64 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const existing = yield* requireTaskInProject(req.path.slug, req.path.id);
         const { task, activity } = yield* taskService.restore(actorFromIdentity(identity), existing.id);
         return { data: formatTask(task), activity: activityPayload(activity) };
+      }))
+    )
+    .handle("bulkTasks", (req) =>
+      respond(Effect.gen(function* () {
+        const env = yield* currentEnv;
+        if (!tasksBulkEnabled(env)) return yield* Effect.fail(new TasksBulkDisabled());
+        const taskService = yield* TaskService;
+        const columnService = yield* ColumnService;
+        const githubService = yield* GitHubService;
+        const identity = yield* AuthIdentity;
+        const project = yield* requireProjectRead(req.path.slug);
+        // Accept the PREFIX-n ticket-key alias like every other task-id surface
+        // (invariant 13). Unresolvable keys pass through and fail per task.
+        const ids = yield* Effect.forEach(
+          req.payload.ids,
+          (raw) => resolveTaskId(raw, req.path.slug),
+          { concurrency: 1 }
+        );
+        const result = yield* taskService.bulk(actorFromIdentity(identity), project.id, {
+          ids,
+          action: req.payload.action,
+          ...(req.payload.columnId !== undefined ? { columnId: req.payload.columnId } : {}),
+          ...(req.payload.swimlaneId !== undefined ? { swimlaneId: req.payload.swimlaneId } : {}),
+          ...(req.payload.priority !== undefined ? { priority: req.payload.priority } : {}),
+          ...(req.payload.type !== undefined ? { type: req.payload.type } : {}),
+          ...(req.payload.assignees !== undefined ? { assignees: [...req.payload.assignees] } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
+        });
+        // Route-level best-effort GitHub sync, AFTER the transaction commits —
+        // the SAME orchestration as the single-task updateTask/moveTask
+        // handlers. The service stays GitHub-free (invariant 1). Without it a
+        // bulk edit leaves pushed_title/pushed_body stale (the echo check then
+        // fails and a later GitHub webhook can silently revert the edit) and a
+        // bulk move never opens/closes the linked issues.
+        if (req.payload.action === "update") {
+          for (const id of result.applied) {
+            const task = yield* taskService.getById(id);
+            if (task.githubs.length === 0) continue;
+            yield* githubService.syncContentFromLexa(id).pipe(
+              Effect.catchTag("DbError", (e) => Effect.logWarning(`[GitHub] content sync failed for task ${id}`, e)),
+              Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] content sync failed for task ${id}`, e))
+            );
+          }
+        } else if (req.payload.action === "move" && req.payload.columnId !== undefined && result.applied.length > 0) {
+          const column = yield* columnService.getById(req.payload.columnId);
+          if (column.githubState) {
+            for (const id of result.applied) {
+              const task = yield* taskService.getById(id);
+              if (task.githubs.length === 0) continue;
+              yield* githubService.syncStateFromLexa(id, column.githubState).pipe(
+                Effect.catchTag("GithubApiError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${id}`, e)),
+                Effect.catchTag("DbError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${id}`, e)),
+                Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] sync failed for task ${id}`, e))
+              );
+            }
+          }
+        }
+        return result;
       }))
     )
     .handle("taskActivity", (req) =>

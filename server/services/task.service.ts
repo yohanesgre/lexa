@@ -18,6 +18,9 @@ import {
   NeighborNotInColumn,
   InvalidOption,
   DeadlineAfterLane,
+  InvalidArgs,
+  errorCodeMap,
+  errorMessage,
 } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
@@ -34,6 +37,10 @@ import {
   type ActivityInput,
 } from "../repos/task-batch";
 import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType } from "../../shared/types";
+
+// Hard request cap for POST /projects/:slug/tasks/bulk — an oversized batch is
+// refused with InvalidArgs (422) before any write.
+export const BULK_TASK_ID_CAP = 100;
 
 export function isEmptyDoc(doc: TipTapDoc): boolean {
   // A doc is empty when it holds no text and no meaningful content nodes
@@ -123,7 +130,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         }
       });
 
-    return {
+    const service = {
       create: (actor: Actor, input: {
         projectId: string;
         columnId: string;
@@ -649,8 +656,135 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return { unlinked: true };
         }),
     };
+
+    // ── Bulk actions (POST /projects/:slug/tasks/bulk) ───────────────────
+    // Same per-task semantics as the single-task methods, all inside ONE
+    // withTx. Domain rejections (WIP limit, required_fields, not-found,
+    // invalid option, deadline) are collected per task while permitted tasks
+    // still apply; DbError / ConstraintViolation abort the whole transaction
+    // so a request-level failure changes NO task.
+    const bulkFail = (id: string, e: { _tag: string }): BulkTaskFailure => ({
+      id,
+      code: errorCodeMap[e._tag] ?? "INTERNAL",
+      message: errorMessage(e as unknown as { _tag: string } & Record<string, unknown>),
+    });
+
+    const applyOne = (
+      actor: Actor,
+      projectId: string,
+      id: string,
+      input: BulkTaskInput,
+      opts?: { viaAssistant?: boolean }
+    ): Effect.Effect<
+      void,
+      TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound
+    > =>
+      Effect.gen(function* () {
+        const task = yield* taskRepo.findById(id).pipe(
+          Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
+        );
+        if (task.projectId !== projectId) return yield* new TaskNotFound({ id });
+        switch (input.action) {
+          case "move":
+            yield* service.move(actor, id, {
+              columnId: input.columnId ?? task.columnId,
+              swimlaneId: input.swimlaneId ?? task.swimlaneId,
+            }, opts);
+            return;
+          case "update":
+            yield* service.update(actor, id, {
+              ...(input.priority !== undefined ? { priority: input.priority } : {}),
+              ...(input.type !== undefined ? { type: input.type } : {}),
+              ...(input.assignees !== undefined ? { assignees: input.assignees } : {}),
+              ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+            }, opts);
+            return;
+          case "archive":
+            yield* service.archive(actor, id, opts);
+            return;
+          case "restore":
+            yield* service.restore(actor, id, opts);
+            return;
+        }
+      });
+
+    const bulk = (
+      actor: Actor,
+      projectId: string,
+      input: BulkTaskInput,
+      opts?: { viaAssistant?: boolean }
+    ): Effect.Effect<BulkTaskResult, InvalidArgs | ConstraintViolation | DbError | RowNotFound> =>
+      Effect.gen(function* () {
+        if (input.action === "move" && input.columnId === undefined && input.swimlaneId === undefined) {
+          return yield* new InvalidArgs({ reason: "move requires columnId or swimlaneId" });
+        }
+        // De-dupe first-seen so `applied` never echoes a repeated id, then
+        // cap the request at BULK_TASK_ID_CAP tasks — both are request-level
+        // rejections (InvalidArgs) raised BEFORE withTx, so nothing is written.
+        const ids = [...new Set(input.ids)];
+        if (ids.length > BULK_TASK_ID_CAP) {
+          return yield* new InvalidArgs({ reason: `bulk accepts at most ${BULK_TASK_ID_CAP} ids` });
+        }
+        return yield* withTx(db, Effect.gen(function* () {
+          const applied: string[] = [];
+          const failed: BulkTaskFailure[] = [];
+          for (const id of ids) {
+            // Ordering guarantee for "a rejected task writes nothing": every
+            // domain error caught below is raised BEFORE that task's first
+            // write. All validation (existence/ownership, option ids,
+            // required_fields, lane deadline, column/lane ownership) runs
+            // ahead of the inner withTx; the WIP guard is a conditional
+            // UPDATE that changes 0 rows when it rejects; and the post-write
+            // re-fetch cannot miss inside this transaction (one connection,
+            // no interleaving). So a `failed` entry never leaves a partial
+            // write behind. DbError / ConstraintViolation are deliberately
+            // NOT caught: they abort the whole transaction. (Pinned by the
+            // "leaves a rejected id untouched" regression test.)
+            const outcome = yield* applyOne(actor, projectId, id, input, opts).pipe(
+              Effect.as({ ok: true as const }),
+              Effect.catchTags({
+                TaskNotFound: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                ColumnNotFound: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                SwimlaneNotFound: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                RequiredFieldMissing: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                WipLimitExceeded: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                NeighborNotInColumn: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                InvalidOption: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+                DeadlineAfterLane: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),
+              })
+            );
+            if (outcome.ok) applied.push(id);
+            else failed.push(outcome.failure);
+          }
+          return { applied, failed };
+        }));
+      });
+
+    return { ...service, bulk };
   }),
 }) {}
+
+export interface BulkTaskInput {
+  ids: string[];
+  action: "move" | "update" | "archive" | "restore";
+  columnId?: string;
+  swimlaneId?: string;
+  priority?: string;
+  type?: string;
+  assignees?: string[];
+  dueAt?: string | null;
+}
+
+export interface BulkTaskFailure {
+  id: string;
+  code: string;
+  message: string;
+}
+
+export interface BulkTaskResult {
+  applied: string[];
+  failed: BulkTaskFailure[];
+}
 
 interface MoveTarget {
   columnId: string;

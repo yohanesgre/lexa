@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capabilities, capabilitiesFromRuntimeEnv, chatAttachmentsEnabled, hasSecretsMasterKey } from "./capabilities";
+import { capabilities, capabilitiesFromRuntimeEnv, chatAttachmentsEnabled, hasSecretsMasterKey, tasksBulkEnabled } from "./capabilities";
 import type { RuntimeEnv } from "./env";
 
 const KEY = Buffer.from("k".repeat(32)).toString("base64");
@@ -25,29 +25,60 @@ describe("chatAttachmentsEnabled (kill switch)", () => {
   });
 });
 
+describe("tasksBulkEnabled (kill switch)", () => {
+  it("is enabled by default and for every value except exactly '1'", () => {
+    expect(tasksBulkEnabled({})).toBe(true);
+    expect(tasksBulkEnabled({ LXK_DISABLE_TASKS_BULK: "0" })).toBe(true);
+    expect(tasksBulkEnabled({ LXK_DISABLE_TASKS_BULK: "true" })).toBe(true);
+    expect(tasksBulkEnabled({ LXK_DISABLE_TASKS_BULK: "" })).toBe(true);
+  });
+
+  it("is disabled only when set to exactly '1'", () => {
+    expect(tasksBulkEnabled({ LXK_DISABLE_TASKS_BULK: "1" })).toBe(false);
+  });
+});
+
 describe("capabilities (GET /api/capabilities)", () => {
   it("bun flavor always reports assistant:false and chatAttachments:false", () => {
-    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false });
+    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true });
     // The master key and the kill switch cannot make the Bun host offer a
     // Workers-only feature.
     expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({
       assistant: false,
       flavor: "bun",
       chatAttachments: false,
+      tasksBulk: true,
     });
   });
 
   it("workers flavor needs the master key; chatAttachments follows the kill switch", () => {
-    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false });
+    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false, tasksBulk: true });
     expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({
       assistant: true,
       flavor: "workers",
       chatAttachments: true,
+      tasksBulk: true,
     });
     expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_CHAT_ATTACHMENTS: "1" })).toEqual({
       assistant: true,
       flavor: "workers",
       chatAttachments: false,
+      tasksBulk: true,
+    });
+  });
+
+  it("tasksBulk follows its kill switch on both flavors", () => {
+    expect(capabilities("bun", { LXK_DISABLE_TASKS_BULK: "1" })).toEqual({
+      assistant: false,
+      flavor: "bun",
+      chatAttachments: false,
+      tasksBulk: false,
+    });
+    expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_TASKS_BULK: "1" })).toEqual({
+      assistant: true,
+      flavor: "workers",
+      chatAttachments: true,
+      tasksBulk: false,
     });
   });
 
