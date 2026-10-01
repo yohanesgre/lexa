@@ -376,6 +376,48 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(parsed[0]?.parts?.[0]?.text).toBe("mirrored");
   }, 60_000);
 
+  it("persists the data-assistant-approval carrier and reads it back from the DO session store", async () => {
+    // W7b/WS1 + review item 2: prove the custom data part survives the SDK's
+    // persistence sanitizer into SQLite — not just the in-memory array. A
+    // fresh DO instance does not rehydrate `this.messages` until a WS connect,
+    // so the SQLite session row is the persistence proof.
+    const documentId = "carrier-roundtrip";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const diff = { type: "task_create", title: "Write docs", fields: { priority: "high" } };
+    const carrierPart = {
+      type: "data-assistant-approval",
+      data: {
+        batchId: "b1",
+        approvals: [{ approvalId: "ap1", seq: 0, name: "create_task", detail: "Create “Write docs”", diff }],
+      },
+    };
+    const persisted = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "create a task" }] },
+      { id: "a1", role: "assistant", parts: [{ type: "text", text: "I can do that." }, carrierPart] },
+    ];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+
+    const transcript = await waitFor<unknown[]>(
+      () => transcriptOf(documentId).then((m) => (m.length === 2 ? m : null)),
+      20_000
+    );
+    const assistant = transcript[1] as { parts: Array<{ type?: string; data?: unknown }> };
+    expect(assistant.parts.find((p) => p.type === "data-assistant-approval")).toEqual(carrierPart);
+
+    // The persisted session row keeps the data part verbatim.
+    const id = await durableObjectId(threadKey);
+    const storage = await mf!.unsafeGetDurableObjectStorage(WORKER_NAME, class_name, { id });
+    const rows = await storage.exec<{ id: string; content: string }>(
+      "SELECT id, content FROM cf_agents_session_messages WHERE id = 'a1'"
+    );
+    const stored = JSON.parse(rows[0]!.content) as { parts: unknown[] };
+    expect(stored.parts).toContainEqual(carrierPart);
+  }, 60_000);
+
   it("resetThread clears the DO transcript and it stays cleared across a fresh hydrate", async () => {
     const documentId = "reset-clear";
     const threadKey = `chat:${documentId}`;

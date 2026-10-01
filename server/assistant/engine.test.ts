@@ -320,6 +320,81 @@ describe("runAssistantTurn mid-stream failure", () => {
   });
 });
 
+// Reasoning-capable provider: a reasoning delta, then content, then the finish
+// with usage. The openai-compatible parser emits reasoning-start/delta/end
+// around the burst, which the engine observes to time the reasoning span.
+function reasoningFetch(text = "answer"): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
+  return async () =>
+    sseResponse([
+      chunk({ role: "assistant", reasoning_content: "thinking" }, null),
+      chunk({ content: text }, null),
+      chunk({}, "stop", { prompt_tokens: 7, completion_tokens: 4, total_tokens: 11 }),
+    ]);
+}
+
+// The UI message stream frames each chunk as an SSE `data: {json}` line; pull
+// the metadata the engine attached to the terminal `finish` part.
+function finishMetadata(body: string): unknown {
+  for (const line of body.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    const payload = line.slice("data: ".length).trim();
+    if (payload === "[DONE]") continue;
+    const parsed = JSON.parse(payload) as { type?: string; messageMetadata?: unknown };
+    if (parsed.type === "finish") return parsed.messageMetadata;
+  }
+  return undefined;
+}
+
+describe("runAssistantTurn message metadata", () => {
+  it("attaches usage ({in,out}) and a measured reasoningMs to the finish part", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    let clock = 1_000;
+    const response = await runAssistantTurn(deps([config({ fetchImpl: reasoningFetch() })], recorded), {
+      projectId: "p1",
+      threadKey: "chat:c1",
+      sessionId: "c1",
+      messages: MESSAGES,
+      nowMs: () => (clock += 100),
+    });
+    const body = await drain(response);
+
+    expect(finishMetadata(body)).toEqual({ usage: { in: 7, out: 4 }, reasoningMs: 100 });
+  });
+
+  it("omits reasoningMs when the turn emitted no reasoning", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    const response = await runAssistantTurn(deps([config({ fetchImpl: successFetch("plain") })], recorded), {
+      projectId: "p1",
+      threadKey: "chat:c1",
+      sessionId: "c1",
+      messages: MESSAGES,
+    });
+    const body = await drain(response);
+
+    expect(finishMetadata(body)).toEqual({ usage: { in: 3, out: 2 } });
+  });
+
+  it("omits usage entirely when the provider reports no token counts", async () => {
+    const noUsageFetch = (): ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
+      async () =>
+        sseResponse([
+          chunk({ role: "assistant", content: "" }, null),
+          chunk({ content: "plain" }, null),
+          chunk({}, "stop"),
+        ]);
+    const recorded: Recorded = { logs: [], runs: [] };
+    const response = await runAssistantTurn(deps([config({ fetchImpl: noUsageFetch() })], recorded), {
+      projectId: "p1",
+      threadKey: "chat:c1",
+      sessionId: "c1",
+      messages: MESSAGES,
+    });
+    const body = await drain(response);
+
+    expect(finishMetadata(body)).toBeUndefined();
+  });
+});
+
 describe("runAssistantTurn with tools", () => {
   it("executes a tool through the passed ToolSet and streams its output", async () => {
     const recorded: Recorded = { logs: [], runs: [] };

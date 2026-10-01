@@ -1,6 +1,7 @@
 import type { ChatStatus, DynamicToolUIPart, ToolUIPart, UIDataTypes, UIMessage, UIMessagePart, UITools } from "ai";
 import { getToolName, isToolUIPart } from "ai";
 import type { AssistantWriteDiff } from "../../shared/assistant";
+import { ASSISTANT_APPROVAL_DATA_PART } from "../../shared/assistant";
 import type {
   AssistantPendingChip,
   AssistantStreamSnapshot,
@@ -168,11 +169,19 @@ function citationFromPart(part: { url?: unknown; title?: unknown }): AgentCitati
   return { url, title: typeof title === "string" ? title : null, hostname };
 }
 
+// W7b/WS2: a reconciled carrier carries each approval's live decision status;
+// surface it on the chip so a reload renders terminal chips instead of
+// re-arming them as pending.
+function pendingState(source: Record<string, unknown>): AssistantPendingChip["state"] | undefined {
+  const status = source.status;
+  return status === "pending" || status === "approved" || status === "rejected" || status === "expired" ? status : undefined;
+}
+
 // One data part → pending chip(s). Supports a single chip payload and the
 // `{ batchId, approvals: [...] }` envelope the persisted marker uses, so the
 // adapter is ready for the D3 live data part without an app change.
 function chipsFromDataPart(type: string, data: unknown): AssistantPendingChip[] {
-  if (!type.startsWith("data-")) return [];
+  if (type !== ASSISTANT_APPROVAL_DATA_PART) return [];
   if (!isRecord(data)) return [];
   const single = (): AssistantPendingChip | null => {
     const approvalId = readString(data, "approvalId");
@@ -182,7 +191,8 @@ function chipsFromDataPart(type: string, data: unknown): AssistantPendingChip[] 
     if (!approvalId || !batchId || !name || !isRecord(diff)) return null;
     const seq = typeof data.seq === "number" && Number.isFinite(data.seq) ? data.seq : 0;
     const detail = readString(data, "detail");
-    return { approvalId, batchId, seq, name, ...(detail ? { detail } : {}), diff: diff as unknown as AssistantWriteDiff };
+    const state = pendingState(data);
+    return { approvalId, batchId, seq, name, ...(detail ? { detail } : {}), ...(state ? { state } : {}), diff: diff as unknown as AssistantWriteDiff };
   };
   const one = single();
   if (one) return [one];
@@ -198,7 +208,8 @@ function chipsFromDataPart(type: string, data: unknown): AssistantPendingChip[] 
     if (!approvalId || !name || !isRecord(diff)) continue;
     const seq = typeof raw.seq === "number" && Number.isFinite(raw.seq) ? raw.seq : out.length;
     const detail = readString(raw, "detail");
-    out.push({ approvalId, batchId, seq, name, ...(detail ? { detail } : {}), diff: diff as unknown as AssistantWriteDiff });
+    const state = pendingState(raw);
+    out.push({ approvalId, batchId, seq, name, ...(detail ? { detail } : {}), ...(state ? { state } : {}), diff: diff as unknown as AssistantWriteDiff });
   }
   return out;
 }
@@ -308,7 +319,10 @@ export function segmentFromAssistantMessage(message: UIMessage | undefined): Age
   if (pending.length > 0) {
     pending.sort((a, b) => a.seq - b.seq);
     segment.pending = pending;
-    segment.suspendedBatchId = pending[0]!.batchId;
+    // Only a still-pending approval suspends the turn; a carrier whose chips
+    // are all terminal (decided in another tab) must not re-arm the carousel.
+    const suspending = pending.find((chip) => (chip.state ?? "pending") === "pending");
+    segment.suspendedBatchId = suspending?.batchId ?? null;
   }
   segment.reasoningMs = reasoningMsFromMessage(message);
   return segment;

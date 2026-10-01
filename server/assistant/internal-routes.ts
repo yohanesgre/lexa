@@ -284,10 +284,21 @@ function parseTipTap(raw: string | null | undefined): TipTapDoc {
   }
 }
 
+// W7b/WS1: the write tool only returns `{ proposed, approvalId }`; the Worker
+// captures the proposal's diff/detail here so `executeAssistantWriteTool` can
+// hand them back with the response, letting the DO build the persisted
+// `data-assistant-approval` carrier and the live adapter rebuild the chip.
+export interface CapturedWriteProposal {
+  diff?: unknown;
+  detail?: string;
+  name?: string;
+}
+
 /** D1-backed snapshot deps for the write toolset (same shapes as the service). */
 function writeToolDeps(
   driver: DbDriver,
-  input: AssistantWriteToolRequest
+  input: AssistantWriteToolRequest,
+  capture?: CapturedWriteProposal
 ): AssistantWriteToolDeps {
   const one = <T>(sql: string, ...params: unknown[]): Promise<T | null> =>
     Effect.runPromise(queryFirst<T>(driver, sql, ...params)).catch(() => null);
@@ -367,6 +378,11 @@ function writeToolDeps(
     },
     record: async (proposal) => {
       const approvalId = crypto.randomUUID();
+      if (capture) {
+        capture.diff = proposal.diff;
+        capture.name = proposal.name;
+        if (proposal.detail !== undefined) capture.detail = proposal.detail;
+      }
       try {
         const existing = await one<{ n: number }>(
           `SELECT COUNT(*) AS n FROM assistant_pending_writes WHERE project_id = ? AND batch_id = ?`,
@@ -415,7 +431,8 @@ export async function executeAssistantWriteTool(
   if (!isAssistantWriteTool(input.name)) {
     return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: `Unknown write tool: ${input.name}` } } };
   }
-  const tools = buildAssistantWriteTools(writeToolDeps(driver, input));
+  const capture: CapturedWriteProposal = {};
+  const tools = buildAssistantWriteTools(writeToolDeps(driver, input, capture));
   const target = tools.find((t) => t.name === input.name);
   const execute = (target as { execute?: (args: unknown) => Promise<unknown> } | undefined)?.execute;
   if (!execute) {
@@ -423,7 +440,21 @@ export async function executeAssistantWriteTool(
   }
   try {
     const result = await execute(input.args ?? {});
-    return { status: 200, body: result };
+    // Only a successful proposal carries the captured chip payload; a failed
+    // execute must stay `{ proposed: false, error }` untouched.
+    const body =
+      result !== null &&
+      typeof result === "object" &&
+      (result as { proposed?: unknown }).proposed === true
+        ? {
+            ...(result as Record<string, unknown>),
+            batchId: input.batchId,
+            name: capture.name ?? input.name,
+            ...(capture.detail !== undefined ? { detail: capture.detail } : {}),
+            ...(capture.diff !== undefined ? { diff: capture.diff } : {}),
+          }
+        : result;
+    return { status: 200, body };
   } catch (e) {
     return {
       status: 500,

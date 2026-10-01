@@ -204,10 +204,13 @@ export function chipStateFromError(err: Error & { code?: string | undefined; det
 
 // ── Freeze (suspended / error terminal frames) ──
 
-export function pendingChipsOf(pending: ReadonlyArray<Omit<ApprovalChip, "state"> & { batchId: string }>, batchId: string): ApprovalChip[] {
+export function pendingChipsOf(
+  pending: ReadonlyArray<Omit<ApprovalChip, "state"> & { batchId: string; state?: ApprovalChip["state"] }>,
+  batchId: string
+): ApprovalChip[] {
   const chips: ApprovalChip[] = [];
   for (const p of pending) {
-    if (p.batchId === batchId) chips.push({ ...p, state: "pending" as const });
+    if (p.batchId === batchId) chips.push({ ...p, state: p.state ?? "pending" });
   }
   return chips;
 }

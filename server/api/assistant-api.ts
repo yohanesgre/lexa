@@ -53,7 +53,7 @@ import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
 import { AssistantThreadRpc, assistantThreadRpcNoop, type AssistantThreadRpcShape } from "../assistant/thread-rpc";
-import { legacyFromUIMessages } from "../assistant/legacy-convert";
+import { convertStoredMessages, type LegacyStoredMessage } from "../assistant/legacy-convert";
 import { AuthorizationService } from "../services/authorization.service";
 import { AttachmentService } from "../services/attachment.service";
 import { Storage, StorageConfig } from "../storage/storage";
@@ -367,15 +367,18 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         const service = yield* AssistantService;
-        // DO canonical read with D1 fallback (ADR-0003 §B.3/B.4). The legacy
-        // transcript shape is kept for P4 (D3 lands the UIMessage-parts shape
-        // with the frontend rewrite); on Bun the RPC is a no-op → D1.
+        // D3 (W7b/WS2): serve the DO canonical transcript in UIMessage-parts
+        // shape; the D1 mirror is the fallback and is forward-converted so both
+        // paths speak parts. Approvals reconciliation covers the carrier part
+        // and the legacy `pendingBatch` field alike, so the decision endpoints
+        // stay untouched.
         const doTranscript = yield* threadRpcCall((rpc) => rpc.getTranscript(`chat:${req.path.chatId}`));
         const doMessages =
           doTranscript && Array.isArray(doTranscript.messages) && doTranscript.messages.length > 0
-            ? legacyFromUIMessages(doTranscript.messages)
+            ? doTranscript.messages
             : null;
-        const messages = yield* service.reconcileChatApprovals(doMessages ?? t.messages);
+        const rawMessages = doMessages ?? convertStoredMessages(t.messages as LegacyStoredMessage[]);
+        const messages = yield* service.reconcileChatApprovals(rawMessages);
         // DO-first: a non-null DO value (P3 engine) wins; otherwise the D1
         // mirror (the DO returns null until the engine tracks them).
         const doSummary = doTranscript ? doTranscript.summary : null;

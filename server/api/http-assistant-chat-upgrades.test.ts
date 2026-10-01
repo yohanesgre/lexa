@@ -73,6 +73,15 @@ function startServer(mode: "hold" | "complete"): Promise<{ server: Server; port:
   });
 }
 
+// D3 transcript messages are UIMessage-parts shaped: a display message's text
+// is the concatenation of its text parts.
+function messageText(message: { parts?: Array<{ type?: string; text?: string }> }): string {
+  return (message.parts ?? [])
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("");
+}
+
 // Parse the SSE wire (`event: <type>\ndata: <json>\n\n`) into frame objects.
 async function readSseFrames(res: Response, until?: string): Promise<Array<Record<string, unknown>>> {
   const reader = res.body!.getReader();
@@ -141,6 +150,11 @@ VALUES ('chat', 'chat-rec', 'p1', 'u1', 'Recency', '[]', datetime('now', '-1 hou
 -- Anna's thread: invisible to Maria.
 INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, messages)
 VALUES ('chat', 'chat-u2', 'p1', 'u2', 'Anna private', '[]');
+-- D3 mirror fixture (W7b/WS2 review): parts-shaped rows as the Workers mirror
+-- stores them, incl. an attachment part and a pending-batch carrier. Project p2
+-- keeps the p1 list-ordering fixtures untouched.
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, messages)
+VALUES ('chat', 'chat-parts', 'p2', 'u1', 'Parts', '[{"id":"m1","role":"user","parts":[{"type":"text","text":"see file"},{"type":"data-attachment","data":{"storageKey":"blob-1","mimeType":"image/png","name":"shot.png"}}],"metadata":{"ts":"2026-08-22T10:00:00.000Z"}},{"id":"m2","role":"assistant","parts":[{"type":"text","text":"I can do that."},{"type":"data-assistant-approval","data":{"batchId":"b-parts","approvals":[{"approvalId":"ap-parts","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]}]');
 `);
   handler = createAssistantApiHandler(dbPath);
 });
@@ -246,6 +260,58 @@ describe("GET /api/assistant/chat/:chatId/export", () => {
   });
 });
 
+describe("GET /api/assistant/chat/:chatId (D3 UIMessage parts)", () => {
+  it("serves parts-shaped D1 mirror rows verbatim — attachment parts survive", async () => {
+    const res = await handler(authed("GET", "/api/assistant/chat/chat-parts"));
+    expect(res.status).toBe(200);
+    const { messages, chatId } = (await res.json()) as {
+      chatId: string;
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string; data?: unknown }>; metadata?: { ts?: string } }>;
+    };
+    expect(chatId).toBe("chat-parts");
+    expect(messages).toHaveLength(2);
+    expect(messages[0]!.role).toBe("user");
+    expect(messages[0]!.parts).toContainEqual({
+      type: "data-attachment",
+      data: { storageKey: "blob-1", mimeType: "image/png", name: "shot.png" },
+    });
+    expect(messages[0]!.metadata?.ts).toBe("2026-08-22T10:00:00.000Z");
+    // The carrier part survives the read (reconciliation leaves it intact when
+    // no decision rows exist).
+    expect(messages[1]!.parts).toContainEqual({
+      type: "data-assistant-approval",
+      data: {
+        batchId: "b-parts",
+        approvals: [
+          {
+            approvalId: "ap-parts",
+            seq: 0,
+            name: "create_task",
+            diff: { type: "task_create", title: "New task", fields: {} },
+          },
+        ],
+      },
+    });
+  });
+
+  it("reconciles a parts-shaped carrier against live pending-write rows", async () => {
+    db.exec(
+      `INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+       VALUES ('ap-parts', 'p1', 'chat', 'chat-parts', 'u1', 'b-parts', 0, 'create_task', '{}', '{"type":"task_create","title":"New task","fields":{}}', 'approved', '2999-01-01 00:00:00')`
+    );
+    try {
+      const res = await handler(authed("GET", "/api/assistant/chat/chat-parts"));
+      const { messages } = (await res.json()) as {
+        messages: Array<{ parts: Array<{ type: string; data?: { approvals?: Array<{ approvalId: string; status?: string }> } }> }>;
+      };
+      const carrier = messages[1]!.parts.find((p) => p.type === "data-assistant-approval");
+      expect(carrier?.data?.approvals?.[0]).toMatchObject({ approvalId: "ap-parts", status: "approved" });
+    } finally {
+      db.exec(`DELETE FROM assistant_pending_writes WHERE id = 'ap-parts'`);
+    }
+  });
+});
+
 describe("POST /api/assistant/chat/stream (fromIndex)", () => {
   it("edit flow: truncates to fromIndex, appends the new turn, persists ts meta", async () => {
     const put = await handler(
@@ -273,16 +339,20 @@ describe("POST /api/assistant/chat/stream (fromIndex)", () => {
     expect(frames.at(-1)!?.type).toBe("done");
 
     const transcript = await handler(authed("GET", "/api/assistant/chat/chat-edit"));
-    const { messages } = (await transcript.json()) as { messages: Array<Record<string, unknown>> };
+    const { messages } = (await transcript.json()) as {
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }>; metadata?: { ts?: string } }>;
+    };
     expect(messages).toHaveLength(4);
-    expect(messages[0]!).toEqual({ role: "user", content: "q0" });
-    expect(messages[1]!).toEqual({ role: "assistant", content: "a0" });
+    expect(messages[0]!.role).toBe("user");
+    expect(messageText(messages[0]!)).toBe("q0");
+    expect(messages[1]!.role).toBe("assistant");
+    expect(messageText(messages[1]!)).toBe("a0");
     expect(messages[2]!.role).toBe("user");
-    expect(messages[2]!.content).toBe("edited q1");
-    expect(typeof messages[2]!.ts).toBe("string");
+    expect(messageText(messages[2]!)).toBe("edited q1");
+    expect(typeof messages[2]!.metadata?.ts).toBe("string");
     expect(messages[3]!.role).toBe("assistant");
-    expect(messages[3]!.content).toBe("Hi");
-    expect(typeof messages[3]!.ts).toBe("string");
+    expect(messageText(messages[3]!)).toBe("Hi");
+    expect(typeof messages[3]!.metadata?.ts).toBe("string");
   }, 20000);
 
   it("bad fromIndex → 422 INVALID_ARGS, transcript untouched", async () => {
@@ -310,13 +380,15 @@ describe("POST /api/assistant/chat/stream (fromIndex)", () => {
     await readSseFrames(res, "done");
 
     const transcript = await handler(authed("GET", "/api/assistant/chat/chat-err"));
-    const { messages } = (await transcript.json()) as { messages: Array<Record<string, unknown>> };
+    const { messages } = (await transcript.json()) as {
+      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }>; metadata?: { error?: unknown } }>;
+    };
     expect(messages).toHaveLength(2);
     expect(messages[0]!.role).toBe("user");
-    expect(messages[0]!.content).toBe("hi again");
+    expect(messageText(messages[0]!)).toBe("hi again");
     expect(messages[1]!.role).toBe("assistant");
-    expect(messages[1]!.content).toBe("Hi");
-    expect(messages[1]!.error).toBeUndefined();
+    expect(messageText(messages[1]!)).toBe("Hi");
+    expect(messages[1]!.metadata?.error).toBeUndefined();
   }, 20000);
 
   it("second concurrent stream on an active chat → 409 ASSISTANT_TASK_ACTIVE", async () => {

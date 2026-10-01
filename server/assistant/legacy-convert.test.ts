@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertLegacyMessage,
   convertLegacyMessages,
+  convertStoredMessages,
   type LegacyStoredMessage,
 } from "./legacy-convert";
 
@@ -117,7 +118,37 @@ describe("convertLegacyMessages", () => {
     const converted = convertLegacyMessages(legacy);
     expect(converted.map((m) => m.role)).toEqual(["user", "assistant", "system", "assistant"]);
     expect(converted.map((m) => m.id)).toEqual(["legacy-0", "legacy-2", "legacy-3", "legacy-4"]);
-    expect(converted[3]).toEqual({ id: "legacy-4", role: "assistant", parts: [{ type: "text", text: "done" }] });
+    expect(converted[3]).toEqual({
+      id: "legacy-4",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "done" },
+        { type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } },
+      ],
+    });
+  });
+
+  it("maps a legacy pendingBatch marker to the data-assistant-approval carrier", () => {
+    const diff = { type: "task_create", title: "New task", fields: {} };
+    const converted = convertLegacyMessages([
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: { batchId: "b7", approvals: [{ approvalId: "ap1", seq: 0, name: "create_task", diff }] },
+      },
+    ]);
+    expect(converted[0]?.parts).toEqual([
+      { type: "text", text: "proposed" },
+      { type: "data-assistant-approval", data: { batchId: "b7", approvals: [{ approvalId: "ap1", seq: 0, name: "create_task", diff }] } },
+    ]);
+  });
+
+  it("turns a legacy string pendingBatch into a marker-only carrier", () => {
+    const converted = convertLegacyMessages([{ role: "assistant", content: "waiting", pendingBatch: "b-legacy" }]);
+    expect(converted[0]?.parts).toEqual([
+      { type: "text", text: "waiting" },
+      { type: "data-assistant-approval", data: { batchId: "b-legacy", approvals: [] } },
+    ]);
   });
 
   it("returns an empty array for empty or non-array input", () => {
@@ -125,5 +156,51 @@ describe("convertLegacyMessages", () => {
     expect(
       convertLegacyMessages([{ role: "tool", content: "x" }, { role: "narrator", content: "y" } as LegacyStoredMessage])
     ).toEqual([]);
+  });
+});
+
+describe("convertStoredMessages (mixed D1 mirror rows)", () => {
+  it("passes parts-shaped rows through verbatim, preserving attachment parts", () => {
+    const partsShaped = {
+      id: "m1",
+      role: "user",
+      parts: [
+        { type: "text", text: "see file" },
+        { type: "data-attachment", data: { storageKey: "blob-1", mimeType: "image/png", name: "shot.png" } },
+      ],
+    };
+
+    const out = convertStoredMessages([partsShaped]);
+    expect(out).toEqual([partsShaped]);
+    // identity, not a copy — the attachment part must survive untouched
+    expect(out[0]).toBe(partsShaped);
+  });
+
+  it("converts legacy rows and keeps parts-shaped rows in one pass", () => {
+    const partsShaped = {
+      id: "m2",
+      role: "assistant",
+      parts: [{ type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } }],
+    };
+    const out = convertStoredMessages([{ role: "user", content: "legacy" }, partsShaped]);
+
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({
+      id: "legacy-0",
+      role: "user",
+      parts: [{ type: "text", text: "legacy" }],
+    });
+    expect(out[1]).toBe(partsShaped);
+  });
+
+  it("drops unmappable legacy rows and keeps malformed parts-shaped rows verbatim", () => {
+    const out = convertStoredMessages([
+      { role: "tool", content: "dropped" },
+      { role: "assistant", content: "kept" },
+      { role: "assistant", parts: [] },
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({ id: "legacy-1", role: "assistant", parts: [{ type: "text", text: "kept" }] });
+    expect(out[1]).toEqual({ role: "assistant", parts: [] });
   });
 });

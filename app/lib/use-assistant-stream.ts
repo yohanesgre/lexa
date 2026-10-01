@@ -29,6 +29,8 @@ export type AssistantStreamStatus = "idle" | "connecting" | "streaming" | "suspe
 // One proposed write from a `tool_pending` frame (assistant-write-approvals.html).
 // Chips arrive in seq order right before the terminal `suspended` frame and
 // stay in session memory until the page freezes them into the transcript view.
+// `state` is set only when the source already carries a reconciled decision
+// (a persisted carrier read back on reload); absent → pending.
 export interface AssistantPendingChip {
   approvalId: string;
   batchId: string;
@@ -36,6 +38,7 @@ export interface AssistantPendingChip {
   name: string;
   detail?: string | undefined;
   diff: AssistantWriteDiff;
+  state?: "pending" | "approved" | "rejected" | "expired";
 }
 
 // Chronological reply timeline (assistant-chat.html): one entry per content

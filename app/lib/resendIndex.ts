@@ -15,11 +15,20 @@
 // surface a visible error instead of emitting a sentinel index the server would
 // reject.
 
-// Text of a raw transcript entry: plain string content, or the concatenated
-// text parts (image parts carry no text). Mirrors renderTranscript's extraction
-// so a display turn's text compares equal to its raw source.
+// Text of a raw transcript entry: UIMessage `parts` (D3) concatenated text
+// parts, else plain string content, or the concatenated legacy content parts
+// (image parts carry no text). Mirrors renderTranscript's extraction so a
+// display turn's text compares equal to its raw source.
 export function rawMessageText(raw: unknown): string {
-  const content = (raw as { content?: unknown } | undefined)?.content;
+  const record = raw as { content?: unknown; parts?: unknown } | undefined;
+  if (Array.isArray(record?.parts)) {
+    let text = "";
+    for (const part of record.parts as Array<{ type?: unknown; text?: unknown }>) {
+      if (part?.type === "text") text += String(part.text ?? "");
+    }
+    return text;
+  }
+  const content = record?.content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   let text = "";
