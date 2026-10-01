@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CF_AIG_COLLECT_LOG_PAYLOAD_HEADER,
   OPENCODE_SESSION_HEADER,
   baseUrlForProvider,
   buildLanguageModel,
@@ -118,6 +119,15 @@ describe("buildLanguageModel", () => {
   it("falls back to providerId for the session header when the conversation id is absent", () => {
     const model = buildLanguageModel({ ...baseConfig, sessionId: undefined });
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-prov-1");
+  });
+
+  it("sends cf-aig-collect-log-payload: false by default on every gateway kind (D7)", () => {
+    for (const kind of ["openai_compatible", "anthropic_compatible", "openai_responses"] as const) {
+      expect(headersOf(buildLanguageModel({ ...baseConfig, kind }))?.[CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]).toBe("false");
+    }
+    expect(
+      headersOf(buildLanguageModel({ ...baseConfig, collectLogPayload: true }))?.[CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]
+    ).toBe("true");
   });
 });
 

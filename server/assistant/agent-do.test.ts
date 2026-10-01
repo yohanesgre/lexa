@@ -1,5 +1,5 @@
 // Miniflare Durable Object smoke + P2 persistence integration (ADR-0003 §B.1,
-// §B.3). The other assistant tests exercise pure modules; this one proves the
+// §B.3, §B.5). The other assistant tests exercise pure modules; this one proves the
 // things that only exist once the class is loaded by workerd:
 //   1. `wrangler.jsonc`'s `durable_objects` binding + `new_sqlite_classes`
 //      migration actually resolve `LexaAssistantAgent` (the class is exported
@@ -14,6 +14,12 @@
 //      hydrate); `destroyThread` tears down through `_cf_scheduleDestroy` and
 //      leaves the session tables usable for a later persist; a seeded
 //      summary/count/title survives the COALESCE mirror.
+//   6. Load smoke: ten thread-keyed DO instances connect, persist, and read
+//      their transcripts back concurrently (no provider turn, so inference
+//      concurrency and gateway limits stay live-deploy checks).
+//   7. Recovery drill: evicting a live instance rehydrates its durable state
+//      and leaves the thread writable (in-flight `runFiber` resume is a
+//      live-deploy check, documented in docs/DEPLOYMENT.md).
 //
 // The wrapper worker stands in for the Worker entry: it serves the internal
 // assistant routes against a real miniflare D1 database and forwards the
@@ -499,5 +505,83 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(seeded?.summary).toBe("seeded summary");
     expect(seeded?.summarized_count).toBe(9);
     expect(seeded?.title).toBe("Seeded Title");
+  }, 60_000);
+
+  it("load smoke: 10 concurrent threads connect, persist, and read back independently", async () => {
+    // WS2 (P6): bounded local load smoke. Ten thread-keyed DO instances are
+    // driven concurrently through the real WS gate + persistence + canonical
+    // read-back. Does NOT cover inference concurrency (no provider turn, no
+    // gateway rate limits, no runFiber recovery) — those are live-deploy checks.
+    const COUNT = 10;
+    const results = await Promise.all(
+      Array.from({ length: COUNT }, async (_, i) => {
+        const documentId = `load-${i}`;
+        const threadKey = `chat:${documentId}`;
+        const identity: InternalAuthIdentity = {
+          actorUserId: `user-load-${i}`,
+          projectId: "proj-load",
+          threadKey,
+        };
+        const connection = await dispatchWebSocket(await signedHeaders(identity));
+        expect(connection.status).toBe(101);
+
+        const persisted = [
+          { id: `u${i}`, role: "user", parts: [{ type: "text", text: `hello ${i}` }] },
+          { id: `a${i}`, role: "assistant", parts: [{ type: "text", text: `hi ${i}` }] },
+        ];
+        const res = await persistStep(threadKey, persisted);
+        expect(res.status).toBe(200);
+
+        const messages = await waitFor<unknown[]>(
+          () => transcriptOf(documentId).then((m) => (m.length === 2 ? m : null)),
+          20_000
+        );
+        expect(messages).toEqual(persisted);
+        return messages.length;
+      })
+    );
+    expect(results).toEqual(Array.from({ length: COUNT }, () => 2));
+  }, 120_000);
+
+  it("recovery drill: eviction rehydrates the transcript and the thread stays writable", async () => {
+    // WS3 (P6): local approximation of a mid-turn isolate eviction/redeploy.
+    // No provider turn is started, so this proves state coherence across
+    // eviction (persist → evict → reconnect → transcript intact → writable),
+    // not runFiber resume of an in-flight turn (live-deploy drill, documented
+    // in docs/DEPLOYMENT.md).
+    const documentId = "recovery-drill";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-rec", projectId: "proj-1", threadKey };
+
+    const first = await dispatchWebSocket(await signedHeaders(identity));
+    expect(first.status).toBe(101);
+    const persisted = [
+      { id: "rec-u1", role: "user", parts: [{ type: "text", text: "before eviction" }] },
+      { id: "rec-a1", role: "assistant", parts: [{ type: "text", text: "acknowledged" }] },
+    ];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 2 ? 2 : null)), 20_000);
+    expect(await sessionMessageCount(threadKey)).toBe(2);
+
+    // Evict the instance (closes its sockets). All durable state must survive in
+    // DO SQLite; a fresh instance re-hydrates on the next RPC/connect.
+    await evictThread(threadKey);
+
+    const second = await dispatchWebSocket(await signedHeaders(identity));
+    expect(second.status).toBe(101);
+    expect(await transcriptOf(documentId)).toEqual(persisted);
+    expect(await sessionMessageCount(threadKey)).toBe(2);
+
+    // The rehydrated instance is still writable: append a message and read back.
+    const appended = [
+      ...persisted,
+      { id: "rec-u2", role: "user", parts: [{ type: "text", text: "after resume" }] },
+    ];
+    expect((await persistStep(threadKey, appended)).status).toBe(200);
+    const after = await waitFor<unknown[]>(
+      () => transcriptOf(documentId).then((m) => (m.length === 3 ? m : null)),
+      20_000
+    );
+    expect(after).toEqual(appended);
   }, 60_000);
 });

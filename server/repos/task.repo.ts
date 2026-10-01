@@ -150,7 +150,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
            WHERE t.project_id = ? AND t.title LIKE ? ESCAPE '\\'
            GROUP BY t.id
-           ORDER BY t.archived_at IS NOT NULL, t.updated_at DESC
+           ORDER BY t.archived_at IS NOT NULL, t.updated_at DESC, t.number ASC
            LIMIT ?`,
           projectId,
           `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
@@ -574,7 +574,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
            INNER JOIN task_github_issues gi ON gi.task_id = t.id
            WHERE gi.synced_state IS NOT c.github_state
              AND t.archived_at IS NULL
-           ORDER BY t.updated_at DESC
+           ORDER BY t.updated_at DESC, t.id ASC
            LIMIT ?`,
           limit
         ),

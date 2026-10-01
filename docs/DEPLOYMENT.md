@@ -454,6 +454,33 @@ receiving new features; Docker/bare metal stay frozen at their current features.
    provider registry and keys, project settings, call logs, prices, provider
    health, and the agents/skills catalog.
 
+### Verifying recovery + cost on a live Workers deploy (manual, deployer-run)
+
+The local gate exercises DO persistence/eviction coherence
+(`server/assistant/agent-do.test.ts`), but in-flight turn recovery, gateway
+rate limits, and real cost are only observable on a live deploy. Steps:
+
+1. **Deploy, then start a turn and redeploy mid-turn.** In one shell run
+   `bunx wrangler deploy` (or `wrangler versions deploy`) while a long chat or
+   document turn is streaming. Expected: the WS client reconnects/resumes, the
+   turn reaches a terminal frame, `assistant_tasks.status` transitions exactly
+   once, and no duplicate `task_activity` rows appear (invariant #12).
+2. **Confirm cost/limits (R1).** Workers dashboard → Durable Objects
+   (requests, duration, SQLite rows) and AI Gateway (requests, tokens). An idle
+   hibernated WS must not bill duration; DO requests should track turns, not
+   wall-clock. Compare against the plan's ~$5/mo + usage budget.
+3. **Rate-limit UX (R2).** Drive a gated model through a tool loop until the
+   gateway returns 20 rpm (50 with prepaid credits). Expected: a
+   `PROVIDER_RATE_LIMITED` (429) frame plus the fallback-model walk, never a
+   hung turn.
+4. **Confirm metadata-only gateway logs (D7, R13).** After a turn, the gateway's
+   logs show request metadata only, not prompt/response payloads. The app sends
+   `cf-aig-collect-log-payload: false` on every provider request (ADR-0003 §C
+   D7), which overrides the gateway's own payload-collection toggle — payloads
+   can only be enabled by changing the app-sent header (the
+   `RegistryModelConfig.collectLogPayload` switch, not wired from any production
+   config path today), never from the dashboard toggle alone.
+
 ## Upgrading across managed-only MCP client secrets (2026-09-28)
 
 MCP client credentials became managed-only: the `env:NAME` / `file:/abs/path`

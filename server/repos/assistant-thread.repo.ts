@@ -185,7 +185,7 @@ export class AssistantThreadRepo extends Effect.Service<AssistantThreadRepo>()("
           db,
           `SELECT * FROM assistant_threads
            WHERE ${conditions.join(" AND ")}
-           ORDER BY pinned DESC, updated_at DESC
+           ORDER BY pinned DESC, updated_at DESC, document_id ASC
            LIMIT ?`,
           ...params
         ).pipe(Effect.map((rows) => rows.map(rowToThread)));

@@ -30,11 +30,18 @@ export interface RegistryModelConfig {
   providerId?: string | undefined;
   /** Per-conversation value for `x-opencode-session`; falls back to providerId/model. */
   sessionId?: string | undefined;
+  /**
+   * ADR-0003 §C D7: gateway payload logging is metadata-only by default.
+   * `false` (the default) sends `cf-aig-collect-log-payload: false`; set `true`
+   * to opt a provider into gateway payload collection for debugging.
+   */
+  collectLogPayload?: boolean | undefined;
   /** Test seam: routes provider HTTP through an injected fetch (never set in production). */
   fetchImpl?: FetchLike | undefined;
 }
 
 export const OPENCODE_SESSION_HEADER = "x-opencode-session" as const;
+export const CF_AIG_COLLECT_LOG_PAYLOAD_HEADER = "cf-aig-collect-log-payload" as const;
 
 // `@ai-sdk/openai`'s default baseURL already includes /v1 and appends /responses;
 // `@ai-sdk/openai-compatible` appends /chat/completions to baseURL; and
@@ -79,7 +86,12 @@ export function resolveOpencodeSessionId(
 }
 
 function sessionHeaders(config: RegistryModelConfig): Record<string, string> {
-  return { [OPENCODE_SESSION_HEADER]: resolveOpencodeSessionId(config.sessionId, config) };
+  return {
+    [OPENCODE_SESSION_HEADER]: resolveOpencodeSessionId(config.sessionId, config),
+    // ADR-0003 §C D7: metadata-only AI Gateway logs by default. Harmless for
+    // non-gateway providers — unrecognized headers are ignored.
+    [CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]: String(config.collectLogPayload ?? false),
+  };
 }
 
 // `exactOptionalPropertyTypes`-safe fetch seam: only attach `fetch` when a test
