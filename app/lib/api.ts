@@ -431,17 +431,34 @@ export function updateRateLimit(input: { max: number; windowMs: number }): Promi
 
 export interface GithubSettings {
   appId: string;
+  appSlug: string;
   privateKeySet: boolean;
   webhookSecretSet: boolean;
-  source: "settings" | "env" | "none";
+  source: "settings" | "none";
+}
+
+// Manifest-connect contract: `manifest` is posted to `url` as a form field by
+// the browser; `state` is the single-use CSRF value the callback echoes back.
+export interface GithubAppManifestResponse {
+  url: string;
+  state: string;
+  manifest: unknown;
 }
 
 export function getGithubSettings(): Promise<GithubSettings> {
   return request(`${BASE}/settings/github`);
 }
 
-export function updateGithubSettings(input: { appId: string; privateKey?: string | undefined; webhookSecret?: string }): Promise<GithubSettings> {
+export function updateGithubSettings(input: { appId: string; appSlug?: string | undefined; privateKey?: string | undefined; webhookSecret?: string }): Promise<GithubSettings> {
   return request(`${BASE}/settings/github`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export function createGithubManifest(): Promise<GithubAppManifestResponse> {
+  return request(`${BASE}/settings/github/manifest`, { method: "POST" });
+}
+
+export function completeGithubSetup(input: { code?: string | undefined; state: string }): Promise<GithubSettings> {
+  return request(`${BASE}/settings/github/setup`, { method: "POST", body: JSON.stringify(input) });
 }
 
 // ---- teams (Better Auth organizations) ----
