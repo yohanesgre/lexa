@@ -46,6 +46,7 @@
     "@ai-sdk/anthropic": "4.0.71",
     "@ai-sdk/openai": "4.0.83",
     "@ai-sdk/openai-compatible": "3.0.62",
+    "@ai-sdk/react": "^4.0.130",
     "@cloudflare/ai-chat": "0.12.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

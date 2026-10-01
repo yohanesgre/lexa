@@ -27,9 +27,15 @@ export function useDashboard() {
 }
 
 // Capability discovery — one signal per flavor. `tasksBulk` is the LX-4 kill
-// switch; older builds omit it, which the UI treats as enabled.
-export function useCapabilities() {
-  return useQuery({ queryKey: ["capabilities"], queryFn: () => api.getCapabilities() });
+// switch; older builds omit it, which the UI treats as enabled. `enabled:false`
+// suppresses the fetch on surfaces with no session (bare auth pages), where the
+// read would 401 and retry-spam the console.
+export function useCapabilities(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["capabilities"],
+    queryFn: () => api.getCapabilities(),
+    enabled: opts?.enabled ?? true,
+  });
 }
 
 export function useCreateProject() {

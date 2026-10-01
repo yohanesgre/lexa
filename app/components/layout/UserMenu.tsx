@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useSession, useSignOut, useTeams } from "../../lib/queries";
+import { useAssistantEnabled } from "../../lib/assistant-enabled";
 
 // Top-right profile menu (app-nav right cluster). Identity header + role-
 // scoped settings entries + Log out. The old Settings nav link is gone — all
@@ -16,6 +17,8 @@ export function UserMenu() {
   const { data: teams } = useTeams();
   const signOut = useSignOut();
   const navigate = useNavigate();
+  // Capability gate: the Assistant workspace entry is Workers-only.
+  const { enabled: assistantEnabled } = useAssistantEnabled();
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
 
@@ -102,7 +105,7 @@ export function UserMenu() {
               
             </Link>
           )}
-          {isSuperadmin && (
+          {isSuperadmin && assistantEnabled && (
             <Link to="/admin/assistant" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
               <span className="text-sm color-secondary">Assistant</span>

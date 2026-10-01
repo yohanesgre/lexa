@@ -17,6 +17,7 @@ vi.mock("@tanstack/react-router", () => ({
 const h = vi.hoisted(() => ({
   role: "superadmin" as string,
   teams: [] as unknown[],
+  assistantEnabled: true,
 }));
 
 vi.mock("../../lib/queries", () => ({
@@ -26,6 +27,9 @@ vi.mock("../../lib/queries", () => ({
   }),
   useTeams: () => ({ data: h.teams }),
   useSignOut: () => ({ mutate: vi.fn(), isPending: false }),
+  // Capability gate — UserMenu hides the Assistant entry when the flavor lacks
+  // it (ADR-0003 §F.3).
+  useCapabilities: () => ({ data: { assistant: h.assistantEnabled, flavor: h.assistantEnabled ? "workers" : "bun" }, isLoading: false }),
 }));
 
 import { UserMenu } from "./UserMenu";
@@ -33,6 +37,7 @@ import { UserMenu } from "./UserMenu";
 beforeEach(() => {
   h.role = "superadmin";
   h.teams = [];
+  h.assistantEnabled = true;
 });
 
 async function openMenu() {
@@ -64,5 +69,12 @@ describe("UserMenu role scoping", () => {
     expect(screen.queryByText("Assistant")).not.toBeInTheDocument();
     expect(screen.getByText("User settings")).toBeInTheDocument();
     expect(screen.getByText("Log out")).toBeInTheDocument();
+  });
+
+  it("hides Assistant from a superadmin on the capability-disabled flavor", async () => {
+    h.assistantEnabled = false;
+    await openMenu();
+    expect(screen.queryByText("Assistant")).not.toBeInTheDocument();
+    expect(screen.getByText("Workspace settings")).toBeInTheDocument();
   });
 });

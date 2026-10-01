@@ -30,6 +30,7 @@ export function AssistantPanelBody({
   onDismiss,
   editor,
   onClose,
+  reconnecting,
   children,
 }: {
   stream: Stream;
@@ -50,15 +51,23 @@ export function AssistantPanelBody({
   onDismiss: () => void;
   editor: Editor;
   onClose: () => void;
+  // Transport reconnect (herald-popover.html): the socket is down but the run
+  // continues server-side. Read off the agent stream in AssistantPanel and
+  // passed in so this view stays transport-blind.
+  reconnecting: boolean;
   children: React.ReactNode;
 }) {
   if (providerMissing) {
     return <AssistantProviderMissing projectId={projectId} />;
   }
 
-  const running = stream.status === "connecting" || stream.status === "streaming";
+  const running = stream.status === "connecting" || stream.status === "streaming" || reconnecting;
   const done = stream.status === "done";
   const failed = stream.status === "error";
+  // Reconnect (herald-popover.html): the socket is down but the run continues
+  // server-side — keep the last frame and replace the footer controls with the
+  // warning banner. Also wins over a premature terminal status while the WS
+  // re-establishes.
 
   // A settings fetch failure is not a missing provider — say so and offer a
   // retry instead of a silently disabled form.
@@ -89,17 +98,24 @@ export function AssistantPanelBody({
           </div>
         )}
         <AssistantStreamingPreview text={stream.text} />
-        <div className="flex items-center justify-end" style={{ padding: "10px 12px", borderTop: "1px solid var(--lx-border-default)" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            style={{ borderColor: "rgba(255,68,68,0.45)", color: "var(--lx-text-danger)" }}
-            onClick={onStop}
-          >
-            <Square size={12} strokeWidth={1.5} fill="currentColor" />
-            Stop
-          </button>
-        </div>
+        {reconnecting ? (
+          <div className="banner-warning" role="status" style={{ margin: "0 12px 10px" }}>
+            <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} aria-hidden="true" />
+            <span>Connection lost — reconnecting. The run continues server-side.</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end" style={{ padding: "10px 12px", borderTop: "1px solid var(--lx-border-default)" }}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ borderColor: "rgba(255,68,68,0.45)", color: "var(--lx-text-danger)" }}
+              onClick={onStop}
+            >
+              <Square size={12} strokeWidth={1.5} fill="currentColor" />
+              Stop
+            </button>
+          </div>
+        )}
       </>
     );
   }

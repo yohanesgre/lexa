@@ -10,7 +10,7 @@ import {
   useChatAttachments,
   useUploadChatAttachment,
 } from "../../lib/queries";
-import { useAssistantStream } from "../../lib/use-assistant-stream";
+import { useAssistantAgent } from "../../lib/use-assistant-agent";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
@@ -194,7 +194,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   }, [chatId, qc]);
 
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
-  const stream = useAssistantStream(streamKey);
+  const stream = useAssistantAgent(streamKey);
   const streaming = stream.status === "connecting" || stream.status === "streaming";
 
   const { turns, setTurns } = useSettledTurns({
@@ -452,6 +452,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             seed={seed}
             streamStatus={stream.status}
             sendError={stream.error}
+            reconnecting={stream.reconnecting}
+            resumed={stream.resumed}
             attachmentsEnabled={attachmentsEnabled}
             ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}
@@ -508,6 +510,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             seed={seed}
             streamStatus={stream.status}
             sendError={stream.error}
+            reconnecting={stream.reconnecting}
+            resumed={stream.resumed}
             attachmentsEnabled={attachmentsEnabled}
             ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}

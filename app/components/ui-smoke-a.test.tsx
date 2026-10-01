@@ -27,6 +27,7 @@ const h = vi.hoisted(() => ({
   pathname: "/admin/assistant",
   search: { value: { task: undefined as string | undefined, swimlane: undefined as string | undefined } },
   navigate: vi.fn(),
+  assistantEnabled: true,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -55,6 +56,12 @@ vi.mock("../lib/queries", async (importOriginal) => {
     useRevisions: () => h.revisions,
     useWikiAttachments: () => ({ data: h.wikiAttachments }),
     useDeleteAttachment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+    // Capability gate — AssistantShell renders the unavailable notice on the
+    // Bun flavor (ADR-0003 §F.3).
+    useCapabilities: () => ({
+      data: { assistant: h.assistantEnabled, flavor: h.assistantEnabled ? "workers" : "bun" },
+      isLoading: false,
+    }),
   };
 });
 
@@ -336,6 +343,7 @@ describe("admin.assistant shell gating", () => {
     h.session.value = null;
     h.session.loading = false;
     h.pathname = "/admin/assistant";
+    h.assistantEnabled = true;
   });
 
   it("renders the tab bar and the outlet for a superadmin", () => {
@@ -389,6 +397,15 @@ describe("admin.assistant shell gating", () => {
     h.session.loading = true;
     const { container } = render(<AssistantShell />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders the capability-disabled notice on the Bun flavor (no tab bar)", () => {
+    h.session.value = { user: { role: "superadmin" } };
+    h.assistantEnabled = false;
+    render(<AssistantShell />);
+    expect(screen.getByText("The Assistant runs on the Cloudflare Workers deployment")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("outlet")).not.toBeInTheDocument();
   });
 });
 

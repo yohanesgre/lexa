@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { createFileRoute, Link, Navigate, Outlet, useRouterState } from "@tanstack/react-router";
 import { useSession } from "../lib/queries";
+import { useAssistantEnabled } from "../lib/assistant-enabled";
+import { AssistantUnavailableNotice } from "../components/assistant/AssistantUnavailableNotice";
 import { useToast } from "../components/ui/Toast";
 
 // /admin/assistant — the superadmin shell: fixed header + tab bar + <Outlet/>.
@@ -32,6 +34,7 @@ function normalizePath(pathname: string): string {
 export function AssistantShell() {
   const { data: session, isLoading } = useSession();
   const isSuperadmin = session?.user?.role === "superadmin";
+  const { enabled: assistantEnabled, loading: capabilitiesLoading } = useAssistantEnabled();
   const toast = useToast();
   const pathname = normalizePath(useRouterState({ select: (s) => s.location.pathname }) as string);
 
@@ -44,6 +47,20 @@ export function AssistantShell() {
   if (isLoading) return null;
   if (!isSuperadmin) {
     return <Navigate to="/" replace />;
+  }
+
+  // Capability gate (ADR-0003 §F.3): the admin panels are mounted only on the
+  // Cloudflare Workers flavor. A direct URL on Docker/Bun renders the notice
+  // instead of the shell. Gate while capabilities resolve.
+  if (capabilitiesLoading) return null;
+  if (!assistantEnabled) {
+    return (
+      <main className="page-frame">
+        <div className="card-panel">
+          <AssistantUnavailableNotice />
+        </div>
+      </main>
+    );
   }
 
   return (

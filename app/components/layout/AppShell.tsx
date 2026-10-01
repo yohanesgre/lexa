@@ -5,6 +5,7 @@ import { Menu, X, PanelLeft, ChevronDown } from "lucide-react";
 import { cn } from "../ui/cn";
 import { useProjectSelection } from "../../lib/project-selection";
 import { useProjects } from "../../lib/queries";
+import { useAssistantEnabled } from "../../lib/assistant-enabled";
 import { NavLink } from "./NavLink";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
@@ -127,7 +128,7 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
   );
 }
 
-function MobileMenuLinks({ targets }: { targets: {
+function MobileMenuLinks({ targets, assistantEnabled }: { targets: {
   dashboard: NavTarget;
   board: NavTarget;
   tasks: NavTarget;
@@ -135,7 +136,7 @@ function MobileMenuLinks({ targets }: { targets: {
   swimlanes: NavTarget;
   wiki: NavTarget;
   chat: NavTarget;
-} }) {
+}, assistantEnabled: boolean }) {
   return (
     <>
       <Link {...linkProps(targets.dashboard)} className="app-nav-menu-link" activeOptions={{ exact: true }}>
@@ -156,9 +157,11 @@ function MobileMenuLinks({ targets }: { targets: {
       <Link {...linkProps(targets.wiki)} className="app-nav-menu-link">
         Wiki
       </Link>
-      <Link {...linkProps(targets.chat)} className="app-nav-menu-link">
-        Chat
-      </Link>
+      {assistantEnabled && (
+        <Link {...linkProps(targets.chat)} className="app-nav-menu-link">
+          Chat
+        </Link>
+      )}
     </>
   );
 }
@@ -171,6 +174,9 @@ export function AppShell() {
   // would 401 and retry-spam the console. Skip the fetch there.
   const isBare = isBarePath(pathname);
   const { data: projects = [] } = useProjects({ enabled: !isBare });
+  // Capability gate: hide the Chat nav entry on the Docker/Bun flavor where the
+  // assistant surface is absent. Suppressed on bare pages (no session).
+  const { enabled: assistantEnabled } = useAssistantEnabled({ enabled: !isBare });
   const selectedProjectId = projects.find((p) => p.slug === selectedSlug)?.id;
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectListOpen, setProjectListOpen] = useState(false);
@@ -242,9 +248,11 @@ export function AppShell() {
             <NavLink {...linkProps(targets.wiki)} active={routeType === "wiki"}>
               Wiki
             </NavLink>
-            <NavLink {...linkProps(targets.chat)} active={routeType === "chat"}>
-              Chat
-            </NavLink>
+            {assistantEnabled && (
+              <NavLink {...linkProps(targets.chat)} active={routeType === "chat"}>
+                Chat
+              </NavLink>
+            )}
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">
@@ -278,7 +286,7 @@ export function AppShell() {
                 }}
               />
             )}
-            <MobileMenuLinks targets={targets} />
+            <MobileMenuLinks targets={targets} assistantEnabled={assistantEnabled} />
           </div>
         </nav>
       )}

@@ -16,6 +16,8 @@ import { AssistantProjectMcpSection } from "./AssistantProjectMcpSection";
 import { AssistantProjectJevSection } from "./AssistantProjectJevSection";
 import { AgentSkillAvailabilitySection } from "./assistant/AssistantAgentSkills";
 import { ProjectMemorySection } from "./assistant/AssistantProjectMemory";
+import { AssistantUnavailableNotice } from "../assistant/AssistantUnavailableNotice";
+import { useAssistantEnabled } from "../../lib/assistant-enabled";
 import type { Project } from "../../../shared/types";
 
 // /settings/project/$projectId — the project settings surface reached from
@@ -26,6 +28,11 @@ import type { Project } from "../../../shared/types";
 export function ProjectSettingsHub({ projectId }: { projectId: string }) {
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
   const project = projects.find((p) => p.id === projectId);
+  // Capability gate (ADR-0003 §F.3): on Docker/Bun the whole Assistant
+  // provider/settings block is hidden and the capability-false notice renders
+  // in its place. While the read is in flight the block stays empty — never the
+  // notice — so Workers does not flash "unavailable" before the flag resolves.
+  const { enabled: assistantEnabled, loading: assistantLoading } = useAssistantEnabled();
 
   if (projectsLoading) {
     return (
@@ -63,12 +70,20 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
       <TeamAssignmentSection project={project} />
       <ProjectBasicSection project={project} />
       <LinkedReposSection slug={project.slug} />
-      <AssistantProjectProviderSection key={project.id} project={project} />
-      <AssistantWriteToolsSection key={project.id} project={project} />
-      <AssistantProjectMcpSection key={project.id} project={project} />
-      <AssistantProjectJevSection key={project.id} project={project} />
-      <AgentSkillAvailabilitySection projectId={project.id} />
-      <ProjectMemorySection projectId={project.id} />
+      {assistantLoading ? null : assistantEnabled ? (
+        <>
+          <AssistantProjectProviderSection key={project.id} project={project} />
+          <AssistantWriteToolsSection key={project.id} project={project} />
+          <AssistantProjectMcpSection key={project.id} project={project} />
+          <AssistantProjectJevSection key={project.id} project={project} />
+          <AgentSkillAvailabilitySection projectId={project.id} />
+          <ProjectMemorySection projectId={project.id} />
+        </>
+      ) : (
+        <section className="mb-8" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <AssistantUnavailableNotice variant="settings" />
+        </section>
+      )}
       <ProjectMembersSection slug={project.slug} />
       <ProjectDangerSection project={project} />
     </main>

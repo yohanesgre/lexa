@@ -114,11 +114,20 @@ vi.mock("../../lib/api", () => ({
   decideAssistantApproval: vi.fn(),
 }));
 
-vi.mock("../../lib/use-assistant-stream", () => ({
+vi.mock("../../lib/use-assistant-agent", () => ({
   assistantSendForKey: vi.fn(),
-  useAssistantStream: (key: string | null) => {
+  useAssistantAgent: (key: string | null) => {
     const snapshot = key ? streamFx.state.current : streamFx.idle();
-    return { ...snapshot, send: vi.fn(), abort: vi.fn(), reset: vi.fn(), subscribe: () => () => {}, getSnapshot: () => snapshot };
+    return {
+      ...snapshot,
+      send: vi.fn(),
+      abort: vi.fn(),
+      reset: vi.fn(),
+      subscribe: () => () => {},
+      getSnapshot: () => snapshot,
+      reconnecting: false,
+      resumed: false,
+    };
   },
 }));
 

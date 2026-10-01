@@ -7,7 +7,7 @@ import type { AssistantChatThreadSummary } from "../../lib/api";
 import { useRenameAssistantChat, useDeleteAssistantChat, useUpdateAssistantChatMeta } from "../../lib/queries";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useToast } from "../ui/Toast";
-import { assistantSendForKey } from "../../lib/use-assistant-stream";
+import { assistantSendForKey } from "../../lib/use-assistant-agent";
 import { settleTurns } from "./assistant-chat-turns-state";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
@@ -223,7 +223,7 @@ export function useChatStartStream(args: {
       }
       const body = chatStreamBody({ projectId, chatId: threadId, message, effort, attachments, fromIndex });
       if (isNewThread) {
-        assistantSendForKey(`assistant-chat:${threadId}`, "/api/assistant/chat/stream", body);
+        assistantSendForKey(`assistant-chat:${threadId}`, body);
       } else {
         stream.send("/api/assistant/chat/stream", body);
       }
