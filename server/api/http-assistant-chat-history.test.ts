@@ -7,7 +7,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 import { seedProviderSecret } from "../assistant/test-secrets";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -112,7 +112,7 @@ VALUES ('chat', 'chat-d', 'p2', 'u1', 'Elsewhere', '[]', datetime('now', '-2 hou
 INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, messages)
 VALUES ('chat', 'chat-del', 'p1', 'u1', 'Doomed', '[]');
 `);
-  handler = createApiHandler(dbPath);
+  handler = createAssistantApiHandler(dbPath);
 });
 
 afterAll(() => {

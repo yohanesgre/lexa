@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
-import { createWorkersApiHandler } from "./http";
+import { createWorkersApiHandler } from "./assistant-api";
 import type { StorageConfigShape } from "../storage/config";
 import type { ApiAuthHooksShape } from "./auth-hooks";
 

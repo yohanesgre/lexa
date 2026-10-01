@@ -266,8 +266,9 @@ PM reads), curated `project_memory` FTS5 facts, repo-content grounding from
 source-role repos, and a freeform chat surface on the same engine. Queue table
 `assistant_tasks` (`queued → running → completed|failed|cancelled`); thread
 state in `assistant_threads` (ModelMessage[] JSON, rolling summary). The
-queue's only consumer is the in-process HTTP stream handler — there is no
-external worker, no claim loop, and no heartbeat.
+queue's only consumer is now the Workers-only DO runtime (`LexaAssistantAgent`
+`runFiber`/`chatRecovery`, ADR-0003 §B.5), not the pre-ADR in-process HTTP
+stream handler — there is no external worker, no claim loop, and no heartbeat.
 
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.

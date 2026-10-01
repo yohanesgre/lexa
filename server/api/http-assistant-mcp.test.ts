@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { Effect, Layer } from "effect";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 import { McpConnectFailed } from "./errors";
 import { McpConnector, PROCESS_FIELDS_REJECTED, SECRET_CLEAR_CONFLICT_REJECTED, SECRET_REQUIRES_MASTER_KEY } from "../services/assistant-mcp.service";
 
@@ -84,9 +84,9 @@ beforeAll(async () => {
       ('u3','member','p1'),
       ('u5','admin','p1');
   `);
-  handler = createApiHandler(dbPath);
-  okHandler = createApiHandler(dbPath, undefined, { mcpConnector: okConnector });
-  failHandler = createApiHandler(dbPath, undefined, { mcpConnector: failConnector });
+  handler = createAssistantApiHandler(dbPath);
+  okHandler = createAssistantApiHandler(dbPath, undefined, { mcpConnector: okConnector });
+  failHandler = createAssistantApiHandler(dbPath, undefined, { mcpConnector: failConnector });
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });

@@ -85,19 +85,6 @@ await runGithubConfigBoot(DATABASE_PATH, getEnv());
 // count. Runs after the env mirror so the settings are DB-authoritative first.
 // Awaited (not runSync): the effect suspends on WebCrypto promises.
 await runBootBackfill(DATABASE_PATH, getEnv());
-// Boot-time stale-run sweep: a crash mid-stream leaves `running` assistant
-// rows that never finish, blocking reset/resume. Mark them failed.
-{
-  const db = new Database(DATABASE_PATH);
-  try {
-    const swept = db.prepare(
-      "UPDATE assistant_tasks SET status = 'failed', error = 'server restarted', finished_at = datetime('now') WHERE status = 'running' AND started_at < datetime('now', '-30 minutes')"
-    ).run().changes;
-    if (swept > 0) console.log(`[Assistant] swept ${swept} stale running task(s) to failed`);
-  } finally {
-    db.close();
-  }
-}
 // FTS5 optimize merges deleted-row b-trees; table may be absent on a pre-0001 DB.
 try {
   const db = new Database(DATABASE_PATH);

@@ -6,7 +6,7 @@
 
 | Concern | Convention |
 |---------|-----------|
-| Base URL | `https://<host>/api` (Bun server behind the cloudflared tunnel) |
+| Base URL | `https://<host>/api` (the deploy origin — Cloudflare Workers, or the Bun server behind the cloudflared tunnel) |
 | Auth | Dual-channel: `Authorization: Bearer lxk_<43 base62 chars>` (machines — required by every `/api/*` route except the exempt list below, see Auth) OR a Better Auth session cookie (humans — browsers). `/api/auth/*` is mounted BEFORE the key middleware. The `x-lxk-user` header is removed. |
 | Content type | `application/json; charset=utf-8` |
 | IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (32-char, `[a-zA-Z0-9]`; migrated legacy rows are 32 lowercase hex — opaque, do not pattern-match) |
@@ -81,10 +81,12 @@ All non-2xx responses share one shape:
 | 409 | `PROVIDER_NOT_CONFIGURED` | Assistant generate/test/chat without saved provider settings for the project |
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
-| 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
+| 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream, or a turn whose recovery was exhausted |
 | 502 | `ASSISTANT_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| 409 | `ASSISTANT_TASK_ACTIVE` | Thread reset or second chat stream while an Assistant stream is running |
-| 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row |
+| 502 | `ASSISTANT_UNAVAILABLE` | Assistant Durable Object unreachable, DO RPC failed, legacy import failed after retry, or an internal route failed — Workers only |
+| 429 | `PROVIDER_RATE_LIMITED` | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
+| 409 | `ASSISTANT_TASK_ACTIVE` | Enqueue race on an `assistant_tasks` row, or thread reset while a run is claimed. A second chat client on a live thread no longer gets this — the DO serializes and queues (see Assistant) |
+| 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row, or the WS gate refusing a thread that is missing / not owned / not project-readable (no existence oracle) |
 | 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
 | 400 | `SECRET_KEY_UNAVAILABLE` | A managed provider key or Jev key was submitted but `LXK_SECRETS_MASTER_KEY` is unset or malformed (an MCP token save is refused as `MCP_INVALID_TRANSPORT_CONFIG` instead) |
 | 400 | `JEV_INVALID_CONFIG` | Jev registry payload refused: `clearSecret` + `secret`, invalid base URL, or model length (details: `{ reason }`) |
@@ -152,6 +154,15 @@ injection is removed — browsers authenticate `/api/*` via the session cookie.
     /api/share/:token/attachments/:id` joins this exemption — same bucket,
     token validated per request.
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
+  - `GET /api/capabilities` — flavor + capability discovery (see Health & Setup).
+    Unauthenticated, leak-free, no DB read; served before boot on both flavors.
+  - `/api/internal/assistant/*` — DO→Worker internal routes (Workers only).
+    Mounted before the key middleware and authenticated by an
+    `X-Lexa-Internal: v1:<unix-ts>:<hmac-sha256>` header derived from
+    `LXK_SECRETS_MASTER_KEY` — never the API key or a session.
+  - `GET /api/assistant/agent/:threadKey` — the assistant WebSocket upgrade is
+    session-cookie authenticated at the Worker gate (mounted before the key
+    middleware); it is not an API-key route.
 - **Login rate limit (R17):** failed logins on `/api/auth/sign-in/email` are
   throttled by an in-process limiter (5 attempts/60s per email, 15 min
   lockout; success resets — better-auth 1.6.27 has NO rate-limit plugin, so
@@ -469,6 +480,18 @@ interface Dashboard {             // GET /api/dashboard — full dashboard snaps
 GET    /api/health
 → 200 { ok: true }
   API-key exempt (health probe).
+
+GET    /api/capabilities
+→ 200 { assistant: boolean, flavor: "bun" | "workers",
+        chatAttachments: boolean, tasksBulk: boolean }
+  API-key exempt. Flavor + capability discovery (ADR-0003 §F.2), served before
+  boot on both flavors, no DB read, no leak. `assistant` is `true` only on the
+  Workers flavor **and** when `LXK_SECRETS_MASTER_KEY` is configured (the
+  assistant needs it for HMAC derivation + provider-secret decryption), so the
+  Bun/Docker flavor always reports `false`. `chatAttachments` is
+  `assistant && !LXK_DISABLE_CHAT_ATTACHMENTS`; `tasksBulk` is
+  `!LXK_DISABLE_TASKS_BULK` (flavor-independent). The frontend gates assistant
+  surfaces on these flags; the server refuses regardless.
 
 GET    /api/setup/status
 → 200 { configured: boolean, needsAdmin: boolean,
@@ -1486,7 +1509,7 @@ DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
 # ── Lexa Agents & Skills catalog (global rule bundles; browser, Bearer) ──
 # Hard cutover from the pre-baseline agent/skill paths — no aliases (sole
 # consumer is the bundled web app). The catalog is the behavioral spec for the
-# in-process Assistant (prompt injection); the removed Blacksmith/daemon
+# Assistant (prompt injection); the removed Blacksmith/daemon
 # file-writing consumer no longer exists. All mutations are admin-only
 # (403 FORBIDDEN for members).
 GET    /api/agents
@@ -1534,19 +1557,80 @@ Notes:
   per assistant run from the project's `source_role` repos, capped by
   `assistant_repo_cap` (env bootstrap `LXK_ASSISTANT_REPO_CAP`, default 3).
 
-### Assistant (AI assistant tier)
+### Assistant (AI assistant tier — Cloudflare Workers only)
 
-Server-side TanStack AI `chat()` assistant (in-process; the external
-Blacksmith/daemon tier was removed). Per-project provider settings;
-keys are server-side only and never serialized (masked view). Settings
-mutations + test/models are superadmin (`403 FORBIDDEN` otherwise); reads,
-tasks, chat, and memory follow normal project access; chat additionally
-requires a session user (bare API key → `400 NO_USER_CONTEXT`).
+> **Workers-only.** The assistant runs on `@cloudflare/ai-chat` `AIChatAgent`
+> Durable Objects (one DO per conversation thread), reached over a
+> session-authenticated WebSocket through the Worker gate. It is the only flavor
+> that serves this section: on **Bun/Docker** the assistant HttpApi groups are
+> not mounted, so `/api/assistant/*` and `/api/admin/assistant/*` return the
+> framework's **404** and `GET /api/capabilities` reports
+> `{ "assistant": false, "flavor": "bun" }` (ADR-0003 §F).
+
+Persistence is dual-store: **DO SQLite is canonical** (replay/resume/recovery),
+while the D1 `assistant_threads` row is a **mirror** updated per persisted turn
+step. List/search/export read the mirror and may lag by at most one mirror
+write; the canonical transcript read (`GET /api/assistant/chat/:chatId`) reads
+the DO with a D1 fallback. Legacy D1 threads are imported into the DO once, on
+first activation (migrate-on-read).
+
+Per-project provider settings; keys are server-side only and never serialized
+(masked view). Settings mutations + test/models are superadmin (`403 FORBIDDEN`
+otherwise); reads, tasks, chat, and memory follow normal project access; chat
+additionally requires a session user (bare API key → `400 NO_USER_CONTEXT`).
 
 Visibility: Assistant task brief info (status, timestamps) is member-visible;
 the result text is admin-gated on the status endpoint.
 
+**Concurrency (intentional behavior change).** A second client sending on a live
+thread no longer receives `409 ASSISTANT_TASK_ACTIVE` — the DO serializes and
+queues the message and fans frames out to every connected client. The code
+remains only for enqueue races on `assistant_tasks` rows and for thread reset
+while a run is claimed.
+
 ```
+GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers only)
+  :threadKey = `chat:<chatId>` | `task:<taskId>` | `wiki:<documentId>`,
+  URL-encoded as one path segment. Same-origin; the Better Auth session cookie
+  rides the handshake. The Worker gate runs BEFORE the key middleware:
+    no session                       → 401 NO_USER_CONTEXT
+    thread missing / not owned /
+      not project-readable           → 404 ASSISTANT_THREAD_NOT_FOUND (no existence oracle)
+    missing chat row                 → upsert (document_type='chat', project_id
+                                       from ?projectId=, owner = session user)
+    DO unreachable / forward failed  → 502 ASSISTANT_UNAVAILABLE
+  After authorization the gate strips every inbound `X-Lexa-*` header and
+  forwards to the per-thread DO with minted `X-Lexa-*` HMAC identity headers
+  (defense-in-depth; the DO route is only reachable through the Worker).
+
+  Wire protocol: the `@cloudflare/ai-chat` WS protocol carrying `UIMessage`
+  data parts (the chat surface's replacement for the retained-legacy SSE chat
+  stream — the route itself stays mounted on Workers, see `chat/stream` below).
+  The chat send contract (attachments, `fromIndex` edit/regenerate/retry,
+  `@`-mention and `$`-skill resolution) is carried over the socket. A dropped
+  socket auto-resumes; the client surfaces a synthetic
+  `ASSISTANT_CONNECTION_LOST` status while reconnecting (client-side only —
+  never a server REST code).
+
+  Approval resume stays a plain REST POST (below); its frames then arrive on
+  this socket. The document-panel SSE endpoints remain mounted on Workers until
+  the panel moves to the socket.
+
+  Internal DO→Worker routes (Workers only; `X-Lexa-Internal` HMAC, not the API
+  key/session). Mounted before the API-key middleware (ADR-0003 §B.2):
+    GET  /api/internal/assistant/legacy/:threadKey  → { messages }        (legacy import read)
+    POST /api/internal/assistant/mirror             → { ok: true }        (per-step D1 mirror)
+    POST /api/internal/assistant/tool               → { ok, result, error }   (read tool)
+    POST /api/internal/assistant/write-tool         → { proposed, approvalId, error }
+    GET  /api/internal/assistant/provider-config    → decrypted provider config per turn
+    GET  /api/internal/assistant/turn-context       → prompt/Jev/memory context per turn
+    POST /api/internal/assistant/call-log           → { ok: true }
+    POST /api/internal/assistant/run-status         → { ok: true }        (terminal task transitions)
+  A missing/malformed HMAC → 401 NO_USER_CONTEXT; no master key → 502
+  ASSISTANT_UNAVAILABLE.
+  Like `GET /api/capabilities`, these mounts run before the HttpApi app and
+  before boot — they answer with no DB read.
+
 GET    /api/assistant/settings/:projectId
 → 200 { projectId, searchProvider: "exa"|null, hasSearchKey: boolean,
         urlAllowlist: string|null,
@@ -2045,6 +2129,11 @@ GET    /api/assistant/tasks/:id
 
 POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
 → 200 text/event-stream
+  > **Retained legacy — Workers only.** Still mounted on Workers; the document
+  > panel uses it. **404 on Bun/Docker** (the assistant groups are not mounted).
+  > Superseded by the `GET /api/assistant/agent/:threadKey` WebSocket for the
+  > chat surface; new integrations should prefer the socket. (The ADR's REMOVED
+  > applies to the Bun flavor / a later release, not to today's Workers route.)
   Frames (exactly one terminal frame — error|done|suspended):
     event: start  data: {"taskId":"…","threadId":"…"}
     event: delta  data: {"text":"…"}
@@ -2081,11 +2170,23 @@ POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
        fromIndex?: number }
-  Freeform chat ALWAYS runs the assistant lane (in-process).
-  One persistent thread per (project, user), ownership enforced (another
-  user's chatId → 404). Direct synchronous SSE — same frames as the task
-  stream minus taskId (frames carry chatId). Second concurrent stream on the
-  same chatId → 409 ASSISTANT_TASK_ACTIVE.
+  > **Retained legacy — Workers only.** Still mounted on Workers (the app now
+  > sends over the `GET /api/assistant/agent/chat:<chatId>` WebSocket);
+  > **404 on Bun/Docker** (the assistant groups are not mounted). Not removed on
+  > Workers — the ADR's REMOVED applies to the Bun flavor / a later release.
+  Freeform chat ALWAYS runs the assistant lane. Multi-thread per user: a chat
+  thread is keyed by its own client-generated `chatId` and owned by one user
+  (`assistant_threads` PK `(document_type, document_id)` with `owner_user_id`
+  and the owner-scoped chat-list index — `docs/SCHEMA.md` → assistant_threads);
+  any number of threads per (project, user). **Doc correction:** this section
+  previously claimed "one persistent thread per (project, user)" — that was
+  stale; the schema and the list/pin endpoints have always been multi-thread.
+  Ownership is enforced (another user's chatId → 404 ASSISTANT_THREAD_NOT_FOUND).
+  Direct synchronous SSE — same frames as the task stream minus taskId (frames
+  carry chatId). A second concurrent stream on the same chatId is **no longer a
+  409**: the DO serializes and queues the message and fans frames out to all
+  clients (intentional behavior change; `ASSISTANT_TASK_ACTIVE` remains only for
+  enqueue races on `assistant_tasks`).
   attachments are chat-attachment refs (uploads above; cross-project keys →
   422). Images feed the vision path (inline parts; 409 VISION_NOT_CONFIGURED
   when `primary_supports_images=0`) and persist as `image-ref` parts; documents
@@ -2168,7 +2269,11 @@ body { verdict*: "approve" | "reject" }
 
 POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-stream)
 POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
-  Same frames as the respective stream endpoints. Server-side sequence:
+  Kept path (ADR-0003 §B.4). On the chat surface the app issues this as a plain
+  REST POST and reads no body; the DO resume RPC runs server-side and the
+  resumed frames arrive on the `chat:<chatId>` WebSocket. The endpoint's own SSE
+  body (same frames as the respective stream endpoints) remains for the document
+  panel. Server-side sequence:
   sweep expired → execute approved rows in seq order (each emitting an
   approval_result frame right after start: applied|failed, error carries
   "CODE: message"; rejected rows emit denied) → continue the provider turn

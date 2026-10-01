@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "r".repeat(43);
@@ -37,7 +37,7 @@ beforeAll(async () => {
     INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1','A','','',0);
     INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1','S','','',0);
   `);
-  handler = createApiHandler(dbPath);
+  handler = createAssistantApiHandler(dbPath);
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 import { JEV_CLEAR_SECRET_CONFLICT_REJECTED, JEV_SECRET_REQUIRES_MASTER_KEY } from "../services/assistant-jev.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -63,7 +63,7 @@ beforeAll(async () => {
       ('u3','member','p1'),
       ('u5','admin','p1');
   `);
-  handler = createApiHandler(dbPath);
+  handler = createAssistantApiHandler(dbPath);
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });

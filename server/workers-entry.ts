@@ -54,7 +54,7 @@ import {
   mirrorSettingsFromEnvAsync,
   stringEnvFromRuntimeEnv,
 } from "./api/workers-ports";
-import { createWorkersApiHandler } from "./api/http";
+import { createWorkersApiHandler } from "./api/assistant-api";
 import { createAuth, handleAuthSurface } from "./auth";
 import { resolveMaxApiBody } from "./api/limits";
 import { syncRateLimitFromDbAsync } from "./api/rate-limit";
