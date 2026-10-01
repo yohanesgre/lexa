@@ -2,7 +2,7 @@ import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
 import { Effect, Schema, Data } from "effect";
 import type { LexaApi } from "./http";
 import { respond } from "./http-helpers";
-import { auth } from "../auth";
+import { ApiAuthHooks, type AuthSessionSummary } from "./auth-hooks";
 import type { SessionInfo } from "../../shared/types";
 
 export class SessionNotFound extends Data.TaggedError("SessionNotFound")<{}> {}
@@ -17,7 +17,7 @@ const SessionInfoSchema = Schema.Struct({
 
 const SessionIdPath = Schema.Struct({ sessionId: Schema.String });
 
-const toSessionInfo = (s: { id: string; ipAddress?: string | null; userAgent?: string | null; expiresAt: string | Date; createdAt: string | Date }): SessionInfo => ({
+const toSessionInfo = (s: AuthSessionSummary): SessionInfo => ({
   id: s.id,
   ipAddress: s.ipAddress ?? null,
   userAgent: s.userAgent ?? null,
@@ -38,11 +38,12 @@ export const createSessionsLive = (api: typeof LexaApi) =>
     handlers
       .handle("listSessions", (req) =>
         respond(Effect.gen(function* () {
+          const hooks = yield* ApiAuthHooks;
           const headers = new Headers(req.request.headers);
-          const sessions = yield* Effect.tryPromise(() => auth.api.listSessions({ headers })).pipe(
+          const sessions = yield* Effect.tryPromise(() => hooks.listSessions(headers)).pipe(
             Effect.mapError((cause) => new Error("listSessions failed", { cause }))
           );
-          const own = ((sessions ?? []) as Parameters<typeof toSessionInfo>[0][])
+          const own = (sessions ?? [])
             .map(toSessionInfo)
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           return { data: own };
@@ -50,15 +51,16 @@ export const createSessionsLive = (api: typeof LexaApi) =>
       )
       .handle("revokeSession", (req) =>
         respond(Effect.gen(function* () {
+          const hooks = yield* ApiAuthHooks;
           const headers = new Headers(req.request.headers);
-          const sessions = yield* Effect.tryPromise(() => auth.api.listSessions({ headers })).pipe(
+          const sessions = yield* Effect.tryPromise(() => hooks.listSessions(headers)).pipe(
             Effect.mapError((cause) => new Error("listSessions failed", { cause }))
           );
           const target = (sessions ?? []).find((s) => s.id === req.path.sessionId);
           if (!target) {
             return yield* Effect.fail(new SessionNotFound());
           }
-          yield* Effect.tryPromise(() => auth.api.revokeSession({ body: { token: target.token }, headers })).pipe(
+          yield* Effect.tryPromise(() => hooks.revokeSession({ token: target.token, headers })).pipe(
             Effect.mapError((cause) => new Error("revokeSession failed", { cause }))
           );
         }))
