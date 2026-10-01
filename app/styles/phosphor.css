@@ -8781,6 +8781,7 @@
   font-size: 10px;
   color: var(--lx-text-secondary);
 }
+.deck-attach-item.is-pending { border-style: dashed; }
 .deck-attach-thumb { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; }
 .deck-meter { flex: 1; height: 3px; border-radius: 2px; background: var(--lx-border-subtle); position: relative; }
 .deck-meter-fill { position: absolute; left: 0; top: 0; height: 3px; border-radius: 2px; background: var(--lx-border-focus); }

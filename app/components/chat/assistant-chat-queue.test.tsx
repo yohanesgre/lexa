@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { AssistantChatComposer, lastApprovalBatch } from "./AssistantChatComposer";
 import { useChatQueue } from "./useChatQueue";
-import type { AssistantImage } from "../../lib/assistant-image";
+import type { ChatAttachmentRef, ComposerAttachment } from "../../lib/assistant-image";
 import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
 
 // Client-only queue (assistant-chat-deck §3.3): one held message per thread.
@@ -19,26 +19,42 @@ function renderQueue(status: AssistantStreamStatus, send = vi.fn()) {
   return { ...utils, send };
 }
 
+function readyAttachment(overrides: Partial<ComposerAttachment> = {}): ComposerAttachment {
+  return {
+    id: "i1",
+    kind: "image",
+    file: new File([new Uint8Array(1024)], "sketch.png", { type: "image/png" }),
+    name: "sketch.png",
+    size: 1024,
+    mimeType: "image/png",
+    previewUrl: "blob:mock",
+    status: "ready",
+    progress: 100,
+    storageKey: "sk1",
+    ...overrides,
+  };
+}
+
 describe("useChatQueue", () => {
   it("holds a message while streaming without sending it", () => {
     const { result, send } = renderQueue("streaming");
-    act(() => result.current.enqueue("hold this", 0));
+    act(() => result.current.enqueue("hold this"));
     expect(result.current.queued?.text).toBe("hold this");
     expect(send).not.toHaveBeenCalled();
   });
 
   it("flushes the queue on a clean done and marks it flushing", () => {
     const { result, rerender, send } = renderQueue("streaming");
-    act(() => result.current.enqueue("ship it", 1));
+    act(() => result.current.enqueue("ship it"));
     rerender({ chatId: "A", streamStatus: "done" });
 
-    expect(send).toHaveBeenCalledWith("ship it", 1);
+    expect(send).toHaveBeenCalledWith("ship it", []);
     expect(result.current.queued?.flushing).toBe(true);
   });
 
   it("keeps the message held (stopped) after an aborted turn", () => {
     const { result, rerender, send } = renderQueue("streaming");
-    act(() => result.current.enqueue("still here", 0));
+    act(() => result.current.enqueue("still here"));
     rerender({ chatId: "A", streamStatus: "aborted" });
 
     expect(send).not.toHaveBeenCalled();
@@ -47,7 +63,7 @@ describe("useChatQueue", () => {
 
   it("keeps the message held (failed) after an errored turn", () => {
     const { result, rerender, send } = renderQueue("streaming");
-    act(() => result.current.enqueue("still here", 0));
+    act(() => result.current.enqueue("still here"));
     rerender({ chatId: "A", streamStatus: "error" });
 
     expect(send).not.toHaveBeenCalled();
@@ -56,7 +72,7 @@ describe("useChatQueue", () => {
 
   it("re-holds a flushed message when that turn fails", () => {
     const { result, rerender, send } = renderQueue("streaming");
-    act(() => result.current.enqueue("try me", 0));
+    act(() => result.current.enqueue("try me"));
     rerender({ chatId: "A", streamStatus: "done" });
     expect(send).toHaveBeenCalledTimes(1);
 
@@ -68,19 +84,19 @@ describe("useChatQueue", () => {
 
   it("does not flush while the turn is suspended, then flushes on done", () => {
     const { result, rerender, send } = renderQueue("streaming");
-    act(() => result.current.enqueue("after approvals", 0));
+    act(() => result.current.enqueue("after approvals"));
     rerender({ chatId: "A", streamStatus: "suspended" });
 
     expect(send).not.toHaveBeenCalled();
     expect(result.current.queued?.heldReason).toBeUndefined();
 
     rerender({ chatId: "A", streamStatus: "done" });
-    expect(send).toHaveBeenCalledWith("after approvals", 0);
+    expect(send).toHaveBeenCalledWith("after approvals", []);
   });
 
   it("keeps one message per thread", () => {
     const { result, rerender } = renderQueue("streaming");
-    act(() => result.current.enqueue("for A", 0));
+    act(() => result.current.enqueue("for A"));
     expect(result.current.queued?.text).toBe("for A");
 
     rerender({ chatId: "B", streamStatus: "streaming" });
@@ -94,12 +110,12 @@ describe("useChatQueue", () => {
     const send = vi.fn(() => false);
     const onUnqueue = vi.fn();
     const { result, rerender } = renderQueue("streaming", send);
-    act(() => result.current.enqueue("keep me", 0));
+    act(() => result.current.enqueue("keep me"));
     rerender({ chatId: "A", streamStatus: "done" });
 
     // The refused flush is attempted once, never reported as sent, and the
     // entry stays held with flushing cleared (not a stuck "Sending…" chip).
-    expect(send).toHaveBeenCalledWith("keep me", 0);
+    expect(send).toHaveBeenCalledWith("keep me", []);
     expect(send).toHaveBeenCalledTimes(1);
     expect(result.current.queued).toMatchObject({ text: "keep me", flushing: false });
 
@@ -162,7 +178,7 @@ describe("AssistantChatComposer — queue controls", () => {
     expect(container.querySelector(".deck-action")!.textContent).toContain("HELD — TURN STOPPED");
 
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(onSend).toHaveBeenCalledWith("later", 0);
+    expect(onSend).toHaveBeenCalledWith("later", []);
     expect(onUnqueue).toHaveBeenCalledTimes(1);
   });
 
@@ -181,11 +197,9 @@ describe("AssistantChatComposer — queue controls", () => {
     expect(onUnqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("flushes a refused held send without destroying the chip or its images", () => {
-    const onSend = vi.fn(() => false);
+  it("flushes a refused held send without destroying the chip or its attachments", () => {
+    const onSend = vi.fn((_message: string, _attachments: ChatAttachmentRef[]) => false);
     const onUnqueue = vi.fn();
-    const file = new File([new Uint8Array(1024)], "sketch.png", { type: "image/png" });
-    const image: AssistantImage = { id: "i1", file, previewUrl: "blob:mock" };
     const utils = render(
       <AssistantChatComposer
         slug="nimbus"
@@ -198,23 +212,24 @@ describe("AssistantChatComposer — queue controls", () => {
         onAbort={() => {}}
         onUnqueue={onUnqueue}
         queued={{ text: "keep me", heldReason: "stopped" }}
-        initialImages={[image]}
+        initialAttachments={[readyAttachment()]}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(onSend).toHaveBeenCalledWith("keep me", 1);
+    const refs = onSend.mock.calls[0]![1];
+    expect(onSend.mock.calls[0]![0]).toBe("keep me");
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({ storageKey: "sk1", mimeType: "image/png", name: "sketch.png" });
     expect(onUnqueue).not.toHaveBeenCalled();
     expect(utils.container.querySelector(".deck-queued-text")!.textContent).toContain("keep me");
     expect(utils.container.querySelector(".deck-attach-item")).toBeTruthy();
   });
 
-  it("keeps a held chip and its images safe while a stream runs (Send is a guarded no-op)", () => {
+  it("keeps a held chip and its attachments safe while a stream runs (Send is a guarded no-op)", () => {
     const onSend = vi.fn(() => true);
     const onUnqueue = vi.fn();
-    const file = new File([new Uint8Array(1024)], "sketch.png", { type: "image/png" });
-    const image: AssistantImage = { id: "i1", file, previewUrl: "blob:mock" };
     const props = {
       slug: "nimbus",
       busy409: false,
@@ -230,7 +245,7 @@ describe("AssistantChatComposer — queue controls", () => {
         {...props}
         streaming={false}
         queued={{ text: "held msg", heldReason: "stopped" as const }}
-        initialImages={[image]}
+        initialAttachments={[readyAttachment()]}
       />
     );
 
@@ -239,7 +254,7 @@ describe("AssistantChatComposer — queue controls", () => {
         {...props}
         streaming
         queued={{ text: "held msg", heldReason: "stopped" as const }}
-        initialImages={[image]}
+        initialAttachments={[readyAttachment()]}
       />
     );
 
@@ -253,14 +268,38 @@ describe("AssistantChatComposer — queue controls", () => {
     expect(utils.container.querySelector(".deck-attach-item")).toBeTruthy();
   });
 
-  it("revokes preview URLs when an image is removed and when the message is sent", () => {
+  it("blocks the held Send while an attachment failed extraction", () => {
+    const onSend = vi.fn(() => true);
+    render(
+      <AssistantChatComposer
+        slug="nimbus"
+        streaming={false}
+        busy409={false}
+        suspendedLock={false}
+        suspendCount={0}
+        attachDisabled={false}
+        onSend={onSend}
+        onAbort={() => {}}
+        queued={{ text: "held msg", heldReason: "stopped" }}
+        initialAttachments={[readyAttachment({ status: "extraction-failed" })]}
+      />
+    );
+
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+    fireEvent.click(send);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("revokes preview URLs when an attachment is removed and when the sent chip clears", () => {
     const revoke = vi.fn();
     const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
     Object.defineProperty(URL, "revokeObjectURL", { value: revoke, configurable: true, writable: true });
     try {
-      const first: AssistantImage = { id: "i1", file: new File([new Uint8Array(8)], "a.png", { type: "image/png" }), previewUrl: "blob:first" };
-      const second: AssistantImage = { id: "i2", file: new File([new Uint8Array(8)], "b.png", { type: "image/png" }), previewUrl: "blob:second" };
-      const { container } = renderComposer({ initialImages: [first, second] });
+      const first = readyAttachment({ id: "i1", name: "a.png", previewUrl: "blob:first" });
+      const second = readyAttachment({ id: "i2", name: "b.png", previewUrl: "blob:second", storageKey: "sk2" });
+      const overrides = { initialAttachments: [first, second] };
+      const { container, rerender } = renderComposer(overrides);
 
       fireEvent.click(screen.getByRole("button", { name: "Remove a.png" }));
       expect(revoke).toHaveBeenCalledWith("blob:first");
@@ -270,6 +309,22 @@ describe("AssistantChatComposer — queue controls", () => {
       fireEvent.change(screen.getByLabelText("Message Assistant"), { target: { value: "go" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
+      // Sent chips clear on the terminal stream status; the object URL is
+      // revoked with the chip.
+      rerender(
+        <AssistantChatComposer
+          slug="nimbus"
+          streaming={false}
+          streamStatus="done"
+          busy409={false}
+          suspendedLock={false}
+          suspendCount={0}
+          attachDisabled={false}
+          onSend={() => true}
+          onAbort={() => {}}
+          {...overrides}
+        />
+      );
       expect(revoke).toHaveBeenCalledWith("blob:second");
     } finally {
       if (originalRevoke) Object.defineProperty(URL, "revokeObjectURL", originalRevoke);

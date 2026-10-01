@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, FileText } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { AssistantFlameIcon } from "../assistant/panel/AssistantFlameIcon";
 import { CheckIcon, CopyButton, EditIcon, RegenerateIcon, XIcon } from "./assistant-chat-icons";
 import { AssistantActivity } from "./AssistantActivity";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
-import { hhmm } from "./assistant-chat-utils";
+import { hhmm, refKind } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
+import { chatAttachmentUrl, type ChatAttachment } from "../../lib/api";
+import { formatBytes, type ChatAttachmentRef } from "../../lib/assistant-image";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 
 type Stream = ReturnType<typeof useAssistantStream>;
@@ -96,6 +98,36 @@ function UserTurnEditor({
   );
 }
 
+// Sent-message attachments (herald-chat.html "Sent-message rendering"): images
+// resolve as storage-ref thumbnails inside the user bubble (local object URL
+// while optimistic, chat attachment serve URL after reload), documents as a
+// glyph + name + size chip. Both re-appear on reload because they ride the
+// persisted turn.
+function SentAttachment({ att, index }: { att: ChatAttachmentRef; index: Map<string, ChatAttachment> | undefined }) {
+  const meta = index?.get(att.storageKey);
+  const name = att.name || meta?.filename || "";
+  const size = att.sizeBytes ?? meta?.sizeBytes;
+  if (refKind(att.mimeType) === "image") {
+    const src = (meta ? chatAttachmentUrl(meta.id) : undefined) ?? att.previewUrl;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {src ? (
+          <img alt={name} src={src} style={{ width: 56, height: 56, border: "1px solid var(--lx-border-default)", borderRadius: 6, background: "var(--lx-surface-card-hover)", objectFit: "cover" }} />
+        ) : (
+          <div style={{ width: 56, height: 56, border: "1px solid var(--lx-border-default)", borderRadius: 6, background: "var(--lx-surface-card-hover)" }} />
+        )}
+        {name && <span className="font-micro text-2xs text-lx-text-muted truncate" style={{ maxWidth: 72 }}>{name}</span>}
+      </div>
+    );
+  }
+  return (
+    <span className="deck-attach-item" style={{ background: "var(--lx-surface-card)" }}>
+      <FileText size={14} strokeWidth={1.5} style={{ color: "var(--lx-text-muted)", flexShrink: 0 }} />
+      {name || "document"}{size !== undefined ? ` · ${formatBytes(size)}` : ""}
+    </span>
+  );
+}
+
 export function UserTurnBubble({
   turn,
   pos,
@@ -109,6 +141,7 @@ export function UserTurnBubble({
   lastUser,
   streaming,
   onRegenerate,
+  attachmentIndex,
 }: {
   turn: ChatTurn;
   pos: number;
@@ -122,8 +155,10 @@ export function UserTurnBubble({
   lastUser: boolean;
   streaming: boolean;
   onRegenerate: () => void;
+  attachmentIndex?: Map<string, ChatAttachment> | undefined;
 }) {
   const time = hhmm(turn.ts);
+  const attachments = turn.attachments ?? [];
   return (
     <div className="bubble-user">
       <div className="bubble-meta" style={{ textAlign: "right" }}>You{time ? ` · ${time}` : ""}</div>
@@ -132,10 +167,10 @@ export function UserTurnBubble({
       ) : (
         <>
           <div className="text-sm text-lx-text-primary" style={{ lineHeight: "20px" }}>{renderTokenized(turn.text, slug)}</div>
-          {turn.imageCount > 0 && (
-            <div className="flex items-center gap-2 mt-2">
-              {Array.from({ length: turn.imageCount }).map((_, j) => (
-                <div key={j} style={{ width: 40, height: 40, border: "1px solid var(--lx-border-default)", borderRadius: 6, background: "var(--lx-surface-card-hover)" }} />
+          {attachments.length > 0 && (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              {attachments.map((att, j) => (
+                <SentAttachment key={`${att.storageKey}-${j}`} att={att} index={attachmentIndex} />
               ))}
             </div>
           )}

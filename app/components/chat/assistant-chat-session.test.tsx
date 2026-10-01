@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tan
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { AssistantChatComposer } from "./AssistantChatComposer";
+import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ToastProvider } from "../ui/Toast";
 import { appendEphemeralUserTurn, terminalTranscriptAction } from "./assistant-chat-logic";
 import { useSettledTurns, useTerminalRefetch, useTurnResend } from "./assistant-chat-session";
@@ -78,7 +79,7 @@ describe("useSettledTurns — fresh thread 404 keeps the optimistic user turn", 
     expect(result.current.turns).toEqual([]);
 
     // send()'s optimistic append
-    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", 0)));
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", [])));
     const optimistic = [{ role: "user", text: "hello", imageCount: 0, rawIndex: -1 }];
     expect(result.current.turns).toEqual(optimistic);
 
@@ -166,7 +167,7 @@ function FreshThreadHarness({ stream, queryFn }: { stream: Stream; queryFn: () =
   useTerminalRefetch({ stream, chatId, projectId: "p1", qc, transcriptError: transcript.error });
   return (
     <>
-      <button onClick={() => setTurns((prev) => appendEphemeralUserTurn(prev, "hello", 0))}>send</button>
+      <button onClick={() => setTurns((prev) => appendEphemeralUserTurn(prev, "hello", []))}>send</button>
       <div data-testid="turns">{(turns ?? []).map((t) => `${t.role}:${t.text}`).join("|")}</div>
     </>
   );
@@ -256,7 +257,7 @@ describe("useTurnResend — raw index space", () => {
     const turns = [{ role: "user" as const, text: "hello", imageCount: 0, rawIndex: -1 }, errorTurn];
     const { result, startStream } = renderResend({ turns, rawMessages: [{ role: "user", content: "hello" }] });
     act(() => result.current.handleRetryTurn(turns[1]!));
-    expect(startStream).toHaveBeenCalledWith("hello", 0);
+    expect(startStream).toHaveBeenCalledWith("hello", [], 0);
   });
 
   it("resends from the raw user index once the transcript has it", () => {
@@ -267,7 +268,7 @@ describe("useTurnResend — raw index space", () => {
     ];
     const { result, startStream } = renderResend({ turns, rawMessages: raw });
     act(() => result.current.handleRetryTurn(turns[1]!));
-    expect(startStream).toHaveBeenCalledWith("hello", 0);
+    expect(startStream).toHaveBeenCalledWith("hello", [], 0);
   });
 
   it("regenerates from the correct raw index despite a stale display position", () => {
@@ -280,7 +281,7 @@ describe("useTurnResend — raw index space", () => {
     const target = { role: "user" as const, text: "next", imageCount: 0, rawIndex: 0 };
     const { result, startStream } = renderResend({ turns: [target], rawMessages: raw });
     act(() => result.current.handleRegenerate(target));
-    expect(startStream).toHaveBeenCalledWith("next", 2);
+    expect(startStream).toHaveBeenCalledWith("next", [], 2);
   });
 
   it("refuses an optimistic retry whose duplicate text only matches an older prompt (stale raw → toast, no truncation)", () => {
@@ -315,7 +316,7 @@ describe("useTurnResend — raw index space", () => {
     ];
     const { result, startStream } = renderResend({ turns, rawMessages: raw });
     act(() => result.current.handleRetryTurn(turns[3]!));
-    expect(startStream).toHaveBeenCalledWith("hello", 2);
+    expect(startStream).toHaveBeenCalledWith("hello", [], 2);
   });
 });
 
@@ -323,6 +324,19 @@ function renderComposer(overrides: Partial<Parameters<typeof AssistantChatCompos
   const onSend = vi.fn(() => true);
   const onQueue = vi.fn();
   const onUnqueue = vi.fn();
+  const uploadAttachment = vi.fn(async (req: ChatUploadRequest) => ({
+    id: "att-1",
+    projectId: "p1",
+    chatId: req.chatId,
+    filename: req.file.name,
+    mimeType: req.file.type,
+    sizeBytes: req.file.size,
+    sha256: "sha",
+    storageKey: "sk-1",
+    uploadedBy: null,
+    uploadedByLabel: null,
+    createdAt: "2026-01-01T00:00:00Z",
+  }));
   const utils = render(
     <AssistantChatComposer
       slug="nimbus"
@@ -335,10 +349,12 @@ function renderComposer(overrides: Partial<Parameters<typeof AssistantChatCompos
       onAbort={() => {}}
       onQueue={onQueue}
       onUnqueue={onUnqueue}
+      ensureChatId={() => "chat-1"}
+      uploadAttachment={uploadAttachment}
       {...overrides}
     />
   );
-  return { ...utils, onSend, onQueue, onUnqueue };
+  return { ...utils, onSend, onQueue, onUnqueue, uploadAttachment };
 }
 
 describe("AssistantChatComposer", () => {
@@ -354,7 +370,7 @@ describe("AssistantChatComposer", () => {
     fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(textarea, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("hello", 0);
+    expect(onSend).toHaveBeenCalledWith("hello", []);
   });
 
   it("shows the wireframe busy-409 placeholder, reason line, and no action button", () => {
@@ -391,17 +407,17 @@ describe("AssistantChatComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("renders the attachment strip with name, size and meter — no caps copy", () => {
+  it("renders the attachment strip with name, size and meter — no caps copy", async () => {
     const createObjectURL = vi.fn(() => "blob:preview");
     Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, configurable: true });
     const { container } = renderComposer();
     const file = new File([new Uint8Array(524288)], "screenshot.png", { type: "image/png" });
     fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
 
+    await waitFor(() => expect(container.querySelector(".deck-attach-item")).toBeTruthy());
     const item = container.querySelector(".deck-attach-item")!;
-    expect(item).toBeTruthy();
     expect(item.textContent).toContain("screenshot.png");
-    expect(item.textContent).toContain("0.5MB");
+    expect(item.textContent).toContain("512KB");
     expect(item.querySelector(".deck-attach-thumb")).toBeTruthy();
     expect(container.querySelector(".deck-meter")).toBeTruthy();
     expect(container.querySelector(".deck-meter-fill")).toBeTruthy();

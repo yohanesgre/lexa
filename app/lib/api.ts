@@ -255,6 +255,9 @@ export interface Capabilities {
   assistant: boolean;
   flavor: "bun" | "workers";
   tasksBulk?: boolean | undefined;
+  // LX-2 kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1 → false); absent on older
+  // builds, which the UI treats as enabled.
+  chatAttachments?: boolean | undefined;
 }
 
 export function getCapabilities(): Promise<Capabilities> {
@@ -1163,6 +1166,84 @@ export function uploadAttachmentWithProgress(
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve((xhr.response ?? {}) as { data: Attachment; activity?: ActivityEvent[] });
+        return;
+      }
+      const body = (xhr.response ?? {}) as { error?: { code?: string | undefined; message?: string | undefined; details?: unknown } };
+      const err = new Error(body.error?.message ?? `HTTP ${xhr.status}`) as Error & { code?: string | undefined; details?: unknown };
+      err.code = body.error?.code;
+      err.details = body.error?.details;
+      reject(err);
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.onabort = () => {
+      const err = new Error("Upload cancelled") as Error & { code?: string };
+      err.code = "UPLOAD_CANCELLED";
+      reject(err);
+    };
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+    }
+    xhr.send(form);
+  });
+  return { promise, abort: () => xhr.abort() };
+}
+
+// ── Chat attachments (LX-2, thread-scoped conversation context) ──
+
+// `ChatAttachment` = the upload/list row. A send references these by
+// `storageKey` (see AssistantChatAttachment in shared/assistant.ts).
+export interface ChatAttachment {
+  id: string;
+  projectId: string;
+  chatId: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  storageKey: string;
+  uploadedBy: string | null;
+  uploadedByLabel: string | null;
+  createdAt: string;
+}
+
+export function listChatAttachments(slug: string, chatId: string): Promise<{ data: ChatAttachment[] }> {
+  return request(`${BASE}/projects/${encodeURIComponent(slug)}/assistant/chat/${encodeURIComponent(chatId)}/attachments`);
+}
+
+// Binary serve URL — never fetched through `request` (images render straight
+// from this in an <img src>). The session cookie is sent by the browser.
+export function chatAttachmentUrl(id: string): string {
+  return `${BASE}/chat-attachments/${encodeURIComponent(id)}`;
+}
+
+// Chat uploads resolve a ChatAttachment (not a task/wiki Attachment), so they
+// need their own handle type.
+export interface ChatUploadHandle {
+  promise: Promise<{ data: ChatAttachment }>;
+  abort: () => void;
+}
+
+// XHR upload with determinate progress + in-flight abort (same shape as the
+// task/wiki upload helper).
+export function uploadChatAttachmentWithProgress(
+  slug: string,
+  chatId: string,
+  file: File,
+  onProgress?: (percent: number) => void
+): ChatUploadHandle {
+  const path = `${BASE}/projects/${encodeURIComponent(slug)}/assistant/chat/${encodeURIComponent(chatId)}/attachments`;
+  const form = new FormData();
+  form.append("file", file);
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<{ data: ChatAttachment }>((resolve, reject) => {
+    xhr.open("POST", path);
+    xhr.withCredentials = true;
+    xhr.responseType = "json";
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve((xhr.response ?? {}) as { data: ChatAttachment });
         return;
       }
       const body = (xhr.response ?? {}) as { error?: { code?: string | undefined; message?: string | undefined; details?: unknown } };

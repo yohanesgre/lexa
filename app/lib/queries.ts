@@ -2070,6 +2070,40 @@ export function useDeleteAttachment(slug: string, documentType: "task" | "wiki",
   });
 }
 
+// ── Chat attachments (LX-2) ──
+
+// The thread's uploaded rows — keyed by storageKey, used to resolve sent
+// message refs to a serve URL + size on transcript reload.
+export function useChatAttachments(slug: string, chatId: string) {
+  return useQuery({
+    queryKey: ["chat-attachments", slug, chatId],
+    queryFn: () => api.listChatAttachments(slug, chatId).then((r) => r.data),
+    enabled: !!slug && !!chatId,
+  });
+}
+
+type ChatAttachmentUploadInput = {
+  chatId: string;
+  file: File;
+  onProgress?: (percent: number) => void;
+  onHandle?: (handle: { abort: () => void }) => void;
+};
+
+export function useUploadChatAttachment(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    // No toast on error: the composer renders the per-file failed-upload row.
+    mutationFn: ({ chatId, file, onProgress, onHandle }: ChatAttachmentUploadInput) => {
+      const handle = api.uploadChatAttachmentWithProgress(slug, chatId, file, onProgress);
+      onHandle?.(handle);
+      return handle.promise.then((r) => r.data);
+    },
+    onSuccess: (data, vars) => {
+      qc.setQueryData<api.ChatAttachment[]>(["chat-attachments", slug, vars.chatId], (old) => (old ? [...old, data] : [data]));
+    },
+  });
+}
+
 // ── Assistant (server-side assistant tier) ──
 // Cache keys: chat list ["assistant-chats",projectId] vs doc thread ["assistant-thread",projectId,docType,docId] vs single chat ["assistant-chat",chatId] — distinct prefixes, no collision. Verified 2026-08-27 concern split.
 

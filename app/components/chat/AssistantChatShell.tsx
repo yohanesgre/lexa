@@ -5,13 +5,16 @@ import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
 import { AssistantBubble } from "./AssistantBubble";
-import { AssistantChatComposer } from "./AssistantChatComposer";
+import { AssistantChatComposer, type ChatUploadRequest } from "./AssistantChatComposer";
 import { EffortPicker, DeckRailSummary } from "./EffortPicker";
 import { useChatComposerClearance } from "./assistant-chat-hooks";
 import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
 import type { QueuedMessage } from "./useChatQueue";
 import type { LexaSkill } from "../../../shared/types";
 import type { AssistantReasoningEffort } from "../../../shared/assistant";
+import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
+import type { ChatAttachmentRef } from "../../lib/assistant-image";
+import type { ChatAttachment } from "../../lib/api";
 
 type Stream = ReturnType<typeof useAssistantStream>;
 
@@ -265,6 +268,7 @@ export function ChatTranscriptArea({
   stream,
   atBottom,
   onJump,
+  attachmentIndex,
 }: {
   turns: ChatTurn[];
   slug: string;
@@ -290,6 +294,7 @@ export function ChatTranscriptArea({
   stream: Stream;
   atBottom: boolean;
   onJump: () => void;
+  attachmentIndex?: Map<string, ChatAttachment> | undefined;
 }) {
   const lastAssistantPos = turns.findLastIndex((turn) => turn.role === "assistant");
   return (
@@ -313,6 +318,7 @@ export function ChatTranscriptArea({
                 lastUser={pos === lastUserPos}
                 streaming={streaming}
                 onRegenerate={() => onRegenerate(turn)}
+                attachmentIndex={attachmentIndex}
               />
             ) : (
               <AssistantBubble
@@ -345,9 +351,12 @@ export function ChatComposerArea({
   busy409,
   slug,
   streaming,
+  streamStatus,
+  sendError,
   suspendedLock,
   suspendCount,
   attachDisabled,
+  attachmentsEnabled = true,
   isMobileComposer,
   effort,
   projectEffort,
@@ -359,25 +368,32 @@ export function ChatComposerArea({
   onQueue,
   onUnqueue,
   seed,
+  ensureChatId,
+  uploadAttachment,
 }: {
   skills: LexaSkill[];
   busy409: boolean;
   slug: string;
   streaming: boolean;
+  streamStatus?: AssistantStreamStatus | undefined;
+  sendError?: { code: string; details?: unknown } | null | undefined;
   suspendedLock: boolean;
   suspendCount: number;
   attachDisabled: boolean;
+  attachmentsEnabled?: boolean | undefined;
   isMobileComposer: boolean;
   effort: AssistantReasoningEffort | "";
   projectEffort: AssistantReasoningEffort | null | undefined;
   onEffortChange: (e: AssistantReasoningEffort | "") => void;
-  onSend: (message: string, imageCount: number) => boolean;
+  onSend: (message: string, attachments: ChatAttachmentRef[]) => boolean;
   onAbort: () => void;
   landing?: boolean | undefined;
   queued?: QueuedMessage | null | undefined;
   onQueue?: ((text: string) => void) | undefined;
   onUnqueue?: (() => void) | undefined;
   seed?: { text: string; nonce: number } | null | undefined;
+  ensureChatId?: (() => string) | undefined;
+  uploadAttachment?: ((req: ChatUploadRequest) => Promise<ChatAttachment>) | undefined;
 }) {
   const railDisabled = streaming || busy409 || suspendedLock;
   // The docked composer floats over the transcript (chat-composer-float);
@@ -399,16 +415,21 @@ export function ChatComposerArea({
           slug={slug}
           skills={skills}
           streaming={streaming}
+          streamStatus={streamStatus}
           busy409={busy409}
           suspendedLock={suspendedLock}
           suspendCount={suspendCount}
           attachDisabled={attachDisabled}
+          attachmentsEnabled={attachmentsEnabled}
+          sendError={sendError}
           onSend={onSend}
           onAbort={onAbort}
           queued={queued}
           onQueue={onQueue}
           onUnqueue={onUnqueue}
           seed={seed}
+          ensureChatId={ensureChatId}
+          uploadAttachment={uploadAttachment}
           rail={
             isMobileComposer ? (
               <>

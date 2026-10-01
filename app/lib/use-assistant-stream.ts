@@ -74,7 +74,7 @@ export interface AssistantStreamSnapshot {
   pending: AssistantPendingChip[];
   // Set by the terminal `suspended` frame — the batch awaiting decisions.
   suspendedBatchId: string | null;
-  error: { code: string; message: string } | null;
+  error: { code: string; message: string; details?: unknown } | null;
   usage: { in: number; out: number } | null;
   hasIngress: boolean;
 }
@@ -186,10 +186,14 @@ class AssistantStreamSession {
       return;
     }
     if (!res.ok) {
-      const payload = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string } };
+      const payload = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string; details?: unknown } };
       this.emit({
         status: "error",
-        error: { code: payload.error?.code ?? `HTTP ${res.status}`, message: payload.error?.message ?? `Request failed (${res.status}).` },
+        error: {
+          code: payload.error?.code ?? `HTTP ${res.status}`,
+          message: payload.error?.message ?? `Request failed (${res.status}).`,
+          ...(payload.error?.details !== undefined ? { details: payload.error.details } : {}),
+        },
       });
       return;
     }

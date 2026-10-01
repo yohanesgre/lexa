@@ -1,6 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ASSISTANT_AGENT_ID, hasVisionCapability } from "../../lib/assistant-agent";
 import type { LexaSkill } from "../../../shared/types";
+import type { AssistantChatAttachment } from "../../../shared/assistant";
+import type { ChatAttachmentRef } from "../../lib/assistant-image";
 import { deriveChatTitle } from "../../../shared/assistant";
 import type { AssistantChatThreadSummary } from "../../lib/api";
 import { resolveRawUserIndex } from "../../lib/resendIndex";
@@ -69,13 +71,19 @@ export function chatStreamBody(args: {
   chatId: string;
   message: string;
   effort: string;
+  attachments?: ChatAttachmentRef[] | undefined;
   fromIndex?: number | undefined;
 }) {
+  const attachments: AssistantChatAttachment[] = (args.attachments ?? []).map((a) => ({
+    storageKey: a.storageKey,
+    mimeType: a.mimeType,
+    name: a.name,
+  }));
   return {
     projectId: args.projectId,
     chatId: args.chatId,
     message: args.message,
-    attachments: [],
+    attachments,
     ...(args.effort ? { reasoningEffort: args.effort } : {}),
     ...(args.fromIndex !== undefined ? { fromIndex: args.fromIndex } : {}),
   };
@@ -83,8 +91,18 @@ export function chatStreamBody(args: {
 
 // ── Turn list transforms (setTurns updaters) ──
 
-export function appendEphemeralUserTurn(prev: ChatTurn[] | null, message: string, imageCount: number): ChatTurn[] {
-  return [...(prev ?? []), { role: "user", text: message, imageCount, rawIndex: -1 }];
+export function ephemeralUserTurn(message: string, attachments: ChatAttachmentRef[], rawIndex = -1): ChatTurn {
+  return {
+    role: "user",
+    text: message,
+    imageCount: attachments.filter((a) => a.mimeType.startsWith("image/")).length,
+    rawIndex,
+    ...(attachments.length > 0 ? { attachments } : {}),
+  };
+}
+
+export function appendEphemeralUserTurn(prev: ChatTurn[] | null, message: string, attachments: ChatAttachmentRef[]): ChatTurn[] {
+  return [...(prev ?? []), ephemeralUserTurn(message, attachments)];
 }
 
 // Keep turns up to & including `target` (optionally rewriting its text) —

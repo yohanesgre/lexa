@@ -6,6 +6,9 @@ import {
   useAgents,
   useSkills,
   useAssistantChatList,
+  useCapabilities,
+  useChatAttachments,
+  useUploadChatAttachment,
 } from "../../lib/queries";
 import { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -42,7 +45,10 @@ import {
   useThreadKnowledge,
 } from "./assistant-chat-session";
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
+import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
+import type { ChatAttachment } from "../../lib/api";
+import type { ChatAttachmentRef } from "../../lib/assistant-image";
 
 // Assistant Chat — dedicated /$slug/chat route (assistant-chat.html +
 // assistant-chat-upgrades.html). Multi-thread per (project, user): the
@@ -270,14 +276,40 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     ingressInsertedRef,
   });
 
+  // LX-2 attachments: the deployment kill switch (absent on older builds →
+  // enabled), the active thread's uploaded rows (storageKey → row, resolves
+  // sent refs to serve URLs + sizes on reload), and the XHR upload mutation.
+  const capabilities = useCapabilities();
+  const attachmentsEnabled = capabilities.isFetched && capabilities.data?.chatAttachments !== false;
+  const attachmentQuery = useChatAttachments(slug, chatId);
+  const attachmentIndex = useMemo(
+    () => new Map<string, ChatAttachment>((attachmentQuery.data ?? []).map((a) => [a.storageKey, a])),
+    [attachmentQuery.data]
+  );
+  const uploadMutation = useUploadChatAttachment(slug);
+  const uploadAttachment = useCallback(
+    (req: ChatUploadRequest) => uploadMutation.mutateAsync(req),
+    [uploadMutation]
+  );
+  // Uploads are thread-scoped: mint the thread id at pick time so a file can be
+  // uploaded before the first send, then reuse that id for the send. The
+  // composer's startStream mints an id too, but this makes both agree.
+  const ensureChatId = useCallback((): string => {
+    if (chatId) return chatId;
+    const id = crypto.randomUUID();
+    applyChatId(id);
+    openThreadParam(id);
+    return id;
+  }, [chatId, applyChatId, openThreadParam]);
+
   // Returns whether the send was accepted — the composer only clears its draft
   // / held queue + attachments on an accepted send, so a refused flush can
   // never destroy a held message.
   const send = useCallback(
-    (message: string, imageCount = 0): boolean => {
+    (message: string, attachments: ChatAttachmentRef[]): boolean => {
       if (!message || streaming || suspendedLock) return false;
-      setTurns((prev) => appendEphemeralUserTurn(prev, message, imageCount));
-      startStream(message);
+      setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
+      startStream(message, attachments);
       return true;
     },
     [streaming, suspendedLock, startStream, setTurns]
@@ -415,9 +447,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             onAbort={handleAbort}
             landing={isLanding}
             queued={queued}
-            onQueue={(text) => enqueue(text, 0)}
+            onQueue={(text) => enqueue(text)}
             onUnqueue={unqueue}
             seed={seed}
+            streamStatus={stream.status}
+            sendError={stream.error}
+            attachmentsEnabled={attachmentsEnabled}
+            ensureChatId={ensureChatId}
+            uploadAttachment={uploadAttachment}
           />
         </ChatLanding>
       ) : (
@@ -447,6 +484,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             stream={stream}
             atBottom={atBottom}
             onJump={() => scrollToBottom(true)}
+            attachmentIndex={attachmentIndex}
           />
 
           <ChatComposerArea
@@ -465,9 +503,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             onAbort={handleAbort}
             landing={isLanding}
             queued={queued}
-            onQueue={(text) => enqueue(text, 0)}
+            onQueue={(text) => enqueue(text)}
             onUnqueue={unqueue}
             seed={seed}
+            streamStatus={stream.status}
+            sendError={stream.error}
+            attachmentsEnabled={attachmentsEnabled}
+            ensureChatId={ensureChatId}
+            uploadAttachment={uploadAttachment}
           />
         </>
       )}

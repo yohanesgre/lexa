@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
 import { createQueryWrapper, createTestQueryClient } from "../../test-utils";
+import type { ChatAttachmentRef } from "../../lib/assistant-image";
 
 const navigateMock = vi.hoisted(() => vi.fn());
 const getAssistantChatMock = vi.hoisted(() => vi.fn());
@@ -13,7 +14,7 @@ const shellCapture = vi.hoisted(() => ({ turns: null as unknown }));
 // Captured composer props — landing tests read the seed the page hands down.
 const composerCapture = vi.hoisted(() => ({
   seed: null as { text: string; nonce: number } | null,
-  onSend: null as ((message: string, imageCount: number) => boolean) | null,
+  onSend: null as ((message: string, attachments: ChatAttachmentRef[]) => boolean) | null,
 }));
 
 // Mutable assistant-stream snapshot: the page test drives the live session
@@ -90,6 +91,9 @@ vi.mock("../../lib/queries", () => ({
   useSkills: () => ({ data: [] }),
   useAssistantSettings: () => ({ data: fx.settings, isLoading: false }),
   useAssistantChatList: (projectId: string) => ({ data: fx.lists[projectId] ?? [], isLoading: fx.listLoading }),
+  useCapabilities: () => ({ data: { chatAttachments: true }, isFetched: true }),
+  useChatAttachments: () => ({ data: [] }),
+  useUploadChatAttachment: () => ({ mutateAsync: vi.fn(async () => ({})) }),
   useRenameAssistantChat: () => ({ mutateAsync: vi.fn(async () => {}) }),
   useUpdateAssistantChatMeta: () => ({ mutateAsync: vi.fn(async () => {}) }),
   useDeleteAssistantChat: () => ({
@@ -133,7 +137,7 @@ vi.mock("./AssistantChatShell", () => ({
   },
   ChatComposerArea: (props: {
     seed?: { text: string; nonce: number } | null | undefined;
-    onSend?: (message: string, imageCount: number) => boolean;
+    onSend?: (message: string, attachments: ChatAttachmentRef[]) => boolean;
   }) => {
     composerCapture.seed = props.seed ?? null;
     composerCapture.onSend = props.onSend ?? null;
@@ -535,7 +539,7 @@ describe("AssistantChatPage — zero-turn landing", () => {
     // seed must drop — otherwise returning to the landing remounts the composer
     // and refills the draft with the stale chip text.
     act(() => {
-      expect(composerCapture.onSend!("Create a task from my notes", 0)).toBe(true);
+      expect(composerCapture.onSend!("Create a task from my notes", [])).toBe(true);
     });
 
     await waitFor(() => expect(composerCapture.seed).toBeNull());
