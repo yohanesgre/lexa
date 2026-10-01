@@ -32,9 +32,28 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: api.createProject,
     onSuccess: (project) => {
-      qc.setQueryData(["projects"], (old: unknown) => {
-        if (!Array.isArray(old)) return old;
+      // Idempotent by project id: a double submit that resolves to the same
+      // project must not duplicate the row in either cache.
+      qc.setQueryData<Project[]>(["projects"], (old) => {
+        if (!old || old.some((p) => p.id === project.id)) return old;
         return [project, ...old];
+      });
+      // The dashboard is the homepage's list (query key ["dashboard"]) — the
+      // created project must land there too, synthesized into a fresh-project
+      // ProjectHealth entry. This is an approximation, not a fetch: columnCount
+      // and wipSegments stay as synthesized (0 / []) and diverge from the
+      // server's real values (a create seeds default columns + Backlog) until
+      // the next dashboard fetch.
+      qc.setQueryData<Dashboard>(["dashboard"], (old) => {
+        if (!old || old.projects.some((h) => h.project.id === project.id)) return old;
+        return {
+          ...old,
+          projects: [
+            { project, taskCount: 0, columnCount: 0, urgentCount: 0, syncCount: 0, health: "ok", wipSegments: [] },
+            ...old.projects,
+          ],
+          stats: { ...old.stats, activeProjects: old.stats.activeProjects + 1 },
+        };
       });
       toast.push("success", "Project created");
     },

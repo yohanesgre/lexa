@@ -5,7 +5,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
-import type { Board, Task, Project, Swimlane, Column, WikiPage, FieldConfig, ActivityItem } from "../../shared/types";
+import type { Board, Task, Project, Swimlane, Column, WikiPage, FieldConfig, ActivityItem, Dashboard } from "../../shared/types";
 import { createFetchMock, createQueryWrapper, createTestQueryClient, json } from "../test-utils";
 import {
   useCreateProject, useUpdateProject, useDeleteProject, useCreateTask, useUpdateTask,
@@ -23,6 +23,13 @@ const { fetchMock, routes, mockFetch } = createFetchMock();
 
 const PROJECT: Project = { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const PROJECT2: Project = { ...PROJECT, id: "p2", slug: "other", name: "Other" };
+const PROJECT3: Project = { ...PROJECT, id: "p3", slug: "third", name: "Third" };
+const DASHBOARD: Dashboard = {
+  projects: [{ project: PROJECT, taskCount: 2, columnCount: 1, urgentCount: 0, syncCount: 0, health: "ok", wipSegments: [] }],
+  stats: { totalTasks: 2, activeProjects: 1, wipExceeded: 0, outOfSync: 0 },
+  urgentTasks: [],
+  outOfSyncTasks: [],
+};
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
 const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
 const FIELD_CONFIG: FieldConfig = { priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }], types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }] };
@@ -73,6 +80,97 @@ describe("project mutations", () => {
     expect(queryClient.getQueryData<Project[]>(["projects"])).toEqual([PROJECT2, PROJECT]);
     const projectsCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === "/api/projects" && (c[1] as RequestInit | undefined)?.method !== "POST");
     expect(projectsCalls).toHaveLength(0);
+  });
+
+  it("useCreateProject prepends the full-shape ProjectHealth entry to the dashboard and bumps activeProjects — no refetch", async () => {
+    routes.set("POST /api/projects", PROJECT2);
+    queryClient.setQueryData(["projects"], [PROJECT]);
+    queryClient.setQueryData<Dashboard>(["dashboard"], DASHBOARD);
+    const { result } = renderHook(() => useCreateProject(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ name: "Other", slug: "other" }); });
+    const dash = queryClient.getQueryData<Dashboard>(["dashboard"])!;
+    expect(dash.projects[0]).toEqual({
+      project: PROJECT2,
+      taskCount: 0,
+      columnCount: 0,
+      urgentCount: 0,
+      syncCount: 0,
+      health: "ok",
+      wipSegments: [],
+    });
+    expect(dash.projects[1]!.project.id).toBe("p1");
+    expect(dash.stats).toEqual({ totalTasks: 2, activeProjects: 2, wipExceeded: 0, outOfSync: 0 });
+    const dashboardCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === "/api/dashboard");
+    expect(dashboardCalls).toHaveLength(0);
+  });
+
+  it("useCreateProject appends a second create without losing the first", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.resolve(json(PROJECT2)))
+      .mockImplementationOnce(() => Promise.resolve(json(PROJECT3)));
+    queryClient.setQueryData(["projects"], [PROJECT]);
+    queryClient.setQueryData<Dashboard>(["dashboard"], DASHBOARD);
+    const { result } = renderHook(() => useCreateProject(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ name: "Other", slug: "other" });
+      await result.current.mutateAsync({ name: "Third", slug: "third" });
+    });
+    const dash = queryClient.getQueryData<Dashboard>(["dashboard"])!;
+    expect(dash.projects.map((h) => h.project.id)).toEqual(["p3", "p2", "p1"]);
+    expect(dash.stats.activeProjects).toBe(3);
+  });
+
+  it("useCreateProject failure writes nothing to either cache", async () => {
+    fetchMock.mockImplementationOnce(() => Promise.resolve(json({ error: { code: "CONFLICT", message: "nope" } }, 409)));
+    queryClient.setQueryData(["projects"], [PROJECT]);
+    queryClient.setQueryData<Dashboard>(["dashboard"], DASHBOARD);
+    const { result } = renderHook(() => useCreateProject(), { wrapper });
+    await expect(result.current.mutateAsync({ name: "Other", slug: "other" })).rejects.toThrow("nope");
+    expect(queryClient.getQueryData<Project[]>(["projects"])).toEqual([PROJECT]);
+    expect(queryClient.getQueryData<Dashboard>(["dashboard"])).toEqual(DASHBOARD);
+  });
+
+  // Server reality: two POSTs yield distinct ids; a duplicate slug is 409
+  // SLUG_TAKEN. This case only covers a client replaying the same response
+  // (e.g. a retried request resolving twice) — the id guard must dedupe it.
+  it("useCreateProject replayed same response yields exactly one dashboard entry", async () => {
+    routes.set("POST /api/projects", PROJECT2);
+    queryClient.setQueryData(["projects"], [PROJECT]);
+    queryClient.setQueryData<Dashboard>(["dashboard"], DASHBOARD);
+    const { result } = renderHook(() => useCreateProject(), { wrapper });
+    await act(async () => {
+      await Promise.all([
+        result.current.mutateAsync({ name: "Other", slug: "other" }),
+        result.current.mutateAsync({ name: "Other", slug: "other" }),
+      ]);
+    });
+    const dash = queryClient.getQueryData<Dashboard>(["dashboard"])!;
+    expect(dash.projects.filter((h) => h.project.id === "p2")).toHaveLength(1);
+    expect(dash.projects.map((h) => h.project.id)).toEqual(["p2", "p1"]);
+    expect(dash.stats.activeProjects).toBe(2);
+    expect(queryClient.getQueryData<Project[]>(["projects"])!.filter((p) => p.id === "p2")).toHaveLength(1);
+  });
+
+  it("useCreateProject second submit 409 SLUG_TAKEN keeps exactly one entry and surfaces the error", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.resolve(json(PROJECT2)))
+      .mockImplementationOnce(() => Promise.resolve(json({ error: { code: "SLUG_TAKEN", message: "Slug already taken" } }, 409)));
+    queryClient.setQueryData(["projects"], [PROJECT]);
+    queryClient.setQueryData<Dashboard>(["dashboard"], DASHBOARD);
+    const { result } = renderHook(() => useCreateProject(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ name: "Other", slug: "other" });
+    });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ name: "Other", slug: "other" })).rejects.toThrow("Slug already taken");
+    });
+    const dash = queryClient.getQueryData<Dashboard>(["dashboard"])!;
+    expect(dash.projects.filter((h) => h.project.id === "p2")).toHaveLength(1);
+    expect(dash.projects.map((h) => h.project.id)).toEqual(["p2", "p1"]);
+    expect(dash.stats.activeProjects).toBe(2);
+    expect(queryClient.getQueryData<Project[]>(["projects"])!.filter((p) => p.id === "p2")).toHaveLength(1);
+    expect(result.current.error).toBeInstanceOf(Error);
+    expect((result.current.error as Error).message).toBe("Slug already taken");
   });
 
   it("useUpdateProject replaces the matching row in place", async () => {
