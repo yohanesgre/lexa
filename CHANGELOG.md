@@ -7,6 +7,19 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.6] - 2026-10-01
+
+### Fixed
+
+- **Session listing and revocation 500 on Workers** — `/api/sessions` returned
+  a 500 on Cloudflare Workers deployments. The sessions handlers imported the
+  Bun better-auth singleton, which cannot run on workerd: the module has no
+  `process.env` and `bun:sqlite` is a throwing shim, so importing it took down
+  every handler in the graph. `listSessions` and `revokeSession` now resolve
+  through the `ApiAuthHooks` tag — the Bun host wires the process-wide
+  singleton, the Workers factory wires its per-request `createAuth(env)`
+  instance (D1 adapter). (#178)
+
 ## [2026.5.5] - 2026-10-01
 
 ### Added
