@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "h".repeat(43);
@@ -33,7 +33,7 @@ beforeAll(async () => {
     INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1','test','${adminHash}','u1');
     INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x', '');
   `);
-  handler = createApiHandler(dbPath);
+  handler = createAssistantApiHandler(dbPath);
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });

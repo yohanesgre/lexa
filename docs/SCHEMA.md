@@ -648,12 +648,24 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- api_keys.key_hash is indexed by its UNIQUE constraint.
 
 -- ============================================================
+-- Assistant (Cloudflare Workers only — ADR-0003)
+-- ============================================================
+-- Every `assistant_*` table below stays in the shared, flavor-agnostic
+-- migration set (Docker keeps them inert; D1 cannot drop columns cheaply).
+-- On Workers the assistant runs on `@cloudflare/ai-chat` Durable Objects: DO
+-- SQLite is the CANONICAL message store (replay/resume/recovery), and the D1
+-- `assistant_threads` row is a per-step MIRROR (list/search/export may lag by
+-- one mirror write). The Bun/Docker flavor serves no assistant routes and
+-- reports `assistant:false` from `/api/capabilities`.
+-- ============================================================
 -- Assistant task queue (document Generate)
 -- ============================================================
 -- assistant_tasks: the document-Generate queue. Rows are created from the
--- editor popover, claimed by the in-process assistant stream handler, and
--- streamed/completed over SSE. No daemon/machine columns — the assistant runs
--- in-process (renamed from runtime_tasks by 0008_remove_agent_runtimes.sql).
+-- editor popover, enqueued into the per-thread DO (`enqueueRun`), and completed
+-- there; status/terminal transitions are written back through the Worker
+-- internal route. No daemon/machine columns — the assistant runs in a
+-- per-thread Durable Object (Workers only; renamed from runtime_tasks by
+-- 0008_remove_agent_runtimes.sql).
 CREATE TABLE assistant_tasks (
   id            TEXT PRIMARY KEY,
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -825,6 +837,13 @@ SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
 -- (`summarized_count` = messages folded into it) — explicit replacement for
 -- opencode's auto-compaction. document_type 'chat' rows are keyed by a chat
 -- id and scoped to `owner_user_id`.
+--
+-- Workers-only storage role (ADR-0003): this D1 row is a MIRROR of the
+-- canonical DO SQLite store — the per-thread Durable Object is authoritative
+-- for replay/resume/recovery and writes this row per persisted step. List,
+-- search, and export read the mirror and may lag by one mirror write; the
+-- canonical transcript read goes to the DO with a D1 fallback. On Bun/Docker
+-- the table is inert (the flavor serves no assistant routes).
 --
 -- Multi-thread chat: chat rows are N-per-(project_id, owner_user_id), each
 -- keyed by its own chat id. `title` is the list label — derived once from the
@@ -1195,10 +1214,11 @@ existing hard delete).
   `deleted_at` (hidden from timeline). No revision history — edit overwrites
   `body`.
 
-### Assistant (in-process) + removed agent-runtime tier
+### Assistant (Workers-only DO runtime) + removed agent-runtime tier
 The document **Generate** button in the task/wiki editors and freeform chat both
-run through the in-process Assistant. There is no external daemon, machine
-registry, or warm-session state anymore — the former "Runtimes"/Blacksmith tier
+run through the Workers-only Durable Object assistant (ADR-0003). There is no
+external daemon, machine registry, or warm-session state anymore — the former
+"Runtimes"/Blacksmith tier
 was deleted by `0008_remove_agent_runtimes.sql` (tables `runtimes`, `machines`,
 `runtime_events`, `runtime_sessions`, `runtime_task_logs` dropped; `runtime_tasks`
 rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
@@ -1222,8 +1242,10 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
 - **Auth:** every assistant endpoint is a normal Bearer/session-authenticated API
   call. The `x-runtime-token` daemon credential and the `/api/runtimes/*` routes
   no longer exist.
-- **Stale-run safety:** a crash mid-stream leaves rows `running`; the server marks
-  `running` rows older than 30 min as `failed` ("server restarted") at boot.
+- **Recovery (no boot sweep):** in-flight turns run via the DO's `runFiber` +
+  `chatRecovery` (ADR-0003 §B.5) — a turn survives isolate eviction/redeploy and
+  on give-up is marked failed through the internal route. The former Bun
+  boot-time stale-`running` sweep is removed with the Bun assistant code.
 - **Vision resolution order** (per request): `primary_supports_images=1` → inline
   image parts; else `VISION_NOT_CONFIGURED` (409). The legacy `vision_model`
   delegation was removed in the squashed baseline.

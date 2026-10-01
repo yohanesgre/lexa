@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "u".repeat(43);
@@ -48,7 +48,7 @@ beforeAll(async () => {
       ('l3','p2',NULL,'openai/gpt-5-mini','openai_compatible','error',10,5,0,500,10,'2026-08-02 11:00:00'),
       ('l4','p1',NULL,'openai/gpt-5-mini','openai_compatible','done',50,25,0,1000,50,'2026-08-03 10:00:00');
   `);
-  handler = createApiHandler(dbPath);
+  handler = createAssistantApiHandler(dbPath);
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });

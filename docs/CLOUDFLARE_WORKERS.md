@@ -256,10 +256,10 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   migration clears every row, and any write to a client nulls its ref too.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it; the
   old `lexa-cli deploy` compose flow is gone (removed in cli-v2026.2.0).
-- The AI path is fully in-process (the agent-runtime tier is removed) — no
-  external runner to host; outbound subrequest budget 50/request free, 1000 paid.
-  (superseded by ADR-0003: the assistant runs on `@cloudflare/ai-chat`
-  `AIChatAgent` Durable Objects on this flavor, and does not exist on Bun/Docker.)
+- The AI path runs on Workers-only `@cloudflare/ai-chat` `AIChatAgent` Durable
+  Objects (ADR-0003; the pre-ADR in-process SSE transport is retired and the
+  agent-runtime tier is removed, so the assistant does not exist on Bun/Docker) —
+  no external runner to host; outbound subrequest budget 50/request free, 1000 paid.
 
 ## Object storage (R2)
 
@@ -294,8 +294,10 @@ months; one wire-format break already shipped). Core is web-standard JS — work
 clean. Official `@cloudflare/tanstack-ai` 0.2.1 exists (Workers AI binding + AI
 Gateway routing; published from `cloudflare/ai`, not the TanStack monorepo).
 
-Decision (2026-08-22, amended 2026-09-26): the `chat()` path IS the only AI tier —
-**Assistant** (writing assistant + PM assistant), in-process. The daemon/opencode
+Decision (2026-08-22, amended 2026-09-26; execution model superseded by ADR-0003):
+the `chat()` path IS the only AI tier — **Assistant** (writing assistant + PM
+assistant), now Workers-only `AIChatAgent` Durable Objects (one DO per thread)
+instead of the pre-ADR in-process engine. The daemon/opencode
 coding tier was removed end to end on 2026-09-26 (see `docs/ARCHITECTURE.md`
 §Assistant → removal record); there is no external runner, no claim loop, and
 nothing Workers-hostile left in the AI path. See `docs/ARCHITECTURE.md` §Assistant.
@@ -337,7 +339,8 @@ POST /api/assistant/tasks → queue → server-side chat():
   block + task tools. Not covered, and deliberately so: shell/file-edit/exec and
   sandbox filesystem work — coding territory, removed with the agent-runtime tier
   (reintroducing it needs a new architecture decision + security review).
-- **Verdict: one in-process Assistant tier**, no daemon path. Services
+- **Verdict: one Assistant tier, Workers-only DO execution** (`AIChatAgent`
+  `LexaAssistantAgent`, ADR-0003), no daemon path. Services
   `Lexa/AssistantChatService` / `Lexa/AssistantTaskService` behind the
   `Lexa/Assistant` facade.
 - Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/Assistant`

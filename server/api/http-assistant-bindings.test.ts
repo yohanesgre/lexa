@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createAssistantApiHandler } from "./assistant-api";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "b".repeat(43);
@@ -41,7 +41,7 @@ beforeAll(async () => {
     INSERT INTO assistant_settings (project_id) VALUES ('p3');
     INSERT INTO project_memory (id, project_id, content, source) VALUES ('m1','p1','note one','assistant'), ('m2','p1','note two','assistant');
   `);
-  handler = createApiHandler(dbPath);
+  handler = createAssistantApiHandler(dbPath);
 });
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });

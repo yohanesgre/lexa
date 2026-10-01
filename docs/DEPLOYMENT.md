@@ -17,10 +17,10 @@ superadmin is provisioned **only** by the web `/setup` wizard (email + password
 Cloudflare Workers is the actively developed deploy target and the only one
 receiving new features. **Docker and bare metal are frozen at their current
 features** — the install script and releases keep them running, but no new
-features land there. The **AI Assistant is Workers-only**; assistant upgrade
-notes (what changes for Docker users, how to export thread history before
-switching) are added in a later phase. See `docs/RELEASING.md` → *Deploy
-targets — policy*.
+features land there. The **AI Assistant is Workers-only**; the Docker upgrade
+notes (assistant absent, how to export thread history before switching) are in
+*Upgrading across the assistant move to Workers* below. See
+`docs/RELEASING.md` → *Deploy targets — policy*.
 
 The canonical config file is **`.env.toml`**. It is structured TOML where the
 sections (`[core]`, `[auth]`, `[github]`, …) are presentation only and every
@@ -244,10 +244,10 @@ re-runs.
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync, or applied at install with `--secrets-file` / the wizard; preserved across install-script re-runs (the installer merges, never truncates) | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
-| `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no |
+| `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store any managed secret** (MCP token, provider key, or Jev API key); unset allows secret-less MCP clients and keyless providers, and leaves Jev disabled |
+| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store any managed secret** (MCP token, provider key, or Jev API key) and, **on Workers, required for the assistant** (internal HMAC derivation); unset allows secret-less MCP clients and keyless providers, leaves Jev disabled, and reports `assistant:false` |
 
 ## Full variable reference
 
@@ -262,10 +262,10 @@ re-runs.
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. Workers installs auto-prune the leftover Worker secret after a successful deploy (manual fallback: `wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler.lexa.json`); docker/bare env migration drops it. |
-| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
+| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3); **Workers-only assistant** — inert on Docker/bare metal, which serve no assistant routes |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
-| `LXK_SECRETS_MASTER_KEY` | **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → managed secret storage is disabled**: an MCP save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, a provider/Jev save carrying a key with 400 `SECRET_KEY_UNAVAILABLE`; secret-less MCP clients and keyless providers stay legal, an already-stored secret is never silently dropped, and Jev simply stays disabled. Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart, then re-enter secrets in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
+| `LXK_SECRETS_MASTER_KEY` | **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key — and, **on Workers, required for the assistant** (its internal `X-Lexa-Internal` HMAC key is derived from it; unset ⇒ `/api/capabilities` reports `assistant:false`). The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → managed secret storage is disabled**: an MCP save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, a provider/Jev save carrying a key with 400 `SECRET_KEY_UNAVAILABLE`; secret-less MCP clients and keyless providers stay legal, an already-stored secret is never silently dropped, and Jev simply stays disabled. Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart, then re-enter secrets in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -420,6 +420,40 @@ configuration into the encrypted, webapp-managed store.
    dropped column); downgrading means restoring a pre-upgrade backup
    (`docs/BACKUPS.md`).
 
+## Upgrading across the assistant move to Workers (2026-10-02)
+
+The AI Assistant became **Cloudflare Workers only** (ADR-0003): it runs on
+`@cloudflare/ai-chat` Durable Objects on the Workers flavor and is removed from
+the Bun/Docker/bare-metal flavor end to end. Workers is the only deploy target
+receiving new features; Docker/bare metal stay frozen at their current features.
+
+1. **Docker / bare metal lose the assistant.** After upgrading, `/api/assistant/*`
+   and `/api/admin/assistant/*` return **404** (the groups are not mounted), the
+   assistant UI is hidden, and `GET /api/capabilities` reports
+   `{ "assistant": false, "flavor": "bun" }`. Everything else keeps working. If
+   you depend on the assistant, **stay on the previous release** rather than
+   upgrading this target.
+2. **Export chat history BEFORE switching flavors.** There is **no cross-flavor
+   data sync** (`docs/CLOUDFLARE_WORKERS.md` §"Data does not cross flavors").
+   From the old Docker install, export each chat to markdown
+   (`GET /api/assistant/chat/:chatId/export`, or the UI's Export action) and keep
+   the files; then install the Workers target and re-import manually if needed.
+   The `assistant_*` tables are **not dropped** on Docker (they remain inert, so
+   a downgrade/backup still has them), but nothing reads or writes them there.
+3. **Workers requires `LXK_SECRETS_MASTER_KEY`.** The assistant derives its
+   internal HMAC key (`HMAC(master, "lexa-internal-v1")`) and decrypts provider
+   secrets from it. Without it, `/api/capabilities` reports `assistant:false` and
+   the WS gate / internal routes fail `502 ASSISTANT_UNAVAILABLE`. The installer
+   mints and preserves this key in `cf-workers/.env.toml` custody (see the
+   Upgrade section); no manual step is needed on a normal install.
+4. **Workers upgrade is a normal re-run** of `install.sh` from the new release
+   tag: it applies the D1 migrations (none required for the assistant move —
+   the tables already exist) and deploys the DO class. Threads stay readable via
+   the D1 mirror; the first open of a legacy thread imports it into its DO once.
+5. **Preserved on Workers:** chat threads, `assistant_tasks` history, memory,
+   provider registry and keys, project settings, call logs, prices, provider
+   health, and the agents/skills catalog.
+
 ## Upgrading across managed-only MCP client secrets (2026-09-28)
 
 MCP client credentials became managed-only: the `env:NAME` / `file:/abs/path`
@@ -452,8 +486,8 @@ The coding-agent ("agent-runtime") tier was deleted end to end — migration
 `0008_remove_agent_runtimes.sql` drops `machines`, `runtimes`,
 `runtime_events`, `runtime_sessions`, `runtime_task_logs`, renames
 `runtime_tasks` → `assistant_tasks`, and drops the daemon token. The only AI
-tier left is the in-process Assistant. See `docs/ARCHITECTURE.md` §Assistant →
-removal record.
+tier is the Workers-only Assistant (ADR-0003); Bun/Docker serves none. See
+`docs/ARCHITECTURE.md` §Assistant → removal record.
 
 1. **Upgrade the server.** Boot applies `0008` (Bun standalone: re-run
    `install.sh` from the new release tag; Workers:
