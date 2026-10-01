@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects } from "../../lib/queries";
-import { ApiKeysSection, GithubSyncSection, RateLimitSection } from "./SettingsSections";
+import { ApiKeysSection, GithubSyncSection, RateLimitSection, type GithubReturnResult } from "./SettingsSections";
 import { AssistantProvidersSection } from "./AssistantProvidersSection";
 import { AssistantMcpSection } from "./AssistantMcpSection";
 import { formatRelative } from "../../lib/relative-time";
@@ -328,7 +328,7 @@ function AgentsSkillsSections() {
   );
 }
 
-type WorkspaceTab = "members" | "teams" | "access" | "integrations";
+export type WorkspaceTab = "members" | "teams" | "access" | "integrations";
 
 const WORKSPACE_TABS: { id: WorkspaceTab; label: string }[] = [
   { id: "members", label: "Members" },
@@ -337,10 +337,17 @@ const WORKSPACE_TABS: { id: WorkspaceTab; label: string }[] = [
   { id: "integrations", label: "Integrations" },
 ];
 
-export function WorkspaceSettings() {
+export function WorkspaceSettings({ initialTab, githubResult }: { initialTab?: WorkspaceTab | undefined; githubResult?: GithubReturnResult | undefined } = {}) {
   const { data: session } = useSession();
   const isSuperadmin = session?.user?.role === "superadmin";
-  const [tab, setTab] = useState<WorkspaceTab>("members");
+  const [tab, setTab] = useState<WorkspaceTab>(initialTab ?? "members");
+
+  // The callback lands with ?tab=integrations — keep local tab state in sync
+  // with search-driven changes without making every tab click a navigation.
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
+
   return (
     <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
@@ -381,7 +388,7 @@ export function WorkspaceSettings() {
       )}
       {tab === "integrations" && (
         <>
-          <GithubSyncSection />
+          <GithubSyncSection githubResult={githubResult} />
           {isSuperadmin && <AssistantProvidersSection />}
           {isSuperadmin && <AssistantMcpSection />}
           <AgentsSkillsSections />

@@ -16,6 +16,7 @@ import {
   useUpdateComment, useAddTaskLink, useRemoveTaskLink,
   useAddSource, useRemoveSource, useCreateAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
+  useCreateGithubManifest, useCompleteGithubSetup,
   useCreateMyApiKey, useDeleteMyApiKey, useRestoreWikiRevision, wikiKeys,
 } from "./queries";
 
@@ -416,26 +417,50 @@ describe("board-structure + settings mutations", () => {
   });
 
   it("useUpdateGithubSettings replaces the cache from the authoritative response — no refetch", async () => {
-    routes.set("PUT /api/settings/github", { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
-    queryClient.setQueryData(["github-settings"], { appId: "1", privateKeySet: false, webhookSecretSet: false, source: "none" });
+    routes.set("PUT /api/settings/github", { appId: "123456", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    queryClient.setQueryData(["github-settings"], { appId: "1", appSlug: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
     const getCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
     const { result } = renderHook(() => useUpdateGithubSettings(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ appId: "123456", webhookSecret: "" }); });
-    expect(queryClient.getQueryData(["github-settings"])).toEqual({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    expect(queryClient.getQueryData(["github-settings"])).toEqual({ appId: "123456", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" });
     const getCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
     expect(getCallsAfter).toBe(getCallsBefore);
   });
 
   it("useClearGithubSettings sends the all-empty clear body and replaces the cache — no refetch", async () => {
-    routes.set("PUT /api/settings/github", { appId: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
-    queryClient.setQueryData(["github-settings"], { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    routes.set("PUT /api/settings/github", { appId: "", appSlug: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
+    queryClient.setQueryData(["github-settings"], { appId: "123456", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" });
     const getCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
     const { result } = renderHook(() => useClearGithubSettings(), { wrapper });
     await act(async () => { await result.current.mutateAsync(undefined); });
     const put = fetchMock.mock.calls.find((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method === "PUT");
-    expect(JSON.parse(String((put?.[1] as RequestInit | undefined)?.body))).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
-    expect(queryClient.getQueryData(["github-settings"])).toEqual({ appId: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
+    expect(JSON.parse(String((put?.[1] as RequestInit | undefined)?.body))).toEqual({ appId: "", appSlug: "", privateKey: "", webhookSecret: "" });
+    expect(queryClient.getQueryData(["github-settings"])).toEqual({ appId: "", appSlug: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
     const getCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    expect(getCallsAfter).toBe(getCallsBefore);
+  });
+
+  it("useCreateGithubManifest POSTs to the manifest endpoint and returns the redirect payload", async () => {
+    const payload = { url: "https://github.com/settings/apps/new?state=s1", state: "s1", manifest: { name: "lexa" } };
+    routes.set("POST /api/settings/github/manifest", payload);
+    const { result } = renderHook(() => useCreateGithubManifest(), { wrapper });
+    let res: import("./api").GithubAppManifestResponse | undefined;
+    await act(async () => { res = await result.current.mutateAsync(undefined); });
+    expect(res).toEqual(payload);
+    const post = fetchMock.mock.calls.find((c) => String(c[0]).includes("/settings/github/manifest") && (c[1] as RequestInit | undefined)?.method === "POST");
+    expect(post).toBeTruthy();
+  });
+
+  it("useCompleteGithubSetup posts {code,state} and seeds the github-settings cache — no refetch", async () => {
+    const summary = { appId: "7654321", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" };
+    routes.set("POST /api/settings/github/setup", summary);
+    const getCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "POST").length;
+    const { result } = renderHook(() => useCompleteGithubSetup(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ code: "c0de", state: "s1" }); });
+    const post = fetchMock.mock.calls.find((c) => String(c[0]).includes("/settings/github/setup") && (c[1] as RequestInit | undefined)?.method === "POST");
+    expect(JSON.parse(String((post?.[1] as RequestInit | undefined)?.body))).toEqual({ code: "c0de", state: "s1" });
+    expect(queryClient.getQueryData(["github-settings"])).toEqual(summary);
+    const getCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "POST").length;
     expect(getCallsAfter).toBe(getCallsBefore);
   });
 

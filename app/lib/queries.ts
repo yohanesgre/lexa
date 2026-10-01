@@ -1203,7 +1203,7 @@ export function useUpdateGithubSettings() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (input: { appId: string; privateKey?: string | undefined; webhookSecret?: string }) => api.updateGithubSettings(input),
+    mutationFn: (input: { appId: string; appSlug?: string | undefined; privateKey?: string | undefined; webhookSecret?: string }) => api.updateGithubSettings(input),
     onSuccess: (settings) => {
       // Mutation response is authoritative — update the cache from it, never refetch.
       qc.setQueryData(["github-settings"], settings);
@@ -1215,13 +1215,14 @@ export function useUpdateGithubSettings() {
   });
 }
 
-// Remove GitHub sync — same PUT, all three fields as empty strings; the
-// server's clear semantics (empty string = delete the settings row).
+// Remove GitHub sync — same PUT, every field as an empty string; the server's
+// clear semantics (empty string = delete the settings row). appSlug must ride
+// along or the server leaves the stored slug in place (omitted = unchanged).
 export function useClearGithubSettings() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: () => api.updateGithubSettings({ appId: "", privateKey: "", webhookSecret: "" }),
+    mutationFn: () => api.updateGithubSettings({ appId: "", appSlug: "", privateKey: "", webhookSecret: "" }),
     onSuccess: (settings) => {
       // Mutation response is authoritative — update the cache from it, never refetch.
       qc.setQueryData(["github-settings"], settings);
@@ -1229,6 +1230,27 @@ export function useClearGithubSettings() {
     },
     onError: (err) => {
       toast.push("error", "Failed to remove GitHub sync", toastMessage(err));
+    },
+  });
+}
+
+// In-app manifest connect (LX-6). `useCreateGithubManifest` starts the flow
+// (the caller POSTs the returned manifest to GitHub); `useCompleteGithubSetup`
+// finishes it from the callback and seeds the settings cache from the
+// authoritative response. The callback owns its own success/failure surface,
+// so neither hook toasts.
+export function useCreateGithubManifest() {
+  return useMutation({
+    mutationFn: () => api.createGithubManifest(),
+  });
+}
+
+export function useCompleteGithubSetup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { code?: string | undefined; state: string }) => api.completeGithubSetup(input),
+    onSuccess: (settings) => {
+      qc.setQueryData(["github-settings"], settings);
     },
   });
 }

@@ -39,6 +39,7 @@ import { Route as AdminAssistantProvidersRouteImport } from './routes/admin.assi
 import { Route as AdminAssistantRunsRouteImport } from './routes/admin.assistant.runs'
 import { Route as AdminAssistantUsageRouteImport } from './routes/admin.assistant.usage'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
+import { Route as SettingsGithubCallbackRouteImport } from './routes/settings/github.callback'
 import { Route as SettingsProjectProjectIdRouteImport } from './routes/settings/project.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -191,6 +192,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsGithubCallbackRoute = SettingsGithubCallbackRouteImport.update({
+  id: '/github/callback',
+  path: '/github/callback',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsProjectProjectIdRoute =
   SettingsProjectProjectIdRouteImport.update({
     id: '/project/$projectId',
@@ -227,6 +233,7 @@ export interface FileRoutesByFullPath {
   '/admin/assistant/runs': typeof AdminAssistantRunsRoute
   '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/settings/github/callback': typeof SettingsGithubCallbackRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
   '/admin/assistant/': typeof AdminAssistantIndexRoute
@@ -259,6 +266,7 @@ export interface FileRoutesByTo {
   '/admin/assistant/runs': typeof AdminAssistantRunsRoute
   '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/settings/github/callback': typeof SettingsGithubCallbackRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki': typeof SlugWikiIndexRoute
   '/admin/assistant': typeof AdminAssistantIndexRoute
@@ -293,6 +301,7 @@ export interface FileRoutesById {
   '/admin/assistant/runs': typeof AdminAssistantRunsRoute
   '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/settings/github/callback': typeof SettingsGithubCallbackRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
   '/admin/assistant/': typeof AdminAssistantIndexRoute
@@ -328,6 +337,7 @@ export interface FileRouteTypes {
     | '/admin/assistant/runs'
     | '/admin/assistant/usage'
     | '/api/auth/$'
+    | '/settings/github/callback'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
     | '/admin/assistant/'
@@ -360,6 +370,7 @@ export interface FileRouteTypes {
     | '/admin/assistant/runs'
     | '/admin/assistant/usage'
     | '/api/auth/$'
+    | '/settings/github/callback'
     | '/settings/project/$projectId'
     | '/$slug/wiki'
     | '/admin/assistant'
@@ -393,6 +404,7 @@ export interface FileRouteTypes {
     | '/admin/assistant/runs'
     | '/admin/assistant/usage'
     | '/api/auth/$'
+    | '/settings/github/callback'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
     | '/admin/assistant/'
@@ -634,6 +646,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/github/callback': {
+      id: '/settings/github/callback'
+      path: '/github/callback'
+      fullPath: '/settings/github/callback'
+      preLoaderRoute: typeof SettingsGithubCallbackRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/project/$projectId': {
       id: '/settings/project/$projectId'
       path: '/project/$projectId'
@@ -648,6 +667,7 @@ interface SettingsRouteChildren {
   SettingsMeRoute: typeof SettingsMeRoute
   SettingsTeamRoute: typeof SettingsTeamRoute
   SettingsWorkspaceRoute: typeof SettingsWorkspaceRoute
+  SettingsGithubCallbackRoute: typeof SettingsGithubCallbackRoute
   SettingsProjectProjectIdRoute: typeof SettingsProjectProjectIdRoute
 }
 
@@ -655,6 +675,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsMeRoute: SettingsMeRoute,
   SettingsTeamRoute: SettingsTeamRoute,
   SettingsWorkspaceRoute: SettingsWorkspaceRoute,
+  SettingsGithubCallbackRoute: SettingsGithubCallbackRoute,
   SettingsProjectProjectIdRoute: SettingsProjectProjectIdRoute,
 }
 

@@ -4297,6 +4297,16 @@
     user-select: all;
   }
 
+  .notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
   .notice-warning {
     display: flex;
     align-items: flex-start;
@@ -4325,6 +4335,12 @@
     font-family: var(--lx-font-body);
   }
   .notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+
+  .notice-success {
+    background: var(--lx-bg-success-subtle);
+    border: 1px solid rgba(74, 222, 128, 0.15);
+    color: var(--lx-text-success);
+  }
 
   /* ---- Wiki edit workspace ---- */
   .wiki-edit-workspace {
