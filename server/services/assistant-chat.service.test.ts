@@ -1,7 +1,8 @@
 import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
@@ -629,5 +630,157 @@ INSERT INTO columns (id, project_id, name, position) VALUES ('c-rev', 'p1', 'In 
     const text = promptText(providerMock.calls[0]!);
     expect(text).toContain("- [wiki] In Review");
     expect(text).toContain("- [column] In Review");
+  });
+});
+
+describe("chat — document attachments", () => {
+  it("feeds extracted document text to the model and persists a document-ref part", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+
+    const bytes = new TextEncoder().encode("# Spec\n\nThe widget enqueues work.");
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    const key = `blobs/${sha}`;
+    const onDisk = join(dir, "blobs", key);
+    mkdirSync(dirname(onDisk), { recursive: true });
+    writeFileSync(onDisk, bytes);
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
+`);
+    db.prepare(
+      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ('ca1', 'p1', 'chat', 'c1', 'spec.md', 'text/markdown', ?, ?, ?, 'u1')`
+    ).run(bytes.byteLength, sha, key);
+
+    const frames = await drain(await run(service.runChatStream("c1", "u1", {
+      projectId: "p1",
+      chatId: "c1",
+      message: "summarize the spec",
+      attachments: [{ storageKey: key, mimeType: "text/markdown", name: "spec.md" }],
+    })));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+
+    // The model saw the extracted text, labelled with the file name.
+    const sent = JSON.stringify(providerMock.calls[0]!.messages);
+    expect(sent).toContain("attached document: spec.md");
+    expect(sent).toContain("The widget enqueues work.");
+
+    // The transcript persists the document-ref part (reload labels by name).
+    const row = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
+    const messages = JSON.parse(row.messages) as Array<{ role: string; content: unknown }>;
+    const user = messages.find((m) => m.role === "user")!;
+    expect(user.content).toEqual([
+      { type: "text", content: "summarize the spec" },
+      { type: "document-ref", storageKey: key, mimeType: "text/markdown", name: "spec.md" },
+    ]);
+  });
+
+  it("blocks the send with AttachmentExtractionFailed when a document yields no text", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+
+    const bytes = new TextEncoder().encode("not really a pdf");
+    const sha = createHash("sha256").update(bytes).digest("hex");
+    const key = `blobs/${sha}`;
+    const onDisk = join(dir, "blobs", key);
+    mkdirSync(dirname(onDisk), { recursive: true });
+    writeFileSync(onDisk, bytes);
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
+`);
+    db.prepare(
+      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ('ca1', 'p1', 'chat', 'c1', 'broken.pdf', 'application/pdf', ?, ?, ?, 'u1')`
+    ).run(bytes.byteLength, sha, key);
+
+    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
+      projectId: "p1",
+      chatId: "c1",
+      message: "read this",
+      attachments: [{ storageKey: key, mimeType: "application/pdf", name: "broken.pdf" }],
+    })));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string; filename: string } }).left).toMatchObject({
+      _tag: "AttachmentExtractionFailed",
+      filename: "broken.pdf",
+    });
+    expect(providerMock.calls).toHaveLength(0);
+  });
+});
+
+describe("chat — attachment validation on the send path", () => {
+  function seedThread(): void {
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
+`);
+  }
+
+  function insertChatAttachment(id: string, key: string, mime: string): void {
+    db.prepare(
+      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES (?, 'p1', 'chat', 'c1', 'doc.md', ?, 5, ?, ?, 'u1')`
+    ).run(id, mime, `sha-${id}`, key);
+  }
+
+  it("refuses a send carrying attachments when the kill switch is on", async () => {
+    setup({ env: { LXK_DISABLE_CHAT_ATTACHMENTS: "1" } as RuntimeEnv });
+    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
+      projectId: "p1",
+      chatId: "c1",
+      message: "read this",
+      attachments: [{ storageKey: "blobs/x", mimeType: "text/plain", name: "x.txt" }],
+    })));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string } }).left._tag).toBe("ChatAttachmentsDisabled");
+    expect(providerMock.calls).toHaveLength(0);
+  });
+
+  it("rejects a storage key that does not belong to the project", async () => {
+    setup();
+    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
+      projectId: "p1",
+      chatId: "c1",
+      message: "read this",
+      attachments: [{ storageKey: "blobs/other-project", mimeType: "text/plain", name: "sneaky.txt" }],
+    })));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string; reason: string } }).left).toMatchObject({ _tag: "InvalidArgs" });
+    expect((result as { left: { reason: string } }).left.reason).toContain("does not belong to this project");
+    expect(providerMock.calls).toHaveLength(0);
+  });
+
+  it("rejects a declared mime that differs from the stored sniffed mime", async () => {
+    setup();
+    seedThread();
+    insertChatAttachment("ca-mm", "blobs/mm", "text/markdown");
+    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
+      projectId: "p1",
+      chatId: "c1",
+      message: "read this",
+      attachments: [{ storageKey: "blobs/mm", mimeType: "text/plain", name: "doc.md" }],
+    })));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string; reason: string } }).left).toMatchObject({ _tag: "InvalidArgs" });
+    expect((result as { left: { reason: string } }).left.reason).toContain("mimeType mismatch");
+    expect(providerMock.calls).toHaveLength(0);
+  });
+
+  it("rejects a fourth attachment (images + documents share the count)", async () => {
+    setup();
+    seedThread();
+    for (let i = 1; i <= 4; i += 1) insertChatAttachment(`ca-${i}`, `blobs/cap-${i}`, "text/plain");
+    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
+      projectId: "p1",
+      chatId: "c1",
+      message: "many files",
+      attachments: [1, 2, 3, 4].map((i) => ({ storageKey: `blobs/cap-${i}`, mimeType: "text/plain", name: `f${i}.txt` })),
+    })));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string; reason: string } }).left).toMatchObject({ _tag: "InvalidArgs" });
+    expect((result as { left: { reason: string } }).left.reason).toContain("at most 3 attachments");
+    expect(providerMock.calls).toHaveLength(0);
   });
 });

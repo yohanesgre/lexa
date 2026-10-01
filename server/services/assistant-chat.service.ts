@@ -15,7 +15,9 @@ import { Storage } from "../storage/storage";
 import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { AssistantJevService } from "./assistant-jev.service";
-import { ProviderNotConfigured, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
+import { ProviderNotConfigured, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired, ChatAttachmentsDisabled, AttachmentExtractionFailed } from "../api/errors";
+import { isChatImageMime } from "../storage/mime";
+import { chatAttachmentsEnabled } from "../capabilities";
 import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
 import { executeAssistantWrite } from "../assistant/write-execution";
 import { TaskService } from "./task.service";
@@ -32,7 +34,7 @@ import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
 import { collectResumeResults } from "../assistant/resume-results";
-import { scanMentionTokens, buildMentionContextBlock, MENTION_CAPS, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_IMAGE_CAPS, CHAT_CITATION_CAP, assertAttachmentCaps, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
+import { scanMentionTokens, buildMentionContextBlock, MENTION_CAPS, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
@@ -77,7 +79,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
     const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
-    const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
+    const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
     const loadBoundSkills = (agentId: string): Promise<BoundSkill[]> => dbAll<BoundSkill>(BOUND_SKILLS_SQL, agentId);
     // Per-message skill context: the ≤3 `$mentioned` skills bound to the agent,
     // injected under `## Skill: {name}`, plus the compact catalog of every bound
@@ -106,6 +108,28 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     };
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
     const loadImageBase64 = (key: string): Promise<string | null> => Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
+    // Chat documents are extracted once per key and cached for THAT RUN only:
+    // a fresh Map per stream bounds memory to one run's documents (a
+    // process-lifetime Map grew without limit). The current turn's prompt is
+    // pre-warmed before the stream starts (so a null here is a real failure),
+    // while history refs resolve lazily and a missing row/blob simply drops the
+    // part (see hydrateDocumentParts).
+    const makeDocumentTextLoader = (): ((key: string) => Promise<string | null>) => {
+      const cache = new Map<string, string | null>();
+      return async (key: string): Promise<string | null> => {
+        if (cache.has(key)) return cache.get(key) ?? null;
+        const row =
+          (await dbFirst<{ mime_type: string }>(`SELECT mime_type FROM chat_attachments WHERE storage_key = ? LIMIT 1`, key)) ??
+          (await dbFirst<{ mime_type: string }>(`SELECT mime_type FROM attachments WHERE storage_key = ? LIMIT 1`, key));
+        if (!row) { cache.set(key, null); return null; }
+        const bytes = await Effect.runPromise(storage.get(key)).catch(() => null);
+        if (!bytes) { cache.set(key, null); return null; }
+        const text = await extractDocumentText(bytes, row.mime_type);
+        const value = text !== null && text.trim() !== "" ? text : null;
+        cache.set(key, value);
+        return value;
+      };
+    };
     const resolveMentionContext = (projectId: string, message: string): Effect.Effect<string, DbError> => Effect.gen(function* () {
       const tokens = scanMentionTokens(message);
       if (tokens.length === 0) return "";
@@ -181,15 +205,19 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       }
       return buildMentionContextBlock(resolved);
     });
-    const validateAttachments = (projectId: string, attachments: ReadonlyArray<{ storageKey: string; mimeType: string }>, caps: { maxCount: number; maxBytesEach?: number; maxTotalBytes?: number }): Effect.Effect<void, InvalidArgs | DbError> => Effect.gen(function* () {
+    // Chat refs are validated against `chat_attachments` (not project
+    // `attachments`): the row must belong to this project and its stored
+    // server-sniffed mime must match the client-declared one. Caps are the
+    // shared image+document budget, named per file (D4).
+    const validateAttachments = (projectId: string, attachments: ReadonlyArray<{ storageKey: string; mimeType: string; name: string }>): Effect.Effect<void, InvalidArgs | DbError> => Effect.gen(function* () {
+      const sized: Array<{ mimeType: string; size: number; name: string }> = [];
       for (const a of attachments) {
-        const row = yield* Effect.promise(() => dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, a.storageKey));
-        if (!row) return yield* new InvalidArgs({ reason: `attachment '${a.storageKey}' does not belong to this project` });
-        const dbMime = row.mime_type ?? "";
-        if (a.mimeType !== dbMime) return yield* new InvalidArgs({ reason: `attachment '${a.storageKey}' mimeType mismatch` });
+        const row = yield* Effect.promise(() => dbFirst<{ mime_type: string; size_bytes: number; filename: string }>(`SELECT mime_type, size_bytes, filename FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, a.storageKey));
+        if (!row) return yield* new InvalidArgs({ reason: `attachment '${a.name}' does not belong to this project` });
+        if (a.mimeType !== row.mime_type) return yield* new InvalidArgs({ reason: `attachment '${a.name}' mimeType mismatch` });
+        sized.push({ mimeType: row.mime_type, size: row.size_bytes, name: row.filename });
       }
-      const sized = yield* Effect.forEach(attachments, (a) => storage.stat(a.storageKey).pipe(Effect.catchTag("StorageError", () => Effect.succeed(null)), Effect.map((size) => ({ mimeType: a.mimeType, size: size ?? 0 }))));
-      yield* Effect.try({ try: () => assertAttachmentCaps(sized, caps), catch: (e) => e as InvalidArgs });
+      yield* Effect.try({ try: () => assertChatAttachmentCaps(sized), catch: (e) => e as InvalidArgs });
     });
     // Jev preflight. Advisory and fail-open by contract: any outcome other than
     // a rendered segment leaves the run untouched, and the catch below keeps
@@ -317,10 +345,24 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         return yield* Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(req.projectId);
         const config = configFromRow(settingsRow);
+        const env = yield* currentEnv;
+        const loadDocumentText = makeDocumentTextLoader();
         const attachments = req.attachments ?? [];
+        const imageAttachments = attachments.filter((a) => isChatImageMime(a.mimeType));
+        // Kill switch refuses sends carrying any attachment regardless of the
+        // capability flag (D5).
+        if (attachments.length > 0 && !chatAttachmentsEnabled(env)) return yield* new ChatAttachmentsDisabled();
+        yield* validateAttachments(req.projectId, attachments);
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
-        yield* validateAttachments(req.projectId, attachments, CHAT_IMAGE_CAPS);
-        if (attachments.length > 0 && imageMode === "none") return yield* new VisionNotConfigured();
+        // Documents do not need vision; only image attachments gate on it.
+        if (imageAttachments.length > 0 && imageMode === "none") return yield* new VisionNotConfigured();
+        // Send-time extraction: a document whose bytes yield no text blocks the
+        // send with a named error rather than being silently dropped (D3).
+        for (const a of attachments) {
+          if (isChatImageMime(a.mimeType)) continue;
+          const text = yield* Effect.promise(() => loadDocumentText(a.storageKey));
+          if (text === null) return yield* new AttachmentExtractionFailed({ filename: a.name, reason: "could not extract readable text" });
+        }
         const mentionContext = yield* resolveMentionContext(req.projectId, req.message);
         const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
         const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(req.message, boundSkills);
@@ -366,7 +408,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           memoryHits,
         });
         const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, mentionContext, writeTools: enabledWriteTools, advisory: preflight.segment });
-        const refs: unknown[] = attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType }));
+        const refs: unknown[] = attachments.map((a) => isChatImageMime(a.mimeType)
+          ? { type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType }
+          : { type: "document-ref", storageKey: a.storageKey, mimeType: a.mimeType, name: a.name });
         const userContent: string | unknown[] = refs.length > 0 ? [{ type: "text", content: req.message }, ...refs] : req.message;
         let citations: import("../../shared/assistant").Citation[] = [];
         let chatWriteDrain: (() => QueuedProposal[]) | undefined;
@@ -387,8 +431,8 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
-            return imageMode === "delegate" && attachments.length > 0 ? [...base, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: chatId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
-          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode: attachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+            return imageMode === "delegate" && imageAttachments.length > 0 ? [...base, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: chatId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
+          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
@@ -408,6 +452,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       resumeChatStream: (chatId: string, userId: string) => Effect.gen(function* () {
         if (!tryAcquireChat(chatId)) return yield* new AssistantTaskActive();
         return yield* Effect.gen(function* () {
+        const loadDocumentText = makeDocumentTextLoader();
         yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
         const thread = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId })));
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
@@ -442,7 +487,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
-          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });

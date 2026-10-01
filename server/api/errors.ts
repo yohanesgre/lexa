@@ -52,8 +52,14 @@ export class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden
 export class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
 export class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
 export class AttachmentNotFound extends Data.TaggedError("AttachmentNotFound")<{ id: string }> {}
-export class PayloadTooLarge extends Data.TaggedError("PayloadTooLarge")<{ size: number; maxBytes: number }> {}
+export class PayloadTooLarge extends Data.TaggedError("PayloadTooLarge")<{ size: number; maxBytes: number; filename?: string }> {}
 export class AttachmentDeleteForbidden extends Data.TaggedError("AttachmentDeleteForbidden")<{ id: string }> {}
+// Operator kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1): uploads and sends
+// carrying attachments are refused regardless of the capability flag.
+export class ChatAttachmentsDisabled extends Data.TaggedError("ChatAttachmentsDisabled")<{}> {}
+// A document attachment's bytes could not be turned into model-visible text
+// (unreadable PDF, non-UTF-8 text). The send is blocked; the file is named.
+export class AttachmentExtractionFailed extends Data.TaggedError("AttachmentExtractionFailed")<{ filename: string; reason: string }> {}
 export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: string }> {}
 export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
@@ -171,6 +177,8 @@ export const errorCodeMap: Record<string, string> = {
   AttachmentNotFound: "ATTACHMENT_NOT_FOUND",
   PayloadTooLarge: "PAYLOAD_TOO_LARGE",
   AttachmentDeleteForbidden: "ATTACHMENT_DELETE_FORBIDDEN",
+  ChatAttachmentsDisabled: "CHAT_ATTACHMENTS_DISABLED",
+  AttachmentExtractionFailed: "ATTACHMENT_EXTRACTION_FAILED",
   InvalidName: "INVALID_NAME",
   InvalidRateLimit: "INVALID_RATE_LIMIT",
   InvalidGithubSettings: "INVALID_GITHUB_SETTINGS",
@@ -235,6 +243,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "CommentEditForbidden":
     case "CommentDeleteForbidden":
     case "AttachmentDeleteForbidden":
+    case "ChatAttachmentsDisabled":
     case "SoleOwner":
       return 403;
     case "PayloadTooLarge":
@@ -300,6 +309,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InvalidRateLimit":
     case "InvalidGithubSettings":
     case "MemberNotInWorkspace":
+    case "AttachmentExtractionFailed":
       return 422;
     case "ToolDenied":
       return 403;
@@ -428,10 +438,20 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.reason ?? "Invalid comment");
     case "AttachmentNotFound":
       return "Attachment not found";
-    case "PayloadTooLarge":
-      return `Attachment exceeds the ${Math.round(Number(error.maxBytes ?? 0) / (1024 * 1024))} MB upload limit`;
+    case "PayloadTooLarge": {
+      const limit = `${Math.round(Number(error.maxBytes ?? 0) / (1024 * 1024))} MB`;
+      return typeof error.filename === "string" && error.filename !== ""
+        ? `File '${error.filename}' exceeds the ${limit} upload limit`
+        : `Attachment exceeds the ${limit} upload limit`;
+    }
     case "AttachmentDeleteForbidden":
       return "You can only delete your own attachments (or an admin's)";
+    case "ChatAttachmentsDisabled":
+      return "Chat attachments are disabled on this server";
+    case "AttachmentExtractionFailed":
+      return typeof error.reason === "string" && error.reason !== ""
+        ? `Could not read '${error.filename}': ${error.reason}`
+        : `Could not read '${error.filename}'`;
     case "InvalidName":
       return String(error.reason ?? "Invalid name");
     case "InvalidRateLimit":

@@ -408,7 +408,7 @@ configuration into the encrypted, webapp-managed store.
    `PROVIDER_AUTH_FAILED` until the key is set and the server restarts. Never
    blank the column by hand.
 4. **Gate before the next release.** The dead column is dropped forward-only in
-   Release N+1 (`0015_drop_provider_api_key.sql`). Before upgrading to it, set
+   Release N+1 (`0016_drop_provider_api_key.sql`). Before upgrading to it, set
    `LXK_SECRETS_MASTER_KEY`, boot this release at least once on every database
    (Bun restart; Workers deploy + one request), and verify the backfill is
    complete on each:
@@ -416,7 +416,7 @@ configuration into the encrypted, webapp-managed store.
    SELECT COUNT(*) FROM assistant_providers WHERE api_key <> '';
    ```
    `0` on every DB means the drop is safe; the guard aborts otherwise.
-5. **Forward-only.** After `0015` an older build cannot run (it writes the
+5. **Forward-only.** After `0016` an older build cannot run (it writes the
    dropped column); downgrading means restoring a pre-upgrade backup
    (`docs/BACKUPS.md`).
 

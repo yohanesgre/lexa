@@ -57,8 +57,9 @@ All non-2xx responses share one shape:
 | 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
-| 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`) |
+| 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`). Chat attachment uploads use their own per-file cap of 5 MB (`CHAT_ATTACHMENT_MAX_UPLOAD_BYTES`) independent of `LXK_MAX_UPLOAD_MB` (details: `{ size, maxBytes, filename }`) |
 | 403 | `ATTACHMENT_DELETE_FORBIDDEN` | Attachment delete without uploader/admin authority |
+| 403 | `CHAT_ATTACHMENTS_DISABLED` | Chat attachment upload or a chat send carrying attachments while `LXK_DISABLE_CHAT_ATTACHMENTS=1` |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
@@ -70,6 +71,7 @@ All non-2xx responses share one shape:
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
 | 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant attachment scope/cap violations |
+| 422 | `ATTACHMENT_EXTRACTION_FAILED` | A chat document attachment's bytes yielded no model-visible text (unreadable PDF, non-UTF-8 text) — the send is blocked, the file named (details: `{ filename, reason }`) |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (one shared bucket; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
@@ -773,6 +775,63 @@ DELETE /api/attachments/:id
 ```
 
 Event types added: `attachment_added` · `attachment_removed`.
+
+### Chat attachments (Assistant conversation context)
+
+Temporary, thread-scoped context — a separate surface from the project
+attachments above (see `docs/SCHEMA.md` → Chat attachments). One capability
+flag gates the composer: `GET /api/capabilities` reports `chatAttachments`
+(true only where the assistant is available and the kill switch is off). With
+`LXK_DISABLE_CHAT_ATTACHMENTS=1` every upload and every send carrying
+attachments is refused with 403 `CHAT_ATTACHMENTS_DISABLED`, regardless of the
+flag. Kill switch default is enabled (feature ON).
+
+Upload accepts images (`image/png` `image/jpeg` `image/webp` `image/gif`) and
+documents (`application/pdf` `text/markdown` `text/plain`). The stored mime is
+SERVER-SNIFFED (magic bytes; content with no signature is UTF-8-probed and
+extension-classified — `.md`/`.markdown` → `text/markdown`, else
+`text/plain`); a sniffed-but-unsupported type (SVG/BMP/ICO/XLSX) is rejected
+`INVALID_ARGS`. Per-file cap is 5 MB
+(`CHAT_ATTACHMENT_MAX_UPLOAD_BYTES`, independent of `LXK_MAX_UPLOAD_MB`);
+zero-byte files are rejected. Send-time caps: ≤3 attachments per message
+(images + documents share the count), ≤10 MB per message. Errors name the file.
+
+```
+POST   /api/projects/:slug/assistant/chat/:chatId/attachments   (multipart, field "file")
+→ 201 { data: ChatAttachment }
+  | 404 PROJECT_ACCESS_DENIED / PROJECT_NOT_FOUND
+  | 404 ASSISTANT_THREAD_NOT_FOUND
+  | 403 CHAT_ATTACHMENTS_DISABLED | 413 PAYLOAD_TOO_LARGE | 422 INVALID_ARGS
+  The thread row is created lazily (ON CONFLICT DO NOTHING), so an attachment
+  may arrive before the first send. No activity row.
+
+GET    /api/projects/:slug/assistant/chat/:chatId/attachments
+→ 200 { data: ChatAttachment[] } — oldest first (created_at ASC, id ASC)
+  | 404 PROJECT_ACCESS_DENIED / PROJECT_NOT_FOUND
+  | 404 ASSISTANT_THREAD_NOT_FOUND
+
+GET    /api/chat-attachments/:id
+→ 200 binary (Content-Type = sniffed mime; Content-Disposition inline for
+   image/* + application/pdf, attachment otherwise; X-Content-Type-Options:
+   nosniff always)
+  | 404 ATTACHMENT_NOT_FOUND (unknown id or blob missing) | 403 PROJECT_ACCESS_DENIED
+  | 404 ASSISTANT_THREAD_NOT_FOUND
+
+DELETE /api/chat-attachments/:id
+→ 204 | 404 ATTACHMENT_NOT_FOUND | 403 ATTACHMENT_DELETE_FORBIDDEN
+  Authority: uploader OR project admin. The blob is deleted only when no other
+  row (task/wiki or chat) references its storage_key.
+```
+
+list/upload require thread ownership; serve requires the thread owner or a
+project admin.
+
+`ChatAttachment` = `{ id, projectId, chatId, filename, mimeType, sizeBytes,
+sha256, storageKey, uploadedBy, uploadedByLabel, createdAt }`. A send
+references these by `storageKey`; the server verifies the row belongs to the
+project and that the declared mime matches the stored (sniffed) mime. Text and
+Markdown decode directly; PDFs extract through `unpdf` server-side; a document
+that yields no text blocks the send with 422 `ATTACHMENT_EXTRACTION_FAILED`.
 
 ### Activity & Comments
 
@@ -1956,13 +2015,19 @@ body { projectId*, chatId*, message*, agentId?,
   One persistent thread per (project, user), ownership enforced (another
   user's chatId → 404). Direct synchronous SSE — same frames as the task
   stream minus taskId (frames carry chatId). Second concurrent stream on the
-  same chatId → 409 ASSISTANT_TASK_ACTIVE. Image caps tighter than
-  document-Assistant: ≤3/message, ≤1.5MB total request; vision resolution as on
-  task create (inline parts / 409 VISION_NOT_CONFIGURED — vision_model
-  delegation removed in the squashed baseline).
+  same chatId → 409 ASSISTANT_TASK_ACTIVE.
+  attachments are chat-attachment refs (uploads above; cross-project keys →
+  422). Images feed the vision path (inline parts; 409 VISION_NOT_CONFIGURED
+  when `primary_supports_images=0`) and persist as `image-ref` parts; documents
+  (PDF/Markdown/plain text) are extracted server-side (PDF via `unpdf`) and
+  persist as `document-ref` parts, becoming model-visible text. Caps shared
+  across images + documents: ≤3 per message, ≤5 MB each, ≤10 MB per message;
+  the send is blocked with 422 ATTACHMENT_EXTRACTION_FAILED when a document
+  yields no text, and with 403 CHAT_ATTACHMENTS_DISABLED under the kill switch.
   | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / ASSISTANT_TASK_ACTIVE
   | 409 VISION_NOT_CONFIGURED
-  | 422 INVALID_ARGS
+  | 403 CHAT_ATTACHMENTS_DISABLED
+  | 422 INVALID_ARGS / ATTACHMENT_EXTRACTION_FAILED
 
   Edit/regenerate/retry semantics (fromIndex):
   | fromIndex                    | effect

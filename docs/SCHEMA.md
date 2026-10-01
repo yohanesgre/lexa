@@ -415,6 +415,36 @@ CREATE INDEX idx_attachments_task ON attachments(task_id);
 CREATE INDEX idx_attachments_wiki_page ON attachments(wiki_page_id);
 CREATE INDEX idx_attachments_storage_key ON attachments(storage_key);
 
+-- 0015_chat_attachments.sql — chat attachments are TEMPORARY conversation
+-- context, NOT project artifacts. Deliberately a separate table from
+-- `attachments`: no UNIQUE(project_id, sha256) dedupe (per-thread rows),
+-- no task_activity emission, never listed on a project's attachment surface.
+-- Thread-scoped lifecycle: the composite FK (document_type, document_id) →
+-- assistant_threads(document_type, document_id) with ON DELETE CASCADE means
+-- the row dies with its conversation. `mime_type` is SERVER-SNIFFED at upload
+-- (magic bytes; content with no signature is UTF-8-probed and extension-
+-- classified) — the client-declared content type is never trusted or stored.
+-- `storage_key` stays content-addressed ("blobs/<sha256>"), so a blob shared
+-- with a task/wiki attachment is deleted only when the LAST referencing row
+-- across BOTH tables goes. Additive only — `attachments` is never rebuilt.
+CREATE TABLE chat_attachments (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL CHECK (document_type IN ('task','wiki','chat')),
+  document_id   TEXT NOT NULL,
+  filename      TEXT NOT NULL,
+  mime_type     TEXT NOT NULL,
+  size_bytes    INTEGER NOT NULL,
+  sha256        TEXT NOT NULL,
+  storage_key   TEXT NOT NULL,
+  uploaded_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (document_type, document_id) REFERENCES assistant_threads(document_type, document_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_chat_attachments_thread ON chat_attachments(document_type, document_id);
+CREATE INDEX idx_chat_attachments_storage_key ON chat_attachments(storage_key);
+CREATE INDEX idx_chat_attachments_project ON chat_attachments(project_id);
+
 -- ============================================================
 -- Wiki Pages (nested, TipTap content)
 -- ============================================================
@@ -695,7 +725,7 @@ CREATE TABLE assistant_settings (
 -- Assistant Gateway: global providers (no project_id) — superadmin-only.
 -- `api_key` is a DEAD column in Release N: it stays NOT NULL, every write stores
 -- '' (the empty string), and only the one-way boot backfill reads it. Release N+1
--- drops it (migration 0015). The live credential is `assistant_provider_secrets`.
+-- drops it (migration 0016). The live credential is `assistant_provider_secrets`.
 CREATE TABLE assistant_providers (
   id TEXT PRIMARY KEY,
   label TEXT NOT NULL,
@@ -1092,7 +1122,10 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- `assistant_jev_config` / `assistant_jev_secrets` / `assistant_jev_projects`),
 -- 0014_provider_secrets.sql (provider credentials move into
 -- `assistant_provider_secrets`; the legacy plaintext column stays dead for
--- Release N). Future migrations continue at 0015_*.sql.
+-- Release N), 0015_chat_attachments.sql (chat attachments — one additive
+-- `chat_attachments` table, thread-scoped via a composite FK to
+-- `assistant_threads` with ON DELETE CASCADE). Future migrations continue at
+-- 0016_*.sql.
 ```
 
 ## Design Notes
@@ -1206,7 +1239,7 @@ keep opening.
   (`server/db/provider-secrets-backfill.ts`), which encrypts every non-empty
   `assistant_providers.api_key` into this table and then writes `''`. The legacy
   column is dead in Release N (only the backfill reads it) and is dropped in
-  Release N+1 by `0015_drop_provider_api_key.sql`.
+  Release N+1 by `0016_drop_provider_api_key.sql`.
 - **Jev (0013).** `assistant_jev_secrets` holds the API key as a singleton
   (`config_id = 'default'`, FK to `assistant_jev_config`), AAD-bound to that
   row; `key_hint` is the last 4 characters, display only. The config registry
@@ -1293,6 +1326,15 @@ Two-level model: `attachments` rows are scoped to a project (UNIQUE(project_id, 
 - **Blob lifecycle:** a blob is deleted only when the last `attachments` row referencing its storage_key goes (refcount query at delete time). Delete authority: uploader OR project admin.
 - **Orphan blobs are possible and harmless:** FK cascades (project/task/page delete) remove rows without app-level blob cleanup, as does a crash between blob write and row insert. Re-uploading the same bytes re-links the orphan. Periodic GC is out of scope.
 - **mime_type is server-derived** from magic-byte sniffing at upload; serving inline is allowed ONLY for image/* and application/pdf — everything else downloads via Content-Disposition: attachment with X-Content-Type-Options: nosniff.
+
+### Chat attachments — thread-scoped, temporary
+`chat_attachments` (0015) holds files attached to an Assistant chat message: images feed the existing vision path (`image-ref` parts) and PDF/Markdown/plain-text files become model-visible extracted text (`document-ref` parts, persisted in `assistant_threads.messages` like image refs). Differences from `attachments`:
+
+- **Lifecycle:** a row is bound to its conversation by the composite FK `(document_type, document_id) → assistant_threads(document_type, document_id)` with `ON DELETE CASCADE`; it dies with the thread (never listed on a project's attachment surface, never emits `task_activity`).
+- **No dedupe:** `chat_attachments` carries no `UNIQUE(project_id, sha256)` — every upload is its own row, though the blob stays content-addressed and shared.
+- **Blob lifecycle:** the same refcount rule as `attachments`, but counted across BOTH tables — a blob is dropped only when the last row in `attachments` **and** `chat_attachments` referencing its `storage_key` goes. Orphan blobs remain possible and harmless.
+- **Server-side extraction:** text/markdown decode directly; PDFs extract through `unpdf` (`server/services/assistant-helpers.ts`). A document that yields no text blocks the send with `ATTACHMENT_EXTRACTION_FAILED`.
+- **Caps (D4):** ≤3 attachments per message (images + documents share the count), ≤5 MB per file, ≤10 MB per message; zero-byte and unsupported types rejected. Kill switch `LXK_DISABLE_CHAT_ATTACHMENTS=1` disables uploads and sends-with-attachments.
 
 ### FTS5 for `search_wiki`
 The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` (plain-text projection of TipTap JSON) on every wiki write — searching raw TipTap JSON would match syntax tokens, not words.
