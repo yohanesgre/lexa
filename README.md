@@ -1,8 +1,13 @@
 # Lexa
 
-Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, an in-process AI Assistant, team auth, and two-way GitHub issue sync.
+Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, an AI Assistant, team auth, and two-way GitHub issue sync.
 
-Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (docker, bare metal, Cloudflare Workers, or dev).
+Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (Cloudflare Workers, docker, bare metal, or dev).
+
+**Deploy targets:** Cloudflare Workers is the actively developed target and the
+only one receiving new features. Docker and bare metal keep running at their
+current features — existing installs keep working, no new work lands there
+(`docs/DEPLOYMENT.md`, ADR-0003). The AI Assistant is Workers-only.
 
 ## Features
 
@@ -10,7 +15,7 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self
 - **Tasks** — rich TipTap descriptions, assignees, activity timeline + comments, attachments, subtasks / blocked-by / related links, GitHub issue links with sync status
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions with restore, public share links
 - **Milestones** — goals above sprints with target dates, progress tracking, timeline gantt
-- **AI Assistant** — one in-process AI tier: streaming chat with threads, document Generate with review-in-editor, a multi-provider gateway, builtin agent + skills rule bundles, and a proposed-actions approval flow for task/wiki writes
+- **AI Assistant** (Cloudflare Workers deploy only) — streaming chat with threads, document Generate with review-in-editor, a multi-provider gateway, builtin agent + skills rule bundles, and a proposed-actions approval flow for task/wiki writes
 - **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for scripts and the CLI
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
 - **`lx`** — headless operator CLI for tasks, wiki, projects, GitHub status, and upgrades; also the integration surface for external agents
@@ -55,6 +60,9 @@ bleeding edge). Targets:
 | `bare` | release tarball + env file + `lexa-start.sh` (systemd opt-in via `--systemd`) |
 | `workers` | Cloudflare Workers + D1 + R2 + KV via `bunx wrangler` — or zero-file: [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yohanesgre/lexa) (DRAFT-UNVERIFIED, see `docs/DEPLOYMENT.md`; disable Builds auto-deploy after) |
 | `dev` | clone the repo, `bun install`, `bun run dev:full` |
+
+`workers` is the actively developed target. `docker` and `bare` are frozen at
+their current features — they keep running, no new features land there.
 
 Flags: `--ref <tag|branch>`, `--name <name>` (workers), `--port`, `--bind`, `--domain` (workers custom domain), `--systemd`
 (bare), `--image <tag>` (docker version pin), `--no-pull` (docker; use a locally

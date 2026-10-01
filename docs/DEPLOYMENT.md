@@ -12,6 +12,16 @@ superadmin is provisioned **only** by the web `/setup` wizard (email + password
 > them; `lexa-cli` is now an operate-only headless frontend (tasks, wiki,
 > machines, keys, upgrades).
 
+## Deploy targets frozen
+
+Cloudflare Workers is the actively developed deploy target and the only one
+receiving new features. **Docker and bare metal are frozen at their current
+features** — the install script and releases keep them running, but no new
+features land there. The **AI Assistant is Workers-only**; assistant upgrade
+notes (what changes for Docker users, how to export thread history before
+switching) are added in a later phase. See `docs/RELEASING.md` → *Deploy
+targets — policy*.
+
 The canonical config file is **`.env.toml`**. It is structured TOML where the
 sections (`[core]`, `[auth]`, `[github]`, …) are presentation only and every
 leaf key is the env-var name verbatim (`DATABASE_PATH`, `LXK_*`, `GITHUB_*`).
