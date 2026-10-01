@@ -3,9 +3,13 @@ import { TasksPage } from "../../components/tasks/TasksPage";
 import { getBoard } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/tasks")({
-  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; swimlane?: string | undefined } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; swimlane?: string | undefined; new?: boolean | undefined } => ({
     task: typeof search.task === "string" ? search.task : undefined,
     swimlane: typeof search.swimlane === "string" ? search.swimlane : undefined,
+    // Frozen create trigger — mirrors the dashboard's /?new=1 (wireframes/src/tasks.html).
+    // The router's default search parser coerces "1" to the number 1, so accept
+    // all three forms the URL can produce.
+    new: search.new === 1 || search.new === "1" || search.new === true ? true : undefined,
   }),
   // Interactive list view — same treatment as the board: client-only
   // (`ssr: false` here; root is `ssr: true` so public routes can render), loader
