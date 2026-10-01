@@ -44,6 +44,8 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "LXK_ASSISTANT_REPO_CAP",
   // Chat attachments kill switch (only the exact value "1" disables).
   "LXK_DISABLE_CHAT_ATTACHMENTS",
+  // Bulk task actions kill switch (only the exact value "1" disables; both flavors).
+  "LXK_DISABLE_TASKS_BULK",
   // Managed secrets — the envelope key pair shared by MCP tokens, provider API
   // keys, and the Jev API key. Both are RuntimeEnv slots so they reach the
   // keyring on both runtimes; the master keys themselves are never a client
@@ -117,6 +119,7 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_RATE_LIMIT_WINDOW_MS: source.LXK_RATE_LIMIT_WINDOW_MS,
     LXK_ASSISTANT_REPO_CAP: source.LXK_ASSISTANT_REPO_CAP,
     LXK_DISABLE_CHAT_ATTACHMENTS: source.LXK_DISABLE_CHAT_ATTACHMENTS,
+    LXK_DISABLE_TASKS_BULK: source.LXK_DISABLE_TASKS_BULK,
     LXK_SECRETS_MASTER_KEY: source.LXK_SECRETS_MASTER_KEY,
     LXK_SECRETS_MASTER_KEY_PREV: source.LXK_SECRETS_MASTER_KEY_PREV,
     LOG_LEVEL: source.LOG_LEVEL,
@@ -163,6 +166,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_RATE_LIMIT_WINDOW_MS: s("LXK_RATE_LIMIT_WINDOW_MS"),
     LXK_ASSISTANT_REPO_CAP: s("LXK_ASSISTANT_REPO_CAP"),
     LXK_DISABLE_CHAT_ATTACHMENTS: s("LXK_DISABLE_CHAT_ATTACHMENTS"),
+    LXK_DISABLE_TASKS_BULK: s("LXK_DISABLE_TASKS_BULK"),
     LXK_SECRETS_MASTER_KEY: s("LXK_SECRETS_MASTER_KEY"),
     LXK_SECRETS_MASTER_KEY_PREV: s("LXK_SECRETS_MASTER_KEY_PREV"),
     LOG_LEVEL: s("LOG_LEVEL"),

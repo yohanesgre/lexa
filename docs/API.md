@@ -60,6 +60,7 @@ All non-2xx responses share one shape:
 | 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`). Chat attachment uploads use their own per-file cap of 5 MB (`CHAT_ATTACHMENT_MAX_UPLOAD_BYTES`) independent of `LXK_MAX_UPLOAD_MB` (details: `{ size, maxBytes, filename }`) |
 | 403 | `ATTACHMENT_DELETE_FORBIDDEN` | Attachment delete without uploader/admin authority |
 | 403 | `CHAT_ATTACHMENTS_DISABLED` | Chat attachment upload or a chat send carrying attachments while `LXK_DISABLE_CHAT_ATTACHMENTS=1` |
+| 403 | `TASKS_BULK_DISABLED` | `POST /projects/:slug/tasks/bulk` while `LXK_DISABLE_TASKS_BULK=1` — refused before any write |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
@@ -70,7 +71,7 @@ All non-2xx responses share one shape:
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
-| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant attachment scope/cap violations |
+| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant attachment scope/cap violations; bulk move with neither `columnId` nor `swimlaneId`; bulk with more than 100 `ids` (details: `{ reason }`) |
 | 422 | `ATTACHMENT_EXTRACTION_FAILED` | A chat document attachment's bytes yielded no model-visible text (unreadable PDF, non-UTF-8 text) — the send is blocked, the file named (details: `{ filename, reason }`) |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (one shared bucket; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
@@ -719,6 +720,40 @@ POST   /api/projects/:slug/tasks/:id/archive
 POST   /api/projects/:slug/tasks/:id/restore
 → 200 Task (archivedAt null) | 404
   Idempotent: restoring a live task returns it unchanged.
+
+POST   /api/projects/:slug/tasks/bulk
+body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueAt? }
+  action = "move" | "update" | "archive" | "restore"
+  One transaction (invariant #12 parity): every applied task runs the SAME
+  service path as its single-task endpoint, so activity rows, required_fields
+  and WIP guards match exactly. Position-only reorders emit nothing.
+  - ids accept the ticket key (PREFIX-N) alias like every other task-id
+    surface (invariant #13); unresolvable keys pass through and fail per task.
+    They are de-duped first-seen (so `applied` never echoes a repeated id) and
+    capped at 100 per request — a longer list is 422 INVALID_ARGS before any
+    write.
+  - move: columnId/swimlaneId override the task's current value; at least one
+    is required. A lane-only move keeps the task's column. Each task is
+    evaluated independently, so WIP/required_fields/deadline rejections are
+    collected per task while the permitted tasks still move.
+  - update: only the provided priority/type/assignees/dueAt change.
+  - archive / restore: idempotent, exactly like the single-task endpoints.
+  Side effect (after the transaction commits, best-effort — a GitHub failure
+  never fails the request): update pushes content for linked tasks
+  (syncContentFromLexa), and move to a github-mapped target column pushes state
+  (syncStateFromLexa). Same orchestration as the single-task routes; the
+  service itself makes no GitHub calls.
+→ 200 { applied: string[], failed: [{ id, code, message }] }
+  `applied`/`failed[].id` are the RESOLVED task ids (aliases → UUIDs).
+  Per-task domain rejections are collected in `failed` while the rest apply:
+  TASK_NOT_FOUND, COLUMN_NOT_FOUND, SWIMLANE_NOT_FOUND, WIP_LIMIT,
+  REQUIRED_FIELD, NEIGHBOR_NOT_IN_COLUMN, INVALID_OPTION, DEADLINE_AFTER_LANE.
+  Request-level failures return the standard error envelope and abort the
+  transaction — NO task changes:
+  | 403 TASKS_BULK_DISABLED (`LXK_DISABLE_TASKS_BULK=1`)
+  | 404 PROJECT_NOT_FOUND
+  | 422 INVALID_ARGS (targetless move: neither columnId nor swimlaneId;
+    more than 100 ids)
 
 GET    /api/projects/:slug/board?includeArchived=true
 → 200 Board          (unpaginated full snapshot — the kanban's single fetch)

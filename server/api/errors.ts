@@ -57,6 +57,9 @@ export class AttachmentDeleteForbidden extends Data.TaggedError("AttachmentDelet
 // Operator kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1): uploads and sends
 // carrying attachments are refused regardless of the capability flag.
 export class ChatAttachmentsDisabled extends Data.TaggedError("ChatAttachmentsDisabled")<{}> {}
+// Operator kill switch (LXK_DISABLE_TASKS_BULK=1): the bulk task endpoint is
+// refused regardless of the capability flag — no partial write.
+export class TasksBulkDisabled extends Data.TaggedError("TasksBulkDisabled")<{}> {}
 // A document attachment's bytes could not be turned into model-visible text
 // (unreadable PDF, non-UTF-8 text). The send is blocked; the file is named.
 export class AttachmentExtractionFailed extends Data.TaggedError("AttachmentExtractionFailed")<{ filename: string; reason: string }> {}
@@ -178,6 +181,7 @@ export const errorCodeMap: Record<string, string> = {
   PayloadTooLarge: "PAYLOAD_TOO_LARGE",
   AttachmentDeleteForbidden: "ATTACHMENT_DELETE_FORBIDDEN",
   ChatAttachmentsDisabled: "CHAT_ATTACHMENTS_DISABLED",
+  TasksBulkDisabled: "TASKS_BULK_DISABLED",
   AttachmentExtractionFailed: "ATTACHMENT_EXTRACTION_FAILED",
   InvalidName: "INVALID_NAME",
   InvalidRateLimit: "INVALID_RATE_LIMIT",
@@ -244,6 +248,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "CommentDeleteForbidden":
     case "AttachmentDeleteForbidden":
     case "ChatAttachmentsDisabled":
+    case "TasksBulkDisabled":
     case "SoleOwner":
       return 403;
     case "PayloadTooLarge":
@@ -448,6 +453,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "You can only delete your own attachments (or an admin's)";
     case "ChatAttachmentsDisabled":
       return "Chat attachments are disabled on this server";
+    case "TasksBulkDisabled":
+      return "Bulk task actions are disabled on this server";
     case "AttachmentExtractionFailed":
       return typeof error.reason === "string" && error.reason !== ""
         ? `Could not read '${error.filename}': ${error.reason}`

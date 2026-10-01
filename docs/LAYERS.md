@@ -349,6 +349,25 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
       // interaction (routes orchestrate any sync, per the no-cycle rule).
       archive: (id: string) => ...,
       restore: (id: string) => ...,
+
+      // Bulk actions (POST /projects/:slug/tasks/bulk). Every id runs the
+      // matching single-task method (move/update/archive/restore) inside ONE
+      // withTx, so each task emits the SAME activity rows as the single-task
+      // path (invariant #12 parity). Per-task DOMAIN rejections (not-found,
+      // WIP_LIMIT, REQUIRED_FIELD, NEIGHBOR_NOT_IN_COLUMN, INVALID_OPTION,
+      // DEADLINE_AFTER_LANE) are caught and COLLECTED in `failed` while the
+      // permitted tasks still apply; DbError / ConstraintViolation are NOT
+      // caught and abort the whole transaction — a request-level failure
+      // changes NOTHING. A targetless move (no columnId and no swimlaneId)
+      // fails with InvalidArgs before any write. Failure codes/messages come
+      // from the error catalog via errorCodeMap/errorMessage, never
+      // hand-rolled. ids are de-duped first-seen and capped at 100
+      // (BULK_TASK_ID_CAP) BEFORE withTx. GitHub sync stays
+      // route-orchestrated: after the transaction commits the ROUTE
+      // best-effort syncs linked tasks (content push for update, state push
+      // for a move to a github-mapped column) exactly as the single-task
+      // handlers do — the service makes no GitHub calls (invariant #1).
+      bulk: (projectId: string, input: BulkTaskInput) => ...,
     };
   }),
   dependencies: [/* TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo */],
@@ -708,6 +727,17 @@ position-only reorders emit nothing; webhook moves emit `github_synced` only
 nothing. If the mutation rolls back, the activity rows roll back with it.
 Messages are frozen at write time via the catalog
 (`server/activity-messages.ts`) — never hand-rolled at call sites.
+
+**Bulk parity:** `TaskService.bulk` runs each id through the matching
+single-task method inside ONE transaction, so the emission rule above holds
+per applied task; a per-task rejection collects into `failed` and writes
+nothing for that id. That no-partial-write guarantee rests on error ordering:
+every caught domain error is raised before the task's first write (all
+validation runs ahead of the inner `withTx`; the WIP guard is a conditional
+UPDATE that changes 0 rows when it rejects) — pinned by a regression test.
+The route then best-effort syncs GitHub after the transaction commits, so a
+bulk edit does not leave `pushed_*` stale and a bulk move still closes/opens
+linked issues.
 
 **Content-sync emission:** the Lexa→GitHub content push (`syncContentFromLexa`)
 emits NOTHING — it runs after the mutation commits and the mutation's
