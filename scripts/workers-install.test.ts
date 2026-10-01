@@ -15,6 +15,7 @@ import {
   readPriorAccount,
   readRootWranglerConfig,
   resolveAccountOrDie,
+  resolveDurableObjects,
   resolveNames,
   resolveObservability,
   selectAccount,
@@ -294,6 +295,50 @@ describe("readRootWranglerConfig JSONC scanner", () => {
   });
 });
 
+describe("root durable objects / migrations", () => {
+  const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+  test("the generated per-deploy config carries root's DO binding + sqlite migration", () => {
+    const blocks = resolveDurableObjects(readRootWranglerConfig(ROOT));
+    expect(blocks.durable_objects).toEqual({
+      bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }],
+    });
+    expect(blocks.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }]);
+  });
+
+  test("a missing or malformed durable_objects block fails loud", () => {
+    expect(() => resolveDurableObjects({} as RootWorkerConfig)).toThrow(/durable_objects/);
+    expect(() =>
+      resolveDurableObjects({ durable_objects: [], migrations: [{}] } as unknown as RootWorkerConfig)
+    ).toThrow(/durable_objects/);
+    expect(() =>
+      resolveDurableObjects({ durable_objects: { bindings: [] } } as unknown as RootWorkerConfig)
+    ).toThrow(/durable_objects/);
+    expect(() =>
+      resolveDurableObjects({
+        durable_objects: { bindings: [{ name: "OTHER", class_name: "Other" }] },
+        migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
+      } as unknown as RootWorkerConfig)
+    ).toThrow(/ASSISTANT_AGENT/);
+  });
+
+  test("a missing or empty migrations block fails loud", () => {
+    const withDo = {
+      durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }] },
+    } as RootWorkerConfig;
+    expect(() => resolveDurableObjects(withDo)).toThrow(/migrations/);
+    expect(() =>
+      resolveDurableObjects({ ...withDo, migrations: [] } as RootWorkerConfig)
+    ).toThrow(/migrations/);
+    expect(() =>
+      resolveDurableObjects({
+        ...withDo,
+        migrations: [{ tag: "v1", new_sqlite_classes: ["Other"] }],
+      } as RootWorkerConfig)
+    ).toThrow(/new_sqlite_classes/);
+  });
+});
+
 describe("source order — account resolves before any resource is created", () => {
   test("the resolveAccountOrDie call precedes the ensureD1 call in main", () => {
     const src = readFileSync(
@@ -305,6 +350,16 @@ describe("source order — account resolves before any resource is created", () 
     expect(resolveIdx).toBeGreaterThanOrEqual(0);
     expect(ensureIdx).toBeGreaterThanOrEqual(0);
     expect(resolveIdx).toBeLessThan(ensureIdx);
+  });
+
+  test("main emits the DO blocks: resolveDurableObjects(rootConfig) spread into the config", () => {
+    const src = readFileSync(
+      new URL("./workers-install.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain("resolveDurableObjects(rootConfig)");
+    expect(src).toContain("durable_objects,");
+    expect(src).toContain("migrations,");
   });
 
   test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {

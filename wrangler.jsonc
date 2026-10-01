@@ -55,6 +55,16 @@
       "id": "00000000000000000000000000000000"
     }
   ],
+  // Assistant Durable Object (ADR-0003 §B.1): one instance per conversation
+  // thread (`chat:<id>` | `task:<id>` | `wiki:<id>`), class exported from
+  // server/workers-entry.ts. `new_sqlite_classes` is the v1 migration that
+  // creates SQLite-backed storage for the class — installed deployments get
+  // these blocks transcribed by scripts/workers-install.ts, so never remove
+  // them from this root config.
+  "durable_objects": {
+    "bindings": [{ "name": "ASSISTANT_AGENT", "class_name": "LexaAssistantAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] }],
   "triggers": {
     "crons": ["*/15 * * * *"]
   },

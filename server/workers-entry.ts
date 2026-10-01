@@ -32,6 +32,7 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import type {
   D1Database,
+  DurableObjectNamespace,
   ExecutionContext,
   ExportedHandler,
   KVNamespace,
@@ -40,10 +41,11 @@ import type {
   Response as WorkersResponse,
   ScheduledController,
 } from "@cloudflare/workers-types";
+import { getAgentByName } from "agents";
 import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
 import { getEnvFromWorkers, type RuntimeEnv } from "./env";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
-import { Db, DbD1Live, batch as batchStmts, queryFirst } from "./db/db";
+import { Db, DbD1Live, RowNotFound, batch as batchStmts, queryFirst, run } from "./db/db";
 import { createD1Driver } from "./db/drivers/d1";
 import type { DbDriver } from "./db/db";
 import {
@@ -60,9 +62,27 @@ import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "./storage/c
 import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
+import { AuthorizationService } from "./services/authorization.service";
+import { capabilitiesFromRuntimeEnv } from "./capabilities";
+import {
+  ASSISTANT_AGENT_ROUTE_PREFIX,
+  INTERNAL_ASSISTANT_ROUTE_PREFIX,
+  assistantGateErrorResponse,
+  authorizeInternalRequest,
+  handleAssistantAgentRequest,
+  type AssistantThreadRow,
+  type UpsertChatThreadInput,
+} from "./assistant/agent-gate";
+import { LexaAssistantAgent } from "./assistant/agent";
+import type { AssistantThreadType } from "../shared/assistant";
+
+export { LexaAssistantAgent };
+
+type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
 
 export interface WorkersEnv {
   DB?: D1Database;
+  ASSISTANT_AGENT?: AssistantAgentNamespace;
   BLOB?: R2Bucket;
   KV?: KVNamespace;
   LXK_ENV?: string;
@@ -131,6 +151,90 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
   return bootPromise;
 }
 
+// ─── Assistant gate data access (D1 + authorization) ─────────────────────
+// The WS gate (server/assistant/agent-gate.ts) is IO-free; these are the
+// dependency-injected implementations it runs in production.
+
+interface AssistantThreadRowRaw {
+  document_type: AssistantThreadType;
+  document_id: string;
+  project_id: string;
+  owner_user_id: string | null;
+}
+
+async function loadAssistantThread(
+  driver: DbDriver,
+  documentType: AssistantThreadType,
+  documentId: string
+): Promise<AssistantThreadRow | null> {
+  try {
+    const row = await Effect.runPromise(
+      queryFirst<AssistantThreadRowRaw>(
+        driver,
+        `SELECT document_type, document_id, project_id, owner_user_id
+         FROM assistant_threads WHERE document_type = ? AND document_id = ?`,
+        documentType,
+        documentId
+      )
+    );
+    return {
+      documentType: row.document_type,
+      documentId: row.document_id,
+      projectId: row.project_id,
+      ownerUserId: row.owner_user_id,
+    };
+  } catch (e) {
+    if (e instanceof RowNotFound) return null;
+    throw e;
+  }
+}
+
+// Connect-upsert for a chat thread with no D1 row (ADR-0003 §B.2). DO NOTHING
+// on conflict: project/owner never migrate, and a concurrent insert loses the
+// race harmlessly — the gate re-reads and rejects a mismatched owner.
+async function upsertChatThread(
+  driver: DbDriver,
+  input: UpsertChatThreadInput
+): Promise<AssistantThreadRow | null> {
+  try {
+    await Effect.runPromise(
+      run(
+        driver,
+        `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+         VALUES ('chat', ?, ?, ?, '[]')
+         ON CONFLICT(document_type, document_id) DO NOTHING`,
+        input.documentId,
+        input.projectId,
+        input.ownerUserId
+      )
+    );
+  } catch (e) {
+    console.error("[Assistant] chat thread upsert failed:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+  return loadAssistantThread(driver, "chat", input.documentId);
+}
+
+// Project read access via the shared authorization service (same decision as
+// the REST middleware). A DB failure is a deny, never a bypass.
+async function canReadProject(base: BaseLayers, userId: string, projectId: string): Promise<boolean> {
+  const runtime = ManagedRuntime.make(Layer.provide(AuthorizationService.Default, base));
+  try {
+    const role = await runtime.runPromise(
+      Effect.gen(function* () {
+        const authz = yield* AuthorizationService;
+        return yield* authz.projectAccess(userId, projectId);
+      })
+    );
+    return role !== null;
+  } catch (e) {
+    console.error("[Assistant] project access check failed:", e instanceof Error ? e.message : String(e));
+    return false;
+  } finally {
+    await runtime.dispose();
+  }
+}
+
 // ─── Response helpers (same envelopes as the Bun host) ───────────────────
 
 function securityHeaders(headers?: HeadersInit): Headers {
@@ -189,6 +293,19 @@ function apiFingerprint(runtimeEnv: RuntimeEnv): string {
   return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? ""]);
 }
 
+// better-auth is isolate-stable the same way the API stack is: build once per
+// env fingerprint. Shared by the REST handler and the assistant WS gate so the
+// session call is byte-for-byte the one the API middleware uses.
+let authCache: { fingerprint: string; value: { auth: BetterAuthApi } } | null = null;
+
+function getRuntimeAuth(runtimeEnv: RuntimeEnv): { auth: BetterAuthApi } {
+  const fingerprint = apiFingerprint(runtimeEnv);
+  if (!authCache || authCache.fingerprint !== fingerprint) {
+    authCache = { fingerprint, value: createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi } };
+  }
+  return authCache.value;
+}
+
 async function handleApi(
   req: WorkersRequest,
   runtimeEnv: RuntimeEnv,
@@ -197,7 +314,7 @@ async function handleApi(
 ): Promise<Response> {
   const fingerprint = apiFingerprint(runtimeEnv);
   if (!apiCache || apiCache.fingerprint !== fingerprint) {
-    const lexaAuth = createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi };
+    const lexaAuth = getRuntimeAuth(runtimeEnv);
     const handler = createWorkersApiHandler({
       driver,
       runtimeEnv,
@@ -424,10 +541,19 @@ export async function runScheduledCore(
 const handler: ExportedHandler<WorkersEnv> = {
   async fetch(req: WorkersRequest, env: WorkersEnv, ctx: ExecutionContext): Promise<WorkersResponse> {
     try {
-      await ensureBoot(env);
-      const { runtimeEnv, driver, base } = requestLayers(env);
       const url = new URL(req.url);
       const path = url.pathname;
+
+      // Capability discovery (ADR-0003 §B.4): unauthenticated, no DB read, and
+      // served BEFORE boot — a probe must not pay the first-request sync cost.
+      if (path === "/api/capabilities") {
+        return json(
+          capabilitiesFromRuntimeEnv("workers", getEnvFromWorkers(env as unknown as Record<string, unknown>))
+        ) as unknown as WorkersResponse;
+      }
+
+      await ensureBoot(env);
+      const { runtimeEnv, driver, base } = requestLayers(env);
 
       if (path === "/health") {
         return json({ ok: true, flavor: "workers" }) as unknown as WorkersResponse;
@@ -455,6 +581,75 @@ const handler: ExportedHandler<WorkersEnv> = {
           maxBodyBytes: resolveMaxApiBody(runtimeEnv),
         });
         return res as unknown as WorkersResponse;
+      }
+      // Assistant WebSocket gate (ADR-0003 §B.2): session cookie → thread ACL
+      // (chat owner / project read) → stripped + HMAC-signed identity headers →
+      // forward to the per-thread Durable Object. Mounted BEFORE the general
+      // /api handler, whose API-key middleware would 401 the cookie path.
+      if (path.startsWith(ASSISTANT_AGENT_ROUTE_PREFIX)) {
+        const outcome = await handleAssistantAgentRequest(req as unknown as Request, {
+          // Deny on error (middleware convention, server/api/middleware.ts): a
+          // thrown session lookup is treated as "no session" → 401, never 500.
+          getSession: async (headers) => {
+            try {
+              return await getRuntimeAuth(runtimeEnv).auth.api.getSession({ headers });
+            } catch (e) {
+              console.error("[Workers] assistant session lookup failed (deny):", String(e));
+              return null;
+            }
+          },
+          loadThread: (documentType, documentId) => loadAssistantThread(driver, documentType, documentId),
+          canReadProject: (userId, projectId) => canReadProject(base, userId, projectId),
+          upsertChatThread: (input) => upsertChatThread(driver, input),
+          masterKey: runtimeEnv.LXK_SECRETS_MASTER_KEY,
+        });
+        if (outcome.kind === "error") {
+          return assistantGateErrorResponse(outcome) as unknown as WorkersResponse;
+        }
+        if (!env.ASSISTANT_AGENT) {
+          return json(
+            { error: { code: "ASSISTANT_UNAVAILABLE", message: "Assistant binding missing" } },
+            502
+          ) as unknown as WorkersResponse;
+        }
+        // ADR-0003 §B.6: a rejected RPC or DO error is the assistant being
+        // unavailable, not a generic Worker 500. Guard the forward so a thrown
+        // getAgentByName/fetch still yields the 502 envelope.
+        try {
+          const agent = await getAgentByName(env.ASSISTANT_AGENT, outcome.threadKey);
+          return (await agent.fetch(
+            new Request(req as unknown as Request, { headers: outcome.headers })
+          )) as unknown as WorkersResponse;
+        } catch (e) {
+          console.error("[Workers] assistant agent forward failed:", String(e));
+          return json(
+            { error: { code: "ASSISTANT_UNAVAILABLE", message: "Assistant unavailable" } },
+            502
+          ) as unknown as WorkersResponse;
+        }
+      }
+      // Internal DO → Worker routes (ADR-0003 §B.2). The public middleware
+      // would demand an API key, so this mount sits before it and accepts only
+      // a valid signed identity. P1 is the mount point + guard; the assistant
+      // internal handlers land in P2/P3.
+      if (path.startsWith(INTERNAL_ASSISTANT_ROUTE_PREFIX)) {
+        const outcome = await authorizeInternalRequest(req as unknown as Request, runtimeEnv.LXK_SECRETS_MASTER_KEY);
+        if (outcome === "unavailable") {
+          return json(
+            { error: { code: "ASSISTANT_UNAVAILABLE", message: "Assistant not configured" } },
+            502
+          ) as unknown as WorkersResponse;
+        }
+        if (outcome === "unauthorized") {
+          return json(
+            { error: { code: "NO_USER_CONTEXT", message: "Invalid internal authentication" } },
+            401
+          ) as unknown as WorkersResponse;
+        }
+        return json(
+          { error: { code: "ASSISTANT_THREAD_NOT_FOUND", message: "Unknown internal assistant route" } },
+          404
+        ) as unknown as WorkersResponse;
       }
       if (path.startsWith("/api/")) {
         return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;

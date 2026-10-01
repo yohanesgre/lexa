@@ -17,6 +17,7 @@ import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import { bodyCapFor, resolveStorageConfig } from "./storage/config";
 import { runBackup, createBackupDriver, DEFAULT_BACKUP_RETENTION } from "./storage/backup";
 import { auth, handleAuthSurface, readBodyWithLimit } from "./auth";
+import { capabilities } from "./capabilities";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
@@ -190,6 +191,17 @@ const server: Server<unknown> = Bun.serve({
     const url = new URL(req.url);
 
     const path = url.pathname;
+
+    // Capability discovery (ADR-0003 §B.4): the same JSON contract the Workers
+    // host serves. The Bun flavor is honest about the assistant move — it is
+    // Workers-only, so Bun always reports `assistant:false`.
+    if (path === "/api/capabilities") {
+      return withSecurityHeaders(
+        new Response(JSON.stringify(capabilities("bun", getEnv())), {
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+    }
 
     if (url.pathname.startsWith("/api/")) {
       // Better Auth — mounted BEFORE the API-key middleware. The auth handler
