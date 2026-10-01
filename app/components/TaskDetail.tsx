@@ -36,6 +36,8 @@ interface TaskDetailProps {
   task?: Task | undefined;
   project?: { name: string };
   defaultColumnId?: string | undefined;
+  defaultSwimlaneId?: string | undefined;
+  showCreateSwimlane?: boolean | undefined;
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
   swimlanes?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
@@ -59,6 +61,7 @@ interface TaskDetailProps {
     assignees: string[];
     description: TipTapDoc;
     dueAt?: string | null | undefined;
+    swimlaneId?: string | undefined;
   }) => Promise<void>;
 }
 
@@ -273,7 +276,7 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
   );
 }
 
-export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const navigate = useNavigate();
   const slug = params.slug;
@@ -320,6 +323,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
     selectedSwimlaneId, setSelectedSwimlaneId,
     createTitle, setCreateTitle,
     createColumnId, setCreateColumnId,
+    createSwimlaneId, setCreateSwimlaneId,
     createPriority, setCreatePriority,
     createType, setCreateType,
     createAssignees, setCreateAssignees,
@@ -330,6 +334,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
   } = useTaskDetailActions({
     task,
     defaultColumnId,
+    defaultSwimlaneId,
     columns,
     fieldConfig,
     emptyDoc,
@@ -420,6 +425,9 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           onMove={onMove!}
           createColumnId={createColumnId}
           setCreateColumnId={setCreateColumnId}
+          createSwimlaneId={createSwimlaneId}
+          setCreateSwimlaneId={setCreateSwimlaneId}
+          showCreateSwimlane={showCreateSwimlane}
           createPriority={createPriority}
           setCreatePriority={setCreatePriority}
           createType={createType}
@@ -467,6 +475,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           creating={creating}
           createTitle={createTitle}
           createColumnId={createColumnId}
+          createBlocked={missingFields.length > 0}
           onClose={handleClose}
           onCreate={handleCreate}
           onArchive={onArchive!}

@@ -6,6 +6,7 @@ interface TaskFooterProps {
   creating: boolean;
   createTitle: string;
   createColumnId: string;
+  createBlocked: boolean;
   onClose: () => void;
   onCreate: () => void;
   onArchive: (id: string) => void;
@@ -14,7 +15,7 @@ interface TaskFooterProps {
   taskId: string;
 }
 
-export function TaskFooter({ isCreate, isArchived, creating, createTitle, createColumnId, onClose, onCreate, onArchive, onRestore, onDeleteClick, taskId }: TaskFooterProps) {
+export function TaskFooter({ isCreate, isArchived, creating, createTitle, createColumnId, createBlocked, onClose, onCreate, onArchive, onRestore, onDeleteClick, taskId }: TaskFooterProps) {
   const handleClose = onClose;
   const handleCreate = onCreate;
   return (
@@ -29,7 +30,7 @@ export function TaskFooter({ isCreate, isArchived, creating, createTitle, create
         <button type="button"
           className="btn btn-primary"
           onClick={handleCreate}
-          disabled={!createTitle.trim() || !createColumnId || creating}
+          disabled={!createTitle.trim() || !createColumnId || creating || createBlocked}
         >
           {creating ? "Creating..." : "Create task"}
         </button>

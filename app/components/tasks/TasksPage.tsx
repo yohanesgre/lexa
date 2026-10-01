@@ -1,10 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useBoard, useTask, useTasks, useMoveTask, useUpdateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
+import {
+  useBoard,
+  useTask,
+  useTasks,
+  useMoveTask,
+  useUpdateTask,
+  useCreateTask,
+  useDeleteTask,
+  useArchiveTask,
+  useRestoreTask,
+  useLinkGithubIssue,
+  useUnlinkGithubIssue,
+  useCapabilities,
+  useBulkTaskAction,
+} from "../../lib/queries";
+import type { BulkTaskActionInput } from "../../lib/api";
 import { parseSwimlaneParam } from "../../lib/filters";
 import type { TaskListItem } from "../../lib/queries";
 import { useToast } from "../ui/Toast";
 import { TaskDetail } from "../TaskDetail";
+import { Menu } from "../ui/Menu";
+import { DatePicker } from "../ui/DatePicker";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { cn } from "../ui/cn";
 import type { MoveTarget } from "../kanban/KanbanBoard";
 import type { Task, TipTapDoc, FieldConfig, Column, Swimlane } from "../../../shared/types";
 
@@ -12,6 +32,9 @@ type SortKey = "board" | "priority" | "created";
 
 // Ticket-key pattern: project prefix (2–6 chars) + dash + number — e.g. "EG-12".
 const KEY_PATTERN = /^[A-Z0-9]{2,6}-\d+$/i;
+
+const CHECK_PATH = "M20 6L9 17l-5-5";
+const DASH_PATH = "M5 12h14";
 
 interface TasksFilters {
   query: string;
@@ -140,65 +163,194 @@ function TasksSkeleton() {
 
 export interface TasksPageProps {
   slug: string;
-  search: { task?: string | undefined; swimlane?: string | undefined };
+  search: { task?: string | undefined; swimlane?: string | undefined; new?: boolean | undefined };
 }
 
-function TaskRow({ task, swimlaneId, swimlanes, exactMatchId, onSelect }: {
-  task: TaskListItem;
-  swimlaneId: string;
-  swimlanes: Swimlane[];
-  exactMatchId: string | null;
-  onSelect: (t: TaskListItem) => void;
+function SelectBox({ checked, mixed, label, disabled, onClick }: {
+  checked: boolean;
+  mixed: boolean;
+  label: string;
+  disabled?: boolean | undefined;
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }) {
   return (
     <button
       type="button"
-      className={task.archivedAt ? "card-row archived" : "card-row"}
-      style={task.priorityColor !== "" ? { borderLeft: `3px solid ${task.priorityColor}` } : undefined}
-      onClick={() => onSelect(task)}
+      className="task-selectbox"
+      role="checkbox"
+      aria-checked={mixed ? "mixed" : checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
     >
-      <span className="task-key">{task.key}</span>
-      <span className="task-row-title">{task.title}</span>
-      <span className="task-row-meta">
-        {swimlaneId && (
-          <span className="task-row-where">
-            <span className="task-chip gh">
-              Sprint: {swimlanes.find((l) => l.id === swimlaneId)?.name ?? swimlaneId}
-            </span>
-          </span>
-        )}
-        <span className="task-row-where">
-          {task.columnColor ? (
-            <span
-              className="task-row-where-chip"
-              style={{ color: task.columnColor, background: `${task.columnColor}1a` }}
-            >
-              <span className="dot" style={{ background: task.columnColor }} />
-              {task.columnName}
-            </span>
-          ) : (
-            <span className="task-row-where-chip">{task.columnName}</span>
-          )}
-          <span>{task.swimlaneName}</span>
-        </span>
-        <span className="task-row-status">
-          {task.id === exactMatchId && (
-            <span className="task-chip gh">
-              exact match
-            </span>
-          )}
-          <span className="task-chip type" style={task.typeColor ? { color: task.typeColor, borderColor: task.typeColor } : undefined}>
-            {task.typeLabel}
-          </span>
-          <span className="task-chip priority" style={task.priorityColor ? { color: task.priorityColor, borderColor: task.priorityColor } : undefined}>
-            {task.priorityLabel}
-          </span>
-          {task.githubNumber !== null && <span className="task-gh">#{task.githubNumber}</span>}
-          <span className="task-row-date">{task.createdAt.slice(0, 10)}</span>
-        </span>
-      </span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+        <path d={mixed ? DASH_PATH : CHECK_PATH} />
+      </svg>
     </button>
   );
+}
+
+function TaskRow({ task, bulkEnabled, selected, swimlaneId, swimlanes, exactMatchId, onToggleSelect, onSelect }: {
+  task: TaskListItem;
+  bulkEnabled: boolean;
+  selected: boolean;
+  swimlaneId: string;
+  swimlanes: Swimlane[];
+  exactMatchId: string | null;
+  onToggleSelect: (taskId: string, shiftKey: boolean) => void;
+  onSelect: (t: TaskListItem) => void;
+}) {
+  return (
+    <div
+      className={cn("card-row", task.archivedAt && "archived", selected && "state-selected")}
+      style={task.priorityColor !== "" ? { borderLeft: `3px solid ${task.priorityColor}` } : undefined}
+    >
+      {bulkEnabled && (
+        <SelectBox
+          checked={selected}
+          mixed={false}
+          label={`${selected ? "Deselect" : "Select"} ${task.key} ${task.title}`}
+          onClick={(e) => onToggleSelect(task.id, e.shiftKey)}
+        />
+      )}
+      <button
+        type="button"
+        className="task-row-open"
+        aria-label={`Open ${task.key}: ${task.title}`}
+        onClick={() => onSelect(task)}
+      >
+        <span className="task-key">{task.key}</span>
+        <span className="task-row-title">{task.title}</span>
+        <span className="task-row-meta">
+          {swimlaneId && (
+            <span className="task-row-where">
+              <span className="task-chip gh">
+                Sprint: {swimlanes.find((l) => l.id === swimlaneId)?.name ?? swimlaneId}
+              </span>
+            </span>
+          )}
+          <span className="task-row-where">
+            {task.columnColor ? (
+              <span
+                className="task-row-where-chip"
+                style={{ color: task.columnColor, background: `${task.columnColor}1a` }}
+              >
+                <span className="dot" style={{ background: task.columnColor }} />
+                {task.columnName}
+              </span>
+            ) : (
+              <span className="task-row-where-chip">{task.columnName}</span>
+            )}
+            <span>{task.swimlaneName}</span>
+          </span>
+          <span className="task-row-status">
+            {task.id === exactMatchId && (
+              <span className="task-chip gh">
+                exact match
+              </span>
+            )}
+            <span className="task-chip type" style={task.typeColor ? { color: task.typeColor, borderColor: task.typeColor } : undefined}>
+              {task.typeLabel}
+            </span>
+            <span className="task-chip priority" style={task.priorityColor ? { color: task.priorityColor, borderColor: task.priorityColor } : undefined}>
+              {task.priorityLabel}
+            </span>
+            {task.githubNumber !== null && <span className="task-gh">#{task.githubNumber}</span>}
+            <span className="task-row-date">{task.createdAt.slice(0, 10)}</span>
+          </span>
+        </span>
+      </button>
+    </div>
+  );
+}
+
+type BulkActionInput = Omit<BulkTaskActionInput, "ids">;
+
+function BulkActionBar({ count, archivedView, columns, swimlanes, fieldConfig, assigneeOptions, pending, onAction, onArchive, onRestore, onClear }: {
+  count: number;
+  archivedView: boolean;
+  columns: Column[];
+  swimlanes: Swimlane[];
+  fieldConfig: FieldConfig | undefined;
+  assigneeOptions: string[];
+  pending: boolean;
+  onAction: (input: BulkActionInput) => void;
+  onArchive: () => void;
+  onRestore: () => void;
+  onClear: () => void;
+}) {
+  const triggerClass = "btn btn-ghost btn-sm";
+  return (
+    <div className="bulk-bar" role="toolbar" aria-label="Bulk actions" data-pending={pending ? "true" : undefined}>
+      <span className="bulk-bar-count">{count} selected</span>
+      <span className="bulk-bar-sep" />
+      <Menu align="left" trigger={({ toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Move to column…</button>
+      )}>
+        {columns.map((c) => (
+          <button key={c.id} type="button" className="menu-item" onClick={() => onAction({ action: "move", columnId: c.id })}>
+            {c.name}
+          </button>
+        ))}
+      </Menu>
+      <Menu align="left" trigger={({ toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Move to sprint…</button>
+      )}>
+        {swimlanes.map((l) => (
+          <button key={l.id} type="button" className="menu-item" onClick={() => onAction({ action: "move", swimlaneId: l.id })}>
+            {l.name}
+          </button>
+        ))}
+      </Menu>
+      <Menu align="left" trigger={({ toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Set assignee…</button>
+      )}>
+        {assigneeOptions.map((name) => (
+          <button key={name} type="button" className="menu-item" onClick={() => onAction({ action: "update", assignees: [name] })}>
+            {name}
+          </button>
+        ))}
+      </Menu>
+      <Menu align="left" trigger={({ toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Set priority…</button>
+      )}>
+        {(fieldConfig?.priorities ?? []).map((o) => (
+          <button key={o.id} type="button" className="menu-item" onClick={() => onAction({ action: "update", priority: o.id })}>
+            <span className="priority-dot" style={{ background: o.color }} />
+            {o.label}
+          </button>
+        ))}
+      </Menu>
+      <DatePicker
+        value={null}
+        placeholder="Set due date…"
+        onChange={(v) => { if (v) onAction({ action: "update", dueAt: v }); }}
+      />
+      <span className="bulk-bar-spacer" />
+      {archivedView ? (
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore} disabled={pending}>Restore</button>
+      ) : (
+        <button type="button" className="btn btn-danger btn-sm" onClick={onArchive} disabled={pending}>Archive</button>
+      )}
+      <button type="button" className="btn btn-ghost btn-sm" aria-label="Clear selection" onClick={onClear} disabled={pending}>Clear</button>
+    </div>
+  );
+}
+
+function confirmVerb(kind: "archive" | "restore") {
+  return kind === "archive" ? "Archive" : "Restore";
+}
+
+function pluralTasks(n: number) {
+  return n === 1 ? "task" : "tasks";
+}
+
+function keySummary(keys: string[]) {
+  const shown = keys.slice(0, 3);
+  if (keys.length > 3) return `${shown.join(", ")} +${keys.length - 3} more`;
+  if (shown.length <= 1) return shown.join("");
+  // Wireframe: two keys read "EG-25 and EG-18" (tasks.html:385).
+  return `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`;
 }
 
 export function TasksPage({ slug, search }: TasksPageProps) {
@@ -219,6 +371,10 @@ export function TasksPage({ slug, search }: TasksPageProps) {
 
   const { query, columnId, typeId, priorityId, assignee, swimlaneId, sortKey } = filters;
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [confirmKind, setConfirmKind] = useState<"archive" | "restore" | null>(null);
+
   // Keep the filter in sync when the ?swimlane= param changes while mounted
   // (e.g. "View tasks" links from the swimlanes page while already here).
   useEffect(() => {
@@ -234,11 +390,19 @@ export function TasksPage({ slug, search }: TasksPageProps) {
 
   const moveTask = useMoveTask(slug);
   const updateTask = useUpdateTask(slug);
+  const createTask = useCreateTask(slug);
   const deleteTask = useDeleteTask(slug);
   const archiveTask = useArchiveTask(slug);
   const restoreTask = useRestoreTask(slug);
   const linkGithubIssue = useLinkGithubIssue(slug);
   const unlinkGithubIssue = useUnlinkGithubIssue(slug);
+
+  const capabilities = useCapabilities();
+  // Kill switch: `tasksBulk:false` disables selection entirely; an absent field
+  // (older build) means enabled (default-on). Gate on isFetched so the switch
+  // settles before first paint — controls never flash on then off.
+  const bulkEnabled = capabilities.isFetched && capabilities.data?.tasksBulk !== false;
+  const bulk = useBulkTaskAction(slug);
 
   const hasActiveFilters = hasActiveTaskFilters(filters);
 
@@ -250,6 +414,104 @@ export function TasksPage({ slug, search }: TasksPageProps) {
     [tasks, filters, showArchived, fieldConfig, exactMatchId],
   );
 
+  const keyById = useMemo(() => new Map((board?.tasks ?? []).map((t) => [t.id, t.key])), [board]);
+  const selectedCount = selectedIds.size;
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+    setAnchorId(null);
+  };
+
+  // Deleting/archiving from the detail removes the row from the live list, so
+  // its id must not linger in the selection.
+  const dropSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  // Selection is scoped to the filtered result: changing a filter, the sort, or
+  // the archived toggle clears it (ids can fall out of the result set).
+  const filterSignature = `${query}|${columnId}|${typeId}|${priorityId}|${assignee}|${swimlaneId}|${sortKey}|${showArchived}`;
+  useEffect(() => {
+    setSelectedIds(new Set());
+    setAnchorId(null);
+  }, [filterSignature]);
+
+  const filteredIds = useMemo(() => filtered.map((t) => t.id), [filtered]);
+  const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.has(id));
+  const someSelected = filteredIds.some((id) => selectedIds.has(id));
+  const selectAllState = allSelected ? "true" : someSelected ? "mixed" : "false";
+  const selectAllLabel = allSelected
+    ? (showArchived ? "Deselect all archived tasks" : "Deselect all tasks")
+    : someSelected
+      ? `Select all tasks — ${selectedCount} of ${filteredIds.length} selected`
+      : hasActiveFilters
+        ? `Select all ${filteredIds.length} matching tasks`
+        : "Select all tasks";
+
+  const toggleSelect = (taskId: string, shiftKey: boolean) => {
+    const anchorIndex = anchorId !== null ? filteredIds.indexOf(anchorId) : -1;
+    const targetIndex = filteredIds.indexOf(taskId);
+    const isRange = shiftKey && anchorIndex >= 0 && targetIndex >= 0;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (isRange) {
+        const targetState = !prev.has(taskId);
+        const [lo, hi] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+        for (let i = lo; i <= hi; i++) {
+          const id = filteredIds[i]!;
+          if (targetState) next.add(id);
+          else next.delete(id);
+        }
+        return next;
+      }
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+    // Shift-click keeps the anchor; a plain click (or a range-less shift) moves it.
+    if (!isRange) setAnchorId(taskId);
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (filteredIds.every((id) => prev.has(id))) {
+        for (const id of filteredIds) next.delete(id);
+        return next;
+      }
+      for (const id of filteredIds) next.add(id);
+      return next;
+    });
+    setAnchorId(null);
+  };
+
+  const runBulk = async (input: BulkActionInput) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    try {
+      const res = await bulk.mutateAsync({ ids, ...input });
+      if (res.failed.length === 0) {
+        clearSelection();
+        return;
+      }
+      // Partial failure: failed rows stay selected, permitted tasks applied.
+      const failedIds = new Set(res.failed.map((f) => f.id));
+      setSelectedIds(new Set(ids.filter((id) => failedIds.has(id))));
+      setAnchorId(null);
+      const reasons = res.failed
+        .map((f) => `${keyById.get(f.id) ?? f.id}: ${f.message}`)
+        .join(", ");
+      toast.push("error", `${res.failed.length} ${pluralTasks(res.failed.length)} not updated`, reasons);
+    } catch {
+      // request/network failure: the mutation toasts; nothing changes
+    }
+  };
+
   const clearFilters = () => {
     // Search + dropdowns only — the sort key and archived toggle are preserved
     // (wireframes/src/tasks.html:234).
@@ -258,8 +520,10 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   };
 
   const selectedTaskId = search.task ?? null;
+  const isCreating = search.new === true;
   const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
   const selectedTask = resolveSelectedTask(selectedTaskFull, boardQuery.data?.tasks, selectedTaskId);
+  const defaultBacklogId = swimlanes.find((l) => l.kind === "backlog")?.id;
 
   const handleMove = async (taskId: string, target: MoveTarget) => {
     await moveTask.mutateAsync({ id: taskId, ...target });
@@ -269,11 +533,17 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   };
   const handleDelete = (id: string) => runTaskMutation(
     () => deleteTask.mutateAsync({ id }),
-    () => navigate({ search: { task: undefined }, replace: true } as never),
+    () => {
+      dropSelected(id);
+      navigate({ search: { task: undefined }, replace: true } as never);
+    },
   );
   const handleArchive = (id: string) => runTaskMutation(
     () => archiveTask.mutateAsync({ id }),
-    () => navigate({ search: { task: undefined }, replace: true } as never),
+    () => {
+      dropSelected(id);
+      navigate({ search: { task: undefined }, replace: true } as never);
+    },
   );
   const handleRestore = (id: string) => runTaskMutation(() => restoreTask.mutateAsync({ id }));
   const handleLinkGithub = async (id: string, repo: string) => {
@@ -287,11 +557,34 @@ export function TasksPage({ slug, search }: TasksPageProps) {
     navigate({ search: { task: task.id }, replace: true } as never);
   };
   const handleClose = () => {
-    navigate({ search: { task: undefined }, replace: true } as never);
+    navigate({ search: { task: undefined, new: undefined }, replace: true } as never);
   };
-  const handleCreate = async (_input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc }) => {
-    // browse-only page: creation happens on the board; this keeps TaskDetail's prop contract complete
-    toast.push("warning", "Create tasks from the board", "Open Board → column menu → Add task");
+  const handleOpenCreate = () => {
+    navigate({ search: { new: true }, replace: true } as never);
+  };
+  const handleCreate = async (input: {
+    title: string;
+    columnId: string;
+    priority: string;
+    type: string;
+    assignees: string[];
+    description: TipTapDoc;
+    dueAt?: string | null | undefined;
+    swimlaneId?: string | undefined;
+  }) => {
+    await createTask.mutateAsync({
+      title: input.title,
+      columnId: input.columnId,
+      priority: input.priority,
+      type: input.type,
+      assignees: input.assignees,
+      description: input.description,
+      ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+      ...(input.swimlaneId !== undefined ? { swimlaneId: input.swimlaneId } : {}),
+    });
+  };
+  const handleListKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") clearSelection();
   };
 
   if (isLoading) {
@@ -303,6 +596,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   if (!board || !tasks) return <main className="page-frame page-frame-narrow"><div className="tasks-error">Project not found</div></main>;
 
   const emptyProject = board.tasks.length === 0;
+  const confirmKeys = [...selectedIds].map((id) => keyById.get(id) ?? id);
 
   return (
     <main className="page-frame page-frame-narrow">
@@ -314,6 +608,15 @@ export function TasksPage({ slug, search }: TasksPageProps) {
               {board.project.name} · {board.tasks.filter((t) => t.archivedAt === null).length} total
             </div>
           </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleOpenCreate}
+            disabled={createTask.isPending}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M12 5v14m-7-7h14" /></svg>
+            New task
+          </button>
         </div>
 
       <TasksFilterBar
@@ -334,7 +637,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
       {emptyProject ? (
         <div className="tasks-empty">
           <div className="tasks-empty-title">No tasks yet</div>
-          <div className="tasks-empty-sub">Create tasks from the board.</div>
+          <div className="tasks-empty-sub">Create tasks from the board, or use New task above.</div>
           <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate({ to: "/$slug/board", params: { slug } } as never)}>
             Open board
           </button>
@@ -350,18 +653,90 @@ export function TasksPage({ slug, search }: TasksPageProps) {
           )}
         </div>
       ) : (
-        <div className="tasks-list">
-          {filtered.map((t) => (
-            <TaskRow key={t.id} task={t} swimlaneId={swimlaneId} swimlanes={swimlanes} exactMatchId={exactMatchId} onSelect={handleSelectTask} />
-          ))}
-        </div>
+        <>
+          {bulkEnabled && (
+            <div className="tasks-list-head">
+              <SelectBox
+                checked={allSelected}
+                mixed={someSelected && !allSelected}
+                label={selectAllLabel}
+                onClick={toggleSelectAll}
+              />
+              {selectedCount > 0
+                ? <span className="tasks-selection-count">{selectedCount} selected</span>
+                : <span className="tasks-list-head-label">Select all</span>}
+            </div>
+          )}
+          <div className="tasks-list" onKeyDown={handleListKeyDown}>
+            {filtered.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                bulkEnabled={bulkEnabled}
+                selected={selectedIds.has(t.id)}
+                swimlaneId={swimlaneId}
+                swimlanes={swimlanes}
+                exactMatchId={exactMatchId}
+                onToggleSelect={toggleSelect}
+                onSelect={handleSelectTask}
+              />
+            ))}
+          </div>
+        </>
       )}
 
-      {selectedTaskId !== null && (
+      {bulkEnabled && selectedCount > 0 && (
+        <BulkActionBar
+          count={selectedCount}
+          archivedView={showArchived}
+          columns={columns}
+          swimlanes={swimlanes}
+          fieldConfig={fieldConfig}
+          assigneeOptions={assigneeOptions}
+          pending={bulk.isPending}
+          onAction={runBulk}
+          onArchive={() => setConfirmKind("archive")}
+          onRestore={() => setConfirmKind("restore")}
+          onClear={clearSelection}
+        />
+      )}
+
+      {confirmKind !== null && (
+        <ConfirmDialog
+          title={`${confirmVerb(confirmKind)} ${selectedCount} ${pluralTasks(selectedCount)}?`}
+          confirmLabel={`${confirmVerb(confirmKind)} ${selectedCount} ${pluralTasks(selectedCount)}`}
+          variant={confirmKind === "archive" ? "danger" : "default"}
+          body={
+            confirmKind === "archive" ? (
+              <>
+                <span className="font-mono text-xs">{keySummary(confirmKeys)}</span> will be archived and hidden from the live list and the header count.
+                <br />
+                Archived tasks can be restored later from the archived view. Activity history is kept.
+              </>
+            ) : (
+              <>
+                <span className="font-mono text-xs">{keySummary(confirmKeys)}</span> will return to their columns in the live list.
+                <br />
+                They rejoin the header count at their previous column positions.
+              </>
+            )
+          }
+          onCancel={() => setConfirmKind(null)}
+          onConfirm={() => {
+            const kind = confirmKind;
+            setConfirmKind(null);
+            void runBulk({ action: kind });
+          }}
+        />
+      )}
+
+      {(selectedTaskId !== null || isCreating) && (
         <TaskDetail
-          mode="view"
+          mode={isCreating ? "create" : "view"}
           from="tasks"
-          task={selectedTask ?? undefined}
+          task={isCreating ? undefined : (selectedTask ?? undefined)}
+          defaultSwimlaneId={defaultBacklogId}
+          showCreateSwimlane
           columns={columns}
           swimlanes={swimlanes}
           columnRequiredFields={columns.map((column) => ({

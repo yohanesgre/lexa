@@ -4,12 +4,13 @@ import type { TipTapDoc } from "../../shared/types";
 interface UseTaskDetailActionsArgs {
   task: { id: string; columnId: string | null; swimlaneId: string | null; title: string } | null | undefined;
   defaultColumnId?: string | null | undefined;
+  defaultSwimlaneId?: string | null | undefined;
   columns?: { id: string }[] | undefined;
   fieldConfig?: { priorities: { id: string }[]; types: { id: string }[] } | undefined;
   emptyDoc: TipTapDoc;
   onLinkGithub?: ((id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>) | undefined;
   onUnlinkGithub?: ((id: string, issueId: string) => Promise<void>) | undefined;
-  onCreate?: ((input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc; dueAt?: string | null | undefined }) => Promise<void>) | undefined;
+  onCreate?: ((input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc; dueAt?: string | null | undefined; swimlaneId?: string | undefined }) => Promise<void>) | undefined;
   onClose: () => void;
 }
 
@@ -77,9 +78,10 @@ async function requestUnlinkIssue(
 }
 
 export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
-  const { task, defaultColumnId, columns, fieldConfig, emptyDoc, onLinkGithub, onUnlinkGithub, onCreate, onClose } = args;
+  const { task, defaultColumnId, defaultSwimlaneId, columns, fieldConfig, emptyDoc, onLinkGithub, onUnlinkGithub, onCreate, onClose } = args;
   const [createTitle, setCreateTitle] = useState("");
   const [createColumnId, setCreateColumnId] = useState(() => initialCreateColumnId(defaultColumnId, columns));
+  const [createSwimlaneId, setCreateSwimlaneId] = useState<string>(() => defaultSwimlaneId ?? "");
   const [createPriority, setCreatePriority] = useState<string>(() => firstOptionId(fieldConfig?.priorities));
   const [createType, setCreateType] = useState<string>(() => firstOptionId(fieldConfig?.types));
   const [createAssignees, setCreateAssignees] = useState<string[]>([]);
@@ -101,6 +103,9 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
 
   useFollow(followValue(defaultColumnId), (value) => {
     setCreateColumnId(value);
+  });
+  useFollow(followValue(defaultSwimlaneId), (value) => {
+    setCreateSwimlaneId(value);
   });
   useFollow(followValue(task?.columnId ?? ""), (value) => {
     setSelectedColumnId(value);
@@ -125,6 +130,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
         assignees: createAssignees,
         description: createDescription,
         dueAt: dueAtOrNull(createDueAt),
+        swimlaneId: createSwimlaneId === "" ? undefined : createSwimlaneId,
       });
       onClose();
     } finally {
@@ -136,6 +142,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
     selectedSwimlaneId, setSelectedSwimlaneId,
     createTitle, setCreateTitle,
     createColumnId, setCreateColumnId,
+    createSwimlaneId, setCreateSwimlaneId,
     createPriority, setCreatePriority,
     createType, setCreateType,
     createAssignees, setCreateAssignees,

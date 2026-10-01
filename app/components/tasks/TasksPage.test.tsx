@@ -72,7 +72,9 @@ vi.mock("../../lib/queries", () => ({
     return { board: fx.board, tasks: [fx.listItem], isLoading: false, error: null, refetch: vi.fn() };
   },
   useBoard: () => ({ data: fx.state.mode === "loaded" ? fx.board : undefined }),
+  useCapabilities: () => ({ data: { assistant: false, flavor: "bun", tasksBulk: true }, isFetched: true }),
   useTask: () => ({ data: undefined }),
+  useCreateTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useMoveTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useUpdateTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useDeleteTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
@@ -80,6 +82,7 @@ vi.mock("../../lib/queries", () => ({
   useRestoreTask: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useLinkGithubIssue: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
   useUnlinkGithubIssue: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
+  useBulkTaskAction: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock("../TaskDetail", () => ({ TaskDetail: () => null }));

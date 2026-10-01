@@ -4972,7 +4972,8 @@
     gap: 12px;
   }
 
-  /* Layout glue — visual surface comes from .card-row */
+  /* Layout glue — visual surface comes from .card-row. Row is a container
+     (not a button): .task-selectbox and .task-row-open are siblings. */
   .tasks-list .card-row {
     position: relative;
     display: flex;
@@ -4981,7 +4982,7 @@
     width: 100%;
     text-align: left;
     font: inherit;
-    cursor: pointer;
+    cursor: default;
   }
   .tasks-list .card-row:focus-visible {
     outline: none;
@@ -4989,6 +4990,133 @@
   }
   .tasks-list .card-row.archived { opacity: 0.55; }
   .tasks-list .card-row.archived .task-row-title { color: var(--lx-text-muted); }
+
+  /* Per-row selection control — a real checkbox (role="checkbox") that
+     toggles selection without opening the task. */
+  .task-selectbox {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--lx-surface-input);
+    border: 1px solid var(--lx-border-strong);
+    border-radius: 3px;
+    color: transparent;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms, color 100ms;
+  }
+  .task-selectbox:hover { border-color: var(--lx-border-focus); }
+  .task-selectbox:focus-visible { outline: none; box-shadow: var(--lx-focus-ring); }
+  .task-selectbox svg { width: 10px; height: 10px; }
+  .task-selectbox[aria-checked="true"],
+  .task-selectbox[aria-checked="mixed"] {
+    background: var(--lx-border-focus);
+    border-color: var(--lx-border-focus);
+    color: var(--lx-text-inverse);
+  }
+
+  /* Row body — the only open affordance (sibling of the checkbox). */
+  .tasks-list .task-row-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .tasks-list .task-row-open:focus-visible {
+    outline: none;
+    box-shadow: var(--lx-focus-ring);
+  }
+
+  /* Selected row — quieter than the generic .card-row.state-selected ring,
+     since a multi-select list can carry many selected rows at once. */
+  .tasks-list .card-row.state-selected {
+    background: var(--lx-surface-selected);
+    border-color: rgba(240, 192, 64, 0.35);
+    box-shadow: none;
+  }
+
+  /* List header — select-all checkbox + derived count. */
+  .tasks-list-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+  }
+  .tasks-list-head-label {
+    font-family: var(--lx-font-micro);
+    font-size: 11px;
+    line-height: 14px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--lx-text-muted);
+  }
+  .tasks-selection-count {
+    font-family: var(--lx-font-body);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--lx-text-primary);
+  }
+
+  /* Bulk action bar — pinned to the bottom of the list viewport. Renders only
+     when the selection is non-empty (hidden, never shown disabled). */
+  .bulk-bar {
+    position: sticky;
+    bottom: 16px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px;
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-strong);
+    border-radius: 8px;
+    box-shadow: var(--lx-shadow-lg);
+  }
+  .bulk-bar-count {
+    font-family: var(--lx-font-body);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--lx-text-primary);
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+  .bulk-bar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--lx-border-default);
+  }
+  .bulk-bar-spacer { flex: 1; }
+  .bulk-bar[data-pending="true"] .btn {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  /* Bulk due-date action reuses the shared datepicker; size its trigger to the
+     bar's ghost buttons and honour the bar's pending state. */
+  .bulk-bar .datepicker-trigger {
+    min-width: 0;
+    background: transparent;
+    color: var(--lx-text-secondary);
+    font-size: 12px;
+  }
+  .bulk-bar[data-pending="true"] .datepicker-trigger {
+    opacity: 0.55;
+    pointer-events: none;
+  }
 
   .task-row-title {
     flex: 1;

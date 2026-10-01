@@ -22,6 +22,9 @@ interface TaskPropertyBarProps {
   onMove: (id: string, data: { columnId: string; swimlaneId: string }) => void;
   createColumnId: string;
   setCreateColumnId: (v: string) => void;
+  createSwimlaneId: string;
+  setCreateSwimlaneId: (v: string) => void;
+  showCreateSwimlane?: boolean | undefined;
   createPriority: string;
   setCreatePriority: (v: string) => void;
   createType: string;
@@ -79,6 +82,27 @@ function ColumnField(props: TaskPropertyBarProps) {
           )}
         />
       )}
+    </div>
+  );
+}
+
+function CreateSwimlaneField(props: TaskPropertyBarProps) {
+  return (
+    <div className="prop-field">
+      <span className="prop-label">Swimlane</span>
+      <select
+        className="prop-input"
+        aria-label="Swimlane"
+        style={{ minWidth: 120 }}
+        value={props.createSwimlaneId}
+        onChange={(e) => props.setCreateSwimlaneId(e.target.value)}
+      >
+        {(props.swimlanes ?? []).map((lane) => (
+          <option key={lane.id} value={lane.id}>
+            {lane.name}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -281,7 +305,9 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
   return (
 <div className="property-bar mt-3">
   <ColumnField {...props} />
-  {!isCreate && (swimlanes?.length ?? 0) > 0 && <SwimlaneField {...props} />}
+  {isCreate
+    ? props.showCreateSwimlane === true && (swimlanes?.length ?? 0) > 0 && <CreateSwimlaneField {...props} />
+    : (swimlanes?.length ?? 0) > 0 && <SwimlaneField {...props} />}
   <div className="prop-field">
     <span className="prop-label">Priority</span>
     {isCreate ? (

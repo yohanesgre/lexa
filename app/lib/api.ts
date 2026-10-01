@@ -247,6 +247,50 @@ export function getBoard(slug: string, includeArchived = false): Promise<Board> 
   return request(`${BASE}/projects/${slug}/board${qs}`);
 }
 
+// ── Capability discovery (ADR-0003 §F.2) ──
+// One honest signal per flavor, served before boot without a DB read.
+// `tasksBulk` is the LX-4 kill switch (LXK_DISABLE_TASKS_BULK=1 → false);
+// absent on older builds, which the UI treats as enabled.
+export interface Capabilities {
+  assistant: boolean;
+  flavor: "bun" | "workers";
+  tasksBulk?: boolean | undefined;
+}
+
+export function getCapabilities(): Promise<Capabilities> {
+  return request(`${BASE}/capabilities`);
+}
+
+// ── Bulk task actions (LX-4) ──
+// One transaction over many ids; per-task domain failures (WIP limit,
+// required_fields, not-found) come back named in `failed` while permitted
+// tasks apply.
+export interface BulkTaskActionInput {
+  ids: string[];
+  action: "move" | "update" | "archive" | "restore";
+  columnId?: string | undefined;
+  swimlaneId?: string | undefined;
+  priority?: string | undefined;
+  type?: string | undefined;
+  assignees?: string[] | undefined;
+  dueAt?: string | undefined;
+}
+
+export interface BulkTaskActionFailure {
+  id: string;
+  code: string;
+  message: string;
+}
+
+export interface BulkTaskActionResponse {
+  applied: string[];
+  failed: BulkTaskActionFailure[];
+}
+
+export function bulkTaskAction(slug: string, input: BulkTaskActionInput): Promise<BulkTaskActionResponse> {
+  return request(`${BASE}/projects/${slug}/tasks/bulk`, { method: "POST", body: JSON.stringify(input) });
+}
+
 // ── Field config (per-project priority/type options) ──
 
 export function getFieldConfig(slug: string): Promise<FieldConfig> {

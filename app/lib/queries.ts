@@ -6,7 +6,7 @@ import type { AssistantSettingsMasked, AssistantSettingsInput } from "../../shar
 import type { AssistantMemoryEntry } from "./api";
 import * as api from "./api";
 import * as auth from "./auth";
-import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
+import type { TaskMutationResult, ActivityPage, WikiShareLink, BulkTaskActionInput, BulkTaskActionResponse } from "./api";
 import { useToast } from "../components/ui/Toast";
 
 function toastMessage(err: unknown): string {
@@ -24,6 +24,12 @@ export function useProjects(opts?: { enabled?: boolean }) {
 
 export function useDashboard() {
   return useQuery({ queryKey: ["dashboard"], queryFn: () => api.getDashboard() });
+}
+
+// Capability discovery — one signal per flavor. `tasksBulk` is the LX-4 kill
+// switch; older builds omit it, which the UI treats as enabled.
+export function useCapabilities() {
+  return useQuery({ queryKey: ["capabilities"], queryFn: () => api.getCapabilities() });
 }
 
 export function useCreateProject() {
@@ -430,6 +436,78 @@ export function useRestoreTask(slug: string) {
     },
     onError: (err) => {
       toast.push("error", "Failed to restore task", toastMessage(err));
+    },
+  });
+}
+
+function patchBulkFields(task: Task, input: BulkTaskActionInput): Task {
+  switch (input.action) {
+    case "move":
+      return {
+        ...task,
+        ...(input.columnId !== undefined ? { columnId: input.columnId } : {}),
+        ...(input.swimlaneId !== undefined ? { swimlaneId: input.swimlaneId } : {}),
+      };
+    case "update":
+      return {
+        ...task,
+        ...(input.priority !== undefined ? { priority: input.priority } : {}),
+        ...(input.type !== undefined ? { type: input.type } : {}),
+        ...(input.assignees !== undefined ? { assignees: input.assignees } : {}),
+        ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+      };
+    case "archive":
+      return { ...task, archivedAt: task.archivedAt ?? new Date().toISOString() };
+    case "restore":
+      return { ...task, archivedAt: null };
+  }
+}
+
+// Invariant 6: the bulk response is authoritative for WHICH tasks changed; the
+// request carries the target values, so cached rows are patched in place from
+// the response — never by invalidating the query. Archive/restore move the row
+// between the live and archived caches; move/update patch fields in both.
+function applyBulkResult(qc: QueryClient, slug: string, input: BulkTaskActionInput, applied: string[]): void {
+  const appliedIds = new Set(applied);
+  if (appliedIds.size === 0) return;
+  if (input.action === "archive" || input.action === "restore") {
+    const fromKey = input.action === "archive" ? false : true;
+    const toKey = !fromKey;
+    const source = qc.getQueryData<Board>(["board", slug, fromKey]);
+    const moved = (source?.tasks ?? []).filter((t) => appliedIds.has(t.id)).map((t) => patchBulkFields(t, input));
+    qc.setQueryData<Board>(["board", slug, fromKey], (old) => (old ? { ...old, tasks: old.tasks.filter((t) => !appliedIds.has(t.id)) } : old));
+    if (moved.length > 0) {
+      qc.setQueryData<Board>(["board", slug, toKey], (old) => {
+        if (!old) return old;
+        const existing = new Set(old.tasks.map((t) => t.id));
+        const added = moved.filter((t) => !existing.has(t.id));
+        const tasks = [...old.tasks, ...added];
+        return { ...old, tasks: tasks.sort(byPosition) };
+      });
+    }
+    return;
+  }
+  for (const archived of [false, true]) {
+    qc.setQueryData<Board>(["board", slug, archived], (old) => {
+      if (!old) return old;
+      return { ...old, tasks: old.tasks.map((t) => (appliedIds.has(t.id) ? patchBulkFields(t, input) : t)) };
+    });
+  }
+}
+
+export function useBulkTaskAction(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: BulkTaskActionInput) => api.bulkTaskAction(slug, input),
+    onSuccess: (res: BulkTaskActionResponse, input) => {
+      applyBulkResult(qc, slug, input, res.applied);
+      if (res.applied.length > 0 && res.failed.length === 0) {
+        toast.push("success", res.applied.length === 1 ? "Task updated" : `${res.applied.length} tasks updated`);
+      }
+    },
+    onError: (err) => {
+      toast.push("error", "Bulk action failed", toastMessage(err));
     },
   });
 }
