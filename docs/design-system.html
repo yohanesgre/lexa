@@ -1378,6 +1378,13 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 .btn-primary:hover { background: var(--lx-text-link-hover); }
 
+/* Pressed/selected toggle button (e.g. the attach trigger while its menu is open). */
+.btn.is-active {
+  background: var(--lx-bg-accent-subtle);
+  border-color: var(--lx-border-focus);
+  color: var(--lx-text-link);
+}
+
 .btn-ghost {
   background: transparent;
   color: var(--lx-text-secondary);
@@ -3040,6 +3047,7 @@ textarea.prop-input {
 .notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
 .notice-warning { background: var(--lx-bg-warning-subtle); border: 1px solid rgba(240, 192, 64, 0.15); color: var(--lx-text-warning); }
 .notice-danger  { background: var(--lx-bg-danger-subtle);  border: 1px solid rgba(255, 68, 68, 0.15);  color: var(--lx-text-danger); }
+.notice-success { background: var(--lx-bg-success-subtle); border: 1px solid rgba(74, 222, 128, 0.15); color: var(--lx-text-success); }
 
 /* =========================================================
    Task Detail state variants (added for task-detail-* wireframes)
@@ -4237,6 +4245,7 @@ button.history-item {
   font-size: 10px;
   color: var(--lx-text-secondary);
 }
+.deck-attach-item.is-pending { border-style: dashed; }
 .deck-attach-thumb { width: 22px; height: 22px; border-radius: 3px; object-fit: cover; }
 .deck-meter { flex: 1; height: 3px; border-radius: 2px; background: var(--lx-border-subtle); position: relative; }
 .deck-meter-fill { position: absolute; left: 0; top: 0; height: 3px; border-radius: 2px; background: var(--lx-border-focus); }
@@ -4758,6 +4767,128 @@ button.history-item {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* =========================================================
+   Tasks — row selection + bulk actions (LX-4) + create (LX-5)
+   ========================================================= */
+
+/* Per-row selection control — a real checkbox (role="checkbox") that
+   toggles selection without opening the task. */
+.task-selectbox {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 3px;
+  color: transparent;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+.task-selectbox:hover { border-color: var(--lx-border-focus); }
+.task-selectbox:focus-visible { outline: none; box-shadow: var(--lx-focus-ring); }
+.task-selectbox svg { width: 10px; height: 10px; }
+.task-selectbox[aria-checked="true"],
+.task-selectbox[aria-checked="mixed"] {
+  background: var(--lx-border-focus);
+  border-color: var(--lx-border-focus);
+  color: var(--lx-text-inverse);
+}
+
+/* The row is a plain container so the checkbox and the open affordance are
+   siblings — never nested interactive controls. Only the row body opens the
+   task; the checkbox toggles selection. */
+.tasks-list .card-row { cursor: default; }
+.tasks-list .task-row-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.tasks-list .task-row-open:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+
+/* Selected row — quieter than the generic .card-row.state-selected ring,
+   since a multi-select list can carry many selected rows at once. */
+.tasks-list .card-row.state-selected {
+  background: var(--lx-surface-selected);
+  border-color: rgba(240, 192, 64, 0.35);
+  box-shadow: none;
+}
+
+/* List header — select-all checkbox + derived count. */
+.tasks-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+.tasks-list-head-label {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lx-text-muted);
+}
+.tasks-selection-count {
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lx-text-primary);
+}
+
+/* Bulk action bar — pinned to the bottom of the list viewport. Renders only
+   when the selection is non-empty (hidden, never shown disabled). */
+.bulk-bar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 8px;
+  box-shadow: var(--lx-shadow-lg);
+}
+.bulk-bar-count {
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lx-text-primary);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.bulk-bar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--lx-border-default);
+}
+.bulk-bar-spacer { flex: 1; }
+.bulk-bar[data-pending="true"] .btn {
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 /* =========================================================
