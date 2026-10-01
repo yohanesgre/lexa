@@ -7,6 +7,29 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.1] - 2026-10-01
+
+### Fixed
+
+- **Session listing after 24h** — better-auth gates its core list-sessions
+  call behind a fresh-session window (24h by default), so Settings → Sessions
+  could neither list nor revoke for any sign-in older than a day. The gate is
+  now off (its documented off-switch), blank auth 500s keep their underlying
+  cause, and a >24h regression test pins the behavior. (#167)
+- **Workers installer database selection** — Cloudflare's `?name=` D1 filter is
+  fuzzy, so `lexa` matched `lexa-prod`, and the installer acted on the first
+  listed database: a redeploy could bind a differently-named database, and
+  `--reset-db` could drop every listed database. Selection is now
+  client-side deterministic — an exact deploy name, otherwise a single
+  `<name>-`-prefixed database, otherwise a refusal with guidance instead of a
+  guess — and reset drops only the resolved database. The listing also
+  follows Cloudflare pagination, so a database past the first page is no
+  longer invisible. (#168)
+- **Installer dry-run purity** — a workers dry run no longer mints the master
+  key or writes `cf-workers/.env.toml`; it prints the mint plan and a
+  placeholder put only. The real mint path (0600 custody, 32-byte key, never
+  rotated) is covered by tests. (#168)
+
 ## [2026.5.0] - 2026-10-01
 
 ### Added
