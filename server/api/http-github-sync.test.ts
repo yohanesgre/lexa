@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { Effect } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { generateKeyPairSync } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { createApiHandler, createWebhookHandler } from "./http";
-import { syncGitHubConfigFromDb } from "../github/client";
+import { syncGitHubConfigFromDbAsync } from "../github/client";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -77,7 +79,7 @@ INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VA
 INSERT INTO settings (key, value) VALUES ('github_app_id', '12345');
 `);
   db.prepare("INSERT INTO settings (key, value) VALUES ('github_private_key', ?)").run(testPrivateKeyPem);
-  syncGitHubConfigFromDb(db);
+  await Effect.runPromise(syncGitHubConfigFromDbAsync(createBunSqliteDriver(db)));
   handler = createApiHandler(dbPath);
   webhookHandler = createWebhookHandler(dbPath);
 });

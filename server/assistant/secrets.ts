@@ -43,7 +43,7 @@ export const SECRETS_MASTER_KEY_BYTES = 32;
 export const SECRET_IV_BYTES = 12;
 const SECRET_TAG_BITS = 128;
 
-export type SecretScope = "mcp" | "provider" | "jev";
+export type SecretScope = "mcp" | "provider" | "jev" | "github";
 
 // Frozen per-scope AAD prefixes. "mcp" MUST stay "lexa-mcp-v1" — stored MCP
 // blobs authenticate against `lexa-mcp-v1:<serverId>` and must keep opening.
@@ -51,6 +51,7 @@ export const SECRET_AAD_PREFIXES: Readonly<Record<SecretScope, string>> = Object
   mcp: "lexa-mcp-v1",
   provider: "lexa-provider-v1",
   jev: "lexa-jev-v1",
+  github: "lexa-github-v1",
 });
 
 // Fixed messages. They name the required shape or the failure class and

@@ -596,15 +596,36 @@ CREATE TABLE webhook_events (
 -- settings.rate_limit_max / settings.rate_limit_window_ms — per-IP rate limit,
 -- read by the API middleware (DB is the single source; code defaults as
 -- fallback).
--- settings.github_app_id / github_private_key / github_webhook_secret — GitHub
--- App credentials, read by the GitHub client (PEM/secret are write-only over
--- the API).
+-- settings.github_app_id / github_app_slug — plaintext GitHub App identifiers,
+-- read by the GitHub client and shown in Settings.
+-- settings.github_private_key / github_webhook_secret — LEGACY plaintext
+-- credential rows, kept readable as a fallback only. New secrets are written
+-- ENCRYPTED to github_app_secrets (0017); an encrypted row, when present, is
+-- authoritative (see Design Notes → Managed secrets).
 -- Env (GITHUB_*, LXK_RATE_LIMIT_*) is a FIRST-BOOT BOOTSTRAP: mirrorSettingsFromEnv
 -- imports it into these keys once at boot when they are empty; the runtime
 -- never reads env again.
 CREATE TABLE settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 0017_github_app_secrets.sql — GitHub App credentials move into the encrypted
+-- secrets store. Numbering: 0016 is reserved for the future
+-- `0016_drop_provider_api_key.sql` (Release N+1), so this migration takes the
+-- next free number; the runner applies migrations by filename order. One row
+-- per credential name ('private_key' | 'webhook_secret'); the envelope columns
+-- mirror the other per-scope secret tables. Scope "github", frozen AAD prefix
+-- "lexa-github-v1", AAD-bound to the row name. No FK, no plaintext column.
+-- Legacy plaintext `settings.github_private_key` / `github_webhook_secret` rows
+-- are NOT migrated — they stay readable as a fallback.
+CREATE TABLE github_app_secrets (
+  name       TEXT PRIMARY KEY,
+  ciphertext TEXT NOT NULL,
+  iv         TEXT NOT NULL,
+  key_id     TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1124,8 +1145,12 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- `assistant_provider_secrets`; the legacy plaintext column stays dead for
 -- Release N), 0015_chat_attachments.sql (chat attachments — one additive
 -- `chat_attachments` table, thread-scoped via a composite FK to
--- `assistant_threads` with ON DELETE CASCADE). Future migrations continue at
--- 0016_*.sql.
+-- `assistant_threads` with ON DELETE CASCADE), 0017_github_app_secrets.sql
+-- (GitHub App credentials move into `github_app_secrets`; encrypted-only, scope
+-- "github", AAD prefix "lexa-github-v1", no FK/plaintext — legacy plaintext
+-- settings rows are NOT migrated and stay readable as a fallback). 0016 is
+-- reserved by `0016_drop_provider_api_key.sql` (Release N+1) and is absent from
+-- the chain; future migrations continue at 0018_*.sql.
 ```
 
 ## Design Notes
@@ -1205,21 +1230,22 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
 - **Id rebind consequence (one-time, history):** threads keyed on the pre-squash
   agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 
-### Managed secrets (`assistant_mcp_secrets` / `assistant_provider_secrets` / `assistant_jev_secrets`)
+### Managed secrets (`assistant_mcp_secrets` / `assistant_provider_secrets` / `assistant_jev_secrets` / `github_app_secrets`)
 One plain assistant-tier module, `server/assistant/secrets.ts`, envelope-encrypts
-every webapp-managed credential — MCP client tokens, LLM provider API keys, and
-the Jev API key. Each scope stores its blob in its own table, keyed by its owner
-(`server_id` / `provider_id` / `config_id`); the master key lives only in the
+every webapp-managed credential — MCP client tokens, LLM provider API keys, the
+Jev API key, and GitHub App credentials (PEM + webhook secret). Each scope stores
+its blob in its own table, keyed by its owner (`server_id` / `provider_id` /
+`config_id` / the credential `name`); the master key lives only in the
 environment (`LXK_SECRETS_MASTER_KEY`, with `LXK_SECRETS_MASTER_KEY_PREV` as the
-rotation read path). Scopes are `mcp | provider | jev`, and a blob is bound to
-its scope **and** owner through the AAD `<prefix>:<ownerId>` using a frozen
-per-scope prefix (`lexa-mcp-v1` | `lexa-provider-v1` | `lexa-jev-v1`), so a blob
-copied onto another row or another scope fails to decrypt. `lexa-mcp-v1` is
-frozen: stored MCP blobs authenticate against `lexa-mcp-v1:<serverId>` and must
-keep opening.
+rotation read path). Scopes are `mcp | provider | jev | github`, and a blob is
+bound to its scope **and** owner through the AAD `<prefix>:<ownerId>` using a
+frozen per-scope prefix (`lexa-mcp-v1` | `lexa-provider-v1` | `lexa-jev-v1` |
+`lexa-github-v1`), so a blob copied onto another row or another scope fails to
+decrypt. `lexa-mcp-v1` is frozen: stored MCP blobs authenticate against
+`lexa-mcp-v1:<serverId>` and must keep opening.
 
-- **One row per owner.** The owner id is the PRIMARY KEY in every table, so an
-  owner has at most one stored blob. Upsert (`ON CONFLICT(...) DO UPDATE`) is
+- **One row per owner.** The owner id (or credential name) is the PRIMARY KEY in
+  every table, so an owner has at most one stored blob. Upsert (`ON CONFLICT(...) DO UPDATE`) is
   the write, so re-entering a credential replaces the blob and rotates the IV in
   one statement pair.
 - **Ciphertext never enters the registry.** Each blob lives only in its own
@@ -1245,6 +1271,17 @@ keep opening.
   row; `key_hint` is the last 4 characters, display only. The config registry
   surfaces `hasKey` / `keyMask` and never the blob.
   `assistant_jev_projects` is the per-project opt-in (absence = disabled).
+- **GitHub (0017).** `github_app_secrets` holds the App's `private_key` and
+  `webhook_secret`, one row per credential name, AAD-bound to that name. It has
+  no owner table and no FK (the App is an install singleton), and is written only
+  by the in-app manifest connect flow (`POST /api/settings/github/setup`); a
+  manual `PUT /api/settings/github` writes the legacy plaintext settings rows
+  instead and deletes the matching encrypted row (last explicit write wins).
+  Legacy plaintext `settings.github_private_key` / `github_webhook_secret` rows
+  are never migrated and stay readable as a fallback: resolution is
+  encrypted-first, and a present-but-unopenable encrypted row reads as unset —
+  never as a plaintext fallback. The app id and slug stay plaintext settings
+  rows (`github_app_id` / `github_app_slug`).
 - **FK cascade + explicit delete.** `ON DELETE CASCADE` fires under the
   Workers/D1 runner, but the Bun runner runs with `PRAGMA foreign_keys = OFF`
   (`server/db/migrate.ts`), where it does not. The MCP repo therefore deletes the

@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 import { Effect, ManagedRuntime } from "effect";
 import { Database } from "bun:sqlite";
 import { setSetting } from "../db/settings";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { GithubApiError } from "../api/errors";
-import { GitHubClient, syncGitHubConfigFromDb, resetGithubCaches } from "./client";
+import { GitHubClient, syncGitHubConfigFromDbAsync, resetGithubCaches } from "./client";
 
 // The installation-token flow signs an app JWT before any fetch — stub it so
 // the happy path never touches real crypto (the fake PEM below would reject).
@@ -47,7 +48,7 @@ beforeAll(async () => {
   db.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')))");
   setSetting(db, "github_app_id", "12345");
   setSetting(db, "github_private_key", "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----");
-  syncGitHubConfigFromDb(db);
+  await Effect.runPromise(syncGitHubConfigFromDbAsync(createBunSqliteDriver(db)));
   db.close();
   runtime = ManagedRuntime.make(GitHubClient.Default);
 });

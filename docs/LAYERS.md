@@ -41,19 +41,26 @@
 export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
 export const initSqlite = (dbPath: string) => Layer.succeed(Sqlite, new Database(dbPath));
 
-// GitHub App credentials — the settings DB is the SINGLE source of truth at
-// runtime (settings.github_app_id / settings.github_private_key /
-// settings.github_webhook_secret). Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
+// GitHub App credentials — the DB is the SINGLE source of truth at runtime.
+// The non-secret identifiers are plaintext settings rows (github_app_id /
+// github_app_slug); the PEM and webhook secret resolve ENCRYPTED-FIRST via
+// resolveGithubAppSecrets — github_app_secrets (scope "github", AAD-bound to
+// the row name) when written by the in-app manifest connect flow, with the
+// legacy plaintext settings.github_private_key / github_webhook_secret rows
+// as a fallback for existing installs. A manual PUT is the LAST EXPLICIT
+// WRITE: it writes the plaintext settings row and deletes the matching
+// encrypted row. Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
 // GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a FIRST-BOOT BOOTSTRAP
 // only: mirrorSettingsFromEnv copies it into the DB once at boot when keys
 // are empty (GITHUB_PRIVATE_KEY inline wins over the file; the file is read
 // at mirror time), and the runtime never reads env again.
 // GitHubConfigLive serves a MUTABLE module-scope holder (never replaced):
-// syncGitHubConfigFromDb (boot + PUT /api/settings/github) mutates it in
-// place, so every consumer — including the webhook verifier runtime — reads
-// live values on each call. resetGithubCaches() drops cached installation
-// ids/tokens after a save (a credential change must not keep signing with
-// the previous app).
+// syncGitHubConfigFromDbAsync mutates it in place — applied at Bun boot via
+// runGithubConfigBoot, at Workers boot, and after every PUT
+// /api/settings/github — and is async because decrypting suspends. Every
+// consumer, including the webhook verifier runtime, reads live values on each
+// call. resetGithubCaches() drops cached installation ids/tokens after a save
+// (a credential change must not keep signing with the previous app).
 export class GitHubConfig extends Context.Tag("GitHubConfig")<GitHubConfig, {
   readonly appId: string;
   readonly privateKey: string;      // PEM, for JWT signing (PKCS#1 or PKCS#8 — normalized internally)

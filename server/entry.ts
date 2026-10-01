@@ -5,6 +5,7 @@ import "./env-boot";
 import { runMigrations } from "./db/migrate";
 import { backfillTaskKeys } from "./db/task-keys-backfill";
 import { runBootBackfill } from "./db/provider-secrets-boot";
+import { runGithubConfigBoot } from "./db/github-config-boot";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -12,7 +13,6 @@ import { createApiHandler, createWebhookHandler, createWebhookVerifier } from ".
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
 import { getEnv, resolveTrustedProxyCidrs } from "./env";
 import { resolveClientIp, syncRateLimitFromDb } from "./api/rate-limit";
-import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import { bodyCapFor, resolveStorageConfig } from "./storage/config";
 import { runBackup, createBackupDriver, DEFAULT_BACKUP_RETENTION } from "./storage/backup";
@@ -71,11 +71,14 @@ runMigrations(DATABASE_PATH);
       console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
     }
     syncRateLimitFromDb(db);
-    syncGitHubConfigFromDb(db);
   } finally {
     db.close();
   }
 }
+// GitHub config: encrypted-first (github_app_secrets) with the legacy plaintext
+// settings rows as fallback. Awaited — resolving an encrypted row suspends on
+// WebCrypto, so the sync apply cannot open it.
+await runGithubConfigBoot(DATABASE_PATH, getEnv());
 // One-way provider-key backfill: encrypt every legacy plaintext api_key into
 // assistant_provider_secrets and clear the column (it stays NOT NULL, dead).
 // Idempotent; a missing keyring leaves rows untouched and logs the blocked

@@ -63,6 +63,15 @@ export class AttachmentExtractionFailed extends Data.TaggedError("AttachmentExtr
 export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: string }> {}
 export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
+// LX-6 manifest connect flow. StateInvalid covers unknown, already-used,
+// expired, and cancelled attempts with one code (no oracle); ExchangeFailed is
+// the GitHub-side handshake; PermissionsDenied is a created App that lacks the
+// required scopes; SecretWriteFailed is a Lexa-side storage failure (missing or
+// invalid master key, DB error) on the encrypted write path.
+export class GithubManifestStateInvalid extends Data.TaggedError("GithubManifestStateInvalid")<{}> {}
+export class GithubManifestExchangeFailed extends Data.TaggedError("GithubManifestExchangeFailed")<{ message: string }> {}
+export class GithubManifestPermissionsDenied extends Data.TaggedError("GithubManifestPermissionsDenied")<{}> {}
+export class GithubSecretWriteFailed extends Data.TaggedError("GithubSecretWriteFailed")<{ message: string }> {}
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
 export class NoUserContextForbidden extends Data.TaggedError("NoUserContextForbidden")<{}> {}
 export class DeviceLoginNotFound extends Data.TaggedError("DeviceLoginNotFound")<{}> {}
@@ -182,6 +191,10 @@ export const errorCodeMap: Record<string, string> = {
   InvalidName: "INVALID_NAME",
   InvalidRateLimit: "INVALID_RATE_LIMIT",
   InvalidGithubSettings: "INVALID_GITHUB_SETTINGS",
+  GithubManifestStateInvalid: "GITHUB_MANIFEST_STATE_INVALID",
+  GithubManifestExchangeFailed: "GITHUB_MANIFEST_EXCHANGE_FAILED",
+  GithubManifestPermissionsDenied: "GITHUB_MANIFEST_PERMISSIONS_DENIED",
+  GithubSecretWriteFailed: "GITHUB_SECRET_WRITE_FAILED",
   NoUserContext: "NO_USER_CONTEXT",
   NoUserContextForbidden: "NO_USER_CONTEXT",
   DeviceLoginNotFound: "DEVICE_LOGIN_NOT_FOUND",
@@ -308,6 +321,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InvalidArgs":
     case "InvalidRateLimit":
     case "InvalidGithubSettings":
+    case "GithubManifestPermissionsDenied":
     case "MemberNotInWorkspace":
     case "AttachmentExtractionFailed":
       return 422;
@@ -317,6 +331,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "McpStdioUnavailable":
     case "SecretKeyUnavailable":
     case "JevInvalidConfig":
+    case "GithubManifestStateInvalid":
       return 400;
     case "InvalidKey":
     case "MissingAuth":
@@ -332,6 +347,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "DeviceLoginNotFound":
       return 404;
     case "GithubApiError":
+    case "GithubManifestExchangeFailed":
     case "SourceFetchError":
     case "ProviderAuthFailed":
     case "ProviderUnreachable":
@@ -342,6 +358,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "JevAuthFailed":
     case "JevUnreachable":
       return 502;
+    case "GithubSecretWriteFailed":
     case "DbError":
       return 500;
     default:
@@ -458,6 +475,16 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.reason ?? "Invalid rate limit");
     case "InvalidGithubSettings":
       return String(error.reason ?? "Invalid GitHub settings");
+    // Fixed, cause-neutral messages: an upstream body or a storage detail is
+    // never echoed to the client. The callback surface varies copy by code.
+    case "GithubManifestStateInvalid":
+      return "GitHub connection link is invalid or expired";
+    case "GithubManifestExchangeFailed":
+      return "GitHub could not complete the manifest handshake";
+    case "GithubManifestPermissionsDenied":
+      return "The GitHub App was created without the required permissions";
+    case "GithubSecretWriteFailed":
+      return "GitHub credentials could not be stored on this server";
     case "NoUserContext":
     case "NoUserContextForbidden":
       return "No user context — this endpoint needs a session or a key bound to a user";
