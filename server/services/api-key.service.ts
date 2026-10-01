@@ -37,12 +37,9 @@ function generateRawKey(): string {
   return `lxk_${result}`;
 }
 
-// Shared by ApiKeyService and DeviceLoginService (device approval mints keys
-// inside one atomic batch — the helpers must live in one place).
-export function generateRawKeyForMint(): string {
-  return generateRawKey();
-}
-
+// Raw-key format + hashing live here so createFor — the only mint path for
+// UI/device keys, including the device-login poll — generates keys in one
+// place.
 export async function sha256(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest("SHA-256", data);

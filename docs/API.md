@@ -1088,22 +1088,27 @@ GET    /api/device-login/requests/:id  (key-exempt; header x-device-token)
      — keep polling (~2s interval); clientName/code/expiresAt power the
        browser approve page (same endpoint, no separate fetch)
 → 200 { status: "approved", rawKey: "lxk_...", keyName, approverName? }
-     rawKey returned ONCE — the row is consumed on this response; a second
-     poll → 404 DEVICE_LOGIN_NOT_FOUND. Raw key transits an in-memory store
-     (TTL 30 min), never persisted.
+     rawKey returned ONCE — the first poll after approval atomically consumes
+     the row (DELETE … RETURNING), then mints the user-bound key (owner =
+     approver, name = clientName). Consume and INSERT are two statements: if
+     the insert fails the request is spent and the client re-runs `lx login`.
+     A second poll → 404 DEVICE_LOGIN_NOT_FOUND. Minting on the poll (not on
+     approve) is what makes the flow isolate-independent — no shared
+     in-memory transit state.
 → 403 { error: { code: "DEVICE_LOGIN_DENIED" } }
-→ 410 { error: { code: "DEVICE_LOGIN_EXPIRED" } }      (also when the minted
-       key is gone from the transit store)
+→ 410 { error: { code: "DEVICE_LOGIN_EXPIRED" } }
 → 404 { error: { code: "DEVICE_LOGIN_NOT_FOUND" } }    (unknown id / consumed)
 
 POST   /api/device-login/requests/:id/approve  (user-bound identity + token)
 body { token*: string }        — token is the raw hex string from the URL
 → 200 { status: "approved", clientName }
-  Mints a user-bound key (user_id = approver, name = clientName) —
-  shows up in the approver's Settings → Me → API keys. Mint + status flip
-  are one atomic batch (Bun transaction / D1 batch). Any user-bound
-  identity may approve (session cookie or a user-bound key — the token,
-  a 256-bit capability, is the approval secret); bare server keys → 401/403.
+  Flips the request to approved and records the approver (single conditional
+  UPDATE). The key is NOT minted here — the CLI's first subsequent poll
+  consumes the row and mints the user-bound key (user_id = approver, name =
+  clientName), which then appears in the approver's Settings → Me → API keys.
+  Any user-bound identity may approve (session cookie or a user-bound key —
+  the token, a 256-bit capability, is the approval secret); bare server keys
+  → 401/403.
   | 401 (no identity) | 404 DEVICE_LOGIN_NOT_FOUND (unknown/mismatched/
     consumed — no oracle) | 410 DEVICE_LOGIN_EXPIRED
 ```
@@ -1111,11 +1116,6 @@ body { token*: string }        — token is the raw hex string from the URL
 Errors: `DEVICE_LOGIN_NOT_FOUND` (404), `DEVICE_LOGIN_EXPIRED` (410),
 `DEVICE_LOGIN_DENIED` (403), `NO_USER_CONTEXT` (403, personal keys +
 mint-from-server-key paths).
-
-Limitations: the minted raw key transits an in-memory store (30 min TTL)
-— per-isolate. On Workers, an approve on isolate A and a poll on isolate B
-cannot share the store (poll 410s; row pruned at next boot — no security
-impact). Bun serves one process, so self-hosted installs are unaffected.
 
 GET    /api/settings/rate-limit  (admin)
 → 200 { max: number, windowMs: number, envOverride: boolean }
