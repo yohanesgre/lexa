@@ -3,6 +3,7 @@ import { ASSISTANT_AGENT_ID, hasVisionCapability } from "../../lib/assistant-age
 import type { LexaSkill } from "../../../shared/types";
 import { deriveChatTitle } from "../../../shared/assistant";
 import type { AssistantChatThreadSummary } from "../../lib/api";
+import { resolveRawUserIndex } from "../../lib/resendIndex";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
@@ -114,6 +115,43 @@ export function lastUserIndex(turns: ChatTurn[] | null): number {
   return -1;
 }
 
+// Resolve an edit/regenerate/retry request to a RAW user-message index. The
+// display turn is only a locator: the server truncates its OWN raw array, so
+// the index must come from `rawMessages`. An optimistic display turn
+// (rawIndex -1) can never be the target by itself — it is mapped back to the
+// nearest raw user turn with the same text. The text fallback is floored at the
+// raw position just past the turn's nearest preceding sibling with a known raw
+// index: without the floor, stale `rawMessages` would map the optimistic turn
+// onto an OLDER identical prompt and the server would truncate the thread to
+// that point, dropping later prompts. Returns null when unmappable; callers
+// surface a visible error instead of a silent no-op.
+//
+// - edit/regenerate: `target` is the display user turn (the edited bubble / the
+//   last user turn);
+// - retry: `target` is the failed/stopped assistant turn — the trigger is the
+//   nearest preceding user turn.
+export function resolveResendTarget(args: {
+  turns: ChatTurn[] | null;
+  target: ChatTurn;
+  rawMessages: readonly unknown[];
+  mode: "edit" | "regenerate" | "retry";
+}): { turn: ChatTurn; index: number } | null {
+  const turn = args.mode === "retry" ? previousUserTurn(args.turns, args.target) : args.target;
+  if (!turn || turn.role !== "user") return null;
+  const turns = args.turns ?? [];
+  const pos = turns.indexOf(turn);
+  let floor = 0;
+  for (let i = pos; i >= 0; i--) {
+    const rawIndex = turns[i]?.rawIndex ?? -1;
+    if (rawIndex >= 0) {
+      floor = rawIndex + 1;
+      break;
+    }
+  }
+  const index = resolveRawUserIndex(args.rawMessages, turn, floor);
+  return index === null ? null : { turn, index };
+}
+
 // ── Write approvals ──
 
 export function applyChipPatch(
@@ -221,20 +259,23 @@ export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>)
 
 // ── Thread resolution ( ?thread= deep link | in-session selection ) ──
 
-// Returns the chat id to apply, or null when the current selection stands. The
-// ONLY sources that select an existing thread are an explicit ?thread= deep
-// link and the already-applied in-session selection; everything else resolves
-// to null — the /$slug/chat default is the new-chat landing (herald-chat.html
-// "Open behavior"). The last-visited memory is never a default; it is kept for
-// stale-thread recovery only. An explicit ?thread= always wins over the active
-// selection.
+// Returns the chat id to apply, or null when the current selection stands. An
+// explicit ?thread= deep link always wins. With no deep link, the last active
+// thread (`lexa-chat-last:<projectId>`) is restored so a run that survived a
+// navigation re-attaches (LX-8); the already-applied in-session selection is
+// never clobbered. Deleting the active thread clears the memory first, so the
+// restore falls through to the fresh landing. An unmapped/empty memory is the
+// new-chat landing.
 export function resolveChatId(args: {
   projectId: string | undefined;
   thread: string | undefined;
   currentChatId: string;
+  lastVisited?: string | null;
 }): string | null {
   if (!args.projectId) return null;
   if (args.thread) return args.thread === args.currentChatId ? null : args.thread;
+  const last = args.lastVisited ?? null;
+  if (last && last !== args.currentChatId) return last;
   return null;
 }
 

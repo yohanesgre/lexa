@@ -45,12 +45,12 @@ import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
 
 // Assistant Chat — dedicated /$slug/chat route (assistant-chat.html +
-// assistant-chat-upgrades.html). Multi-thread per (project, user): the History
-// dropdown lists threads (?thread= deep link), each thread keeps a client
-// uuid in document_id. /$slug/chat opens the NEW-CHAT landing by default
-// (herald-chat.html "Open behavior"): resuming a thread is explicit — a
-// sidebar row or a ?thread= deep link. The "last visited" key
-// lexa-chat-last:<projectId> is kept only so stale-thread recovery can tell a
+// assistant-chat-upgrades.html). Multi-thread per (project, user): the
+// History dropdown lists threads (?thread= deep link), each thread keeps a
+// client uuid in document_id. An explicit ?thread= deep link or a sidebar row
+// selects a thread; with no deep link the last active thread
+// (lexa-chat-last:<projectId>) is restored so a run that survived a navigation
+// re-attaches (LX-8) — stale-thread recovery also uses that key to tell a
 // brand-new deep-linked thread from a known one. No queue row — streams are
 // direct SSE.
 // No agent picker: the persona mirrors the project's configured Assistant Agent
@@ -99,10 +99,12 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const listQuery = useAssistantChatList(projectId, debouncedSearch);
   const threads = useMemo(() => listQuery.data ?? [], [listQuery.data]);
 
-  // chatId resolution: ?thread= deep link or an already-applied in-session
-  // selection; everything else is the fresh landing. Every applied selection is
-  // written back to localStorage (lexa-chat-last:<projectId>) for stale-thread
-  // recovery — it never drives the default selection.
+  // chatId resolution: ?thread= deep link wins; otherwise the last active
+  // thread (lexa-chat-last:<projectId>) is restored so a run that survived a
+  // navigation re-attaches (LX-8). Everything else is the fresh landing. Every
+  // applied selection is written back to localStorage (lexa-chat-last:<projectId>)
+  // for stale-thread recovery — and, with no deep link, to drive the default
+  // restore above.
   const [chatId, setChatId] = useState("");
   const applyChatId = useCallback(
     (id: string) => {
@@ -119,14 +121,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const clearThreadParam = useCallback(() => void navigate({ search: {}, replace: true }), [navigate]);
   const openThreadParam = useCallback((threadId: string) => void navigate({ search: { thread: threadId }, replace: true }), [navigate]);
 
-  // Resolve the active thread from the two EXPLICIT sources only: a ?thread=
-  // deep link or an already-applied in-session selection. Everything else
-  // resolves to "" — the /$slug/chat default is the new-chat landing
-  // (herald-chat.html "Open behavior"); the last-visited memory never selects a
-  // thread. An already-active selection is never clobbered — except on a
-  // project switch, where the previous project's thread must not leak.
-  // Deleting the ACTIVE thread lands on a fresh empty chat (herald-chat.html
-  // "The view lands on a fresh empty chat"), NOT the next list head.
+  // Resolve the active thread: an explicit ?thread= deep link wins; otherwise
+  // the last active thread (`lexa-chat-last:<projectId>`) is restored so a run
+  // that survived a navigation re-attaches (LX-8). An already-active selection
+  // is never clobbered — except on a project switch, where the previous
+  // project's thread must not leak. Deleting the ACTIVE thread clears the
+  // memory and lands on a fresh empty chat (herald-chat.html "The view lands on
+  // a fresh empty chat"), NOT the next list head.
   // Which project's thread resolution has settled — the landing must not paint
   // before the resolve effect has run, or a hard load / deep link flashes the
   // hero over a project that actually has threads.
@@ -137,10 +138,17 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     if (!projectId) return;
     const projectChanged = resolvedProjectRef.current !== projectId;
     resolvedProjectRef.current = projectId;
+    let lastVisited: string | null = null;
+    try {
+      lastVisited = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
+    } catch {
+      // non-fatal
+    }
     const next = resolveChatId({
       projectId,
       thread,
       currentChatId: projectChanged ? "" : chatId,
+      lastVisited,
     });
     if (next) applyChatId(next);
     else if (projectChanged && chatId) setChatId("");

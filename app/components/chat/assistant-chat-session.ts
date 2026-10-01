@@ -9,7 +9,6 @@ import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useToast } from "../ui/Toast";
 import { assistantSendForKey } from "../../lib/use-assistant-stream";
 import { settleTurns } from "./assistant-chat-turns-state";
-import { resendIndex } from "../../lib/resendIndex";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
 import {
@@ -23,7 +22,7 @@ import {
   nextTurnsAfterStreamError,
   pendingChipsOf,
   pendingChipTargets,
-  previousUserTurn,
+  resolveResendTarget,
   resumableBatchId,
   suspendTurnFrame,
   terminalTranscriptAction,
@@ -341,6 +340,9 @@ export function useThreadListIngress(args: {
 }
 
 // Edit/regenerate/retry: optimistic truncate + resend from the raw index.
+// The trigger is resolved against the RAW transcript (an optimistic display
+// turn maps back to its raw user message); an unmappable trigger is surfaced
+// as a toast, never a silent no-op that would drop the user's prompt.
 export function useTurnResend(args: {
   turns: ChatTurn[] | null;
   setTurns: React.Dispatch<React.SetStateAction<ChatTurn[] | null>>;
@@ -349,39 +351,47 @@ export function useTurnResend(args: {
   startStream: (message: string, fromIndex?: number) => void;
 }) {
   const { turns, setTurns, rawMessages, streaming, startStream } = args;
+  const toast = useToast();
+
+  const resendFailed = () =>
+    toast.push("error", "Couldn’t resend turn", "This turn isn’t saved with this text yet — try again in a moment.");
 
   const handleEditSave = (target: ChatTurn, draft: string) => {
     const message = draft.trim();
     if (!message || streaming) return;
-    // No valid raw target (e.g. the edited turn is still optimistic, rawIndex
-    // -1) → wait for the transcript; never emit a sentinel index the server
-    // rejects with INVALID_ARGS.
-    const idx = resendIndex(rawMessages, "edit", target.rawIndex);
-    if (idx === null) return;
-    setTurns((prev) => truncateTurns(prev, target, message));
-    startStream(message, idx);
+    const resolved = resolveResendTarget({ turns, target, rawMessages, mode: "edit" });
+    if (!resolved) {
+      resendFailed();
+      return;
+    }
+    setTurns((prev) => truncateTurns(prev, resolved.turn, message));
+    startStream(message, resolved.index);
   };
 
   // Regenerate exists ONLY on the last user turn: resends that message and
   // replaces the trailing assistant reply.
   const handleRegenerate = (target: ChatTurn) => {
     if (streaming) return;
-    const idx = resendIndex(rawMessages, "regenerate");
-    if (idx === null) return;
-    setTurns((prev) => truncateTurns(prev, target));
-    startStream(target.text, idx);
+    const resolved = resolveResendTarget({ turns, target, rawMessages, mode: "regenerate" });
+    if (!resolved) {
+      resendFailed();
+      return;
+    }
+    setTurns((prev) => truncateTurns(prev, resolved.turn));
+    startStream(resolved.turn.text, resolved.index);
   };
 
   // Retry on a failed/stopped bubble resends ITS triggering user message
   // from that point without duplicating the failed turn.
   const handleRetryTurn = (assistantTurn: ChatTurn) => {
     if (streaming) return;
-    const trigger = previousUserTurn(turns, assistantTurn);
-    if (!trigger) return;
-    const idx = resendIndex(rawMessages, "edit", trigger.rawIndex);
-    if (idx === null) return;
-    setTurns((prev) => truncateTurns(prev, trigger));
-    startStream(trigger.text, idx);
+    const resolved = resolveResendTarget({ turns, target: assistantTurn, rawMessages, mode: "retry" });
+    if (!resolved) {
+      resendFailed();
+      return;
+    }
+    setTurns((prev) => truncateTurns(prev, resolved.turn));
+    startStream(resolved.turn.text, resolved.index);
   };
 
   return { handleEditSave, handleRegenerate, handleRetryTurn };
