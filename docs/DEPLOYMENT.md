@@ -79,6 +79,8 @@ setup && bun run dev:full`.
 
 Flags: `--ref <tag|branch>` (script + artifact source: a release tag or
 `main`), `--name <name>` (workers deploy name, default `lexa`),
+`--account <id>` (workers Cloudflare account id; skips the account
+prompt and disambiguates a multi-account token),
 `--port` (docker, default
 8080), `--bind` (default 127.0.0.1), `--domain` (workers custom domain; skips the prompt),
 `--systemd` (bare), `--image <tag>` (docker), `--no-pull` (docker; skip
@@ -118,6 +120,10 @@ normally.
   database (deploy `lexa` reuses a lone `lexa-prod`); several matches refuse the
   run rather than guess — remove the stale database, or pass `--name <deploy>`
   to start a distinct deployment under that name.
+- **Account selection:** with several accounts on the token the installer picks
+  on a TTY, refuses headless listing the account ids, honors `--account` /
+  `CLOUDFLARE_ACCOUNT_ID`, and refuses a stale explicit id with guidance. A
+  re-run reuses the account recorded by the previous deploy's wrangler config.
 - **Envelope key (custody):** the installer mints `LXK_SECRETS_MASTER_KEY` once
   and keeps it in `cf-workers/.env.toml` (0600). On re-runs the order is local
   custody → remote presence (`wrangler secret list`) → mint, so the key is

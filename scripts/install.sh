@@ -306,6 +306,20 @@ deploy_workers() {
   [ -n "${CF_TOKEN}" ] || die "No Cloudflare credentials found — run \`wrangler login\` once, or pass a token via --cf-token / CF_API_TOKEN, then re-run."
   export CLOUDFLARE_API_TOKEN="${CF_TOKEN}"
   export CF_API_TOKEN="${CF_TOKEN}"
+  # Cloudflare account: --account wins; then CLOUDFLARE_ACCOUNT_ID from the
+  # environment; else the previous deploy's wrangler config records it (read
+  # BEFORE the release unpack wipes deploy-<name>/), else workers-install.ts
+  # resolves from the token's account list and dies on ambiguity. Export when
+  # the id is known at shell level so every wrangler call is unambiguous; a
+  # fresh multi-account install stays unresolved here and the TS step refuses
+  # (headless) or prompts (TTY).
+  _shell_account="${ACCOUNT:-${CLOUDFLARE_ACCOUNT_ID:-}}"
+  if [ -z "${_shell_account}" ]; then
+    _shell_account="$(resolve_shell_account "${_ww_dir}" "${FLAVOR_NAME}")"
+  fi
+  if [ -n "${_shell_account}" ]; then
+    export CLOUDFLARE_ACCOUNT_ID="${_shell_account}"
+  fi
   # Domain: a previous deploy's LXK_PUBLIC_URL becomes the default (Enter
   # keeps it, "-" switches back to workers.dev). Read BEFORE the wipe below.
   if [ -z "${DOMAIN}" ]; then
@@ -352,6 +366,7 @@ deploy_workers() {
   fi
 
   cf_args=(--name "${FLAVOR_NAME}")
+  [ -n "${ACCOUNT}" ] && cf_args+=(--account "${ACCOUNT}")
   [ "${RESET_DB}" = "1" ] && cf_args+=(--reset-db)
   [ -n "${DOMAIN}" ] && cf_args+=(--domain "${DOMAIN}")
   # A stale URL from a previous deploy must never outlive this run's result.
