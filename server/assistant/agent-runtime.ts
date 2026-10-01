@@ -20,9 +20,19 @@ import {
   type ConvertedUIMessage,
   type LegacyStoredMessage,
 } from "./legacy-convert";
+import type { RegistryModelConfig } from "./model-factory";
+import type { AssistantCallLogInput } from "../../shared/assistant";
+import type { AssistantRunStatusInput, AssistantTurnContext } from "./internal-routes";
+import type { ReadToolResponse, WriteToolResponse } from "./tools-ai";
 
 export const INTERNAL_LEGACY_PATH = "/api/internal/assistant/legacy";
 export const INTERNAL_MIRROR_PATH = "/api/internal/assistant/mirror";
+export const INTERNAL_PROVIDER_CONFIG_PATH = "/api/internal/assistant/provider-config";
+export const INTERNAL_TURN_CONTEXT_PATH = "/api/internal/assistant/turn-context";
+export const INTERNAL_CALL_LOG_PATH = "/api/internal/assistant/call-log";
+export const INTERNAL_RUN_STATUS_PATH = "/api/internal/assistant/run-status";
+export const INTERNAL_TOOL_PATH = "/api/internal/assistant/tool";
+export const INTERNAL_WRITE_TOOL_PATH = "/api/internal/assistant/write-tool";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -125,5 +135,168 @@ export async function mirrorTranscript(deps: AssistantInternalDeps, input: Mirro
   } catch (e) {
     console.warn("[Assistant] mirror failed after retry:", e instanceof Error ? e.message : String(e));
     return false;
+  }
+}
+
+/**
+ * Resolve the project's provider chain for one turn (ADR-0003 §C). Keys are
+ * decrypted Worker-side and never persisted by the DO. `null` covers both "no
+ * binding" (409) and an unreachable Worker — the engine maps either to
+ * PROVIDER_NOT_CONFIGURED, and the next turn retries.
+ */
+export async function resolveProviderConfigs(
+  deps: AssistantInternalDeps,
+  projectId: string
+): Promise<RegistryModelConfig[] | null> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+  const url = `${originOf(deps)}${INTERNAL_PROVIDER_CONFIG_PATH}?projectId=${encodeURIComponent(projectId)}`;
+  try {
+    const res = await fetchImpl(url, { method: "GET", headers: await signedHeaders(deps) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { configs?: unknown };
+    return Array.isArray(body.configs) ? (body.configs as RegistryModelConfig[]) : null;
+  } catch (e) {
+    console.warn("[Assistant] provider config resolution failed:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+/**
+ * Resolve the project's per-turn tool gating (ADR-0003 §D). `null` when the
+ * Worker cannot answer — the DO then offers the core read set and NO write
+ * tools (writes are the higher-risk surface; reads degrade gracefully).
+ */
+export async function resolveTurnContext(
+  deps: AssistantInternalDeps,
+  projectId: string
+): Promise<AssistantTurnContext | null> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+  const url = `${originOf(deps)}${INTERNAL_TURN_CONTEXT_PATH}?projectId=${encodeURIComponent(projectId)}`;
+  try {
+    const res = await fetchImpl(url, { method: "GET", headers: await signedHeaders(deps) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { context?: unknown };
+    const context = body.context as AssistantTurnContext | undefined;
+    if (!context || !Array.isArray(context.readTools) || !Array.isArray(context.writeTools)) return null;
+    return context;
+  } catch (e) {
+    console.warn("[Assistant] turn-context resolution failed:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+/**
+ * Record one provider call (call-log row). Best-effort with the retry-once
+ * policy: a failed call-log write is warned, never thrown — the turn's stream
+ * must not be broken by telemetry.
+ */
+export async function recordCallLog(deps: AssistantInternalDeps, input: AssistantCallLogInput): Promise<boolean> {
+  return postInternal(deps, INTERNAL_CALL_LOG_PATH, input, "call-log");
+}
+
+/**
+ * Report a terminal run status (task/wiki runs). Best-effort with retry-once;
+ * the engine treats a false result as "Worker unreachable, leave the run row
+ * to the next recovery".
+ */
+export async function transitionRun(deps: AssistantInternalDeps, input: AssistantRunStatusInput): Promise<boolean> {
+  return postInternal(deps, INTERNAL_RUN_STATUS_PATH, input, "run-status");
+}
+
+async function postInternal(
+  deps: AssistantInternalDeps,
+  path: string,
+  body: unknown,
+  label: string
+): Promise<boolean> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+  const url = `${originOf(deps)}${path}`;
+  try {
+    return await withRetryOnce(async () => {
+      const res = await fetchImpl(url, { method: "POST", headers: await signedHeaders(deps), body: JSON.stringify(body) });
+      if (!res.ok) throw new AssistantInternalUnavailable(`${label} failed (${res.status})`);
+      return true;
+    });
+  } catch (e) {
+    console.warn(`[Assistant] ${label} failed after retry:`, e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+/** One write proposal sent to the Worker internal route. */
+export interface AssistantWriteToolCallInput {
+  name: string;
+  args: Record<string, unknown>;
+  batchId: string;
+  seq: number;
+  projectId: string;
+  documentType: "task" | "wiki" | "chat";
+  documentId: string;
+  ownerUserId: string;
+}
+
+/**
+ * Execute one read tool in the Worker. Best-effort with the retry-once policy;
+ * a transport failure is returned as a typed `{ ok: false, error }` so the
+ * model can recover rather than breaking the stream.
+ */
+export async function callReadTool(
+  deps: AssistantInternalDeps,
+  name: string,
+  args: Record<string, unknown>
+): Promise<ReadToolResponse> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+  const url = `${originOf(deps)}${INTERNAL_TOOL_PATH}`;
+  try {
+    return await withRetryOnce(async () => {
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: await signedHeaders(deps),
+        body: JSON.stringify({ name, args }),
+      });
+      if (!res.ok) throw new AssistantInternalUnavailable(`tool ${name} failed (${res.status})`);
+      const body = (await res.json()) as { ok?: unknown; result?: unknown; error?: unknown };
+      return {
+        ok: body.ok === true,
+        ...(body.result !== undefined ? { result: body.result } : {}),
+        ...(typeof body.error === "string" ? { error: body.error } : {}),
+      } satisfies ReadToolResponse;
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "tool call failed" };
+  }
+}
+
+/**
+ * Persist one write proposal in the Worker. Best-effort with retry-once; a
+ * failure is returned as `{ ok: false, error }` so the tool result tells the
+ * model the proposal did not land (never a false `proposed: true`).
+ */
+export async function proposeWrite(
+  deps: AssistantInternalDeps,
+  input: AssistantWriteToolCallInput
+): Promise<WriteToolResponse> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input_, init) => fetch(input_, init));
+  const url = `${originOf(deps)}${INTERNAL_WRITE_TOOL_PATH}`;
+  try {
+    return await withRetryOnce(async () => {
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: await signedHeaders(deps),
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) throw new AssistantInternalUnavailable(`write-tool ${input.name} failed (${res.status})`);
+      const body = (await res.json()) as { proposed?: unknown; approvalId?: unknown; error?: unknown };
+      if (body.proposed === true && typeof body.approvalId === "string") {
+        return { ok: true, proposed: true, approvalId: body.approvalId, seq: input.seq } satisfies WriteToolResponse;
+      }
+      return {
+        ok: false,
+        proposed: false,
+        error: typeof body.error === "string" ? body.error : "write proposal failed",
+      } satisfies WriteToolResponse;
+    });
+  } catch (e) {
+    return { ok: false, proposed: false, error: e instanceof Error ? e.message : "write proposal failed" };
   }
 }

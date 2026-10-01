@@ -22,8 +22,8 @@ import {
   type JevUsage,
 } from "./jev";
 
-export const MAX_TOOL_ROUNDS = 12;
-export const MAX_CHAT_TOOL_ROUNDS = 24;
+import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
+export { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS };
 
 const SNIPPET_CAP = 500;
 const S3_FILE_CAP = 5 * 1024 * 1024;

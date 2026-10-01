@@ -9,7 +9,7 @@
 // The real engine/tools arrive in P3.
 
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import type { UIMessage } from "ai";
+import { stepCountIs, type StopCondition, type ToolSet, type UIMessage } from "ai";
 import type { Connection, ConnectionContext } from "agents";
 import type { DurableObjectState, Fetcher } from "@cloudflare/workers-types";
 import {
@@ -20,7 +20,29 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveTurnContext, recordCallLog, transitionRun, callReadTool, proposeWrite, type AssistantInternalDeps } from "./agent-runtime";
+import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
+import { buildReadTools, buildWriteTools, type AssistantToolTransport } from "./tools-ai";
+import { ASSISTANT_WRITE_TOOL_NAMES } from "./write-tool-names";
+import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
+import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
+
+// Read tools available without per-project settings resolution (project data +
+// attachments). The optional tools (web_search / get_skill / analyze_image /
+// jev_assess) are gated by settings the DO does not load yet — adding them
+// blindly would offer capabilities the Worker may reject. Wired in the next
+// settings pass alongside the Worker read-tool executor.
+const CORE_READ_TOOLS: ReadonlySet<string> = new Set<string>([
+  "fetch_url",
+  "read_s3_file",
+  "get_task",
+  "search_tasks",
+  "search_wiki",
+  "read_wiki_page",
+  "get_all_tasks",
+  "get_all_wiki_pages",
+  "get_board_structure",
+]);
 
 export interface LexaAssistantEnv {
   LXK_SECRETS_MASTER_KEY?: string | undefined;
@@ -48,6 +70,19 @@ const THREAD_META_DDL = `CREATE TABLE IF NOT EXISTS thread_meta (
 
 const INTERNAL_ORIGIN_KEY = "internalOrigin";
 const INTERNAL_IDENTITY_KEY = "internalIdentity";
+const RUN_ID_KEY = "assistantRunId";
+
+// Recovery budgets from ADR-0003 §B.5 (maxAttempts 10, noProgressTimeoutMs
+// 300_000, maxRecoveryWork 1000, maxOomRetries 3, keep recovering). Assigned as
+// a class field — the SDK reads it on wake before `onStart()` runs.
+const ASSISTANT_CHAT_RECOVERY = {
+  maxAttempts: 10,
+  noProgressTimeoutMs: 300_000,
+  maxRecoveryWork: 1000,
+  maxOomRetries: 3,
+  terminalMessage: "Assistant generation failed after repeated interruptions",
+  shouldKeepRecovering: () => true,
+} as const;
 
 function documentTypeOf(threadKey: string): "chat" | "task" | "wiki" | null {
   const separator = threadKey.indexOf(":");
@@ -56,12 +91,31 @@ function documentTypeOf(threadKey: string): "chat" | "task" | "wiki" | null {
   return documentType === "chat" || documentType === "task" || documentType === "wiki" ? documentType : null;
 }
 
+function assistantErrorResponse(status: number, code: string, message: string): Response {
+  return new Response(JSON.stringify({ error: { code, message } }), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+}
+
 export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // TS 7's preview compiler does not surface the protected `ctx`/`env` fields
   // inherited through `DurableObject` (an `export =` module); re-declaring them
   // here restores the access the base class provides at runtime.
   declare protected ctx: DurableObjectState<Record<string, unknown>>;
   declare protected env: LexaAssistantEnv;
+
+  // Durable chat recovery (ADR-0003 §B.5). The base class declares this field;
+  // assigning it here (not in `onStart`) makes the budgets effective on wake.
+  override chatRecovery = ASSISTANT_CHAT_RECOVERY;
+
+  private async loadRunId(): Promise<string | null> {
+    try {
+      return (await this.ctx.storage.get<string>(RUN_ID_KEY)) ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   private ensureThreadMetaTable(): void {
     this.ctx.storage.sql.exec(THREAD_META_DDL);
@@ -214,17 +268,116 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     }
   }
 
-  // P1 echo/no-op turn: no provider calls, no tools. Returns the last user text
-  // so the transport (plain-text reply path) has something to stream. The real
-  // engine arrives in P3.
-  override async onChatMessage(): Promise<Response | undefined> {
+  // Real engine turn (ADR-0003 §B.5/§C): resolve the project's provider chain
+  // (decrypted Worker-side, never persisted here), stream the model through the
+  // AI SDK with the built-in `x-opencode-session` header, and let the engine
+  // record the call log + terminal run status via the internal routes.
+  override async onChatMessage(
+    _onFinish?: unknown,
+    options?: { abortSignal?: AbortSignal | undefined } | undefined
+  ): Promise<Response | undefined> {
     this.ensureThreadMetaTable();
-    const lastUser = [...this.messages].reverse().find((message) => message.role === "user");
-    const text = (lastUser?.parts ?? [])
-      .filter((part): part is { type: "text"; text: string } => part.type === "text" && "text" in part)
-      .map((part) => part.text)
-      .join("");
-    return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    const threadKey = this.ctx.id.name ?? "";
+    const meta = this.readThreadMeta(threadKey);
+    const deps = await this.loadInternalDeps();
+    if (!meta || !deps) {
+      return assistantErrorResponse(502, "ASSISTANT_UNAVAILABLE", "Assistant not configured");
+    }
+    const sessionId = threadKey.slice(threadKey.indexOf(":") + 1);
+    const documentType = documentTypeOf(threadKey);
+    const runId = await this.loadRunId();
+    const turnDeps: AssistantTurnDeps = {
+      resolveProviderConfigs: (projectId) => resolveProviderConfigs(deps, projectId),
+      recordCallLog: async (input) => {
+        await recordCallLog(deps, input);
+      },
+      transitionRun: async (input) => {
+        const ok = await transitionRun(deps, input);
+        // Terminal transition landed: clear the run cursor so later turns on
+        // this thread do not re-fire the same transition (which would be a
+        // no-op anyway, but keeping the id around invites repeat attempts).
+        if (ok) {
+          try {
+            await this.ctx.storage.delete(RUN_ID_KEY);
+          } catch (e) {
+            console.warn("[Assistant] failed to clear run id:", e instanceof Error ? e.message : String(e));
+          }
+        }
+      },
+    };
+
+    // Tool transport (ADR-0003 §B.5): read tools execute in the Worker; write
+    // tools persist a pending row and return `proposed:true`, which stops the
+    // tool loop (approval suspend). A write batch is minted per turn.
+    const batchId = crypto.randomUUID();
+    let writeSeq = 0;
+    const transport: AssistantToolTransport = {
+      read: (name, args) => callReadTool(deps, name, args),
+      propose: (name, args) =>
+        proposeWrite(deps, {
+          name,
+          args,
+          batchId,
+          seq: writeSeq++,
+          projectId: meta.project_id,
+          documentType: documentType ?? "chat",
+          documentId: sessionId,
+          ownerUserId: deps.identity.actorUserId,
+        }),
+    };
+    // Per-turn tool gating (ADR-0003 §D; P3 WS3): the Worker resolves which
+    // read tools have their dependencies (Exa key, bound skills, Jev) and which
+    // write tools the project enabled. Unreachable → core reads, no writes.
+    const turnContext = await resolveTurnContext(deps, meta.project_id);
+    const availableRead = new Set(turnContext?.readTools ?? CORE_READ_TOOLS);
+    const enabledWrite = turnContext?.writeTools ?? [];
+    const tools: ToolSet = {
+      ...buildReadTools({ transport, available: availableRead }),
+      ...buildWriteTools({ transport, enabled: enabledWrite }),
+    };
+    const toolRoundCap = documentType === "chat" ? MAX_CHAT_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
+    const stopWhen: StopCondition<ToolSet>[] = [stepCountIs(toolRoundCap)];
+    if (enabledWrite.length > 0) {
+      // Suspend only on a SUCCESSFUL write proposal (`proposed === true`). A
+      // failed proposal is a recoverable tool error the model may retry; the Bun
+      // path loops until the round cap, so stopping on mere tool-call presence
+      // would end the turn on that failure (reviewer MED).
+      const enabled = new Set(enabledWrite);
+      stopWhen.push(({ steps }) =>
+        steps.some((step) =>
+          step.toolResults.some((result) => {
+            if (!enabled.has(result.toolName)) return false;
+            const output = result.output as { proposed?: unknown } | null | undefined;
+            return output !== null && typeof output === "object" && output.proposed === true;
+          })
+        )
+      );
+    }
+    const system = systemPromptText(
+      buildSystemPrompts({
+        identity: documentType === "chat" ? CHAT_IDENTITY : IDENTITY,
+        memoryBlock: null,
+        agentMarkdown: null,
+      })
+    );
+    try {
+      return await runAssistantTurn(turnDeps, {
+        projectId: meta.project_id,
+        threadKey,
+        sessionId,
+        messages: this.messages,
+        tools,
+        system,
+        stopWhen,
+        runId,
+        ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+      });
+    } catch (e) {
+      const turnError = e instanceof AssistantTurnError ? e : null;
+      if (turnError) return assistantErrorResponse(turnError.status, turnError.code, turnError.message);
+      console.error("[Assistant] engine turn failed:", e instanceof Error ? e.message : String(e));
+      return assistantErrorResponse(502, "ASSISTANT_GENERATION_FAILED", "Assistant generation failed");
+    }
   }
 
   // ─── Thread lifecycle RPC surface (ADR-0003 §B.4) ──────────────────────
@@ -242,7 +395,15 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     return { ok: true };
   }
 
-  async enqueueRun(_projectId: string, _taskId: string): Promise<{ ok: true }> {
+  async enqueueRun(_projectId: string, taskId: string): Promise<{ ok: true }> {
+    // The run id keys the terminal status transition the engine reports back
+    // through `/api/internal/assistant/run-status`. Full background run start
+    // (`runFiber`) lands with the tools/run-control pass.
+    try {
+      await this.ctx.storage.put(RUN_ID_KEY, taskId);
+    } catch (e) {
+      console.warn("[Assistant] failed to persist run id:", e instanceof Error ? e.message : String(e));
+    }
     return { ok: true };
   }
 

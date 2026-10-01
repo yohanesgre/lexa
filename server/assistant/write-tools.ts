@@ -4,46 +4,20 @@ import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantWriteDiff } from "../../shared/assistant";
 
-// Max write proposals per stream turn — further proposals in the same turn
-// return a tool error result instead of persisting.
-export const MAX_WRITES_PER_TURN = 8;
-
-// Approval TTL (assistant_pending_writes.expires_at) — lazy sweep only.
-export const APPROVAL_TTL_HOURS = 24;
-
-// Max task refs per bulk call on the single-task write tools (archive/restore/
-// delete). A bulk call still occupies one proposal slot (MAX_WRITES_PER_TURN,
-// below) and one approval; it avoids only the per-task proposal cost, not the
-// per-turn write budget or the tool-round budget.
-export const MAX_BULK_TASK_REFS = 100;
-
 const DIFF_TEXT_CAP = 2000;
 const COMMENT_BODYTEXT_CAP = 2000;
 const COMMENT_BODY_BYTES = 64 * 1024;
 
-export const ASSISTANT_WRITE_TOOL_NAMES = [
-  "create_task",
-  "update_task",
-  "move_task",
-  "archive_task",
-  "restore_task",
-  "delete_task",
-  "add_comment",
-  "create_wiki_page",
-  "edit_wiki_page",
-  "delete_wiki_page",
-  "create_milestone",
-  "update_milestone",
-  "archive_milestone",
-  "delete_milestone",
-  "create_sprint",
-  "update_sprint",
-  "archive_sprint",
-  "delete_sprint",
-  "move_swimlane",
-] as const;
+import {
+  APPROVAL_TTL_HOURS,
+  ASSISTANT_WRITE_TOOL_NAMES,
+  MAX_BULK_TASK_REFS,
+  MAX_WRITES_PER_TURN,
+  type AssistantWriteToolName,
+} from "./write-tool-names";
 
-export type AssistantWriteToolName = (typeof ASSISTANT_WRITE_TOOL_NAMES)[number];
+export { APPROVAL_TTL_HOURS, ASSISTANT_WRITE_TOOL_NAMES, MAX_BULK_TASK_REFS, MAX_WRITES_PER_TURN };
+export type { AssistantWriteToolName };
 
 export function isAssistantWriteTool(name: string): name is AssistantWriteToolName {
   return (ASSISTANT_WRITE_TOOL_NAMES as readonly string[]).includes(name);

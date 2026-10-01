@@ -55,6 +55,14 @@
       "id": "00000000000000000000000000000000"
     }
   ],
+  // DO → Worker transport (ADR-0003 §B.2/R7): the assistant Durable Object
+  // reaches its internal routes through this self service binding. `service`
+  // names the worker itself — `scripts/workers-install.ts` rewrites it to the
+  // per-flavor worker name at deploy time. When the binding is absent the DO
+  // falls back to a global fetch against the public origin (agent.ts).
+  "services": [
+    { "binding": "ASSISTANT_SERVICE", "service": "lexa" }
+  ],
   // Assistant Durable Object (ADR-0003 §B.1): one instance per conversation
   // thread (`chat:<id>` | `task:<id>` | `wiki:<id>`), class exported from
   // server/workers-entry.ts. `new_sqlite_classes` is the v1 migration that
