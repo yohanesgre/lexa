@@ -1,7 +1,7 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import * as Multipart from "@effect/platform/Multipart";
-import { Cause, Context, Effect, Either, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import { Cause, Effect, Either, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
@@ -15,6 +15,7 @@ import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
 import { AuthIdentity, AuthIdentityShape, actorFromIdentity } from "./auth";
+import { ApiAuthHooks, type ApiAuthHooksShape } from "./auth-hooks";
 import { teamsGroup, createTeamsLive } from "./teams";
 import { workspaceGroup, createWorkspaceLive } from "./workspace";
 import { sessionsGroup, createSessionsLive } from "./sessions";
@@ -1722,15 +1723,11 @@ const searchParams = (req: unknown): URLSearchParams => {
 // invisible to the static graph, served by the host runtime on Bun and by
 // the vitest alias under node. Never executed on Workers.
 // Per-factory auth hooks (B6a/B6b). The setup setAdmin handler provisions
-// through better-auth's createUser — the Bun factory wires the process-wide
-// singleton, the Workers factory wires its per-request createAuth(env)
-// instance (D1 adapter). Handlers yield this tag instead of importing the
-// singleton, so the module graph stays workerd-safe.
-export interface ApiAuthHooksShape {
-  createUser(input: { email: string; password: string; name: string }): Promise<unknown>;
-}
-
-export class ApiAuthHooks extends Context.Tag("Lexa/ApiAuthHooks")<ApiAuthHooks, ApiAuthHooksShape>() {}
+// through better-auth's createUser and the sessions handlers list/revoke —
+// the Bun factory wires the process-wide singleton, the Workers factory
+// wires its per-request createAuth(env) instance (D1 adapter). Handlers
+// yield the ApiAuthHooks tag (server/api/auth-hooks.ts) instead of importing
+// the singleton, so the module graph stays workerd-safe.
 
 async function buildBunApp(dbPath: string, env?: RuntimeEnv, mcpConnector?: Layer.Layer<McpConnector>) {
   const { Database } = await import("bun:sqlite");
@@ -1744,6 +1741,8 @@ async function buildBunApp(dbPath: string, env?: RuntimeEnv, mcpConnector?: Laye
     Layer.succeed(ApiAuthHooks, {
       createUser: (input) =>
         auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
+      listSessions: (headers) => auth.api.listSessions({ headers }),
+      revokeSession: ({ token, headers }) => auth.api.revokeSession({ body: { token }, headers }),
     } satisfies ApiAuthHooksShape),
   );
   const serviceLayer = buildServiceLayer(dbPath, env, mcpConnector);

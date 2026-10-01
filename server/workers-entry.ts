@@ -158,6 +158,8 @@ type BetterAuthApi = {
   api: {
     getSession: (opts: { headers: Headers }) => Promise<{ user?: { id: string; name: string; role?: string } | null } | null>;
     createUser: (opts: { body: { email: string; password: string; name: string; data: { role: string } } }) => Promise<unknown>;
+    listSessions: (opts: { headers: Headers }) => Promise<ReadonlyArray<{ id: string; token: string; ipAddress?: string | null; userAgent?: string | null; expiresAt: string | Date; createdAt: string | Date }>>;
+    revokeSession: (opts: { body: { token: string }; headers: Headers }) => Promise<unknown>;
   };
   handler: (req: Request) => Promise<Response>;
 };
@@ -203,6 +205,8 @@ async function handleApi(
       authHooks: {
         createUser: (input) =>
           lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
+        listSessions: (headers) => lexaAuth.auth.api.listSessions({ headers }),
+        revokeSession: ({ token, headers }) => lexaAuth.auth.api.revokeSession({ body: { token }, headers }),
       },
       getSession: (headers) => lexaAuth.auth.api.getSession({ headers }),
     });
