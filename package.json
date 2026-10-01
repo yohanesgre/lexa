@@ -1,6 +1,6 @@
 {
   "name": "lexa",
-  "version": "2026.5.4",
+  "version": "2026.5.5",
   "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, two-way GitHub issue sync.",
   "scripts": {
     "test": "vitest run",
