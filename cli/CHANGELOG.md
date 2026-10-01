@@ -12,6 +12,15 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.5.1] - 2026-10-01
+
+### Fixed
+
+- **`lx login` polling window** — the device-flow poll deadline now follows the
+  server-reported expiry (`expiresMs`, plus a small grace; clamped; falls back
+  to 5 minutes) instead of a hard-coded window, and the local-timeout message
+  names the actual window. (#174)
+
 ## [2026.5.0] - 2026-09-30
 
 ### Added

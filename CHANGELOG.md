@@ -7,6 +7,18 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.4] - 2026-10-01
+
+### Fixed
+
+- **Device login key delivery** — an approval could succeed in the web app
+  while the CLI still saw "Login request expired": the raw key transited a
+  per-isolate in-memory store, so an approve and the CLI's next poll could
+  land on different Workers isolates. The key is now minted on the CLI's first
+  poll after approval (the request row is atomically consumed), which is
+  isolate-independent and leaves no orphan keys; a null-approver row is
+  refused before consumption. (#174)
+
 ## [2026.5.3] - 2026-10-01
 
 ### Fixed
