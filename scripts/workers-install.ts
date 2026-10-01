@@ -250,6 +250,132 @@ export function readPriorAccount(dir: string, flavorName: string): string {
   }
 }
 
+// Root repo wrangler config — the per-deploy config mirrors
+// `compatibility_date` and the observability block from it. Wrangler's JSONC
+// schema allows line/block comments and trailing commas, so the file is
+// scanned (string-aware) rather than regex-stripped: a `//` inside a string
+// value (e.g. a URL) is data, not a comment, and genuinely malformed JSON must
+// still be rejected with the parse error.
+export interface RootWorkerConfig {
+  compatibility_date?: string;
+  observability?: Record<string, unknown>;
+}
+
+// Remove // line comments and /* */ block comments while respecting string
+// literals and escapes (a `//` or `/*` inside a quoted value is data; `\"`
+// never ends a string).
+function stripJsoncComments(input: string): string {
+  let out = "";
+  let i = 0;
+  const n = input.length;
+  let inString = false;
+  while (i < n) {
+    const ch = input[i]!;
+    if (inString) {
+      out += ch;
+      if (ch === "\\" && i + 1 < n) {
+        out += input[i + 1]!;
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === "/" && input[i + 1] === "/") {
+      i += 2;
+      while (i < n && input[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && input[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(input[i] === "*" && input[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+// Drop trailing commas before a closing `}`/`]` (string-aware). Comments are
+// already gone, so the lookahead only has to skip whitespace.
+function stripTrailingCommas(input: string): string {
+  let out = "";
+  let i = 0;
+  const n = input.length;
+  let inString = false;
+  while (i < n) {
+    const ch = input[i]!;
+    if (inString) {
+      out += ch;
+      if (ch === "\\" && i + 1 < n) {
+        out += input[i + 1]!;
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < n && /\s/.test(input[j]!)) j++;
+      if (input[j] === "}" || input[j] === "]") {
+        i++;
+        continue;
+      }
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+export function readRootWranglerConfig(dir: string): RootWorkerConfig {
+  const path = join(dir, "wrangler.jsonc");
+  const raw = readFileSync(path, "utf-8");
+  try {
+    return JSON.parse(
+      stripTrailingCommas(stripJsoncComments(raw)),
+    ) as RootWorkerConfig;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`${path}: ${message}`);
+  }
+}
+
+// Observability block written into the per-deploy config: root's block
+// verbatim, or the bare legacy enable when root declares no block. A present
+// but non-object block is refused loudly — never silently downgraded.
+export function resolveObservability(
+  root: RootWorkerConfig,
+): Record<string, unknown> {
+  const block = root.observability;
+  if (block === undefined) return { enabled: true };
+  if (typeof block !== "object" || block === null || Array.isArray(block)) {
+    throw new Error(
+      `root wrangler.jsonc 'observability' must be a JSON object (got ${
+        Array.isArray(block) ? "array" : typeof block
+      }) — fix the key or remove it`,
+    );
+  }
+  return block;
+}
+
 const API = "https://api.cloudflare.com/client/v4";
 
 let CF_TOKEN = "";
@@ -614,34 +740,36 @@ async function main(): Promise<void> {
   copyContents(assetsAbs, join(deployDir, "assets"));
 
   const publicUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
-  const config = {
-    name: FLAVOR.workerName,
-    account_id: account,
-    main: `./${(manifest.main ?? "index.js").split("/").pop()}`,
-    compatibility_date:
-      (
-        JSON.parse(
-          readFileSync(join(DIR, "wrangler.jsonc"), "utf-8").replace(
-            /\/\/[^\n]*/g,
-            "",
-          ),
-        ) as { compatibility_date?: string }
-      ).compatibility_date ?? "2026-08-01",
-    compatibility_flags: ["nodejs_compat"],
-    ...(manifest.no_bundle ? { no_bundle: true } : {}),
-    ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
-    assets: { directory: "./assets" },
-    vars: {
-      LXK_ENV: "production",
-      ...(publicUrl ? { LXK_PUBLIC_URL: publicUrl } : {}),
-    },
-    d1_databases: [
-      { binding: "DB", database_name: FLAVOR.d1Name, database_id: d1Id },
-    ],
-    r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
-    kv_namespaces: [{ binding: "KV", id: kvId }],
-    observability: { enabled: true },
-  };
+  // The root config read/parse and the observability shape check both refuse
+  // through die: a bad wrangler.jsonc must read as an installer refusal, not a
+  // crash. `observability` carries root's block verbatim into the per-deploy
+  // config (bare `{ enabled: true }` when root declares none).
+  let config: Record<string, unknown>;
+  try {
+    const rootConfig = readRootWranglerConfig(DIR);
+    config = {
+      name: FLAVOR.workerName,
+      account_id: account,
+      main: `./${(manifest.main ?? "index.js").split("/").pop()}`,
+      compatibility_date: rootConfig.compatibility_date ?? "2026-08-01",
+      compatibility_flags: ["nodejs_compat"],
+      ...(manifest.no_bundle ? { no_bundle: true } : {}),
+      ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
+      assets: { directory: "./assets" },
+      vars: {
+        LXK_ENV: "production",
+        ...(publicUrl ? { LXK_PUBLIC_URL: publicUrl } : {}),
+      },
+      d1_databases: [
+        { binding: "DB", database_name: FLAVOR.d1Name, database_id: d1Id },
+      ],
+      r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
+      kv_namespaces: [{ binding: "KV", id: kvId }],
+      observability: resolveObservability(rootConfig),
+    };
+  } catch (err) {
+    die(err instanceof Error ? err.message : String(err));
+  }
   const configPath = join(deployDir, `wrangler.${FLAVOR_NAME}.json`);
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", {
     mode: 0o600,

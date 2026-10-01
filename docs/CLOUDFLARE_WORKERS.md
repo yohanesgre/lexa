@@ -45,8 +45,9 @@ replaces the other; either or both can be live at any time.
    flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
    targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
 8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup (cron
-   `*/15 * * * *`); `wrangler.jsonc` enables observability. The Bun path keeps its
-   `setInterval`.
+   `*/15 * * * *`); `wrangler.jsonc` enables observability, and the installer
+   transcribes that observability block from the root `wrangler.jsonc` into the
+   per-deploy config. The Bun path keeps its `setInterval`.
 9. **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for the
    14 architectural invariants listed in `AGENTS.md` and fails any PR that introduces
    a violation. This is the durable record of the invariants for future contributors.

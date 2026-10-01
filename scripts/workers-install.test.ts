@@ -7,17 +7,21 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   accountAmbiguousMessage,
   accountStaleMessage,
   d1AmbiguousMessage,
   readPriorAccount,
+  readRootWranglerConfig,
   resolveAccountOrDie,
   resolveNames,
+  resolveObservability,
   selectAccount,
   selectD1,
   type AccountRow,
   type D1Row,
+  type RootWorkerConfig,
 } from "./workers-install";
 
 function row(name: string): D1Row {
@@ -209,6 +213,87 @@ describe("readPriorAccount", () => {
   });
 });
 
+describe("root wrangler observability", () => {
+  const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+  test("root wrangler.jsonc pins the project defaults (Cloudflare defaults + redact_query_string)", () => {
+    expect(readRootWranglerConfig(ROOT).observability).toEqual({
+      enabled: true,
+      head_sampling_rate: 1,
+      redact_query_string: true,
+      logs: {
+        enabled: true,
+        head_sampling_rate: 1,
+        invocation_logs: true,
+        persist: true,
+      },
+      traces: {
+        enabled: true,
+        head_sampling_rate: 1,
+        persist: true,
+      },
+      issues: { enabled: true },
+    });
+  });
+
+  test("the generated per-deploy config mirrors root's block", () => {
+    const root = readRootWranglerConfig(ROOT);
+    expect(resolveObservability(root)).toEqual(root.observability!);
+  });
+
+  test("a root config without observability falls back to bare enable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wi-obs-"));
+    writeFileSync(join(dir, "wrangler.jsonc"), '{ "name": "lexa" }\n');
+    expect(resolveObservability(readRootWranglerConfig(dir))).toEqual({
+      enabled: true,
+    });
+  });
+
+  test("a present but non-object observability block fails loud", () => {
+    const root = { observability: "enabled" } as unknown as RootWorkerConfig;
+    expect(() => resolveObservability(root)).toThrow(/observability/);
+  });
+});
+
+describe("readRootWranglerConfig JSONC scanner", () => {
+  function configDir(content: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "wi-jsonc-"));
+    writeFileSync(join(dir, "wrangler.jsonc"), content);
+    return dir;
+  }
+  // These cases exercise arbitrary configs, not just RootWorkerConfig's two keys.
+  function read(dir: string): Record<string, unknown> {
+    return readRootWranglerConfig(dir) as Record<string, unknown>;
+  }
+
+  test("a string value containing // parses (a URL is not a comment)", () => {
+    const dir = configDir(
+      '{\n  "vars": { "LXK_PUBLIC_URL": "https://lexa.example.com//x" }\n}\n',
+    );
+    expect(read(dir)).toEqual({
+      vars: { LXK_PUBLIC_URL: "https://lexa.example.com//x" },
+    });
+  });
+
+  test("block comments are stripped", () => {
+    const dir = configDir('{\n  /* c */ "name": "lexa" /* trailing */\n}\n');
+    expect(read(dir)).toEqual({ name: "lexa" });
+  });
+
+  test("trailing commas are accepted", () => {
+    const dir = configDir('{\n  "name": "lexa",\n  "vars": { "A": "b", },\n}\n');
+    expect(read(dir)).toEqual({
+      name: "lexa",
+      vars: { A: "b" },
+    });
+  });
+
+  test("malformed JSON throws a message naming wrangler.jsonc", () => {
+    const dir = configDir('{ "name": }\n');
+    expect(() => readRootWranglerConfig(dir)).toThrow(/wrangler\.jsonc/);
+  });
+});
+
 describe("source order — account resolves before any resource is created", () => {
   test("the resolveAccountOrDie call precedes the ensureD1 call in main", () => {
     const src = readFileSync(
@@ -220,5 +305,13 @@ describe("source order — account resolves before any resource is created", () 
     expect(resolveIdx).toBeGreaterThanOrEqual(0);
     expect(ensureIdx).toBeGreaterThanOrEqual(0);
     expect(resolveIdx).toBeLessThan(ensureIdx);
+  });
+
+  test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {
+    const src = readFileSync(
+      new URL("./workers-install.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain("observability: resolveObservability(rootConfig)");
   });
 });
