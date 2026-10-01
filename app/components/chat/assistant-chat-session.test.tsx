@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tan
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { AssistantChatComposer } from "./AssistantChatComposer";
+import { ToastProvider } from "../ui/Toast";
 import { appendEphemeralUserTurn, terminalTranscriptAction } from "./assistant-chat-logic";
 import { useSettledTurns, useTerminalRefetch, useTurnResend } from "./assistant-chat-session";
 
@@ -230,28 +231,91 @@ describe("terminalTranscriptAction — not-found vs ingress", () => {
   });
 });
 
-describe("useTurnResend — no sentinel fromIndex", () => {
-  it("does not resend a retry while the trigger turn is still optimistic", () => {
+describe("useTurnResend — raw index space", () => {
+  const errorTurn = { role: "assistant" as const, text: "", imageCount: 0, rawIndex: -1, error: { code: "PROVIDER_UNREACHABLE", message: "x" } };
+
+  function renderResend(args: { turns: Parameters<typeof useTurnResend>[0]["turns"]; rawMessages: unknown[] }) {
     const startStream = vi.fn();
-    const turns = [
-      { role: "user" as const, text: "hello", imageCount: 0, rawIndex: -1 },
-      { role: "assistant" as const, text: "", imageCount: 0, rawIndex: -1, error: { code: "PROVIDER_UNREACHABLE", message: "x" } },
-    ];
-    const { result } = renderHook(() => useTurnResend({ turns, setTurns: vi.fn(), rawMessages: [], streaming: false, startStream }));
+    const setTurns = vi.fn();
+    const { result } = renderHook(
+      () => useTurnResend({ turns: args.turns, setTurns, rawMessages: args.rawMessages, streaming: false, startStream }),
+      { wrapper: ({ children }) => <ToastProvider>{children}</ToastProvider> }
+    );
+    return { result, startStream, setTurns };
+  }
+
+  it("surfaces an error instead of a silent no-op for an unmappable trigger", () => {
+    const turns = [{ role: "user" as const, text: "hello", imageCount: 0, rawIndex: -1 }, errorTurn];
+    const { result, startStream } = renderResend({ turns, rawMessages: [] });
     act(() => result.current.handleRetryTurn(turns[1]!));
     expect(startStream).not.toHaveBeenCalled();
+    expect(screen.getByText("Couldn’t resend turn")).toBeTruthy();
+  });
+
+  it("maps an optimistic retry trigger to its raw user message (never a no-op)", () => {
+    const turns = [{ role: "user" as const, text: "hello", imageCount: 0, rawIndex: -1 }, errorTurn];
+    const { result, startStream } = renderResend({ turns, rawMessages: [{ role: "user", content: "hello" }] });
+    act(() => result.current.handleRetryTurn(turns[1]!));
+    expect(startStream).toHaveBeenCalledWith("hello", 0);
   });
 
   it("resends from the raw user index once the transcript has it", () => {
-    const startStream = vi.fn();
     const raw = [{ role: "user", content: "hello" }, { role: "assistant", content: "x" }];
     const turns = [
       { role: "user" as const, text: "hello", imageCount: 0, rawIndex: 0 },
       { role: "assistant" as const, text: "x", imageCount: 0, rawIndex: 1, error: { code: "PROVIDER_UNREACHABLE", message: "x" } },
     ];
-    const { result } = renderHook(() => useTurnResend({ turns, setTurns: vi.fn(), rawMessages: raw, streaming: false, startStream }));
+    const { result, startStream } = renderResend({ turns, rawMessages: raw });
     act(() => result.current.handleRetryTurn(turns[1]!));
     expect(startStream).toHaveBeenCalledWith("hello", 0);
+  });
+
+  it("regenerates from the correct raw index despite a stale display position", () => {
+    const raw = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "x" },
+      { role: "user", content: "next" },
+      { role: "assistant", content: "y" },
+    ];
+    const target = { role: "user" as const, text: "next", imageCount: 0, rawIndex: 0 };
+    const { result, startStream } = renderResend({ turns: [target], rawMessages: raw });
+    act(() => result.current.handleRegenerate(target));
+    expect(startStream).toHaveBeenCalledWith("next", 2);
+  });
+
+  it("refuses an optimistic retry whose duplicate text only matches an older prompt (stale raw → toast, no truncation)", () => {
+    const raw = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "a1" },
+    ];
+    const turns = [
+      { role: "user" as const, text: "hello", imageCount: 0, rawIndex: 0 },
+      { role: "assistant" as const, text: "a1", imageCount: 0, rawIndex: 1 },
+      { role: "user" as const, text: "hello", imageCount: 0, rawIndex: -1 },
+      errorTurn,
+    ];
+    const { result, startStream } = renderResend({ turns, rawMessages: raw });
+    act(() => result.current.handleRetryTurn(turns[3]!));
+    expect(startStream).not.toHaveBeenCalled();
+    expect(screen.getByText("Couldn’t resend turn")).toBeTruthy();
+  });
+
+  it("resends the LAST duplicate once the raw transcript catches up", () => {
+    const raw = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "a2" },
+    ];
+    const turns = [
+      { role: "user" as const, text: "hello", imageCount: 0, rawIndex: 0 },
+      { role: "assistant" as const, text: "a1", imageCount: 0, rawIndex: 1 },
+      { role: "user" as const, text: "hello", imageCount: 0, rawIndex: -1 },
+      errorTurn,
+    ];
+    const { result, startStream } = renderResend({ turns, rawMessages: raw });
+    act(() => result.current.handleRetryTurn(turns[3]!));
+    expect(startStream).toHaveBeenCalledWith("hello", 2);
   });
 });
 

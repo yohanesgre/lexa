@@ -16,6 +16,29 @@ const composerCapture = vi.hoisted(() => ({
   onSend: null as ((message: string, imageCount: number) => boolean) | null,
 }));
 
+// Mutable assistant-stream snapshot: the page test drives the live session
+// state (idle / suspended) for the key it subscribes to, so a nav-return test
+// can assert a run that survived unmount re-attaches with its pending batch.
+const streamFx = vi.hoisted(() => {
+  const idle = () => ({
+    status: "idle",
+    frames: [] as unknown[],
+    text: "",
+    tools: [] as unknown[],
+    items: [] as unknown[],
+    reasoningText: "",
+    reasoningActive: false,
+    reasoningMs: null as number | null,
+    pending: [] as unknown[],
+    suspendedBatchId: null as string | null,
+    error: null as { code: string; message: string } | null,
+    usage: null as { in: number; out: number } | null,
+    hasIngress: false,
+  });
+  const state = { current: idle() };
+  return { idle, state, reset: () => { state.current = idle(); } };
+});
+
 const fx = vi.hoisted(() => {
   const thread = (chatId: string, title: string) => ({
     chatId,
@@ -89,26 +112,10 @@ vi.mock("../../lib/api", () => ({
 
 vi.mock("../../lib/use-assistant-stream", () => ({
   assistantSendForKey: vi.fn(),
-  useAssistantStream: () => ({
-    status: "idle",
-    frames: [],
-    text: "",
-    tools: [],
-    items: [],
-    reasoningText: "",
-    reasoningActive: false,
-    reasoningMs: null,
-    pending: [],
-    suspendedBatchId: null,
-    error: null,
-    usage: null,
-    hasIngress: false,
-    send: vi.fn(),
-    abort: vi.fn(),
-    reset: vi.fn(),
-    subscribe: () => () => {},
-    getSnapshot: () => ({}),
-  }),
+  useAssistantStream: (key: string | null) => {
+    const snapshot = key ? streamFx.state.current : streamFx.idle();
+    return { ...snapshot, send: vi.fn(), abort: vi.fn(), reset: vi.fn(), subscribe: () => () => {}, getSnapshot: () => snapshot };
+  },
 }));
 
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ push: vi.fn() }) }));
@@ -220,6 +227,7 @@ function deleteThreadA() {
 
 beforeEach(() => {
   fx.reset();
+  streamFx.reset();
   window.localStorage.clear();
   getAssistantChatMock.mockReset();
   navigateMock.mockReset();
@@ -229,16 +237,24 @@ beforeEach(() => {
 });
 
 describe("AssistantChatPage thread selection", () => {
-  it("opens the new-chat landing on a project with existing threads when no ?thread= is given", () => {
-    // fx.lists.p1 already holds threads "A" and "B", and lexa-chat-last points
-    // at "A" — neither may auto-select: the last-visited memory never drives the
-    // default selection, and the landing must not fall back to the list head.
+  it("restores the last active thread when no ?thread= is given (LX-8 return)", async () => {
+    // fx.lists.p1 already holds threads "A" and "B"; lexa-chat-last points at
+    // "A", so entering the chat with no deep link re-enters "A" instead of the
+    // new-chat landing — a run that survived a navigation re-attaches.
     window.localStorage.setItem("lexa-chat-last:p1", "A");
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    const { container } = renderPage();
+
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    expect(container.querySelector(".chat-landing")).toBeNull();
+    expect(container.querySelector(".thread-row.active")?.textContent).toContain("Thread A");
+  });
+
+  it("opens the new-chat landing when there is no ?thread= and no last-visited memory", () => {
     const { container } = renderPage();
 
     expect(container.querySelector(".chat-landing")).toBeTruthy();
     expect(screen.getByText("Thread A")).toBeTruthy();
-    expect(screen.getByText("Thread B")).toBeTruthy();
     expect(getAssistantChatMock).not.toHaveBeenCalled();
     expect(container.querySelector(".thread-row.active")).toBeNull();
   });
@@ -342,6 +358,70 @@ describe("AssistantChatPage thread selection", () => {
     await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
     expect(getAssistantChatMock).not.toHaveBeenCalled();
     expect(container.querySelector(".thread-row.active")).toBeNull();
+  });
+});
+
+describe("AssistantChatPage — return restore (LX-8)", () => {
+  it("re-enters the last active thread after a navigation without ?thread=", async () => {
+    const qc = createTestQueryClient();
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    const first = renderPage({ thread: "A" }, qc);
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "A"])?.fetchStatus).toBe("idle"));
+    expect(window.localStorage.getItem("lexa-chat-last:p1")).toBe("A");
+    first.unmount();
+
+    // Return through the nav link: the URL carries no ?thread= param.
+    getAssistantChatMock.mockClear();
+    renderPage({}, qc);
+    // The restore re-enters "A" and the reconcile read runs on mount.
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    expect(shellCapture.turns ?? []).toHaveLength(1);
+  });
+
+  it("re-attaches a run that suspended for approval while unmounted", async () => {
+    const qc = createTestQueryClient();
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "go" }] });
+    const first = renderPage({ thread: "A" }, qc);
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "A"])?.fetchStatus).toBe("idle"));
+    first.unmount();
+
+    // The module session survived the unmount and sits at its suspended frame.
+    streamFx.state.current = {
+      ...streamFx.idle(),
+      status: "suspended",
+      hasIngress: true,
+      suspendedBatchId: "b1",
+      pending: [{ approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", diff: DIFF }],
+    };
+    renderPage({}, qc);
+
+    await waitFor(() => expect(batchChips(shellCapture.turns)).toHaveLength(1));
+    expect(batchChips(shellCapture.turns)[0]!.approvalId).toBe("a1");
+    expect(batchChips(shellCapture.turns)[0]!.state).toBe("pending");
+  });
+
+  it("reconciles a run that finished while unmounted (terminal refetch)", async () => {
+    const qc = createTestQueryClient();
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    const first = renderPage({ thread: "A" }, qc);
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "A"])?.fetchStatus).toBe("idle"));
+    first.unmount();
+
+    // The run completed while the page was gone — the session is terminal and
+    // the stored thread now holds the reply the client never saw.
+    streamFx.state.current = { ...streamFx.idle(), status: "done", hasIngress: true };
+    getAssistantChatMock.mockClear();
+    getAssistantChatMock.mockResolvedValue({
+      ...TRANSCRIPT,
+      messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }],
+    });
+    renderPage({}, qc);
+
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(shellCapture.turns ?? []).toHaveLength(2));
   });
 });
 

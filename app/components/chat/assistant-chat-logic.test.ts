@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { renderTranscript } from "./assistant-chat-utils";
-import { chipStateFromError, dropUnknownThread, resolveChatId } from "./assistant-chat-logic";
+import type { ChatTurn } from "./assistant-chat-utils";
+import { chipStateFromError, dropUnknownThread, resolveChatId, resolveResendTarget } from "./assistant-chat-logic";
+
+const user = (text: string, rawIndex = -1): ChatTurn => ({ role: "user", text, imageCount: 0, rawIndex });
+const assistant = (text: string, rawIndex = -1, error?: { code: string; message: string }): ChatTurn => ({
+  role: "assistant",
+  text,
+  imageCount: 0,
+  rawIndex,
+  ...(error ? { error } : {}),
+});
 
 const DIFF = { type: "task_delete", taskRef: "LX-1", taskTitle: "old" } as const;
 
@@ -81,6 +91,90 @@ describe("resolveChatId", () => {
 
   it("returns null without a resolved project", () => {
     expect(resolveChatId({ ...base, projectId: undefined, thread: "t1" })).toBeNull();
+  });
+
+  it("restores the last active thread when there is no deep link", () => {
+    expect(resolveChatId({ ...base, lastVisited: "A" })).toBe("A");
+  });
+
+  it("does not re-apply the last active thread once it is the current selection", () => {
+    expect(resolveChatId({ ...base, currentChatId: "A", lastVisited: "A" })).toBeNull();
+  });
+
+  it("an explicit deep link wins over the last active thread", () => {
+    expect(resolveChatId({ ...base, thread: "t1", lastVisited: "A" })).toBe("t1");
+  });
+
+  it("lands fresh when the last-visited memory is empty", () => {
+    expect(resolveChatId({ ...base, lastVisited: null })).toBeNull();
+    expect(resolveChatId(base)).toBeNull();
+  });
+});
+
+describe("resolveResendTarget — one raw index space", () => {
+  it("maps an optimistic retry trigger to its raw user message", () => {
+    // The display turn is optimistic (rawIndex -1) but the prompt persisted.
+    const turns = [user("hello"), assistant("", -1, { code: "PROVIDER_UNREACHABLE", message: "x" })];
+    const raw = [{ role: "user", content: "hello" }];
+    const resolved = resolveResendTarget({ turns, target: turns[1]!, rawMessages: raw, mode: "retry" });
+    expect(resolved).toEqual({ turn: turns[0], index: 0 });
+  });
+
+  it("resolves a retry against the raw transcript turn position", () => {
+    const raw = [{ role: "user", content: "hello" }, { role: "assistant", content: "x" }];
+    const turns = [user("hello", 0), assistant("x", 1, { code: "PROVIDER_UNREACHABLE", message: "x" })];
+    expect(resolveResendTarget({ turns, target: turns[1]!, rawMessages: raw, mode: "retry" })).toEqual({
+      turn: turns[0],
+      index: 0,
+    });
+  });
+
+  it("ignores a stale raw position and finds the user message by text (no early truncation)", () => {
+    // Display is stale: "next" claims raw index 0, which now holds "hello".
+    // Falling back to the position would truncate to [hello] and drop "next".
+    const raw = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "x" },
+      { role: "user", content: "next" },
+      { role: "assistant", content: "y" },
+    ];
+    const target = user("next", 0);
+    expect(resolveResendTarget({ turns: [target], target, rawMessages: raw, mode: "regenerate" })).toEqual({
+      turn: target,
+      index: 2,
+    });
+  });
+
+  it("returns null for an unmappable trigger (never a sentinel index)", () => {
+    const turns = [user("ghost"), assistant("", -1, { code: "PROVIDER_UNREACHABLE", message: "x" })];
+    expect(resolveResendTarget({ turns, target: turns[1]!, rawMessages: [], mode: "retry" })).toBeNull();
+  });
+
+  it("returns null when a retry has no preceding user turn", () => {
+    const turns = [assistant("", -1, { code: "PROVIDER_UNREACHABLE", message: "x" })];
+    expect(resolveResendTarget({ turns, target: turns[0]!, rawMessages: [], mode: "retry" })).toBeNull();
+  });
+
+  it("floors the duplicate-text fallback: stale raw + optimistic retry cannot target the older identical prompt", () => {
+    // Two identical prompts: the FIRST exchange is persisted, the second is
+    // still optimistic and the second prompt has not landed in `raw` yet. The
+    // bare text fallback would pick raw index 0 (the older "hello") and the
+    // server would truncate the thread to it, dropping "a1" and everything
+    // after. The floor (just past the last known raw turn) makes it null.
+    const turns = [user("hello", 0), assistant("a1", 1), user("hello"), assistant("", -1, { code: "PROVIDER_UNREACHABLE", message: "x" })];
+    const staleRaw = [{ role: "user", content: "hello" }, { role: "assistant", content: "a1" }];
+    expect(resolveResendTarget({ turns, target: turns[3]!, rawMessages: staleRaw, mode: "retry" })).toBeNull();
+  });
+
+  it("resolves the LAST duplicate once the raw transcript catches up", () => {
+    const turns = [user("hello", 0), assistant("a1", 1), user("hello"), assistant("", -1, { code: "PROVIDER_UNREACHABLE", message: "x" })];
+    const raw = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "a2" },
+    ];
+    expect(resolveResendTarget({ turns, target: turns[3]!, rawMessages: raw, mode: "retry" })).toEqual({ turn: turns[2], index: 2 });
   });
 });
 
