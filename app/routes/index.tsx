@@ -23,7 +23,7 @@ export const Route = createFileRoute("/")({
   component: Home,
 });
 
-function Home() {
+export function Home() {
   const navigate = useNavigate();
   const search = Route.useSearch();
   const { data: dashboard, isLoading } = useDashboard();
