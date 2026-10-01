@@ -1222,6 +1222,19 @@ export function useAcceptInvite() {
   });
 }
 
+// Pre-flight peek for the invite page (LX-10): decides the render state before
+// any form is shown. retry:false — a failed peek renders an invalid state with
+// an explicit Retry, never the create-account form (frozen D2).
+export function useInvitePeek(token: string | undefined) {
+  return useQuery({
+    queryKey: ["invite-peek", token],
+    queryFn: () => api.peekInvite(token as string),
+    enabled: !!token,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useChangePassword() {
   const qc = useQueryClient();
   const toast = useToast();

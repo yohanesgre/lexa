@@ -20,6 +20,13 @@ const accept = (body: unknown) =>
     body: JSON.stringify(body),
   }));
 
+const peek = (body: unknown) =>
+  auth.handler(new Request("http://localhost:3000/api/auth/invite/peek", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+
 function seedInvite(email: string, opts: { expired?: boolean; accepted?: boolean } = {}): string {
   const db = new Database(dbPath);
   const token = `tok-${email}-${Math.random().toString(36).slice(2)}`;
@@ -49,6 +56,52 @@ const acceptCode = async (body: unknown): Promise<{ status: number; code?: strin
   const res = await accept(body);
   return { status: res.status, code: ((await res.json()) as { code?: string }).code };
 };
+
+interface PeekBody {
+  valid: boolean;
+  email?: string | undefined;
+  reason?: string | undefined;
+}
+
+const peekBody = async (body: unknown): Promise<{ status: number; json: PeekBody }> => {
+  const res = await peek(body);
+  return { status: res.status, json: (await res.json()) as PeekBody };
+};
+
+describe("POST /api/auth/invite/peek", () => {
+  it("returns valid + email for a live invite and does not consume it", async () => {
+    const token = seedInvite("peek-valid@lexa.dev");
+    const res = await peekBody({ token });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ valid: true, email: "peek-valid@lexa.dev" });
+
+    const db = new Database(dbPath);
+    const row = db.query("SELECT accepted_at FROM workspace_invitations WHERE token = ?").get(token) as { accepted_at: string | null } | null;
+    db.close();
+    expect(row?.accepted_at).toBeNull();
+  });
+
+  it("returns reason used for an accepted invite", async () => {
+    const token = seedInvite("peek-used@lexa.dev");
+    await accept({ token, name: "Used", password: "password123" });
+    const res = await peekBody({ token });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ valid: false, reason: "used" });
+  });
+
+  it("returns reason expired for an expired invite", async () => {
+    const token = seedInvite("peek-expired@lexa.dev", { expired: true });
+    const res = await peekBody({ token });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ valid: false, reason: "expired" });
+  });
+
+  it("returns reason unknown for an unknown token", async () => {
+    const res = await peekBody({ token: "no-such-token" });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ valid: false, reason: "unknown" });
+  });
+});
 
 describe("POST /api/auth/invite/accept", () => {
   it("accepts a valid invite: creates a member account and stamps accepted_at", async () => {

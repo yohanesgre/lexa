@@ -199,6 +199,27 @@ function makeLexaInvitesPluginD1(d1: D1Database, getAuth: () => LexaAuthApi) {
   return () => ({
     id: "lexa-invites",
     endpoints: {
+      peekInvite: createAuthEndpoint(
+        "/invite/peek",
+        {
+          method: "POST",
+          body: z.object({ token: z.string() }),
+        },
+        async (ctx) => {
+          const driver = createD1Driver(d1DatabaseToD1Like(d1));
+          const row = await Effect.runPromise(
+            queryFirst<{ email: string; expires_at: string; accepted_at: string | null }>(
+              driver,
+              "SELECT email, expires_at, accepted_at FROM workspace_invitations WHERE token = ?",
+              ctx.body.token
+            ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)))
+          );
+          if (!row) return ctx.json({ valid: false as const, reason: "unknown" as const });
+          if (row.accepted_at) return ctx.json({ valid: false as const, reason: "used" as const });
+          if (new Date(row.expires_at).getTime() < Date.now()) return ctx.json({ valid: false as const, reason: "expired" as const });
+          return ctx.json({ valid: true as const, email: row.email });
+        },
+      ),
       acceptInvite: createAuthEndpoint(
         "/invite/accept",
         {
@@ -245,6 +266,22 @@ function makeLexaInvitesPlugin(db: Database, getAuth: () => LexaAuthApi) {
   return () => ({
     id: "lexa-invites",
     endpoints: {
+      peekInvite: createAuthEndpoint(
+        "/invite/peek",
+        {
+          method: "POST",
+          body: z.object({ token: z.string() }),
+        },
+        async (ctx) => {
+          const row = db
+            .prepare("SELECT email, expires_at, accepted_at FROM workspace_invitations WHERE token = ?")
+            .get(ctx.body.token) as { email: string; expires_at: string; accepted_at: string | null } | null;
+          if (!row) return ctx.json({ valid: false as const, reason: "unknown" as const });
+          if (row.accepted_at) return ctx.json({ valid: false as const, reason: "used" as const });
+          if (new Date(row.expires_at).getTime() < Date.now()) return ctx.json({ valid: false as const, reason: "expired" as const });
+          return ctx.json({ valid: true as const, email: row.email });
+        },
+      ),
       acceptInvite: createAuthEndpoint(
         "/invite/accept",
         {

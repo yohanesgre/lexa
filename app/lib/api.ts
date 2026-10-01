@@ -449,6 +449,18 @@ export function createWorkspaceInvite(email: string): Promise<{ link: string }> 
   return request(`${BASE}/workspace/invites`, { method: "POST", body: JSON.stringify({ email }) });
 }
 
+// Pre-flight peek for the invite page (LX-10). Keyless/session-less — the
+// token is the auth. Domain outcomes are 200: valid carries the email, a
+// spent/unknown token carries a reason. A thrown error means the peek itself
+// failed (network/404) and the page must not render the form.
+export type InvitePeekResult =
+  | { valid: true; email: string }
+  | { valid: false; reason: "used" | "expired" | "unknown" };
+
+export function peekInvite(token: string): Promise<InvitePeekResult> {
+  return request(`${BASE}/auth/invite/peek`, { method: "POST", body: JSON.stringify({ token }) });
+}
+
 // Not in the contract surface (POST/DELETE only) — the wireframe's pending
 // invites table needs a list; the FE calls it defensively and degrades to
 // mutation-seeded rows when the endpoint is absent.
