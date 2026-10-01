@@ -7,6 +7,24 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.5.3] - 2026-10-01
+
+### Fixed
+
+- **Installer resume metadata** — the retry-safety wipe deleted the whole
+  work directory on a failed run, including the `deploy-<name>/` folder whose
+  wrangler config records the domain and account the next run resumes from.
+  The wipe now keeps the deploy directories (`prune_workdir`) and still
+  removes stale extractions. (#172)
+- **Alias installs target the right Worker** — with the deprecated
+  `--name prod`/`staging` aliases, the secret put/list and `LXK_API_KEY` prune
+  commands targeted the alias name instead of the deployed Worker
+  (`lexa`/`lexa-staging`). Every such command now resolves the Worker name from
+  the deploy config, falling back to the alias map. (#172)
+- **Login refresh hint** — a stored `wrangler login` token that could not be
+  verified only offered entering a token; the installer now also points at
+  `wrangler whoami` to refresh the login. (#172)
+
 ## [2026.5.2] - 2026-10-01
 
 ### Fixed
