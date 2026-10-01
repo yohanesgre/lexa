@@ -531,10 +531,10 @@ CREATE TABLE api_keys (
 -- carrying a 256-bit random token (stored hashed — token_hash UNIQUE
 -- doubles as the lookup index, same pattern as api_keys.key_hash). A
 -- logged-in user opens the URL and approves (session + token = both
--- required); the server mints a USER-BOUND API key (user_id = approver)
--- and the CLI's next poll receives the raw key ONCE (row consumed —
--- replay impossible). Raw key transits an in-memory store with a TTL
--- (never persisted). Expired rows are purged at boot.
+-- required); approve records the approver only. The CLI's first poll
+-- after approval atomically consumes the row and mints a USER-BOUND API
+-- key (user_id = approver), returning the raw key ONCE — replay
+-- impossible. No in-memory transit store. Expired rows are purged at boot.
 CREATE TABLE device_login_requests (
   id               TEXT PRIMARY KEY,
   token_hash       TEXT NOT NULL UNIQUE,          -- hex(SHA-256(token)); lookup = poll/approve
@@ -543,7 +543,7 @@ CREATE TABLE device_login_requests (
   status           TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied')),
   expires_at       TEXT NOT NULL,                 -- datetime('now', '+10 minutes'); compared lexically
   approver_user_id TEXT REFERENCES users(id),     -- set at approve
-  api_key_id       TEXT REFERENCES api_keys(id) ON DELETE SET NULL,  -- minted at approve
+  api_key_id       TEXT REFERENCES api_keys(id) ON DELETE SET NULL,  -- legacy/unused (old rows only)
   created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -234,6 +234,19 @@ function promptRequired(question: string, requiredMessage: string): Effect.Effec
 
 const DEVICE_POLL_INTERVAL_MS = 2000;
 const DEVICE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+// The server owns the pairing TTL; the CLI deadline derives from the create
+// response's expiresMs plus a small grace for clock skew and the in-flight
+// poll. Absent/nonsensical expiresMs falls back to the constant above, and the
+// window is clamped so a bogus far-future value cannot keep the loop alive.
+const DEVICE_POLL_GRACE_MS = 10 * 1000;
+const DEVICE_POLL_MAX_MS = 30 * 60 * 1000;
+
+export function devicePollDeadline(expiresMs: number | undefined, now: number): number {
+  if (typeof expiresMs === "number" && Number.isFinite(expiresMs) && expiresMs > now) {
+    return Math.min(expiresMs + DEVICE_POLL_GRACE_MS, now + DEVICE_POLL_MAX_MS);
+  }
+  return now + DEVICE_POLL_TIMEOUT_MS;
+}
 
 // Browser-approval login: create a pairing request, print the verify URL,
 // poll until a logged-in user approves, then save the minted user-bound key
@@ -256,7 +269,8 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
     console.log(`    ${req.verifyUrl}`);
     console.log(`  Backup code (shown on the approve page): ${req.code}`);
     console.log("  Waiting for approval…");
-    const deadline = Date.now() + DEVICE_POLL_TIMEOUT_MS;
+    const startedAt = Date.now();
+    const deadline = devicePollDeadline(req.expiresMs, startedAt);
     while (Date.now() < deadline) {
       const result = yield* client.pollDeviceLoginRequest(req.id, token).pipe(
         Effect.catchAll((e) => {
@@ -285,7 +299,8 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
       }
       yield* Effect.sleep(DEVICE_POLL_INTERVAL_MS);
     }
-    console.error("  Login request timed out after 5 minutes — nobody approved it. Try again.");
+    const windowMin = Math.max(1, Math.round((deadline - startedAt) / 60000));
+    console.error(`  Login request timed out after ${windowMin} minute${windowMin === 1 ? "" : "s"} — nobody approved it. Try again.`);
     process.exit(1);
   });
 }

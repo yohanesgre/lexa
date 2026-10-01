@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
-import { DeviceLoginRepo, storeDeviceRawKey, takeDeviceRawKey } from "./device-login.repo";
+import { DeviceLoginRepo } from "./device-login.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -81,25 +81,48 @@ describe("DeviceLoginRepo", () => {
     expect(dup).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "ConstraintViolation" }) });
   });
 
-  it("setApproved transitions pending → approved and is one-shot", async () => {
+  it("setApproved transitions pending → approved, records the approver, and mints nothing", async () => {
     setup();
     await Effect.runPromise(create());
-    await Effect.runPromise(repo.setApproved("d1", "u1", "k1"));
+    await Effect.runPromise(repo.setApproved("d1", "u1"));
     const row = await Effect.runPromise(repo.findById("d1"));
     expect(row.status).toBe("approved");
     expect(row.approver_user_id).toBe("u1");
-    expect(row.api_key_id).toBe("k1");
+    expect(row.api_key_id).toBeNull();
     expect(row.approver_name).toBe("User One");
-    expect(row.key_name).toBe("cli-host");
+    expect(row.key_name).toBeNull();
 
-    const again = await Effect.runPromise(Effect.either(repo.setApproved("d1", "u1", "k1")));
+    const again = await Effect.runPromise(Effect.either(repo.setApproved("d1", "u1")));
     expect(again).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
   });
 
   it("setApproved on an unknown id fails RowNotFound", async () => {
     setup();
-    const res = await Effect.runPromise(Effect.either(repo.setApproved("nope", "u1", "k1")));
+    const res = await Effect.runPromise(Effect.either(repo.setApproved("nope", "u1")));
     expect(res).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
+  });
+
+  it("consumeApproved deletes the approved row once and returns its fields", async () => {
+    setup();
+    await Effect.runPromise(create());
+    await Effect.runPromise(repo.setApproved("d1", "u1"));
+    const consumed = await Effect.runPromise(repo.consumeApproved("d1"));
+    expect(consumed).toEqual({ client_name: "cli-host", approver_user_id: "u1" });
+
+    const gone = await Effect.runPromise(Effect.either(repo.findById("d1")));
+    expect(gone).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
+
+    const again = await Effect.runPromise(Effect.either(repo.consumeApproved("d1")));
+    expect(again).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
+  });
+
+  it("consumeApproved refuses a pending row (only approved rows are consumed)", async () => {
+    setup();
+    await Effect.runPromise(create());
+    const res = await Effect.runPromise(Effect.either(repo.consumeApproved("d1")));
+    expect(res).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
+    const still = await Effect.runPromise(repo.findById("d1"));
+    expect(still.status).toBe("pending");
   });
 
   it("setDenied transitions pending → denied and rejects a second/foreign transition", async () => {
@@ -113,7 +136,7 @@ describe("DeviceLoginRepo", () => {
 
     const again = await Effect.runPromise(Effect.either(repo.setDenied("d1")));
     expect(again).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
-    const foreign = await Effect.runPromise(Effect.either(repo.setApproved("d1", "u1", "k1")));
+    const foreign = await Effect.runPromise(Effect.either(repo.setApproved("d1", "u1")));
     expect(foreign).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
   });
 
@@ -124,21 +147,5 @@ describe("DeviceLoginRepo", () => {
     await Effect.runPromise(repo.deleteById("d1"));
     const gone = await Effect.runPromise(Effect.either(repo.findById("d1")));
     expect(gone).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
-  });
-
-  it("api_key delete nulls api_key_id on an approved request", async () => {
-    setup();
-    await Effect.runPromise(create());
-    await Effect.runPromise(repo.setApproved("d1", "u1", "k1"));
-    db.exec(`DELETE FROM api_keys WHERE id = 'k1'`);
-    const row = await Effect.runPromise(repo.findById("d1"));
-    expect(row.api_key_id).toBeNull();
-    expect(row.key_name).toBeNull();
-  });
-
-  it("raw key store hands the key out exactly once", () => {
-    storeDeviceRawKey("raw-1", "lxk_secret");
-    expect(takeDeviceRawKey("raw-1")).toBe("lxk_secret");
-    expect(takeDeviceRawKey("raw-1")).toBeNull();
   });
 });

@@ -1,8 +1,8 @@
 import { Effect, Data } from "effect";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DeviceLoginRepo, storeDeviceRawKey, takeDeviceRawKey } from "../repos/device-login.repo";
-import { generateRawKeyForMint, sha256 } from "./api-key.service";
-import { Db, batch, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { DeviceLoginRepo } from "../repos/device-login.repo";
+import { ApiKeyService, type ApiKeyNameEmpty } from "./api-key.service";
+import { DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { DeviceLoginNotFound, DeviceLoginExpired, DeviceLoginDenied, InvalidName } from "../api/errors";
 import { getEnv, resolvePublicUrl } from "../env";
 import type { DeviceLoginRequestInfo } from "../../shared/types";
@@ -40,10 +40,10 @@ function randomCode(): string {
 }
 
 export class DeviceLoginService extends Effect.Service<DeviceLoginService>()("Lexa/DeviceLoginService", {
-  dependencies: [DeviceLoginRepo.Default],
+  dependencies: [DeviceLoginRepo.Default, ApiKeyService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* DeviceLoginRepo;
-    const db = yield* Db;
+    const apiKeys = yield* ApiKeyService;
 
     return {
       // Mint a pending pairing request; returns the one-time token embedded in
@@ -70,11 +70,14 @@ export class DeviceLoginService extends Effect.Service<DeviceLoginService>()("Le
         }),
 
       // Poll loop (CLI, ~2s). Pending carries the fields the approve page
-      // shows; approved returns the raw key exactly once then consumes the row.
+      // shows; approved consumes the row and then mints the user-bound key in
+      // the same response — one-shot, replay impossible, no shared transit
+      // state. Consume and mint are two statements: if the mint fails the
+      // request is already spent and the client re-runs `lx login`.
       poll: (id: string, token: string): Effect.Effect<
         | { status: "pending"; clientName: string; code: string; expiresAt: string }
         | { status: "approved"; rawKey: string; keyName: string; approverName: string | null },
-        DeviceLoginNotFound | DeviceLoginExpired | DeviceLoginDenied | DbError | ConstraintViolation | RowNotFound
+        DeviceLoginNotFound | DeviceLoginExpired | DeviceLoginDenied | ApiKeyNameEmpty | DbError | ConstraintViolation | RowNotFound
       > =>
         Effect.gen(function* () {
           const row = yield* repo.findById(id).pipe(
@@ -83,20 +86,24 @@ export class DeviceLoginService extends Effect.Service<DeviceLoginService>()("Le
           if (!tokensEqual(hashToken(token), row.token_hash)) return yield* new DeviceLoginNotFound();
           if (row.status === "denied") return yield* new DeviceLoginDenied();
           if (row.status === "approved") {
-            const rawKey = takeDeviceRawKey(row.id);
-            if (!rawKey) return yield* new DeviceLoginExpired();
-            yield* repo.deleteById(row.id);
-            return { status: "approved", rawKey, keyName: row.key_name ?? "", approverName: row.approver_name };
+            // Guard BEFORE consuming: an approved row with no recorded approver
+            // can never mint a user-bound key, and must not be destroyed.
+            if (!row.approver_user_id) return yield* new DeviceLoginNotFound();
+            const consumed = yield* repo.consumeApproved(row.id).pipe(
+              Effect.catchTag("RowNotFound", () => Effect.fail(new DeviceLoginNotFound()))
+            );
+            const minted = yield* apiKeys.createFor(row.approver_user_id, consumed.client_name);
+            return { status: "approved", rawKey: minted.rawKey, keyName: minted.key.name, approverName: row.approver_name };
           }
           if (row.is_expired) return yield* new DeviceLoginExpired();
           return { status: "pending", clientName: row.client_name, code: row.code, expiresAt: row.expires_at_iso ?? row.expires_at };
         }),
 
       // Browser approval: user-bound identity (session or user-bound key) + token
-      // (both required). Mints a user-bound key (owner = approver, name =
-      // clientName). The insert + status flip run as ONE atomic batch — on
-      // Bun (transaction) and on D1 (driver.batch is atomic) — so a
-      // concurrent approve/deny can never leave an orphan key row.
+      // (both required). Flips the request to approved and records the approver
+      // — nothing is minted here. The CLI's next poll consumes the row and mints
+      // the user-bound key (owner = approver, name = clientName), so approve and
+      // poll can land on different isolates.
       approve: (userId: string, id: string, token: string): Effect.Effect<
         { status: "approved"; clientName: string },
         DeviceLoginNotFound | DeviceLoginExpired | ConstraintViolation | DbError | RowNotFound
@@ -108,27 +115,12 @@ export class DeviceLoginService extends Effect.Service<DeviceLoginService>()("Le
           if (!tokensEqual(hashToken(token), row.token_hash)) return yield* new DeviceLoginNotFound();
           if (row.status !== "pending") return yield* new DeviceLoginNotFound(); // already decided — no oracle
           if (row.is_expired) return yield* new DeviceLoginExpired();
-          const keyId = crypto.randomUUID();
-          const rawKey = generateRawKeyForMint();
-          const keyHash = yield* Effect.promise(() => sha256(rawKey));
-          yield* batch(db, [
-            {
-              sql: "INSERT INTO api_keys (id, name, key_hash, user_id) VALUES (?, ?, ?, ?)",
-              params: [keyId, row.client_name, keyHash, userId],
-            },
-            {
-              sql: "UPDATE device_login_requests SET status = 'approved', approver_user_id = ?, api_key_id = ? WHERE id = ? AND status = 'pending'",
-              params: [userId, keyId, row.id],
-            },
-          ]);
-          // Verify the flip landed for THIS approver; compensate (delete the
-          // minted key) if a concurrent decide won between read and batch.
-          const after = yield* repo.findById(row.id).pipe(Effect.catchAll(() => Effect.succeed(null)));
-          if (!after || after.status !== "approved" || after.approver_user_id !== userId) {
-            yield* run(db, "DELETE FROM api_keys WHERE id = ?", keyId).pipe(Effect.catchAll(() => Effect.succeed(0)));
-            return yield* new DeviceLoginNotFound();
-          }
-          storeDeviceRawKey(row.id, rawKey);
+          // Conditional UPDATE (WHERE status='pending') is the flip verification:
+          // a concurrent decide that won between read and write yields
+          // RowNotFound → NotFound. Nothing minted, so nothing to compensate.
+          yield* repo.setApproved(row.id, userId).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.fail(new DeviceLoginNotFound()))
+          );
           return { status: "approved", clientName: row.client_name };
         }),
 

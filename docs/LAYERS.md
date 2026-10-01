@@ -588,7 +588,7 @@ capability-based, RFC-8628-flavored:
 CLI ──POST /api/device-login/requests──► mint request
       ◄── { id, code, verifyUrl, expiresMs }   (token = 256-bit, hex)
 browser ──GET <base>/device-login?token=…──► approve page (session required)
-      ──POST .../requests/:id/approve { token }──► mint user-bound key
+      ──POST .../requests/:id/approve { token }──► record approver (no mint)
 CLI ──GET .../requests/:id (x-device-token)──► { status: approved, rawKey } ONCE
 ```
 
@@ -601,8 +601,10 @@ Rules:
 - The minted key binds to the approver (`api_keys.user_id`), name =
   `client_name` (CLI sends `cli-<hostname>`), so it appears in the owner's
   Settings → Me → API keys.
-- Raw key transits an in-memory store with TTL (30 min). Poll returns it once; the row
-  is consumed (deleted) — replay is impossible; a later poll is 404.
+- The key is minted on the CLI's first poll after approval: that poll
+  atomically consumes the row (`DELETE … RETURNING`), then mints the
+  user-bound key. Replay is impossible — a later poll is 404. No in-memory
+  transit store: approve and poll may land on different isolates.
 - Terminal states: denied (403 DEVICE_LOGIN_DENIED), expired (410 —
   `expires_at` = 10 min; expired rows purged at boot with the webhook prune).
 - Middleware carve-out: create + poll are API-key exempt (the CLI has no

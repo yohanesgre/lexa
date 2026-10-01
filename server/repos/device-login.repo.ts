@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryFirst, run, runReturning, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 
 export type DeviceLoginStatus = "pending" | "approved" | "denied";
 
@@ -24,28 +24,11 @@ export interface DeviceLoginRequestRow {
   approver_name: string | null;
 }
 
-// Raw key transit store: the minted key is handed to the CLI's poll exactly
-// once through this in-memory map (30 min TTL) — never persisted. Same idiom
-// as runtime-event.repo.ts.
-// LIMITATION (documented): per-isolate memory. On Workers an approve that
-// lands on isolate A and a poll served by isolate B cannot see the same
-// store — the poll 410s and the minted key is undeliverable (the expired row
-// is pruned on the next boot; no security impact). Bun serves all requests
-// from one process, so self-hosted deployments are unaffected.
-const rawKeyStore = new Map<string, string>();
-const RAW_KEY_TTL_MS = 30 * 60 * 1000;
-
-export function storeDeviceRawKey(requestId: string, rawKey: string): void {
-  rawKeyStore.set(requestId, rawKey);
-  setTimeout(() => rawKeyStore.delete(requestId), RAW_KEY_TTL_MS).unref?.();
-}
-
-export function takeDeviceRawKey(requestId: string): string | null {
-  const rawKey = rawKeyStore.get(requestId) ?? null;
-  rawKeyStore.delete(requestId);
-  return rawKey;
-}
-
+// No raw-key transit store: the key is minted on the first poll after
+// approval and returned in that response, so approve and poll need no shared
+// memory and any isolate can serve either leg. The `api_key_id` column is
+// legacy/unused — new requests never set it (the key does not exist until the
+// poll mints it); the LEFT JOIN below still resolves it for old rows.
 const SELECT_DEVICE_LOGIN = `SELECT r.*,
   (r.expires_at < datetime('now')) AS is_expired,
   strftime('%Y-%m-%dT%H:%M:%SZ', r.expires_at) AS expires_at_iso,
@@ -79,18 +62,31 @@ export class DeviceLoginRepo extends Effect.Service<DeviceLoginRepo>()("Lexa/Dev
       findById: (id: string): Effect.Effect<DeviceLoginRequestRow, RowNotFound | DbError> =>
         queryFirst<DeviceLoginRequestRow>(db, `${SELECT_DEVICE_LOGIN} WHERE r.id = ?`, id),
 
-      setApproved: (id: string, approverUserId: string, apiKeyId: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
+      setApproved: (id: string, approverUserId: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
+          // Flip only — the key is minted and returned by the first poll.
           const changed = yield* run(
             db,
-            `UPDATE device_login_requests SET status = 'approved', approver_user_id = ?, api_key_id = ?
+            `UPDATE device_login_requests SET status = 'approved', approver_user_id = ?
              WHERE id = ? AND status = 'pending'`,
             approverUserId,
-            apiKeyId,
             id
           );
           if (changed === 0) return yield* Effect.fail(new RowNotFound({ table: "device_login_requests" }));
         }),
+
+      // One-shot consume: atomically deletes the approved row and returns what
+      // the poll needs to mint the user-bound key. A concurrent poll loses the
+      // DELETE and gets RowNotFound (→ NotFound, no oracle).
+      consumeApproved: (
+        id: string
+      ): Effect.Effect<{ client_name: string; approver_user_id: string | null }, RowNotFound | ConstraintViolation | DbError> =>
+        runReturning<{ client_name: string; approver_user_id: string | null }>(
+          db,
+          `DELETE FROM device_login_requests WHERE id = ? AND status = 'approved'
+           RETURNING client_name, approver_user_id`,
+          id
+        ),
 
       setDenied: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {

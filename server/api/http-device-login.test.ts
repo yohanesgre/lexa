@@ -128,7 +128,7 @@ describe("GET /api/device-login/requests/:id (poll, key-exempt)", () => {
 });
 
 describe("approve → poll → consume", () => {
-  it("session approve mints a user-bound key; the CLI poll receives it exactly once", async () => {
+  it("session approve records the approver without minting; the poll mints the user-bound key exactly once", async () => {
     const { id, token } = await createRequest("cli-approve-host");
 
     // No session → 401.
@@ -153,6 +153,57 @@ describe("approve → poll → consume", () => {
     const again = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
     expect(again.status).toBe(404);
     expect((await again.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
+  });
+
+  it("poll mints a key bound to the recorded approver and consumes the row", async () => {
+    const { id, token } = await createRequest("cli-mint-at-poll");
+    const approve = await call("POST", `/api/device-login/requests/${id}/approve`, {
+      body: { token },
+      headers: { cookie: sessionCookie },
+    });
+    expect(approve.status).toBe(200);
+
+    const db = new Database(process.env.DATABASE_PATH!);
+    const afterApprove = db
+      .prepare("SELECT status, approver_user_id, api_key_id FROM device_login_requests WHERE id = ?")
+      .get(id) as unknown as { status: string; approver_user_id: string | null; api_key_id: string | null };
+    expect(afterApprove.status).toBe("approved");
+    expect(afterApprove.approver_user_id).toBeTruthy();
+    expect(afterApprove.api_key_id).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE name = ?").get("cli-mint-at-poll")).toMatchObject({ n: 0 });
+
+    const poll = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
+    expect(poll.status).toBe(200);
+    const polled = await poll.json();
+    expect(polled.rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
+    expect(polled.keyName).toBe("cli-mint-at-poll");
+
+    const minted = db
+      .prepare("SELECT name, user_id FROM api_keys WHERE name = ?")
+      .get("cli-mint-at-poll") as unknown as { name: string; user_id: string };
+    expect(minted.user_id).toBe(afterApprove.approver_user_id);
+    // The request row is consumed by the poll that delivered the key.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM device_login_requests WHERE id = ?").get(id)).toMatchObject({ n: 0 });
+    db.close();
+  });
+
+  it("two concurrent polls after approval: exactly one mints, the other 404s, api_keys count 1", async () => {
+    const { id, token } = await createRequest("cli-concurrent-poll");
+    await call("POST", `/api/device-login/requests/${id}/approve`, { body: { token }, headers: { cookie: sessionCookie } });
+
+    const [a, b] = await Promise.all([
+      call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } }),
+      call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } }),
+    ]);
+    const winner = a.status === 200 ? a : b;
+    const loser = a.status === 200 ? b : a;
+    expect([a.status, b.status].sort()).toEqual([200, 404]);
+    expect((await winner.json()).rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
+    expect((await loser.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
+
+    const db = new Database(process.env.DATABASE_PATH!);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE name = ?").get("cli-concurrent-poll")).toMatchObject({ n: 1 });
+    db.close();
   });
 
   it("the minted key acts as the approving member (project access ok, admin gates 403)", async () => {

@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NotLoggedIn } from "./index";
+import { NotLoggedIn, devicePollDeadline } from "./index";
 import { cleanupIsolationDirs, freshLexaDir, runCli } from "./test-utils";
 
 afterAll(cleanupIsolationDirs);
@@ -251,6 +251,25 @@ describe("login (legacy key + device flow)", () => {
     const r = await runCli(["login"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Server URL is required");
+  });
+});
+
+describe("device poll deadline", () => {
+  const now = 1_000_000;
+  const MIN = 60 * 1000;
+
+  it("honors the server expiresMs plus a small grace", () => {
+    expect(devicePollDeadline(now + 10 * MIN, now)).toBe(now + 10 * MIN + 10 * 1000);
+  });
+
+  it("clamps an absurd far-future expiresMs to the max window", () => {
+    expect(devicePollDeadline(now + 24 * 60 * MIN, now)).toBe(now + 30 * MIN);
+  });
+
+  it("falls back to the 5-minute constant when expiresMs is absent or nonsensical", () => {
+    expect(devicePollDeadline(undefined, now)).toBe(now + 5 * MIN);
+    expect(devicePollDeadline(Number.NaN, now)).toBe(now + 5 * MIN);
+    expect(devicePollDeadline(now - 1000, now)).toBe(now + 5 * MIN);
   });
 });
 
