@@ -35,6 +35,7 @@ import type {
   DurableObjectNamespace,
   ExecutionContext,
   ExportedHandler,
+  Fetcher,
   KVNamespace,
   R2Bucket,
   Request as WorkersRequest,
@@ -63,6 +64,8 @@ import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
 import { AuthorizationService } from "./services/authorization.service";
+import { AssistantGateway } from "./assistant/gateway.service";
+import type { RegistryModelConfig } from "./assistant/model-factory";
 import { capabilitiesFromRuntimeEnv } from "./capabilities";
 import {
   ASSISTANT_AGENT_ROUTE_PREFIX,
@@ -74,7 +77,13 @@ import {
   type UpsertChatThreadInput,
 } from "./assistant/agent-gate";
 import { LexaAssistantAgent } from "./assistant/agent";
+import {
+  INTERNAL_AUTH_ACTOR_HEADER,
+  INTERNAL_AUTH_PROJECT_HEADER,
+  INTERNAL_AUTH_THREAD_HEADER,
+} from "./assistant/internal-auth";
 import { handleInternalAssistantRequest } from "./assistant/internal-routes";
+import { buildWorkerReadToolExecutor, resolveWorkerTurnContext } from "./assistant/worker-tools";
 import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
 import type { AssistantThreadType } from "../shared/assistant";
 
@@ -111,6 +120,8 @@ function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadR
 export interface WorkersEnv {
   DB?: D1Database;
   ASSISTANT_AGENT?: AssistantAgentNamespace;
+  // Self service binding the DO uses to reach the internal routes (R7).
+  ASSISTANT_SERVICE?: Fetcher;
   BLOB?: R2Bucket;
   KV?: KVNamespace;
   LXK_ENV?: string;
@@ -258,6 +269,36 @@ async function canReadProject(base: BaseLayers, userId: string, projectId: strin
   } catch (e) {
     console.error("[Assistant] project access check failed:", e instanceof Error ? e.message : String(e));
     return false;
+  } finally {
+    await runtime.dispose();
+  }
+}
+
+// Provider config for one assistant turn (ADR-0003 §C): the DO asks, the
+// Worker resolves the project's provider chain with the API keys decrypted in
+// this isolate. `null` = no binding (route → 409) or a resolution failure.
+async function resolveAssistantProviderConfigs(
+  base: BaseLayers,
+  projectId: string
+): Promise<RegistryModelConfig[] | null> {
+  const runtime = ManagedRuntime.make(Layer.provide(AssistantGateway.Default, base));
+  try {
+    const configs = await runtime.runPromise(
+      Effect.gen(function* () {
+        const gateway = yield* AssistantGateway;
+        return yield* gateway.resolveFallback(projectId);
+      })
+    );
+    return configs.map((c) => ({
+      kind: c.kind,
+      baseUrl: c.baseUrl,
+      apiKey: c.apiKey,
+      model: c.model,
+      ...(c.providerId !== undefined ? { providerId: c.providerId } : {}),
+    }));
+  } catch (e) {
+    console.error("[Workers] provider config resolution failed:", e instanceof Error ? e.message : String(e));
+    return null;
   } finally {
     await runtime.dispose();
   }
@@ -684,11 +725,24 @@ const handler: ExportedHandler<WorkersEnv> = {
             body = null;
           }
         }
+        const internalHeaders = new Headers(req.headers as unknown as HeadersInit);
+        const identity = {
+          actorUserId: internalHeaders.get(INTERNAL_AUTH_ACTOR_HEADER) ?? "",
+          projectId: internalHeaders.get(INTERNAL_AUTH_PROJECT_HEADER) ?? "",
+          threadKey: internalHeaders.get(INTERNAL_AUTH_THREAD_HEADER) ?? "",
+        };
         const result = await handleInternalAssistantRequest({
           method: req.method,
           path,
+          query: Object.fromEntries(url.searchParams),
           body,
           driver,
+          identity,
+          deps: {
+            resolveProviderConfigs: (projectId) => resolveAssistantProviderConfigs(base, projectId),
+            resolveTurnContext: (projectId) => resolveWorkerTurnContext({ driver, base }, projectId),
+            executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB }),
+          },
         });
         return json(result.body, result.status) as unknown as WorkersResponse;
       }

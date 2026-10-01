@@ -261,6 +261,7 @@ export interface RootWorkerConfig {
   observability?: Record<string, unknown>;
   durable_objects?: Record<string, unknown>;
   migrations?: Array<Record<string, unknown>>;
+  services?: Array<Record<string, unknown>>;
 }
 
 // Remove // line comments and /* */ block comments while respecting string
@@ -437,6 +438,42 @@ export function resolveDurableObjects(root: RootWorkerConfig): {
     );
   }
   return { durable_objects: durableObjects, migrations };
+}
+
+// Service bindings written into the per-deploy config (ADR-0003 §B.2/R7):
+// the assistant DO reaches the Worker's internal routes through
+// `ASSISTANT_SERVICE`. Root declares the binding name (and a placeholder
+// `service`); the generated config pins `service` to the deployed worker's own
+// name so a self-binding is correct on every flavor (lexa / lexa-staging).
+// Root's `services` may be absent (older clones) — then the binding is omitted
+// and the DO keeps its public-origin fallback.
+export function resolveServiceBindings(
+  root: RootWorkerConfig,
+  workerName: string,
+): Array<Record<string, unknown>> {
+  const services = root.services;
+  if (services === undefined) return [];
+  if (!Array.isArray(services)) {
+    throw new Error(
+      "root wrangler.jsonc 'services' must be an array of service bindings",
+    );
+  }
+  const out: Array<Record<string, unknown>> = [];
+  for (const entry of services) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(
+        "root wrangler.jsonc 'services' entries must be objects with a string 'binding'",
+      );
+    }
+    const binding = (entry as { binding?: unknown }).binding;
+    if (typeof binding !== "string" || binding.length === 0) {
+      throw new Error(
+        "root wrangler.jsonc 'services' entries must carry a non-empty string 'binding'",
+      );
+    }
+    out.push({ binding, service: workerName });
+  }
+  return out;
 }
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -811,6 +848,7 @@ async function main(): Promise<void> {
   try {
     const rootConfig = readRootWranglerConfig(DIR);
     const { durable_objects, migrations } = resolveDurableObjects(rootConfig);
+    const services = resolveServiceBindings(rootConfig, FLAVOR.workerName);
     config = {
       name: FLAVOR.workerName,
       account_id: account,
@@ -831,6 +869,7 @@ async function main(): Promise<void> {
       kv_namespaces: [{ binding: "KV", id: kvId }],
       durable_objects,
       migrations,
+      ...(services.length > 0 ? { services } : {}),
       observability: resolveObservability(rootConfig),
     };
   } catch (err) {

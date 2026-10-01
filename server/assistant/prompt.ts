@@ -112,6 +112,16 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
   return prompts;
 }
 
+// The AI SDK `streamText` takes one system string; the Worker path keeps the
+// same segments in the same order so behavior is byte-identical (cache markers
+// are dropped — the DO's provider adapter owns its own caching semantics).
+export function systemPromptText(prompts: CacheablePrompt[]): string {
+  return prompts
+    .map((p) => p.content)
+    .filter((c) => c.trim() !== "")
+    .join("\n\n");
+}
+
 export interface UserMessageInput {
   instruction: string;
   summary?: string | null;
