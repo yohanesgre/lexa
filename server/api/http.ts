@@ -90,6 +90,8 @@ import { AssistantJevRepo } from "../repos/assistant-jev.repo";
 import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
+import { AssistantThreadRpc, assistantThreadRpcNoop, type AssistantThreadRpcShape } from "../assistant/thread-rpc";
+import { legacyFromUIMessages } from "../assistant/legacy-convert";
 import { SourceService } from "../services/source.service";
 import { SourceRepo } from "../repos/source.repo";
 import { TaskLinkService } from "../services/task-link.service";
@@ -1717,6 +1719,48 @@ const searchParams = (req: unknown): URLSearchParams => {
   return url ? (URL.parse(url)?.searchParams ?? new URLSearchParams()) : new URLSearchParams();
 };
 
+// Best-effort DO RPC from the shared handlers (ADR-0003 §B.4). On the Bun
+// flavor the injected `AssistantThreadRpc` is the no-op layer (every call
+// resolves null), so behavior is unchanged; on Workers a transport failure is
+// no longer silent — `available` distinguishes "no DO here" (null is the
+// fallback) from a real DO failure (logged, then the handler's D1 / in-process
+// path is used).
+const threadRpcCall = <A>(f: (rpc: AssistantThreadRpcShape) => Promise<A>): Effect.Effect<A | null, never, AssistantThreadRpc> =>
+  Effect.gen(function* () {
+    const rpc = yield* AssistantThreadRpc;
+    return yield* Effect.tryPromise(() => f(rpc)).pipe(
+      Effect.catchAll((e) =>
+        rpc.available
+          ? Effect.sync(() =>
+              console.warn("[assistant] DO thread RPC failed:", e instanceof Error ? e.message : String(e))
+            ).pipe(Effect.as(null))
+          : Effect.succeed(null)
+      )
+    );
+  });
+
+// Engine-control forward (enqueue/abort). Reports whether a DO was present and
+// acked, so call sites can honour the ADR §B.4 failure semantics instead of
+// silently degrading. On Bun `available` is false (no DO — the in-process
+// engine owns the task); on Workers a rejected call is `available: true,
+// ok: false`.
+const threadRpcControl = (
+  f: (rpc: AssistantThreadRpcShape) => Promise<{ ok: true } | null>
+): Effect.Effect<{ available: boolean; ok: boolean }, never, AssistantThreadRpc> =>
+  Effect.gen(function* () {
+    const rpc = yield* AssistantThreadRpc;
+    if (!rpc.available) return { available: false, ok: false };
+    return yield* Effect.tryPromise(() => f(rpc)).pipe(
+      Effect.map((result) => ({ available: true, ok: result !== null })),
+      Effect.catchAll((e) =>
+        Effect.sync(() => {
+          console.warn("[assistant] DO thread control RPC failed:", e instanceof Error ? e.message : String(e));
+          return { available: true, ok: false };
+        })
+      )
+    );
+  });
+
 // Bun-only Database loading. Reached synchronously from entry.ts but the
 // constructor must not be a static value import (that would pin bun:sqlite
 // into the workerd module graph). Resolve it with a dynamic import —
@@ -2640,7 +2684,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
         const service = yield* AssistantService;
-        return yield* service.enqueue({
+        const task = yield* service.enqueue({
           projectId: project.id,
           documentType: req.payload.documentType,
           documentId: req.payload.documentId,
@@ -2650,6 +2694,20 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           ...(req.payload.selection !== undefined ? { selection: req.payload.selection } : {}),
           ...(req.payload.attachments !== undefined ? { attachments: [...req.payload.attachments] } : {}),
         });
+        const enqueue = yield* threadRpcControl((rpc) =>
+          rpc.enqueueRun(`${req.payload.documentType}:${req.payload.documentId}`, project.id, task.id)
+        );
+        // ADR-0003 §B.4: `enqueueRun` RPC failure → task marked `failed` + 502
+        // ASSISTANT_UNAVAILABLE. TODO(P3): the DO `enqueueRun` is still a P2
+        // stub returning `{ok:true}` and cannot fail, so there is no failure
+        // branch to take yet; when the P3 engine can report a failed start,
+        // branch on `enqueue` here (mark the task failed, fail the request).
+        if (enqueue.available && !enqueue.ok) {
+          yield* Effect.logWarning(
+            `[assistant] enqueueRun RPC not acked for task ${task.id}; task left queued until the P3 failure path`
+          );
+        }
+        return task;
       }))
     )
     .handle("getAssistantTask", (req) =>
@@ -2681,6 +2739,20 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         if (!service.abortStream(req.path.id)) {
           yield* taskService.cancel(req.path.id);
         }
+        const task = yield* taskService.getById(req.path.id).pipe(Effect.catchAll(() => Effect.succeed(null)));
+        if (task) {
+          const abort = yield* threadRpcControl((rpc) =>
+            rpc.abortRun(`${task.documentType}:${task.documentId}`, req.path.id)
+          );
+          // ADR-0003 §B.4/§B.6: `abortRun` RPC failure is the assistant being
+          // unavailable. TODO(P3): `abortRun` is still a P2 stub and the local
+          // abort (`abortStream`/`taskService.cancel`) already ran above; once
+          // the P3 engine owns the canonical turn, branch on `abort` here (502
+          // ASSISTANT_UNAVAILABLE).
+          if (abort.available && !abort.ok) {
+            yield* Effect.logWarning(`[assistant] abortRun RPC not acked for task ${req.path.id}`);
+          }
+        }
         return { ok: true as const };
       }))
     )
@@ -2693,6 +2765,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         yield* requireProjectReadById(thread.projectId);
         const service = yield* AssistantService;
         yield* service.resetThread(thread.projectId, req.path.documentType, req.path.documentId);
+        yield* threadRpcCall((rpc) => rpc.resetThread(`${req.path.documentType}:${req.path.documentId}`));
         return undefined;
       }))
     )
@@ -2734,6 +2807,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         yield* requireProjectReadById(t.projectId);
         const service = yield* AssistantService;
         const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
+        yield* threadRpcCall((rpc) => rpc.resumeBatch(`chat:${req.path.chatId}`, null));
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
         return sseHttpResponse(frames);
       }))
@@ -2747,6 +2821,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         yield* requireProjectReadById(thread.projectId);
         const service = yield* AssistantService;
         const frames = yield* service.resumeThreadStream(req.path.documentType, req.path.documentId);
+        yield* threadRpcCall((rpc) => rpc.resumeBatch(`${req.path.documentType}:${req.path.documentId}`, null));
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.documentId));
         return sseHttpResponse(frames);
       }))
@@ -2760,7 +2835,19 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         const service = yield* AssistantService;
-        const messages = yield* service.reconcileChatApprovals(t.messages);
+        // DO canonical read with D1 fallback (ADR-0003 §B.3/B.4). The legacy
+        // transcript shape is kept for P4 (D3 lands the UIMessage-parts shape
+        // with the frontend rewrite); on Bun the RPC is a no-op → D1.
+        const doTranscript = yield* threadRpcCall((rpc) => rpc.getTranscript(`chat:${req.path.chatId}`));
+        const doMessages =
+          doTranscript && Array.isArray(doTranscript.messages) && doTranscript.messages.length > 0
+            ? legacyFromUIMessages(doTranscript.messages)
+            : null;
+        const messages = yield* service.reconcileChatApprovals(doMessages ?? t.messages);
+        // DO-first: a non-null DO value (P3 engine) wins; otherwise the D1
+        // mirror (the DO returns null until the engine tracks them).
+        const doSummary = doTranscript ? doTranscript.summary : null;
+        const doSummarizedCount = doTranscript ? doTranscript.summarizedCount : null;
         return {
           chatId: t.documentId,
           projectId: t.projectId,
@@ -2768,8 +2855,8 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           agentId: t.agentId,
           skillId: t.skillId,
           messages,
-          summary: t.summary,
-          summarizedCount: t.summarizedCount,
+          summary: doSummary ?? t.summary,
+          summarizedCount: doSummarizedCount ?? t.summarizedCount,
           createdAt: t.createdAt,
           updatedAt: t.updatedAt,
         };
@@ -2786,6 +2873,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         yield* threadRepo.resetThread("chat", req.path.chatId);
+        yield* threadRpcCall((rpc) => rpc.destroyThread(`chat:${req.path.chatId}`));
         return undefined;
       }))
     )
@@ -4489,7 +4577,11 @@ function buildServiceLayer(dbPath: string, env?: RuntimeEnv, mcpConnector?: Laye
   return buildServiceLayerWithStorage(storageCfg, mcpConnector);
 }
 
-function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnector?: Layer.Layer<McpConnector>) {
+function buildServiceLayerWithStorage(
+  storageCfg: StorageConfigShape,
+  mcpConnector?: Layer.Layer<McpConnector>,
+  threadRpc?: AssistantThreadRpcShape
+) {
   return Layer.mergeAll(
     ProjectRepo.Default, ProjectService.Default, ProjectReposRepo.Default,
     ColumnRepo.Default, ColumnService.Default,
@@ -4531,6 +4623,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape, mcpConnect
     // HTTP/SSE connector backs the registry test endpoint.
     AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? LiveMcpConnector)),
     AssistantJevRepo.Default, AssistantJevService.Default,
+    Layer.succeed(AssistantThreadRpc, threadRpc ?? assistantThreadRpcNoop),
   );
 }
 
@@ -4611,6 +4704,9 @@ export interface WorkersApiHandlerOptions {
   storage: StorageConfigShape;
   authHooks: ApiAuthHooksShape;
   getSession?: ((headers: Headers) => Promise<MiddlewareSession | null>) | undefined;
+  // DO-backed thread RPC (ADR-0003 §B.4). Built in workers-entry.ts from the
+  // ASSISTANT_AGENT namespace so this module stays free of `agents`/DO imports.
+  threadRpc?: AssistantThreadRpcShape | undefined;
 }
 
 const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
@@ -4746,7 +4842,7 @@ export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
     RuntimeEnvLive(runtimeEnv),
     Layer.succeed(ApiAuthHooks, authHooks),
   );
-  const serviceLayer = buildServiceLayerWithStorage(storage);
+  const serviceLayer = buildServiceLayerWithStorage(storage, undefined, opts.threadRpc);
   const handlerLayer = routeGroups().pipe(
     Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),
     Layer.provide(dbLayer)

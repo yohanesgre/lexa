@@ -1,23 +1,39 @@
-// Miniflare Durable Object smoke (ADR-0003 §B.1). The other assistant tests
-// exercise pure modules; this one proves the two things that only exist once
-// the class is loaded by workerd:
+// Miniflare Durable Object smoke + P2 persistence integration (ADR-0003 §B.1,
+// §B.3). The other assistant tests exercise pure modules; this one proves the
+// things that only exist once the class is loaded by workerd:
 //   1. `wrangler.jsonc`'s `durable_objects` binding + `new_sqlite_classes`
 //      migration actually resolve `LexaAssistantAgent` (the class is exported
 //      from the module graph, not merely declared).
 //   2. The DO-side HMAC gate runs on a real WebSocket connect and SQLite
 //      storage is available (`thread_meta` DDL + insert on the happy path).
+//   3. Migrate-on-read: a legacy D1 `assistant_threads` row converts and lands
+//      in the DO transcript on first connect.
+//   4. Mirror write-back: a persisted step POSTs to the internal mirror route
+//      (over a self service binding) and lands in the D1 row.
+//   5. `resetThread` clears the framework session rows (no resurrect on a fresh
+//      hydrate); `destroyThread` tears down through `_cf_scheduleDestroy` and
+//      leaves the session tables usable for a later persist; a seeded
+//      summary/count/title survives the COALESCE mirror.
+//
+// The wrapper worker stands in for the Worker entry: it serves the internal
+// assistant routes against a real miniflare D1 database and forwards the
+// WebSocket to the DO. The inline route bodies mirror
+// `server/assistant/internal-routes.ts` — that module's SQL/contract is pinned
+// by `internal-routes.test.ts`; here it runs behind the DO's real HTTP call.
 // The bundle is built with the repo's existing esbuild (transitive via vite /
 // wrangler); no new test dependency is declared here.
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { build } from "esbuild";
-import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { Miniflare, convertV4MiniflareOptions, kCurrentWorker } from "miniflare";
 import { signInternalAuth, type InternalAuthIdentity } from "./internal-auth";
 
 const REPO_ROOT = new URL("../../", import.meta.url);
 const MASTER_KEY = "do-smoke-master-key-0123456789";
 const THREAD_KEY = "chat:smoke";
+const WORKER_NAME = "assistant-do-smoke";
+const DB_NAME = "assistant-do-smoke-db";
 
 interface WranglerConfig {
   compatibility_date?: string;
@@ -45,22 +61,87 @@ const class_name = binding?.class_name ?? "";
 const sqliteMigration = config.migrations?.find((m) => m.tag === "v1");
 const useSQLite = sqliteMigration?.new_sqlite_classes?.includes(class_name) ?? false;
 
-// The wrapper stands in for `server/workers-entry.ts`'s WS gate: get the
-// thread-named DO and forward. Only the DO class + its imports are bundled —
-// the Worker entry pulls the whole app and is exercised by the workers build.
+// The wrapper: internal assistant routes are served inline against D1; every
+// other request is forwarded to the thread-named DO (the real Worker gate's
+// job in production). Only the DO class + its imports are bundled — the Worker
+// entry pulls the whole app and is exercised by the workers build.
 const ENTRY = `
 import { LexaAssistantAgent } from "./server/assistant/agent";
 export { LexaAssistantAgent };
+
+const INTERNAL = "/api/internal/assistant/";
+
+async function handleInternal(request, env) {
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "legacy/")) {
+    const threadKey = decodeURIComponent(url.pathname.slice((INTERNAL + "legacy/").length));
+    const sep = threadKey.indexOf(":");
+    const row = await env.DB
+      .prepare("SELECT messages FROM assistant_threads WHERE document_type = ? AND document_id = ?")
+      .bind(threadKey.slice(0, sep), threadKey.slice(sep + 1))
+      .first();
+    if (!row) return Response.json({ error: { code: "ASSISTANT_THREAD_NOT_FOUND" } }, { status: 404 });
+    return Response.json({ messages: JSON.parse(row.messages) });
+  }
+  if (request.method === "POST" && url.pathname === INTERNAL + "mirror") {
+    const body = await request.json();
+    const sep = body.threadKey.indexOf(":");
+    await env.DB
+      .prepare(
+        "UPDATE assistant_threads SET messages = ?, summary = COALESCE(?, summary), summarized_count = COALESCE(?, summarized_count), title = COALESCE(title, ?), updated_at = datetime('now') WHERE document_type = ? AND document_id = ?"
+      )
+      .bind(JSON.stringify(body.messages), body.summary, body.summarizedCount, body.title, body.threadKey.slice(0, sep), body.threadKey.slice(sep + 1))
+      .run();
+    return Response.json({ ok: true });
+  }
+  return Response.json({ error: { code: "ASSISTANT_THREAD_NOT_FOUND" } }, { status: 404 });
+}
+
 export default {
   async fetch(request, env) {
-    const ns = env.ASSISTANT_AGENT;
-    const stub = ns.get(ns.idFromName(${JSON.stringify(THREAD_KEY)}));
+    const url = new URL(request.url);
+    if (url.pathname.startsWith(INTERNAL)) return handleInternal(request, env);
+    if (url.pathname === "/__test/transcript") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.getTranscript());
+    }
+    if (url.pathname === "/__test/persist") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      await stub.persistMessages(body.messages);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__test/reset") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.resetThread());
+    }
+    if (url.pathname === "/__test/destroy") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.destroyThread());
+    }
+    const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
+    const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
     return stub.fetch(request);
   },
 };
 `;
 
+interface D1LikeTest {
+  exec(q: string): Promise<unknown>;
+  prepare(q: string): {
+    bind(...p: unknown[]): {
+      run(): Promise<unknown>;
+      first<T = Record<string, unknown>>(): Promise<T | null>;
+    };
+  };
+}
+
 let mf: Miniflare | undefined;
+let d1: D1LikeTest;
 
 interface Connection {
   status: number;
@@ -83,16 +164,73 @@ async function dispatchWebSocket(headers: Record<string, string>): Promise<Conne
   return connection;
 }
 
-// The first DO start plus the async HMAC verify can push the server's close
-// frame well past a second (observed >1.5s under vitest); poll instead of
-// guessing a single delay.
-async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+function signedHeaders(identity: InternalAuthIdentity): Promise<Record<string, string>> {
+  return signInternalAuth(MASTER_KEY, identity).then((internal) => ({
+    "X-Lexa-Actor-UserId": identity.actorUserId,
+    "X-Lexa-Project-Id": identity.projectId,
+    "X-Lexa-Thread-Key": identity.threadKey,
+    "X-Lexa-Internal": internal,
+  }));
+}
+
+async function transcriptOf(documentId: string): Promise<unknown[]> {
+  const res = await mf!.dispatchFetch(`http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(`chat:${documentId}`)}`);
+  const body = (await res.json()) as { messages?: unknown[] };
+  return Array.isArray(body.messages) ? body.messages : [];
+}
+
+async function d1Messages(documentId: string): Promise<string | null> {
+  const row = await d1
+    .prepare("SELECT messages FROM assistant_threads WHERE document_id = ?")
+    .bind(documentId)
+    .first<{ messages: string }>();
+  return row ? row.messages : null;
+}
+
+async function persistStep(threadKey: string, messages: unknown[]) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/persist?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages }),
+  });
+}
+
+async function callThreadControl(op: "reset" | "destroy", threadKey: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/${op}?threadKey=${encodeURIComponent(threadKey)}`);
+}
+
+async function durableObjectId(threadKey: string): Promise<string> {
+  const namespace = await mf!.getDurableObjectNamespace("ASSISTANT_AGENT", WORKER_NAME);
+  return namespace.idFromName(threadKey).toString();
+}
+
+// Read the DO's own SQLite session store directly: proves a reset actually
+// DELETEs the rows the next hydrate reads, rather than only clearing the
+// in-memory cache.
+async function sessionMessageCount(threadKey: string): Promise<number> {
+  const id = await durableObjectId(threadKey);
+  const storage = await mf!.unsafeGetDurableObjectStorage(WORKER_NAME, class_name, { id });
+  const rows = await storage.exec<{ n: number }>("SELECT COUNT(*) AS n FROM cf_agents_session_messages");
+  return Number(rows[0]?.n ?? 0);
+}
+
+// Evict the DO instance so the next RPC boots a fresh instance that re-hydrates
+// `this.messages` from SQLite — the path where unrestored rows would resurrect.
+async function evictThread(threadKey: string): Promise<void> {
+  const id = await durableObjectId(threadKey);
+  await mf!.unsafeEvictDurableObject(WORKER_NAME, class_name, { id, webSockets: "close" });
+}
+
+// Poll an async probe until it returns a non-null value (the DO start + import
+// + mirror are async and can lag the connect/persist call by design).
+async function waitFor<T>(probe: () => Promise<T | null>, timeoutMs: number): Promise<T> {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return true;
+  for (;;) {
+    const value = await probe();
+    if (value !== null) return value;
+    if (Date.now() >= deadline) throw new Error("timed out waiting for DO persistence");
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  return predicate();
 }
 
 describe("LexaAssistantAgent Durable Object smoke", () => {
@@ -108,22 +246,30 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
       logLevel: "silent",
     });
     const script = bundled.outputFiles[0]!.text;
-    mf = new Miniflare(
-      await convertV4MiniflareOptions({
+    mf = new Miniflare({
+      ...(await convertV4MiniflareOptions({
         workers: [
           {
-            name: "assistant-do-smoke",
+            name: WORKER_NAME,
             modules: true,
             script,
             compatibilityDate: config.compatibility_date ?? "2026-08-01",
             compatibilityFlags: config.compatibility_flags ?? [],
             durableObjects: { ASSISTANT_AGENT: { className: class_name, useSQLite } },
+            d1Databases: { DB: DB_NAME },
+            serviceBindings: { ASSISTANT_SERVICE: kCurrentWorker },
             bindings: { LXK_SECRETS_MASTER_KEY: MASTER_KEY },
           },
         ],
-      })
-    );
-  }, 120_000);
+      })),
+      // Required for `unsafeGetDurableObjectStorage` / `unsafeEvictDurableObject`
+      // (the reset/hydrate assertions inspect the DO's SQLite directly).
+      unsafeInspectDurableObjects: true,
+    });
+    d1 = (await mf.getD1Database("DB", WORKER_NAME)) as unknown as D1LikeTest;
+    // D1 `exec` splits on newlines — the DDL must be a single line.
+    await d1.exec("CREATE TABLE IF NOT EXISTS assistant_threads (document_type TEXT NOT NULL, document_id TEXT NOT NULL, project_id TEXT NOT NULL, owner_user_id TEXT, title TEXT, pinned INTEGER NOT NULL DEFAULT 0, agent_id TEXT, skill_id TEXT, messages TEXT NOT NULL DEFAULT '[]', summary TEXT, summarized_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (document_type, document_id))");
+  }, 180_000);
 
   afterAll(async () => {
     await mf?.dispose();
@@ -145,29 +291,24 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
       projectId: "proj-1",
       threadKey: THREAD_KEY,
     };
-    const warm = await dispatchWebSocket({
-      "X-Lexa-Actor-UserId": warmIdentity.actorUserId,
-      "X-Lexa-Project-Id": warmIdentity.projectId,
-      "X-Lexa-Thread-Key": warmIdentity.threadKey,
-      "X-Lexa-Internal": await signInternalAuth(MASTER_KEY, warmIdentity),
-    });
+    const warm = await dispatchWebSocket(await signedHeaders(warmIdentity));
     expect(warm.status).toBe(101);
 
     const connection = await dispatchWebSocket({});
     expect(connection.status).toBe(101);
-    const closed = await waitUntil(() => connection.closed !== null, 20_000);
+    let closed = false;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline && connection.closed === null) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      closed = connection.closed !== null;
+    }
     expect(closed).toBe(true);
     expect(connection.closed?.code).toBe(1008);
   }, 60_000);
 
   it("keeps a correctly signed websocket open and writes thread_meta in SQLite", async () => {
     const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey: THREAD_KEY };
-    const connection = await dispatchWebSocket({
-      "X-Lexa-Actor-UserId": identity.actorUserId,
-      "X-Lexa-Project-Id": identity.projectId,
-      "X-Lexa-Thread-Key": identity.threadKey,
-      "X-Lexa-Internal": await signInternalAuth(MASTER_KEY, identity),
-    });
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
     expect(connection.status).toBe(101);
     // onConnect ran verifyConnection → ensureThreadMetaTable → pinThreadMeta
     // before super.onConnect; a SQLite failure would have thrown (1011/runtime
@@ -176,4 +317,145 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(connection.closed).toBeNull();
     expect(connection.readyState()).toBe(1);
   }, 30_000);
+
+  it("migrates a legacy D1 transcript into the DO on first connect (migrate-on-read)", async () => {
+    const documentId = "legacy-import";
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey: `chat:${documentId}` };
+    const legacy = [
+      { role: "user", content: "hello", ts: "2026-01-01T00:00:00.000Z" },
+      { role: "assistant", content: "hi", ts: "2026-01-01T00:00:01.000Z", citations: [{ title: "Doc", url: "https://example.test/d" }] },
+    ];
+    await d1
+      .prepare("INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', ?)")
+      .bind(documentId, JSON.stringify(legacy))
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = await waitFor<unknown[]>(
+      () => transcriptOf(documentId).then((m) => (m.length > 0 ? m : null)),
+      20_000
+    );
+
+    expect(messages).toEqual([
+      { id: "legacy-0", role: "user", parts: [{ type: "text", text: "hello" }], metadata: { ts: "2026-01-01T00:00:00.000Z" } },
+      {
+        id: "legacy-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "hi" }],
+        metadata: { ts: "2026-01-01T00:00:01.000Z", citations: [{ title: "Doc", url: "https://example.test/d" }] },
+      },
+    ]);
+  }, 60_000);
+
+  it("mirrors a persisted step back to the D1 assistant_threads row", async () => {
+    const documentId = "mirror-write";
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey: `chat:${documentId}` };
+    await d1
+      .prepare("INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')")
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const persisted = [{ id: "m1", role: "user", parts: [{ type: "text", text: "mirrored" }] }];
+    const res = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/persist?threadKey=${encodeURIComponent(`chat:${documentId}`)}`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: persisted }) }
+    );
+    expect(res.status).toBe(200);
+
+    const mirrored = await waitFor<string>(
+      () => d1Messages(documentId).then((raw) => (raw !== null && raw !== "[]" ? raw : null)),
+      20_000
+    );
+    const parsed = JSON.parse(mirrored) as Array<{ parts?: Array<{ text?: string }> }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.parts?.[0]?.text).toBe("mirrored");
+  }, 60_000);
+
+  it("resetThread clears the DO transcript and it stays cleared across a fresh hydrate", async () => {
+    const documentId = "reset-clear";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const persisted = [
+      { id: "r1", role: "user", parts: [{ type: "text", text: "one" }] },
+      { id: "r2", role: "assistant", parts: [{ type: "text", text: "two" }] },
+    ];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 2 ? 2 : null)), 20_000);
+    expect(await sessionMessageCount(threadKey)).toBe(2);
+
+    const reset = await callThreadControl("reset", threadKey);
+    expect(reset.status).toBe(200);
+    expect(await reset.json()).toEqual({ ok: true });
+    expect(await transcriptOf(documentId)).toEqual([]);
+    // `persistMessages([])` would reconcile against the prior transcript and
+    // leave the rows behind; the session store must actually be empty.
+    expect(await sessionMessageCount(threadKey)).toBe(0);
+
+    // A fresh instance re-hydrates from SQLite. Deleted rows must not come back.
+    await evictThread(threadKey);
+    expect(await transcriptOf(documentId)).toEqual([]);
+  }, 60_000);
+
+  it("destroyThread leaves the framework session tables intact so a later persist does not 500", async () => {
+    const documentId = "destroy-reuse";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const before = [{ id: "d1", role: "user", parts: [{ type: "text", text: "before" }] }];
+    expect((await persistStep(threadKey, before)).status).toBe(200);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
+
+    const destroyed = await callThreadControl("destroy", threadKey);
+    expect(destroyed.status).toBe(200);
+    expect(await destroyed.json()).toEqual({ ok: true });
+
+    // The old `ctx.storage.deleteAll()` teardown dropped `cf_agents_session_*`,
+    // so this write threw `no such table: cf_agents_session_messages`. Routing
+    // through `_cf_scheduleDestroy` keeps the SDK's tables usable.
+    const after = [{ id: "d2", role: "user", parts: [{ type: "text", text: "after" }] }];
+    const res = await persistStep(threadKey, after);
+    expect(res.status).toBe(200);
+  }, 60_000);
+
+  it("preserves a seeded summary/summarized_count/title across a persisted step", async () => {
+    const documentId = "mirror-preserve";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, summary, summarized_count, messages) VALUES ('chat', ?, 'proj-1', 'user-1', 'Seeded Title', 'seeded summary', 9, '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const persisted = [{ id: "m1", role: "user", parts: [{ type: "text", text: "step" }] }];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+    await waitFor<string>(
+      () => d1Messages(documentId).then((raw) => (raw !== null && raw !== "[]" ? raw : null)),
+      20_000
+    );
+
+    const seeded = await d1
+      .prepare("SELECT summary, summarized_count, title FROM assistant_threads WHERE document_id = ?")
+      .bind(documentId)
+      .first<{ summary: string | null; summarized_count: number; title: string | null }>();
+    // The DO sends null until the P3 engine tracks summary state; COALESCE must
+    // keep the seeded columns. A literal 0 previously clobbered the count.
+    expect(seeded?.summary).toBe("seeded summary");
+    expect(seeded?.summarized_count).toBe(9);
+    expect(seeded?.title).toBe("Seeded Title");
+  }, 60_000);
 });

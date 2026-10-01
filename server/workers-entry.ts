@@ -74,11 +74,39 @@ import {
   type UpsertChatThreadInput,
 } from "./assistant/agent-gate";
 import { LexaAssistantAgent } from "./assistant/agent";
+import { handleInternalAssistantRequest } from "./assistant/internal-routes";
+import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
 import type { AssistantThreadType } from "../shared/assistant";
 
 export { LexaAssistantAgent };
 
 type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
+
+// DO-backed thread RPC for the REST handlers (ADR-0003 §B.4). Built here (the
+// only module allowed to import `agents`) and injected into the shared handler
+// factory, which stays `agents`-free. Structure matches the DO's RPC surface
+// in `server/assistant/agent.ts`.
+function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadRpcShape {
+  interface Stub {
+    getTranscript(): Promise<{ messages: unknown[]; summary: string | null; summarizedCount: number | null }>;
+    resumeBatch(batchId: string | null): Promise<{ ok: true }>;
+    destroyThread(): Promise<{ ok: true }>;
+    resetThread(): Promise<{ ok: true }>;
+    enqueueRun(projectId: string, taskId: string): Promise<{ ok: true }>;
+    abortRun(taskId: string): Promise<{ ok: true }>;
+  }
+  const stubFor = async (threadKey: string): Promise<Stub> =>
+    (await getAgentByName(namespace, threadKey)) as unknown as Stub;
+  return {
+    available: true,
+    getTranscript: async (threadKey) => (await stubFor(threadKey)).getTranscript(),
+    resumeBatch: async (threadKey, batchId) => (await stubFor(threadKey)).resumeBatch(batchId),
+    destroyThread: async (threadKey) => (await stubFor(threadKey)).destroyThread(),
+    resetThread: async (threadKey) => (await stubFor(threadKey)).resetThread(),
+    enqueueRun: async (threadKey, projectId, taskId) => (await stubFor(threadKey)).enqueueRun(projectId, taskId),
+    abortRun: async (threadKey, taskId) => (await stubFor(threadKey)).abortRun(taskId),
+  };
+}
 
 export interface WorkersEnv {
   DB?: D1Database;
@@ -310,7 +338,8 @@ async function handleApi(
   req: WorkersRequest,
   runtimeEnv: RuntimeEnv,
   driver: DbDriver,
-  blob: R2Bucket | undefined
+  blob: R2Bucket | undefined,
+  threadRpc: AssistantThreadRpcShape | undefined
 ): Promise<Response> {
   const fingerprint = apiFingerprint(runtimeEnv);
   if (!apiCache || apiCache.fingerprint !== fingerprint) {
@@ -319,6 +348,7 @@ async function handleApi(
       driver,
       runtimeEnv,
       storage: r2StorageConfig(runtimeEnv, blob),
+      threadRpc,
       authHooks: {
         createUser: (input) =>
           lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
@@ -628,10 +658,10 @@ const handler: ExportedHandler<WorkersEnv> = {
           ) as unknown as WorkersResponse;
         }
       }
-      // Internal DO → Worker routes (ADR-0003 §B.2). The public middleware
+      // Internal DO → Worker routes (ADR-0003 §B.2/B.3). The public middleware
       // would demand an API key, so this mount sits before it and accepts only
-      // a valid signed identity. P1 is the mount point + guard; the assistant
-      // internal handlers land in P2/P3.
+      // a valid signed identity. Handlers: the D1 transcript read (legacy
+      // import) and the per-step mirror write.
       if (path.startsWith(INTERNAL_ASSISTANT_ROUTE_PREFIX)) {
         const outcome = await authorizeInternalRequest(req as unknown as Request, runtimeEnv.LXK_SECRETS_MASTER_KEY);
         if (outcome === "unavailable") {
@@ -646,13 +676,30 @@ const handler: ExportedHandler<WorkersEnv> = {
             401
           ) as unknown as WorkersResponse;
         }
-        return json(
-          { error: { code: "ASSISTANT_THREAD_NOT_FOUND", message: "Unknown internal assistant route" } },
-          404
-        ) as unknown as WorkersResponse;
+        let body: unknown = null;
+        if (req.method === "POST") {
+          try {
+            body = await req.json();
+          } catch {
+            body = null;
+          }
+        }
+        const result = await handleInternalAssistantRequest({
+          method: req.method,
+          path,
+          body,
+          driver,
+        });
+        return json(result.body, result.status) as unknown as WorkersResponse;
       }
       if (path.startsWith("/api/")) {
-        return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
+        return (await handleApi(
+          req,
+          runtimeEnv,
+          driver,
+          env.BLOB,
+          env.ASSISTANT_AGENT ? createDoThreadRpc(env.ASSISTANT_AGENT) : undefined
+        )) as unknown as WorkersResponse;
       }
       // Only /share/* is server-rendered; every other route is client-only and
       // served the prerendered SPA shell (per-response entry-script patch).
