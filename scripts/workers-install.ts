@@ -250,6 +250,29 @@ export function readPriorAccount(dir: string, flavorName: string): string {
   }
 }
 
+// Root repo wrangler config (JSONC comments stripped) — the per-deploy config
+// mirrors `compatibility_date` and the observability block from it.
+export interface RootWorkerConfig {
+  compatibility_date?: string;
+  observability?: Record<string, unknown>;
+}
+export function readRootWranglerConfig(dir: string): RootWorkerConfig {
+  return JSON.parse(
+    readFileSync(join(dir, "wrangler.jsonc"), "utf-8").replace(
+      /\/\/[^\n]*/g,
+      "",
+    ),
+  ) as RootWorkerConfig;
+}
+
+// Observability block written into the per-deploy config: root's block
+// verbatim, or the bare legacy enable when root declares none.
+export function resolveObservability(
+  root: RootWorkerConfig,
+): Record<string, unknown> {
+  return root.observability ?? { enabled: true };
+}
+
 const API = "https://api.cloudflare.com/client/v4";
 
 let CF_TOKEN = "";
@@ -614,19 +637,12 @@ async function main(): Promise<void> {
   copyContents(assetsAbs, join(deployDir, "assets"));
 
   const publicUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
+  const rootConfig = readRootWranglerConfig(DIR);
   const config = {
     name: FLAVOR.workerName,
     account_id: account,
     main: `./${(manifest.main ?? "index.js").split("/").pop()}`,
-    compatibility_date:
-      (
-        JSON.parse(
-          readFileSync(join(DIR, "wrangler.jsonc"), "utf-8").replace(
-            /\/\/[^\n]*/g,
-            "",
-          ),
-        ) as { compatibility_date?: string }
-      ).compatibility_date ?? "2026-08-01",
+    compatibility_date: rootConfig.compatibility_date ?? "2026-08-01",
     compatibility_flags: ["nodejs_compat"],
     ...(manifest.no_bundle ? { no_bundle: true } : {}),
     ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
@@ -640,7 +656,7 @@ async function main(): Promise<void> {
     ],
     r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
     kv_namespaces: [{ binding: "KV", id: kvId }],
-    observability: { enabled: true },
+    observability: resolveObservability(rootConfig),
   };
   const configPath = join(deployDir, `wrangler.${FLAVOR_NAME}.json`);
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", {

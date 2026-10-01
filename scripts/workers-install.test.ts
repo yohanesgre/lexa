@@ -7,13 +7,16 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   accountAmbiguousMessage,
   accountStaleMessage,
   d1AmbiguousMessage,
   readPriorAccount,
+  readRootWranglerConfig,
   resolveAccountOrDie,
   resolveNames,
+  resolveObservability,
   selectAccount,
   selectD1,
   type AccountRow,
@@ -206,6 +209,58 @@ describe("readPriorAccount", () => {
   test("missing config reads empty", () => {
     const dir = mkdtempSync(join(tmpdir(), "wi-acct-"));
     expect(readPriorAccount(dir, "lexa")).toBe("");
+  });
+});
+
+describe("root wrangler observability", () => {
+  const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+  test("root wrangler.jsonc pins the Cloudflare default observability block", () => {
+    expect(readRootWranglerConfig(ROOT).observability).toEqual({
+      enabled: true,
+      head_sampling_rate: 1,
+      redact_query_string: false,
+      logs: {
+        enabled: true,
+        head_sampling_rate: 1,
+        invocation_logs: true,
+        persist: true,
+      },
+      traces: {
+        enabled: true,
+        head_sampling_rate: 1,
+        persist: true,
+      },
+      issues: { enabled: true },
+    });
+  });
+
+  test("the generated per-deploy config mirrors root's block", () => {
+    const root = readRootWranglerConfig(ROOT);
+    const generated = resolveObservability(root);
+    if (!root.observability) throw new Error("root wrangler.jsonc has no observability");
+    expect(generated).toEqual(root.observability);
+    expect(generated.logs).toMatchObject({
+      enabled: true,
+      head_sampling_rate: 1,
+      invocation_logs: true,
+      persist: true,
+    });
+    expect(generated.traces).toMatchObject({
+      enabled: true,
+      head_sampling_rate: 1,
+      persist: true,
+    });
+    expect(generated.issues).toMatchObject({ enabled: true });
+    expect(generated.head_sampling_rate).toBe(1);
+  });
+
+  test("a root config without observability falls back to bare enable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wi-obs-"));
+    writeFileSync(join(dir, "wrangler.jsonc"), '{ "name": "lexa" }\n');
+    expect(resolveObservability(readRootWranglerConfig(dir))).toEqual({
+      enabled: true,
+    });
   });
 });
 
