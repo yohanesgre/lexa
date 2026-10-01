@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
+import type { ChatAttachmentRef } from "../../lib/assistant-image";
 
 // Client-only queue state (assistant-chat-deck design §3.3). One held message
 // per thread; it lives in page memory and is lost on reload. A turn that ends
 // cleanly flushes the queue through the normal send path, while a stopped or
-// failed turn keeps it held until the user sends it explicitly.
+// failed turn keeps it held until the user sends it explicitly. The queue is
+// text-only: attachments stay in the composer strip until an explicit send.
 
 export type QueuedMessage = {
   text: string;
-  imageCount: number;
   heldReason?: "stopped" | "failed";
   flushing?: boolean;
 };
@@ -16,7 +17,7 @@ export type QueuedMessage = {
 export function useChatQueue({ chatId, streamStatus, send }: {
   chatId: string;
   streamStatus: AssistantStreamStatus;
-  send: (message: string, imageCount?: number) => boolean;
+  send: (message: string, attachments: ChatAttachmentRef[]) => boolean;
 }) {
   const [byChat, setByChat] = useState<Record<string, QueuedMessage>>({});
   const sendRef = useRef(send);
@@ -45,7 +46,7 @@ export function useChatQueue({ chatId, streamStatus, send }: {
       // and spin the effect. It stays held for edit / cancel / explicit send.
       if (queued.flushing === false) return;
       setByChat((prev) => (prev[chatId] ? { ...prev, [chatId]: { ...queued, flushing: true } } : prev));
-      if (sendRef.current(queued.text, queued.imageCount) === false) {
+      if (sendRef.current(queued.text, []) === false) {
         // Refused flush: never report it as sent — clear flushing and keep the
         // entry so it can still be sent explicitly, cancelled, or edited.
         setByChat((prev) => (prev[chatId] ? { ...prev, [chatId]: { ...queued, flushing: false } } : prev));
@@ -59,8 +60,8 @@ export function useChatQueue({ chatId, streamStatus, send }: {
     }
   }, [streamStatus, chatId, byChat]);
 
-  const enqueue = useCallback((text: string, imageCount: number) => {
-    setByChat((prev) => ({ ...prev, [chatId]: { text, imageCount } }));
+  const enqueue = useCallback((text: string) => {
+    setByChat((prev) => ({ ...prev, [chatId]: { text } }));
   }, [chatId]);
 
   const unqueue = useCallback(() => {

@@ -1,6 +1,7 @@
 import type { AssistantWriteDiff } from "../../../shared/assistant";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
+import type { ChatAttachmentKind, ChatAttachmentRef } from "../../lib/assistant-image";
 
 // Pure helpers + wire-shape types for Assistant chat (assistant-chat.html +
 // assistant-chat-upgrades.html).
@@ -15,6 +16,10 @@ export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   imageCount: number;
+  // Persisted attachment refs for a user turn (LX-2) — replayed by retry /
+  // regenerate (D6) and rendered as thumbnails / document chips. Optimistic
+  // turns carry previewUrl/sizeBytes too.
+  attachments?: ChatAttachmentRef[] | undefined;
   // Index into the RAW transcript messages array — resend targets are raw
   // positions (the server truncates its own array).
   rawIndex: number;
@@ -128,6 +133,12 @@ export function splitFences(text: string): { fenced: boolean; body: string; lang
   return out;
 }
 
+// Image vs document from the stored mime (image/* → image, everything else is
+// a document ref).
+export function refKind(mimeType: string): ChatAttachmentKind {
+  return mimeType.startsWith("image/") ? "image" : "document";
+}
+
 export function hhmm(ts?: string): string | null {
   if (!ts) return null;
   const d = new Date(ts);
@@ -162,12 +173,19 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
     if (msg.role !== "user" && msg.role !== "assistant") continue;
     let text = "";
     let imageCount = 0;
+    const attachments: ChatAttachmentRef[] = [];
     if (typeof msg.content === "string") {
       text = msg.content;
     } else if (Array.isArray(msg.content)) {
-      for (const part of msg.content as Array<{ type?: string | undefined; content?: unknown; text?: unknown }>) {
-        if (part.type === "image-ref") imageCount++;
-        else text += String(part.content ?? part.text ?? "");
+      for (const part of msg.content as Array<{ type?: string | undefined; content?: unknown; text?: unknown; storageKey?: unknown; mimeType?: unknown; name?: unknown }>) {
+        if ((part.type === "image-ref" || part.type === "image") && typeof part.storageKey === "string") {
+          attachments.push({ storageKey: part.storageKey, mimeType: typeof part.mimeType === "string" ? part.mimeType : "image/png", name: typeof part.name === "string" ? part.name : "" });
+          imageCount++;
+        } else if (part.type === "document-ref" && typeof part.storageKey === "string") {
+          attachments.push({ storageKey: part.storageKey, mimeType: typeof part.mimeType === "string" ? part.mimeType : "text/plain", name: typeof part.name === "string" ? part.name : "" });
+        } else {
+          text += String(part.content ?? part.text ?? "");
+        }
       }
     }
     // Suspended-turn marker (legacy string batchId or PendingBatchMarker
@@ -199,6 +217,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       text,
       imageCount,
       rawIndex,
+      ...(attachments.length > 0 ? { attachments } : {}),
       ...(typeof msg.ts === "string" ? { ts: msg.ts } : {}),
       ...(citations.length > 0 ? { citations } : {}),
       ...(err ? { error: err } : {}),

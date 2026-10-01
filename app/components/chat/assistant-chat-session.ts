@@ -11,6 +11,7 @@ import { assistantSendForKey } from "../../lib/use-assistant-stream";
 import { settleTurns } from "./assistant-chat-turns-state";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
+import type { ChatAttachmentRef } from "../../lib/assistant-image";
 import {
   applyChipPatch,
   chatStreamBody,
@@ -204,7 +205,7 @@ export function useChatStartStream(args: {
 }) {
   const { stream, projectId, chatId, applyChatId, openThreadParam, qc, effort, setEffort, pendingTitleRef, ingressInsertedRef } = args;
   return useCallback(
-    (message: string, fromIndex?: number) => {
+    (message: string, attachments: ChatAttachmentRef[], fromIndex?: number) => {
       let threadId = chatId;
       const isNewThread = !threadId;
       if (!threadId) {
@@ -220,7 +221,7 @@ export function useChatStartStream(args: {
       } else {
         ingressInsertedRef.current?.delete(threadId);
       }
-      const body = chatStreamBody({ projectId, chatId: threadId, message, effort, fromIndex });
+      const body = chatStreamBody({ projectId, chatId: threadId, message, effort, attachments, fromIndex });
       if (isNewThread) {
         assistantSendForKey(`assistant-chat:${threadId}`, "/api/assistant/chat/stream", body);
       } else {
@@ -348,7 +349,7 @@ export function useTurnResend(args: {
   setTurns: React.Dispatch<React.SetStateAction<ChatTurn[] | null>>;
   rawMessages: unknown[];
   streaming: boolean;
-  startStream: (message: string, fromIndex?: number) => void;
+  startStream: (message: string, attachments: ChatAttachmentRef[], fromIndex?: number) => void;
 }) {
   const { turns, setTurns, rawMessages, streaming, startStream } = args;
   const toast = useToast();
@@ -365,7 +366,7 @@ export function useTurnResend(args: {
       return;
     }
     setTurns((prev) => truncateTurns(prev, resolved.turn, message));
-    startStream(message, resolved.index);
+    startStream(message, resolved.turn.attachments ?? [], resolved.index);
   };
 
   // Regenerate exists ONLY on the last user turn: resends that message and
@@ -378,11 +379,12 @@ export function useTurnResend(args: {
       return;
     }
     setTurns((prev) => truncateTurns(prev, resolved.turn));
-    startStream(resolved.turn.text, resolved.index);
+    startStream(resolved.turn.text, resolved.turn.attachments ?? [], resolved.index);
   };
 
   // Retry on a failed/stopped bubble resends ITS triggering user message
-  // from that point without duplicating the failed turn.
+  // (with its original attachment refs — D6) from that point without
+  // duplicating the failed turn.
   const handleRetryTurn = (assistantTurn: ChatTurn) => {
     if (streaming) return;
     const resolved = resolveResendTarget({ turns, target: assistantTurn, rawMessages, mode: "retry" });
@@ -391,7 +393,7 @@ export function useTurnResend(args: {
       return;
     }
     setTurns((prev) => truncateTurns(prev, resolved.turn));
-    startStream(resolved.turn.text, resolved.index);
+    startStream(resolved.turn.text, resolved.turn.attachments ?? [], resolved.index);
   };
 
   return { handleEditSave, handleRegenerate, handleRetryTurn };
