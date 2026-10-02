@@ -180,17 +180,62 @@ describe("CliConfigService", () => {
     await Effect.runPromise(svc.saveConfig({ url: "http://example.com", apiKey: "k" }, g));
     await Effect.runPromise(svc.clearConfig(g));
     expect(existsSync(join(g, "config.json"))).toBe(false);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("Logged out. Removed"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Logged out example.com. Removed"));
     log.mockRestore();
   });
-  it("savedLogin finds the login in a group dir", async () => {
+  it("clearConfig on a missing file is silent (no false success)", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const svc = await loadService();
-    await Effect.runPromise(svc.saveConfig({ url: "http://lexa.example.com", apiKey: "k" }, await groupFor("http://lexa.example.com")));
-    expect(await Effect.runPromise(svc.savedLogin())).toEqual({ url: "http://lexa.example.com", apiKey: "k" });
+    await Effect.runPromise(svc.clearConfig(await groupFor("http://example.com")));
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
   });
-  it("savedLogin is null when no group has a login", async () => {
+  it("listSavedLogins returns group dirs sorted, skipping the active marker and non-dirs", async () => {
     const svc = await loadService();
-    expect(await Effect.runPromise(svc.savedLogin())).toBeNull();
+    await Effect.runPromise(svc.saveConfig({ url: "http://b.example.com", apiKey: "kb" }, await groupFor("http://b.example.com")));
+    await Effect.runPromise(svc.saveConfig({ url: "http://a.example.com", apiKey: "ka" }, await groupFor("http://a.example.com")));
+    // The reserved active marker and plain files must never be read as groups.
+    writeFileSync(join(dir, "active"), "a.example.com\n");
+    writeFileSync(join(dir, "not-a-dir"), "x");
+    expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([
+      { host: "a.example.com", url: "http://a.example.com", apiKey: "ka" },
+      { host: "b.example.com", url: "http://b.example.com", apiKey: "kb" },
+    ]);
+  });
+  it("listSavedLogins is empty when no group has a login", async () => {
+    const svc = await loadService();
+    expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([]);
+  });
+  it("listSavedLogins normalizes raw group dir names to hosts", async () => {
+    const svc = await loadService();
+    const raw = join(dir, "127.0.0.1");
+    mkdirSync(raw, { recursive: true });
+    writeFileSync(join(raw, "config.json"), JSON.stringify({ url: "http://127.0.0.1", apiKey: "k" }));
+    expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([
+      { host: "localhost", url: "http://127.0.0.1", apiKey: "k" },
+    ]);
+  });
+  it("singleSavedLogin returns the only login, null for zero or several", async () => {
+    const svc = await loadService();
+    expect(await Effect.runPromise(svc.singleSavedLogin())).toBeNull();
+    await Effect.runPromise(svc.saveConfig({ url: "http://only.example.com", apiKey: "k" }, await groupFor("http://only.example.com")));
+    expect(await Effect.runPromise(svc.singleSavedLogin())).toEqual({ host: "only.example.com", url: "http://only.example.com", apiKey: "k" });
+    await Effect.runPromise(svc.saveConfig({ url: "http://two.example.com", apiKey: "k2" }, await groupFor("http://two.example.com")));
+    expect(await Effect.runPromise(svc.singleSavedLogin())).toBeNull();
+  });
+  it("setActiveHost normalizes + round-trips; clearActiveHost removes the marker", async () => {
+    const svc = await loadService();
+    expect(await Effect.runPromise(svc.activeHost())).toBeNull();
+    await Effect.runPromise(svc.setActiveHost("https://Lexa.Example.Com"));
+    expect(await Effect.runPromise(svc.activeHost())).toBe("lexa.example.com");
+    expect(mode(join(dir, "active"))).toBe(0o600);
+    await Effect.runPromise(svc.clearActiveHost());
+    expect(await Effect.runPromise(svc.activeHost())).toBeNull();
+  });
+  it("activeHost is null on an empty marker", async () => {
+    writeFileSync(join(dir, "active"), "  \n");
+    const svc = await loadService();
+    expect(await Effect.runPromise(svc.activeHost())).toBeNull();
   });
   it("lexaDir() reports the env override", async () => {
     const svc = await loadService();
