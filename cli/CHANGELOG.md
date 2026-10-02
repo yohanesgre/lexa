@@ -12,6 +12,20 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.5.2] - 2026-10-03
+
+### Changed
+
+- **Active-host model for multiple logins** — resolution is `--url` >
+  `LEXA_URL` > the active saved login, stored keys are host-scoped, `logout`
+  targets the active host (with `--all` to clear every saved login), and
+  `status` shows the host it resolved.
+
+### Removed
+
+- **`lx github --local/--env-file`** — GitHub sync is configured in the web
+  app only; both flags are now hard errors.
+
 ## [2026.5.1] - 2026-10-01
 
 ### Fixed
