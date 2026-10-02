@@ -189,10 +189,6 @@ export function deleteSettingAsync(
 // `mirrorSettingsFromEnv` takes Record<string, string|undefined> but
 // RuntimeEnv carries D1/R2/KV bindings — project the string keys only.
 const STRING_ENV_KEYS = [
-  "GITHUB_APP_ID",
-  "GITHUB_PRIVATE_KEY",
-  "GITHUB_PRIVATE_KEY_FILE",
-  "GITHUB_WEBHOOK_SECRET",
   "LXK_RATE_LIMIT_MAX",
   "LXK_RATE_LIMIT_WINDOW_MS",
   "LXK_ASSISTANT_REPO_CAP",
@@ -211,17 +207,12 @@ export function stringEnvFromRuntimeEnv(env: RuntimeEnv): Record<string, string 
 // Same semantics as mirrorSettingsFromEnv in server/db/settings.ts: the DB
 // is the single source of truth at runtime; env only provisions first boot.
 // Each mapping is written when the DB key is absent/empty AND the env value
-// is truthy — existing DB values are NEVER overwritten. Inline
-// GITHUB_PRIVATE_KEY wins over the file when both are set.
-//
-// Workers difference (platform, not behavior): GITHUB_PRIVATE_KEY_FILE is
-// impossible on Workers (no filesystem), so the file branch only runs when
-// the caller passes a readFile — workers-entry.ts omits it and logs a warn
-// when the var is set. Returns the mirrored keys (for boot logging).
+// is truthy — existing DB values are NEVER overwritten. GitHub config is
+// never mirrored: it is written only by the web app. Returns the mirrored
+// keys (for boot logging).
 export function mirrorSettingsFromEnvAsync(
   driver: DbDriver,
-  env: Record<string, string | undefined>,
-  readFile?: (path: string) => string
+  env: Record<string, string | undefined>
 ): Effect.Effect<string[], ConstraintViolation | DbError> {
   return Effect.gen(function* () {
     const mirrored: string[] = [];
@@ -239,31 +230,6 @@ export function mirrorSettingsFromEnvAsync(
       );
     };
 
-    yield* mirror("github_app_id", env.GITHUB_APP_ID);
-    yield* mirror("github_webhook_secret", env.GITHUB_WEBHOOK_SECRET);
-    if (env.GITHUB_PRIVATE_KEY) {
-      yield* mirror("github_private_key", env.GITHUB_PRIVATE_KEY);
-    } else if (env.GITHUB_PRIVATE_KEY_FILE) {
-      if (yield* isAbsent("github_private_key")) {
-        if (!readFile) {
-          yield* Effect.sync(() =>
-            console.warn("[Settings] GITHUB_PRIVATE_KEY_FILE is set but unreadable here (no filesystem) — set inline GITHUB_PRIVATE_KEY instead")
-          );
-        } else {
-          const content = yield* Effect.try({
-            try: () => readFile(env.GITHUB_PRIVATE_KEY_FILE as string),
-            catch: () => new DbError({ message: "unreadable" }),
-          }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-          if (content === null) {
-            yield* Effect.sync(() =>
-              console.warn(`[Settings] GITHUB_PRIVATE_KEY_FILE unreadable (${env.GITHUB_PRIVATE_KEY_FILE}) — skipping mirror`)
-            );
-          } else {
-            yield* mirror("github_private_key", content);
-          }
-        }
-      }
-    }
     yield* mirror("rate_limit_max", env.LXK_RATE_LIMIT_MAX);
     yield* mirror("rate_limit_window_ms", env.LXK_RATE_LIMIT_WINDOW_MS);
     yield* mirror("assistant_repo_cap", env.LXK_ASSISTANT_REPO_CAP);

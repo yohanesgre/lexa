@@ -98,8 +98,21 @@ describe("parseEnvToml", () => {
   });
 
   it("parses a multiline basic string (PEM-friendly)", () => {
-    const values = parseEnvToml('[github]\nGITHUB_PRIVATE_KEY = """line1\nline2\n"""\n');
-    expect(values.GITHUB_PRIVATE_KEY).toBe("line1\nline2\n");
+    const values = parseEnvToml('[secrets]\nLXK_SECRETS_MASTER_KEY = """line1\nline2\n"""\n');
+    expect(values.LXK_SECRETS_MASTER_KEY).toBe("line1\nline2\n");
+  });
+});
+
+describe("legacy [github] section", () => {
+  it("still parses and loads its values into the environment", () => {
+    const dir = tmpDir();
+    const path = join(dir, ".env.toml");
+    writeFileSync(path, '[github]\nGITHUB_APP_ID = "123"\nGITHUB_WEBHOOK_SECRET = "whsec"\n');
+    const env: Record<string, string | undefined> = {};
+    const res = applyEnvFile({ path, env });
+    expect(res.applied).toEqual(["GITHUB_APP_ID", "GITHUB_WEBHOOK_SECRET"]);
+    expect(env.GITHUB_APP_ID).toBe("123");
+    expect(env.GITHUB_WEBHOOK_SECRET).toBe("whsec");
   });
 });
 
@@ -272,8 +285,8 @@ describe("writeEnvFile / readEnvFile", () => {
     const dir = tmpDir();
     const path = join(dir, ".env.toml");
     const pem = "-----BEGIN PRIVATE KEY-----\nMIIabc\n-----END PRIVATE KEY-----\n";
-    writeEnvFile(path, { GITHUB_PRIVATE_KEY: pem });
-    expect(readEnvFile(path).GITHUB_PRIVATE_KEY).toBe(pem);
+    writeEnvFile(path, { LXK_SECRETS_MASTER_KEY: pem });
+    expect(readEnvFile(path).LXK_SECRETS_MASTER_KEY).toBe(pem);
   });
 
   it("is byte-exact against a legacy dotenv fixture (legacy parity)", () => {
@@ -282,8 +295,8 @@ describe("writeEnvFile / readEnvFile", () => {
       "DATABASE_PATH=./data/lexa.db",
       "LXK_ADMIN_EMAILS=ops@example.com",
       "LOG_LEVEL=debug",
-      "GITHUB_WEBHOOK_SECRET=abc123",
-      'GITHUB_PRIVATE_KEY="line1\\nline2"',
+      "LXK_S3_SECRET_ACCESS_KEY=abc123",
+      'LXK_SECRETS_MASTER_KEY="line1\\nline2"',
       "",
     ].join("\n");
     const parsed = parseDotenv(legacy);
@@ -441,7 +454,7 @@ describe(".env.toml.example drift guard", () => {
     for (const key of Object.keys(active)) expect(present.has(key)).toBe(true);
     expect(text.indexOf("[core]")).toBeLessThan(text.indexOf("[auth]"));
     expect(text.indexOf("[auth]")).toBeLessThan(text.indexOf("[urls]"));
-    expect(text.indexOf("[urls]")).toBeLessThan(text.indexOf("[github]"));
+    expect(text.indexOf("[urls]")).toBeLessThan(text.indexOf("[storage]"));
   });
 });
 
@@ -475,6 +488,8 @@ describe("env-file CLI", () => {
       "VITE_LXK_API_KEY=dead1",
       "LXK_API_KEY=dead2",
       "RUNTIME_STALE_RUN_MIN=45",
+      "GITHUB_APP_ID=dead-github-id",
+      "GITHUB_WEBHOOK_SECRET=dead-github-secret",
       "LOG_LEVEL=debug",
       `LXK_SECRETS_MASTER_KEY="${pem.replace(/\n/g, "\\n")}"`,
       "",

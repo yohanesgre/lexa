@@ -5,6 +5,7 @@ import {
   getEnv,
   getEnvFromWorkers,
   isRuntimeEnvStringKey,
+  legacyGithubEnvVars,
   RUNTIME_ENV_STRING_KEYS,
   resolveDatabasePath,
   resolvePublicUrl,
@@ -21,7 +22,6 @@ describe("getEnv", () => {
       LXK_ENV: "prod",
       LXK_PUBLIC_URL: "https://lexa.example.com",
       LXK_TRUSTED_ORIGINS: "https://a.example.com, https://b.example.com",
-      GITHUB_APP_ID: "123",
       LXK_MAX_BODY_MB: "32",
       LXK_RATE_LIMIT_MAX: "1000",
       LXK_RATE_LIMIT_WINDOW_MS: "60000",
@@ -33,7 +33,6 @@ describe("getEnv", () => {
     expect(rt.LXK_ENV).toBe("prod");
     expect(rt.LXK_PUBLIC_URL).toBe("https://lexa.example.com");
     expect(rt.LXK_TRUSTED_ORIGINS).toBe("https://a.example.com, https://b.example.com");
-    expect(rt.GITHUB_APP_ID).toBe("123");
     expect(rt.LXK_MAX_BODY_MB).toBe("32");
     expect(rt.LXK_RATE_LIMIT_MAX).toBe("1000");
     expect(rt.LXK_RATE_LIMIT_WINDOW_MS).toBe("60000");
@@ -58,6 +57,30 @@ describe("legacy env keys are dropped", () => {
     expect("LXK_RUNTIME_DAEMON_TOKEN" in rt).toBe(false);
     expect("LXK_RUNTIME_REPO_CAP" in rt).toBe(false);
     expect("RUNTIME_STALE_RUN_MIN" in rt).toBe(false);
+  });
+});
+
+describe("legacyGithubEnvVars", () => {
+  it("returns present non-empty names in fixed order", () => {
+    expect(
+      legacyGithubEnvVars({
+        GITHUB_WEBHOOK_SECRET: "whsec",
+        GITHUB_APP_ID: "1",
+        GITHUB_PRIVATE_KEY_FILE: "/x.pem",
+        GITHUB_PRIVATE_KEY: "pem",
+      })
+    ).toEqual(["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]);
+  });
+
+  it("treats absent and empty as not present", () => {
+    expect(legacyGithubEnvVars({})).toEqual([]);
+    expect(legacyGithubEnvVars({ GITHUB_APP_ID: "", GITHUB_PRIVATE_KEY: undefined })).toEqual([]);
+  });
+
+  it("never returns values", () => {
+    const names = legacyGithubEnvVars({ GITHUB_APP_ID: "super-secret-id" });
+    expect(names).toEqual(["GITHUB_APP_ID"]);
+    expect(names.join(",")).not.toContain("super-secret-id");
   });
 });
 
@@ -109,8 +132,6 @@ describe("getEnvFromWorkers", () => {
     const rt = getEnvFromWorkers({
       LXK_ENV: "prod",
       LXK_PUBLIC_URL: "https://lexa.example.com",
-      GITHUB_APP_ID: "123",
-      GITHUB_WEBHOOK_SECRET: "whsec",
       LXK_TRUSTED_ORIGINS: "https://a.test",
       LOG_LEVEL: "warn",
       LXK_MAX_BODY_MB: "16",
@@ -123,8 +144,6 @@ describe("getEnvFromWorkers", () => {
     });
     expect(rt.LXK_ENV).toBe("prod");
     expect(rt.LXK_PUBLIC_URL).toBe("https://lexa.example.com");
-    expect(rt.GITHUB_APP_ID).toBe("123");
-    expect(rt.GITHUB_WEBHOOK_SECRET).toBe("whsec");
     expect(rt.LXK_TRUSTED_ORIGINS).toBe("https://a.test");
     expect(rt.LOG_LEVEL).toBe("warn");
     expect(rt.LXK_MAX_BODY_MB).toBe("16");
@@ -186,9 +205,9 @@ describe("RUNTIME_ENV_STRING_KEYS", () => {
     const source = Object.fromEntries(RUNTIME_ENV_STRING_KEYS.map((k) => [k, `v-${k}`]));
     const bun = getEnv(source as Record<string, string | undefined>);
     const workers = getEnvFromWorkers(source);
-    expect(bun.GITHUB_WEBHOOK_SECRET).toBe("v-GITHUB_WEBHOOK_SECRET");
+    expect(bun.LXK_RATE_LIMIT_MAX).toBe("v-LXK_RATE_LIMIT_MAX");
     expect(bun.LXK_S3_SECRET_ACCESS_KEY).toBe("v-LXK_S3_SECRET_ACCESS_KEY");
-    expect(workers.GITHUB_WEBHOOK_SECRET).toBe("v-GITHUB_WEBHOOK_SECRET");
+    expect(workers.LXK_RATE_LIMIT_MAX).toBe("v-LXK_RATE_LIMIT_MAX");
     expect(workers.CRON_SECRET).toBe("v-CRON_SECRET");
     // Workers path differences are preserved, not forced through the list.
     expect(workers.LXK_STORAGE_DRIVER).toBe("r2");

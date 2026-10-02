@@ -236,8 +236,7 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   configured in the webapp (Admin → Assistant → Providers & Models). With no key
   stored and the flag off the layer stays disabled and costs nothing. It uses the
   same `LXK_SECRETS_MASTER_KEY` as every other managed secret.
-- `GITHUB_PRIVATE_KEY_FILE` (path-based PEM) **impossible** — no filesystem. Use
-  inline `GITHUB_PRIVATE_KEY` secret (already supported per `docs/GITHUB_SETUP.md`).
+- GitHub config lives in D1 via the web app — no GitHub secrets.
 - **Managed secrets** (MCP client tokens, LLM provider API keys, and the Jev API
   key entered in the webapp) work natively here — which is the point, since
   Workers has no per-client auth path other than a bound secret. The managed
