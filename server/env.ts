@@ -22,11 +22,6 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "LXK_TRUSTED_ORIGINS",
   "LXK_TRUSTED_PROXY_CIDRS",
   "LXK_ADMIN_EMAILS",
-  // GitHub
-  "GITHUB_APP_ID",
-  "GITHUB_PRIVATE_KEY",
-  "GITHUB_PRIVATE_KEY_FILE",
-  "GITHUB_WEBHOOK_SECRET",
   // Storage drivers
   "LXK_STORAGE_DRIVER",
   "LXK_STORAGE_FS_ROOT",
@@ -87,6 +82,23 @@ export function isRuntimeEnvStringKey(name: string): name is RuntimeEnvStringKey
 
 export type ProcessEnvSource = Record<string, string | undefined>;
 
+// The four legacy GitHub env names, in fixed order. GitHub config is written
+// only by the web app; these names are dead and warned-and-ignored at boot.
+const LEGACY_GITHUB_ENV_VARS = [
+  "GITHUB_APP_ID",
+  "GITHUB_PRIVATE_KEY",
+  "GITHUB_PRIVATE_KEY_FILE",
+  "GITHUB_WEBHOOK_SECRET",
+] as const;
+
+/** Present, non-empty legacy GitHub env names (never values), in fixed order. */
+export function legacyGithubEnvVars(source: Record<string, string | undefined>): string[] {
+  return LEGACY_GITHUB_ENV_VARS.filter((name) => {
+    const value = source[name];
+    return typeof value === "string" && value !== "";
+  });
+}
+
 /**
  * Build a RuntimeEnv from a plain process-env-shaped object. Used by the Bun
  * host's `server/entry.ts` at boot — the snapshot is captured once and
@@ -102,10 +114,6 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_TRUSTED_ORIGINS: source.LXK_TRUSTED_ORIGINS,
     LXK_TRUSTED_PROXY_CIDRS: source.LXK_TRUSTED_PROXY_CIDRS,
     LXK_ADMIN_EMAILS: source.LXK_ADMIN_EMAILS,
-    GITHUB_APP_ID: source.GITHUB_APP_ID,
-    GITHUB_PRIVATE_KEY: source.GITHUB_PRIVATE_KEY,
-    GITHUB_PRIVATE_KEY_FILE: source.GITHUB_PRIVATE_KEY_FILE,
-    GITHUB_WEBHOOK_SECRET: source.GITHUB_WEBHOOK_SECRET,
     LXK_STORAGE_DRIVER: source.LXK_STORAGE_DRIVER,
     LXK_STORAGE_FS_ROOT: source.LXK_STORAGE_FS_ROOT,
     LXK_S3_BUCKET: source.LXK_S3_BUCKET,
@@ -149,10 +157,6 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_TRUSTED_ORIGINS: s("LXK_TRUSTED_ORIGINS"),
     LXK_TRUSTED_PROXY_CIDRS: s("LXK_TRUSTED_PROXY_CIDRS"),
     LXK_ADMIN_EMAILS: s("LXK_ADMIN_EMAILS"),
-    GITHUB_APP_ID: s("GITHUB_APP_ID"),
-    GITHUB_PRIVATE_KEY: s("GITHUB_PRIVATE_KEY"),
-    GITHUB_PRIVATE_KEY_FILE: s("GITHUB_PRIVATE_KEY_FILE"),
-    GITHUB_WEBHOOK_SECRET: s("GITHUB_WEBHOOK_SECRET"),
     LXK_STORAGE_DRIVER: "r2",
     LXK_STORAGE_FS_ROOT: undefined,
     LXK_S3_BUCKET: undefined,

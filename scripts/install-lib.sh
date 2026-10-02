@@ -19,7 +19,7 @@
 #     reads stdin (script may be piped) — /dev/tty only, flag > env > default.
 #   - write_env_file / write_env_toml / compose_render accept whitelisted
 #     keys/values only. Env writes merge (never truncate) so operator-added
-#     keys (GITHUB_*) survive a re-run.
+#     keys survive a re-run.
 #   - Dry-run (§9 test-swap): INSTALL_DRY_RUN=1 swaps R — mutating commands
 #     route through mutate() (docker/systemctl/curl -X/-f) and are logged,
 #     not executed; step() marks nodes with "#» DRY-RUN". Same graph.
@@ -51,7 +51,8 @@ Flags:
   --no-pull                        docker only: skip `docker compose pull` and
                                    use a locally available image
   --systemd                        bare: write + enable systemd unit
-  --secrets-file <path>            optional secrets (KEY=value) applied at install
+  --secrets-file <path>            optional secrets (KEY=value, e.g.
+                                   LXK_SECRETS_MASTER_KEY) applied at install
   --reset-db                       workers: drop the existing D1 database and
                                    start migrations fresh (data is lost)
   --yes                            assume yes for confirmations
@@ -234,8 +235,8 @@ verify_checksum() {
 # compose itself interpolates.
 # Keys the app no longer reads — migration drops them, never carries them.
 # ---------------------------------------------------------------------------
-ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET LXK_SECRETS_MASTER_KEY COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
-ENV_FILE_DEAD_KEYS=" VITE_LXK_API_KEY LXK_API_KEY LXK_ACCESS_AUD LXK_ACCESS_TEAM LXK_RUNTIME_DAEMON_TOKEN LXK_RUNTIME_REPO_CAP RUNTIME_STALE_RUN_MIN "
+ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT LXK_SECRETS_MASTER_KEY COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
+ENV_FILE_DEAD_KEYS=" VITE_LXK_API_KEY LXK_API_KEY LXK_ACCESS_AUD LXK_ACCESS_TEAM LXK_RUNTIME_DAEMON_TOKEN LXK_RUNTIME_REPO_CAP RUNTIME_STALE_RUN_MIN GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET "
 # Compose-tooling keys: compose itself interpolates these from the flat `.env`,
 # so migration must NOT move them into `.env.toml` (that would drop the compose
 # project name and orphan the `lexa-data` volume, or silently unpin the image).
@@ -362,7 +363,7 @@ toml_escape() {
 # presentation only (the loader keys off the leaf names); order mirrors
 # server/env-file.ts.
 env_to_toml() {
-  local core="" auth="" urls="" github="" other=""
+  local core="" auth="" urls="" other=""
   local kv key line
   for kv in "$@"; do
     key="${kv%%=*}"
@@ -374,14 +375,12 @@ env_to_toml() {
       DATABASE_PATH|PORT|COMPOSE_PROJECT_NAME|LXK_IMAGE_TAG|CF_TUNNEL_TOKEN) core+="${line}"$'\n' ;;
       LXK_ADMIN_EMAILS) auth+="${line}"$'\n' ;;
       LXK_ENV|LXK_PUBLIC_URL|LXK_TRUSTED_ORIGINS|LXK_TRUSTED_PROXY_CIDRS) urls+="${line}"$'\n' ;;
-      GITHUB_APP_ID|GITHUB_PRIVATE_KEY|GITHUB_PRIVATE_KEY_FILE|GITHUB_WEBHOOK_SECRET) github+="${line}"$'\n' ;;
       *) other+="${line}"$'\n' ;;
     esac
   done
   [ -n "$core" ] && printf '[core]\n%s\n' "$core"
   [ -n "$auth" ] && printf '[auth]\n%s\n' "$auth"
   [ -n "$urls" ] && printf '[urls]\n%s\n' "$urls"
-  [ -n "$github" ] && printf '[github]\n%s\n' "$github"
   [ -n "$other" ] && printf '[other]\n%s\n' "$other"
   return 0
 }
@@ -1150,14 +1149,14 @@ bare_start_manual() {
 # ---------------------------------------------------------------------------
 # final_banner <url>
 # Per-target summary: URL, /setup, CLI keys, and the secrets state. Callers set
-# BANNER_MASTER (e.g. `master key ✓ (dockers/.env.toml)`) and BANNER_GITHUB.
-# An empty url means the address was not recorded (workers without a captured
-# .deployed-url) — the banner points at the dashboard instead of inventing one.
+# BANNER_MASTER (e.g. `master key ✓ (dockers/.env.toml)`); the Secrets block is
+# printed only when it is non-empty. An empty url means the address was not
+# recorded (workers without a captured .deployed-url) — the banner points at the
+# dashboard instead of inventing one.
 # ---------------------------------------------------------------------------
 final_banner() {
   local url="$1"
   local master="${BANNER_MASTER:-}"
-  local github="${BANNER_GITHUB:-GitHub sync not configured — add later with --secrets-file}"
   echo ""
   echo "═══════════════════════════════════════════════"
   if [ -n "$url" ]; then
@@ -1180,39 +1179,8 @@ final_banner() {
   echo ""
   if [ -n "$master" ]; then
     echo "  Secrets: ${master}"
-    echo "           ${github}"
-  else
-    echo "  Secrets: ${github}"
   fi
   echo "═══════════════════════════════════════════════"
-}
-
-# set_banner_github [env_file] — GitHub nudge line from GITHUB_TRIO_OK, falling
-# back to the persisted trio in the target env file on a re-run.
-set_banner_github() {
-  local file="${1:-}"
-  if [ "${GITHUB_TRIO_OK:-0}" = "1" ]; then
-    BANNER_GITHUB="GitHub sync configured"
-    return 0
-  fi
-  if [ -n "$file" ] && _env_file_has_github_trio "$file"; then
-    BANNER_GITHUB="GitHub sync configured"
-  else
-    BANNER_GITHUB="GitHub sync not configured — add later with --secrets-file"
-  fi
-}
-
-# _env_file_has_github_trio <file> — a complete, persisted GitHub trio in an
-# env file (TOML or flat). Empty values count as absent. Lets a re-run banner
-# report the real state even when this run didn't re-supply the secrets.
-_env_file_has_github_trio() {
-  local file="$1" id="" wh="" pk=""
-  [ -f "$file" ] || return 1
-  id="$(env_file_value "$file" GITHUB_APP_ID)"
-  wh="$(env_file_value "$file" GITHUB_WEBHOOK_SECRET)"
-  pk="$(env_file_value "$file" GITHUB_PRIVATE_KEY)"
-  [ -n "$pk" ] || pk="$(env_file_value "$file" GITHUB_PRIVATE_KEY_FILE)"
-  [ -n "$id" ] && [ -n "$wh" ] && [ -n "$pk" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -1413,11 +1381,10 @@ _tty_available() {
   { : > /dev/tty; } 2>/dev/null
 }
 
-# SECRET_ENTRIES — "KEY=value" pairs collected from --secrets-file or the
-# interactive wizard; applied per target (docker/bare: merged into .env.toml;
-# workers: pushed as Worker secrets + written to custody).
+# SECRET_ENTRIES — "KEY=value" pairs collected from --secrets-file; applied per
+# target (docker/bare: merged into .env.toml; workers: pushed as Worker secrets
+# + written to custody).
 SECRET_ENTRIES=()
-GITHUB_TRIO_OK=0
 
 # secrets_load_file <path> — KEY=value lines, each key validated against
 # ENV_FILE_ALLOWED_KEYS. Values are dotenv-decoded (quotes / `\n` escapes).
@@ -1449,126 +1416,12 @@ secrets_load_file() {
   done < "$path"
 }
 
-# secrets_wizard <target> — interactive optional-secrets entry. Fail-closed:
-# the GitHub trio is only recorded when all three values are present/readable.
-secrets_wizard() {
-  local target="$1" answer app_id webhook pk_path pk
-  answer=$(tty_read "Set up optional secrets now (GitHub sync)? [y/N]" "n")
-  case "$answer" in
-    [Yy]*) ;;
-    *) return 0 ;;
-  esac
-  app_id=$(tty_read "GitHub App ID:" "")
-  webhook=$(tty_read_secret "GitHub webhook secret:")
-  pk_path=$(tty_read "Private key — paste the path to your .pem file:" "")
-  if [ -z "$app_id" ] || [ -z "$webhook" ] || [ -z "$pk_path" ] || [ ! -r "$pk_path" ]; then
-    echo "  GitHub sync needs all three values — skipping it. Add them later with --secrets-file."
-    return 0
-  fi
-  if [ "$target" = "bare" ]; then
-    SECRET_ENTRIES+=("GITHUB_APP_ID=${app_id}" "GITHUB_WEBHOOK_SECRET=${webhook}" "GITHUB_PRIVATE_KEY_FILE=${pk_path}")
-  else
-    pk="$(cat "$pk_path")"
-    SECRET_ENTRIES+=("GITHUB_APP_ID=${app_id}" "GITHUB_WEBHOOK_SECRET=${webhook}" "GITHUB_PRIVATE_KEY=${pk}")
-  fi
-}
-
-# secrets_normalize_for_target <target> — docker/workers have no filesystem
-# (Workers) or take the key inline (docker): a GITHUB_PRIVATE_KEY_FILE entry is
-# read and rewritten as inline GITHUB_PRIVATE_KEY. An unreadable path drops the
-# entry so the trio check fails closed. Bare may keep the path.
-secrets_normalize_for_target() {
-  local target="$1" need_inline=0 kv k pk="" have_pk_file=0
-  [ "${#SECRET_ENTRIES[@]}" -eq 0 ] && return 0
-  if [ "$target" = "docker" ] || [ "$target" = "workers" ]; then
-    need_inline=1
-  fi
-  [ "$need_inline" = "1" ] || return 0
-  for kv in "${SECRET_ENTRIES[@]}"; do
-    k="${kv%%=*}"
-    if [ "$k" = "GITHUB_PRIVATE_KEY_FILE" ]; then
-      have_pk_file=1
-      pk="${kv#*=}"
-    fi
-  done
-  [ "$have_pk_file" = "1" ] || return 0
-  local out=()
-  if [ ! -r "$pk" ]; then
-    for kv in "${SECRET_ENTRIES[@]}"; do
-      k="${kv%%=*}"
-      [ "$k" = "GITHUB_PRIVATE_KEY_FILE" ] && continue
-      out+=("$kv")
-    done
-    SECRET_ENTRIES=(${out[@]+"${out[@]}"})
-    return 0
-  fi
-  local content
-  content="$(cat "$pk")"
-  for kv in "${SECRET_ENTRIES[@]}"; do
-    k="${kv%%=*}"
-    [ "$k" = "GITHUB_PRIVATE_KEY_FILE" ] && continue
-    out+=("$kv")
-  done
-  out+=("GITHUB_PRIVATE_KEY=${content}")
-  SECRET_ENTRIES=(${out[@]+"${out[@]}"})
-}
-
-# secrets_check_trio — GitHub sync needs all three values. None → nothing to do;
-# all three → ok; partial → drop the whole trio with a warning (never write a
-# partial trio). An empty value counts as absent, and a GITHUB_PRIVATE_KEY_FILE
-# must be readable — the path is useless if the file isn't there.
-secrets_check_trio() {
-  GITHUB_TRIO_OK=0
-  local have_id=0 have_wh=0 have_pk=0 kv k v
-  for kv in ${SECRET_ENTRIES[@]+"${SECRET_ENTRIES[@]}"}; do
-    k="${kv%%=*}"
-    v="${kv#*=}"
-    case "$k" in
-      GITHUB_APP_ID)
-        if [ -n "$v" ]; then have_id=1; fi
-        ;;
-      GITHUB_WEBHOOK_SECRET)
-        if [ -n "$v" ]; then have_wh=1; fi
-        ;;
-      GITHUB_PRIVATE_KEY)
-        if [ -n "$v" ]; then have_pk=1; fi
-        ;;
-      GITHUB_PRIVATE_KEY_FILE)
-        if [ -n "$v" ] && [ -r "$v" ]; then have_pk=1; fi
-        ;;
-    esac
-  done
-  [ $((have_id + have_wh + have_pk)) -eq 0 ] && return 0
-  if [ "$have_id" = "1" ] && [ "$have_wh" = "1" ] && [ "$have_pk" = "1" ]; then
-    GITHUB_TRIO_OK=1
-    return 0
-  fi
-  local out=()
-  for kv in "${SECRET_ENTRIES[@]}"; do
-    k="${kv%%=*}"
-    case "$k" in
-      GITHUB_APP_ID|GITHUB_WEBHOOK_SECRET|GITHUB_PRIVATE_KEY|GITHUB_PRIVATE_KEY_FILE) continue ;;
-    esac
-    out+=("$kv")
-  done
-  SECRET_ENTRIES=(${out[@]+"${out[@]}"})
-  echo "  GitHub sync needs all three values — skipping it. Add them later with --secrets-file."
-}
-
-# collect_optional_secrets <target> — populate SECRET_ENTRIES from
-# --secrets-file, else the TTY wizard (skipped with --yes / no terminal), then
-# normalize + fail-closed trio check.
+# collect_optional_secrets — populate SECRET_ENTRIES from --secrets-file.
 collect_optional_secrets() {
-  local target="$1"
   SECRET_ENTRIES=()
-  GITHUB_TRIO_OK=0
   if [ -n "${SECRETS_FILE:-}" ]; then
     secrets_load_file "${SECRETS_FILE}"
-  elif [ "${ASSUME_YES:-0}" != "1" ] && _tty_available; then
-    secrets_wizard "${target}"
   fi
-  secrets_normalize_for_target "${target}"
-  secrets_check_trio
 }
 
 # apply_secrets_to_env <path> — merge collected entries with no value in argv.
@@ -1579,10 +1432,10 @@ apply_secrets_to_env() {
 }
 
 # workers_apply_secrets <workdir> — push the master key (from _WORKERS_MASTER_KEY,
-# set by deploy_workers) and any collected GitHub secrets via wrangler, and write
-# them to custody. Values travel on stdin from 0600 temp files.
+# set by deploy_workers) via wrangler, and write any collected secrets to
+# custody. Values travel on stdin from 0600 temp files.
 workers_apply_secrets() {
-  local workdir="$1" kv k vf
+  local workdir="$1" vf
   if [ -n "${_WORKERS_MASTER_KEY:-}" ]; then
     vf="$(mktemp)"
     chmod 600 "$vf"
@@ -1590,18 +1443,6 @@ workers_apply_secrets() {
     step "apply secrets" wrangler_secret_put "$workdir" LXK_SECRETS_MASTER_KEY "$vf"
     rm -f "$vf"
   fi
-  for kv in ${SECRET_ENTRIES[@]+"${SECRET_ENTRIES[@]}"}; do
-    k="${kv%%=*}"
-    case "$k" in
-      GITHUB_APP_ID|GITHUB_WEBHOOK_SECRET|GITHUB_PRIVATE_KEY) ;;
-      *) continue ;;
-    esac
-    vf="$(mktemp)"
-    chmod 600 "$vf"
-    printf '%s' "${kv#*=}" > "$vf"
-    step "apply secrets" wrangler_secret_put "$workdir" "$k" "$vf"
-    rm -f "$vf"
-  done
   if [ "${#SECRET_ENTRIES[@]}" -gt 0 ]; then
     write_env_toml "${workdir}/.env.toml" "${SECRET_ENTRIES[@]}"
   fi

@@ -26,7 +26,7 @@ notes (assistant absent, how to export thread history before switching) are in
 
 The canonical config file is **`.env.toml`**. It is structured TOML where the
 sections (`[core]`, `[auth]`, `[github]`, …) are presentation only and every
-leaf key is the env-var name verbatim (`DATABASE_PATH`, `LXK_*`, `GITHUB_*`).
+leaf key is the env-var name verbatim (`DATABASE_PATH`, `LXK_*`).
 Working env files are **never committed** — values are generated
 on the machine by the install script or the setup wizard, and all working
 `.env*` files are gitignored. The tracked `.env.toml.example` (repo root) is the
@@ -53,7 +53,7 @@ converts it to `.env.toml` and renames the original to `.env.legacy` (0600).
 > tunnel is configured. An operator-set `COMPOSE_PROJECT_NAME` is preserved but
 > the installer never writes it (setting it would rename the compose project and
 > orphan the `lexa-data` volume). Re-runs **merge** — operator-added keys such as
-> `GITHUB_*`, `LXK_SECRETS_MASTER_KEY`, and a pinned `LXK_IMAGE_TAG` are preserved
+> `LXK_SECRETS_MASTER_KEY` and a pinned `LXK_IMAGE_TAG` are preserved
 > (previously the flat `.env` was truncated). The installer reads the image's
 > own uid:gid (never a hardcode) and re-owns `.env.toml` to
 > `host-uid:<image-gid>` mode 0640 (a root installer uses
@@ -179,10 +179,9 @@ bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local
   `<D1_DATABASE_ID>`, and `<KV_NAMESPACE_ID>` in the copied file.
 - `LXK_SECRETS_MASTER_KEY` is **required** — Better Auth's session-signing
   secret derives from it (see the variable table) — mint it as base64 of exactly
-  32 bytes (`openssl rand -base64 32`). Optional GitHub sync secrets:
-  `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY` (inline PEM),
-  or use the in-app GitHub connect flow. Point staging at its own GitHub App —
-  one webhook URL belongs to one App.
+  32 bytes (`openssl rand -base64 32`). Configure GitHub sync in the web app
+  after first deploy — point staging at its own GitHub App (one webhook URL
+  belongs to one App).
 - `LXK_PUBLIC_URL` is optional (workers.dev URL or custom domain); a custom
   domain needs a zone in the same Cloudflare account.
 - First superadmin: open `<url>/setup`.
@@ -208,14 +207,11 @@ same isolation (`--name` keys the resource names).
 
 `--secrets-file <path>` applies `KEY=value` lines (keys validated against the
 installer whitelist) at install time. `docker`/`bare` merge them into the
-target `.env.toml`; `workers` pushes them with `wrangler secret put` and writes
-them to `cf-workers/.env.toml` custody. On a terminal, an install without
-`--secrets-file` offers a GitHub-sync wizard instead (`--yes` skips it). The
-GitHub trio (`GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, and a private key) is
-fail-closed: a partial trio is skipped with a warning, never written half-way.
-Workers take the key inline (`GITHUB_PRIVATE_KEY`); bare may keep
-`GITHUB_PRIVATE_KEY_FILE`. Reconfigure later with the same flag, or edit the
-custody file and re-run.
+target `.env.toml`; `workers` pushes only the master key (resolved from
+custody / remote / mint) with `wrangler secret put` and writes the file's
+other keys to `cf-workers/.env.toml` custody. GitHub keys are rejected here —
+configure GitHub sync in the web app after install. Reconfigure later with the
+same flag, or edit the custody file and re-run.
 
 ### Deploy Button — Cloudflare dashboard (DRAFT-UNVERIFIED)
 
@@ -287,9 +283,8 @@ default columns appear when the first project is created.
 
 `bun run setup` (via `server/env-file.ts`) writes `.env.toml` at 0600, merging
 into any existing file. The loader applies `.env.toml` (or a legacy `.env`) at
-boot and never overwrites a variable already set in the real environment. Setup
-and `--local` CLI writes preserve `GITHUB_*` / `LXK_SECRETS_MASTER_KEY` across
-re-runs.
+boot and never overwrites a variable already set in the real environment.
+`LXK_SECRETS_MASTER_KEY` is preserved across re-runs.
 
 | Variable | Written by | Required |
 |---|---|---|
@@ -298,12 +293,10 @@ re-runs.
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
-| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync, or applied at install with `--secrets-file` / the wizard; preserved across install-script re-runs (the installer merges, never truncates) | only for GitHub sync |
-| `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs like `GITHUB_*` | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and, **on Workers, the assistant's** internal HMAC derivation |
+| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and, **on Workers, the assistant's** internal HMAC derivation |
 
 ## Full variable reference
 
@@ -311,10 +304,7 @@ re-runs.
 |---|---|
 | `COMPOSE_PROJECT_NAME` | docker compose project name (dev flavor) — not read by the app |
 | `DATABASE_PATH` | SQLite file path (default `./data/lexa.db`; `/app/data/lexa.db` in compose) |
-| `GITHUB_APP_ID` | GitHub App id for two-way issue sync |
-| `GITHUB_PRIVATE_KEY` | App private key inline (escaped `\n`) — wins over `_FILE` |
-| `GITHUB_PRIVATE_KEY_FILE` | App private key file path (read at boot, no escaping — recommended) |
-| `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
+| `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` / `GITHUB_WEBHOOK_SECRET` | REMOVED — configure GitHub sync in the web app (Settings → GitHub Sync); legacy values are warned and ignored |
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. Workers installs auto-prune the leftover Worker secret after a successful deploy (manual fallback: `wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler.lexa.json`); docker/bare env migration drops it. |
@@ -373,12 +363,10 @@ no email transport anywhere.
 - `.env.toml` (and any legacy `.env*`) is gitignored — values are generated on
   the machine, never committed. Re-running the install script **merges** into
   `.env.toml`: installer-owned keys are rewritten, operator-added keys
-  (`GITHUB_*`, `LXK_SECRETS_MASTER_KEY`, …) are preserved. DB-minted API keys
+  (`LXK_SECRETS_MASTER_KEY`, …) are preserved. DB-minted API keys
   survive in the data volume / D1.
-- The GitHub App private key is never written to the env file: it is either
-  referenced via `GITHUB_PRIVATE_KEY_FILE` or mounted read-only into the
-  container (`./github-app.private-key.pem:/app/github-app.private-key.pem:ro`
-  in prod compose; the PEM itself is gitignored).
+- The GitHub App private key is stored encrypted in the DB via the web app
+  (Settings → GitHub Sync) — never written to the env file or a volume mount.
 - `/api/*` accepts a session cookie OR a Bearer key (dual-channel);
   `/api/webhooks/*` is HMAC-only. Keys are `lxk_` + 43 base62 chars
   (256-bit), rate-limited per IP, revocable per-named-key (Settings → API
@@ -417,8 +405,9 @@ defaults — so existing installs keep booting unchanged.
    the original to `.env.legacy` (0600). `bun run setup` does the same
    automatically (interactive confirm; `--migrate-env` for non-interactive),
    and `setup --env-file <path>.toml` writes TOML directly. Dead keys
-   (`LXK_API_KEY`, `VITE_LXK_API_KEY`, `RUNTIME_*`, `LXK_ACCESS_*`) are dropped
-   rather than carried.
+   (`LXK_API_KEY`, `VITE_LXK_API_KEY`, `RUNTIME_*`, `LXK_ACCESS_*`,
+   `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, `GITHUB_PRIVATE_KEY_FILE`,
+   `GITHUB_WEBHOOK_SECRET`) are dropped rather than carried.
 2. **Rollback** — nothing is destructive: restore the legacy file and remove the
    new one.
    ```bash
@@ -429,7 +418,7 @@ defaults — so existing installs keep booting unchanged.
    `.env.toml` (keeping the original as `.env.legacy`) and then merges its own
    keys in; the container bind-mounts it read-only and a bare host loads it from
    the install directory. No manual conversion needed, and operator-added keys
-   (`GITHUB_*`, `LXK_SECRETS_MASTER_KEY`, …) plus a pinned `LXK_IMAGE_TAG` are
+   (`LXK_SECRETS_MASTER_KEY`, …) plus a pinned `LXK_IMAGE_TAG` are
    preserved. Rollback requires re-running the installer: restore `.env.legacy`
    to `.env`, remove `.env.toml`, then re-run so the tooling `.env` and compose
    file are regenerated.
@@ -560,8 +549,8 @@ legal). See `docs/ARCHITECTURE.md` §Managed-only MCP client secrets.
    `Authorization` header exactly as before.
 4. **Managed tokens survive** the migration untouched (ciphertext rows are not
    modified); nothing else changes for them.
-5. **`LXK_SECRETS_MASTER_KEY` is preserved across re-runs** like `GITHUB_*`, so
-   upgrades do not clobber the key.
+5. **`LXK_SECRETS_MASTER_KEY` is preserved across re-runs**, so upgrades do not
+   clobber the key.
 
 ## Upgrading across the agent-runtime removal (2026-09-26)
 

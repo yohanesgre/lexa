@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
 
 export function getSetting(db: Database, key: string): string | null {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
@@ -20,14 +19,12 @@ export function deleteSetting(db: Database, key: string) {
 // source of truth at runtime; env only provisions first boot. Each mapping is
 // written when the DB key is absent/empty AND the env value is truthy —
 // existing DB values are NEVER overwritten (a cleared key is re-imported from
-// env at the next boot). GITHUB_PRIVATE_KEY_FILE is read at mirror time (its
-// content is stored; an unreadable path is skipped with a warn). Inline
-// GITHUB_PRIVATE_KEY wins over the file when both are set. Returns the list
-// of mirrored settings keys (for boot logging).
+// env at the next boot). GitHub config is never mirrored: it is written only
+// by the web app. Returns the list of mirrored settings keys (for boot
+// logging).
 export function mirrorSettingsFromEnv(
   db: Database,
-  env: Record<string, string | undefined>,
-  readFile: (path: string) => string = (p) => readFileSync(p, "utf8")
+  env: Record<string, string | undefined>
 ): string[] {
   const mirrored: string[] = [];
   const isAbsent = (key: string): boolean => {
@@ -41,17 +38,6 @@ export function mirrorSettingsFromEnv(
     mirrored.push(dbKey);
   };
 
-  mirror("github_app_id", env.GITHUB_APP_ID);
-  mirror("github_webhook_secret", env.GITHUB_WEBHOOK_SECRET);
-  if (env.GITHUB_PRIVATE_KEY) {
-    mirror("github_private_key", env.GITHUB_PRIVATE_KEY);
-  } else if (env.GITHUB_PRIVATE_KEY_FILE && isAbsent("github_private_key")) {
-    try {
-      mirror("github_private_key", readFile(env.GITHUB_PRIVATE_KEY_FILE));
-    } catch {
-      console.warn(`[Settings] GITHUB_PRIVATE_KEY_FILE unreadable (${env.GITHUB_PRIVATE_KEY_FILE}) — skipping mirror`);
-    }
-  }
   mirror("rate_limit_max", env.LXK_RATE_LIMIT_MAX);
   mirror("rate_limit_window_ms", env.LXK_RATE_LIMIT_WINDOW_MS);
   mirror("assistant_repo_cap", env.LXK_ASSISTANT_REPO_CAP);

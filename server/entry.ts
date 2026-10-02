@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
-import { getEnv, resolveTrustedProxyCidrs } from "./env";
+import { getEnv, legacyGithubEnvVars, resolveTrustedProxyCidrs } from "./env";
 import { resolveClientIp, syncRateLimitFromDb } from "./api/rate-limit";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import { bodyCapFor, resolveStorageConfig } from "./storage/config";
@@ -66,13 +66,19 @@ runMigrations(DATABASE_PATH);
 {
   const db = new Database(DATABASE_PATH);
   try {
-    const mirrored = mirrorSettingsFromEnv(db, process.env, (p) => readFileSync(p, "utf8"));
+    const mirrored = mirrorSettingsFromEnv(db, process.env);
     if (mirrored.length > 0) {
       console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
     }
     syncRateLimitFromDb(db);
   } finally {
     db.close();
+  }
+}
+{
+  const legacyGithub = legacyGithubEnvVars(process.env);
+  if (legacyGithub.length > 0) {
+    console.warn(`[GitHub] legacy env config ignored (${legacyGithub.join(", ")}) — configure GitHub sync in Settings → Workspace → Integrations → GitHub Sync`);
   }
 }
 // GitHub config: encrypted-first (github_app_secrets) with the legacy plaintext

@@ -1,9 +1,4 @@
 services:
-  app:
-    volumes:
-      # GitHub App private key (GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem)
-      - ./github-app.private-key.pem:/app/github-app.private-key.pem:ro
-
   tunnel:
     image: cloudflare/cloudflared
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}

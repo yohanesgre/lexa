@@ -11,90 +11,53 @@ const freshDb = () => {
 };
 
 describe("mirrorSettingsFromEnv", () => {
-  it("mirrors env values into empty settings rows", () => {
+  it("mirrors rate-limit and cap env values into empty settings rows", () => {
     const db = freshDb();
     const mirrored = mirrorSettingsFromEnv(db, {
-      GITHUB_APP_ID: "12345",
-      GITHUB_PRIVATE_KEY: PEM,
-      GITHUB_WEBHOOK_SECRET: "whsec",
       LXK_RATE_LIMIT_MAX: "100",
       LXK_RATE_LIMIT_WINDOW_MS: "5000",
+      LXK_ASSISTANT_REPO_CAP: "7",
     });
-    expect(mirrored).toEqual(["github_app_id", "github_webhook_secret", "github_private_key", "rate_limit_max", "rate_limit_window_ms"]);
-    expect(getSetting(db, "github_app_id")).toBe("12345");
-    expect(getSetting(db, "github_private_key")).toBe(PEM);
-    expect(getSetting(db, "github_webhook_secret")).toBe("whsec");
+    expect(mirrored).toEqual(["rate_limit_max", "rate_limit_window_ms", "assistant_repo_cap"]);
     expect(getSetting(db, "rate_limit_max")).toBe("100");
     expect(getSetting(db, "rate_limit_window_ms")).toBe("5000");
+    expect(getSetting(db, "assistant_repo_cap")).toBe("7");
     db.close();
   });
 
   it("never overwrites existing DB values", () => {
     const db = freshDb();
-    setSetting(db, "github_app_id", "111");
     setSetting(db, "rate_limit_max", "10");
     const mirrored = mirrorSettingsFromEnv(db, {
-      GITHUB_APP_ID: "222",
-      GITHUB_PRIVATE_KEY: PEM,
       LXK_RATE_LIMIT_MAX: "999",
+      LXK_RATE_LIMIT_WINDOW_MS: "5000",
     });
-    expect(mirrored).toEqual(["github_private_key"]); // only the absent key mirrored
-    expect(getSetting(db, "github_app_id")).toBe("111");
+    expect(mirrored).toEqual(["rate_limit_window_ms"]); // only the absent key mirrored
     expect(getSetting(db, "rate_limit_max")).toBe("10");
-    expect(getSetting(db, "github_private_key")).toBe(PEM);
+    expect(getSetting(db, "rate_limit_window_ms")).toBe("5000");
     db.close();
   });
 
   it("empty-string DB values count as absent (re-import on next boot)", () => {
     const db = freshDb();
-    setSetting(db, "github_app_id", "");
-    const mirrored = mirrorSettingsFromEnv(db, { GITHUB_APP_ID: "333" });
-    expect(mirrored).toEqual(["github_app_id"]);
-    expect(getSetting(db, "github_app_id")).toBe("333");
+    setSetting(db, "rate_limit_max", "");
+    const mirrored = mirrorSettingsFromEnv(db, { LXK_RATE_LIMIT_MAX: "333" });
+    expect(mirrored).toEqual(["rate_limit_max"]);
+    expect(getSetting(db, "rate_limit_max")).toBe("333");
     db.close();
   });
 
-  it("reads GITHUB_PRIVATE_KEY_FILE content at mirror time and stores it", () => {
+  it("ignores legacy GitHub env vars — no github_% rows", () => {
     const db = freshDb();
-    const mirrored = mirrorSettingsFromEnv(db, { GITHUB_PRIVATE_KEY_FILE: "/x.pem" }, () => PEM);
-    expect(mirrored).toEqual(["github_private_key"]);
-    expect(getSetting(db, "github_private_key")).toBe(PEM);
-    db.close();
-  });
-
-  it("unreadable GITHUB_PRIVATE_KEY_FILE is skipped (warn, no row, no throw)", () => {
-    const db = freshDb();
-    expect(() =>
-      mirrorSettingsFromEnv(db, { GITHUB_PRIVATE_KEY_FILE: "/does/not/exist.pem" }, () => {
-        throw new Error("ENOENT");
-      })
-    ).not.toThrow();
-    expect(getSetting(db, "github_private_key")).toBeNull();
-    db.close();
-  });
-
-  it("inline GITHUB_PRIVATE_KEY wins over the file", () => {
-    const db = freshDb();
-    const mirrored = mirrorSettingsFromEnv(
-      db,
-      { GITHUB_PRIVATE_KEY: "inline-pem", GITHUB_PRIVATE_KEY_FILE: "/x.pem" },
-      () => "file-pem"
-    );
-    expect(mirrored).toEqual(["github_private_key"]);
-    expect(getSetting(db, "github_private_key")).toBe("inline-pem");
-    db.close();
-  });
-
-  it("existing github_private_key row skips the file read entirely", () => {
-    const db = freshDb();
-    setSetting(db, "github_private_key", "existing");
-    let readCalled = false;
-    mirrorSettingsFromEnv(db, { GITHUB_PRIVATE_KEY_FILE: "/x.pem" }, () => {
-      readCalled = true;
-      return PEM;
+    const mirrored = mirrorSettingsFromEnv(db, {
+      GITHUB_APP_ID: "12345",
+      GITHUB_PRIVATE_KEY: PEM,
+      GITHUB_PRIVATE_KEY_FILE: "/x.pem",
+      GITHUB_WEBHOOK_SECRET: "whsec",
+      LXK_RATE_LIMIT_MAX: "100",
     });
-    expect(readCalled).toBe(false);
-    expect(getSetting(db, "github_private_key")).toBe("existing");
+    expect(mirrored).toEqual(["rate_limit_max"]);
+    expect(db.prepare("SELECT COUNT(*) c FROM settings WHERE key LIKE 'github_%'").get()).toEqual({ c: 0 });
     db.close();
   });
 
