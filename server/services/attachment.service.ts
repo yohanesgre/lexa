@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { createHash, randomUUID } from "node:crypto";
-import { Db, batch, batchResults, requireRow, DbError, ConstraintViolation } from "../db/db";
+import { Db, batch, batchResults, requireRow, DbError, ConstraintViolation, type BatchStmt } from "../db/db";
 import { AttachmentRepo, AttachmentRow } from "../repos/attachment.repo";
 import { ChatAttachmentRepo, ChatAttachmentRow } from "../repos/chat-attachment.repo";
 import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
@@ -132,8 +132,13 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         yield* storage.put(key, input.bytes);
         const filename = sanitizeFilename(input.filename);
         const id = randomUUID();
-        const results = yield* batchResults(db, [
-          attachmentRepo.insertStmt({
+        // One atomic batch: the deduped INSERT — a concurrent same-bytes upload
+        // loses the UNIQUE(project_id, sha256) race quietly — plus the task
+        // activity, gated on THIS attempted row existing so the loser never
+        // emits a duplicate activity row. `RETURNING id` on the insert tells
+        // the caller whether this upload won.
+        const stmts: BatchStmt[] = [
+          attachmentRepo.insertDedupeStmt({
             id,
             projectId: input.projectId,
             taskId: input.taskId,
@@ -145,21 +150,28 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
             storageKey: key,
             uploadedBy: input.actor.userId ?? null,
           }),
-          ...(input.taskId
-            ? [activityService.appendStmt(
-                input.taskId,
-                input.actor,
-                "attachment_added",
-                msg.attachmentAdded(input.actor.label, filename)
-              )]
-            : []),
-        ]);
-        const activity: ActivityEvent | null = input.taskId
+        ];
+        if (input.taskId) {
+          stmts.push({
+            sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+                  SELECT ?, ?, ?, ?, ?, ?, 0
+                  WHERE EXISTS (SELECT 1 FROM attachments WHERE id = ?)
+                  RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`,
+            params: [input.taskId, input.actor.kind, input.actor.label, input.actor.userId ?? null, "attachment_added", msg.attachmentAdded(input.actor.label, filename), id],
+          });
+        }
+        const results = yield* batchResults(db, stmts);
+        const inserted = (results[0]?.results.length ?? 0) > 0;
+        const row = inserted
+          ? yield* attachmentRepo.findById(id).pipe(
+              Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "attachment row vanished after insert" })))
+            )
+          : yield* attachmentRepo.findByProjectAndSha(input.projectId, sha256).pipe(
+              Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "attachment dedupe row vanished after conflict" })))
+            );
+        const activity: ActivityEvent | null = inserted && input.taskId
           ? rowToActivityEvent(yield* requireRow<ActivityRow>(results[1], "attachment.upload activity"))
           : null;
-        const row = yield* attachmentRepo.findById(id).pipe(
-          Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "attachment row vanished after insert" })))
-        );
         const attachment = yield* toAttachment(row);
         return { attachment, activity };
       });

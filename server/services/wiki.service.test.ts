@@ -7,7 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
-import { DbBunLive, ConstraintViolation, RowNotFound } from "../db/db";
+import { DbBunLive } from "../db/db";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { UserRepo } from "../repos/user.repo";
@@ -76,14 +76,17 @@ const MOCK_PAGE: WikiPage = {
 };
 
 // Provides a stub WikiRepo (DefaultWithoutDependencies bypasses the baked-in
-// WikiRepo.Default) so a specific repo error can be injected deterministically.
+// WikiRepo.Default) so a specific write failure can be injected
+// deterministically. The update path now runs a single `batch` of
+// builder-produced statements, so a failure is injected through the SQL the
+// builder returns, not through a repo method.
 function makeServiceWithRepo(db: Database, overrides: Record<string, unknown>) {
   const base = {
     findById: () => Effect.succeed(MOCK_PAGE),
     isDescendant: () => Effect.succeed(false),
-    createRevision: () => Effect.succeed(undefined as never),
-    pruneRevisions: () => Effect.void,
-    update: () => Effect.fail(new RowNotFound({ table: "wiki_pages" })),
+    createRevisionStmt: () => ({ sql: "SELECT 1", params: [] }),
+    pruneRevisionsStmt: () => ({ sql: "SELECT 1", params: [] }),
+    updateStmt: () => ({ sql: "SELECT 1", params: [] }),
   };
   const layer = WikiService.DefaultWithoutDependencies.pipe(
     Layer.provide(
@@ -220,14 +223,10 @@ describe("WikiService.update", () => {
 
   it("unique-slug ConstraintViolation → SlugTaken (narrowed mapping)", async () => {
     seed(db);
+    db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('a','p1','A','a','{\"type\":\"doc\",\"content\":[]}')").run();
+    db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('b','p1','B','b','{\"type\":\"doc\",\"content\":[]}')").run();
     const svc = makeServiceWithRepo(db, {
-      update: () =>
-        Effect.fail(
-          new ConstraintViolation({
-            message: "SQLiteError: UNIQUE constraint failed: wiki_pages.project_id, wiki_pages.slug",
-            isPositionConflict: false,
-          })
-        ),
+      updateStmt: () => ({ sql: "UPDATE wiki_pages SET slug = 'b' WHERE id = 'a'", params: [] }),
     });
     const res = await Effect.runPromise(Effect.either(svc.update("a", { slug: "b" })));
     expect(Either.isLeft(res)).toBe(true);
@@ -239,11 +238,9 @@ describe("WikiService.update", () => {
 
   it("FK ConstraintViolation → WikiPageNotFound, not SlugTaken (narrowed mapping)", async () => {
     seed(db);
+    db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('a','p1','A','a','{\"type\":\"doc\",\"content\":[]}')").run();
     const svc = makeServiceWithRepo(db, {
-      update: () =>
-        Effect.fail(
-          new ConstraintViolation({ message: "SQLiteError: FOREIGN KEY constraint failed", isPositionConflict: false })
-        ),
+      updateStmt: () => ({ sql: "UPDATE wiki_pages SET parent_id = 'missing' WHERE id = 'a'", params: [] }),
     });
     const res = await Effect.runPromise(Effect.either(svc.update("a", { parentId: "other" })));
     expect(Either.isLeft(res)).toBe(true);

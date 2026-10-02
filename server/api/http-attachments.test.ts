@@ -161,6 +161,29 @@ describe("POST /api/projects/:slug/tasks/:taskId/attachments", () => {
     expect(blobCount()).toBe(1);
   });
 
+  it("concurrent identical uploads → one row, one activity, both resolve to the same id", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
+    const [ra, rb] = await Promise.all([
+      handler(uploadReq("/api/projects/p1/tasks/t1/attachments", bytes, "race-a.png")),
+      handler(uploadReq("/api/projects/p1/tasks/t1/attachments", bytes, "race-b.png")),
+    ]);
+    expect(ra.status).toBe(201);
+    expect(rb.status).toBe(201);
+    const [ba, bb] = [await ra.json(), await rb.json()];
+    expect(ba.data.id).toBe(bb.data.id);
+
+    const rows = db.prepare("SELECT COUNT(*) AS n FROM attachments WHERE sha256 = ?").get(ba.data.sha256) as { n: number };
+    expect(rows.n).toBe(1);
+    // Exactly one winner emits attachment_added; the loser's activity insert is
+    // gated on its own row existing, so it can never emit an orphan row.
+    const acts = db.prepare(
+      "SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'attachment_added' AND message LIKE '%race-%'"
+    ).get() as { n: number };
+    expect(acts.n).toBe(1);
+    const empty = [ba.activity, bb.activity].filter((a: unknown[]) => a.length === 0);
+    expect(empty).toHaveLength(1);
+  });
+
   it("oversize (cap 1 MB via LXK_MAX_UPLOAD_MB) → 413 PAYLOAD_TOO_LARGE", async () => {
     const big = new Uint8Array(2 * 1024 * 1024);
     const { res, body } = await uploadToTask(big, "big.bin");

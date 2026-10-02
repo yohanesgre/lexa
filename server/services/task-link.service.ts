@@ -2,11 +2,13 @@ import { Effect } from "effect";
 import { TaskLinkRepo } from "../repos/task-link.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
+import { Db, batchResults, requireRow, withTx, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { rowToTaskLink, rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { ProjectNotFound, TaskNotFound, TaskLinkNotFound, TaskLinkCycle, InvalidTaskLink } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
 import { keyAfter } from "../../shared/positions";
+import { buildWipMoveStmt } from "../repos/task-batch";
 import type { TaskLink, TaskLinkRelation, TaskLinkSuggestion, Actor, ActivityEvent } from "../../shared/types";
 
 export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/TaskLinkService", {
@@ -52,7 +54,7 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
         toTaskId: string;
         relation: TaskLinkRelation;
       }): Effect.Effect<{ link: TaskLink; activity: ActivityEvent[] }, ProjectNotFound | TaskNotFound | TaskLinkCycle | InvalidTaskLink | ConstraintViolation | DbError | RowNotFound> =>
-        Effect.gen(function* () {
+        withTx(db, Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
@@ -79,32 +81,50 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
           }
 
           // Child inherits the parent's column (subtask_of: from=child, to=parent).
-          return yield* withTx(
-            db,
-            Effect.gen(function* () {
-              if (input.relation === "subtask_of" && from.columnId !== to.columnId) {
-                const last = yield* taskRepo.findLastInColumn(input.projectId, to.columnId).pipe(
-                  Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-                );
-                yield* taskRepo.move(input.fromTaskId, {
-                  columnId: to.columnId,
-                  swimlaneId: to.swimlaneId,
-                  position: keyAfter(last?.position ?? null),
-                  projectId: input.projectId,
-                });
-              }
-              const link = yield* repo.create({
-                id: crypto.randomUUID(),
-                projectId: input.projectId,
-                fromTaskId: input.fromTaskId,
-                toTaskId: input.toTaskId,
-                relation: input.relation,
-              });
-              const ev = yield* activityService.append(input.fromTaskId, actor, "link_added", msg.linkAdded(input.relation, to.key, to.title));
-              return { link, activity: [ev] };
-            })
-          );
-        }),
+          // The ancestor-guard reads, validation and every write run inside one
+          // `withTx`: on Bun a real BEGIN IMMEDIATE serializes the guard against
+          // a reciprocal link; on D1 `withTx` is a no-op and the batch stays
+          // atomic, but the guard-vs-write window remains the accepted residual.
+          const linkId = crypto.randomUUID();
+          const stmts: BatchStmt[] = [];
+          if (input.relation === "subtask_of" && from.columnId !== to.columnId) {
+            const last = yield* taskRepo.findLastInColumn(input.projectId, to.columnId).pipe(
+              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+            );
+            stmts.push(buildWipMoveStmt({
+              taskId: input.fromTaskId,
+              projectId: input.projectId,
+              columnId: to.columnId,
+              swimlaneId: to.swimlaneId,
+              position: keyAfter(last?.position ?? null),
+              clearDueAt: false,
+            }));
+          }
+          stmts.push(repo.createStmt({
+            id: linkId,
+            projectId: input.projectId,
+            fromTaskId: input.fromTaskId,
+            toTaskId: input.toTaskId,
+            relation: input.relation,
+          }));
+          stmts.push(activityService.appendStmt(
+            input.fromTaskId,
+            actor,
+            "link_added",
+            msg.linkAdded(input.relation, to.key, to.title)
+          ));
+          const results = yield* batchResults(db, stmts);
+          const activityRow = yield* requireRow<ActivityRow>(results[stmts.length - 1], "task-link.add activity");
+          const link = rowToTaskLink({
+            id: linkId,
+            project_id: input.projectId,
+            from_task_id: input.fromTaskId,
+            to_task_id: input.toTaskId,
+            relation: input.relation,
+            created_at: new Date().toISOString(),
+          });
+          return { link, activity: [rowToActivityEvent(activityRow)] };
+        })),
 
       remove: (actor: Actor, taskId: string, linkId: string): Effect.Effect<{ activity: ActivityEvent[] }, TaskLinkNotFound | TaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
@@ -120,12 +140,34 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
           const other = yield* taskRepo.findById(link.toTaskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: link.toTaskId }))
           );
-          return yield* withTx(db, Effect.gen(function* () {
-            const n = yield* repo.delete(linkId);
-            if (n === 0) return yield* new TaskLinkNotFound({ id: linkId });
-            const ev = yield* activityService.append(link.fromTaskId, actor, "link_removed", msg.linkRemoved(link.relation, other.key, other.title));
-            return { activity: [ev] };
-          }));
+          // Activity first, conditional on the link row still existing, then the
+          // delete — one atomic batch. The SQL guard keeps the array fixed and
+          // emits no orphan activity if another writer removed the link between
+          // the pre-read and this batch. A delete that matches nothing means the
+          // link is gone → TaskLinkNotFound.
+          const activityStmt: BatchStmt = {
+            sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+                  SELECT ?, ?, ?, ?, ?, ?, ?
+                  WHERE EXISTS (SELECT 1 FROM task_links WHERE id = ?)
+                  RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`,
+            params: [
+              link.fromTaskId,
+              actor.kind,
+              actor.label,
+              actor.userId ?? null,
+              "link_removed",
+              msg.linkRemoved(link.relation, other.key, other.title),
+              0,
+              linkId,
+            ],
+          };
+          const [activityRes, deleteRes] = yield* batchResults(db, [
+            activityStmt,
+            repo.deleteStmt(linkId),
+          ]);
+          if ((deleteRes?.changes ?? 0) === 0) return yield* new TaskLinkNotFound({ id: linkId });
+          const activityRow = yield* requireRow<ActivityRow>(activityRes, "task-link.remove activity");
+          return { activity: [rowToActivityEvent(activityRow)] };
         }),
 
       search: (projectId: string, query: string, excludeTaskId: string): Effect.Effect<TaskLinkSuggestion[], DbError> =>

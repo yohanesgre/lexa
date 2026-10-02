@@ -4,7 +4,7 @@ import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound, Db, withTx } from "../db/db";
+import { ConstraintViolation, DbError, RowNotFound, Db, batch } from "../db/db";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import { generateTaskKey } from "../task-key";
 import type { DomainProject, ProjectRepo as ProjectRepoType } from "../../shared/types";
@@ -37,39 +37,38 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
         const doCreate = Effect.gen(function* () {
           const taken = new Set((yield* repo.listKeys()).map((k) => k));
           const key = generateTaskKey(slug, (c) => taken.has(c));
-          return yield* repo
-            .create({ id, name: input.name, slug, key, description: input.description ?? "", teamId: input.teamId ?? null })
-            .pipe(
-              Effect.flatMap(() => repo.findBySlug(slug)),
-              Effect.tap((project) =>
-                Effect.all([
-                  ...DEFAULT_COLUMNS.map((col) =>
-                    columnRepo.create({
-                      id: crypto.randomUUID(),
-                      projectId: project.id,
-                      name: col.name,
-                      position: col.position,
-                      color: col.color,
-                    })
-                  ),
-                  swimlaneRepo.create({
-                    id: crypto.randomUUID(),
-                    projectId: project.id,
-                    name: "Backlog",
-                    position: 0,
-                    kind: "backlog",
-                  }),
-                  fieldConfigRepo.seedDefaults(project.id),
-                ])
-              )
-            );
+          // Project + default columns + Backlog swimlane + field defaults are
+          // one atomic batch: an attempt that trips a constraint (key/slug)
+          // rolls back in full — no partial project. The retry below re-reads
+          // the taken keys and regenerates the key.
+          yield* batch(db, [
+            repo.createStmt({ id, name: input.name, slug, key, description: input.description ?? "", teamId: input.teamId ?? null }),
+            ...DEFAULT_COLUMNS.map((col) =>
+              columnRepo.createStmt({
+                id: crypto.randomUUID(),
+                projectId: id,
+                name: col.name,
+                position: col.position,
+                color: col.color,
+              })
+            ),
+            swimlaneRepo.createStmt({
+              id: crypto.randomUUID(),
+              projectId: id,
+              name: "Backlog",
+              position: 0,
+              kind: "backlog",
+            }),
+            ...fieldConfigRepo.seedDefaultsStmts(id),
+          ]);
+          return yield* repo.findBySlug(slug);
         });
-        return withTx(db, doCreate).pipe(
+        return doCreate.pipe(
           // Key collision race — regenerate once (slug collisions fall through
           // to SlugTaken below).
           Effect.catchIf(
             (e) => e instanceof ConstraintViolation,
-            () => withTx(db, doCreate)
+            () => doCreate
           ),
           Effect.tap((project) => Effect.logInfo(`[Project] Created ${project.id} slug=${project.slug}`)),
           Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })),

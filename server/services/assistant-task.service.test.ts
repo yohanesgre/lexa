@@ -465,6 +465,76 @@ describe("task preflight — fail-open and disable", () => {
     expect(jev[0]!.meta.outcome).toBe("failed");
   });
 
+  it("task terminal transitions ride one batch", async () => {
+    setup();
+    queueRun("at1");
+    db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'at1'").run();
+
+    const t = await run(service.complete("at1", "done"));
+    expect(t.status).toBe("completed");
+    expect(t.result).toBe("done");
+    const acts = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1' ORDER BY id").all() as Array<{ type: string }>;
+    expect(acts.map((a) => a.type)).toEqual(["assistant_completed"]);
+  });
+
+  it("a second terminal call is a no-op with no extra activity (idempotent)", async () => {
+    setup();
+    queueRun("at1");
+    db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'at1'").run();
+    await run(service.complete("at1", "first"));
+
+    const again = await run(service.complete("at1", "second"));
+    expect(again.status).toBe("completed");
+    expect(again.result).toBe("first");
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'assistant_completed'").get() as { n: number }).n;
+    expect(n).toBe(1);
+  });
+
+  it("concurrent terminal calls emit exactly one activity row; the loser gets the current row, not a 404", async () => {
+    setup();
+    queueRun("at1");
+    db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'at1'").run();
+
+    const [ra, rb] = await Promise.all([
+      run(Effect.either(service.complete("at1", "a"))),
+      run(Effect.either(service.complete("at1", "b"))),
+    ]);
+
+    // Both callers succeed: the loser's conditional UPDATE returns no row, but
+    // the task still exists, so it re-reads and returns the current row rather
+    // than a false AssistantTaskNotFound.
+    expect(ra._tag).toBe("Right");
+    expect(rb._tag).toBe("Right");
+    const a = ra._tag === "Right" ? ra.right : null;
+    const b = rb._tag === "Right" ? rb.right : null;
+    expect(a!.status).toBe("completed");
+    expect(b!.status).toBe("completed");
+    expect(a!.result).toBe(b!.result);
+
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'assistant_completed'").get() as { n: number }).n;
+    expect(n).toBe(1);
+    const t = await run(service.getById("at1"));
+    expect(t.status).toBe("completed");
+  });
+
+  it("cancel from queued emits exactly one assistant_cancelled and no task activity for a wiki run", async () => {
+    setup();
+    db.exec("INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1','p1','Home','home','{\"type\":\"doc\",\"content\":[]}','',0)");
+    db.exec("INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, status) VALUES ('atw','p1','wiki','home','a1','sk1','','','queued')");
+    db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'atw'").run();
+
+    const t = await run(service.complete("atw", "done"));
+    expect(t.status).toBe("completed");
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n;
+    expect(n).toBe(0);
+
+    queueRun("at2");
+    const c = await run(service.cancel("at2"));
+    expect(c.status).toBe("cancelled");
+    const acts = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1' ORDER BY id").all() as Array<{ type: string }>;
+    expect(acts.map((a) => a.type)).toEqual(["assistant_cancelled"]);
+  });
+
   it("Jev neither writes nor emits task activity — the only row is the run's own terminal one", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();

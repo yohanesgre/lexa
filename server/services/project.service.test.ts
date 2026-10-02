@@ -74,7 +74,7 @@ describe("ProjectService.create", () => {
     }
   });
 
-  it("duplicate slug → SlugTaken (derived and explicit)", async () => {
+  it("duplicate slug → SlugTaken (derived and explicit); the retried batch leaves no partial rows", async () => {
     const svc = makeService(db);
     await Effect.runPromise(svc.create({ name: "Acme" }));
     const dupName = await Effect.runPromise(Effect.either(svc.create({ name: "Acme" })));
@@ -83,6 +83,50 @@ describe("ProjectService.create", () => {
     const dupSlug = await Effect.runPromise(Effect.either(svc.create({ name: "Other", slug: "acme" })));
     expect(Either.isLeft(dupSlug)).toBe(true);
     if (Either.isLeft(dupSlug)) expect(dupSlug.left).toBeInstanceOf(SlugTaken);
+    // Exactly one project survived: the retry-once path rolled the losing
+    // batch (project + columns + Backlog + field defaults) back in full.
+    const projects = db.prepare("SELECT COUNT(*) AS n FROM projects").get() as { n: number };
+    expect(projects.n).toBe(1);
+    const columns = db.prepare("SELECT COUNT(*) AS n FROM columns").get() as { n: number };
+    expect(columns.n).toBe(5);
+    const lanes = db.prepare("SELECT COUNT(*) AS n FROM swimlanes").get() as { n: number };
+    expect(lanes.n).toBe(1);
+    const prios = db.prepare("SELECT COUNT(*) AS n FROM priority_options").get() as { n: number };
+    expect(prios.n).toBe(4);
+    const types = db.prepare("SELECT COUNT(*) AS n FROM type_options").get() as { n: number };
+    expect(types.n).toBe(4);
+  });
+
+  it("rolls the whole creation back when the Backlog swimlane insert fails — no partial project", async () => {
+    const svc = makeService(db);
+    db.exec("CREATE TRIGGER fail_backlog BEFORE INSERT ON swimlanes BEGIN SELECT RAISE(ABORT, 'forced backlog failure'); END");
+    try {
+      const res = await Effect.runPromise(Effect.either(svc.create({ name: "Doomed" })));
+      expect(Either.isLeft(res)).toBe(true);
+      const zero = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+      expect(zero("SELECT COUNT(*) AS n FROM projects")).toBe(0);
+      expect(zero("SELECT COUNT(*) AS n FROM columns")).toBe(0);
+      expect(zero("SELECT COUNT(*) AS n FROM swimlanes")).toBe(0);
+      expect(zero("SELECT COUNT(*) AS n FROM priority_options")).toBe(0);
+      expect(zero("SELECT COUNT(*) AS n FROM type_options")).toBe(0);
+    } finally {
+      db.exec("DROP TRIGGER fail_backlog");
+    }
+  });
+
+  it("rolls back when a default field-config insert fails — no partial project", async () => {
+    const svc = makeService(db);
+    db.exec("CREATE TRIGGER fail_prio BEFORE INSERT ON priority_options BEGIN SELECT RAISE(ABORT, 'forced field-config failure'); END");
+    try {
+      const res = await Effect.runPromise(Effect.either(svc.create({ name: "Doomed" })));
+      expect(Either.isLeft(res)).toBe(true);
+      const zero = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+      expect(zero("SELECT COUNT(*) AS n FROM projects")).toBe(0);
+      expect(zero("SELECT COUNT(*) AS n FROM swimlanes")).toBe(0);
+      expect(zero("SELECT COUNT(*) AS n FROM priority_options")).toBe(0);
+    } finally {
+      db.exec("DROP TRIGGER fail_prio");
+    }
   });
 
   it("seeds 5 default columns, one Backlog swimlane, and 4+4 field options", async () => {

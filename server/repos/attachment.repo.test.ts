@@ -7,7 +7,8 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { DbBunLive, batchResults } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { AttachmentRepo } from "./attachment.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -135,5 +136,23 @@ describe("AttachmentRepo", () => {
     // Same sha in a different project is allowed.
     const other = await Effect.runPromise(Effect.either(repo.insert({ ...base, id: "a3", projectId: "p2", taskId: "t2" })));
     expect(other._tag).toBe("Right");
+  });
+
+  it("insertDedupeStmt twice in one batch: winner returns its row, loser returns none", async () => {
+    // Deterministic exercise of the ON CONFLICT(project_id, sha256) DO NOTHING
+    // path: both inserts ride one batch, so the service pre-check cannot
+    // short-circuit the second. Exactly one row lands and only the first
+    // statement's RETURNING yields a row.
+    const driver = createBunSqliteDriver(db);
+    const results = await Effect.runPromise(
+      batchResults(driver, [
+        repo.insertDedupeStmt({ ...base, id: "d1", taskId: "t1" }),
+        repo.insertDedupeStmt({ ...base, id: "d2", taskId: "t1" }),
+      ])
+    );
+    expect(results[0]!.results.map((r) => r.id)).toEqual(["d1"]);
+    expect(results[1]!.results).toEqual([]);
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM attachments WHERE sha256 = ?").get("sha-a") as { n: number }).n;
+    expect(n).toBe(1);
   });
 });

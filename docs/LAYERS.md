@@ -743,6 +743,15 @@ meaningful change (updates may emit several `field_changed` rows);
 position-only reorders emit nothing; webhook moves emit `github_synced` only
 (actor system/'github', never `moved`); archived→archived no-ops emit
 nothing. If the mutation rolls back, the activity rows roll back with it.
+A read-then-batch mutation gates its activity INSERT in SQL on the mutation
+itself (`WHERE EXISTS (SELECT 1 FROM <row> WHERE id = ?)`, or a conditional
+UPDATE's `changes() > 0`), so a concurrently-lost mutation emits no orphan
+activity row and both writes still ride one batch. The two sites that carry a
+reciprocal-write guard — wiki update's reparent cycle check and task-link add's
+subtask_of ancestor check — keep `withTx` around the guard reads and the write
+batch: on Bun `BEGIN IMMEDIATE` serializes the check against a reciprocal
+writer, while on D1 `withTx` is a no-op and the guard-vs-write window is the
+accepted residual (the activity emission stays in the same batch on both).
 Messages are frozen at write time via the catalog
 (`server/activity-messages.ts`) — never hand-rolled at call sites.
 
@@ -782,11 +791,15 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
     // upload({ projectId, taskId?, wikiPageId?, filename, bytes, declaredMime, actor })
     //   1. size cap → PayloadTooLarge (413) BEFORE any write.
     //   2. sha256 hex + magic-byte mime sniff (client mime NEVER stored).
-    //   3. Dedupe lookup UNIQUE(project_id, sha256): hit → existing row
+    //   3. Dedupe pre-check UNIQUE(project_id, sha256): hit → existing row
     //      UNCHANGED — no blob rewrite, no activity row.
     //   4. Miss → storage.put("blobs/<sha256>") OUTSIDE the batch, then ONE
     //      atomic batch: attachments INSERT + attachment_added activity row
-    //      (task attachments only — wiki-page uploads emit nothing).
+    //      (task attachments only — wiki-page uploads emit nothing). The INSERT
+    //      carries ON CONFLICT(project_id, sha256) DO NOTHING RETURNING id, so
+    //      a concurrent same-bytes upload loses the UNIQUE race quietly; the
+    //      activity INSERT is gated on THIS row existing, so the loser emits
+    //      none and both callers resolve to the winner's row.
     //   5. filename sanitized (basename, control chars stripped, ≤255 chars).
     // remove(attachmentId, identity)
     //   Authority = uploader OR project admin (mirror CommentService.remove:
@@ -1419,7 +1432,9 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     return {
       // Queue lifecycle: create/getById/listForDocument/hasRunning/complete/
       //   fail/cancel. Terminal transitions emit assistant_completed|failed|
-      //   cancelled inside the SAME withTx as the status write (invariant #12).
+      //   cancelled inside the SAME batch as the status write (invariant #12);
+      //   the activity INSERT is gated on the status UPDATE having changed a
+      //   row, so a concurrently-lost transition emits none.
       // enqueue: guard provider configured (ProviderNotConfigured), validate
       //   agent/skill/document/attachments, then queueRepo.createTask (queued).
       //   The assistant lane is the only lane; agentId is always the builtin

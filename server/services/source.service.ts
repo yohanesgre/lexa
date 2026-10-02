@@ -3,7 +3,7 @@ import { SourceRepo } from "../repos/source.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { TaskRepo } from "../repos/task.repo";
-import { DbError, RowNotFound, ConstraintViolation, Db, batchResults, requireRow, withTx } from "../db/db";
+import { DbError, RowNotFound, ConstraintViolation, Db, batchResults, requireRow, type BatchStmt } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable, TaskNotFound } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
@@ -209,12 +209,33 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
             if (n === 0) return yield* new SourceNotFound({ id });
             return { activity: [] as ActivityEvent[] };
           }
-          return yield* withTx(db, Effect.gen(function* () {
-            const n = yield* repo.delete(id);
-            if (n === 0) return yield* new SourceNotFound({ id });
-            const ev = yield* activityService.append(source.documentId, actor, "source_removed", msg.sourceRemoved(source.title));
-            return { activity: [ev] };
-          }));
+          // Activity first, conditional on the source row still existing, then
+          // the delete — one atomic batch. No orphan activity if another writer
+          // removed the source between the pre-read and this batch; a delete
+          // that matches nothing → SourceNotFound.
+          const activityStmt: BatchStmt = {
+            sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+                  SELECT ?, ?, ?, ?, ?, ?, ?
+                  WHERE EXISTS (SELECT 1 FROM document_sources WHERE id = ?)
+                  RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`,
+            params: [
+              source.documentId,
+              actor.kind,
+              actor.label,
+              actor.userId ?? null,
+              "source_removed",
+              msg.sourceRemoved(source.title),
+              0,
+              id,
+            ],
+          };
+          const [activityRes, deleteRes] = yield* batchResults(db, [
+            activityStmt,
+            repo.deleteStmt(id),
+          ]);
+          if ((deleteRes?.changes ?? 0) === 0) return yield* new SourceNotFound({ id });
+          const activityRow = yield* requireRow<ActivityRow>(activityRes, "source.remove activity");
+          return { activity: [rowToActivityEvent(activityRow)] };
         }),
 
       // Resolve a source's content as plain text (used by the Runtime prompt).

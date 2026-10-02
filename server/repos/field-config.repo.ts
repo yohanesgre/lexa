@@ -102,7 +102,19 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
       replaceList: (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): Effect.Effect<void, ConstraintViolation | DbError> =>
         batch(db, buildReplaceListStmts(projectId, kind, options)),
 
-      // Create the default 4+4 options for a brand-new project.
+      // Create the default 4+4 options for a brand-new project. Returned as a
+      // pure builder so project creation can fold it into one atomic batch.
+      seedDefaultsStmts: (projectId: string): BatchStmt[] => [
+        { sql: `INSERT INTO priority_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Urgent", "#FF4444", 0] },
+        { sql: `INSERT INTO priority_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "High", "#F0C040", 1] },
+        { sql: `INSERT INTO priority_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Medium", "#22D3EE", 2] },
+        { sql: `INSERT INTO priority_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Low", "#6B6560", 3] },
+        { sql: `INSERT INTO type_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Feature", "#4ADE80", 0] },
+        { sql: `INSERT INTO type_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Bug", "#FF4444", 1] },
+        { sql: `INSERT INTO type_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Task", "#22D3EE", 2] },
+        { sql: `INSERT INTO type_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Asset", "#F472B6", 3] },
+      ],
+
       seedDefaults: (projectId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         batch(db, [
           { sql: `INSERT INTO priority_options (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`, params: [crypto.randomUUID(), projectId, "Urgent", "#FF4444", 0] },

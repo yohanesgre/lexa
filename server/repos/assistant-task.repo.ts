@@ -1,7 +1,26 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { AssistantTaskRow, rowToAssistantTask } from "../../shared/db";
 import type { AssistantTask, AssistantTaskStatus } from "../../shared/types";
+
+// Terminal status UPDATE, mirroring `updateTaskStatus`. `RETURNING id` lets a
+// batched caller tell a matched transition from a vanished row.
+const buildUpdateTaskStatusStmt = (id: string, status: AssistantTask["status"], result?: string | null, error?: string | null): BatchStmt => {
+  const sets = ["status = ?", "finished_at = datetime('now')"];
+  const params: SqlParam[] = [status];
+  if (result !== undefined) {
+    sets.push("result = ?");
+    params.push(result === null ? null : result.slice(0, 1024 * 1024));
+  }
+  if (error !== undefined) {
+    sets.push("error = ?");
+    params.push(error === null ? null : error.slice(0, 2000));
+  }
+  const from =
+    status === "cancelled" ? "status IN ('queued', 'running')" : "status = 'running'";
+  params.push(id);
+  return { sql: `UPDATE assistant_tasks SET ${sets.join(", ")} WHERE id = ? AND ${from} RETURNING id`, params };
+};
 
 // Assistant tasks are always read joined with their document's title and the
 // agent/skill names so the UI can show names instead of raw ids.
@@ -77,25 +96,15 @@ export class AssistantTaskRepo extends Effect.Service<AssistantTaskRepo>()("Lexa
       // Terminal status writes. Cancel wins over a late complete/fail: complete
       // and fail only transition from 'running', cancel from 'queued' or
       // 'running'. A no-op (0 rows changed) returns the row unchanged.
+      updateTaskStatusStmt: buildUpdateTaskStatusStmt,
+
       updateTaskStatus: (id: string, status: AssistantTask["status"], result?: string | null, error?: string | null): Effect.Effect<AssistantTask, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
-          const sets = ["status = ?", "finished_at = datetime('now')"];
-          const params: unknown[] = [status];
-          if (result !== undefined) {
-            sets.push("result = ?");
-            params.push(result === null ? null : result.slice(0, 1024 * 1024));
-          }
-          if (error !== undefined) {
-            sets.push("error = ?");
-            params.push(error === null ? null : error.slice(0, 2000));
-          }
-          const from =
-            status === "cancelled" ? "status IN ('queued', 'running')" : "status = 'running'";
-          params.push(id);
+          const stmt = buildUpdateTaskStatusStmt(id, status, result, error);
           yield* run(
             db,
-            `UPDATE assistant_tasks SET ${sets.join(", ")} WHERE id = ? AND ${from}`,
-            ...params
+            stmt.sql,
+            ...stmt.params
           );
           return yield* queryFirst<AssistantTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, id).pipe(
             Effect.map(rowToAssistantTask)

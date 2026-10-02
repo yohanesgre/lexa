@@ -1418,9 +1418,15 @@ in `db.transaction`, D1 calls the binding's `batch()`. `withTx` is a Bun-only
 convenience and is a documented no-op on D1, so every multi-write site uses one
 batch. Read-dependent sites either fold the read into the batch SQL (task-create
 counter: the INSERT computes `number`/`key` from the counter it increments in
-the same batch; archive cascades: one set-based `UPDATE` + `INSERT ... SELECT`)
-or explicitly accept a read-compute-retry window (position anchoring, WIP move
-verification, `wiki` save validation).
+the same batch; archive cascades: one set-based `UPDATE` + `INSERT ... SELECT`;
+wiki restore, task-link remove, source remove, project create, and
+the assistant-task terminal transitions read first and then run every write in
+one batch) or explicitly accept a read-compute-retry window (position anchoring,
+WIP move verification). The two sites with a reciprocal-write cycle/ancestor
+guard — wiki update's reparent cycle check and task-link add's subtask_of
+ancestor check — keep `withTx` around the guard reads and the write batch: on
+Bun `BEGIN IMMEDIATE` serializes the check against a reciprocal writer; on D1
+`withTx` no-ops and the guard-vs-write window is the accepted residual.
 
 ### SQLite notes (unchanged from v1)
 - TEXT UUIDs via `crypto.randomUUID()` in Bun.

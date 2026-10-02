@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { UserRepo } from "../repos/user.repo";
-import { ConstraintViolation, DbError, RowNotFound, Db, withTx } from "../db/db";
+import { ConstraintViolation, DbError, RowNotFound, Db, batch, withTx, type BatchStmt } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { TipTapDoc } from "../../shared/types";
@@ -135,61 +135,65 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         saveType: "autosave" | "manual" = "autosave",
         updatedBy: string | null = null
       ): Effect.Effect<WikiPage, WikiPageNotFound | InvalidParent | SlugTaken | DbError | ConstraintViolation> =>
-        Effect.gen(function* () {
-          // Validation and the update share one transaction (BEGIN IMMEDIATE)
-          // so a concurrent reciprocal reparent can't pass validation against
-          // stale state — reads and the write are serialized.
-          const updated = yield* withTx(
-            db,
-            Effect.gen(function* () {
-              const current = yield* repo.findById(id).pipe(
-                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+        withTx(db, Effect.gen(function* () {
+          // The cycle-check reads, validation and the write set (revision
+          // insert + prune + page update) run inside one `withTx`. On Bun
+          // `withTx` is a real BEGIN IMMEDIATE, so the check and the batch are
+          // serialized against a reciprocal reparent; on D1 `withTx` is a
+          // documented no-op and the batch stays atomic, but the
+          // check-vs-write window remains the accepted residual.
+          const current = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+          );
+          const nextParentId = input.parentId;
+          if (nextParentId !== undefined && nextParentId !== current.parentId) {
+            if (nextParentId === id) {
+              return yield* new InvalidParent({ reason: "self" });
+            }
+            if (nextParentId !== null) {
+              const parent = yield* repo.findById(nextParentId).pipe(
+                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: nextParentId }))
               );
-              const nextParentId = input.parentId;
-              if (nextParentId !== undefined && nextParentId !== current.parentId) {
-                if (nextParentId === id) {
-                  return yield* new InvalidParent({ reason: "self" });
-                }
-                if (nextParentId !== null) {
-                  const parent = yield* repo.findById(nextParentId).pipe(
-                    Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: nextParentId }))
-                  );
-                  if (parent.projectId !== current.projectId) {
-                    return yield* new InvalidParent({ reason: "cross-project" });
-                  }
-                  const cycle = yield* repo.isDescendant(nextParentId, id);
-                  if (cycle) {
-                    return yield* new InvalidParent({ reason: "cycle" });
-                  }
-                }
+              if (parent.projectId !== current.projectId) {
+                return yield* new InvalidParent({ reason: "cross-project" });
               }
-              yield* repo.createRevision(
-                current.id,
-                current.title,
-                current.slug,
-                JSON.stringify(current.content),
-                extractText(current.content),
-                saveType
-              );
-              // Prune: keep the newest 100 revisions per page (same tx as
-              // the insert — no unbounded revision growth).
-              yield* repo.pruneRevisions(current.id);
-              return yield* repo.update(id, { ...input, updatedBy }).pipe(
-                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id })),
-                Effect.catchIf(
-                  (e) => e instanceof ConstraintViolation && isSlugConflict(e),
-                  () => new SlugTaken({ slug: input.slug ?? current.slug })
-                ),
-                Effect.catchIf(
-                  (e) => e instanceof ConstraintViolation && isForeignKeyFailure(e),
-                  () => new WikiPageNotFound({ id })
-                )
-              );
-            })
+              const cycle = yield* repo.isDescendant(nextParentId, id);
+              if (cycle) {
+                return yield* new InvalidParent({ reason: "cycle" });
+              }
+            }
+          }
+          const stmts: BatchStmt[] = [
+            repo.createRevisionStmt(
+              current.id,
+              current.title,
+              current.slug,
+              JSON.stringify(current.content),
+              extractText(current.content),
+              saveType
+            ),
+            // Prune: keep the newest 100 revisions per page (same batch as
+            // the insert — no unbounded revision growth).
+            repo.pruneRevisionsStmt(current.id),
+          ];
+          const updateStmt = repo.updateStmt(id, { ...input, updatedBy });
+          if (updateStmt) stmts.push(updateStmt);
+          yield* batch(db, stmts).pipe(
+            Effect.catchIf(
+              (e) => e instanceof ConstraintViolation && isSlugConflict(e),
+              () => new SlugTaken({ slug: input.slug ?? current.slug })
+            ),
+            Effect.catchIf(
+              (e) => e instanceof ConstraintViolation && isForeignKeyFailure(e),
+              () => new WikiPageNotFound({ id })
+            )
+          );
+          const updated = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
           );
           yield* Effect.logInfo(`[Wiki] Updated page ${updated.id}`);
           return yield* withUpdatedByName(updated);
-        }),
+        })),
 
       listRevisions: (
         pageSlug: string,
@@ -222,32 +226,28 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             return yield* new WikiPageNotFound({ id: revisionId });
           }
           yield* Effect.logInfo(`[Wiki] Restored revision ${revisionId} for page ${page.id}`);
-          return yield* withTx(
-            db,
-            Effect.gen(function* () {
-              yield* repo.update(page.id, {
-                title: revision.title,
-                slug: revision.slug,
-                content: JSON.stringify(revision.content),
-                contentText: revision.contentText,
-                updatedBy,
-              }).pipe(
-                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
-              );
-              yield* repo.createRevision(
-                page.id,
-                revision.title,
-                revision.slug,
-                JSON.stringify(revision.content),
-                revision.contentText,
-                "manual"
-              );
-              const restored = yield* repo.findById(page.id).pipe(
-                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
-              );
-              return yield* withUpdatedByName(restored);
-            })
+          const stmts: BatchStmt[] = [];
+          const updateStmt = repo.updateStmt(page.id, {
+            title: revision.title,
+            slug: revision.slug,
+            content: JSON.stringify(revision.content),
+            contentText: revision.contentText,
+            updatedBy,
+          });
+          if (updateStmt) stmts.push(updateStmt);
+          stmts.push(repo.createRevisionStmt(
+            page.id,
+            revision.title,
+            revision.slug,
+            JSON.stringify(revision.content),
+            revision.contentText,
+            "manual"
+          ));
+          yield* batch(db, stmts);
+          const restored = yield* repo.findById(page.id).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
           );
+          return yield* withUpdatedByName(restored);
         }),
 
       getById: (id: string): Effect.Effect<WikiPage, WikiPageNotFound | DbError> =>

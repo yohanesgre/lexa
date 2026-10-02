@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { AssistantCatalogRepo } from "../repos/assistant-catalog.repo";
 import { AssistantTaskRepo } from "../repos/assistant-task.repo";
-import { DbError, ConstraintViolation, Db, withTx } from "../db/db";
+import { DbError, ConstraintViolation, Db, batch, type BatchStmt } from "../db/db";
 import { AgentNotFound, SkillNotFound, AgentBuiltinDelete, AgentEntityInUse } from "../api/errors";
 import type { LexaAgent, LexaSkill } from "../../shared/types";
 
@@ -85,16 +85,14 @@ export class AssistantCatalogService extends Effect.Service<AssistantCatalogServ
           if (!agent.isBuiltin || seed === null) {
             return yield* new AgentBuiltinDelete({ kind: "agent", name: agent.name });
           }
-          return yield* withTx(
-            db,
-            Effect.gen(function* () {
-              yield* repo.updateAgent(id, { instructions: seed.instructions }).pipe(
-                Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))
-              );
-              yield* repo.replaceAgentSkills(id, seed.skillIds);
-              return yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
-            })
-          );
+          // Instructions update + skill-set replacement run as ONE atomic
+          // batch; the read-back happens after it commits.
+          const stmts: BatchStmt[] = [];
+          const updateStmt = repo.updateAgentStmt(id, { instructions: seed.instructions });
+          if (updateStmt) stmts.push(updateStmt);
+          stmts.push(...repo.replaceAgentSkillsStmts(id, seed.skillIds));
+          yield* batch(db, stmts);
+          return yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
         }),
 
       // ── Skills ──
