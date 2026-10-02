@@ -788,6 +788,33 @@ export function useSwimlanes(slug: string) {
   return useQuery({ queryKey: ["projects", slug, "swimlanes"], queryFn: () => api.listSwimlanes(slug).then((r) => r.data) });
 }
 
+function syncMilestoneSprintCounts(qc: QueryClient, slug: string): void {
+  const lanes =
+    qc.getQueryData<Swimlane[]>(["projects", slug, "swimlanes"]) ??
+    qc.getQueryData<Board>(["board", slug, true])?.swimlanes;
+  if (!lanes) return;
+
+  const withCounts = (old: Milestone[]): Milestone[] =>
+    old.map((m) => {
+      const owned = lanes.filter((l) => l.milestoneId === m.id);
+      return {
+        ...m,
+        sprintCount: owned.length,
+        archivedSprintCount: owned.filter((l) => l.archivedAt !== null).length,
+      };
+    });
+
+  qc.setQueryData<Milestone[]>(["milestones", slug], (old) => (old ? withCounts(old) : old));
+  // The board header's milestone selector reads counts off the embedded board
+  // milestone list — recompute there too or it stays stale.
+  for (const archived of [false, true]) {
+    qc.setQueryData<Board>(["board", slug, archived], (old) => {
+      if (!old) return old;
+      return { ...old, milestones: withCounts(old.milestones) };
+    });
+  }
+}
+
 export function useCreateSwimlane(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -805,6 +832,7 @@ export function useCreateSwimlane(slug: string) {
           return { ...old, swimlanes: [...old.swimlanes, swimlane] };
         });
       }
+      syncMilestoneSprintCounts(qc, slug);
       toast.push("success", "Swimlane created");
     },
     onError: (err) => {
@@ -832,6 +860,7 @@ export function useUpdateSwimlane(slug: string) {
           return { ...old, swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === swimlane.id ? swimlane : l)) };
         });
       }
+      syncMilestoneSprintCounts(qc, slug);
       toast.push("success", "Swimlane updated");
     },
     onError: (err) => {
@@ -859,6 +888,7 @@ export function useArchiveSwimlane(slug: string) {
         });
       }
       qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => old?.map((l) => (l.id === lane.id ? lane : l)));
+      syncMilestoneSprintCounts(qc, slug);
       toast.push("success", activity.length > 0 ? `Swimlane archived (${activity.length} tasks)` : "Swimlane archived");
     },
     onError: (err) => {
@@ -881,6 +911,7 @@ export function useRestoreSwimlane(slug: string) {
         });
       }
       qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => old?.map((l) => (l.id === lane.id ? lane : l)));
+      syncMilestoneSprintCounts(qc, slug);
       toast.push("success", "Swimlane restored");
     },
     onError: (err) => {
@@ -899,6 +930,13 @@ export function useDeleteSwimlane(slug: string) {
         if (!old) return old;
         return old.filter((s) => s.id !== id);
       });
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, swimlanes: old.swimlanes.filter((l: Swimlane) => l.id !== id) };
+        });
+      }
+      syncMilestoneSprintCounts(qc, slug);
       toast.push("success", "Swimlane deleted");
     },
     onError: (err) => {
@@ -927,6 +965,12 @@ export function useCreateMilestone(slug: string) {
         if (!old) return old;
         return [...old, milestone].sort((a, b) => a.position - b.position);
       });
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old || old.milestones.some((m) => m.id === milestone.id)) return old;
+          return { ...old, milestones: [...old.milestones, milestone].sort((a, b) => a.position - b.position) };
+        });
+      }
       toast.push("success", "Milestone created");
     },
     onError: (err) => {
@@ -946,6 +990,12 @@ export function useUpdateMilestone(slug: string) {
         if (!old) return old;
         return old.map((m) => (m.id === milestone.id ? milestone : m));
       });
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, milestones: old.milestones.map((m) => (m.id === milestone.id ? milestone : m)) };
+        });
+      }
       toast.push("success", "Milestone updated");
     },
     onError: (err) => {
@@ -964,6 +1014,12 @@ export function useDeleteMilestone(slug: string) {
         if (!old) return old;
         return old.filter((m) => m.id !== id);
       });
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, milestones: old.milestones.filter((m: Milestone) => m.id !== id) };
+        });
+      }
       toast.push("success", "Milestone deleted");
     },
     onError: (err) => {
@@ -989,6 +1045,7 @@ export function useArchiveMilestone(slug: string) {
           if (!old) return old;
           return {
             ...old,
+            milestones: old.milestones.map((m: Milestone) => (m.id === milestone.id ? milestone : m)),
             swimlanes: old.swimlanes.map((l: Swimlane) =>
               l.milestoneId === milestone.id ? { ...l, archivedAt: milestone.archivedAt } : l
             ),
@@ -1000,6 +1057,11 @@ export function useArchiveMilestone(slug: string) {
           };
         });
       }
+      // The archive cascades to the milestone's sprints — mirror it into the
+      // standalone lane list too, or a later count sync reads stale lanes.
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) =>
+        old?.map((l) => (l.milestoneId === milestone.id ? { ...l, archivedAt: milestone.archivedAt } : l))
+      );
       toast.push("success", "Milestone completed");
     },
     onError: (err) => {
@@ -1019,6 +1081,12 @@ export function useRestoreMilestone(slug: string) {
         if (!old) return old;
         return old.map((m) => (m.id === milestone.id ? milestone : m));
       });
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, milestones: old.milestones.map((m: Milestone) => (m.id === milestone.id ? milestone : m)) };
+        });
+      }
       toast.push("success", "Milestone restored");
     },
     onError: (err) => {

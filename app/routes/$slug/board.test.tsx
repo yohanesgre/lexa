@@ -6,8 +6,9 @@ import userEvent from "@testing-library/user-event";
 import type { QueryClient } from "@tanstack/react-query";
 import { createFetchMock, createQueryWrapper, createTestQueryClient } from "../../test-utils";
 import { BoardPage } from "../../components/kanban/BoardPage";
+import { readBoardMilestone, writeBoardMilestone } from "../../lib/board-milestone-store";
 
-const searchMock = vi.hoisted(() => ({ value: { task: undefined as string | undefined, milestone: undefined as string | undefined } }));
+const searchMock = vi.hoisted(() => ({ value: { task: undefined as string | undefined, milestone: undefined as string | undefined, swimlane: undefined as string | undefined } as { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined } }));
 const navigateMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-router", () => ({
@@ -51,13 +52,15 @@ function BoardPageWrapper() {
 }
 
 beforeEach(() => {
-  searchMock.value = { task: undefined, milestone: undefined };
+  searchMock.value = { task: undefined, milestone: undefined, swimlane: undefined };
   navigateMock.mockReset();
+  window.sessionStorage.clear();
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   routes.clear();
   mockFetch();
   routes.set("GET /api/projects/demo/board", makeBoard());
+  routes.set("GET /api/projects/demo/swimlanes", { data: makeBoard().swimlanes });
   queryClient = createTestQueryClient();
   wrapper = createQueryWrapper(queryClient);
 });
@@ -95,6 +98,63 @@ describe("board milestone selection", () => {
     render(<BoardPageWrapper />, { wrapper });
     expect(await screen.findByText("Hack week")).toBeInTheDocument();
     expect(screen.queryByText("Sprint 7")).not.toBeInTheDocument();
+  });
+
+  it("remembers the selection across navigation when the URL param is gone", async () => {
+    const user = userEvent.setup();
+    const view = render(<BoardPageWrapper />, { wrapper });
+    await screen.findByText("Sprint 7");
+    await user.click(document.querySelector(".ms-selector-trigger")!);
+    await user.click(screen.getByText("No milestone"));
+    expect(readBoardMilestone("demo")).toBe("none");
+    searchMock.value = { task: undefined, milestone: undefined };
+    view.rerender(<BoardPageWrapper />);
+    expect(await screen.findByText("Hack week")).toBeInTheDocument();
+    expect(screen.queryByText("Sprint 7")).not.toBeInTheDocument();
+  });
+
+  it("persists a milestone URL param for the next visit", async () => {
+    searchMock.value = { task: undefined, milestone: "none" };
+    const view = render(<BoardPageWrapper />, { wrapper });
+    await screen.findByText("Hack week");
+    view.unmount();
+    searchMock.value = { task: undefined, milestone: undefined };
+    render(<BoardPageWrapper />, { wrapper });
+    expect(await screen.findByText("Hack week")).toBeInTheDocument();
+    expect(screen.queryByText("Sprint 7")).not.toBeInTheDocument();
+  });
+
+  it("ignores a stored milestone id that is not in the list", async () => {
+    writeBoardMilestone("demo", "ghost");
+    render(<BoardPageWrapper />, { wrapper });
+    expect(await screen.findByText("Sprint 7")).toBeInTheDocument();
+    expect(screen.queryByText("Hack week")).not.toBeInTheDocument();
+  });
+
+  it("does not leak a stored milestone across projects", async () => {
+    writeBoardMilestone("other", "none");
+    render(<BoardPageWrapper />, { wrapper });
+    expect(await screen.findByText("Sprint 7")).toBeInTheDocument();
+  });
+
+  it("a milestone change preserves the existing task and swimlane params", async () => {
+    const user = userEvent.setup();
+    searchMock.value = { task: "t1", milestone: undefined, swimlane: "s1" };
+    render(<BoardPageWrapper />, { wrapper });
+    await screen.findAllByText("Sprint task");
+    await user.click(document.querySelector(".ms-selector-trigger")!);
+    await user.click(screen.getByText("No milestone"));
+    expect(navigateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ search: { task: "t1", swimlane: "s1", milestone: "none" } })
+    );
+  });
+
+  it("empty ?milestone= falls back to the active milestone and is not persisted", async () => {
+    searchMock.value = { task: undefined, milestone: "", swimlane: undefined };
+    render(<BoardPageWrapper />, { wrapper });
+    expect(await screen.findByText("Sprint 7")).toBeInTheDocument();
+    expect(screen.queryByText("Hack week")).not.toBeInTheDocument();
+    expect(readBoardMilestone("demo")).toBeNull();
   });
 });
 

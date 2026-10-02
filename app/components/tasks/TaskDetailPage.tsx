@@ -184,6 +184,7 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
         project={board.project}
         columns={board.columns}
         swimlanes={board.swimlanes}
+        milestones={board.milestones}
         columnRequiredFields={board.columns.map((column) => ({
           columnId: column.id,
           fields: column.requiredFields,

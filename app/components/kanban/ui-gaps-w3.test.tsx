@@ -3,7 +3,9 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Board, Column, FieldOption, Swimlane } from "../../../shared/types";
+import type { ReactNode } from "react";
+import type { Board, Column, FieldOption, Milestone, Swimlane } from "../../../shared/types";
+import { MilestoneSelector } from "./MilestoneSelector";
 import { TaskCard } from "./TaskCard";
 import { ColumnForm } from "./ColumnForm";
 import { ColumnsSettingsSection } from "./ColumnsSettingsSection";
@@ -23,6 +25,12 @@ vi.mock("../../lib/queries", () => ({
   useArchiveSwimlane: () => ({ mutate: vi.fn() }),
   useRestoreSwimlane: () => ({ mutate: restoreMutate }),
   useMilestones: () => ({ data: [] }),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children, className }: { children?: ReactNode; className?: string }) => (
+    <a className={className}>{children}</a>
+  ),
 }));
 
 const PRIORITIES: FieldOption[] = [{ id: "p1", label: "Low", color: "#6B6560", position: 0 }];
@@ -394,5 +402,74 @@ describe("SwimlaneForm delete", () => {
     );
 
     expect(screen.queryByRole("button", { name: /delete swimlane/i })).not.toBeInTheDocument();
+  });
+});
+
+const SELECTOR_MILESTONES: Milestone[] = [
+  { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 4, archivedSprintCount: 2 },
+  { id: "m2", projectId: "p1", name: "Beta milestone", description: "", position: 1, dueAt: null, archivedAt: null, sprintCount: 3, archivedSprintCount: 1 },
+];
+
+describe("MilestoneSelector light-dismiss", () => {
+  function detailsOf(container: HTMLElement): HTMLDetailsElement {
+    return container.querySelector(".ms-selector-details") as HTMLDetailsElement;
+  }
+
+  it("closes on outside click", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<MilestoneSelector milestones={SELECTOR_MILESTONES} value="m1" onChange={vi.fn()} slug="demo" />);
+
+    await user.click(screen.getByTitle("Filter board by milestone"));
+    expect(detailsOf(container).open).toBe(true);
+
+    await user.click(document.body);
+    expect(detailsOf(container).open).toBe(false);
+  });
+
+  it("closes on Escape", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<MilestoneSelector milestones={SELECTOR_MILESTONES} value="m1" onChange={vi.fn()} slug="demo" />);
+
+    await user.click(screen.getByTitle("Filter board by milestone"));
+    expect(detailsOf(container).open).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(detailsOf(container).open).toBe(false);
+  });
+
+  it("restores focus to the summary on Escape", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<MilestoneSelector milestones={SELECTOR_MILESTONES} value="m1" onChange={vi.fn()} slug="demo" />);
+
+    const summary = screen.getByTitle("Filter board by milestone");
+    await user.click(summary);
+    expect(detailsOf(container).open).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(summary);
+  });
+
+  it("selecting an option calls onChange and closes", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { container } = render(<MilestoneSelector milestones={SELECTOR_MILESTONES} value="m1" onChange={onChange} slug="demo" />);
+
+    await user.click(screen.getByTitle("Filter board by milestone"));
+    expect(detailsOf(container).open).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: /no milestone/i }));
+
+    expect(onChange).toHaveBeenCalledWith(null);
+    expect(detailsOf(container).open).toBe(false);
+  });
+
+  it("keeps the selected milestone label and navigation link", async () => {
+    const user = userEvent.setup();
+    render(<MilestoneSelector milestones={SELECTOR_MILESTONES} value="m2" onChange={vi.fn()} slug="demo" />);
+
+    expect(screen.getByTitle("Filter board by milestone").textContent).toContain("Beta milestone");
+
+    await user.click(screen.getByTitle("Filter board by milestone"));
+    expect(screen.getByText("Manage milestones")).toBeInTheDocument();
   });
 });

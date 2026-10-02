@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useBoard, useTask, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
+import { readBoardMilestone, writeBoardMilestone } from "../../lib/board-milestone-store";
+import { useBoard, useSwimlanes, useTask, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import { useToast } from "../ui/Toast";
 import { KanbanBoard } from "./KanbanBoard";
 import type { MoveTarget } from "./KanbanBoard";
@@ -69,6 +70,9 @@ export function BoardPage({ slug, search }: BoardPageProps) {
   const navigate = useNavigate();
   const [showArchived, setShowArchived] = useState(false);
   const { data: board, isLoading, error } = useBoard(slug, showArchived);
+  // Warm the standalone (includeArchived:true) lane list so sprint-count syncs
+  // read a complete source even when the board is in its default archived=false view.
+  useSwimlanes(slug);
   const toast = useToast();
   const moveTask = useMoveTask(slug);
   const updateTask = useUpdateTask(slug);
@@ -81,15 +85,29 @@ export function BoardPage({ slug, search }: BoardPageProps) {
 
   const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
 
-  // Milestone selection: ?milestone= param wins; default = first non-archived
-  // milestone (the board's active focus). The "none" sentinel is an explicit
-  // user choice that sticks (loose sprints + Backlog), never falling back.
-  const milestoneParam = search.milestone ?? null;
-  const defaultMilestone = (board?.milestones ?? []).find((m) => !m.archivedAt)?.id ?? null;
-  const effectiveMilestone = resolveEffectiveMilestone(milestoneParam, defaultMilestone);
+  // Milestone selection: ?milestone= param wins, then the value remembered for
+  // this project this session, then the first non-archived milestone (the
+  // board's active focus). The "none" sentinel is an explicit user choice that
+  // sticks (loose sprints + Backlog), never falling back.
+  const milestoneParam = search.milestone || null;
+  const milestones = board?.milestones ?? [];
+  const milestoneIds = new Set(milestones.map((m) => m.id));
+  const storedMilestone = readBoardMilestone(slug);
+  const rememberedMilestone =
+    storedMilestone === MILESTONE_NONE || (storedMilestone !== null && milestoneIds.has(storedMilestone))
+      ? storedMilestone
+      : null;
+  const defaultMilestone = milestones.find((m) => !m.archivedAt)?.id ?? null;
+  const effectiveMilestone = resolveEffectiveMilestone(milestoneParam ?? rememberedMilestone, defaultMilestone);
+
+  useEffect(() => {
+    if (search.milestone) writeBoardMilestone(slug, search.milestone);
+  }, [slug, search.milestone]);
 
   const handleMilestoneChange = (id: string | null) => {
-    navigate({ search: { milestone: id === null ? MILESTONE_NONE : id }, replace: true } as never);
+    const value = id === null ? MILESTONE_NONE : id;
+    writeBoardMilestone(slug, value);
+    navigate({ search: { ...search, milestone: value }, replace: true } as never);
   };
 
   const selectedTaskId = search.task ?? null;
@@ -206,6 +224,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
           defaultColumnId={createTarget?.columnId}
           columns={board.columns}
           swimlanes={board.swimlanes}
+          milestones={board.milestones}
           columnRequiredFields={board.columns.map((column) => ({
             columnId: column.id,
             fields: column.requiredFields,
