@@ -105,63 +105,6 @@ renames can never break sync.
      -H "Content-Type: application/json" -d '{}' <host>/api/webhooks/github
    ```
 
-## Appendix — env bootstrap (legacy / non-interactive)
-
-Env values are a **first-boot bootstrap only**: they are imported into the
-settings DB once at boot **when the DB key is empty** — after that the DB wins
-and env is ignored until the key is cleared. Use this when an install cannot
-run the in-app flow (e.g. a pre-provisioned GitHub App).
-
-| Var | Meaning |
-|-----|---------|
-| `GITHUB_APP_ID` | App ID (number, top of the app page) |
-| `GITHUB_PRIVATE_KEY` | Inline PEM with escaped newlines (`"-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"`) |
-| `GITHUB_PRIVATE_KEY_FILE` | Path to a `.pem` file, read at mirror time — **no escaping needed** (recommended; inline wins if both set) |
-| `GITHUB_WEBHOOK_SECRET` | The secret from the App's settings (must match the App exactly) |
-
-The env rows are legacy plaintext `settings.github_private_key` /
-`github_webhook_secret`. They stay readable as a fallback, but they are not what
-the in-app connect flow writes: it writes the encrypted `github_app_secrets`
-rows and deletes the plaintext ones. A manual **Settings → GitHub Sync** save
-(including clearing a field) is likewise the last explicit write — it writes the
-plaintext settings rows and deletes the matching encrypted row.
-
-The `lx` operator tool defaults to the live server: `github status`
-prints the server's effective settings and `github setup` pushes to the
-Settings API (applied immediately, env untouched) — both require
-`lx login`. The env-file path is explicit `--local`:
-`github setup --local` writes the bootstrap values (imported at the next
-boot only while the DB keys are unset) and `github status --local` validates
-them. When not logged in, the remote default fails with a hint to log in or
-use `--local` — there is no silent env fallback.
-
-**Local dev** (`.env.toml`):
-```toml
-[github]
-GITHUB_APP_ID = "1234567"
-GITHUB_PRIVATE_KEY_FILE = "/home/you/projects/lexa/github-app.private-key.pem"
-GITHUB_WEBHOOK_SECRET = "..."
-```
-
-**Prod** (`.env.toml`): the installer writes it in the deploy directory and the
-container bind-mounts it read-only (`create_host_path: false`), so the loader
-applies it at boot. The PEM is volume-mounted read-only into the container
-(`docker-compose.prod.yml` → `./github-app.private-key.pem:/app/github-app.private-key.pem:ro`),
-so use:
-```toml
-[github]
-GITHUB_APP_ID = "1234567"
-GITHUB_PRIVATE_KEY_FILE = "/app/github-app.private-key.pem"
-GITHUB_WEBHOOK_SECRET = "..."
-```
-A bare/systemd host loads the same `.env.toml` from the install directory
-(`systemd` runs `bun server/entry.ts` with the install dir as WorkingDirectory;
-no `--env-file`). Re-running the install script **merges**: it rewrites the
-installer-owned keys and preserves operator-added ones (`GITHUB_*`,
-`LXK_SECRETS_MASTER_KEY`, …), so there is nothing to re-add. The key file is
-gitignored (`*.private-key.pem`) and excluded from the Docker build context
-(`.dockerignore`) — never commit it.
-
 ## Troubleshooting
 
 - **Connect fails with `GITHUB_SECRET_WRITE_FAILED` (500)** —
@@ -177,8 +120,7 @@ gitignored (`*.private-key.pem`) and excluded from the Docker build context
   exchange (network/timeout/non-2xx). Retry the flow.
 - **Link fails with `GITHUB_API_ERROR: GitHub App is not configured`** — no
   credentials reach the server: run the in-app connect flow (applies
-  immediately) or check the env bootstrap (container env / restart after editing
-  `.env.toml`).
+  immediately).
 - **Webhook deliveries never arrive** — check the app's delivery log
   (App settings → **Advanced**): `failed to connect to host` = wrong webhook
   URL (usually a stale `LXK_PUBLIC_URL` after a tunnel restart);

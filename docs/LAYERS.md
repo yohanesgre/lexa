@@ -54,11 +54,8 @@ export const DbD1Live = (d1: D1Like): Layer.Layer<Db> => Layer.succeed(Db, creat
 // legacy plaintext settings.github_private_key / github_webhook_secret rows
 // as a fallback for existing installs. A manual PUT is the LAST EXPLICIT
 // WRITE: it writes the plaintext settings row and deletes the matching
-// encrypted row. Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
-// GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a FIRST-BOOT BOOTSTRAP
-// only: mirrorSettingsFromEnv copies it into the DB once at boot when keys
-// are empty (GITHUB_PRIVATE_KEY inline wins over the file; the file is read
-// at mirror time), and the runtime never reads env again.
+// encrypted row. The DB is the only config surface — the runtime never reads
+// GitHub config from env.
 // GitHubConfigLive serves a MUTABLE module-scope holder (never replaced):
 // syncGitHubConfigFromDbAsync mutates it in place — applied at Bun boot via
 // runGithubConfigBoot, at Workers boot, and after every PUT

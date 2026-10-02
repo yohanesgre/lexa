@@ -604,9 +604,9 @@ CREATE TABLE webhook_events (
 -- credential rows, kept readable as a fallback only. New secrets are written
 -- ENCRYPTED to github_app_secrets (0017); an encrypted row, when present, is
 -- authoritative (see Design Notes → Managed secrets).
--- Env (GITHUB_*, LXK_RATE_LIMIT_*) is a FIRST-BOOT BOOTSTRAP: mirrorSettingsFromEnv
+-- Env (LXK_RATE_LIMIT_*) is a FIRST-BOOT BOOTSTRAP: mirrorSettingsFromEnv
 -- imports it into these keys once at boot when they are empty; the runtime
--- never reads env again.
+-- never reads env again. GitHub config is DB-only, never env.
 CREATE TABLE settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,

@@ -1266,9 +1266,7 @@ GET    /api/settings/github  (admin)
   plaintext settings.github_private_key / settings.github_webhook_secret rows
   stay READABLE as a fallback for installs written before the encrypted store
   existed (an encrypted row, when present, is authoritative — if it cannot be
-  opened, the value reads as unset rather than falling back). Env (GITHUB_APP_ID
-  / GITHUB_PRIVATE_KEY / GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a
-  first-boot bootstrap, mirrored into the DB once at boot. source = "settings"
+  opened, the value reads as unset rather than falling back). source = "settings"
   if the app id or either credential is set, else "none" (no "env" state — env
   is never a runtime source; a slug alone does not flip source).
   ⚠ Write-only secrets: the PEM and webhook secret are never returned —

@@ -13,8 +13,6 @@
 //   bun x wrangler d1 migrations apply DB --remote --config wrangler.staging.local.jsonc
 //   bun x wrangler deploy --config wrangler.staging.local.jsonc
 //   bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local.jsonc
-//   # optional GitHub sync secrets (same names as prod):
-//   #   GITHUB_APP_ID, GITHUB_WEBHOOK_SECRET, GITHUB_PRIVATE_KEY (inline PEM)
 //
 // Rules:
 // - Never commit the filled copy; never deploy with the root wrangler.jsonc
