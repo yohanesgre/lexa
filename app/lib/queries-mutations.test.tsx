@@ -5,14 +5,16 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
-import type { Board, Task, Project, Swimlane, Column, WikiPage, FieldConfig, ActivityItem, Dashboard } from "../../shared/types";
+import type { Board, Task, Project, Swimlane, Milestone, Column, WikiPage, FieldConfig, ActivityItem, Dashboard } from "../../shared/types";
 import { createFetchMock, createQueryWrapper, createTestQueryClient, json } from "../test-utils";
 import {
   useCreateProject, useUpdateProject, useDeleteProject, useCreateTask, useUpdateTask,
   useMoveTask, useDeleteTask, useArchiveTask, useRestoreTask, useCreateWikiPage,
   useUpdateWikiPage, useDeleteWikiPage, useUpdateFieldConfig, useCreateColumn,
   useUpdateColumn, useDeleteColumn, useCreateSwimlane, useUpdateSwimlane, useArchiveSwimlane,
-  useDeleteSwimlane, useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
+  useRestoreSwimlane, useDeleteSwimlane, useCreateMilestone, useUpdateMilestone, useArchiveMilestone,
+  useRestoreMilestone,
+  useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
   useUpdateComment, useAddTaskLink, useRemoveTaskLink,
   useAddSource, useRemoveSource, useCreateAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
@@ -33,6 +35,9 @@ const DASHBOARD: Dashboard = {
 };
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
 const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
+const SPRINT: Swimlane = { ...SWIMLANE, id: "s2", name: "Sprint 1", position: 1, kind: "sprint", milestoneId: "m1" };
+const MILESTONE: Milestone = { id: "m1", projectId: "p1", name: "v1.0", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 };
+const MILESTONE2: Milestone = { ...MILESTONE, id: "m2", name: "v2.0", position: 1 };
 const FIELD_CONFIG: FieldConfig = { priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }], types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }] };
 const TASK: Task = {
   id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1",
@@ -489,6 +494,126 @@ describe("board-structure + settings mutations", () => {
     const { result } = renderHook(() => useDeleteMyApiKey(), { wrapper });
     await act(async () => { await result.current.mutateAsync("k1"); });
     expect(queryClient.getQueryData(["my-api-keys"])).toEqual([]);
+  });
+});
+
+describe("milestone ⇄ swimlane cache fan-in (LX-21)", () => {
+  it("useCreateSwimlane recomputes the milestone sprint counts", async () => {
+    routes.set("POST /api/projects/demo/swimlanes", SPRINT);
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE]);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    const { result } = renderHook(() => useCreateSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ name: "Sprint 1", milestoneId: "m1" }); });
+    const ms = queryClient.getQueryData<Milestone[]>(["milestones", "demo"])!;
+    expect(ms[0]).toMatchObject({ sprintCount: 1, archivedSprintCount: 0 });
+  });
+
+  it("useArchiveSwimlane bumps the milestone archivedSprintCount", async () => {
+    const archived: Swimlane = { ...SPRINT, archivedAt: "2026-03-01T00:00:00.000Z" };
+    routes.set("POST /api/projects/demo/swimlanes/s2/archive", { data: archived, activity: [] });
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, SPRINT]);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    const { result } = renderHook(() => useArchiveSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "s2" }); });
+    const ms = queryClient.getQueryData<Milestone[]>(["milestones", "demo"])!;
+    expect(ms[0]).toMatchObject({ sprintCount: 1, archivedSprintCount: 1 });
+  });
+
+  it("useRestoreSwimlane drops the milestone archivedSprintCount", async () => {
+    const archived: Swimlane = { ...SPRINT, archivedAt: "2026-03-01T00:00:00.000Z" };
+    routes.set("POST /api/projects/demo/swimlanes/s2/restore", { data: SPRINT, activity: [] });
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, archived]);
+    queryClient.setQueryData(["milestones", "demo"], [{ ...MILESTONE, sprintCount: 1, archivedSprintCount: 1 }]);
+    const { result } = renderHook(() => useRestoreSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "s2" }); });
+    const ms = queryClient.getQueryData<Milestone[]>(["milestones", "demo"])!;
+    expect(ms[0]).toMatchObject({ sprintCount: 1, archivedSprintCount: 0 });
+  });
+
+  it("useDeleteSwimlane drops the lane from the board and the milestone count", async () => {
+    routes.set("DELETE /api/projects/demo/swimlanes/s2", 204);
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, SPRINT]);
+    queryClient.setQueryData(["milestones", "demo"], [{ ...MILESTONE, sprintCount: 1 }]);
+    queryClient.setQueryData(["board", "demo", false], { ...BOARD, swimlanes: [SWIMLANE, SPRINT] });
+    const { result } = renderHook(() => useDeleteSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "s2" }); });
+    expect(queryClient.getQueryData<Board>(["board", "demo", false])!.swimlanes.map((l) => l.id)).toEqual(["s1"]);
+    expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!.sprintCount).toBe(0);
+  });
+
+  it("useUpdateMilestone mirrors the rename into the board milestone lists", async () => {
+    routes.set("PATCH /api/projects/demo/milestones/m1", { ...MILESTONE, name: "Renamed" });
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    queryClient.setQueryData(["board", "demo", false], { ...BOARD, milestones: [MILESTONE] });
+    queryClient.setQueryData(["board", "demo", true], { ...BOARD, milestones: [MILESTONE] });
+    const { result } = renderHook(() => useUpdateMilestone("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "m1", name: "Renamed" }); });
+    expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!.name).toBe("Renamed");
+    expect(queryClient.getQueryData<Board>(["board", "demo", false])!.milestones[0]!.name).toBe("Renamed");
+    expect(queryClient.getQueryData<Board>(["board", "demo", true])!.milestones[0]!.name).toBe("Renamed");
+  });
+
+  it("useCreateMilestone appends the milestone to the board lists", async () => {
+    routes.set("POST /api/projects/demo/milestones", MILESTONE2);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    queryClient.setQueryData(["board", "demo", false], { ...BOARD, milestones: [MILESTONE] });
+    queryClient.setQueryData(["board", "demo", true], { ...BOARD, milestones: [MILESTONE] });
+    const { result } = renderHook(() => useCreateMilestone("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ name: "v2.0" }); });
+    expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])!.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(queryClient.getQueryData<Board>(["board", "demo", false])!.milestones.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(queryClient.getQueryData<Board>(["board", "demo", true])!.milestones.map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("useCreateSwimlane falls back to the board-true lane source when the standalone list is absent", async () => {
+    const archivedSprint: Swimlane = { ...SPRINT, archivedAt: "2026-03-01T00:00:00.000Z" };
+    routes.set("POST /api/projects/demo/swimlanes", SPRINT);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    queryClient.setQueryData(["board", "demo", true], { ...BOARD, swimlanes: [archivedSprint], milestones: [MILESTONE] });
+    queryClient.setQueryData(["board", "demo", false], { ...BOARD, swimlanes: [], milestones: [MILESTONE] });
+    const { result } = renderHook(() => useCreateSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ name: "Sprint 1", milestoneId: "m1" }); });
+    // The standalone list stays absent; counts come from board-true (2 for m1, 1 archived).
+    expect(queryClient.getQueryData(["projects", "demo", "swimlanes"])).toBeUndefined();
+    expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]).toMatchObject({ sprintCount: 2, archivedSprintCount: 1 });
+    expect(queryClient.getQueryData<Board>(["board", "demo", true])!.milestones[0]).toMatchObject({ sprintCount: 2, archivedSprintCount: 1 });
+    expect(queryClient.getQueryData<Board>(["board", "demo", false])!.milestones[0]).toMatchObject({ sprintCount: 2, archivedSprintCount: 1 });
+  });
+
+  it("useCreateSwimlane with no lane source leaves the milestone counts untouched", async () => {
+    routes.set("POST /api/projects/demo/swimlanes", SPRINT);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    const { result } = renderHook(() => useCreateSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ name: "Sprint 1", milestoneId: "m1" }); });
+    expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]).toMatchObject({ sprintCount: 0, archivedSprintCount: 0 });
+  });
+
+  it("useArchiveMilestone mirrors the sprint cascade into the standalone lane list", async () => {
+    const archivedAt = "2026-03-01T00:00:00.000Z";
+    routes.set("POST /api/projects/demo/milestones/m1/archive", { data: { ...MILESTONE, archivedAt }, activity: [] });
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, SPRINT]);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE]);
+    const { result } = renderHook(() => useArchiveMilestone("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "m1" }); });
+    const lanes = queryClient.getQueryData<Swimlane[]>(["projects", "demo", "swimlanes"])!;
+    expect(lanes.find((l) => l.id === "s2")!.archivedAt).toBe(archivedAt);
+    expect(lanes.find((l) => l.id === "s1")!.archivedAt).toBeNull();
+    expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!.archivedAt).toBe(archivedAt);
+  });
+
+  it("useRestoreMilestone leaves the milestone's lanes archived in the standalone lane list", async () => {
+    const archivedAt = "2026-03-01T00:00:00.000Z";
+    routes.set("POST /api/projects/demo/milestones/m1/restore", { data: { ...MILESTONE, sprintCount: 1, archivedSprintCount: 1 }, activity: [] });
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, { ...SPRINT, archivedAt }]);
+    queryClient.setQueryData(["milestones", "demo"], [{ ...MILESTONE, archivedAt, sprintCount: 1, archivedSprintCount: 1 }]);
+    const { result } = renderHook(() => useRestoreMilestone("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "m1" }); });
+    const lanes = queryClient.getQueryData<Swimlane[]>(["projects", "demo", "swimlanes"])!;
+    expect(lanes.find((l) => l.id === "s2")!.archivedAt).toBe(archivedAt);
+    expect(lanes.find((l) => l.id === "s1")!.archivedAt).toBeNull();
+    const m = queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!;
+    expect(m.archivedAt).toBeNull();
+    expect(m).toMatchObject({ sprintCount: 1, archivedSprintCount: 1 });
   });
 });
 
