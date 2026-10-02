@@ -28,6 +28,7 @@ bun run test:fe       # shared/ + app/
 bun run test:app      # app/ only (fastest frontend loop)
 bun run test:cli      # cli/src/
 bun run test          # full suite
+bash scripts/test-install.sh   # installer unit + dry-run suite (no vitest)
 
 # 3. Invariants (if touched server/, shared/, docs/SCHEMA.md, scripts/check-invariants.ts)
 bun run check:invariants
@@ -67,6 +68,10 @@ override; accepts `scripts/ci-local.sh`'s `fe|be|cli` tokens plus `full` —
 ci-local also has `shared` and rejects `full`), `--print-plan` (print the
 chosen lane + command(s), run nothing, exit 0).
 
+When installer paths change (`scripts/install*`, `scripts/uninstall*`,
+`scripts/test-install*`, `scripts/workers-install*`, `wrangler.jsonc`), the
+gate also runs `bash scripts/test-install.sh` alongside the scoped vitest lane.
+
 Iteration contract: touched test file(s) during iteration
 (`bun run test -- <path>`, ~1s), the lane at lane close, the full suite at
 pre-merge only.
@@ -75,12 +80,14 @@ pre-merge only.
 
 CI runs **only at release preparation** — a push to `chore/release-*` / `release/*`
 or a manual `workflow_dispatch`; PRs and main merges rely on the local gate below
-plus review. On those runs CI executes the full validation:
-`typecheck` → `test:full` → `check:invariants` → build → `docker smoke` →
-coverage 60% → `gitleaks` → `lint warn`.
-Local `verify-gate.sh` covers the fast subset (first 3 + secrets + wireframes);
-its test step is scoped by default — use `--full` for the complete suite. Full
-docker smoke only in CI.
+plus review. On those runs CI executes the full validation in the `ci` job:
+`typecheck` → `test:full` → `check:invariants` → build → `gitleaks` +
+wireframes build → `lint warn` + coverage 60% + `check:mobile` (warn-only).
+A separate `install-script` job runs `bash scripts/test-install.sh` when
+installer paths change. Local `verify-gate.sh` covers the fast subset
+(first 3 + secrets + wireframes) and also runs the installer suite when
+installer files change; its test step is scoped by default — use `--full` for
+the complete suite.
 
 ## Failure handling
 

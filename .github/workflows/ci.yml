@@ -268,8 +268,8 @@ jobs:
 
   install-script:
     # Install script = the deploy surface; tests must run the SAME graph as
-    # production (design-deploy-tooling.md §9 test-swap R). Docker-free: the
-    # suite is offline and hermetic (dry-runs + fixtures only — no network, no
+    # production (design-deploy-tooling.md §9 test-swap R). The suite is
+    # offline and hermetic (dry-runs + fixtures only — no network, no
     # real Cloudflare call, no container), so it finishes in seconds.
     runs-on: ubuntu-latest
     timeout-minutes: 10
