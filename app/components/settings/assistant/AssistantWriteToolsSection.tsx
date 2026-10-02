@@ -64,7 +64,7 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
         {/* Master toggle */}
         <div className="field">
           <div className="flex items-center gap-3">
-            <button type="button" className={`toggle-switch${enabled ? " is-on" : ""}`} aria-label="Write tools enabled" aria-pressed={enabled} onClick={toggleMaster} />
+            <button type="button" className={`toggle-switch${enabled ? " is-on" : ""}`} aria-label="Write tools on" aria-pressed={enabled} onClick={toggleMaster} />
             <span className="text-sm font-medium text-lx-text-primary">Write tools enabled</span>
           </div>
           <div className="field-hint">Master gate for all mutating Assistant tools. Off — Assistant never proposes writes and the per-tool list below is ignored. Master OFF wins in every composer mode; changes apply from the next turn — a suspended batch finishes under the mode it started with.</div>

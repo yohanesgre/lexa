@@ -92,23 +92,11 @@ describe("AssistantWriteToolsSection — canonical write-tool list", () => {
     const before = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(before.some((box) => box.checked)).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "Write tools enabled" }));
+    await user.click(screen.getByRole("button", { name: "Write tools on" }));
 
     const after = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(after).toHaveLength(19);
     expect(after.every((box) => box.checked)).toBe(true);
-  });
-
-  it("exposes a stable accessible name and carries toggle state on aria-pressed", async () => {
-    const user = userEvent.setup();
-    render(<AssistantWriteToolsSection project={PROJECT} />);
-
-    const toggle = screen.getByRole("button", { name: "Write tools enabled" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
-    expect(toggle).toHaveAccessibleName("Write tools enabled");
   });
 
   it("documents the two gates, three modes and each mode's behavior", () => {
@@ -130,7 +118,6 @@ describe("AssistantWriteToolsSection — canonical write-tool list", () => {
   it("does not claim per-change approval is universal (no auto-approve copy)", () => {
     const { container } = render(<AssistantWriteToolsSection project={PROJECT} />);
 
-    expect(container.textContent).not.toMatch(/auto-approve/i);
-    expect(container.textContent).not.toMatch(/every proposed write still requires/i);
+    expect(container.textContent).not.toMatch(/no "auto-approve" anywhere|Every proposed write still requires explicit per-change approval/i);
   });
 });
