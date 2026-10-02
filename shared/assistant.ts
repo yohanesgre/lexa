@@ -44,6 +44,32 @@ export const ASSISTANT_PRE_INGRESS_TIMEOUT_MS = 30_000;
 export const ASSISTANT_STALL_TIMEOUT_MS = 90_000;
 export const ASSISTANT_STALL_MESSAGE = "stream stalled — no response from provider";
 
+// Canonical Assistant write-tool names, in approval-chip order. Single source
+// of truth for the settings checkbox list and the runtime registry: the DO-side
+// `server/assistant/write-tool-names.ts` re-exports this list, so the UI can
+// never drift from the registered tools. Pure data — no `@tanstack/ai` import.
+export const ASSISTANT_WRITE_TOOL_NAMES = [
+  "create_task",
+  "update_task",
+  "move_task",
+  "archive_task",
+  "restore_task",
+  "delete_task",
+  "add_comment",
+  "create_wiki_page",
+  "edit_wiki_page",
+  "delete_wiki_page",
+  "create_milestone",
+  "update_milestone",
+  "archive_milestone",
+  "delete_milestone",
+  "create_sprint",
+  "update_sprint",
+  "archive_sprint",
+  "delete_sprint",
+  "move_swimlane",
+] as const;
+
 export interface AssistantSettingsMasked {
   projectId: ID;
   searchProvider: "exa" | null;

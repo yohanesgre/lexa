@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAssistantSettings, useSaveAssistantWriteTools } from "../../../lib/queries";
+import { ASSISTANT_WRITE_TOOL_NAMES } from "../../../../shared/assistant";
 import type { AssistantSettingsInput } from "../../../../shared/assistant";
 import type { Project } from "../../../../shared/types";
 
@@ -8,21 +9,6 @@ import type { Project } from "../../../../shared/types";
 // (write_tools): master OFF = empty array; EMPTY SELECTION = writes off —
 // behaves exactly like master off. Every proposed write still requires
 // explicit per-change approval in chat.
-const ASSISTANT_WRITE_TOOLS = [
-  "create_task",
-  "update_task",
-  "move_task",
-  "archive_task",
-  "restore_task",
-  "add_comment",
-  "create_wiki_page",
-  "edit_wiki_page",
-  "create_milestone",
-  "update_milestone",
-  "archive_milestone",
-  "create_sprint",
-  "update_sprint",
-] as const;
 
 export function AssistantWriteToolsSection({ project }: { project: Project }) {
   const { data: settings, isLoading } = useAssistantSettings(project.id);
@@ -33,7 +19,7 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
   useEffect(() => {
     if (settings && hydratedRef.current !== project.id) {
       hydratedRef.current = project.id;
-      setSelected(settings.writeTools.filter((t) => (ASSISTANT_WRITE_TOOLS as readonly string[]).includes(t)));
+      setSelected(settings.writeTools.filter((t) => (ASSISTANT_WRITE_TOOL_NAMES as readonly string[]).includes(t)));
     }
   }, [settings, project.id]);
 
@@ -45,7 +31,7 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
   // Master OFF clears the list (empty array IS writes off). Master ON from
   // empty restores the full default set — there is no stored "previous"
   // selection to return to.
-  const toggleMaster = () => setSelected((prev) => (prev.length > 0 ? [] : [...ASSISTANT_WRITE_TOOLS]));
+  const toggleMaster = () => setSelected((prev) => (prev.length > 0 ? [] : [...ASSISTANT_WRITE_TOOL_NAMES]));
 
   const handleSave = () => {
     if (!settings) return;
@@ -89,15 +75,15 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
           <span className="field-label">
             Allowed tools{" "}
             <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginLeft: 6 }}>
-              13 write tools
+              {ASSISTANT_WRITE_TOOL_NAMES.length} write tools
             </span>
           </span>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}>
-            {ASSISTANT_WRITE_TOOLS.map((tool) => (
+            {ASSISTANT_WRITE_TOOL_NAMES.map((tool) => (
               <label key={tool} className="check-row" style={{ cursor: "pointer" }}>
                 <input type="checkbox" checked={selected.includes(tool)} onChange={() => toggleTool(tool)} aria-label={tool} style={{ position: "absolute", opacity: 0, width: 14, height: 14 }} />
                 <div className={`checkbox${selected.includes(tool) ? " checked" : ""}`} aria-hidden="true" />
-                <span className="text-sm text-lx-text-secondary">{tool.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}</span>
+                <span className={`font-mono text-xs${selected.includes(tool) ? " text-lx-text-primary" : " text-lx-text-secondary"}`}>{tool}</span>
               </label>
             ))}
           </div>
