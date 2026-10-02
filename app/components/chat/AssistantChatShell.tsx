@@ -7,11 +7,12 @@ import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChat
 import { AssistantBubble } from "./AssistantBubble";
 import { AssistantChatComposer, type ChatUploadRequest } from "./AssistantChatComposer";
 import { EffortPicker, DeckRailSummary } from "./EffortPicker";
+import { WritesPicker, WritesModeSummary, WritesEmptyHint } from "./WritesModePicker";
 import { useChatComposerClearance } from "./assistant-chat-hooks";
 import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
 import type { QueuedMessage } from "./useChatQueue";
 import type { LexaSkill } from "../../../shared/types";
-import type { AssistantReasoningEffort } from "../../../shared/assistant";
+import type { AssistantReasoningEffort, AssistantToolPermissionMode } from "../../../shared/assistant";
 import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
 import type { ChatAttachmentRef } from "../../lib/assistant-image";
 import type { ChatAttachment } from "../../lib/api";
@@ -363,6 +364,9 @@ export function ChatComposerArea({
   effort,
   projectEffort,
   onEffortChange,
+  permissionMode = "ask",
+  onPermissionModeChange,
+  noWriteTools = false,
   onSend,
   onAbort,
   landing,
@@ -390,6 +394,12 @@ export function ChatComposerArea({
   effort: AssistantReasoningEffort | "";
   projectEffort: AssistantReasoningEffort | null | undefined;
   onEffortChange: (e: AssistantReasoningEffort | "") => void;
+  // Per-thread WRITE-tool permission mode (herald-chat.html rail, beside
+  // Effort). Sticky per thread; the send envelope carries the current value.
+  permissionMode?: AssistantToolPermissionMode | undefined;
+  onPermissionModeChange?: ((mode: AssistantToolPermissionMode) => void) | undefined;
+  // The project's allowlist has no write tools → the control locks with a hint.
+  noWriteTools?: boolean | undefined;
   onSend: (message: string, attachments: ChatAttachmentRef[]) => boolean;
   onAbort: () => void;
   landing?: boolean | undefined;
@@ -401,6 +411,7 @@ export function ChatComposerArea({
   uploadAttachment?: ((req: ChatUploadRequest) => Promise<ChatAttachment>) | undefined;
 }) {
   const railDisabled = streaming || busy409 || suspendedLock;
+  const onPermissionChange = onPermissionModeChange ?? (() => {});
   // The docked composer floats over the transcript (chat-composer-float);
   // measure it and publish the clearance var on the shell. Landing never
   // attaches the ref — it stays static and in-flow.
@@ -452,6 +463,12 @@ export function ChatComposerArea({
                   onEffortChange={onEffortChange}
                   disabled={railDisabled}
                 />
+                <WritesModeSummary
+                  mode={permissionMode}
+                  disabled={railDisabled}
+                  noWriteTools={noWriteTools}
+                  onChange={onPermissionChange}
+                />
                 <span className="deck-rail-spacer" />
               </>
             ) : (
@@ -459,9 +476,12 @@ export function ChatComposerArea({
                 <span className="deck-rail-spacer" />
                 <span className="deck-label">Effort</span>
                 <EffortPicker effort={effort} projectEffort={projectEffort ?? null} disabled={railDisabled} align={menuAlign} onChange={onEffortChange} />
+                <span className="deck-label">Writes</span>
+                <WritesPicker mode={permissionMode} disabled={railDisabled} noWriteTools={noWriteTools} align={menuAlign} onChange={onPermissionChange} />
               </>
             )
           }
+          railHint={noWriteTools ? <WritesEmptyHint /> : undefined}
         />
       </div>
     </div>

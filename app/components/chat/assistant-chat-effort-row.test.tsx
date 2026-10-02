@@ -113,7 +113,7 @@ describe("chat rail placement", () => {
   it("collapses the rail to the summary chip on mobile", () => {
     const { container } = renderComposerArea({ isMobileComposer: true });
     const rail = container.querySelector(".deck-rail")!;
-    expect(rail.querySelectorAll(".deck-summary-chip")).toHaveLength(1);
+    expect(rail.querySelectorAll(".deck-summary-chip")).toHaveLength(2);
     expect(within(rail as HTMLElement).queryByText("Effort")).toBeNull();
   });
 

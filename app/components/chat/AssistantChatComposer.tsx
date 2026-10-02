@@ -460,6 +460,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   onSend,
   onAbort,
   rail,
+  railHint,
   queued,
   onQueue,
   onUnqueue,
@@ -489,6 +490,9 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   onSend: (message: string, attachments: ChatAttachmentRef[]) => boolean;
   onAbort: () => void;
   rail?: ReactNode | undefined;
+  // One-line hint rendered directly under the rail (herald-chat.html State 4:
+  // a `.deck-rail` sibling, never inside it).
+  railHint?: ReactNode | undefined;
   queued?: { text: string; heldReason?: "stopped" | "failed"; flushing?: boolean } | null | undefined;
   onQueue?: ((text: string) => void) | undefined;
   onUnqueue?: (() => void) | undefined;
@@ -752,6 +756,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
           {rail}
         </div>
       )}
+      {railHint}
       {queued && (
         <div className="deck-queued" role="status" aria-live="polite">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>

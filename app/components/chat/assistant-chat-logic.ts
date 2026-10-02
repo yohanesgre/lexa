@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ASSISTANT_AGENT_ID, hasVisionCapability } from "../../lib/assistant-agent";
 import type { LexaSkill } from "../../../shared/types";
-import type { AssistantChatAttachment } from "../../../shared/assistant";
+import type { AssistantChatAttachment, AssistantToolPermissionMode } from "../../../shared/assistant";
 import type { ChatAttachmentRef } from "../../lib/assistant-image";
 import { deriveChatTitle } from "../../../shared/assistant";
 import type { AssistantChatThreadSummary } from "../../lib/api";
@@ -71,6 +71,9 @@ export function chatStreamBody(args: {
   chatId: string;
   message: string;
   effort: string;
+  // Omitted when the page has no authoritative source for the thread's mode;
+  // the DO then keeps its sticky value (a brand-new thread resolves to "ask").
+  permissionMode?: AssistantToolPermissionMode | undefined;
   attachments?: ChatAttachmentRef[] | undefined;
   fromIndex?: number | undefined;
 }) {
@@ -85,8 +88,45 @@ export function chatStreamBody(args: {
     message: args.message,
     attachments,
     ...(args.effort ? { reasoningEffort: args.effort } : {}),
+    ...(args.permissionMode ? { permissionMode: args.permissionMode } : {}),
     ...(args.fromIndex !== undefined ? { fromIndex: args.fromIndex } : {}),
   };
+}
+
+// Sticky per-thread WRITE mode (D2/D5): the active thread's in-session pick
+// wins (last send wins); switching threads re-seeds from that thread's cached
+// transcript value, falling back to "ask" when absent/unloaded.
+export function resolvePermissionMode(args: {
+  chatId: string;
+  selection: { chatId: string; value: AssistantToolPermissionMode } | null;
+  transcriptChatId: string | undefined;
+  transcriptMode: AssistantToolPermissionMode | undefined;
+}): AssistantToolPermissionMode {
+  if (args.selection && args.selection.chatId === args.chatId) return args.selection.value;
+  if (args.transcriptChatId === args.chatId && args.transcriptMode) return args.transcriptMode;
+  return "ask";
+}
+
+// The send envelope carries `permissionMode` ONLY when the page has an
+// authoritative source for THIS thread: an in-session pick, or a loaded
+// transcript. Omitting it lets the DO keep its sticky value (server-side
+// truth) — the display fallback ("ask") must never overwrite it.
+export function isPermissionAuthoritative(args: {
+  chatId: string;
+  selection: { chatId: string } | null;
+  transcriptChatId: string | undefined;
+}): boolean {
+  return args.selection?.chatId === args.chatId || args.transcriptChatId === args.chatId;
+}
+
+// State 4 (herald-chat.html): a settled, successful settings read that proves
+// the project's write-tools allowlist is empty locks the Writes control and
+// shows its hint. A missing/loading/unknown list is NOT the empty state.
+export function noWriteToolsAllowed(
+  settings: { writeTools?: readonly string[] | undefined } | null | undefined,
+  loading: boolean
+): boolean {
+  return !loading && settings != null && Array.isArray(settings.writeTools) && settings.writeTools.length === 0;
 }
 
 // ── Turn list transforms (setTurns updaters) ──

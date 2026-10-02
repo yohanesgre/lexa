@@ -1,6 +1,6 @@
 import type { ChatStatus, DynamicToolUIPart, ToolUIPart, UIDataTypes, UIMessage, UIMessagePart, UITools } from "ai";
 import { getToolName, isToolUIPart } from "ai";
-import type { AssistantWriteDiff } from "../../shared/assistant";
+import type { AssistantToolPermissionMode, AssistantWriteDiff } from "../../shared/assistant";
 import { ASSISTANT_APPROVAL_DATA_PART } from "../../shared/assistant";
 import type {
   AssistantPendingChip,
@@ -409,6 +409,8 @@ export interface AgentSendBody {
   attachments?: Array<{ storageKey: string; mimeType: string; name: string }> | undefined;
   fromIndex?: number | undefined;
   reasoningEffort?: string | undefined;
+  // Per-thread WRITE-tool permission mode carried on the send envelope (D2).
+  permissionMode?: AssistantToolPermissionMode | undefined;
 }
 
 export function agentSendParts(body: AgentSendBody): UIMessage["parts"] {
@@ -431,6 +433,7 @@ export function agentSendMetadata(body: AgentSendBody): Record<string, unknown> 
     ...(body.chatId ? { chatId: body.chatId } : {}),
     ...(body.fromIndex !== undefined ? { fromIndex: body.fromIndex } : {}),
     ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+    ...(body.permissionMode ? { permissionMode: body.permissionMode } : {}),
     ...(body.attachments && body.attachments.length > 0 ? { attachments: body.attachments } : {}),
   };
 }
