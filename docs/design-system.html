@@ -6802,7 +6802,7 @@ button.history-item {
           <strong>Use</strong> — `.checkbox` (+ `.checked`) for multi-select rows (required fields, filters); `.toggle-switch` for a single on/off setting (autosave, show archived).<br/>
           <strong>Avoid</strong> — a toggle for a multi-option choice; a checkbox for a persistent on/off preference.<br/>
           <strong>Instead</strong> — `.toggle-switch` for binary settings; `.checkbox` rows for multi-select lists.<br/>
-          <strong>ARIA</strong> — a toggle is a `<button class="toggle-switch" aria-pressed="true|false">`. The accessible name is CONSTANT across states and equals the visible label text (WCAG Label in Name) — for icon-only toggles a constant descriptive name; state lives only in `aria-pressed`, never in the name ("X off"/"X on", "X disabled"/"X enabled"). The `is-on` class carries the visual state.
+          <strong>ARIA</strong> — a toggle button is any `<button>` exposing `aria-pressed="true|false"` (`.toggle-switch`, `.password-toggle`, the pin `.icon-btn`, `.status-chip`); the `.toggle-switch` class is one visual form, not the scope. The accessible name is CONSTANT across states and equals the visible label text (WCAG Label in Name) — for icon-only toggles a constant descriptive label (`Pin thread`, `Show password`); state lives only in `aria-pressed`, never in the name ("X off"/"X on", "X disabled"/"X enabled"). A title/tooltip may describe the next action without changing the name. The visual-state class (`is-on`, `is-pinned`, `is-active`) never substitutes for `aria-pressed`.
         </div>
         <div class="state-row">
           <span class="state-label">Checkbox</span>
