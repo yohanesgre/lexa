@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildAdapter,
   listModels,
+  pingChatCompletion,
+  cloudflareAiAccountId,
+  isCloudflareAiBaseUrl,
+  CLOUDFLARE_DEFAULT_MODEL,
   normalizeBaseUrl,
   normalizeProviderKind,
   inferModelKind,
@@ -316,6 +320,128 @@ describe("listModels", () => {
     const log: { url?: string; headers?: Record<string, string> } = {};
     await listModels(anthropicConfig(), fakeFetch(200, { models: [] }, log), { sessionId: "chat-1" });
     expect(log.headers?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-chat-1");
+  });
+});
+
+const cfConfig = (baseUrl = "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1"): ProviderConfig => ({
+  kind: "openai_compatible",
+  baseUrl,
+  apiKey: "cf-token",
+  model: "@cf/meta/llama-3.2-1b-instruct",
+});
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+describe("cloudflare models", () => {
+  it("detects the CF AI base URL shape on the normalized base", () => {
+    expect(cloudflareAiAccountId("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1")).toBe("acc123");
+    expect(cloudflareAiAccountId("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1/")).toBe("acc123");
+    expect(cloudflareAiAccountId("https://api.example.com/v1")).toBeNull();
+    expect(cloudflareAiAccountId("https://api.cloudflare.com/client/v4/accounts/acc123/ai")).toBeNull();
+    expect(isCloudflareAiBaseUrl("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1")).toBe(true);
+    expect(isCloudflareAiBaseUrl("https://api.example.com/v1")).toBe(false);
+  });
+
+  it("normalizes a bare .../ai base, detects CF, and queries /ai/models/search with the task filter", async () => {
+    const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
+    const res = await listModels(cfConfig("https://api.cloudflare.com/client/v4/accounts/acc123/ai"), async (input, init) => {
+      calls.push({ url: input, init });
+      return jsonResponse(200, { result: [{ name: "@cf/meta/llama-3.2-1b-instruct" }], result_info: { per_page: 50, total_count: 1 } });
+    });
+    expect(calls[0]?.url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/ai/models/search?per_page=50&page=1&task=Text+Generation");
+    expect(res.models).toEqual([{ id: "@cf/meta/llama-3.2-1b-instruct" }]);
+  });
+
+  it("maps result[].name into data[].id and sends Bearer auth", async () => {
+    const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
+    const res = await listModels(cfConfig(), async (input, init) => {
+      calls.push({ url: input, init });
+      return jsonResponse(200, { result: [{ name: "@cf/meta/llama-3.2-1b-instruct" }, { name: "@cf/baai/bge-base-en" }], result_info: { per_page: 50, total_count: 2 } });
+    });
+    expect(calls[0]?.url).toContain("/accounts/acc123/ai/models/search");
+    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe("Bearer cf-token");
+    expect(res.models).toEqual([{ id: "@cf/meta/llama-3.2-1b-instruct" }, { id: "@cf/baai/bge-base-en" }]);
+  });
+
+  it("dedupes repeated names", async () => {
+    const res = await listModels(cfConfig(), async () => jsonResponse(200, { result: [{ name: "@cf/a" }, { name: "@cf/a" }, { name: "@cf/b" }], result_info: { per_page: 50, total_count: 3 } }));
+    expect(res.models).toEqual([{ id: "@cf/a" }, { id: "@cf/b" }]);
+  });
+
+  it("401 and 403 → PROVIDER_AUTH_FAILED", async () => {
+    const e401 = await listModels(cfConfig(), async () => jsonResponse(401, { success: false })).catch((e) => e);
+    expect(e401._tag).toBe("ProviderAuthFailed");
+    const e403 = await listModels(cfConfig(), async () => jsonResponse(403, { success: false })).catch((e) => e);
+    expect(e403._tag).toBe("ProviderAuthFailed");
+  });
+
+  it("500 and network failure → PROVIDER_UNREACHABLE", async () => {
+    const e500 = await listModels(cfConfig(), async () => jsonResponse(500, { success: false })).catch((e) => e);
+    expect(e500._tag).toBe("ProviderUnreachable");
+    const enet = await listModels(cfConfig(), async () => { throw new Error("fetch failed"); }).catch((e) => e);
+    expect(enet._tag).toBe("ProviderUnreachable");
+  });
+
+  it("falls back to the full catalog when the task filter is rejected with 400", async () => {
+    const urls: string[] = [];
+    const res = await listModels(cfConfig(), async (input) => {
+      urls.push(input);
+      if (urls.length === 1) return jsonResponse(400, { success: false });
+      return jsonResponse(200, { result: [{ name: "@cf/full" }], result_info: { per_page: 50, total_count: 1 } });
+    });
+    expect(urls[0]).toContain("task=");
+    expect(urls[1]).not.toContain("task=");
+    expect(res.models).toEqual([{ id: "@cf/full" }]);
+  });
+
+  it("falls back to the full catalog when the task filter yields nothing", async () => {
+    const urls: string[] = [];
+    const res = await listModels(cfConfig(), async (input) => {
+      urls.push(input);
+      if (urls.length === 1) return jsonResponse(200, { result: [], result_info: { per_page: 50, total_count: 0 } });
+      return jsonResponse(200, { result: [{ name: "@cf/full" }], result_info: { per_page: 50, total_count: 1 } });
+    });
+    expect(urls[0]).toContain("task=");
+    expect(urls[1]).not.toContain("task=");
+    expect(res.models).toEqual([{ id: "@cf/full" }]);
+  });
+
+  it("caps pagination at 10 pages", async () => {
+    const urls: string[] = [];
+    const res = await listModels(cfConfig(), async (input) => {
+      urls.push(input);
+      const names = Array.from({ length: 50 }, (_, i) => ({ name: `@cf/model-${urls.length}-${i}` }));
+      return jsonResponse(200, { result: names, result_info: { per_page: 50, total_count: 100_000 } });
+    });
+    expect(urls).toHaveLength(10);
+    expect(res.models).toHaveLength(500);
+  });
+
+  it("ping posts to /chat/completions with max_tokens 1 and stream false", async () => {
+    const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
+    await pingChatCompletion(cfConfig(), async (input, init) => {
+      calls.push({ url: input, init });
+      return jsonResponse(200, { choices: [] });
+    });
+    expect(calls[0]?.url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1/chat/completions");
+    const body = JSON.parse(String(calls[0]?.init?.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({ model: "@cf/meta/llama-3.2-1b-instruct", max_tokens: 1, stream: false });
+    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe("Bearer cf-token");
+  });
+
+  it("ping 401 → PROVIDER_AUTH_FAILED; 503 and network → PROVIDER_UNREACHABLE", async () => {
+    const auth = await pingChatCompletion(cfConfig(), async () => jsonResponse(401, {})).catch((e) => e);
+    expect(auth._tag).toBe("ProviderAuthFailed");
+    const unreachable = await pingChatCompletion(cfConfig(), async () => jsonResponse(503, {})).catch((e) => e);
+    expect(unreachable._tag).toBe("ProviderUnreachable");
+    const net = await pingChatCompletion(cfConfig(), async () => { throw new Error("fetch failed"); }).catch((e) => e);
+    expect(net._tag).toBe("ProviderUnreachable");
+  });
+
+  it("exposes the CF default model constant", () => {
+    expect(CLOUDFLARE_DEFAULT_MODEL).toBe("@cf/meta/llama-3.2-1b-instruct");
   });
 });
 

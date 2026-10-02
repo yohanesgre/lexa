@@ -1685,8 +1685,14 @@ POST   /api/assistant/settings/:projectId/models   (admin — requireAdmin)
 body same as test
 → 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
   Lists models from the provider using submitted unsaved values (per-kind wire
-  format, base URL normalized per kind). Some compat endpoints lack the route
-  — manual model entry is always available as fallback.
+  format, base URL normalized per kind). Some compat endpoints lack the listing
+  route (404/405): the route then pings `POST {base}/chat/completions`
+  (`max_tokens: 1`, `stream: false`); a successful ping returns `{ models: [] }`
+  and manual model entry is always available as fallback.
+  Cloudflare AI (`api.cloudflare.com/client/v4/accounts/<id>/ai/v1`) has no
+  GET /models (405); its catalog is read from
+  `GET .../ai/models/search` (`task=Text Generation` when accepted, full
+  catalog otherwise), mapping `result[].name` → model ids.
 
 ### Assistant Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
 
@@ -1742,7 +1748,14 @@ DELETE /api/admin/assistant/providers/:id   (superadmin)
 POST   /api/admin/assistant/providers/:id/test   (superadmin)
 → 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404
   | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
-  Live probe: listModels against the stored provider row (kind openai_compatible, model "test").
+  Live probe: listModels against the stored provider row (kind openai_compatible,
+  model from the enabled row, else "test"). When the listing route is absent
+  (404/405) the probe falls back to a minimal chat completion
+  (`POST {base}/chat/completions`, `max_tokens: 1`, `stream: false`; model from
+  the row, else `@cf/meta/llama-3.2-1b-instruct` for a Cloudflare base); a
+  successful ping → `{ ok: true, latencyMs }`, 401/403 → PROVIDER_AUTH_FAILED,
+  network/5xx → PROVIDER_UNREACHABLE. Cloudflare AI bases list via
+  `GET .../ai/models/search` (their OpenAI-wire GET /models answers 405).
   A stored key that cannot be opened with the configured master key is a hard
   502 PROVIDER_AUTH_FAILED with the fixed message
   `stored provider key could not be decrypted with the configured master key — re-enter the key`
