@@ -87,6 +87,38 @@ describe("ProjectReposRepo", () => {
     expect(rows.map((r) => r.project_id).sort()).toEqual(["p1", "p2"]);
   });
 
+  it("listByProjects batches by project id, preserving per-project repo order", async () => {
+    await Effect.runPromise(repo.replace("p1", [
+      { repo: "owner/z", sourceRole: true, workspaceRole: false },
+      { repo: "owner/a", sourceRole: false, workspaceRole: true },
+    ]));
+    await Effect.runPromise(repo.replace("p2", [{ repo: "owner/b", sourceRole: true, workspaceRole: true }]));
+    const grouped = await Effect.runPromise(repo.listByProjects(["p1", "p2", "missing"]));
+    expect([...grouped.keys()].sort()).toEqual(["p1", "p2"]);
+    expect(grouped.get("p1")).toEqual([
+      { repo: "owner/a", sourceRole: false, workspaceRole: true },
+      { repo: "owner/z", sourceRole: true, workspaceRole: false },
+    ]);
+    expect(grouped.get("p2")).toEqual([{ repo: "owner/b", sourceRole: true, workspaceRole: true }]);
+    expect(grouped.get("missing")).toBeUndefined();
+  });
+
+  it("listByProjects returns an empty map for empty input", async () => {
+    expect([...(await Effect.runPromise(repo.listByProjects([]))).keys()]).toEqual([]);
+  });
+
+  it("listByProjects chunks past the D1 100-param cap", async () => {
+    const ids = Array.from({ length: 120 }, (_, i) => `pc-${String(i).padStart(3, "0")}`);
+    db.exec(`INSERT INTO projects (id, name, slug) VALUES ${ids.map((id) => `('${id}','${id}','${id}')`).join(",")}`);
+    db.exec(`INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES ${ids.map((id, i) => `('r-${i}','${id}','o/r${i}',1,0)`).join(",")}`);
+    const grouped = await Effect.runPromise(repo.listByProjects(ids));
+    expect(grouped.size).toBe(120);
+    expect(grouped.get(ids[0]!)).toEqual([{ repo: "o/r0", sourceRole: true, workspaceRole: false }]);
+    expect(grouped.get(ids[89]!)).toEqual([{ repo: "o/r89", sourceRole: true, workspaceRole: false }]);
+    expect(grouped.get(ids[90]!)).toEqual([{ repo: "o/r90", sourceRole: true, workspaceRole: false }]);
+    expect(grouped.get(ids[119]!)).toEqual([{ repo: "o/r119", sourceRole: true, workspaceRole: false }]);
+  });
+
   it("project delete cascades project_repos", async () => {
     await Effect.runPromise(repo.replace("p1", [{ repo: "owner/a", sourceRole: true, workspaceRole: true }]));
     db.exec(`DELETE FROM projects WHERE id = 'p1'`);

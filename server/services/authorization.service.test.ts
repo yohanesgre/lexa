@@ -147,4 +147,41 @@ describe("AuthorizationService", () => {
     expect(await Effect.runPromise(authz.canManageTeam("ghost", "team-a"))).toBe(false);
     expect(await Effect.runPromise(authz.isSuperadmin("ghost"))).toBe(false);
   });
+
+  it("projectAccessForProjects matches projectAccess per id in one batch", async () => {
+    seed(db);
+    // Duplicate grant rows are legal (PK includes role) and reachable on D1;
+    // admin must win deterministically in both paths.
+    db.prepare("INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('grantee', 'member', 'p2')").run();
+    // Comma-joined multi-role org membership must read as team admin.
+    db.prepare("UPDATE member SET role = 'owner,admin' WHERE id = 'm4'").run();
+    const authz = makeAuthz(db);
+    const ids = ["p1", "p2", "p3", "missing"];
+    for (const userId of ["sa", "owner", "admin", "member", "outsider", "grantee", "ghost"]) {
+      const batched = await Effect.runPromise(authz.projectAccessForProjects(userId, ids));
+      for (const id of ids) {
+        const single = await Effect.runPromise(authz.projectAccess(userId, id));
+        expect(batched.get(id) ?? null).toBe(single);
+      }
+    }
+    expect(await Effect.runPromise(authz.projectAccess("grantee", "p2"))).toBe("admin");
+    expect((await Effect.runPromise(authz.projectAccessForProjects("grantee", ["p2"]))).get("p2")).toBe("admin");
+    expect(await Effect.runPromise(authz.projectAccess("outsider", "p2"))).toBe("admin");
+    expect((await Effect.runPromise(authz.projectAccessForProjects("outsider", ["p2"]))).get("p2")).toBe("admin");
+    const empty = await Effect.runPromise(authz.projectAccessForProjects("sa", []));
+    expect(empty.size).toBe(0);
+  });
+
+  it("projectAccessForProjects chunks the projects lookup past 90 ids", async () => {
+    seed(db);
+    const ids = Array.from({ length: 120 }, (_, i) => `px-${String(i).padStart(3, "0")}`);
+    db.exec(`INSERT INTO projects (id, name, slug, team_id) VALUES ${ids.map((id) => `('${id}','${id}','${id}','team-a')`).join(",")}`);
+    const authz = makeAuthz(db);
+    const batched = await Effect.runPromise(authz.projectAccessForProjects("member", ids));
+    expect(batched.size).toBe(120);
+    for (const id of ids) {
+      expect(batched.get(id)).toBe("member");
+      expect(await Effect.runPromise(authz.projectAccess("member", id))).toBe("member");
+    }
+  });
 });

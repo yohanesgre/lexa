@@ -420,8 +420,9 @@ function singleton(): AuthInstance {
 // database or read env — on Workers `process.env` is undefined and
 // `bun:sqlite` does not exist, so any import-time side effect would crash the
 // isolate at startup. First property access builds the instance from the
-// process env snapshot. Workers code MUST use `createAuth(env)` per request
-// instead of this singleton.
+// process env snapshot. Workers code never uses this singleton: it builds one
+// `createAuth(env)` instance per isolate, keyed by env fingerprint
+// (getRuntimeAuth in server/workers-entry.ts).
 export const auth: AuthInstance = new Proxy({} as AuthInstance, {
   get(_target, prop) {
     const instance = singleton() as unknown as Record<PropertyKey, unknown>;

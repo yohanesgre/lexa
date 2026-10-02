@@ -3,7 +3,16 @@ import { Effect } from "effect";
 import { Database } from "bun:sqlite";
 import { createBunSqliteDriver } from "./db/drivers/bun-sqlite";
 import { batch } from "./db/db";
-import { pruneR2Backups, runScheduledCore } from "./workers-entry";
+import { getEnvFromWorkers } from "./env";
+import {
+  getRuntimeAuth,
+  pruneR2Backups,
+  requestLayers,
+  resetAuthCache,
+  resetRequestLayersCache,
+  runScheduledCore,
+  type WorkersEnv,
+} from "./workers-entry";
 
 function memDriver(): ReturnType<typeof createBunSqliteDriver> {
   const db = new Database(":memory:");
@@ -100,5 +109,64 @@ describe("pruneR2Backups", () => {
     const r2 = fakeR2(["backups/lexa-b.db.gz", "backups/lexa-a.db.gz", "backups/lexa-a-blobs/f"]);
     const deleted = await pruneR2Backups(r2.binding as never, 1);
     expect(deleted.sort()).toEqual(["backups/lexa-a-blobs/f", "backups/lexa-a.db.gz"]);
+  });
+});
+
+// Minimal D1 binding surface: enough for d1DatabaseToD1Like/createD1Driver
+// construction and better-auth's D1 auto-detection ("batch"/"exec"/"prepare").
+// No query is ever run.
+function fakeD1(): Record<string, unknown> {
+  const stmt = {
+    bind: () => stmt,
+    all: () => Promise.resolve({ results: [] }),
+    first: () => Promise.resolve(null),
+    run: () => Promise.resolve({ success: true, meta: { changes: 0 } }),
+  };
+  return {
+    prepare: () => stmt,
+    exec: () => Promise.resolve({ count: 0, duration: 0 }),
+    batch: () => Promise.resolve([]),
+  };
+}
+
+describe("per-isolate caches", () => {
+  const env = (): WorkersEnv => ({
+    DB: fakeD1() as never,
+    LXK_ENV: "dev",
+    LXK_PUBLIC_URL: "http://localhost:5173",
+  });
+
+  it("requestLayers returns the identical value across same-fingerprint calls", () => {
+    resetRequestLayersCache();
+    const first = requestLayers(env());
+    const second = requestLayers(env());
+    expect(second).toBe(first);
+    expect(second.driver).toBe(first.driver);
+  });
+
+  it("requestLayers rebuilds when LXK_ENV or LXK_PUBLIC_URL changes", () => {
+    resetRequestLayersCache();
+    const base = requestLayers(env());
+    expect(requestLayers({ ...env(), LXK_ENV: "prod" })).not.toBe(base);
+    // Reset first: the ENV change above already moved the fingerprint, so a
+    // PUBLIC_URL-only rebuild must be measured from a fresh dev base.
+    resetRequestLayersCache();
+    const devBase = requestLayers(env());
+    expect(requestLayers({ ...env(), LXK_PUBLIC_URL: "https://lexa.test" })).not.toBe(devBase);
+  });
+
+  it("resetRequestLayersCache forces a rebuild", () => {
+    resetRequestLayersCache();
+    const first = requestLayers(env());
+    resetRequestLayersCache();
+    expect(requestLayers(env())).not.toBe(first);
+  });
+
+  it("getRuntimeAuth returns the identical instance for the same fingerprint", () => {
+    resetAuthCache();
+    const runtimeEnv = getEnvFromWorkers(env() as unknown as Record<string, unknown>);
+    const first = getRuntimeAuth(runtimeEnv);
+    expect(getRuntimeAuth(runtimeEnv)).toBe(first);
+    expect(getRuntimeAuth({ ...runtimeEnv, LXK_ENV: "prod" })).not.toBe(first);
   });
 });

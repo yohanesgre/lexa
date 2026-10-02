@@ -13,6 +13,31 @@ export class ProjectReposRepo extends Effect.Service<ProjectReposRepo>()("Lexa/P
           Effect.map((rows) => rows.map(rowToProjectRepo))
         ),
 
+      listByProjects: (projectIds: string[]): Effect.Effect<Map<string, ProjectRepo[]>, DbError> => {
+        if (projectIds.length === 0) return Effect.succeed(new Map<string, ProjectRepo[]>());
+        return Effect.gen(function* () {
+          const grouped = new Map<string, ProjectRepo[]>();
+          // D1 caps bound parameters at 100 per query (Bun/SQLite allows 32766,
+          // so local tests do not catch this); 90 ids per chunk leaves headroom.
+          const CHUNK = 90;
+          for (let i = 0; i < projectIds.length; i += CHUNK) {
+            const chunk = projectIds.slice(i, i + CHUNK);
+            const placeholders = chunk.map(() => "?").join(",");
+            const rows = yield* queryAll<ProjectRepoRow>(
+              db,
+              `SELECT * FROM project_repos WHERE project_id IN (${placeholders}) ORDER BY project_id, repo`,
+              ...chunk
+            );
+            for (const row of rows) {
+              const list = grouped.get(row.project_id);
+              if (list) list.push(rowToProjectRepo(row));
+              else grouped.set(row.project_id, [rowToProjectRepo(row)]);
+            }
+          }
+          return grouped;
+        });
+      },
+
       listByRepo: (repo: string): Effect.Effect<ProjectRepoRow[], DbError> =>
         queryAll<ProjectRepoRow>(db, `SELECT * FROM project_repos WHERE repo = ?`, repo),
 
