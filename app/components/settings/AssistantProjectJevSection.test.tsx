@@ -64,14 +64,14 @@ describe("AssistantProjectJevSection — structure", () => {
     h.isError = true;
     render(<AssistantProjectJevSection project={PROJECT} />);
     expect(screen.queryByText("Could not load Jev advisory settings.")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Jev advisory disabled for this project" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Jev advisory" })).toBeInTheDocument();
   });
 });
 
 describe("AssistantProjectJevSection — unavailable (available === false)", () => {
   it("renders the disabled toggle with the exact notice", () => {
     render(<AssistantProjectJevSection project={PROJECT} />);
-    const toggle = screen.getByRole("button", { name: "Jev advisory unavailable" });
+    const toggle = screen.getByRole("button", { name: "Jev advisory" });
     expect(toggle).toBeDisabled();
     expect(toggle).not.toHaveClass("is-on");
     expect(screen.getByText("Jev is not configured globally.")).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("AssistantProjectJevSection — unavailable (available === false)", () 
   it("never PUTs while unavailable", async () => {
     const user = userEvent.setup();
     render(<AssistantProjectJevSection project={PROJECT} />);
-    await user.click(screen.getByRole("button", { name: "Jev advisory unavailable" }));
+    await user.click(screen.getByRole("button", { name: "Jev advisory" }));
     expect(h.saved).toEqual([]);
   });
 });
@@ -91,7 +91,7 @@ describe("AssistantProjectJevSection — available", () => {
     h.data = row({ available: true });
     const user = userEvent.setup();
     render(<AssistantProjectJevSection project={PROJECT} />);
-    const toggle = screen.getByRole("button", { name: "Jev advisory disabled for this project" });
+    const toggle = screen.getByRole("button", { name: "Jev advisory" });
     expect(toggle).not.toBeDisabled();
     expect(toggle).not.toHaveClass("is-on");
     expect(screen.getByText(/No Jev preflight and no/)).toBeInTheDocument();
@@ -104,7 +104,7 @@ describe("AssistantProjectJevSection — available", () => {
     h.data = row({ available: true, enabled: true, createdAt: "t", updatedAt: "t" });
     const user = userEvent.setup();
     render(<AssistantProjectJevSection project={PROJECT} />);
-    const toggle = screen.getByRole("button", { name: "Jev advisory enabled for this project" });
+    const toggle = screen.getByRole("button", { name: "Jev advisory" });
     expect(toggle).toHaveClass("is-on");
     expect(screen.getByText(/Advisory preflight \+/)).toBeInTheDocument();
 

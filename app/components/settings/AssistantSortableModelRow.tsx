@@ -30,7 +30,8 @@ export function AssistantSortableModelRow({ providerId, model }: { providerId: s
         <button
           type="button"
           className={`toggle-switch${model.enabled ? " is-on" : ""}`}
-          aria-label={model.enabled ? "Enabled" : "Disabled"}
+          aria-label={mid}
+          aria-pressed={model.enabled}
           onClick={() => update.mutate({ modelId: mid, enabled: !model.enabled })}
           onPointerDown={(e) => e.stopPropagation()}
         />

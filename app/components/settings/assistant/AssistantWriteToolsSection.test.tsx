@@ -92,7 +92,13 @@ describe("AssistantWriteToolsSection — canonical write-tool list", () => {
     const before = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(before.some((box) => box.checked)).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "Write tools on" }));
+    const master = screen.getByRole("button", { name: "Write tools enabled" });
+    expect(master).toHaveAttribute("aria-pressed", "false");
+    await user.click(master);
+
+    // Name stays constant; only aria-pressed flips.
+    const masterAfter = screen.getByRole("button", { name: "Write tools enabled" });
+    expect(masterAfter).toHaveAttribute("aria-pressed", "true");
 
     const after = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(after).toHaveLength(19);

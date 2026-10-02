@@ -26,8 +26,9 @@ export function BoardToolbar({ board, showArchived, filters, onToggleArchived, o
             className={cn("btn btn-ghost text-sm", showArchived && "active")}
             onClick={() => onToggleArchived(!showArchived)}
             title="Show archived tasks"
+            aria-pressed={showArchived}
           >
-            <span className={cn("toggle-switch", showArchived && "is-on")} />
+            <span className={cn("toggle-switch", showArchived && "is-on")} aria-hidden="true" />
             Show archived
           </button>
           <FilterButton board={board} filters={filters} onChange={onFiltersChange} />

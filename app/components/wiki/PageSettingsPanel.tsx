@@ -198,8 +198,7 @@ export function PageSettingsPanel({
           </span>
           <button
             type="button"
-            role="switch"
-            aria-checked={autosaveEnabled}
+            aria-pressed={autosaveEnabled}
             aria-label="Autosave"
             className={cn("toggle-switch", autosaveEnabled && "is-on")}
             onClick={() => onAutosaveChange(!autosaveEnabled)}

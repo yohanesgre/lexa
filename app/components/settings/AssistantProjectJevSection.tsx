@@ -41,7 +41,7 @@ export function AssistantProjectJevSection({ project }: { project: Project }) {
             <button
               type="button"
               className={`toggle-switch${enabled ? " is-on" : ""}`}
-              aria-label={available ? (enabled ? "Jev advisory enabled for this project" : "Jev advisory disabled for this project") : "Jev advisory unavailable"}
+              aria-label="Jev advisory"
               aria-pressed={enabled}
               disabled={!available || save.isPending}
               style={available ? undefined : { opacity: 0.45 }}

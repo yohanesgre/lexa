@@ -168,7 +168,7 @@ function McpClientRow({
         <button
           type="button"
           className={`toggle-switch${server.enabled ? " is-on" : ""}`}
-          aria-label={`${server.label} ${server.enabled ? "enabled" : "disabled"}`}
+          aria-label={server.label}
           aria-pressed={server.enabled}
           onClick={onToggleEnabled}
         />
