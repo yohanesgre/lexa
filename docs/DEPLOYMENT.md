@@ -1,28 +1,24 @@
 # Deployment & Environment Contract
 
 This doc is the single source of truth for deploying Lexa and configuring its
-environment. Deployment goes through **`scripts/install.sh`** — one script,
-three targets (`docker | bare | workers`), zero clone for the hosted targets,
-each installing into a self-describing dir in the current directory. Staging is
-the exception: a second Workers environment runs from a clone with plain
-`wrangler` (see §Staging from a clone). The first
-superadmin is provisioned **only** by the web `/setup` wizard (email + password
-≥8) — the script never handles passwords.
+environment. Deployment goes through **`scripts/install.sh`** — one script, one
+target (`workers`, the default), zero clone: it installs into a self-describing
+`cf-workers/` dir in the current directory. Staging is the exception: a second
+Workers environment runs from a clone with plain `wrangler` (see §Staging from a
+clone). The first superadmin is provisioned **only** by the web `/setup` wizard
+(email + password ≥8) — the script never handles passwords.
 
 > Removed in cli-v2026.2.0: `lexa-cli deploy` / `lexa-cli undeploy` /
 > `--runtime workers` — hard-remove, no stubs. The install script replaced
 > them; `lexa-cli` is now an operate-only headless frontend (tasks, wiki,
 > machines, keys, upgrades).
 
-## Deploy targets frozen
+## Deploy target
 
-Cloudflare Workers is the actively developed deploy target and the only one
-receiving new features. **Docker and bare metal are frozen at their current
-features** — the install script and releases keep them running, but no new
-features land there. The **AI Assistant is Workers-only**; the Docker upgrade
-notes (assistant absent, how to export thread history before switching) are in
-*Upgrading across the assistant move to Workers* below. See
-`docs/RELEASING.md` → *Deploy targets — policy*.
+Cloudflare Workers (D1 + R2 + KV) is the deploy target. The installer ships the
+prebuilt Worker bundle; there is no VPS process or tunnel. The **AI Assistant**
+runs on Workers-only `@cloudflare/ai-chat` Durable Objects (ADR-0003). See
+`docs/RELEASING.md` for the release policy.
 
 The canonical config file is **`.env.toml`**. It is structured TOML where the
 sections (`[core]`, `[auth]`, `[github]`, …) are presentation only and every
@@ -43,80 +39,45 @@ is deprecated: it is still read as a one-release fallback, and migration
 (`bun server/env-file.ts --migrate`, or `bun run setup`'s auto-migration)
 converts it to `.env.toml` and renames the original to `.env.legacy` (0600).
 
-> **Installer (shipped):** the installer writes `.env.toml` for the docker /
-> bare / systemd targets. The container bind-mounts it read-only
-> (`create_host_path: false`, so a missing file fails the start instead of
-> silently creating a directory) and the app applies it at boot; bare and
-> systemd run `bun server/entry.ts` from the install directory, so the loader
-> finds `.env.toml` there (no `--env-file`). The flat `.env` holds
-> compose-tooling variables only: `LXK_IMAGE_TAG`, plus `CF_TUNNEL_TOKEN` when a
-> tunnel is configured. An operator-set `COMPOSE_PROJECT_NAME` is preserved but
-> the installer never writes it (setting it would rename the compose project and
-> orphan the `lexa-data` volume). Re-runs **merge** — operator-added keys such as
-> `LXK_SECRETS_MASTER_KEY` and a pinned `LXK_IMAGE_TAG` are preserved
-> (previously the flat `.env` was truncated). The installer reads the image's
-> own uid:gid (never a hardcode) and re-owns `.env.toml` to
-> `host-uid:<image-gid>` mode 0640 (a root installer uses
-> `<image-uid>:<image-gid>`) so the container process can read the mount. A
-> resolved `.env.toml` that exists but cannot be read or parsed fails the boot
-> (exit non-zero, path named) instead of silently starting on defaults; only a
-> genuinely absent file warns and falls back.
+> **Installer (shipped):** on the `workers` target the installer writes
+> `cf-workers/.env.toml` (0600) as **custody** for the envelope key and pushes it
+> to the Worker with `wrangler secret put`; it is not read by the deployed app,
+> which takes its configuration from bindings and secrets. Re-runs **merge** —
+> an operator-added `LXK_SECRETS_MASTER_KEY` is preserved, never rotated.
 
-## Targets
+## Target
 
 ```bash
-curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- <target> [flags]
+curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- workers [flags]
 ```
 
-The installer hub serves the newest release with `BASE_URL` pinned to its
-tag (see `~/projects/lexa-installer`). Pin explicitly with
-`?ref=vYYYY.MINOR.MICRO`, or bypass the hub: raw
+`workers` is the default. The installer hub serves the newest release with
+`BASE_URL` pinned to its tag (see `~/projects/lexa-installer`). Pin explicitly
+with `?ref=vYYYY.MINOR.MICRO`, or bypass the hub with the raw
 `https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh`
-for a tag, or `main` for the bleeding edge.
+URL for a tag.
 
 | Target | Needs | Layout |
 |---|---|---|
-| `docker` | docker + compose plugin + a running daemon | `dockers/` in the CWD: compose file + canonical `.env.toml` (plus a tooling-only flat `.env` for compose); prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest` = newest release; `--image <tag>` writes `LXK_IMAGE_TAG`, e.g. a version tag, or a locally built `dev` tag with `--no-pull`) |
-| `bare` | curl, tar, bun, `sha256sum` (or `shasum`) | `bare/` in the CWD (release tarball, checksum-verified) + `lexa-start.sh`; manual mode auto-starts the server in the background (`bare/lexa.log`, `bare/lexa.pid`); `--systemd` writes + enables the `lexa` unit |
 | `workers` | curl, tar, bun, `sha256sum` (or `shasum`), Cloudflare credentials | `cf-workers/` in the CWD: D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`); the envelope key is kept in `cf-workers/.env.toml` custody |
 
-Prerequisites are checked per target **before any download or mutation**: one
-pass collects every missing tool and exits with a single list (tool → exact fix
-command). Nothing is auto-installed. (The `dev` target is gone — development
-starts from a clone.)
+Prerequisites are checked **before any download or mutation**: one pass collects
+every missing tool and exits with a single list (tool → exact fix command).
+Nothing is auto-installed. (The `dev` target is gone — development starts from a
+clone.)
 
 **Development** starts from a clone — `git clone
 https://github.com/yohanesgre/lexa && cd lexa`, then `bun install && bun run
 setup && bun run dev:full`.
 
-Flags: `--ref <tag|branch>` (script + artifact source: a release tag or
-`main`), `--name <name>` (workers deploy name, default `lexa`),
-`--account <id>` (workers Cloudflare account id; skips the account
-prompt and disambiguates a multi-account token),
-`--port` (docker, default
-8080), `--bind` (default 127.0.0.1), `--domain` (workers custom domain; skips the prompt),
-`--systemd` (bare), `--image <tag>` (docker), `--no-pull` (docker; skip
-`docker compose pull` and use an image already present locally),
-`--secrets-file <path>` (optional
-secrets applied at install; see below), `--from-repo <dir>` (install
-from a local checkout), `--yes`.
-
-The docker target uses direct semantics — host port mapping, no tunnel. Put
-your own reverse proxy in front of `<bind>:<port>` to reach it over TLS.
-
-### Snapshot build (main, no release)
-
-No main snapshot image is published. Build one from a checkout and install it:
-
-```bash
-git clone https://github.com/yohanesgre/lexa && cd lexa
-docker build -t ghcr.io/yohanesgre/lexa:dev .
-scripts/install.sh docker --port 8080 --image dev --no-pull
-```
-
-`--no-pull` skips `docker compose pull` and requires the image to already exist
-locally. Stable installs keep the default `:latest` (newest release) and pull
-normally.
+Flags: `--ref <tag>` (artifact source: a release tag), `--name <name>` (workers
+deploy name, default `lexa`), `--account <id>` (Cloudflare account id; skips the
+account prompt and disambiguates a multi-account token), `--cf-token <token>`
+(Cloudflare API token; see the credentials chain below), `--domain <domain>`
+(workers custom domain; skips the prompt), `--secrets-file <path>` (optional
+secrets applied at install; see below), `--reset-db` (drop the existing D1
+database and start migrations fresh — data is lost), `--from-repo <dir>`
+(install from a local checkout), `--yes`.
 
 ### Cloudflare Workers target
 
@@ -206,12 +167,11 @@ same isolation (`--name` keys the resource names).
 ### Optional secrets at install
 
 `--secrets-file <path>` applies `KEY=value` lines (keys validated against the
-installer whitelist) at install time. `docker`/`bare` merge them into the
-target `.env.toml`; `workers` pushes only the master key (resolved from
-custody / remote / mint) with `wrangler secret put` and writes the file's
-other keys to `cf-workers/.env.toml` custody. GitHub keys are rejected here —
-configure GitHub sync in the web app after install. Reconfigure later with the
-same flag, or edit the custody file and re-run.
+installer whitelist) at install time. `workers` pushes only the master key
+(resolved from custody / remote / mint) with `wrangler secret put` and writes
+the file's other keys to `cf-workers/.env.toml` custody. GitHub keys are
+rejected here — configure GitHub sync in the web app after install. Reconfigure
+later with the same flag, or edit the custody file and re-run.
 
 ### Deploy Button — Cloudflare dashboard (DRAFT-UNVERIFIED)
 
@@ -243,24 +203,21 @@ same flag, or edit the custody file and re-run.
 ### Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/uninstall.sh | bash -s -- <target>
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/uninstall.sh | bash -s -- workers
 ```
 
-Data is **kept** unless `--purge` (requires typing `purge` on a TTY): docker
-removes the compose project but keeps the `lexa-data` volume; bare keeps the
-install dir; workers keeps D1/R2/KV. The CLI itself is
-uninstalled manually (`rm $(which lx)`). Pass `DEPLOY_DIR` / `INSTALL_DIR` /
-`WORK_DIR` when the target dir is not `dockers/` / `bare/` / `cf-workers/`.
+The Worker is deleted; D1/R2/KV data is always **kept** (delete those resources
+from the Cloudflare dashboard to remove data). `--purge` (requires typing
+`purge` on a TTY) also removes the saved local `.cf-token`. The CLI itself is
+uninstalled manually (`rm $(which lx)`). Pass `WORK_DIR` when the target dir is
+not `cf-workers/`.
 
 ## Upgrade
 
 **Re-run `install.sh` from the new release tag — that is the whole upgrade.**
-The script is idempotent: docker pulls the new image and recreates the
-container (`lexa-data` volume survives); bare fetches the new tarball and
-restarts; workers reuses the Cloudflare resources and applies only new
-migrations. DB migrations run at server boot. Env writes merge: a legacy flat
-`.env` is converted to `.env.toml` in place (original kept as `.env.legacy`)
-and operator-added keys are preserved, so a pre-P4 install upgrades cleanly.
+The script is idempotent: it reuses the Cloudflare resources and applies only
+new D1 migrations. DB migrations run at server boot. Env writes merge, so
+operator-added keys are preserved and a previous install upgrades cleanly.
 
 Workers upgrades resume the previous deploy: run from the same directory
 (`cf-workers/`), and the domain defaults to the last one (Enter keeps it); the
@@ -268,9 +225,8 @@ credentials are reused from `--cf-token`, `CF_API_TOKEN`, the saved
 `cf-workers/.cf-token` file, or an existing `wrangler login` (offered for saving
 after TTY entry, `chmod 600`, never written from env/flag values), and
 `LXK_SECRETS_MASTER_KEY` is read back from `cf-workers/.env.toml` custody so it
-is never rotated. Only the 2 newest release tarballs are kept; starting in a
-directory with no previous deploy asks for confirmation first. On a shared
-machine, decline the token-save offer.
+is never rotated. Starting in a directory with no previous deploy asks for
+confirmation first. On a shared machine, decline the token-save offer.
 
 ## Sample data
 
@@ -290,32 +246,31 @@ boot and never overwrites a variable already set in the real environment.
 |---|---|---|
 | `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lx login` device flow) | only for non-browser clients (CLI/scripts) |
 | `LXK_ENV` | install script / setup wizard | yes (`production` on deployed targets) |
-| `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
+| `LXK_PUBLIC_URL` | install script (from `--domain`; only set for a custom domain) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and, **on Workers, the assistant's** internal HMAC derivation |
+| `LXK_SECRETS_MASTER_KEY` | minted by the installer and pushed/custodied in `cf-workers/.env.toml`; preserved across install-script re-runs | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and the assistant's internal HMAC derivation |
 
 ## Full variable reference
 
 | Variable | Meaning |
 |---|---|
-| `COMPOSE_PROJECT_NAME` | docker compose project name (dev flavor) — not read by the app |
-| `DATABASE_PATH` | SQLite file path (default `./data/lexa.db`; `/app/data/lexa.db` in compose) |
+| `DATABASE_PATH` | SQLite file path for the Bun local-dev flavor (default `./data/lexa.db`); not read on Workers (D1 binding) |
 | `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` / `GITHUB_WEBHOOK_SECRET` | REMOVED — configure GitHub sync in the web app (Settings → GitHub Sync); legacy values are warned and ignored |
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
-| `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. Workers installs auto-prune the leftover Worker secret after a successful deploy (manual fallback: `wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler.lexa.json`); docker/bare env migration drops it. |
-| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3); **Workers-only assistant** — inert on Docker/bare metal, which serve no assistant routes |
+| `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. Workers installs auto-prune the leftover Worker secret after a successful deploy (manual fallback: `wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler.lexa.json`). |
+| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3); **Workers-only assistant** |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key — and, **on Workers**, the assistant's internal `X-Lexa-Internal` HMAC key derives from it. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
-| `LXK_TRUSTED_PROXY_CIDRS` | comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when cloudflared or another sidecar connects from this host. Set it when the proxy is a separate container/host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
+| `LXK_TRUSTED_PROXY_CIDRS` | comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when a reverse proxy connects from this host. Set it when the proxy is a separate host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
 | `PORT` | server port (default 3000) |
 
 **Jev is configured in the webapp** (Admin → Assistant → Providers & Models),
@@ -358,15 +313,15 @@ no email transport anywhere.
 
 - **Pipe per-tag URLs.** Always pipe the install/uninstall script from a
   pinned release tag (`…/v2026.1.2/scripts/install.sh`), never `main` — the
-  script content cannot change between your read and your run. Bare-metal
+  script content cannot change between your read and your run. Release
   tarballs are additionally sha256-verified by the script.
 - `.env.toml` (and any legacy `.env*`) is gitignored — values are generated on
   the machine, never committed. Re-running the install script **merges** into
-  `.env.toml`: installer-owned keys are rewritten, operator-added keys
-  (`LXK_SECRETS_MASTER_KEY`, …) are preserved. DB-minted API keys
-  survive in the data volume / D1.
+  the custody file (`cf-workers/.env.toml`): installer-owned keys are
+  rewritten, operator-added keys (`LXK_SECRETS_MASTER_KEY`, …) are preserved.
+  DB-minted API keys survive in D1.
 - The GitHub App private key is stored encrypted in the DB via the web app
-  (Settings → GitHub Sync) — never written to the env file or a volume mount.
+  (Settings → GitHub Sync) — never written to the env file or on disk.
 - `/api/*` accepts a session cookie OR a Bearer key (dual-channel);
   `/api/webhooks/*` is HMAC-only. Keys are `lxk_` + 43 base62 chars
   (256-bit), rate-limited per IP, revocable per-named-key (Settings → API
@@ -413,19 +368,12 @@ defaults — so existing installs keep booting unchanged.
    ```bash
    rm .env.toml && mv .env.legacy .env
    ```
-3. **Installer targets (docker / bare / systemd): just re-run the installer.**
-   It migrates a pre-existing flat `.env` in the deploy/install dir to
-   `.env.toml` (keeping the original as `.env.legacy`) and then merges its own
-   keys in; the container bind-mounts it read-only and a bare host loads it from
-   the install directory. No manual conversion needed, and operator-added keys
-   (`LXK_SECRETS_MASTER_KEY`, …) plus a pinned `LXK_IMAGE_TAG` are
-   preserved. Rollback requires re-running the installer: restore `.env.legacy`
-   to `.env`, remove `.env.toml`, then re-run so the tooling `.env` and compose
-   file are regenerated.
-4. **Permissions** — `.env.toml` is written 0600 on bare/systemd and 0640
-   (`host-uid:<image-gid>`, derived from the image; a root installer uses
-   `<image-uid>:<image-gid>`) on docker so the container process can read it; it
-   stays gitignored (`.env.toml.example` is the only tracked env file).
+3. **Workers install: just re-run the installer.** It writes/merges
+   `cf-workers/.env.toml` custody — the resolved master key is preserved
+   verbatim, and any `--secrets-file` keys are merged in. No manual conversion
+   is needed.
+4. **Permissions** — the custody file `cf-workers/.env.toml` is written 0600
+   and stays gitignored (`.env.toml.example` is the only tracked env file).
 
 ## Upgrading across the secrets rename + provider/Jev secrets (2026-09-29)
 
@@ -468,24 +416,18 @@ configuration into the encrypted, webapp-managed store.
 ## Upgrading across the assistant move to Workers (2026-10-02)
 
 The AI Assistant became **Cloudflare Workers only** (ADR-0003): it runs on
-`@cloudflare/ai-chat` Durable Objects on the Workers flavor and is removed from
-the Bun/Docker/bare-metal flavor end to end. Workers is the only deploy target
-receiving new features; Docker/bare metal stay frozen at their current features.
+`@cloudflare/ai-chat` Durable Objects and is absent from the Bun local-dev
+flavor, which serves no assistant routes.
 
-1. **Docker / bare metal lose the assistant.** After upgrading, `/api/assistant/*`
-   and `/api/admin/assistant/*` return **404** (the groups are not mounted), the
+1. **The Bun local-dev flavor loses the assistant.** `/api/assistant/*` and
+   `/api/admin/assistant/*` return **404** (the groups are not mounted), the
    assistant UI is hidden, and `GET /api/capabilities` reports
-   `{ "assistant": false, "flavor": "bun" }`. Everything else keeps working. If
-   you depend on the assistant, **stay on the previous release** rather than
-   upgrading this target.
-2. **Export chat history BEFORE switching flavors.** There is **no cross-flavor
-   data sync** (`docs/CLOUDFLARE_WORKERS.md` §"Data does not cross flavors").
-   From the old Docker install, export each chat to markdown
-   (`GET /api/assistant/chat/:chatId/export`, or the UI's Export action) and keep
-   the files; then install the Workers target and re-import manually if needed.
-   The `assistant_*` tables are **not dropped** on Docker (they remain inert, so
-   a downgrade/backup still has them), but nothing reads or writes them there.
-3. **All targets require `LXK_SECRETS_MASTER_KEY`.** Better Auth's session
+   `{ "assistant": false, "flavor": "bun" }`. Everything else keeps working.
+2. **There is no cross-flavor data sync** (`docs/CLOUDFLARE_WORKERS.md` §"Data
+   does not cross flavors"). The `assistant_*` tables are **not dropped** on the
+   Bun flavor (they remain inert, so a downgrade/backup still has them), but
+   nothing reads or writes them there.
+3. **Workers requires `LXK_SECRETS_MASTER_KEY`.** Better Auth's session
    signing secret derives from it (`lexa-better-auth:<key>`), so the server fails
    closed without it. The Workers assistant additionally derives its internal HMAC
    key (`HMAC(master, "lexa-internal-v1")`) and decrypts provider secrets from it.
@@ -558,13 +500,12 @@ The coding-agent ("agent-runtime") tier was deleted end to end — migration
 `0008_remove_agent_runtimes.sql` drops `machines`, `runtimes`,
 `runtime_events`, `runtime_sessions`, `runtime_task_logs`, renames
 `runtime_tasks` → `assistant_tasks`, and drops the daemon token. The only AI
-tier is the Workers-only Assistant (ADR-0003); Bun/Docker serves none. See
+tier is the Workers-only Assistant (ADR-0003); the Bun flavor serves none. See
 `docs/ARCHITECTURE.md` §Assistant → removal record.
 
-1. **Upgrade the server.** Boot applies `0008` (Bun standalone: re-run
-   `install.sh` from the new release tag; Workers:
-   `wrangler d1 migrations apply`). **Back up first** (`docs/BACKUPS.md`) —
-   this is a hard drop of operational state.
+1. **Upgrade the server.** `install.sh` from the new release tag applies `0008`
+   (or run `wrangler d1 migrations apply`). **Back up first**
+   (`docs/BACKUPS.md`) — this is a hard drop of operational state.
 2. **Stop and remove the machine listener on every host.** It has no server
    endpoint any more and will only log errors:
    ```bash
@@ -591,7 +532,7 @@ tier is the Workers-only Assistant (ADR-0003); Bun/Docker serves none. See
 > baseline already contains; fresh installs get it directly.
 
 The baseline carries the renamed DB tables and activity types (`hearth_*`);
-the server image applies it at boot. This rename is history only — the
+migrations apply it at boot. This rename is history only — the
 listener/daemon it described was removed in 2026-09-26 (see above); no
 `lx machine` command exists to reinstall.
 
@@ -611,8 +552,8 @@ builtin agent id `herald`→`assistant`, with no aliases for old routes, codes, 
 JSON fields. Data is migrated, never dropped. No env keys or CLI changes;
 this rename is server-side only.
 
-1. **Upgrade the server.** Boot applies `0006_assistant_rename.sql` (Bun standalone:
-   re-run `install.sh` from the new release tag; Workers: `wrangler d1 migrations apply`).
+1. **Upgrade the server.** `install.sh` from the new release tag applies
+   `0006_assistant_rename.sql` (or run `wrangler d1 migrations apply`).
 2. **Old API clients get 404** on `/api/herald/*` and `/api/admin/herald/*`. Error
    codes are now `ASSISTANT_*`; activity/comment JSON field `viaHerald` is now
    `viaAssistant`.
