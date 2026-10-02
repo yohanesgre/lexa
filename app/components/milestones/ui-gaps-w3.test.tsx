@@ -18,13 +18,16 @@ vi.mock("../../lib/queries", () => ({
   useArchiveMilestone: () => ({ mutate: vi.fn() }),
   useRestoreMilestone: () => ({ mutate: vi.fn() }),
   useSession: vi.fn(),
+  useSwimlanes: vi.fn(),
   useUpdateSwimlane: () => ({ mutate: vi.fn() }),
   useDeleteSwimlane: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
-  Link: ({ children, className }: { children?: ReactNode; className?: string }) => <a className={className}>{children}</a>,
+  Link: ({ children, className, search }: { children?: ReactNode; className?: string; search?: Record<string, unknown> }) => (
+    <a className={className} data-search={JSON.stringify(search ?? null)}>{children}</a>
+  ),
 }));
 
 import { useBoard, useMilestones, useSession } from "../../lib/queries";
@@ -120,6 +123,17 @@ describe("Complete milestone confirm", () => {
     await user.click(within(cardFor("v1.0 launch")).getByRole("button", { name: /complete milestone/i }));
     const dialog = document.querySelector("dialog") as HTMLElement;
     expect(dialog).toHaveTextContent(/2 remaining sprints — Sprint 7 — Core and Sprint 6 — Ash & Bone — plus their 24 live tasks \(12 \+ 12, none archived yet\)/);
+  });
+});
+
+describe("MilestonesPage view-on-board link", () => {
+  it("carries each sprint's swimlane filter to the board", () => {
+    render(<MilestonesPage slug="demo" tab="list" />);
+    const links = within(cardFor("v1.0 launch")).getAllByText("View on board");
+    expect(links.map((l) => l.getAttribute("data-search"))).toEqual([
+      JSON.stringify({ swimlane: "s1" }),
+      JSON.stringify({ swimlane: "s2" }),
+    ]);
   });
 });
 

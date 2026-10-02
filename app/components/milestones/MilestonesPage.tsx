@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
-import { useMilestones, useCreateMilestone, useUpdateMilestone, useDeleteMilestone, useArchiveMilestone, useRestoreMilestone, useBoard, useSession } from "../../lib/queries";
+import { useMilestones, useCreateMilestone, useUpdateMilestone, useDeleteMilestone, useArchiveMilestone, useRestoreMilestone, useBoard, useSwimlanes, useSession } from "../../lib/queries";
 import { sprintProgress, milestoneTaskProgress } from "../../lib/progress";
 import { formatDueChip } from "../../lib/dates";
 import { cn } from "../ui/cn";
@@ -120,6 +120,9 @@ function EmptyMilestones({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => vo
 export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "timeline" }) {
   const { data: milestones = [], isLoading, error, refetch } = useMilestones(slug);
   const { data: board } = useBoard(slug);
+  // Warm the standalone (includeArchived) lane list so sprint-count syncs read
+  // a complete source even when the board is in its default archived=false view.
+  useSwimlanes(slug);
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "superadmin";
 
@@ -304,7 +307,7 @@ function MilestoneSprints({ board, lanes, collapsed }: {
             {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
             <span className="flex-1" />
             {!lane.archivedAt && (
-              <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{}} className="sl-link-btn">
+              <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{ swimlane: lane.id }} className="sl-link-btn">
                 View on board
               </Link>
             )}
