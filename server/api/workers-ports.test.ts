@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, vi } from "vitest";
+import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +23,7 @@ import {
   deleteSettingAsync,
   getSettingAsync,
   mirrorSettingsFromEnvAsync,
+  resetSettingsCache,
   setSettingAsync,
   stringEnvFromRuntimeEnv,
 } from "./workers-ports";
@@ -53,6 +54,10 @@ afterEach(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
   dirs = [];
   apiRateLimiter.setLimits({ max: DEFAULT_RATE_LIMIT_MAX, windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS });
+});
+
+beforeEach(() => {
+  resetSettingsCache();
 });
 
 const runEff = <A, E>(eff: Effect.Effect<A, E>) => Effect.runPromise(eff);
@@ -118,6 +123,59 @@ describe("async settings", () => {
     expect(await runEff(getSettingAsync(driver, "k"))).toBe("v2");
     await runEff(deleteSettingAsync(driver, "k"));
     expect(await runEff(getSettingAsync(driver, "k"))).toBeNull();
+  });
+
+  it("makes a write after a cached read visible immediately", async () => {
+    const driver = tmpDriver();
+    await runEff(setSettingAsync(driver, "k", "v1"));
+    expect(await runEff(getSettingAsync(driver, "k"))).toBe("v1");
+    await runEff(setSettingAsync(driver, "k", "v2"));
+    expect(await runEff(getSettingAsync(driver, "k"))).toBe("v2");
+  });
+
+  it("serves cached reads without re-querying until the cache is reset", async () => {
+    const driver = tmpDriver();
+    await runEff(setSettingAsync(driver, "k", "v1"));
+    expect(await runEff(getSettingAsync(driver, "k"))).toBe("v1");
+    await runEff(run(driver, "UPDATE settings SET value = 'raw' WHERE key = 'k'"));
+    expect(await runEff(getSettingAsync(driver, "k"))).toBe("v1");
+    resetSettingsCache();
+    expect(await runEff(getSettingAsync(driver, "k"))).toBe("raw");
+  });
+
+  it("re-queries after the 30s TTL expires", async () => {
+    const driver = tmpDriver();
+    await runEff(setSettingAsync(driver, "k", "v1"));
+    expect(await runEff(getSettingAsync(driver, "k"))).toBe("v1");
+    vi.useFakeTimers();
+    try {
+      await runEff(run(driver, "UPDATE settings SET value = 'v2' WHERE key = 'k'"));
+      expect(await runEff(getSettingAsync(driver, "k"))).toBe("v1");
+      vi.advanceTimersByTime(30_000);
+      expect(await runEff(getSettingAsync(driver, "k"))).toBe("v2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not cache a non-RowNotFound DbError; a second call re-queries", async () => {
+    let firstCalls = 0;
+    const driver = {
+      prepare: () => ({
+        all: () => Promise.resolve([]),
+        first: () => {
+          firstCalls++;
+          return Promise.reject(new Error("disk torn"));
+        },
+        run: () => Promise.resolve({ changes: 0 }),
+      }),
+      batch: () => Promise.resolve(),
+      transaction: () => Promise.reject(new Error("no interactive tx")),
+      close: () => {},
+    } as unknown as DbDriver;
+    expect(await runEff(getSettingAsync(driver, "k"))).toBeNull();
+    expect(await runEff(getSettingAsync(driver, "k"))).toBeNull();
+    expect(firstCalls).toBe(2);
   });
 });
 

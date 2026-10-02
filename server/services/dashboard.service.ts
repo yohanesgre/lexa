@@ -23,15 +23,16 @@ export class DashboardService extends Effect.Service<DashboardService>()("Lexa/D
             Effect.gen(function* () {
               const columns = yield* columnRepo.findByProject(project.id);
               const repos = yield* projectReposRepo.listByProject(project.id);
-              const [taskCount, urgentCount, syncCount] = yield* Effect.all([
+              const [taskCount, urgentCount, syncCount, columnCounts] = yield* Effect.all([
                 taskRepo.countByProject(project.id),
                 taskRepo.countUrgent(project.id),
                 taskRepo.countOutOfSync(project.id),
-              ], { concurrency: 3 });
+                taskRepo.countsByColumnForProject(project.id),
+              ], { concurrency: 4 });
 
               const wipSegments = yield* Effect.forEach(columns, (column) =>
                 Effect.gen(function* () {
-                  const count = yield* taskRepo.countByColumn(project.id, column.id);
+                  const count = columnCounts.get(column.id) ?? 0;
                   let state: "ok" | "approaching" | "exceeded" | "empty";
                   if (count === 0) {
                     state = "empty";

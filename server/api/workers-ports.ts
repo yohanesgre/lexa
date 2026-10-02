@@ -14,7 +14,7 @@
 import { Effect } from "effect";
 import type { D1Database } from "@cloudflare/workers-types";
 import { mapDbError, queryFirst, run, type BatchStmt, type DbDriver, type SqlParam } from "../db/db";
-import { BatchTimeout, ConstraintViolation, DbError } from "../db/driver";
+import { BatchTimeout, ConstraintViolation, DbError, RowNotFound } from "../db/driver";
 import type { D1BatchItem, D1Like, D1PreparedLike } from "../db/drivers/d1";
 import type { RuntimeEnv } from "../env";
 
@@ -97,14 +97,54 @@ export function d1DatabaseToD1Like(db: D1Database): D1Like {
 }
 
 // ─── Async settings (mirrors server/db/settings.ts verbatim) ─────────────
+// Module-scope TTL cache. The cache-served read is the admin GET of the
+// rate-limit settings; the per-request limiter itself is in-memory and does
+// not read settings. A worker process serves a single D1 database, so the
+// cache is keyed by setting key alone. Invalidation covers same-process
+// writers that go through setSettingAsync/deleteSettingAsync; writes from
+// other modules (e.g. server/github/config-store.ts) and from other worker
+// isolates are bounded by the 30s TTL only. Tests and tooling that open more
+// than one database must call resetSettingsCache() between databases.
+const SETTINGS_CACHE_TTL_MS = 30_000;
+
+interface SettingsCacheEntry {
+  value: string | null;
+  expiresAt: number;
+}
+
+const settingsCache = new Map<string, SettingsCacheEntry>();
+
+// Bumped on every invalidation/reset so an in-flight read cannot repopulate
+// the cache with a value read before the invalidation.
+let settingsCacheGeneration = 0;
+
+export function resetSettingsCache(): void {
+  settingsCache.clear();
+  settingsCacheGeneration++;
+}
 
 export function getSettingAsync(
   driver: DbDriver,
   key: string
 ): Effect.Effect<string | null, DbError> {
+  const cached = settingsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return Effect.succeed(cached.value);
+  const generation = settingsCacheGeneration;
   return queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = ?", key).pipe(
     Effect.map((row) => row.value),
-    Effect.catchAll(() => Effect.succeed(null))
+    Effect.tap((value) =>
+      Effect.sync(() => {
+        if (settingsCacheGeneration === generation) {
+          settingsCache.set(key, { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS });
+        }
+      })
+    ),
+    Effect.catchAll((e) => {
+      if (e._tag === "RowNotFound" && settingsCacheGeneration === generation) {
+        settingsCache.set(key, { value: null, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS });
+      }
+      return Effect.succeed(null);
+    })
   );
 }
 
@@ -118,14 +158,20 @@ export function setSettingAsync(
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
     key,
     value
-  ).pipe(Effect.asVoid);
+  ).pipe(
+    Effect.asVoid,
+    Effect.tap(() => Effect.sync(() => { settingsCache.delete(key); settingsCacheGeneration++; }))
+  );
 }
 
 export function deleteSettingAsync(
   driver: DbDriver,
   key: string
 ): Effect.Effect<void, ConstraintViolation | DbError> {
-  return run(driver, "DELETE FROM settings WHERE key = ?", key).pipe(Effect.asVoid);
+  return run(driver, "DELETE FROM settings WHERE key = ?", key).pipe(
+    Effect.asVoid,
+    Effect.tap(() => Effect.sync(() => { settingsCache.delete(key); settingsCacheGeneration++; }))
+  );
 }
 
 // ─── String-only env projection (B3 concern #4) ───────────────────────────
