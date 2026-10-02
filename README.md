@@ -2,12 +2,11 @@
 
 Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, an AI Assistant, team auth, and two-way GitHub issue sync.
 
-Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (Cloudflare Workers, docker, bare metal, or dev).
+Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**. Self-hosted on Cloudflare Workers (D1 + R2 + KV) via `scripts/install.sh`; local dev runs the Bun + SQLite flavor.
 
-**Deploy targets:** Cloudflare Workers is the actively developed target and the
-only one receiving new features. Docker and bare metal keep running at their
-current features — existing installs keep working, no new work lands there
-(`docs/DEPLOYMENT.md`, ADR-0003). The AI Assistant is Workers-only.
+**Deploy target:** Cloudflare Workers is the only target — `scripts/install.sh`
+provisions D1 + R2 + KV and deploys the prebuilt Worker
+(`docs/DEPLOYMENT.md`). The AI Assistant is Workers-only.
 
 ## Features
 
@@ -47,31 +46,24 @@ vitest run
 One install script — no clone, no repo checkout:
 
 ```bash
-curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- docker
+curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- workers
 ```
 
 The installer hub serves the newest release (pin with `?ref=vYYYY.MINOR.MICRO`,
-or use a raw `.../lexa/<tag>/scripts/install.sh` URL for a tag, `main` for
-bleeding edge). Targets:
+or use a raw `.../lexa/<tag>/scripts/install.sh` URL for a tag). The only target
+is `workers`: Cloudflare Workers + D1 + R2 + KV via `bun x wrangler`, installed
+into `cf-workers/` in the current directory — or zero-file:
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yohanesgre/lexa)
+(DRAFT-UNVERIFIED, see `docs/DEPLOYMENT.md`; disable Builds auto-deploy after).
 
-| Target | What it does |
-|---|---|
-| `docker` | prebuilt image from `ghcr.io/yohanesgre/lexa`, compose up, health check (default 127.0.0.1:8080) |
-| `bare` | release tarball + env file + `lexa-start.sh` (systemd opt-in via `--systemd`) |
-| `workers` | Cloudflare Workers + D1 + R2 + KV via `bunx wrangler` — or zero-file: [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yohanesgre/lexa) (DRAFT-UNVERIFIED, see `docs/DEPLOYMENT.md`; disable Builds auto-deploy after) |
-| `dev` | clone the repo, `bun install`, `bun run dev:full` |
+Flags: `--ref <tag>`, `--name <name>` (deploy name), `--account <id>`,
+`--domain <domain>` (custom domain), `--cf-token <token>`, `--secrets-file <path>`,
+`--reset-db`, `--from-repo <dir>`, `--yes`. Full contract:
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-`workers` is the actively developed target. `docker` and `bare` are frozen at
-their current features — they keep running, no new features land there.
-
-Flags: `--ref <tag|branch>`, `--name <name>` (workers), `--port`, `--bind`, `--domain` (workers custom domain), `--systemd`
-(bare), `--image <tag>` (docker version pin), `--no-pull` (docker; use a locally
-built image). For a main snapshot, build locally and install with `--no-pull` —
-see [Snapshot build](docs/DEPLOYMENT.md#snapshot-build-main-no-release).
-
-**First run:** open `http://<host>:<port>/setup` — create the first admin
-(email + password, min 8 chars). The wizard is the **only** provisioning path;
-passwords never pass through the shell.
+**First run:** open `<worker-url>/setup` — create the first admin (email +
+password, min 8 chars). The wizard is the **only** provisioning path; passwords
+never pass through the shell.
 
 **lx** is the headless operator frontend for the running server (tasks, wiki,
 projects, GitHub status, keys, upgrades) — it installs separately and has **no
@@ -82,14 +74,14 @@ deploy commands** (removed in cli-v2026.2.0; self-hosting is
 curl -fsSL https://install.yohanesgre.com/lexa/install-cli.sh | bash
 ```
 
-**Uninstall** (data kept unless `--purge`):
+**Uninstall** (Worker deleted; D1/R2/KV kept):
 
 ```bash
-curl -fsSL https://install.yohanesgre.com/lexa/uninstall.sh | bash -s -- docker
+curl -fsSL https://install.yohanesgre.com/lexa/uninstall.sh | bash -s -- workers
 ```
 
 - **Upgrade = re-run `install.sh`** from the new tag (idempotent; data survives)
-- Full contract (per-target details, env reference, security notes):
+- Full contract (target details, env reference, security notes):
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - GitHub App setup: [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)
 
@@ -136,16 +128,18 @@ lx wiki get getting-started --project my-project
 template (copy it and edit). `bun run setup` writes `.env.toml` for you.
 Precedence is **real environment → `.env.toml` → legacy `.env` → defaults**:
 a flat `.env` from an earlier release is still read for one release, and
-migrating renames it to `.env.legacy`. The self-hosting contract — per-target
+migrating renames it to `.env.legacy`. The self-hosting contract — target
 layout, env reference, security notes, upgrade steps — lives in
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Working env files are generated on
-the machine and never committed (`.env*` is gitignored; `.env.toml.example` is
-the one tracked exception):
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). On Workers the app reads bindings
+and secrets (`wrangler.jsonc` + `wrangler secret put`); the custody file
+`cf-workers/.env.toml` holds the envelope key. Working env files are generated
+on the machine and never committed (`.env*` is gitignored; `.env.toml.example`
+is the one tracked exception):
 
 | Situation | What's needed |
 |---|---|
 | Local dev (`.env.toml`) | `bun run setup` writes it and records `LXK_ADMIN_EMAILS`; API keys minted post-setup; GitHub sync configured in the web app |
-| Self-hosted (install script) | the script writes canonical `.env.toml` in the deploy/install dir (plus a tooling-only flat `.env` for compose). Docker bind-mounts `.env.toml` read-only (`create_host_path: false`); bare/systemd loads it from the install dir. API keys minted post-setup (login → Settings → API Keys); operator-added keys (`LXK_SECRETS_MASTER_KEY`) and a pinned `LXK_IMAGE_TAG` are preserved across re-runs |
+| Self-hosted (install script) | the script writes `cf-workers/.env.toml` (0600) as custody for `LXK_SECRETS_MASTER_KEY` and pushes it to the Worker as a secret; D1/R2/KV are provisioned under `--name`. API keys minted post-setup (login → Settings → API Keys); the master key is preserved across re-runs |
 | Optional | `LXK_ASSISTANT_REPO_CAP` (Workers-only assistant repo-grounding cap, default 3), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation
@@ -158,10 +152,10 @@ Design and API docs live in [`docs/`](docs/):
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | SQL schema and data invariants |
 | [`docs/API.md`](docs/API.md) | REST contract |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: targets, env reference, bootstrap |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: the Workers target, env reference, bootstrap |
 | [`docs/CLOUDFLARE_WORKERS.md`](docs/CLOUDFLARE_WORKERS.md) | Workers runtime: D1/R2/KV bindings, quirks, cron |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key |
-| [`docs/RELEASING.md`](docs/RELEASING.md) | Release policy, pre-tag checklist, image/CLI build flow |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | Release policy, pre-tag checklist, CLI build flow |
 
 ## Contributing
 
