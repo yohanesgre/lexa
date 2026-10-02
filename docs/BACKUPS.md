@@ -79,7 +79,8 @@ Behavior when enabled (`server/entry.ts`):
 
 ## 4. Restore procedure
 
-1. **Stop the server** (`docker compose down` or the systemd unit).
+1. **Stop the server** — on Bun, stop the process; on Workers, disable the
+   Worker route so nothing writes during the restore.
 2. **Fetch the snapshot** you want from the storage location:
    - fs driver: `<volume>/backups/lexa-<ts>.db.gz`
    - s3 driver: `s3://<bucket>/backups/lexa-<ts>.db.gz`
