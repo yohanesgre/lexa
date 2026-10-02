@@ -52,7 +52,7 @@ all handle `YYYY.MINOR.MICRO` as-is (verified at adoption).
 |---|---|---|
 | Manifest (single source) | `package.json` | `cli/package.json` (read statically by `cli/src/version.ts` — never regenerated) |
 | Tag format | `vYYYY.MINOR.MICRO` (e.g. `v2026.1.0`) | `cli-vYYYY.MINOR.MICRO` (e.g. `cli-v2026.1.0`) |
-| CI | `.github/workflows/publish.yml` (`publish-workers`) → GitHub release `lexa-workers-<tag>.tar.gz` + `checksums.txt` | `.github/workflows/publish-cli.yml` → GitHub release `bin/lx` (legacy `lexa-cli` asset published for one transition cycle) |
+| CI | `.github/workflows/publish.yml` (`publish-workers`) → GitHub release `lexa-workers-<tag>.tar.gz` + `checksums.txt` | `.github/workflows/publish-cli.yml` → GitHub release assets `lx` (binary) and, for one transition cycle, legacy `lexa-cli` |
 | Changelog | `CHANGELOG.md` (root) | `cli/CHANGELOG.md` |
 | Failure guard | — | `publish-cli.yml` fails if the tag doesn't match `cli/package.json` |
 
@@ -90,8 +90,8 @@ CLI asset.
    tag ships nothing.
 8. **Verify the release:** `publish-workers` and `publish-cli` green on the
    tags; the `v<version>` release carries
-   `lexa-workers-<version>.tar.gz` + `checksums.txt`; the `cli-v<version>`
-   release carries `bin/lx` (check the workflow for any legacy asset). The
+   `lexa-workers-v<version>.tar.gz` + `checksums.txt`; the `cli-v<version>`
+   release carries the `lx` asset (check the workflow for any legacy asset). The
    workflows' installer warm + smoke step covers the rest.
 
 ## Web app release flow
