@@ -264,6 +264,8 @@ interface Swimlane {
   startAt: string | null;     // YYYY-MM-DD — sprint start (date-only); null = unset
   kind: "backlog" | "sprint"; // Backlog = system lane (permanent, no deadline); sprint = time-boxed lane
   milestoneId: string | null; // owning milestone id; null = loose sprint (not in any milestone)
+  tasksDone: number;          // done = archived task OR task in a done column (invariant 14)
+  tasksTotal: number;         // every task in the lane, archived included
 }
 
 // Goal wrapper above sprints (e.g. "v1.0 launch"). A milestone holds one or
@@ -279,6 +281,8 @@ interface Milestone {
   archivedAt: string | null;      // null = live; set = archived (cascades to its sprints)
   sprintCount: number;            // total sprints (incl. archived) in this milestone
   archivedSprintCount: number;    // archived sprints
+  tasksDone: number;              // done tasks across the milestone's sprints
+  tasksTotal: number;             // all tasks across the milestone's sprints
 }
 
 // Per-project customizable task fields. tasks.priority / tasks.type hold
@@ -624,6 +628,11 @@ start/end dates (`startAt`, `dueAt`). The Backlog lane (kind `backlog`) is the
 permanent system lane — one per project, never in a milestone, and it rejects
 `dueAt`/`startAt`/`milestoneId`.
 
+Every Swimlane carries `tasksDone`/`tasksTotal`, computed server-side and
+independent of the `includeArchived` toggle: `tasksTotal` counts every task in
+the lane (archived included); `tasksDone` counts archived tasks plus tasks in a
+done column. `includeArchived` controls payload membership only, never counts.
+
 ```
 GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }   (includes archived lanes)
 POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position?, dueAt?, startAt?, milestoneId? } → 201 Swimlane | 403 FORBIDDEN
@@ -655,9 +664,13 @@ A milestone is a goal wrapper holding one or more sprints (via
 (`milestoneId` → null); they surface as loose sprints. Archived milestones keep
 their sprints (see archive cascade below).
 
+Every Milestone carries `tasksDone`/`tasksTotal` aggregating all tasks across
+its sprints (archived sprints and tasks included), with the same done rule as
+Swimlane: archived task OR task in a done column.
+
 ```
 GET    /api/projects/:slug/milestones → 200 { data: Milestone[] }
-       (includes archived milestones; each carries sprintCount + archivedSprintCount)
+       (includes archived milestones; each carries sprintCount + archivedSprintCount + tasksDone/tasksTotal)
 POST   /api/projects/:slug/milestones   (admin)  body { name*, description?, position?, dueAt? } → 201 Milestone | 403 FORBIDDEN
 PATCH  /api/projects/:slug/milestones/:id  (admin) body { name?, description?, position?, dueAt? } → 200 Milestone | 403 FORBIDDEN | 404
   dueAt = "YYYY-MM-DD" (target date); null clears.
@@ -792,8 +805,11 @@ GET    /api/projects/:slug/board?includeArchived=true
   links included — subtask grouping + blocked dots render without extra fetches
   swimlanes carry dueAt/startAt/archivedAt/kind/milestoneId — the Backlog lane
   (kind=backlog) is the permanent system lane; every project has exactly one
+  swimlanes also carry tasksDone/tasksTotal — server-computed, identical for
+  includeArchived=false and true (counts never depend on payload membership)
   milestones: Milestone[] included (archived milestones included when
-  includeArchived=true; sprintCount/archivedSprintCount always present)
+  includeArchived=true; sprintCount/archivedSprintCount + tasksDone/tasksTotal
+  always present)
 ```
 
 ### Attachments

@@ -47,10 +47,10 @@ beforeAll(() => {
 afterAll(() => vi.unstubAllGlobals());
 
 const MILESTONES: Milestone[] = [
-  { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: "2026-09-21", archivedAt: null, sprintCount: 2, archivedSprintCount: 0 },
-  { id: "m2", projectId: "p1", name: "Beta milestone", description: "", position: 1, dueAt: null, archivedAt: null, sprintCount: 1, archivedSprintCount: 0 },
-  { id: "m3", projectId: "p1", name: "Beta 2", description: "", position: 2, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 },
-  { id: "m4", projectId: "p1", name: "Prototype", description: "", position: 3, dueAt: "2026-06-30", archivedAt: "2026-07-01", sprintCount: 1, archivedSprintCount: 1 },
+  { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: "2026-09-21", archivedAt: null, sprintCount: 2, archivedSprintCount: 0, tasksDone: 0, tasksTotal: 24 },
+  { id: "m2", projectId: "p1", name: "Beta milestone", description: "", position: 1, dueAt: null, archivedAt: null, sprintCount: 1, archivedSprintCount: 0, tasksDone: 0, tasksTotal: 1 },
+  { id: "m3", projectId: "p1", name: "Beta 2", description: "", position: 2, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0, tasksDone: 0, tasksTotal: 0 },
+  { id: "m4", projectId: "p1", name: "Prototype", description: "", position: 3, dueAt: "2026-06-30", archivedAt: "2026-07-01", sprintCount: 1, archivedSprintCount: 1, tasksDone: 0, tasksTotal: 0 },
 ];
 
 function tasksFor(laneId: string, count: number): Task[] {
@@ -77,10 +77,10 @@ function tasksFor(laneId: string, count: number): Task[] {
 function makeBoard(): Board {
   return makeBoardFixture({
     swimlanes: [
-      { id: "s1", projectId: "p1", name: "Sprint 7 — Core", description: "", position: 0, dueAt: "2026-08-21", startAt: "2026-08-18", archivedAt: null, kind: "sprint", milestoneId: "m1" },
-      { id: "s2", projectId: "p1", name: "Sprint 6 — Ash & Bone", description: "", position: 1, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m1" },
-      { id: "s3", projectId: "p1", name: "Sprint 3 — UI kit", description: "", position: 2, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m2" },
-      { id: "s5", projectId: "p1", name: "Backlog", description: "", position: 3, dueAt: null, startAt: null, archivedAt: null, kind: "backlog", milestoneId: null },
+      { id: "s1", projectId: "p1", name: "Sprint 7 — Core", description: "", position: 0, dueAt: "2026-08-21", startAt: "2026-08-18", archivedAt: null, kind: "sprint", milestoneId: "m1", tasksDone: 0, tasksTotal: 12 },
+      { id: "s2", projectId: "p1", name: "Sprint 6 — Ash & Bone", description: "", position: 1, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m1", tasksDone: 0, tasksTotal: 12 },
+      { id: "s3", projectId: "p1", name: "Sprint 3 — UI kit", description: "", position: 2, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m2", tasksDone: 0, tasksTotal: 1 },
+      { id: "s5", projectId: "p1", name: "Backlog", description: "", position: 3, dueAt: null, startAt: null, archivedAt: null, kind: "backlog", milestoneId: null, tasksDone: 0, tasksTotal: 0 },
     ],
     milestones: MILESTONES,
     tasks: [...tasksFor("s1", 12), ...tasksFor("s2", 12), ...tasksFor("s3", 1)],
@@ -138,7 +138,7 @@ describe("MilestonesPage view-on-board link", () => {
 });
 
 describe("MilestoneForm delete footer", () => {
-  const base = { id: "m3", projectId: "p1", name: "Beta 2", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 } as Milestone;
+  const base = { id: "m3", projectId: "p1", name: "Beta 2", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0, tasksDone: 0, tasksTotal: 0 } as Milestone;
 
   it("shows Delete Milestone on edit when no sprints are attached", async () => {
     const user = userEvent.setup();

@@ -4,7 +4,6 @@ import { cn } from "../ui/cn";
 import { Menu } from "../ui/Menu";
 import { useUpdateSwimlane, useDeleteSwimlane, useCreateColumn, useArchiveSwimlane, useRestoreSwimlane } from "../../lib/queries";
 import { formatDueLabel } from "../../lib/dates";
-import { sprintProgress } from "../../lib/progress";
 import { SwimlaneForm } from "./SwimlaneForm";
 import { ColumnForm } from "./ColumnForm";
 import { DeleteSwimlaneDialog } from "../swimlanes/DeleteSwimlaneDialog";
@@ -176,10 +175,9 @@ function LaneDates({ lane }: { lane: Swimlane }) {
   );
 }
 
-function SprintLaneProgress({ lane, board }: { lane: Swimlane; board: Board | undefined }) {
-  if (lane.kind !== "sprint" || lane.archivedAt || !board) return null;
-  const p = sprintProgress(board, lane.id);
-  return p.total > 0 ? <SprintProgress done={p.done} total={p.total} /> : null;
+function SprintLaneProgress({ lane }: { lane: Swimlane; board: Board | undefined }) {
+  if (lane.kind !== "sprint" || lane.archivedAt) return null;
+  return lane.tasksTotal > 0 ? <SprintProgress done={lane.tasksDone} total={lane.tasksTotal} /> : null;
 }
 
 function SwimlaneMeta({ lane, count, collapsed, board }: { lane: Swimlane; count: number | undefined; collapsed: boolean; board: Board | undefined }) {

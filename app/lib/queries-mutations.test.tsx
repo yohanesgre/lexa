@@ -9,7 +9,7 @@ import type { Board, Task, Project, Swimlane, Milestone, Column, WikiPage, Field
 import { createFetchMock, createQueryWrapper, createTestQueryClient, json } from "../test-utils";
 import {
   useCreateProject, useUpdateProject, useDeleteProject, useCreateTask, useUpdateTask,
-  useMoveTask, useDeleteTask, useArchiveTask, useRestoreTask, useCreateWikiPage,
+  useMoveTask, useDeleteTask, useArchiveTask, useRestoreTask, useBulkTaskAction, useCreateWikiPage,
   useUpdateWikiPage, useDeleteWikiPage, useUpdateFieldConfig, useCreateColumn,
   useUpdateColumn, useDeleteColumn, useCreateSwimlane, useUpdateSwimlane, useArchiveSwimlane,
   useRestoreSwimlane, useDeleteSwimlane, useCreateMilestone, useUpdateMilestone, useArchiveMilestone,
@@ -34,9 +34,9 @@ const DASHBOARD: Dashboard = {
   outOfSyncTasks: [],
 };
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
-const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
+const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog", tasksDone: 0, tasksTotal: 0 };
 const SPRINT: Swimlane = { ...SWIMLANE, id: "s2", name: "Sprint 1", position: 1, kind: "sprint", milestoneId: "m1" };
-const MILESTONE: Milestone = { id: "m1", projectId: "p1", name: "v1.0", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 };
+const MILESTONE: Milestone = { id: "m1", projectId: "p1", name: "v1.0", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0, tasksDone: 0, tasksTotal: 0 };
 const MILESTONE2: Milestone = { ...MILESTONE, id: "m2", name: "v2.0", position: 1 };
 const FIELD_CONFIG: FieldConfig = { priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }], types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }] };
 const TASK: Task = {
@@ -689,5 +689,118 @@ describe("activity + link mutations", () => {
     expect(queryClient.getQueryData(["sources", "demo", "task", "t1"])).toHaveLength(1);
     const pages = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages;
     expect(pages[0]!.data).toHaveLength(2);
+  });
+});
+
+describe("progress counts stay fresh after mutations (LX 63450bf5)", () => {
+  const DONE_COLUMN: Column = { ...COLUMN, id: "c2", name: "Done", position: 1, isDone: true };
+  const LANE: Swimlane = { ...SWIMLANE, id: "s1", name: "Sprint", kind: "sprint", milestoneId: "m1", tasksDone: 1, tasksTotal: 3 };
+  const MILESTONE_PROGRESS: Milestone = { ...MILESTONE, id: "m1", sprintCount: 1, tasksDone: 1, tasksTotal: 3 };
+  const OPEN_TASK: Task = { ...TASK, id: "t1", swimlaneId: "s1", columnId: "c1", archivedAt: null };
+  const DONE_TASK: Task = { ...TASK, id: "t2", key: "EG-2", swimlaneId: "s1", columnId: "c2", archivedAt: null };
+
+  function seedProgress(): void {
+    const board: Board = {
+      ...BOARD,
+      columns: [COLUMN, DONE_COLUMN],
+      swimlanes: [LANE],
+      milestones: [MILESTONE_PROGRESS],
+      tasks: [OPEN_TASK, DONE_TASK],
+    };
+    queryClient.setQueryData(["board", "demo", false], board);
+    queryClient.setQueryData(["board", "demo", true], board);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE_PROGRESS]);
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [LANE]);
+  }
+
+  function laneCounts(archived: boolean): { tasksDone: number; tasksTotal: number } {
+    const lane = queryClient.getQueryData<Board>(["board", "demo", archived])!.swimlanes.find((l) => l.id === "s1")!;
+    return { tasksDone: lane.tasksDone, tasksTotal: lane.tasksTotal };
+  }
+
+  function milestoneCounts(): { tasksDone: number; tasksTotal: number } {
+    const m = queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!;
+    return { tasksDone: m.tasksDone, tasksTotal: m.tasksTotal };
+  }
+
+  it("useCreateTask in a done column bumps lane and milestone done+total", async () => {
+    routes.set("POST /api/projects/demo/tasks", { data: { ...DONE_TASK, id: "t9", title: "New" }, activity: [] });
+    seedProgress();
+    const { result } = renderHook(() => useCreateTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ columnId: "c2", title: "New" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 2, tasksTotal: 4 });
+    expect(laneCounts(true)).toEqual({ tasksDone: 2, tasksTotal: 4 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 2, tasksTotal: 4 });
+  });
+
+  it("useArchiveTask counts the archived task done without changing total", async () => {
+    routes.set("POST /api/projects/demo/tasks/t1/archive", { data: { ...OPEN_TASK, archivedAt: "2026-03-01T00:00:00.000Z" }, activity: [] });
+    seedProgress();
+    const { result } = renderHook(() => useArchiveTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t1" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 2, tasksTotal: 3 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 2, tasksTotal: 3 });
+  });
+
+  it("useRestoreTask into a non-done column drops done but keeps total", async () => {
+    routes.set("POST /api/projects/demo/tasks/t3/restore", { data: { ...OPEN_TASK, id: "t3", archivedAt: null, position: "a2" }, activity: [] });
+    seedProgress();
+    // Counts are toggle-independent: both board caches already count t3
+    // (archived → done) even though board(false) omits the task row.
+    const withArchived: Swimlane = { ...LANE, tasksDone: 2, tasksTotal: 4 };
+    queryClient.setQueryData<Board>(["board", "demo", false], (old) => (old ? { ...old, swimlanes: [withArchived] } : old));
+    queryClient.setQueryData<Board>(["board", "demo", true], (old) =>
+      old ? { ...old, swimlanes: [withArchived], tasks: [...old.tasks, { ...OPEN_TASK, id: "t3", archivedAt: "2026-03-01T00:00:00.000Z" }] } : old
+    );
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [withArchived]);
+    queryClient.setQueryData(["milestones", "demo"], [{ ...MILESTONE_PROGRESS, tasksDone: 2, tasksTotal: 4 }]);
+    const { result } = renderHook(() => useRestoreTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t3" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 1, tasksTotal: 4 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 1, tasksTotal: 4 });
+  });
+
+  it("useDeleteTask of a done task drops done and total", async () => {
+    routes.set("DELETE /api/projects/demo/tasks/t2", 204);
+    seedProgress();
+    const { result } = renderHook(() => useDeleteTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t2" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 0, tasksTotal: 2 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 0, tasksTotal: 2 });
+  });
+
+  it("useMoveTask into a done column bumps done, keeps total", async () => {
+    routes.set("POST /api/projects/demo/tasks/t1/move", { data: { ...OPEN_TASK, columnId: "c2", position: "a1" }, activity: [] });
+    seedProgress();
+    const { result } = renderHook(() => useMoveTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t1", columnId: "c2", swimlaneId: "s1" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 2, tasksTotal: 3 });
+  });
+
+  it("useBulkTaskAction archive marks the applied tasks done", async () => {
+    routes.set("POST /api/projects/demo/tasks/bulk", { applied: ["t1"], failed: [] });
+    seedProgress();
+    const { result } = renderHook(() => useBulkTaskAction("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ action: "archive", ids: ["t1"] }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 2, tasksTotal: 3 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 2, tasksTotal: 3 });
+  });
+
+  it("useUpdateColumn isDone flip recomputes the lane done count from cached tasks", async () => {
+    routes.set("PATCH /api/projects/demo/columns/c1", { ...COLUMN, isDone: true });
+    seedProgress();
+    const { result } = renderHook(() => useUpdateColumn("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "c1", isDone: true }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 2, tasksTotal: 3 });
+    expect(laneCounts(true)).toEqual({ tasksDone: 2, tasksTotal: 3 });
+  });
+
+  it("useDeleteColumn removes the column from both board caches", async () => {
+    routes.set("DELETE /api/projects/demo/columns/c1", 204);
+    seedProgress();
+    const { result } = renderHook(() => useDeleteColumn("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "c1" }); });
+    expect(queryClient.getQueryData<Board>(["board", "demo", false])!.columns.map((c) => c.id)).toEqual(["c2"]);
+    expect(queryClient.getQueryData<Board>(["board", "demo", true])!.columns.map((c) => c.id)).toEqual(["c2"]);
   });
 });

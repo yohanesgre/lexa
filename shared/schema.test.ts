@@ -5,7 +5,7 @@ import type { Board, Task, TipTapDoc } from "./types";
 const validBoard: Board = {
   project: { id: "p1", name: "Demo", slug: "demo", key: "DEM", description: "", repos: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
   columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#fff", wipLimit: null, requiredFields: [], githubState: null, isDone: false }],
-  swimlanes: [{ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, kind: "backlog", milestoneId: null }],
+  swimlanes: [{ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, kind: "backlog", milestoneId: null, tasksDone: 0, tasksTotal: 0 }],
   milestones: [],
   fieldConfig: { priorities: [], types: [] },
   links: [],

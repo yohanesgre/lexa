@@ -269,6 +269,27 @@ describe("board route", () => {
     expect(body.swimlanes.map((l: { id: string }) => l.id)).toEqual(["sb"]);
   });
 
+  it("lane task counts are identical with and without includeArchived", async () => {
+    db.prepare("INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p-count', 'Count', 'p-count', 'CN', 4)").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position, is_done) VALUES ('cq1', 'p-count', 'Todo', 0, 0), ('cq2', 'p-count', 'Done', 1, 1)").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('sq', 'p-count', 'Sprint', 0, 'sprint')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at, created_at, key, number) VALUES ('tq1', 'p-count', 'cq1', 'sq', 'A', 'a0', '2026-02-01T00:00:00.000Z', '2026-01-01 10:00:00', 'CN-1', 1)").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('tq2', 'p-count', 'cq2', 'sq', 'D', 'a1', '2026-01-01 10:00:00', 'CN-2', 2)").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('tq3', 'p-count', 'cq1', 'sq', 'O', 'a2', '2026-01-01 10:00:00', 'CN-3', 3)").run();
+
+    const live = await handler(json("GET", "/api/projects/p-count/board"));
+    expect(live.status).toBe(200);
+    const liveBody = await live.json();
+    expect(liveBody.swimlanes[0]).toMatchObject({ id: "sq", tasksTotal: 3, tasksDone: 2 });
+    expect(liveBody.tasks.map((t: { id: string }) => t.id)).not.toContain("tq1");
+
+    const full = await handler(json("GET", "/api/projects/p-count/board?includeArchived=true"));
+    expect(full.status).toBe(200);
+    const fullBody = await full.json();
+    expect(fullBody.swimlanes[0]).toMatchObject({ id: "sq", tasksTotal: 3, tasksDone: 2 });
+    expect(fullBody.tasks.map((t: { id: string }) => t.id)).toContain("tq1");
+  });
+
   it("GET /api/projects/:slug/mentions matches task key + title, wiki title/slug; bare @ → defaults", async () => {
     const byKey = await handler(json("GET", "/api/projects/p1/mentions?q=eg-1"));
     expect(byKey.status).toBe(200);

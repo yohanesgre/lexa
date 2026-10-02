@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import { useMilestones, useCreateMilestone, useUpdateMilestone, useDeleteMilestone, useArchiveMilestone, useRestoreMilestone, useBoard, useSwimlanes, useSession } from "../../lib/queries";
-import { sprintProgress, milestoneTaskProgress } from "../../lib/progress";
 import { formatDueChip } from "../../lib/dates";
 import { cn } from "../ui/cn";
 import type { Milestone, Swimlane } from "../../../shared/types";
@@ -272,7 +271,7 @@ function milestoneCardClass(isCurrent: boolean, archived: boolean) {
 
 function milestoneCardData(board: ReturnType<typeof useBoard>["data"], milestone: Milestone) {
   const lanes = (board?.swimlanes ?? []).filter((l) => l.milestoneId === milestone.id);
-  const tasks = board ? milestoneTaskProgress(board, milestone.id) : { done: 0, total: 0 };
+  const tasks = { done: milestone.tasksDone, total: milestone.tasksTotal };
   return { lanes, tasks };
 }
 
@@ -297,7 +296,7 @@ function MilestoneSprints({ board, lanes, collapsed }: {
   return (
     <div className="milestone-sprints">
       {sortMilestoneLanes(lanes).map((lane) => {
-        const p = board ? sprintProgress(board, lane.id) : { done: 0, total: 0 };
+        const p = { done: lane.tasksDone, total: lane.tasksTotal };
         return (
           <div key={lane.id} className={milestoneSprintRowClass(lane)}>
             <span className="milestone-sprint-name">{lane.name}</span>

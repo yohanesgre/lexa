@@ -117,7 +117,7 @@ function ProjectDashboard() {
 
       <ProjectDescription description={health.project.description || board.data.project?.description || ""} />
 
-      <MilestoneCard slug={slug} milestone={activeMilestone} board={board.data} />
+      <MilestoneCard slug={slug} milestone={activeMilestone} />
       <StatusSections dashboard={dashboard} health={health} />
 
       <CreateProjectModal

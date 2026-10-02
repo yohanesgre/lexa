@@ -50,6 +50,8 @@ function lane(overrides: Partial<Swimlane>): Swimlane {
     startAt: null,
     kind: "sprint",
     milestoneId: null,
+    tasksDone: 0,
+    tasksTotal: 0,
     ...overrides,
   };
 }
@@ -65,6 +67,8 @@ function milestone(overrides: Partial<Milestone>): Milestone {
     archivedAt: null,
     sprintCount: 1,
     archivedSprintCount: 0,
+    tasksDone: 0,
+    tasksTotal: 0,
     ...overrides,
   };
 }

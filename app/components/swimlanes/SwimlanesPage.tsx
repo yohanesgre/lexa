@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useBoard, useMilestones, useUpdateSwimlane, useDeleteSwimlane, useArchiveSwimlane, useRestoreSwimlane, useCreateSwimlane, useSession } from "../../lib/queries";
-import { sprintProgress } from "../../lib/progress";
 import { formatDueChip } from "../../lib/dates";
 import { cn } from "../ui/cn";
 import type { Swimlane } from "../../../shared/types";
@@ -243,7 +242,7 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
   onRestore: () => void;
   onDelete: () => void;
 }) {
-  const p = sprintProgress(board, lane.id);
+  const p = { done: lane.tasksDone, total: lane.tasksTotal };
   const taskCount = board.tasks.filter((t) => t.swimlaneId === lane.id).length;
   const dateLabel = lane.startAt && lane.dueAt
     ? `${shortDate(lane.startAt)} → ${shortDate(lane.dueAt)}`

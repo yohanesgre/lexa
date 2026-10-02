@@ -111,6 +111,8 @@ export interface SwimlaneRow {
   start_at: string | null;
   kind?: "backlog" | "sprint";
   milestone_id: string | null;
+  tasks_total?: number;
+  tasks_done?: number;
 }
 
 export function rowToSwimlane(row: SwimlaneRow): Swimlane {
@@ -125,6 +127,8 @@ export function rowToSwimlane(row: SwimlaneRow): Swimlane {
     startAt: row.start_at ?? null,
     kind: (row.kind ?? "sprint") as Swimlane["kind"],
     milestoneId: row.milestone_id ?? null,
+    tasksDone: row.tasks_done ?? 0,
+    tasksTotal: row.tasks_total ?? 0,
   };
 }
 
@@ -138,6 +142,8 @@ export interface MilestoneRow {
   archived_at: string | null;
   sprint_count?: number;
   archived_sprint_count?: number;
+  tasks_total?: number;
+  tasks_done?: number;
 }
 
 export function rowToMilestone(row: MilestoneRow): Milestone {
@@ -151,6 +157,8 @@ export function rowToMilestone(row: MilestoneRow): Milestone {
     archivedAt: row.archived_at ?? null,
     sprintCount: row.sprint_count ?? 0,
     archivedSprintCount: row.archived_sprint_count ?? 0,
+    tasksDone: row.tasks_done ?? 0,
+    tasksTotal: row.tasks_total ?? 0,
   };
 }
 
