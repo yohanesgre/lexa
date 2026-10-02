@@ -46,10 +46,16 @@ replaces the other; either or both can be live at any time.
    use `install.sh workers --from-repo <dir>`. The Bun
    flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
    targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
-8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup (cron
-   `*/15 * * * *`); `wrangler.jsonc` enables observability, and the installer
-   transcribes that observability block from the root `wrangler.jsonc` into the
-   per-deploy config. The Bun path keeps its `setInterval`.
+8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup
+   (cron `*/15 * * * *`): `webhook_events` older than 7 days and
+   `device_login_requests` past `expires_at` (same SQL as the Bun host's
+   `setInterval` prune), plus R2 backup retention. The `*/15` trigger lives in
+   `wrangler.jsonc` `triggers.crons` and is deployed with the Worker; a
+   dashboard-only script upload does not carry triggers — add the cron in the
+   dashboard settings on that path. `wrangler.jsonc` enables observability, and
+   the installer transcribes that observability block from the root
+   `wrangler.jsonc` into the per-deploy config. The Bun path keeps its
+   `setInterval`.
 9. **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for the
    14 architectural invariants listed in `AGENTS.md` and fails any PR that introduces
    a violation. This is the durable record of the invariants for future contributors.

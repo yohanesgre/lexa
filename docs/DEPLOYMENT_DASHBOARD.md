@@ -37,6 +37,9 @@ Prereqs: a Cloudflare account (Workers Paid, $5/mo — free D1 caps at
    `LXK_PUBLIC_URL=https://<your-domain>` when using a custom domain.
    No secrets needed.
 8. `[verify]` Cron trigger `*/15 * * * *` (prune + backup retention).
+   A dashboard script upload does **not** carry `triggers.crons` from
+   `wrangler.jsonc`, so the trigger must be added manually here; the
+   wrangler/installer deploy paths attach it from that config.
    Observability: enabled.
 9. Apply migrations in order via the D1 console, then record them:
    run `migrations/0001_init.sql`, then `0002_device_login.sql`, then

@@ -50,6 +50,7 @@ describe("runScheduledCore", () => {
     await Effect.runPromise(
       batch(driver, [
         { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
+        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
         { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('old', datetime('now', '-8 days'))", params: [] },
         { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('new', datetime('now'))", params: [] },
       ])
@@ -65,11 +66,36 @@ describe("runScheduledCore", () => {
     expect(remaining).toEqual(["new"]);
   });
 
+  it("prunes expired device login requests and keeps live ones", async () => {
+    const driver = memDriver();
+    await Effect.runPromise(
+      batch(driver, [
+        { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
+        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
+        { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('old', datetime('now', '-8 days'))", params: [] },
+        { sql: "INSERT INTO webhook_events (delivery_id, received_at) VALUES ('new', datetime('now'))", params: [] },
+        { sql: "INSERT INTO device_login_requests (id, expires_at) VALUES ('expired', datetime('now', '-1 minute'))", params: [] },
+        { sql: "INSERT INTO device_login_requests (id, expires_at) VALUES ('live', datetime('now', '+10 minutes'))", params: [] },
+      ])
+    );
+    await runScheduledCore(driver, {}, undefined);
+    const remaining = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { queryAll } = yield* Effect.promise(() => import("./db/db"));
+        const w = yield* queryAll<{ delivery_id: string }>(driver, "SELECT delivery_id FROM webhook_events");
+        const d = yield* queryAll<{ id: string }>(driver, "SELECT id FROM device_login_requests");
+        return { webhooks: w.map((x) => x.delivery_id).sort(), devices: d.map((x) => x.id).sort() };
+      })
+    );
+    expect(remaining).toEqual({ webhooks: ["new"], devices: ["live"] });
+  });
+
   it("prunes R2 backups beyond retention (newest kept) when enabled", async () => {
     const driver = memDriver();
     await Effect.runPromise(
       batch(driver, [
         { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
+        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
         { sql: "CREATE TABLE runtime_events (id TEXT PRIMARY KEY, status TEXT, finished_at TEXT)", params: [] },
       ])
     );
@@ -96,6 +122,7 @@ describe("runScheduledCore", () => {
     await Effect.runPromise(
       batch(driver, [
         { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
+        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
         { sql: "CREATE TABLE runtime_events (id TEXT PRIMARY KEY, status TEXT, finished_at TEXT)", params: [] },
       ])
     );
