@@ -232,10 +232,10 @@ Key facts:
   Provisioning is admin-curated: `/setup` wizard creates the first superadmin;
   workspace invite links + set-password links onboard members. No public
   signup. See `docs/ARCHITECTURE.md` → Auth.
-- **GitHub sync:** full setup guide in `docs/GITHUB_SETUP.md` — GitHub App
-  creation, webhook URL/secret, `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` (inline
-  PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount.
-  Webhook auth is HMAC-SHA-256 over the raw body — no Access bypass needed.
+- **GitHub sync:** connect the App in the web app — Settings → Workspace →
+  Integrations → GitHub Sync; full guide in `docs/GITHUB_SETUP.md`. Legacy
+  `GITHUB_*` env vars are warned and ignored. Webhook auth is HMAC-SHA-256
+  over the raw body — no Access bypass needed.
 
 ## Reference (read the linked doc/skill, don't inline it here)
 

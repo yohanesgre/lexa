@@ -207,8 +207,9 @@ same isolation (`--name` keys the resource names).
 
 `--secrets-file <path>` applies `KEY=value` lines (keys validated against the
 installer whitelist) at install time. `docker`/`bare` merge them into the
-target `.env.toml`; `workers` pushes them with `wrangler secret put` and writes
-them to `cf-workers/.env.toml` custody. GitHub keys are rejected here —
+target `.env.toml`; `workers` pushes only the master key (resolved from
+custody / remote / mint) with `wrangler secret put` and writes the file's
+other keys to `cf-workers/.env.toml` custody. GitHub keys are rejected here —
 configure GitHub sync in the web app after install. Reconfigure later with the
 same flag, or edit the custody file and re-run.
 
