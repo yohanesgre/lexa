@@ -6801,7 +6801,8 @@ button.history-item {
         <div class="block-desc">
           <strong>Use</strong> — `.checkbox` (+ `.checked`) for multi-select rows (required fields, filters); `.toggle-switch` for a single on/off setting (autosave, show archived).<br/>
           <strong>Avoid</strong> — a toggle for a multi-option choice; a checkbox for a persistent on/off preference.<br/>
-          <strong>Instead</strong> — `.toggle-switch` for binary settings; `.checkbox` rows for multi-select lists.
+          <strong>Instead</strong> — `.toggle-switch` for binary settings; `.checkbox` rows for multi-select lists.<br/>
+          <strong>ARIA</strong> — a toggle is a `<button class="toggle-switch" aria-pressed="true|false">`. The accessible name is CONSTANT across states and equals the visible label text (WCAG Label in Name) — for icon-only toggles a constant descriptive name; state lives only in `aria-pressed`, never in the name ("X off"/"X on", "X disabled"/"X enabled"). The `is-on` class carries the visual state.
         </div>
         <div class="state-row">
           <span class="state-label">Checkbox</span>
@@ -6810,12 +6811,12 @@ button.history-item {
         </div>
         <div class="state-row">
           <span class="state-label">Toggle · off</span>
-          <button class="toggle-switch" aria-label="Autosave off"></button>
+          <button class="toggle-switch" aria-label="Autosave" aria-pressed="false"></button>
           <span class="text-sm color-secondary">Autosave</span>
         </div>
         <div class="state-row">
           <span class="state-label">Toggle · on</span>
-          <button class="toggle-switch is-on" aria-label="Autosave on"></button>
+          <button class="toggle-switch is-on" aria-label="Autosave" aria-pressed="true"></button>
           <span class="text-sm color-secondary">Autosave</span>
         </div>
         <div class="state-row">
@@ -6825,8 +6826,8 @@ button.history-item {
         </div>
         <pre class="code-block" id="code-inputs-check">&lt;div class="check-row"&gt;&lt;div class="checkbox checked"&gt;&lt;/div&gt; Title&lt;/div&gt;
 &lt;div class="check-row"&gt;&lt;div class="checkbox"&gt;&lt;/div&gt; Description&lt;/div&gt;
-&lt;button class="toggle-switch" aria-label="Autosave off"&gt;&lt;/button&gt;
-&lt;button class="toggle-switch is-on" aria-label="Autosave on"&gt;&lt;/button&gt;</pre>
+&lt;button class="toggle-switch" aria-label="Autosave" aria-pressed="false"&gt;&lt;/button&gt;
+&lt;button class="toggle-switch is-on" aria-label="Autosave" aria-pressed="true"&gt;&lt;/button&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-check">Copy</button>
         <div class="token-contract">Tokens: --lx-border-focus (checked/toggle on). Radio ships as a design-system primitive only — no React component yet.</div>
       </div>
