@@ -19,8 +19,8 @@
 // build links the real handler.
 //
 // Workers-only differences (platform, never behavior):
-// - GITHUB_PRIVATE_KEY_FILE is impossible (no filesystem): the boot mirror
-//   skips the file branch with a warn — set inline GITHUB_PRIVATE_KEY.
+// - Legacy GITHUB_* bindings are ignored with a boot warn: GitHub config is
+//   written only by the web app (Settings → Workspace → Integrations).
 // - Session management endpoints (list/revoke login sessions) still hit the
 //   Bun singleton and 500 here — session verification, sign-in/out,
 //   setAdmin, and invites are D1-native.
@@ -44,7 +44,7 @@ import type {
 } from "@cloudflare/workers-types";
 import { getAgentByName } from "agents";
 import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
-import { getEnvFromWorkers, type RuntimeEnv } from "./env";
+import { getEnvFromWorkers, legacyGithubEnvVars, type RuntimeEnv } from "./env";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
 import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
 import { createD1Driver } from "./db/drivers/d1";
@@ -129,9 +129,6 @@ export interface WorkersEnv {
   LXK_ADMIN_EMAILS?: string;
   CRON_SECRET?: string;
   LXK_STORAGE_DRIVER?: string;
-  GITHUB_APP_ID?: string;
-  GITHUB_PRIVATE_KEY?: string;
-  GITHUB_WEBHOOK_SECRET?: string;
   LXK_TRUSTED_ORIGINS?: string;
   LOG_LEVEL?: string;
   LXK_MAX_BODY_MB?: string;
@@ -191,6 +188,10 @@ export function resetRequestLayersCache(): void {
 function ensureBoot(env: WorkersEnv): Promise<void> {
   if (!bootPromise) {
     bootPromise = (async () => {
+      const legacyGithub = legacyGithubEnvVars(env as unknown as Record<string, string | undefined>);
+      if (legacyGithub.length > 0) {
+        console.warn(`[GitHub] legacy env config ignored (${legacyGithub.join(", ")}) — configure GitHub sync in Settings → Workspace → Integrations → GitHub Sync`);
+      }
       const { runtimeEnv, driver } = requestLayers(env);
       await Effect.runPromise(
         Effect.gen(function* () {

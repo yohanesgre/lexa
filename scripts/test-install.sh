@@ -250,17 +250,20 @@ assert_eq "toml_escape control char (<0x20)" 'a\u0001b' "$got"
 got="$(lib_call toml_escape $'a\x1fb')"
 assert_eq "toml_escape 0x1f" 'a\u001fb' "$got"
 
-toml_out="$(lib_call env_to_toml 'GITHUB_APP_ID=123' 'LXK_ENV=production' 'DATABASE_PATH=/app/data/lexa.db')"
-assert_grep "env_to_toml github section" '^\[github\]$' "$toml_out"
-assert_grep "env_to_toml string value" '^GITHUB_APP_ID = "123"$' "$toml_out"
+toml_out="$(lib_call env_to_toml 'LXK_SECRETS_MASTER_KEY=abc' 'LXK_ENV=production' 'DATABASE_PATH=/app/data/lexa.db')"
+assert_grep "env_to_toml secrets key lands in other section" '^\[other\]$' "$toml_out"
+assert_grep "env_to_toml string value" '^LXK_SECRETS_MASTER_KEY = "abc"$' "$toml_out"
 assert_grep "env_to_toml urls section" '^\[urls\]$' "$toml_out"
 assert_grep "env_to_toml core section" '^\[core\]$' "$toml_out"
 
-got="$(lib_call env_to_toml 'GITHUB_WEBHOOK_SECRET=a b#c')"
-assert_grep "env_to_toml quotes spaces and #" '^GITHUB_WEBHOOK_SECRET = "a b#c"$' "$got"
+gh_toml="$(lib_call env_to_toml 'GITHUB_APP_ID=123')"
+assert_eq "env_to_toml emits no github section" "0" "$(printf '%s' "$gh_toml" | grep -c '^\[github\]$' || true)"
 
-pem="$(lib_call env_to_toml "$(printf 'GITHUB_PRIVATE_KEY=%s' $'-----BEGIN KEY-----\nMIIB\n-----END KEY-----')")"
-assert_grep "env_to_toml multiline PEM escapes newlines" 'GITHUB_PRIVATE_KEY = "-----BEGIN KEY-----\\nMIIB\\n-----END KEY-----"' "$pem"
+got="$(lib_call env_to_toml 'LXK_SECRETS_MASTER_KEY=a b#c')"
+assert_grep "env_to_toml quotes spaces and #" '^LXK_SECRETS_MASTER_KEY = "a b#c"$' "$got"
+
+pem="$(lib_call env_to_toml "$(printf 'LXK_SECRETS_MASTER_KEY=%s' $'-----BEGIN KEY-----\nMIIB\n-----END KEY-----')")"
+assert_grep "env_to_toml multiline value escapes newlines" 'LXK_SECRETS_MASTER_KEY = "-----BEGIN KEY-----\\nMIIB\\n-----END KEY-----"' "$pem"
 
 rc=0
 lib_call env_to_toml 'bad key=1' >/dev/null 2>&1 || rc=$?
@@ -269,14 +272,14 @@ assert_rc "env_to_toml invalid key dies" 1 "$rc"
 echo "== write_env_toml =="
 
 tomldir="$(mktemp -d)"
-lib_call write_env_toml "${tomldir}/.env.toml" 'LXK_ENV=staging' 'GITHUB_APP_ID=111' >/dev/null 2>&1
+lib_call write_env_toml "${tomldir}/.env.toml" 'LXK_ENV=staging' 'LXK_ADMIN_EMAILS=ops@example.com' >/dev/null 2>&1
 assert_eq "write_env_toml mode 0600" "600" "$(stat -c %a "${tomldir}/.env.toml")"
 assert_grep "write_env_toml content" '^LXK_ENV = "staging"$' "$(cat "${tomldir}/.env.toml")"
 
 lib_call write_env_toml "${tomldir}/.env.toml" 'LXK_ENV=production' >/dev/null 2>&1
 toml_merged="$(cat "${tomldir}/.env.toml")"
 assert_grep "write_env_toml updates passed key" '^LXK_ENV = "production"$' "$toml_merged"
-assert_grep "write_env_toml preserves operator-added key" '^GITHUB_APP_ID = "111"$' "$toml_merged"
+assert_grep "write_env_toml preserves operator-added key" '^LXK_ADMIN_EMAILS = "ops@example.com"$' "$toml_merged"
 assert_eq "write_env_toml no duplicate LXK_ENV" "1" "$(grep -c 'LXK_ENV' "${tomldir}/.env.toml")"
 
 rogue_toml_rc=0
@@ -284,11 +287,25 @@ lib_call write_env_toml "${tomldir}/rogue.toml" 'ROGUE_KEY=1' >/dev/null 2>&1 ||
 assert_rc "write_env_toml rogue key dies" 1 "$rogue_toml_rc"
 assert_eq "write_env_toml rogue writes no file" "absent" "$([ -e "${tomldir}/rogue.toml" ] && echo present || echo absent)"
 
+gh_toml_rc=0
+lib_call write_env_toml "${tomldir}/github.toml" 'GITHUB_APP_ID=1' >/dev/null 2>&1 || gh_toml_rc=$?
+assert_rc "write_env_toml rejects a GITHUB_* key (dead key)" 1 "$gh_toml_rc"
+assert_eq "write_env_toml GITHUB rejection writes no file" "absent" "$([ -e "${tomldir}/github.toml" ] && echo present || echo absent)"
+
 # NIT: appending must not glue onto a file with no trailing newline.
 printf 'LXK_ENV = "staging"' > "${tomldir}/noeol.toml"
 lib_call write_env_toml "${tomldir}/noeol.toml" 'PORT=3000' >/dev/null 2>&1
 assert_grep "write_env_toml appends after missing trailing newline" '^PORT = "3000"$' "$(cat "${tomldir}/noeol.toml")"
 assert_eq "write_env_toml did not glue lines" "2" "$(wc -l < "${tomldir}/noeol.toml")"
+
+echo "== GITHUB_* are dead keys (never allowed, never carried) =="
+
+dead_keys="$(lib_eval 'printf "%s" "$ENV_FILE_DEAD_KEYS"')"
+allowed_keys="$(lib_eval 'printf "%s" "$ENV_FILE_ALLOWED_KEYS"')"
+for ghkey in GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET; do
+  assert_grep "ENV_FILE_DEAD_KEYS lists ${ghkey}" " ${ghkey} " "$dead_keys"
+  assert_eq "ENV_FILE_ALLOWED_KEYS excludes ${ghkey}" "0" "$(printf '%s' "$allowed_keys" | grep -c " ${ghkey} " || true)"
+done
 
 echo "== secrets_master_key_entry =="
 
@@ -341,14 +358,15 @@ assert_eq "presence=unknown: _WORKERS_MASTER_KEY empty" "" "$mk_unk_val"
 echo "== migrate_legacy_deploy_env =="
 
 mdir="$(mktemp -d)"
-printf 'LXK_ENV=production\nLXK_PUBLIC_URL=http://127.0.0.1:8080\nGITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY="line1\\nline2"\nLXK_API_KEY=dead\n' > "${mdir}/.env"
+printf 'LXK_ENV=production\nLXK_PUBLIC_URL=http://127.0.0.1:8080\nGITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY="line1\\nline2"\nLXK_S3_BUCKET="line1\\nline2"\nLXK_API_KEY=dead\n' > "${mdir}/.env"
 lib_call migrate_legacy_deploy_env "${mdir}" >/dev/null 2>&1
 assert_eq "migration renames .env to .env.legacy" "present" "$([ -f "${mdir}/.env.legacy" ] && echo present || echo absent)"
 assert_eq "migration removes .env" "absent" "$([ -f "${mdir}/.env" ] && echo present || echo absent)"
 mig_toml="$(cat "${mdir}/.env.toml")"
 assert_grep "migration carries app key" '^LXK_ENV = "production"$' "$mig_toml"
-assert_grep "migration preserves GITHUB_APP_ID" '^GITHUB_APP_ID = "123"$' "$mig_toml"
-assert_grep "migration unescapes quoted value" 'GITHUB_PRIVATE_KEY = "line1\\nline2"' "$mig_toml"
+assert_eq "migration drops GITHUB_APP_ID (dead key)" "0" "$(grep -c 'GITHUB_APP_ID' "${mdir}/.env.toml" || true)"
+assert_eq "migration drops GITHUB_PRIVATE_KEY (dead key)" "0" "$(grep -c 'GITHUB_PRIVATE_KEY' "${mdir}/.env.toml" || true)"
+assert_grep "migration unescapes quoted value" 'LXK_S3_BUCKET = "line1\\nline2"' "$mig_toml"
 assert_eq "migration drops dead key" "0" "$(grep -c 'LXK_API_KEY' "${mdir}/.env.toml" || true)"
 assert_eq "migration .env.legacy mode 0600" "600" "$(stat -c %a "${mdir}/.env.legacy")"
 
@@ -388,7 +406,7 @@ assert_grep "migration single-quoted value has no escapes" '^SQ = "sq#val"$' "$p
 # would rename the compose project and orphan the volume; LXK_IMAGE_TAG must
 # keep its pin across the migration rename).
 toolleg="$(mktemp -d)"
-printf 'GITHUB_APP_ID=7\nCOMPOSE_PROJECT_NAME=myproj\nLXK_IMAGE_TAG=v2026.2.9\n' > "${toolleg}/.env"
+printf 'LXK_ENV=production\nCOMPOSE_PROJECT_NAME=myproj\nLXK_IMAGE_TAG=v2026.2.9\n' > "${toolleg}/.env"
 lib_call migrate_legacy_deploy_env "${toolleg}" >/dev/null 2>&1
 tleg_toml="$(cat "${toolleg}/.env.toml" 2>/dev/null)"
 tleg_env="$(cat "${toolleg}/.env" 2>/dev/null)"
@@ -396,7 +414,7 @@ assert_eq "migration keeps COMPOSE_PROJECT_NAME out of .env.toml" "0" "$(grep -c
 assert_eq "migration keeps LXK_IMAGE_TAG out of .env.toml" "0" "$(grep -c 'LXK_IMAGE_TAG' "${toolleg}/.env.toml" || true)"
 assert_grep "migration re-emits COMPOSE_PROJECT_NAME to flat .env" '^COMPOSE_PROJECT_NAME=myproj$' "$tleg_env"
 assert_grep "migration re-emits pinned LXK_IMAGE_TAG to flat .env" '^LXK_IMAGE_TAG=v2026.2.9$' "$tleg_env"
-assert_grep "migration still carries an app key" '^GITHUB_APP_ID = "7"$' "$tleg_toml"
+assert_grep "migration still carries an app key" '^LXK_ENV = "production"$' "$tleg_toml"
 
 # MED5: the installer-written TOML must be APPLIED by the loader (not just
 # parse). Uses the real loader when bun + the checkout are present.
@@ -603,13 +621,12 @@ cat > "${presdir}/bin/docker" <<'SHIM'
 exit 0
 SHIM
 chmod +x "${presdir}/bin/docker"
-printf '[github]\nGITHUB_APP_ID = "999"\nGITHUB_PRIVATE_KEY_FILE = "/app/github-app.private-key.pem"\n\n[urls]\nLXK_PUBLIC_URL = "http://old.example"\n' > "${presdir}/dockers/.env.toml"
+printf '[auth]\nLXK_ADMIN_EMAILS = "ops@example.com"\n\n[urls]\nLXK_PUBLIC_URL = "http://old.example"\n' > "${presdir}/dockers/.env.toml"
 pres_rc=0
 (cd "${presdir}" && INSTALL_DRY_RUN=1 PATH="${presdir}/bin:${PATH}" bash "$INSTALL" docker --port 9292 >/dev/null 2>&1) || pres_rc=$?
 assert_rc "re-run install.sh docker completes" 0 "$pres_rc"
 pres_body="$(cat "${presdir}/dockers/.env.toml")"
-assert_grep "re-run preserves GITHUB_APP_ID" '^GITHUB_APP_ID = "999"$' "$pres_body"
-assert_grep "re-run preserves GITHUB_PRIVATE_KEY_FILE" '^GITHUB_PRIVATE_KEY_FILE = "/app/github-app.private-key.pem"$' "$pres_body"
+assert_grep "re-run preserves operator-added key" '^LXK_ADMIN_EMAILS = "ops@example.com"$' "$pres_body"
 assert_grep "re-run updates installer-owned LXK_PUBLIC_URL" '^LXK_PUBLIC_URL = "http://127.0.0.1:9292"$' "$pres_body"
 pres_key1="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${presdir}/dockers/.env.toml" | head -1)"
 assert_eq "re-run .env.toml carries a 32-byte secrets key" "32" "$(printf '%s' "$pres_key1" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
@@ -679,8 +696,8 @@ leg_rc=0
 assert_rc "legacy-dir install.sh docker completes" 0 "$leg_rc"
 assert_eq "legacy .env renamed to .env.legacy" "present" "$([ -f "${legdir}/dockers/.env.legacy" ] && echo present || echo absent)"
 leg_toml="$(cat "${legdir}/dockers/.env.toml")"
-assert_grep "legacy migration preserves GITHUB_APP_ID" '^GITHUB_APP_ID = "42"$' "$leg_toml"
-assert_grep "legacy migration preserves GITHUB_WEBHOOK_SECRET" '^GITHUB_WEBHOOK_SECRET = "shh"$' "$leg_toml"
+assert_eq "legacy migration drops GITHUB_APP_ID (dead key)" "0" "$(grep -c 'GITHUB_APP_ID' "${legdir}/dockers/.env.toml" || true)"
+assert_eq "legacy migration drops GITHUB_WEBHOOK_SECRET (dead key)" "0" "$(grep -c 'GITHUB_WEBHOOK_SECRET' "${legdir}/dockers/.env.toml" || true)"
 assert_grep "legacy migration carries LXK_ENV" '^LXK_ENV = "production"$' "$leg_toml"
 assert_eq "legacy migration drops dead key" "0" "$(grep -c 'LXK_API_KEY' "${legdir}/dockers/.env.toml" || true)"
 assert_grep "legacy dir now has tooling-only .env" '^LXK_IMAGE_TAG=latest$' "$(cat "${legdir}/dockers/.env")"
@@ -780,40 +797,33 @@ cat > "${sec_tmp}/bin/docker" <<'SHIM'
 exit 0
 SHIM
 chmod +x "${sec_tmp}/bin/docker"
-sec_pem="${sec_tmp}/github-app.pem"
-printf -- '-----BEGIN KEY-----\nMIIBSYNTHETICKEYBODY\n-----END KEY-----\n' > "${sec_pem}"
-sec_fix_secret="whsec_SYNTHETICWEBHOOKVALUE"
-printf 'GITHUB_APP_ID=123456\nGITHUB_WEBHOOK_SECRET=%s\nGITHUB_PRIVATE_KEY_FILE=%s\n' \
-  "${sec_fix_secret}" "${sec_pem}" > "${sec_tmp}/secrets.env"
+sec_fix_secret="SYNTHETICMASTERKEYVALUE"
+printf 'LXK_SECRETS_MASTER_KEY=%s\n' "${sec_fix_secret}" > "${sec_tmp}/secrets.env"
 sec_rc=0
 sec_out="$(cd "${sec_tmp}" && INSTALL_DRY_RUN=1 PATH="${sec_tmp}/bin:${PATH}" \
   bash "$INSTALL" docker --port 9333 --secrets-file "${sec_tmp}/secrets.env" 2>&1)" || sec_rc=$?
 assert_rc "T-secrets-file docker dry-run completes" 0 "$sec_rc"
 sec_toml="$(cat "${sec_tmp}/dockers/.env.toml" 2>/dev/null)"
-assert_grep "T-secrets-file writes GITHUB_APP_ID" '^GITHUB_APP_ID = "123456"$' "$sec_toml"
-assert_grep "T-secrets-file writes GITHUB_WEBHOOK_SECRET" "^GITHUB_WEBHOOK_SECRET = \"${sec_fix_secret}\"\$" "$sec_toml"
-# docker has no mounted filesystem for the PEM: the file is inlined.
-assert_grep "T-secrets-file inlines GITHUB_PRIVATE_KEY for docker" '^GITHUB_PRIVATE_KEY = "-----BEGIN KEY-----\\nMIIBSYNTHETICKEYBODY' "$sec_toml"
-assert_grep "T-secrets-file banner reports GitHub configured" 'GitHub sync configured' "$sec_out"
-assert_eq "T-secrets-file never prints the webhook secret" "0" "$(printf '%s' "$sec_out" | grep -c "${sec_fix_secret}" || true)"
-assert_eq "T-secrets-file never prints the PEM body" "0" "$(printf '%s' "$sec_out" | grep -c 'MIIBSYNTHETICKEYBODY' || true)"
+assert_grep "T-secrets-file writes LXK_SECRETS_MASTER_KEY" "^LXK_SECRETS_MASTER_KEY = \"${sec_fix_secret}\"\$" "$sec_toml"
+assert_grep "T-secrets-file banner reports the master key" 'Secrets: master key' "$sec_out"
+assert_eq "T-secrets-file never prints the master key" "0" "$(printf '%s' "$sec_out" | grep -c "${sec_fix_secret}" || true)"
 
-# Partial trio: fail-closed — the whole GitHub set is dropped, nothing half-written.
-part_tmp="$(mktemp -d)"
-mkdir -p "${part_tmp}/bin"
-cat > "${part_tmp}/bin/docker" <<'SHIM'
+# A GITHUB_* key is no longer allowed in --secrets-file: rejected, never skipped.
+gh_tmp="$(mktemp -d)"
+mkdir -p "${gh_tmp}/bin"
+cat > "${gh_tmp}/bin/docker" <<'SHIM'
 #!/usr/bin/env bash
 exit 0
 SHIM
-chmod +x "${part_tmp}/bin/docker"
-printf 'GITHUB_APP_ID=999\n' > "${part_tmp}/secrets.env"
-part_rc=0
-part_out="$(cd "${part_tmp}" && INSTALL_DRY_RUN=1 PATH="${part_tmp}/bin:${PATH}" \
-  bash "$INSTALL" docker --port 9334 --secrets-file "${part_tmp}/secrets.env" 2>&1)" || part_rc=$?
-assert_rc "T-secrets-file partial trio still completes" 0 "$part_rc"
-assert_grep "T-secrets-file partial trio warns + skips" 'GitHub sync needs all three values — skipping it' "$part_out"
-assert_eq "T-secrets-file partial trio writes no GITHUB_APP_ID" "0" "$(grep -c 'GITHUB_APP_ID' "${part_tmp}/dockers/.env.toml" 2>/dev/null || true)"
-assert_eq "T-secrets-file banner shows GitHub unconfigured" "1" "$(printf '%s' "$part_out" | grep -c 'GitHub sync not configured' || true)"
+chmod +x "${gh_tmp}/bin/docker"
+printf 'GITHUB_APP_ID=123456\n' > "${gh_tmp}/secrets.env"
+gh_rc=0
+gh_out="$(cd "${gh_tmp}" && INSTALL_DRY_RUN=1 PATH="${gh_tmp}/bin:${PATH}" \
+  bash "$INSTALL" docker --port 9340 --secrets-file "${gh_tmp}/secrets.env" 2>&1)" || gh_rc=$?
+assert_rc "T-secrets-file rejects a GitHub key" 1 "$gh_rc"
+assert_grep "T-secrets-file names the rejected GitHub key" 'Secrets file: key GITHUB_APP_ID not allowed — use the installer whitelist keys \(see docs/DEPLOYMENT\.md\), then re-run\.' "$gh_out"
+assert_eq "T-secrets-file GitHub key writes no GITHUB_APP_ID" "0" "$(grep -rl 'GITHUB_APP_ID' "${gh_tmp}/dockers" 2>/dev/null | wc -l | tr -d ' ')"
+
 
 # A key outside the installer whitelist is refused (never written).
 bad_tmp="$(mktemp -d)"
@@ -834,35 +844,6 @@ assert_grep "T-secrets-file names the rejected key" 'Secrets file: key ROGUE_KEY
 nf_out="$(lib_eval 'secrets_load_file /nonexistent/lexa-nope.env' 2>&1 || true)"
 assert_grep "T-secrets-file missing file names the path + next action" 'Secrets file not found: /nonexistent/lexa-nope\.env — pass an existing file, then re-run\.' "$nf_out"
 
-# MED1: an empty trio member counts as absent — the whole trio is skipped.
-empty_tmp="$(mktemp -d)"
-mkdir -p "${empty_tmp}/bin"
-cat > "${empty_tmp}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${empty_tmp}/bin/docker"
-empty_pem="${empty_tmp}/key.pem"
-printf -- '-----BEGIN KEY-----\nMIIBEMPTYID\n-----END KEY-----\n' > "${empty_pem}"
-printf 'GITHUB_APP_ID=\nGITHUB_WEBHOOK_SECRET=%s\nGITHUB_PRIVATE_KEY_FILE=%s\n' \
-  "${sec_fix_secret}" "${empty_pem}" > "${empty_tmp}/secrets.env"
-empty_rc=0
-empty_out="$(cd "${empty_tmp}" && INSTALL_DRY_RUN=1 PATH="${empty_tmp}/bin:${PATH}" \
-  bash "$INSTALL" docker --port 9336 --secrets-file "${empty_tmp}/secrets.env" 2>&1)" || empty_rc=$?
-assert_rc "T-secrets-file empty GITHUB_APP_ID still completes" 0 "$empty_rc"
-assert_grep "T-secrets-file empty GITHUB_APP_ID skips the trio" 'GitHub sync needs all three values — skipping it' "$empty_out"
-assert_eq "T-secrets-file empty GITHUB_APP_ID writes no GITHUB_APP_ID" "0" "$(grep -c 'GITHUB_APP_ID' "${empty_tmp}/dockers/.env.toml" 2>/dev/null || true)"
-
-# MED1: an unreadable GITHUB_PRIVATE_KEY_FILE counts as absent (bare keeps the
-# path, so the trio check itself must require -r); a readable path completes it.
-uf_out="$(lib_eval 'SECRET_ENTRIES=("GITHUB_APP_ID=1" "GITHUB_WEBHOOK_SECRET=wh" "GITHUB_PRIVATE_KEY_FILE=/nonexistent/nope.pem"); secrets_check_trio; printf "TRIO=%s" "$GITHUB_TRIO_OK"' 2>&1)"
-assert_grep "T-secrets-file unreadable key file skips the trio" 'GitHub sync needs all three values — skipping it' "$uf_out"
-assert_grep "T-secrets-file unreadable key file leaves GITHUB_TRIO_OK=0" 'TRIO=0' "$uf_out"
-# The PEM path is substituted into the snippet text (double-quoted) — the child
-# runs under `set -u`, so an env-prefix var would never reach it.
-uf_ok="$(lib_eval "SECRET_ENTRIES=(\"GITHUB_APP_ID=1\" \"GITHUB_WEBHOOK_SECRET=wh\" \"GITHUB_PRIVATE_KEY_FILE=${empty_pem}\"); secrets_check_trio; printf \"TRIO=%s\" \"\$GITHUB_TRIO_OK\"")"
-assert_grep "T-secrets-file readable key file completes the trio" 'TRIO=1' "$uf_ok"
-
 # MED5: a malformed line reports only its number — never the line content.
 mal_tmp="$(mktemp -d)"
 mkdir -p "${mal_tmp}/bin"
@@ -871,7 +852,7 @@ cat > "${mal_tmp}/bin/docker" <<'SHIM'
 exit 0
 SHIM
 chmod +x "${mal_tmp}/bin/docker"
-printf 'GITHUB_APP_ID=1\nthis line has no equals sign\n' > "${mal_tmp}/secrets.env"
+printf 'LXK_SECRETS_MASTER_KEY=1\nthis line has no equals sign\n' > "${mal_tmp}/secrets.env"
 mal_rc=0
 mal_out="$(cd "${mal_tmp}" && INSTALL_DRY_RUN=1 PATH="${mal_tmp}/bin:${PATH}" \
   bash "$INSTALL" docker --port 9337 --secrets-file "${mal_tmp}/secrets.env" 2>&1)" || mal_rc=$?
@@ -879,25 +860,20 @@ assert_rc "T-secrets-file malformed line exits non-zero" 1 "$mal_rc"
 assert_grep "T-secrets-file malformed line reports its number" 'line 2' "$mal_out"
 assert_eq "T-secrets-file malformed line never echoes the content" "0" "$(printf '%s' "$mal_out" | grep -c 'this line has no equals sign' || true)"
 
-# workers: values are pushed with `wrangler secret put` and written to custody.
+# workers: the master key is pushed with `wrangler secret put` and written to custody.
 if [ "$have_bun_path" -eq 1 ]; then
   sec_w_tmp="$(mktemp -d)"
   sec_w_home="$(mktemp -d)"
-  sec_w_pem="${sec_w_tmp}/key.pem"
-  printf -- '-----BEGIN KEY-----\nMIIBWORKERKEY\n-----END KEY-----\n' > "${sec_w_pem}"
-  printf 'GITHUB_APP_ID=654321\nGITHUB_WEBHOOK_SECRET=%s\nGITHUB_PRIVATE_KEY_FILE=%s\n' \
-    "${sec_fix_secret}" "${sec_w_pem}" > "${sec_w_tmp}/secrets.env"
+  printf 'LXK_SECRETS_MASTER_KEY=%s\n' "${sec_fix_secret}" > "${sec_w_tmp}/secrets.env"
   secw_rc=0
   secw_out="$(cd "${sec_w_tmp}" && HOME="${sec_w_home}" INSTALL_DRY_RUN=1 \
     bash "$INSTALL" workers --cf-token test-token --secrets-file "${sec_w_tmp}/secrets.env" 2>&1)" || secw_rc=$?
   assert_rc "T-secrets-file workers dry-run completes" 0 "$secw_rc"
-  assert_grep "T-secrets-file workers plans GITHUB_APP_ID put" 'wrangler secret put GITHUB_APP_ID --name lexa' "$secw_out"
-  assert_grep "T-secrets-file workers plans GITHUB_WEBHOOK_SECRET put" 'wrangler secret put GITHUB_WEBHOOK_SECRET --name lexa' "$secw_out"
-  assert_grep "T-secrets-file workers plans GITHUB_PRIVATE_KEY put" 'wrangler secret put GITHUB_PRIVATE_KEY --name lexa' "$secw_out"
+  assert_grep "T-secrets-file workers plans the master-key put" 'wrangler secret put LXK_SECRETS_MASTER_KEY --name lexa' "$secw_out"
   secw_custody="$(cat "${sec_w_tmp}/cf-workers/.env.toml" 2>/dev/null)"
-  assert_grep "T-secrets-file workers writes custody GITHUB_APP_ID" '^GITHUB_APP_ID = "654321"$' "$secw_custody"
-  assert_grep "T-secrets-file workers passes the deploy config to secret put" 'wrangler secret put GITHUB_APP_ID --name lexa --config deploy-lexa/wrangler.lexa.json' "$secw_out"
-  assert_eq "T-secrets-file workers never prints the webhook secret" "0" "$(printf '%s' "$secw_out" | grep -c "${sec_fix_secret}" || true)"
+  assert_grep "T-secrets-file workers writes the master key to custody" "^LXK_SECRETS_MASTER_KEY = \"${sec_fix_secret}\"\$" "$secw_custody"
+  assert_grep "T-secrets-file workers passes the deploy config to secret put" 'wrangler secret put LXK_SECRETS_MASTER_KEY --name lexa --config deploy-lexa/wrangler.lexa.json' "$secw_out"
+  assert_eq "T-secrets-file workers never prints the master key" "0" "$(printf '%s' "$secw_out" | grep -c "${sec_fix_secret}" || true)"
 else
   echo "SKIP: bun unavailable — T-secrets-file workers case needs the runtime"
 fi
@@ -1021,7 +997,7 @@ echo "== T-workers-ambiguous: several deploy-* dirs + no --name die before crede
 
 # Two previous deploy dirs and no --name: resolve_deploy_name dies with the
 # ambiguity message. That die runs above the credential chain, so the run needs
-# no token — INSTALL_DRY_RUN keeps it offline, --yes skips the secrets wizard.
+# no token — INSTALL_DRY_RUN keeps it offline, --yes skips the fresh-deploy confirm.
 if [ "$have_bun_path" -eq 1 ]; then
   amb_tmp="$(mktemp -d)"
   amb_home="$(mktemp -d)"
@@ -1257,23 +1233,27 @@ if [ "$have_bun" -eq 1 ]; then
   assert_grep "T-from-repo-existing keeps the existing env" 'exists — kept \(dev env untouched\)' "$fr_out"
   assert_grep "T-from-repo-existing notes secrets are skipped" 'Skipping secrets setup' "$fr_out"
   assert_eq "T-from-repo-existing drops the master-key banner line" "0" "$(printf '%s' "$fr_out" | grep -c 'master key' || true)"
-  assert_eq "T-from-repo-existing banner reports GitHub unconfigured" "1" "$(printf '%s' "$fr_out" | grep -c 'GitHub sync not configured' || true)"
+  assert_eq "T-from-repo-existing makes no GitHub banner claim" "0" "$(printf '%s' "$fr_out" | grep -c 'GitHub' || true)"
   assert_eq "T-from-repo-existing never writes a master key" "0" "$(grep -c 'LXK_SECRETS_MASTER_KEY' "${bare_repo}/.env.toml" 2>/dev/null || true)"
   assert_eq "T-from-repo-existing leaves the env untouched" "1" "$(grep -c '^LXK_ENV = "production"$' "${bare_repo}/.env.toml" 2>/dev/null || true)"
 
-  # A complete GitHub trio already in that env reads back as configured.
+  # Legacy GITHUB_* keys in an existing env are dead: --from-repo keeps the env
+  # untouched and the banner makes no GitHub claim.
   bare_repo_trio="$(mktemp -d)"
   mkdir -p "${bare_repo_trio}/scripts" "${bare_repo_trio}/dist/client"
   {
     printf 'LXK_ENV = "production"\n'
+    printf 'LXK_SECRETS_MASTER_KEY = "SYNTHETICMASTERKEYVALUE"\n'
     printf 'GITHUB_APP_ID = "123456"\n'
     printf 'GITHUB_WEBHOOK_SECRET = "whsec_SYNTH"\n'
     printf 'GITHUB_PRIVATE_KEY = "-----BEGIN KEY-----\\nMIIBSYNTHETICKEYBODY\\n-----END KEY-----"\n'
   } > "${bare_repo_trio}/.env.toml"
   fr_trio_rc=0
   fr_trio_out="$(cd "${bare_repo_trio}" && INSTALL_DRY_RUN=1 bash "$INSTALL" bare --from-repo "${bare_repo_trio}" --port 9339 2>&1)" || fr_trio_rc=$?
-  assert_rc "T-from-repo-existing complete-trio dry-run completes" 0 "$fr_trio_rc"
-  assert_eq "T-from-repo-existing reads back a complete trio as configured" "1" "$(printf '%s' "$fr_trio_out" | grep -c 'GitHub sync configured' || true)"
+  assert_rc "T-from-repo-existing legacy-env dry-run completes" 0 "$fr_trio_rc"
+  assert_eq "T-from-repo-existing makes no GitHub banner claim" "0" "$(printf '%s' "$fr_trio_out" | grep -c 'GitHub' || true)"
+  assert_eq "T-from-repo-existing leaves the legacy GITHUB_* env untouched" "1" "$(grep -c '^GITHUB_APP_ID = "123456"$' "${bare_repo_trio}/.env.toml" 2>/dev/null || true)"
+  assert_eq "T-from-repo-existing never rewrites the existing master key" "1" "$(grep -c '^LXK_SECRETS_MASTER_KEY = "SYNTHETICMASTERKEYVALUE"$' "${bare_repo_trio}/.env.toml" 2>/dev/null || true)"
 else
   echo "SKIP: bun unavailable — T-from-repo-existing needs the runtime"
 fi

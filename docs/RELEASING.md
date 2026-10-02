@@ -139,9 +139,8 @@ superadmin.
 What the CLI still persists: the saved login (endpoint + `lxk_` key) under
 `~/.lexa/`, overridable per-shell with `LEXA_URL` + `LEXA_API_KEY`. Keys are
 minted in the web app (Settings → API Keys) or by `lx login`'s device flow.
-Release-relevant credentials: `GITHUB_*` (App id, private key, webhook secret —
-preserved across install-script re-runs) and `CF_API_TOKEN` (Workers target
-only) live in the env file, not in CLI state.
+Release-relevant credentials: `CF_API_TOKEN` (Workers target only) lives in the
+env file, not in CLI state.
 
 ## Install without bun
 

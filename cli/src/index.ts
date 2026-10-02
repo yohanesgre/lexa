@@ -24,7 +24,7 @@
 import { Effect, Data } from "effect";
 import { LexaClient, ApiError, type ColumnInfo, type SwimlaneInfo } from "./api";
 import { CliConfigService, groupDir, normalizeHost, migrateFlavorRootsSync, type CliConfig } from "./config";
-import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck } from "./github";
+import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck, envFlagsRemoved } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
 import { hostname as osHostname } from "node:os";
@@ -1359,31 +1359,20 @@ Projects:
   project delete <slug> --yes
 
 GitHub sync (optional integration):
-  github status [--local] [--env-file <path>]
-                                       read the LIVE server state (default;
-                                       needs login — the server DB is the
-                                       source of truth); --local: validate
-                                       GITHUB_* in the LOCAL env file
-                                       (.env.toml; a legacy .env is
-                                       auto-selected when .env.toml is
-                                       absent, --env-file overrides —
-                                       offline bootstrap check)
-  github setup [--local] [--env-file <path>]
-                                       configure App ID + PEM + webhook secret
-                                       (default: push to the server API —
-                                       applied immediately, REPLACES the
-                                       current server values like web Settings;
-                                       needs login; --local: write the env
-                                       file as BOOTSTRAP — .env.toml by
-                                       default (legacy .env auto-selected
-                                       when .env.toml is absent; --env-file
-                                       overrides) —
-                                       imported on next boot only while unset,
-                                       never overwrites web Settings values,
-                                       inert once the server has DB config)
+  github status                        read the LIVE server state (needs
+                                       login; the server DB is the source of
+                                       truth; GitHub config is managed in the
+                                       web app: Settings → Workspace →
+                                       Integrations → GitHub Sync)
+  github setup                         configure App ID + PEM + webhook secret
+                                       via the server API — applied
+                                       immediately, REPLACES the current server
+                                       values like web Settings (needs login;
+                                       --app-id, --pem-file, --webhook-secret
+                                       for non-interactive runs)
   github check <slug> <owner/repo>     acceptance round-trip against the live
                                        server (creates a real issue; needs
-                                       login — config source irrelevant)
+                                       login)
   github link <id> --project <slug> --repo <owner/name>
                                        create a GitHub issue from the task and
                                        link it (needs login)
@@ -1452,35 +1441,20 @@ const GROUP_HELP: Record<string, string> = {
               [--parent <pageSlug> | --parent-root] [--position <n>]
   wiki delete <pageSlug> --project <slug>`,
   github: `GitHub sync (optional integration):
-  github status [--local] [--env-file <path>]
-                                       read the LIVE server state (default —
-                                       needs login; the server DB is the source
-                                       of truth at runtime); --local: validate
-                                       GITHUB_* in the LOCAL env file
-                                       (.env.toml; a legacy .env is
-                                       auto-selected when .env.toml is
-                                       absent, --env-file overrides —
-                                       offline bootstrap check)
-  github setup [--local] [--env-file <path>]
-                                       configure GITHUB_APP_ID + PEM + secret
-                                       (default: push to the server API —
-                                       applied immediately, REPLACES the
-                                       current server values like web Settings;
-                                       needs login; --local: write the env file
-                                       as first-boot BOOTSTRAP — .env.toml by
-                                       default (legacy .env auto-selected when
-                                       .env.toml is absent; --env-file
-                                       overrides) —
-                                       imported on the next boot only while
-                                       still unset, never overwrites web
-                                       Settings values, inert once the server
-                                       has DB config; --app-id, --pem-file,
-                                       --webhook-secret for non-interactive
-                                       runs)
+  github status                        read the LIVE server state (needs
+                                       login; the server DB is the source of
+                                       truth; GitHub config is managed in the
+                                       web app: Settings → Workspace →
+                                       Integrations → GitHub Sync)
+  github setup                         configure App ID + PEM + webhook secret
+                                       via the server API — applied
+                                       immediately, REPLACES the current server
+                                       values like web Settings (needs login;
+                                       --app-id, --pem-file, --webhook-secret
+                                       for non-interactive runs)
   github check <slug> <owner/repo>     Lexa→GitHub acceptance round-trip
                                        against the live server (creates a real
-                                       issue; needs login — config source
-                                       irrelevant)
+                                       issue; needs login)
   github link <id> --project <slug> --repo <owner/name>
                                        create a GitHub issue from the task and
                                        link it (needs login)
@@ -1534,12 +1508,20 @@ async function main(): Promise<void> {
       switch (sub) {
         case "status":
           program = Effect.gen(function* () {
+            if (envFlagsRemoved(flags)) {
+              yield* cmdGithubStatus(flags, null);
+              return;
+            }
             const { client } = yield* requireClient(flags);
             yield* cmdGithubStatus(flags, client);
           });
           break;
         case "setup":
           program = Effect.gen(function* () {
+            if (envFlagsRemoved(flags)) {
+              yield* cmdGithubSetup(flags, null);
+              return;
+            }
             const { client } = yield* requireClient(flags);
             yield* cmdGithubSetup(flags, client);
           });

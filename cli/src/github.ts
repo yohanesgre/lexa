@@ -1,71 +1,24 @@
 // lx github — validate, configure, and round-trip the GitHub sync
-// integration. The server's settings DB is the single source of truth; the
-// server env is first-boot bootstrap only (mirrored into the DB at boot when
-// unset). status/setup default to the live server via the API (login
-// required); --local reads/writes the env-file bootstrap; check drives the
-// Lexa→GitHub leg of the RELEASE.md acceptance round-trip against a live
+// integration. GitHub config lives in the server's settings DB, managed in
+// the web app (Settings → Workspace → Integrations → GitHub Sync); status and
+// setup talk to the live server via the API (login required). check drives
+// the Lexa→GitHub leg of the RELEASE.md acceptance round-trip against a live
 // server.
 import { Effect } from "effect";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { assertEnvWriteTarget, formatDotenv, readEnvFile, writeEnvFile } from "../../server/env-file";
 import { LexaClient, type GithubSettingsInfo } from "./api";
 
-const OWNED_KEYS = new Set(["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]);
+const ENV_FLAGS_REMOVED =
+  "--local/--env-file were removed — GitHub sync is configured in the web app (Settings → Workspace → Integrations → GitHub Sync). Run: lx github setup";
+
+export function envFlagsRemoved(flags: Record<string, string | boolean>): boolean {
+  return flags.local === true || flags["env-file"] !== undefined;
+}
 
 function flagStr(flags: Record<string, string | boolean>, name: string): string {
   const v = flags[name];
   return typeof v === "string" ? v : "";
-}
-
-// `.env.toml` is the canonical bootstrap file; a legacy flat `.env` still
-// works (read + written as dotenv). With no `--env-file`, prefer whichever
-// exists — `.env.toml` wins when both do — else the canonical default.
-function envFileFor(flags: Record<string, string | boolean>): string {
-  const explicit = flagStr(flags, "env-file");
-  if (explicit) return explicit;
-  if (existsSync(".env.toml")) return ".env.toml";
-  if (existsSync(".env")) return ".env";
-  return ".env.toml";
-}
-
-function isTomlPath(path: string): boolean {
-  return /\.toml(\.|$)/.test(basename(path));
-}
-
-// Bootstrap values; an absent or unparseable file is an empty map — status is
-// a diagnostic and must not crash on a malformed file.
-function readEnv(file: string): Record<string, string> {
-  try {
-    return existsSync(file) ? readEnvFile(file) : {};
-  } catch {
-    return {};
-  }
-}
-
-// Rewrite the file as `existing - OWNED_KEYS + updates` in the format the
-// extension implies, 0600. A temp file + rename keeps a TOML write from
-// re-merging the on-disk owned keys (e.g. a stale inline GITHUB_PRIVATE_KEY).
-function writeEnvBlock(file: string, updates: Record<string, string>): void {
-  assertEnvWriteTarget(file);
-  const existing = existsSync(file) ? readEnvFile(file) : {};
-  const merged: Record<string, string> = {};
-  for (const [k, v] of Object.entries(existing)) if (!OWNED_KEYS.has(k)) merged[k] = v;
-  for (const [k, v] of Object.entries(updates)) merged[k] = v;
-  const dir = dirname(file);
-  if (dir && dir !== ".") mkdirSync(dir, { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  rmSync(tmp, { force: true });
-  try {
-    if (isTomlPath(file)) writeEnvFile(tmp, merged);
-    else writeFileSync(tmp, formatDotenv(merged), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
-  }
 }
 
 function pemHeaderOk(pemPath: string): boolean {
@@ -120,42 +73,6 @@ function prompt(question: string, fallback = ""): Promise<string> {
   });
 }
 
-function printStatus(env: Record<string, string>): void {
-  const appId = env.GITHUB_APP_ID ?? "";
-  const inlineKey = env.GITHUB_PRIVATE_KEY ?? "";
-  const keyFile = env.GITHUB_PRIVATE_KEY_FILE ?? "";
-  const secret = env.GITHUB_WEBHOOK_SECRET ?? "";
-  let missing = 0;
-
-  const row = (ok: boolean, label: string, detail: string): void => {
-    console.log(`  ${ok ? "✅" : "❌"} ${label}${detail ? ` — ${detail}` : ""}`);
-    if (!ok) missing++;
-  };
-
-  row(appId !== "", "GITHUB_APP_ID", appId || "missing");
-  if (inlineKey) {
-    row(inlineKey.startsWith("-----BEGIN"), "GITHUB_PRIVATE_KEY", inlineKey.length > 24 ? `${inlineKey.slice(0, 24)}…` : "invalid PEM");
-  } else if (keyFile) {
-    const exists = existsSync(keyFile);
-    row(exists && pemHeaderOk(keyFile), "GITHUB_PRIVATE_KEY_FILE", exists ? keyFile : `file not found: ${keyFile}`);
-  } else {
-    row(false, "GITHUB_PRIVATE_KEY(_FILE)", "missing — set one or the other (file recommended)");
-  }
-  row(secret !== "" && secret.length >= 16, "GITHUB_WEBHOOK_SECRET", secret ? `${secret.length} chars` : "missing");
-
-  if (missing === 0) {
-    console.log("  Config looks complete — this is the first-boot BOOTSTRAP.");
-    console.log("  The server imports it only while its settings DB is unset; once");
-    console.log("  the server has DB config (web Settings, or a logged-in setup),");
-    console.log("  env-file edits are inert. Live state: lx github status");
-  } else {
-    console.log(`  ${missing} var(s) missing or invalid — fix with:`);
-    console.log("    lx github setup        (logged in — applies via the server API)");
-    console.log("    lx github setup --local [--env-file <path>]  (env bootstrap)");
-    console.log("  Full manual guide: docs/GITHUB_SETUP.md");
-  }
-}
-
 // The server's effective settings (from GET/PUT /api/settings/github). The
 // DB is the source of truth, so "set" means the server has a usable value.
 function printServerState(s: GithubSettingsInfo): void {
@@ -166,14 +83,8 @@ function printServerState(s: GithubSettingsInfo): void {
 }
 
 export const cmdGithubStatus = Effect.fn("LexaCli/cmdGithubStatus")(function* (flags: Record<string, string | boolean>, client: LexaClient | null = null) {
-  if (flags.local === true) {
-    const file = envFileFor(flags);
-    console.log(`==> Reading ${file}`);
-    yield* Effect.sync(() => printStatus(readEnv(file)));
-    return;
-  }
-  // Default: the live server — the settings DB is the source of truth.
-  if (!client) throw new Error("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
+  if (envFlagsRemoved(flags)) throw new Error(ENV_FLAGS_REMOVED);
+  if (!client) throw new Error("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]");
   const s = yield* client.getGithubSettings();
   console.log("==> GitHub sync — server state (GET /api/settings/github)");
   printServerState(s);
@@ -186,33 +97,27 @@ export const cmdGithubStatus = Effect.fn("LexaCli/cmdGithubStatus")(function* (f
 });
 
 export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (flags: Record<string, string | boolean>, client: LexaClient | null = null) {
-  const file = envFileFor(flags);
-  const env = readEnv(file);
+  if (envFlagsRemoved(flags)) throw new Error(ENV_FLAGS_REMOVED);
   const isTTY = process.stdin.isTTY === true;
-  const local = flags.local === true;
-  // Default: the live server — the settings DB is the source of truth. Fail
-  // loudly before collecting inputs; there is no silent env fallback.
-  if (!local && !client) {
-    throw new Error("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
+  // The settings DB is the source of truth. Fail loudly before collecting
+  // inputs; there is no env fallback.
+  if (!client) {
+    throw new Error("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]");
   }
 
   const appId = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "app-id");
     if (fromFlag) return fromFlag;
-    const current = env.GITHUB_APP_ID ?? "";
-    if (current && !isTTY) return current;
     if (!isTTY) throw new Error("--app-id required on a non-TTY (or run on a terminal)");
-    return yield* Effect.promise(() => prompt(`  GitHub App ID${current ? ` [${current}]` : ""}: `, current));
+    return yield* Effect.promise(() => prompt("  GitHub App ID: "));
   });
   if (!/^\d+$/.test(appId)) throw new Error(`GITHUB_APP_ID must be a number, got "${appId}"`);
 
   const keyFile = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "pem-file");
     if (fromFlag) return fromFlag;
-    const current = env.GITHUB_PRIVATE_KEY_FILE ?? "";
-    if (current && !isTTY) return current;
     if (!isTTY) throw new Error("--pem-file required on a non-TTY (or run on a terminal)");
-    return yield* Effect.promise(() => prompt(`  Private key PEM path${current ? ` [${current}]` : ""}: `, current));
+    return yield* Effect.promise(() => prompt("  Private key PEM path: "));
   });
   if (!existsSync(keyFile)) throw new Error(`PEM file not found: ${keyFile}`);
   if (!pemHeaderOk(keyFile)) throw new Error("PEM file has an unexpected header (expected -----BEGIN RSA PRIVATE KEY----- or PKCS#8)");
@@ -220,42 +125,17 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   const secret = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "webhook-secret");
     if (fromFlag) return fromFlag;
-    const current = env.GITHUB_WEBHOOK_SECRET ?? "";
-    if (current && !isTTY) return current;
     if (!isTTY) throw new Error("--webhook-secret required on a non-TTY (or run on a terminal)");
     const generated = generateSecret();
-    return yield* Effect.promise(() => prompt(`  Webhook secret [Enter to generate]: `, generated));
+    return yield* Effect.promise(() => prompt("  Webhook secret [Enter to generate]: ", generated));
   });
   if (secret.length < 16) throw new Error(`GITHUB_WEBHOOK_SECRET too short (${secret.length} chars, min 16)`);
 
-  // Remote (default): the settings DB is the source of truth — push the
-  // values via the API and the server applies them immediately.
-  if (!local && client) {
-    const pemContent = readFileSync(keyFile, "utf-8");
-    const saved = yield* client.updateGithubSettings({ appId, privateKey: pemContent, webhookSecret: secret });
-    console.log("  Configured via API — applied immediately (no restart)");
-    console.log("  This REPLACES the server's previous values (like saving in web Settings).");
-    printServerState(saved);
-    return;
-  }
-
-  // --local provisioning (env-file bootstrap): rewrite the env file, keep
-  // every other key, own the GitHub block. The server imports these on its
-  // next boot when its settings DB values are unset.
-  writeEnvBlock(file, { GITHUB_APP_ID: appId, GITHUB_PRIVATE_KEY_FILE: keyFile, GITHUB_WEBHOOK_SECRET: secret });
-  console.log(`  Wrote ${file}`);
-  console.log("");
-  console.log("  These values are the first-boot BOOTSTRAP: the server imports");
-  console.log("  them into its settings DB on the next boot ONLY when the key");
-  console.log("  is still unset — they never overwrite values already set in");
-  console.log("  web Settings (or by a logged-in github setup). Once the server");
-  console.log("  has DB config, env-file writes are inert — re-import needs a");
-  console.log("  server restart (docker restart / install.sh re-run).");
-  console.log("");
-  console.log("  Next steps:");
-  console.log("    1. Restart the server (bun run dev:full / docker compose up -d) to import.");
-  console.log("    2. Point the GitHub App webhook at https://<host>/api/webhooks/github");
-  console.log("    3. Verify with: lx github check <slug> <owner/repo>");
+  const pemContent = readFileSync(keyFile, "utf-8");
+  const saved = yield* client.updateGithubSettings({ appId, privateKey: pemContent, webhookSecret: secret });
+  console.log("  Configured via API — applied immediately (no restart)");
+  console.log("  This REPLACES the server's previous values (like saving in web Settings).");
+  printServerState(saved);
 });
 
 export const cmdGithubCheck = Effect.fn("LexaCli/cmdGithubCheck")(function* (client: LexaClient, flags: Record<string, string | boolean>, args: string[]) {

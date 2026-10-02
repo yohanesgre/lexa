@@ -92,18 +92,17 @@ CF_TOKEN="${CF_TOKEN:-}"
 PUBLIC_URL="${PUBLIC_URL:-}"
 RELEASE_TAG="${RELEASE_TAG:-}"
 BARE_PORT="${BARE_PORT:-3000}"
-# Read by final_banner() in install-lib.sh; export so shellcheck sees them as
-# externally consumed rather than dead assignments.
+# Read by final_banner() in install-lib.sh; export so shellcheck sees it as an
+# externally consumed rather than a dead assignment.
 BANNER_MASTER=""
-BANNER_GITHUB=""
-export BANNER_MASTER BANNER_GITHUB
+export BANNER_MASTER
 
 # ---------------------------------------------------------------------------
 # docker — compose render → up → health (dir: dockers/)
 # ---------------------------------------------------------------------------
 deploy_docker() {
   preflight_docker
-  collect_optional_secrets docker
+  collect_optional_secrets
   DEPLOY_DIR="${DEPLOY_DIR:-dockers}"
   mkdir -p "${DEPLOY_DIR}"
   cd "${DEPLOY_DIR}"
@@ -112,7 +111,7 @@ deploy_docker() {
   # hostname; trust both or Better Auth rejects one of them.
   local trusted="${public_url},http://localhost:${PORT},http://127.0.0.1:${PORT}"
   # One-time: a pre-P4 deploy dir keeps its app keys in a flat `.env`. Convert
-  # them to the canonical `.env.toml` (merge — GITHUB_* survive) before the
+  # them to the canonical `.env.toml` (merge — operator keys survive) before the
   # tooling-only `.env` is written.
   migrate_legacy_deploy_env "${PWD}"
   step "write config" write_env_toml "${PWD}/.env.toml" \
@@ -153,7 +152,6 @@ deploy_docker() {
   if [ -f "${PWD}/.env.toml" ]; then
     BANNER_MASTER="master key ✓ (${DEPLOY_DIR}/.env.toml)"
   fi
-  set_banner_github "${PWD}/.env.toml"
   final_banner "http://${BIND}:${PORT}"
 }
 
@@ -187,7 +185,7 @@ deploy_bare() {
     step "bun install" mutate bun install --frozen-lockfile --production --ignore-scripts
   fi
   if [ "${keep_existing_env}" != "1" ]; then
-    collect_optional_secrets bare
+    collect_optional_secrets
   fi
   if [ "${keep_existing_env}" = "1" ]; then
     existing_env="${INSTALL_DIR}/.env.toml"
@@ -220,11 +218,6 @@ deploy_bare() {
   if [ "${keep_existing_env}" != "1" ]; then
     BANNER_MASTER="master key ✓ (${INSTALL_DIR}/.env.toml)"
   fi
-  if [ "${keep_existing_env}" = "1" ]; then
-    set_banner_github "${existing_env}"
-  else
-    set_banner_github "${INSTALL_DIR}/.env.toml"
-  fi
   final_banner "${PUBLIC_URL}"
   if [ "${SYSTEMD}" != "1" ]; then
     echo "  Running in the background — logs: ${INSTALL_DIR}/lexa.log · stop: kill \$(cat ${INSTALL_DIR}/lexa.pid)"
@@ -239,7 +232,7 @@ deploy_bare() {
 # ---------------------------------------------------------------------------
 deploy_workers() {
   preflight_workers
-  collect_optional_secrets workers
+  collect_optional_secrets
   # Pre-resolve paths BEFORE any download/wipe: domain reuse reads the old
   # wrangler config, and the fresh-install guard must fire before network.
   _ww_dir="${WORK_DIR:-cf-workers}"
@@ -389,7 +382,6 @@ deploy_workers() {
   if [ -f "${_custody}" ]; then
     BANNER_MASTER="master key ✓ (custody: ${_ww_dir}/.env.toml)"
   fi
-  set_banner_github "${_custody}"
   final_banner "${deployed_url}"
 }
 

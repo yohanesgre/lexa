@@ -43,6 +43,10 @@ export const DEAD_KEYS: readonly string[] = [
   "LXK_RUNTIME_DAEMON_TOKEN",
   "LXK_RUNTIME_REPO_CAP",
   "RUNTIME_STALE_RUN_MIN",
+  "GITHUB_APP_ID",
+  "GITHUB_PRIVATE_KEY",
+  "GITHUB_PRIVATE_KEY_FILE",
+  "GITHUB_WEBHOOK_SECRET",
 ];
 
 // Presentation-only section order + key membership. Every RuntimeEnv key has a
@@ -52,7 +56,6 @@ export const ENV_SECTION_ORDER = [
   "core",
   "auth",
   "urls",
-  "github",
   "storage",
   "limits",
   "features",
@@ -71,7 +74,6 @@ function section(keys: readonly string[], name: string): void {
 section(["COMPOSE_PROJECT_NAME", "LXK_IMAGE_TAG", "CF_TUNNEL_TOKEN", "DATABASE_PATH", "PORT"], "core");
 section(["LXK_ADMIN_EMAILS"], "auth");
 section(["LXK_ENV", "LXK_PUBLIC_URL", "LXK_TRUSTED_ORIGINS", "LXK_TRUSTED_PROXY_CIDRS"], "urls");
-section(["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"], "github");
 section(
   [
     "LXK_STORAGE_DRIVER",

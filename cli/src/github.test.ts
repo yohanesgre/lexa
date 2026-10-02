@@ -1,24 +1,22 @@
-// cli/github.ts — env-file validation (status), interactive rewrite (setup),
-// and the round-trip orchestration (check). Status/setup run against tmp env
-// files (non-TTY, flag-driven); check runs with a stubbed LexaClient so no
-// network is touched.
+// cli/github.ts — server-API status/setup (mocked LexaClient; no network) and
+// the round-trip orchestration (check, stubbed client). --local/--env-file are
+// rejected with a hard error — GitHub sync is configured in the web app.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cmdGithubCheck, cmdGithubSetup, cmdGithubStatus } from "./github";
-import { readEnvFile, writeEnvFile } from "../../server/env-file";
 import type { LexaClient } from "./api";
 import type { TaskInfo } from "./api";
 
+const REMOVED =
+  "--local/--env-file were removed — GitHub sync is configured in the web app (Settings → Workspace → Integrations → GitHub Sync). Run: lx github setup";
+
 let dir = "";
-let envFile = "";
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lexa-github-test-"));
-  envFile = join(dir, ".env");
-  if (!existsSync(realPem)) writeFileSync(realPem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n", { mode: 0o600 });
 });
 
 afterEach(() => {
@@ -26,121 +24,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function writeEnv(content: string): void {
-  writeFileSync(envFile, content, { mode: 0o600 });
-}
-
-// The status check verifies the key file exists on disk — use a real file.
-const realPem = join(tmpdir(), "lexa-status-key.pem");
-
-function completeEnv(): string {
-  return [
-    "GITHUB_APP_ID=123456",
-    `GITHUB_PRIVATE_KEY_FILE=${realPem}`,
-    "GITHUB_WEBHOOK_SECRET=0123456789abcdef",
-  ].join("\n");
-}
-
 function outputOf(spy: { mock: { calls: unknown[][] } }): string {
   return spy.mock.calls.map((c: unknown[]) => String(c[0]!)).join("\n");
 }
 
 describe("cmdGithubStatus", () => {
-  it("reports a complete config with all ✅ rows", async () => {
-    writeEnv(completeEnv());
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": envFile }));
-    const out = outputOf(log);
-    expect(out).toContain("✅ GITHUB_APP_ID — 123456");
-    expect(out).toContain(`✅ GITHUB_PRIVATE_KEY_FILE — ${realPem}`);
-    expect(out).toContain("✅ GITHUB_WEBHOOK_SECRET — 16 chars");
-    expect(out).toContain("Config looks complete");
-    log.mockRestore();
-  });
-
-  it("flags a missing GITHUB_APP_ID and counts missing vars", async () => {
-    writeEnv("GITHUB_WEBHOOK_SECRET=0123456789abcdef\n");
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": envFile }));
-    const out = outputOf(log);
-    expect(out).toContain("❌ GITHUB_APP_ID — missing");
-    expect(out).toContain("2 var(s) missing or invalid");
-    log.mockRestore();
-  });
-
-  it("flags a key file that does not exist on disk", async () => {
-    writeEnv("GITHUB_APP_ID=1\nGITHUB_PRIVATE_KEY_FILE=/nope/missing.pem\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n");
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": envFile }));
-    expect(outputOf(log)).toContain("file not found: /nope/missing.pem");
-    log.mockRestore();
-  });
-
-  it("flags an inline PEM with a bad header as invalid", async () => {
-    writeEnv("GITHUB_APP_ID=1\nGITHUB_PRIVATE_KEY=not-a-pem\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n");
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": envFile }));
-    expect(outputOf(log)).toContain("invalid PEM");
-    log.mockRestore();
-  });
-
-  it("flags a webhook secret shorter than 16 chars", async () => {
-    writeEnv("GITHUB_APP_ID=1\nGITHUB_PRIVATE_KEY_FILE=/tmp/key.pem\nGITHUB_WEBHOOK_SECRET=short\n");
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": envFile }));
-    expect(outputOf(log)).toContain("❌ GITHUB_WEBHOOK_SECRET — 5 chars");
-    log.mockRestore();
-  });
-
-  it("defaults to .env without --env-file", async () => {
-    const cwd = process.cwd();
-    writeEnv(completeEnv());
-    process.chdir(dir);
-    try {
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await Effect.runPromise(cmdGithubStatus({ local: true }));
-      expect(outputOf(log)).toContain("==> Reading .env");
-      log.mockRestore();
-    } finally {
-      process.chdir(cwd);
-    }
-  });
-
-  it("validates GITHUB_* from a .env.toml file", async () => {
-    const tomlFile = join(dir, ".env.toml");
-    writeEnvFile(tomlFile, {
-      GITHUB_APP_ID: "123456",
-      GITHUB_PRIVATE_KEY_FILE: realPem,
-      GITHUB_WEBHOOK_SECRET: "0123456789abcdef",
-    });
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": tomlFile }));
-    const out = outputOf(log);
-    expect(out).toContain("✅ GITHUB_APP_ID — 123456");
-    expect(out).toContain(`✅ GITHUB_PRIVATE_KEY_FILE — ${realPem}`);
-    expect(out).toContain("Config looks complete");
-    log.mockRestore();
-  });
-
-  it("prefers .env.toml over legacy .env when both exist", async () => {
-    const cwd = process.cwd();
-    writeEnv(completeEnv());
-    writeEnvFile(join(dir, ".env.toml"), { GITHUB_APP_ID: "777" });
-    process.chdir(dir);
-    try {
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await Effect.runPromise(cmdGithubStatus({ local: true }));
-      const out = outputOf(log);
-      expect(out).toContain("==> Reading .env.toml");
-      expect(out).toContain("✅ GITHUB_APP_ID — 777");
-      log.mockRestore();
-    } finally {
-      process.chdir(cwd);
-    }
-  });
-});
-
-describe("cmdGithubStatus (default: remote)", () => {
   it("prints the effective server state from a mocked client", async () => {
     const client = {
       getGithubSettings: () => Effect.succeed({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" }),
@@ -169,21 +57,20 @@ describe("cmdGithubStatus (default: remote)", () => {
     log.mockRestore();
   });
 
-  it("errors clearly without a client (no creds), pointing at --local", async () => {
+  it("errors clearly without a client (no creds)", async () => {
     await expect(Effect.runPromise(cmdGithubStatus({}, null)))
-      .rejects.toThrow("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
+      .rejects.toThrow("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]");
   });
 
-  it("--local validates the env file even with a client present (client ignored)", async () => {
-    writeEnv(completeEnv());
+  it("rejects --local with the removal message even with a client present", async () => {
     const client = {
       getGithubSettings: () => { throw new Error("must not be called"); },
     } as unknown as LexaClient;
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubStatus({ local: true, "env-file": envFile }, client));
-    expect(outputOf(log)).toContain("✅ GITHUB_APP_ID — 123456");
-    expect(outputOf(log)).toContain("first-boot BOOTSTRAP");
-    log.mockRestore();
+    await expect(Effect.runPromise(cmdGithubStatus({ local: true }, client))).rejects.toThrow(REMOVED);
+  });
+
+  it("rejects --env-file with the removal message", async () => {
+    await expect(Effect.runPromise(cmdGithubStatus({ "env-file": join(dir, ".env") }, null))).rejects.toThrow(REMOVED);
   });
 });
 
@@ -191,182 +78,88 @@ describe("cmdGithubSetup", () => {
   const goodPem = join(tmpdir(), "lexa-test.pem");
   beforeAll(() => writeFileSync(goodPem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----\n", { mode: 0o600 }));
 
-  it("writes the GitHub block from flags, preserving unrelated keys and chmod 600", async () => {
-    writeEnv("LXK_API_KEY=keepme\nGITHUB_APP_ID=999\nGITHUB_PRIVATE_KEY=stale-inline\n");
+  function remoteClient(): LexaClient {
+    return {
+      updateGithubSettings: () => Effect.succeed({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" }),
+    } as unknown as LexaClient;
+  }
+
+  it("calls updateGithubSettings with the PEM content and prints applied-immediately", async () => {
+    let sent: unknown = null;
+    const client = {
+      updateGithubSettings: (input: unknown) => {
+        sent = input;
+        return Effect.succeed({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
+      },
+    } as unknown as LexaClient;
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }));
-    const raw = readFileSync(envFile, "utf-8");
-    expect(raw).toContain("LXK_API_KEY=keepme");
-    expect(raw).toContain("GITHUB_APP_ID=123456");
-    expect(raw).toContain(`GITHUB_PRIVATE_KEY_FILE=${goodPem}`);
-    expect(raw).toContain("GITHUB_WEBHOOK_SECRET=0123456789abcdef");
-    expect(raw).not.toContain("GITHUB_PRIVATE_KEY=stale-inline"); // owned key dropped
-    expect(statSync(envFile).mode & 0o777).toBe(0o600);
-    expect(outputOf(log)).toContain(`Wrote ${envFile}`);
+    await Effect.runPromise(cmdGithubSetup({ "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, client));
+    expect(sent).toEqual({
+      appId: "123456",
+      privateKey: "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----\n",
+      webhookSecret: "0123456789abcdef",
+    });
+    const out = outputOf(log);
+    expect(out).toContain("Configured via API — applied immediately (no restart)");
+    expect(out).toContain("This REPLACES the server's previous values (like saving in web Settings).");
+    expect(out).toContain("✅ GitHub App ID — 123456");
     log.mockRestore();
   });
 
-  it("reuses existing env values on a non-TTY when no flags are given", async () => {
-    writeEnv(`GITHUB_APP_ID=456\nGITHUB_PRIVATE_KEY_FILE=${goodPem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
-    const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile }));
-    const raw = readFileSync(envFile, "utf-8");
-    expect(raw).toContain("GITHUB_APP_ID=456");
-    expect(raw).toContain(`GITHUB_PRIVATE_KEY_FILE=${goodPem}`);
-    log.mockRestore();
+  it("rejects --local with the removal message even with a client present", async () => {
+    await expect(Effect.runPromise(cmdGithubSetup(
+      { local: true, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" },
+      remoteClient(),
+    ))).rejects.toThrow(REMOVED);
   });
 
-  it("requires --app-id on a non-TTY when the env file has none", async () => {
-    writeEnv("GITHUB_WEBHOOK_SECRET=0123456789abcdef\n");
-    await expect(Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "pem-file": goodPem, "webhook-secret": "0123456789abcdef" })))
+  it("rejects --env-file with the removal message", async () => {
+    await expect(Effect.runPromise(cmdGithubSetup(
+      { "env-file": join(dir, ".env"), "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" },
+      remoteClient(),
+    ))).rejects.toThrow(REMOVED);
+  });
+
+  it("errors clearly without a client (no creds)", async () => {
+    await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, null)))
+      .rejects.toThrow("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]");
+  });
+
+  it("fails with the login error before collecting inputs when not logged in", async () => {
+    await expect(Effect.runPromise(cmdGithubSetup({}, null)))
+      .rejects.toThrow("Not logged in. Run: lx login");
+  });
+
+  it("requires --app-id on a non-TTY when no flag is given", async () => {
+    await expect(Effect.runPromise(cmdGithubSetup({ "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, remoteClient())))
       .rejects.toThrow("--app-id required on a non-TTY (or run on a terminal)");
   });
 
   it("rejects a non-numeric app id", async () => {
-    await expect(Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "app-id": "abc", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" })))
+    await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "abc", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, remoteClient())))
       .rejects.toThrow("GITHUB_APP_ID must be a number, got \"abc\"");
   });
 
   it("rejects a missing PEM file", async () => {
-    await expect(Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "app-id": "1", "pem-file": join(dir, "missing.pem"), "webhook-secret": "0123456789abcdef" })))
+    await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "1", "pem-file": join(dir, "missing.pem"), "webhook-secret": "0123456789abcdef" }, remoteClient())))
       .rejects.toThrow("PEM file not found");
   });
 
   it("rejects a PEM with an unexpected header", async () => {
     const bad = join(dir, "bad.pem");
     writeFileSync(bad, "-----BEGIN OPENSSH PRIVATE KEY-----\n");
-    await expect(Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "app-id": "1", "pem-file": bad, "webhook-secret": "0123456789abcdef" })))
+    await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "1", "pem-file": bad, "webhook-secret": "0123456789abcdef" }, remoteClient())))
       .rejects.toThrow("PEM file has an unexpected header");
   });
 
   it("rejects a webhook secret shorter than 16 chars", async () => {
-    await expect(Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "app-id": "1", "pem-file": goodPem, "webhook-secret": "short" })))
+    await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "1", "pem-file": goodPem, "webhook-secret": "short" }, remoteClient())))
       .rejects.toThrow("GITHUB_WEBHOOK_SECRET too short (5 chars, min 16)");
   });
 
-  it("requires --webhook-secret on a non-TTY when the env file has none", async () => {
-    writeEnv(`GITHUB_APP_ID=456\nGITHUB_PRIVATE_KEY_FILE=${goodPem}\n`);
-    await expect(Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile })))
+  it("requires --webhook-secret on a non-TTY when no flag is given", async () => {
+    await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "123456", "pem-file": goodPem }, remoteClient())))
       .rejects.toThrow("--webhook-secret required on a non-TTY (or run on a terminal)");
-  });
-
-  describe("default mode (remote API, client provided)", () => {
-    it("calls updateGithubSettings with the PEM content and prints applied-immediately", async () => {
-      let sent: unknown = null;
-      const client = {
-        updateGithubSettings: (input: unknown) => {
-          sent = input;
-          return Effect.succeed({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
-        },
-      } as unknown as LexaClient;
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await Effect.runPromise(cmdGithubSetup({ "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, client));
-      expect(sent).toEqual({
-        appId: "123456",
-        privateKey: "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----\n",
-        webhookSecret: "0123456789abcdef",
-      });
-      const out = outputOf(log);
-      expect(out).toContain("Configured via API — applied immediately (no restart)");
-      expect(out).toContain("This REPLACES the server's previous values (like saving in web Settings).");
-      expect(out).toContain("✅ GitHub App ID — 123456");
-      log.mockRestore();
-    });
-
-    it("errors clearly without a client (no creds), pointing at --local", async () => {
-      await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, null)))
-        .rejects.toThrow("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
-    });
-
-    it("fails with the login error before collecting inputs when not logged in", async () => {
-      await expect(Effect.runPromise(cmdGithubSetup({}, null)))
-        .rejects.toThrow("or use --local to write the env bootstrap");
-    });
-
-    it("does not touch the env file in remote mode", async () => {
-      const client = {
-        updateGithubSettings: () => Effect.succeed({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" }),
-      } as unknown as LexaClient;
-      await Effect.runPromise(cmdGithubSetup({ "env-file": envFile, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, client));
-      expect(existsSync(envFile)).toBe(false);
-    });
-
-    it("reuses env-file defaults for inputs on a non-TTY", async () => {
-      writeEnv("GITHUB_APP_ID=456\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n");
-      let sent: unknown = null;
-      const client = {
-        updateGithubSettings: (input: unknown) => {
-          sent = input;
-          return Effect.succeed({ appId: "456", privateKeySet: true, webhookSecretSet: true, source: "db" });
-        },
-      } as unknown as LexaClient;
-      await Effect.runPromise(cmdGithubSetup({ "env-file": envFile, "pem-file": goodPem }, client));
-      expect(sent).toMatchObject({ appId: "456", webhookSecret: "0123456789abcdef" });
-    });
-
-    it("still validates inputs the same way as local mode", async () => {
-      const client = {
-        updateGithubSettings: () => Effect.succeed({ appId: "1", privateKeySet: true, webhookSecretSet: true, source: "db" }),
-      } as unknown as LexaClient;
-      await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "abc", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, client)))
-        .rejects.toThrow("GITHUB_APP_ID must be a number");
-    });
-  });
-
-  describe("provisioning mode (--local forces env-file even with a client)", () => {
-    it("writes the env file and prints the bootstrap note", async () => {
-      writeEnv("LXK_API_KEY=keepme\n");
-      const client = {
-        updateGithubSettings: () => { throw new Error("must not be called"); },
-      } as unknown as LexaClient;
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await Effect.runPromise(cmdGithubSetup({ local: true, "env-file": envFile, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, client));
-      const raw = readFileSync(envFile, "utf-8");
-      expect(raw).toContain("LXK_API_KEY=keepme");
-      expect(raw).toContain("GITHUB_APP_ID=123456");
-      expect(raw).toContain(`GITHUB_PRIVATE_KEY_FILE=${goodPem}`);
-      expect(statSync(envFile).mode & 0o777).toBe(0o600);
-      const out = outputOf(log);
-      expect(out).toContain(`Wrote ${envFile}`);
-      expect(out).toContain("first-boot BOOTSTRAP");
-      expect(out).toContain("server imports");
-      expect(out).toContain("never overwrite values already set");
-      expect(out).toContain("env-file writes are inert");
-      log.mockRestore();
-    });
-  });
-
-  describe("toml target (.env.toml)", () => {
-    it("writes TOML, drops a stale inline key, and keeps unrelated keys at 0600", async () => {
-      const tomlFile = join(dir, ".env.toml");
-      writeEnvFile(tomlFile, { LXK_API_KEY: "keepme", GITHUB_PRIVATE_KEY: "stale-inline" });
-      const log = vi.spyOn(console, "log").mockImplementation(() => {});
-      await Effect.runPromise(cmdGithubSetup({ local: true, "env-file": tomlFile, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }));
-      const raw = readFileSync(tomlFile, "utf-8");
-      expect(raw).toContain('GITHUB_APP_ID = "123456"');
-      expect(raw).toContain(`GITHUB_PRIVATE_KEY_FILE = "${goodPem}"`);
-      expect(raw).toContain('GITHUB_WEBHOOK_SECRET = "0123456789abcdef"');
-      const parsed = readEnvFile(tomlFile);
-      expect(parsed.LXK_API_KEY).toBe("keepme");
-      expect(parsed.GITHUB_PRIVATE_KEY).toBeUndefined();
-      expect(statSync(tomlFile).mode & 0o777).toBe(0o600);
-      expect(outputOf(log)).toContain(`Wrote ${tomlFile}`);
-      log.mockRestore();
-    });
-
-    it("defaults to .env.toml when no env file exists", async () => {
-      const cwd = process.cwd();
-      process.chdir(dir);
-      try {
-        const log = vi.spyOn(console, "log").mockImplementation(() => {});
-        await Effect.runPromise(cmdGithubSetup({ local: true, "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }));
-        expect(existsSync(join(dir, ".env.toml"))).toBe(true);
-        expect(readEnvFile(join(dir, ".env.toml")).GITHUB_APP_ID).toBe("123456");
-        log.mockRestore();
-      } finally {
-        process.chdir(cwd);
-      }
-    });
   });
 });
 

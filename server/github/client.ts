@@ -5,14 +5,13 @@ import { createAppJwt, verifyWebhookSignature } from "./crypto";
 import { resolveGithubAppSecrets } from "./config-store";
 import type { RuntimeEnv } from "../env";
 
-// ── Config (DB only at runtime) ──
+// ── Config (DB only) ──
 // The non-secret identifiers are plaintext settings rows (github_app_id /
 // github_app_slug); the PEM and webhook secret resolve ENCRYPTED-FIRST via
 // resolveGithubAppSecrets — github_app_secrets (scope "github") when written by
 // the manifest connect flow, with the legacy plaintext settings rows as a
-// fallback. Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY / GITHUB_PRIVATE_KEY_FILE /
-// GITHUB_WEBHOOK_SECRET) is a first-boot bootstrap only — mirrorSettingsFromEnv
-// copies it into the DB once at boot, and the runtime never reads env again.
+// fallback. The web app is the only config surface; the runtime never reads
+// GitHub config from env.
 
 export class GitHubConfig extends Context.Tag("GitHubConfig")<
   GitHubConfig,
@@ -42,8 +41,8 @@ function nonEmptySetting(v: string | null): string {
 }
 
 // Applies the DB-configured values (DB only; empty rows = not configured) to
-// the live holder — called at boot (after the env mirror) and after every
-// PUT /api/settings/github. Encrypted-first: the private key + webhook secret
+// the live holder — called at boot and after every PUT /api/settings/github.
+// Encrypted-first: the private key + webhook secret
 // resolve through resolveGithubAppSecrets (github_app_secrets, legacy
 // plaintext fallback); the app id stays a plain settings row. Async because
 // decrypting suspends.
@@ -133,7 +132,7 @@ async function githubFetch(config: GitHubConfig["Type"], path: string, init: Req
 function requireConfig(config: GitHubConfig["Type"]): void {
   if (!config.appId || !config.privateKey) {
     throw new GithubApiError({
-      message: "GitHub App is not configured — set it in Settings → GitHub Sync or via GITHUB_APP_ID/GITHUB_PRIVATE_KEY env",
+      message: "GitHub App is not configured — connect it in Settings → Workspace → Integrations → GitHub Sync",
     });
   }
 }
