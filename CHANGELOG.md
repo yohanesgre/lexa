@@ -7,6 +7,28 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.6.1] - 2026-10-02
+
+### Added
+
+- **Favicon and Workers static assets** — the Workers flavor serves a real
+  favicon and binds the `ASSETS` binding so static files are delivered by the
+  asset handler instead of the Worker, with the shell fast path taking the
+  shortcut. (#224, #227)
+
+### Fixed
+
+- **Device-login requests pruned on schedule** — device-login requests now
+  expire on the scheduled sweep instead of accumulating. (#223)
+- **Remaining D1 read-modify-write paths made atomic** — the follow-up pass on
+  the `DbDriver.batch` work: the mutations that read state and then wrote in
+  separate statements now compute one pre-computed batch from a single read,
+  so a concurrent writer can no longer interleave and cause partial or lost
+  updates. The attachment dedupe race is settled by the existing
+  `UNIQUE(project_id, sha256)` key, and a lost-race false 404 on assistant
+  terminal transitions is gone. Bun keeps real isolation for the two
+  cycle-guard sites. No new migrations — `0018` is still the latest. (#228)
+
 ## [2026.6.0] - 2026-10-02
 
 ### Added
