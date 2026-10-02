@@ -7,6 +7,136 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.6.0] - 2026-10-02
+
+### Added
+
+- **Assistant write-tool permission modes** — a per-thread mode (`ask` |
+  `auto` | `deny`) sticky in Durable Object `thread_meta`, with a Writes mode
+  picker in the chat rail (Ask / Auto / Blocked) and backend execution paths
+  for each mode plus a per-mode budget (ask: Worker pending-row cap, auto: DO
+  counter, deny: none). Documented in `docs/LAYERS.md`. (#204, #205, #206)
+- **Assistant Workers rework P4b/P4c/P5/P6** — chat transport moves to the
+  agent WebSocket (`useAgentChat` + UIMessage adapter with
+  reconnect/resume), an approval pending-batch carrier persists with assistant
+  messages idempotently, Bun is removed from the assistant API surface
+  (`assistant-contracts.ts` / `assistant-*` split with an API/docs sweep), and
+  P6 hardening applies D7 gateway metadata-only logging
+  (`cf-aig-collect-log-payload` false by default). (#198, #199, #200, #201)
+- **In-app GitHub App connect** — admins create and configure the GitHub App
+  from Settings via the manifest flow, with no env secrets: the manifest +
+  single-use 10-minute state endpoints, a setup exchange that stores app id,
+  private key, webhook secret and slug ENCRYPTED in the new
+  `github_app_secrets` table (migration 0017), encrypted-first resolution with
+  legacy plaintext fallback, and a Settings connect card with all five
+  callback states. Manual PUT remains the last-explicit-write fallback. (#194,
+  #197)
+- **Chat attachments** — images and documents attach in chat: a dedicated
+  `chat_attachments` table bound to the thread (migration 0015), upload/list/
+  serve/delete endpoints with caps (≤3 per message, 5 MB/file, 10 MB total),
+  server-side mime sniffing, PDF text extraction via unpdf with a per-document
+  prompt cap, and a composer picker with chips, a caps meter, and named error
+  rows. Images stay vision-gated; documents do not. (#191, #193)
+- **Tasks bulk actions** — a transactional `POST /projects/:slug/tasks/bulk`
+  endpoint (move/update/archive/restore in one transaction, per-item
+  reporting, best-effort GitHub sync after commit) plus the Tasks page row
+  selection, bulk action bar, and header "New task" control with an opt-in
+  create swimlane. Kill switch `LXK_DISABLE_TASKS_BULK`. (#190, #192)
+
+### Changed
+
+- **Session cookieCache with a derived signing secret** — the `cookieCache`
+  block moved under `session`, so session requests no longer hit D1 on every
+  call. Its signing secret is now derived from `LXK_SECRETS_MASTER_KEY` and
+  **fails closed when missing** (the library default was forgeable), and the
+  middleware re-reads `users.role` per session request instead of trusting the
+  role snapshot baked into the cookie at issue time. **Deploy note:**
+  `LXK_SECRETS_MASTER_KEY` is now required on every target, and existing
+  sessions invalidate once on rollout. (#215)
+- **D1 atomic multi-statement writes** — `withTx` was a no-op on D1 (no
+  BEGIN/ROLLBACK) while the docs claimed atomicity. `DbDriver.batch` now
+  returns positional results, 26 write-only `withTx` sites became pre-computed
+  atomic batches, and the emission-invariant scanner accepts `batch` too.
+  Migration `0018` enforces **one role per (user, project)**, de-duplicating
+  while keeping admin. (#219)
+- **Remaining read-modify-write paths made atomic** — assistant-thread appends
+  are a single-statement `json_insert` (truncate is a length compare-and-swap
+  with bounded retry), task create no longer burns ticket numbers on a failed
+  insert, swimlane/milestone archive cascades are set-based atomic SQL that
+  still emit one activity row per task, bulk task operations are per-item
+  atomic and report per item, and project-memory / assistant-models reorders
+  are batched. A docs truth pass realigned SCHEMA, ARCHITECTURE, LAYERS, API
+  and CLOUDFLARE_WORKERS with the implemented semantics. (#220)
+- **`prosemirror-view` deduped** — the lockfile carried six on-disk copies
+  (1.42.3 plus five nested 1.42.2), ~440 KB of dead weight in the Workers
+  bundle. All consumers accept `^1.42.x`, so an override pins 1.42.3. (#211)
+- **Assistant documentation reframed (ADR-0003)** — the assistant is
+  Workers-only and the self-hosted deploy targets are frozen; the authority
+  docs were rewritten to match. (#182)
+- **Assistant API is Workers-only** — the Durable Object is the real engine
+  (P1 groundwork, P2 threads + legacy TanStack→UIMessage import, P3 engine
+  parity with `x-opencode-session` parity and a provider-config route). (#183,
+  #185, #195)
+
+### Fixed
+
+- **Toggle ARIA convention** — app toggles carried state-varying accessible
+  names, `role="switch"`/`aria-checked`, or no `aria-pressed`. The merged
+  wireframe convention pins a constant name equal to the visible label with
+  state expressed only in `aria-pressed`; the theme toggle and the setup
+  password toggle were transcribed to it. Wireframes first, then app. (#214,
+  #216, #217, #218)
+- **Invite tokens validated before the form renders** — a spent invite link
+  still rendered a live registration form, because the page gated only on
+  token presence while the accept endpoint enforces single use. A new peek
+  endpoint returns `{ valid, email? }` with a per-reason copy and a retry
+  state. (#188)
+- **Chat retry/regenerate index and thread restore** — retry resolved the
+  trigger in display space but truncated the stored thread by raw index, so
+  an optimistic trigger no-opped and a stale transcript dropped previously
+  sent prompts; resolution now happens in raw space with a floor-bound
+  duplicate-text fallback. Re-entering chat without `?thread=` restores the
+  last active thread from `lexa-chat-last` and re-attaches a live run. (#187)
+- **Assistant thread load on a missing row** — the typed `RowNotFound`
+  surfaced as a `FiberFailureImpl` wrapper at the `Effect.runPromise`
+  boundary, so a first message in a new chat 500'd on the Workers flavor.
+  Handled inside Effect with `catchTag`. (#209)
+- **Write-tools settings list truncation** — the settings section hardcoded a
+  13-name array while the server registered 19; hydration filtered stored
+  settings through it and Save wrote the filtered set back, silently
+  truncating a stored 19-name selection (six destructive tools could never be
+  enabled). The canonical list now lives in `shared/assistant.ts` and is
+  re-exported from the server, so the UI and the server read one source. (#212)
+- **Write-tools settings copy** — the section described the pre-modes contract
+  (universal per-change approval, no auto-approve) and the toggle's aria-label
+  drifted from the wireframe; both now match the Writes modes contract. (#213)
+- **Dashboard cache on project create** — Home read `["dashboard"]` while the
+  create mutation wrote only `["projects"]`, so a new project needed a manual
+  refresh. The fresh `ProjectHealth` entry is synthesized into
+  `["dashboard"]` from the mutation response. (#184)
+
+### Performance
+
+- **Dashboard counts batched, settings cached** — Workers telemetry showed one
+  count query per column per project and settings checks re-reading D1 on every
+  request. Column counts collapse into a single `GROUP BY` per project, and
+  settings reads cache for 30s with same-process write invalidation. (#203)
+- **Project access batched, Workers runtime memoized** — the projects list ran
+  per-project authz (up to 4 queries each) plus one repos query per project,
+  the board ran seven serial queries, and the Workers entry rebuilt D1 layers
+  and better-auth every request. Authz and repos reads batch with D1
+  100-param chunking and deterministic grant ordering, board reads run
+  concurrently, and layers memoize per-isolate by env fingerprint. (#207)
+
+### Migration notes
+
+- `0018_user_project_roles_unique.sql` applies on deploy and enforces one role
+  per (user, project), keeping `admin` when duplicates exist.
+- `LXK_SECRETS_MASTER_KEY` is now required to boot; sessions invalidate once
+  because the cookie signing secret is derived from it.
+- D1 multi-statement writes are atomic again; per-item bulk results are now
+  reported instead of a single set-based outcome.
+
 ## [2026.5.6] - 2026-10-01
 
 ### Fixed
