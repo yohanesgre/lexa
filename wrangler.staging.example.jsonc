@@ -38,7 +38,8 @@
     }
   ],
   "assets": {
-    "directory": "./dist/client"
+    "directory": "./dist/client",
+    "binding": "ASSETS"
   },
   "vars": {
     "LXK_ENV": "production"
