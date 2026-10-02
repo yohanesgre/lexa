@@ -23,7 +23,7 @@
  */
 import { Effect, Data } from "effect";
 import { LexaClient, ApiError, type ColumnInfo, type SwimlaneInfo } from "./api";
-import { CliConfigService, groupDir, migrateFlavorRootsSync, type CliConfig } from "./config";
+import { CliConfigService, groupDir, normalizeHost, migrateFlavorRootsSync, type CliConfig } from "./config";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck, envFlagsRemoved } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
@@ -71,22 +71,56 @@ export class NotLoggedIn extends Data.TaggedError("NotLoggedIn")<{}> {
   }
 }
 
-// Resolve the active config: flags > env > saved login. The saved login
-// lives in the group of its server URL; without a URL hint the state root
-// is scanned for the first saved login (one login per machine is the norm).
-function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<CliConfig | null, never, CliConfigService> {
+// Several saved logins and no way to pick one (no --url/LEXA_URL, no active
+// marker) — never silently pick alphabetically; list the hosts and instruct.
+export class AmbiguousHost extends Data.TaggedError("AmbiguousHost")<{ hosts: string[] }> {
+  override get message(): string {
+    return `Multiple saved logins: ${this.hosts.join(", ")}. Pass --url <base-url> to pick one.`;
+  }
+}
+
+// Resolve the active config: flags > env > active host > single saved login.
+// The saved login lives in the group of its normalized host; an explicit
+// --url/LEXA_URL names the host, otherwise the active marker wins, and only a
+// lone saved login may be picked without a hint. Several logins and no hint
+// is an error (AmbiguousHost), never an alphabetical guess.
+function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<CliConfig | null, AmbiguousHost, CliConfigService> {
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
-    const urlFlag = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
-    const saved = urlFlag ? yield* svc.loadConfig(groupDir(urlFlag)) : yield* svc.savedLogin();
-    const url = urlFlag || saved?.url || "";
-    const apiKey = (typeof flags.key === "string" && flags.key) || ENV_KEY || saved?.apiKey || "";
+    const urlFlag = ((typeof flags.url === "string" && flags.url) || "").replace(/\/+$/, "");
+    const envUrl = ENV_URL.replace(/\/+$/, "");
+    const hint = urlFlag || envUrl;
+    const logins = yield* svc.listSavedLogins();
+
+    let host = "";
+    if (hint) {
+      host = normalizeHost(hint);
+    } else {
+      const active = yield* svc.activeHost();
+      if (active && logins.some((l) => l.host === active)) {
+        host = active;
+      } else {
+        const single = yield* svc.singleSavedLogin();
+        if (single) host = single.host;
+        else if (logins.length > 1) return yield* new AmbiguousHost({ hosts: logins.map((l) => l.host) });
+      }
+    }
+
+    const saved = host ? (logins.find((l) => l.host === host) ?? null) : null;
+    const url = hint || saved?.url || "";
+    const keyFlag = (typeof flags.key === "string" && flags.key) || "";
+    // LEXA_API_KEY is ambient: trusted only when LEXA_URL names the resolved
+    // host, or when no LEXA_URL hint exists and there is no saved login at
+    // all. --url X must never ship another host's ambient key to X. Env beats
+    // a saved login when allowed (a matching LEXA_URL is an explicit ask).
+    const envKeyAllowed = envUrl !== "" ? normalizeHost(envUrl) === host : logins.length === 0;
+    const apiKey = keyFlag || (envKeyAllowed ? ENV_KEY : "") || saved?.apiKey || "";
     if (!url || !apiKey) return null;
     return { url, apiKey };
   });
 }
 
-function requireClient(flags: Record<string, string | boolean>): Effect.Effect<{ client: LexaClient; config: CliConfig }, NotLoggedIn, CliConfigService> {
+function requireClient(flags: Record<string, string | boolean>): Effect.Effect<{ client: LexaClient; config: CliConfig }, NotLoggedIn | AmbiguousHost, CliConfigService> {
   return Effect.gen(function* () {
     const config = yield* resolveConfig(flags);
     if (!config) return yield* new NotLoggedIn();
@@ -305,6 +339,7 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
       if (result.status === "approved") {
         const dir = groupDir(url);
         yield* svc.saveConfig({ url, apiKey: result.rawKey }, dir);
+        yield* svc.setActiveHost(url);
         console.log(`  New API key: ${result.keyName}`);
         console.log(`  Logged in as ${result.approverName ?? "unknown"}`);
         console.log(`  Logged in to ${url}`);
@@ -349,6 +384,7 @@ function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]
       // State lands in the group of THIS server — ~/.lexa/<host>/.
       const dir = groupDir(url);
       yield* svc.saveConfig({ url, apiKey: key }, dir);
+      yield* svc.setActiveHost(url);
       console.log(`  Logged in to ${url}`);
       return;
     }
@@ -357,25 +393,47 @@ function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]
   });
 }
 
-function cmdLogout(flags: Record<string, string | boolean>): Effect.Effect<void, never, CliConfigService> {
+function cmdLogout(flags: Record<string, string | boolean>): Effect.Effect<void, AmbiguousHost, CliConfigService> {
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
+    const logins = yield* svc.listSavedLogins();
+    if (flags.all === true) {
+      if (logins.length === 0) {
+        console.log("  Not logged in — nothing to remove.");
+      } else {
+        for (const login of logins) {
+          yield* svc.clearConfig(login.dir);
+        }
+      }
+      yield* svc.clearActiveHost();
+      return;
+    }
     const urlFlag = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
-    const saved = urlFlag ? null : yield* svc.savedLogin();
-    const url = urlFlag || saved?.url || "";
-    if (!url) {
+    const active = yield* svc.activeHost();
+    let host = urlFlag ? normalizeHost(urlFlag) : "";
+    if (!host && active && logins.some((l) => l.host === active)) host = active;
+    if (!host && logins.length === 1) host = logins[0]!.host;
+    if (!host && logins.length > 1) return yield* new AmbiguousHost({ hosts: logins.map((l) => l.host) });
+    if (!host) {
       console.log("  Not logged in — nothing to remove.");
       return;
     }
-    yield* svc.clearConfig(groupDir(url));
+    const login = logins.find((l) => l.host === host);
+    if (!login) {
+      console.log(`  Not logged in for ${host} — nothing to remove.`);
+      return;
+    }
+    yield* svc.clearConfig(login.dir);
+    if (active === host) yield* svc.clearActiveHost();
   });
 }
 
 function cmdStatus(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
   return Effect.gen(function* () {
-    const { client } = yield* requireClient(flags);
+    const { client, config } = yield* requireClient(flags);
     const h = yield* client.health();
     const projects = yield* client.listProjects();
+    console.log(`  Host:     ${config.url}`);
     console.log(`  Server:   reachable (health ${h.ok ? "ok" : "?"})`);
     console.log(`  Projects: ${projects.length}`);
     console.log(`  Auth:     API key accepted`);
@@ -1242,7 +1300,8 @@ Auth:
                                            save credentials (chmod 600); without
                                            --key: browser-approval device login
                                            (prints a link to approve)
-  logout                                 remove saved credentials
+  logout   [--url <base>] [--all]        remove saved credentials (active host
+                                           by default; --all clears every login)
   status                                 server health + auth + counts
 
 Tasks:

@@ -10,7 +10,7 @@
 import { Effect } from "effect";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, rmSync, renameSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 
 export interface CliConfig {
   url: string;
@@ -108,28 +108,82 @@ function saveConfigSync(config: CliConfig, dir: string): void {
 function clearConfigSync(dir: string): void {
   const path = join(dir, "config.json");
   try {
-    if (existsSync(path)) {
-      rmSync(path, { force: true });
-    }
-    console.log("  Logged out. Removed " + path);
+    if (!existsSync(path)) return;
+    rmSync(path, { force: true });
+    console.log(`  Logged out ${basename(dir)}. Removed ${path}`);
   } catch (e) {
     console.error(`  Could not remove ${path}: ${(e as Error).message}`);
   }
 }
 
-// The saved login without knowing the group upfront: scan the state root's
-// group dirs (sorted, deterministic) and return the first valid login. With
-// one login per machine this is unambiguous; with several, pass --url to
-// pick a group explicitly.
-function savedLoginSync(): CliConfig | null {
+// The reserved active-host marker file at the state root. A dot-name so it can
+// never collide with a host group dir; group scans skip it only when it is a
+// file.
+const ACTIVE_FILE = ".active";
+
+// The host the user last logged in to (normalized), or null when unset/empty.
+export function activeHostSync(): string | null {
   try {
-    if (!existsSync(LEXA_DIR)) return null;
-    for (const entry of readdirSync(LEXA_DIR).sort()) {
-      const cfg = loadConfigSync(join(LEXA_DIR, entry));
-      if (cfg) return cfg;
+    const path = join(LEXA_DIR, ACTIVE_FILE);
+    if (!existsSync(path)) return null;
+    const host = readFileSync(path, "utf-8").trim();
+    return host === "" ? null : normalizeHost(host);
+  } catch {
+    return null;
+  }
+}
+
+export function setActiveHostSync(host: string): void {
+  try {
+    mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 });
+    const path = join(LEXA_DIR, ACTIVE_FILE);
+    writeFileSync(path, normalizeHost(host) + "\n", { mode: 0o600 });
+    chmodSync(path, 0o600);
+  } catch { /* best-effort — config is advisory state */ }
+}
+
+export function clearActiveHostSync(): void {
+  try {
+    rmSync(join(LEXA_DIR, ACTIVE_FILE), { force: true });
+  } catch { /* best-effort */ }
+}
+
+export interface SavedLogin {
+  host: string;
+  // Raw group dir on disk — load/clear must use this, not groupDir(host):
+  // a legacy/unnormalized dir (e.g. `127.0.0.1` normalized to `localhost`)
+  // would otherwise be missed.
+  dir: string;
+  url: string;
+  apiKey: string;
+}
+
+// Every valid saved login under the state root, keyed by its normalized host
+// (group dir name) and carrying the raw dir for load/clear. Sorted for
+// deterministic output; the reserved active marker file and non-directory
+// entries are skipped.
+export function listSavedLoginsSync(): SavedLogin[] {
+  const logins: SavedLogin[] = [];
+  try {
+    if (!existsSync(LEXA_DIR)) return logins;
+    for (const entry of readdirSync(LEXA_DIR, { withFileTypes: true })) {
+      if (entry.name === ACTIVE_FILE && entry.isFile()) continue;
+      if (!entry.isDirectory()) continue;
+      const entryDir = join(LEXA_DIR, entry.name);
+      const cfg = loadConfigSync(entryDir);
+      if (cfg) logins.push({ host: normalizeHost(entry.name), dir: entryDir, url: cfg.url, apiKey: cfg.apiKey });
     }
-  } catch { /* unreadable root — no saved login */ }
-  return null;
+  } catch { /* unreadable root — no saved logins */ }
+  logins.sort((a, b) => (a.host < b.host ? -1 : a.host > b.host ? 1 : 0));
+  return logins;
+}
+
+// The single saved login when there is exactly one — the fallback when no
+// --url/LEXA_URL hint and no active marker exist. Several saved logins are
+// ambiguous and must be resolved explicitly by the caller.
+export function singleSavedLoginSync(): SavedLogin | null {
+  const logins = listSavedLoginsSync();
+  return logins.length === 1 ? logins[0]! : null;
 }
 
 // Legacy pre-group ~/.config/lexa-cli|lexa-forge locations. Migrate-and-
@@ -236,7 +290,11 @@ export class CliConfigService extends Effect.Service<CliConfigService>()("LexaCl
       lexaDir: (): string => LEXA_DIR,
       migrateLegacyDirs: (): Effect.Effect<void, never> => Effect.sync(migrateLegacyDirsSync),
       migrateFlavorRoots: (): Effect.Effect<void, never> => Effect.sync(migrateFlavorRootsSync),
-      savedLogin: (): Effect.Effect<CliConfig | null, never> => Effect.sync(savedLoginSync),
+      activeHost: (): Effect.Effect<string | null, never> => Effect.sync(activeHostSync),
+      setActiveHost: (host: string): Effect.Effect<void, never> => Effect.sync(() => setActiveHostSync(host)),
+      clearActiveHost: (): Effect.Effect<void, never> => Effect.sync(clearActiveHostSync),
+      listSavedLogins: (): Effect.Effect<SavedLogin[], never> => Effect.sync(listSavedLoginsSync),
+      singleSavedLogin: (): Effect.Effect<SavedLogin | null, never> => Effect.sync(singleSavedLoginSync),
       loadConfig: (dir: string): Effect.Effect<CliConfig | null, never> => Effect.sync(() => loadConfigSync(dir)),
       saveConfig: (config: CliConfig, dir: string): Effect.Effect<void, never> => Effect.sync(() => saveConfigSync(config, dir)),
       clearConfig: (dir: string): Effect.Effect<void, never> => Effect.sync(() => clearConfigSync(dir)),
