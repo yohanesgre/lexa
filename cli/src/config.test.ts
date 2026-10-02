@@ -190,36 +190,50 @@ describe("CliConfigService", () => {
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
   });
-  it("listSavedLogins returns group dirs sorted, skipping the active marker and non-dirs", async () => {
+  it("listSavedLogins returns group dirs sorted, skipping the active marker file and non-dirs", async () => {
     const svc = await loadService();
-    await Effect.runPromise(svc.saveConfig({ url: "http://b.example.com", apiKey: "kb" }, await groupFor("http://b.example.com")));
-    await Effect.runPromise(svc.saveConfig({ url: "http://a.example.com", apiKey: "ka" }, await groupFor("http://a.example.com")));
+    const aDir = await groupFor("http://a.example.com");
+    const bDir = await groupFor("http://b.example.com");
+    await Effect.runPromise(svc.saveConfig({ url: "http://b.example.com", apiKey: "kb" }, bDir));
+    await Effect.runPromise(svc.saveConfig({ url: "http://a.example.com", apiKey: "ka" }, aDir));
     // The reserved active marker and plain files must never be read as groups.
-    writeFileSync(join(dir, "active"), "a.example.com\n");
+    writeFileSync(join(dir, ".active"), "a.example.com\n");
     writeFileSync(join(dir, "not-a-dir"), "x");
     expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([
-      { host: "a.example.com", url: "http://a.example.com", apiKey: "ka" },
-      { host: "b.example.com", url: "http://b.example.com", apiKey: "kb" },
+      { host: "a.example.com", dir: aDir, url: "http://a.example.com", apiKey: "ka" },
+      { host: "b.example.com", dir: bDir, url: "http://b.example.com", apiKey: "kb" },
+    ]);
+  });
+  it("listSavedLogins treats a directory named like the marker as a group", async () => {
+    const svc = await loadService();
+    const markerDir = join(dir, ".active");
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(join(markerDir, "config.json"), JSON.stringify({ url: "http://dot-active.example.com", apiKey: "k" }));
+    expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([
+      { host: ".active", dir: markerDir, url: "http://dot-active.example.com", apiKey: "k" },
     ]);
   });
   it("listSavedLogins is empty when no group has a login", async () => {
     const svc = await loadService();
     expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([]);
   });
-  it("listSavedLogins normalizes raw group dir names to hosts", async () => {
+  it("listSavedLogins normalizes the host but carries the raw dir for load", async () => {
     const svc = await loadService();
     const raw = join(dir, "127.0.0.1");
     mkdirSync(raw, { recursive: true });
     writeFileSync(join(raw, "config.json"), JSON.stringify({ url: "http://127.0.0.1", apiKey: "k" }));
-    expect(await Effect.runPromise(svc.listSavedLogins())).toEqual([
-      { host: "localhost", url: "http://127.0.0.1", apiKey: "k" },
+    const logins = await Effect.runPromise(svc.listSavedLogins());
+    expect(logins).toEqual([
+      { host: "localhost", dir: raw, url: "http://127.0.0.1", apiKey: "k" },
     ]);
+    expect(await Effect.runPromise(svc.loadConfig(logins[0]!.dir))).toEqual({ url: "http://127.0.0.1", apiKey: "k" });
   });
   it("singleSavedLogin returns the only login, null for zero or several", async () => {
     const svc = await loadService();
     expect(await Effect.runPromise(svc.singleSavedLogin())).toBeNull();
-    await Effect.runPromise(svc.saveConfig({ url: "http://only.example.com", apiKey: "k" }, await groupFor("http://only.example.com")));
-    expect(await Effect.runPromise(svc.singleSavedLogin())).toEqual({ host: "only.example.com", url: "http://only.example.com", apiKey: "k" });
+    const onlyDir = await groupFor("http://only.example.com");
+    await Effect.runPromise(svc.saveConfig({ url: "http://only.example.com", apiKey: "k" }, onlyDir));
+    expect(await Effect.runPromise(svc.singleSavedLogin())).toEqual({ host: "only.example.com", dir: onlyDir, url: "http://only.example.com", apiKey: "k" });
     await Effect.runPromise(svc.saveConfig({ url: "http://two.example.com", apiKey: "k2" }, await groupFor("http://two.example.com")));
     expect(await Effect.runPromise(svc.singleSavedLogin())).toBeNull();
   });
@@ -228,12 +242,17 @@ describe("CliConfigService", () => {
     expect(await Effect.runPromise(svc.activeHost())).toBeNull();
     await Effect.runPromise(svc.setActiveHost("https://Lexa.Example.Com"));
     expect(await Effect.runPromise(svc.activeHost())).toBe("lexa.example.com");
-    expect(mode(join(dir, "active"))).toBe(0o600);
+    expect(mode(join(dir, ".active"))).toBe(0o600);
     await Effect.runPromise(svc.clearActiveHost());
     expect(await Effect.runPromise(svc.activeHost())).toBeNull();
   });
+  it("activeHost normalizes a raw marker value", async () => {
+    writeFileSync(join(dir, ".active"), "https://Lexa.Example.Com\n");
+    const svc = await loadService();
+    expect(await Effect.runPromise(svc.activeHost())).toBe("lexa.example.com");
+  });
   it("activeHost is null on an empty marker", async () => {
-    writeFileSync(join(dir, "active"), "  \n");
+    writeFileSync(join(dir, ".active"), "  \n");
     const svc = await loadService();
     expect(await Effect.runPromise(svc.activeHost())).toBeNull();
   });

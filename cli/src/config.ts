@@ -116,9 +116,10 @@ function clearConfigSync(dir: string): void {
   }
 }
 
-// The reserved active-host marker file at the state root. It is never a
-// group dir — group scans skip it explicitly.
-const ACTIVE_FILE = "active";
+// The reserved active-host marker file at the state root. A dot-name so it can
+// never collide with a host group dir; group scans skip it only when it is a
+// file.
+const ACTIVE_FILE = ".active";
 
 // The host the user last logged in to (normalized), or null when unset/empty.
 export function activeHostSync(): string | null {
@@ -126,7 +127,7 @@ export function activeHostSync(): string | null {
     const path = join(LEXA_DIR, ACTIVE_FILE);
     if (!existsSync(path)) return null;
     const host = readFileSync(path, "utf-8").trim();
-    return host === "" ? null : host;
+    return host === "" ? null : normalizeHost(host);
   } catch {
     return null;
   }
@@ -149,21 +150,28 @@ export function clearActiveHostSync(): void {
 
 export interface SavedLogin {
   host: string;
+  // Raw group dir on disk — load/clear must use this, not groupDir(host):
+  // a legacy/unnormalized dir (e.g. `127.0.0.1` normalized to `localhost`)
+  // would otherwise be missed.
+  dir: string;
   url: string;
   apiKey: string;
 }
 
 // Every valid saved login under the state root, keyed by its normalized host
-// (group dir name). Sorted for deterministic output; the reserved active
-// marker and non-directory entries are skipped.
+// (group dir name) and carrying the raw dir for load/clear. Sorted for
+// deterministic output; the reserved active marker file and non-directory
+// entries are skipped.
 export function listSavedLoginsSync(): SavedLogin[] {
   const logins: SavedLogin[] = [];
   try {
     if (!existsSync(LEXA_DIR)) return logins;
     for (const entry of readdirSync(LEXA_DIR, { withFileTypes: true })) {
-      if (entry.name === ACTIVE_FILE || !entry.isDirectory()) continue;
-      const cfg = loadConfigSync(join(LEXA_DIR, entry.name));
-      if (cfg) logins.push({ host: normalizeHost(entry.name), url: cfg.url, apiKey: cfg.apiKey });
+      if (entry.name === ACTIVE_FILE && entry.isFile()) continue;
+      if (!entry.isDirectory()) continue;
+      const entryDir = join(LEXA_DIR, entry.name);
+      const cfg = loadConfigSync(entryDir);
+      if (cfg) logins.push({ host: normalizeHost(entry.name), dir: entryDir, url: cfg.url, apiKey: cfg.apiKey });
     }
   } catch { /* unreadable root — no saved logins */ }
   logins.sort((a, b) => (a.host < b.host ? -1 : a.host > b.host ? 1 : 0));

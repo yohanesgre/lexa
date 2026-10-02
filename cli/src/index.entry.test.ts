@@ -167,7 +167,7 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     writeFileSync(join(lexaDir, activeHost, "config.json"), JSON.stringify({ url: base, apiKey: activeKey }));
     mkdirSync(join(lexaDir, "other.example.com"), { recursive: true });
     writeFileSync(join(lexaDir, "other.example.com", "config.json"), JSON.stringify({ url: "http://other.example.com", apiKey: "lxk_other_key_12345678901234567890123456789012345678901" }));
-    writeFileSync(join(lexaDir, "active"), `${activeHost}\n`);
+    writeFileSync(join(lexaDir, ".active"), `${activeHost}\n`);
     seenAuth = [];
     const r = await runCli(["status"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
@@ -188,6 +188,20 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     expect(r.status).toBe(0);
     expect(seenAuth).toContain(`Bearer ${savedKey}`);
     expect(seenAuth).not.toContain(`Bearer ${envKey}`);
+  });
+
+  it("matching LEXA_URL + saved login: the env key wins over the saved key", async () => {
+    const lexaDir = freshLexaDir();
+    const p = new URL(base).port;
+    const savedKey = "lxk_saved_key_1234567890123456789012345678901234567890";
+    const envKey = "lxk_env_key_12345678901234567890123456789012345678901";
+    mkdirSync(join(lexaDir, `localhost:${p}`), { recursive: true });
+    writeFileSync(join(lexaDir, `localhost:${p}`, "config.json"), JSON.stringify({ url: base, apiKey: savedKey }));
+    seenAuth = [];
+    const r = await runCli(["status"], { LEXA_URL: base, LEXA_API_KEY: envKey, LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(seenAuth).toContain(`Bearer ${envKey}`);
+    expect(seenAuth).not.toContain(`Bearer ${savedKey}`);
   });
 
   it("--url X with no saved login and a non-matching LEXA_URL does not borrow LEXA_API_KEY", async () => {
@@ -219,7 +233,7 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     writeFileSync(join(lexaDir, envHost, "config.json"), JSON.stringify({ url: base, apiKey: envHostKey }));
     mkdirSync(join(lexaDir, "active.example.com"), { recursive: true });
     writeFileSync(join(lexaDir, "active.example.com", "config.json"), JSON.stringify({ url: "http://active.example.com", apiKey: "lxk_active_key_12345678901234567890123456789012345678901" }));
-    writeFileSync(join(lexaDir, "active"), "active.example.com\n");
+    writeFileSync(join(lexaDir, ".active"), "active.example.com\n");
     seenAuth = [];
     const r = await runCli(["status"], { LEXA_URL: base, LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
@@ -233,7 +247,7 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     const p = new URL(base).port;
     mkdirSync(join(lexaDir, `localhost:${p}`), { recursive: true });
     writeFileSync(join(lexaDir, `localhost:${p}`, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_single_key_1234567890123456789012345678901234567890" }));
-    writeFileSync(join(lexaDir, "active"), "gone.example.com\n");
+    writeFileSync(join(lexaDir, ".active"), "gone.example.com\n");
     const r = await runCli(["status"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Host:");
@@ -242,7 +256,7 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
 
   it("stale active marker with no saved logins and no env → NotLoggedIn", async () => {
     const lexaDir = freshLexaDir();
-    writeFileSync(join(lexaDir, "active"), "gone.example.com\n");
+    writeFileSync(join(lexaDir, ".active"), "gone.example.com\n");
     const r = await runCli(["status"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Not logged in");
@@ -256,13 +270,13 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     writeFileSync(join(lexaDir, activeHost, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_a" }));
     mkdirSync(join(lexaDir, "other.example.com"), { recursive: true });
     writeFileSync(join(lexaDir, "other.example.com", "config.json"), JSON.stringify({ url: "http://other.example.com", apiKey: "lxk_b" }));
-    writeFileSync(join(lexaDir, "active"), `${activeHost}\n`);
+    writeFileSync(join(lexaDir, ".active"), `${activeHost}\n`);
     const r = await runCli(["logout"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`Logged out ${activeHost}`);
     expect(existsSync(join(lexaDir, activeHost, "config.json"))).toBe(false);
     expect(existsSync(join(lexaDir, "other.example.com", "config.json"))).toBe(true);
-    expect(existsSync(join(lexaDir, "active"))).toBe(false);
+    expect(existsSync(join(lexaDir, ".active"))).toBe(false);
   });
 
   it("logout --all clears every saved login and the active marker", async () => {
@@ -273,14 +287,14 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     writeFileSync(join(lexaDir, activeHost, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_a" }));
     mkdirSync(join(lexaDir, "other.example.com"), { recursive: true });
     writeFileSync(join(lexaDir, "other.example.com", "config.json"), JSON.stringify({ url: "http://other.example.com", apiKey: "lxk_b" }));
-    writeFileSync(join(lexaDir, "active"), `${activeHost}\n`);
+    writeFileSync(join(lexaDir, ".active"), `${activeHost}\n`);
     const r = await runCli(["logout", "--all"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`Logged out ${activeHost}`);
     expect(r.stdout).toContain("Logged out other.example.com");
     expect(existsSync(join(lexaDir, activeHost, "config.json"))).toBe(false);
     expect(existsSync(join(lexaDir, "other.example.com", "config.json"))).toBe(false);
-    expect(existsSync(join(lexaDir, "active"))).toBe(false);
+    expect(existsSync(join(lexaDir, ".active"))).toBe(false);
   });
 
   it("logout with several logins and no active marker errors listing hosts", async () => {
@@ -311,13 +325,39 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     expect(existsSync(join(lexaDir, "other.example.com", "config.json"))).toBe(true);
   });
 
+  it("logout without --url but with LEXA_URL targets that host among several logins", async () => {
+    const lexaDir = freshLexaDir();
+    const p = new URL(base).port;
+    const target = `localhost:${p}`;
+    mkdirSync(join(lexaDir, target), { recursive: true });
+    writeFileSync(join(lexaDir, target, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_a" }));
+    mkdirSync(join(lexaDir, "other.example.com"), { recursive: true });
+    writeFileSync(join(lexaDir, "other.example.com", "config.json"), JSON.stringify({ url: "http://other.example.com", apiKey: "lxk_b" }));
+    const r = await runCli(["logout"], { LEXA_URL: base, LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`Logged out ${target}`);
+    expect(existsSync(join(lexaDir, target, "config.json"))).toBe(false);
+    expect(existsSync(join(lexaDir, "other.example.com", "config.json"))).toBe(true);
+  });
+
+  it("logout clears a login stored under a raw (unnormalized) group dir", async () => {
+    const lexaDir = freshLexaDir();
+    const raw = join(lexaDir, "127.0.0.1");
+    mkdirSync(raw, { recursive: true });
+    writeFileSync(join(raw, "config.json"), JSON.stringify({ url: "http://127.0.0.1", apiKey: "lxk_a" }));
+    const r = await runCli(["logout", "--url", "http://127.0.0.1"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Logged out 127.0.0.1");
+    expect(existsSync(join(raw, "config.json"))).toBe(false);
+  });
+
   it("logout --url <host> with no saved login reports nothing to remove and leaves the marker", async () => {
     const lexaDir = freshLexaDir();
-    writeFileSync(join(lexaDir, "active"), "keep.example.com\n");
+    writeFileSync(join(lexaDir, ".active"), "keep.example.com\n");
     const r = await runCli(["logout", "--url", "http://nobody.example.com"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Not logged in for nobody.example.com");
-    expect(existsSync(join(lexaDir, "active"))).toBe(true);
+    expect(existsSync(join(lexaDir, ".active"))).toBe(true);
   });
 
   it("logout --all with zero logins reports nothing to remove", async () => {
@@ -388,7 +428,7 @@ describe("login (legacy key + device flow)", () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(`Logged in to ${base}`);
     expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
-    expect(readFileSync(join(lexaDir, "active"), "utf-8").trim()).toBe(`localhost:${new URL(base).port}`);
+    expect(readFileSync(join(lexaDir, ".active"), "utf-8").trim()).toBe(`localhost:${new URL(base).port}`);
   });
 
   it("legacy env login (LEXA_URL/LEXA_API_KEY) still works", async () => {
@@ -411,7 +451,7 @@ describe("login (legacy key + device flow)", () => {
     expect(r.stdout).toContain("Logged in as Maria");
     expect(r.stdout).toContain(`Logged in to ${base}`);
     expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: approvedKey });
-    expect(readFileSync(join(lexaDir, "active"), "utf-8").trim()).toBe(`localhost:${new URL(base).port}`);
+    expect(readFileSync(join(lexaDir, ".active"), "utf-8").trim()).toBe(`localhost:${new URL(base).port}`);
   });
 
   it("device flow denied → exit 1 with a clear message", async () => {

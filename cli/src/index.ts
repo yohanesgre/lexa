@@ -75,7 +75,7 @@ export class NotLoggedIn extends Data.TaggedError("NotLoggedIn")<{}> {
 // marker) — never silently pick alphabetically; list the hosts and instruct.
 export class AmbiguousHost extends Data.TaggedError("AmbiguousHost")<{ hosts: string[] }> {
   override get message(): string {
-    return `Multiple saved logins: ${this.hosts.join(", ")}. Pass --url <base-url> or run: lx login <base-url>`;
+    return `Multiple saved logins: ${this.hosts.join(", ")}. Pass --url <base-url> to pick one.`;
   }
 }
 
@@ -106,14 +106,15 @@ function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<C
       }
     }
 
-    const saved = host ? yield* svc.loadConfig(groupDir(host)) : null;
+    const saved = host ? (logins.find((l) => l.host === host) ?? null) : null;
     const url = hint || saved?.url || "";
     const keyFlag = (typeof flags.key === "string" && flags.key) || "";
     // LEXA_API_KEY is ambient: trusted only when LEXA_URL names the resolved
     // host, or when no LEXA_URL hint exists and there is no saved login at
-    // all. --url X must never ship another host's ambient key to X.
+    // all. --url X must never ship another host's ambient key to X. Env beats
+    // a saved login when allowed (a matching LEXA_URL is an explicit ask).
     const envKeyAllowed = envUrl !== "" ? normalizeHost(envUrl) === host : logins.length === 0;
-    const apiKey = keyFlag || saved?.apiKey || (envKeyAllowed ? ENV_KEY : "") || "";
+    const apiKey = keyFlag || (envKeyAllowed ? ENV_KEY : "") || saved?.apiKey || "";
     if (!url || !apiKey) return null;
     return { url, apiKey };
   });
@@ -401,13 +402,13 @@ function cmdLogout(flags: Record<string, string | boolean>): Effect.Effect<void,
         console.log("  Not logged in — nothing to remove.");
       } else {
         for (const login of logins) {
-          yield* svc.clearConfig(groupDir(login.host));
+          yield* svc.clearConfig(login.dir);
         }
       }
       yield* svc.clearActiveHost();
       return;
     }
-    const urlFlag = ((typeof flags.url === "string" && flags.url) || "").replace(/\/+$/, "");
+    const urlFlag = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
     const active = yield* svc.activeHost();
     let host = urlFlag ? normalizeHost(urlFlag) : "";
     if (!host && active && logins.some((l) => l.host === active)) host = active;
@@ -417,11 +418,12 @@ function cmdLogout(flags: Record<string, string | boolean>): Effect.Effect<void,
       console.log("  Not logged in — nothing to remove.");
       return;
     }
-    if (!logins.some((l) => l.host === host)) {
+    const login = logins.find((l) => l.host === host);
+    if (!login) {
       console.log(`  Not logged in for ${host} — nothing to remove.`);
       return;
     }
-    yield* svc.clearConfig(groupDir(host));
+    yield* svc.clearConfig(login.dir);
     if (active === host) yield* svc.clearActiveHost();
   });
 }
