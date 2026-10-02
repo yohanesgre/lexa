@@ -22,7 +22,7 @@ import {
 } from "./legacy-convert";
 import type { RegistryModelConfig } from "./model-factory";
 import type { AssistantCallLogInput } from "../../shared/assistant";
-import type { AssistantRunStatusInput, AssistantTurnContext } from "./internal-routes";
+import type { AssistantRunStatusInput, HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
 import type { ReadToolResponse, WriteExecuteResponse, WriteToolResponse } from "./tools-ai";
 
 export const INTERNAL_LEGACY_PATH = "/api/internal/assistant/legacy";
@@ -163,21 +163,27 @@ export async function resolveProviderConfigs(
 }
 
 /**
- * Resolve the project's per-turn tool gating (ADR-0003 §D). `null` when the
- * Worker cannot answer — the DO then offers the core read set and NO write
- * tools (writes are the higher-risk surface; reads degrade gracefully).
+ * Resolve the project's per-turn harness context bundle (ADR-0004 §1). `null`
+ * when the Worker cannot answer — the DO then offers the core read set, NO write
+ * tools, and the identity-only system prompt (reads degrade gracefully).
+ * The request body carries only thread/run/userText/mode; project/actor/thread
+ * identity is the signed HMAC header set, never the body.
  */
-export async function resolveTurnContext(
+export async function resolveHarnessContext(
   deps: AssistantInternalDeps,
-  projectId: string
-): Promise<AssistantTurnContext | null> {
+  request: HarnessTurnContextRequest
+): Promise<HarnessTurnContext | null> {
   const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
-  const url = `${originOf(deps)}${INTERNAL_TURN_CONTEXT_PATH}?projectId=${encodeURIComponent(projectId)}`;
+  const url = `${originOf(deps)}${INTERNAL_TURN_CONTEXT_PATH}`;
   try {
-    const res = await fetchImpl(url, { method: "GET", headers: await signedHeaders(deps) });
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: await signedHeaders(deps),
+      body: JSON.stringify({ ...request, threadKey: deps.identity.threadKey }),
+    });
     if (!res.ok) return null;
     const body = (await res.json()) as { context?: unknown };
-    const context = body.context as AssistantTurnContext | undefined;
+    const context = body.context as HarnessTurnContext | undefined;
     if (!context || !Array.isArray(context.readTools) || !Array.isArray(context.writeTools)) return null;
     return context;
   } catch (e) {

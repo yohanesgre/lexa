@@ -11,11 +11,14 @@
 
 import { Effect, Layer, ManagedRuntime } from "effect";
 import type { DbDriver } from "../db/db";
-import { Db, queryAll, queryFirst } from "../db/db";
+import { Db, queryAll, queryFirst, type SqlParam } from "../db/db";
 import type { RuntimeEnv } from "../env";
 import { RuntimeEnvTag } from "../runtime-env";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
+import { ProjectReposRepo } from "../repos/project-repos.repo";
+import { ProjectMemoryRepo } from "../repos/project-memory.repo";
+import { GitHubClient } from "../github/client";
 import { Storage, StorageConfig } from "../storage/storage";
 import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "../storage/config";
 import { AssistantJevService } from "../services/assistant-jev.service";
@@ -25,17 +28,24 @@ import { WikiService } from "../services/wiki.service";
 import { MilestoneService } from "../services/milestone.service";
 import { SwimlaneService } from "../services/swimlane.service";
 import { AuthorizationService } from "../services/authorization.service";
+import { loadTaskRepoContent, type RepoContentEntry } from "../services/assistant-repo-content";
 import { errorCodeMap } from "../api/errors";
 import { applyAssistantWrite, type AssistantWriteApplyCtx } from "./write-execution";
 import type { AssistantWriteToolName } from "./write-tool-names";
 import { BOUND_SKILLS_SQL, matchBoundSkillByName } from "../services/assistant-helpers";
+import { buildSkillPromptParts, resolveMentionContext, type MentionResolverDeps } from "./context";
 import { docToMarkdown } from "../../shared/markdown";
+import { extractMemoryTerms, memoryBlockFromHits } from "./prompt";
+import { parseThreadKey } from "./agent-gate";
+import { buildPreflightState, runJevPreflight, type JevPreflightResult } from "./jev";
 import { parseWriteTools } from "./write-tools";
 import { buildAssistantTools, type AssistantToolDeps, type BoundSkill } from "./tools";
 import { resolveVisionMode } from "./vision";
 import type { JevRuntimeConfig } from "./jev";
 import type { ApprovalPartial } from "../../shared/assistant";
 import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
+import type { HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
+import type { TipTapDoc } from "../../shared/types";
 
 type BaseLayer = Layer.Layer<Db | RuntimeEnvTag>;
 
@@ -63,9 +73,13 @@ export interface WorkerTurnSettings {
   primarySupportsImages: boolean;
 }
 
-export interface WorkerTurnContext extends WorkerTurnSettings {
+export interface WorkerTurnContext {
   /** Read-tool names the DO may offer this turn (optional tools gated). */
   readTools: string[];
+  writeTools: string[];
+  primarySupportsImages: boolean;
+  /** Boolean capability flags — never the Exa key / URL allowlist values. */
+  hasSearchKey: boolean;
   jevConfigured: boolean;
 }
 
@@ -157,9 +171,281 @@ export async function resolveWorkerTurnContext(
   });
   if (visionMode !== "delegate") available.delete("analyze_image");
   return {
-    ...settings,
     readTools: [...available],
+    writeTools: settings.writeTools,
+    primarySupportsImages: settings.primarySupportsImages,
+    hasSearchKey: settings.searchApiKey !== null,
     jevConfigured: jevConfig !== null,
+  };
+}
+
+// ── Per-turn harness context bundle (ADR-0004 §1; H1) ─────────────────────
+// One Worker round trip per turn. Every step is fail-open except identity; a
+// missing row/skill/agent degrades to a smaller block, never a failed turn.
+// Redacted by construction: the Exa key / URL allowlist are consumed only to
+// derive `hasSearchKey`, and never enter the returned bundle.
+
+export interface WorkerHarnessContextDeps {
+  driver: DbDriver;
+  base: BaseLayer;
+}
+
+const HARNESS_PREFLIGHT_TIMEOUT_MS = 3_000;
+
+function firstOf(driver: DbDriver) {
+  return <T>(sql: string, ...params: unknown[]): Promise<T | null> =>
+    Effect.runPromise(queryFirst<T>(driver, sql, ...(params as SqlParam[]))).catch(() => null);
+}
+
+function parseTipTap(raw: string | null | undefined): TipTapDoc {
+  if (!raw) return { type: "doc", content: [] } as TipTapDoc;
+  try {
+    return JSON.parse(raw) as TipTapDoc;
+  } catch {
+    return { type: "doc", content: [] } as TipTapDoc;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    );
+  });
+}
+
+function workerMentionDeps(deps: WorkerHarnessContextDeps): MentionResolverDeps {
+  const dbFirst = firstOf(deps.driver);
+  return {
+    dbAll: async <T>(sql: string, ...params: unknown[]) => {
+      try {
+        return await Effect.runPromise(queryAll<T>(deps.driver, sql, ...(params as SqlParam[])));
+      } catch {
+        return [];
+      }
+    },
+    findTaskByKey: async (key) => {
+      const row = await dbFirst<{ id: string; project_id: string; key: string; title: string; description: string | null }>(
+        `SELECT id, project_id, key, title, description FROM tasks WHERE key = ?`,
+        key
+      );
+      if (!row) return null;
+      return { id: row.id, projectId: row.project_id, key: row.key, title: row.title, description: parseTipTap(row.description) };
+    },
+    findWikiBySlug: async (projectId, slug) => {
+      const row = await dbFirst<{ id: string; title: string; content: string | null }>(
+        `SELECT id, title, content FROM wiki_pages WHERE project_id = ? AND slug = ?`,
+        projectId,
+        slug
+      );
+      if (!row) return null;
+      return { id: row.id, title: row.title, content: parseTipTap(row.content) };
+    },
+  };
+}
+
+async function loadWorkerMemory(deps: WorkerHarnessContextDeps, projectId: string, terms: string[]): Promise<string[]> {
+  try {
+    const layer = Layer.provide(ProjectMemoryRepo.Default, deps.base);
+    return await Effect.runPromise(
+      Effect.provide(Effect.flatMap(ProjectMemoryRepo, (repo) => repo.searchByProject(projectId, terms)), layer)
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function loadWorkerRepoContent(
+  deps: WorkerHarnessContextDeps,
+  documentType: "chat" | "task" | "wiki",
+  documentId: string,
+  projectId: string
+): Promise<RepoContentEntry[]> {
+  try {
+    const layer = Layer.mergeAll(
+      Layer.provide(TaskRepo.Default, deps.base),
+      Layer.provide(ProjectReposRepo.Default, deps.base),
+      GitHubClient.Default,
+      deps.base
+    );
+    return await Effect.runPromise(
+      Effect.provide(
+        loadTaskRepoContent({ projectId, documentType, documentId } as Parameters<typeof loadTaskRepoContent>[0]),
+        layer
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function runWorkerPreflight(
+  deps: WorkerHarnessContextDeps,
+  input: HarnessTurnContextRequest & { projectId: string },
+  documentType: "chat" | "task" | "wiki",
+  title: string | null,
+  docContext: string | null,
+  memoryHits: string[]
+): Promise<string | null> {
+  try {
+    const config = await resolveWorkerJevConfig(deps.base, input.projectId);
+    if (config === null) return null;
+    const state = buildPreflightState({
+      runKind: documentType === "chat" ? "chat" : "task",
+      projectId: input.projectId,
+      threadId: parseThreadKey(input.threadKey)?.documentId ?? input.threadKey,
+      threadLabel: title,
+      userMessage: input.userText,
+      taskWikiContext: docContext,
+      memoryHits,
+    });
+    const result: JevPreflightResult | null = await withTimeout(
+      runJevPreflight({ state, config }),
+      HARNESS_PREFLIGHT_TIMEOUT_MS
+    );
+    return result?.segment ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveWorkerHarnessContext(
+  deps: WorkerHarnessContextDeps,
+  input: HarnessTurnContextRequest & { projectId: string }
+): Promise<HarnessTurnContext> {
+  const dbFirst = firstOf(deps.driver);
+  const parsed = parseThreadKey(input.threadKey);
+  const documentType: "chat" | "task" | "wiki" = parsed?.documentType ?? "chat";
+  const documentId = parsed?.documentId ?? input.threadKey;
+
+  const threadRow = await dbFirst<{
+    agent_id: string | null;
+    skill_id: string | null;
+    summary: string | null;
+    summarized_count: number;
+    title: string | null;
+  }>(
+    `SELECT agent_id, skill_id, summary, summarized_count, title
+     FROM assistant_threads WHERE document_type = ? AND document_id = ?`,
+    documentType,
+    documentId
+  );
+
+  // Agent: run row (document runs) wins over the thread row; fall back to the
+  // builtin `assistant` row and finally a synthetic blank agent.
+  let agentId = threadRow?.agent_id ?? null;
+  if (input.runId) {
+    const runRow = await dbFirst<{ agent_id: string }>(`SELECT agent_id FROM assistant_tasks WHERE id = ?`, input.runId);
+    if (runRow?.agent_id) agentId = runRow.agent_id;
+  }
+  const agentRow = agentId
+    ? await dbFirst<{ id: string; name: string; instructions: string }>(
+        `SELECT id, name, instructions FROM lexa_agents WHERE id = ?`,
+        agentId
+      )
+    : null;
+  const builtinRow = agentRow
+    ? null
+    : await dbFirst<{ id: string; name: string; instructions: string }>(
+        `SELECT id, name, instructions FROM lexa_agents WHERE id = 'assistant'`
+      );
+  const agent = agentRow
+    ? { id: agentRow.id, name: agentRow.name, instructions: agentRow.instructions }
+    : builtinRow
+      ? { id: builtinRow.id, name: builtinRow.name, instructions: builtinRow.instructions }
+      : { id: "assistant", name: "Assistant Agent", instructions: "" };
+
+  // Skills: ≤3 `$tokens` against the resolved agent's bound skills (catalog
+  // ≤20). Task/wiki use the thread's bound skillId as the first markdown.
+  const boundSkills = await resolveWorkerBoundSkills(deps.driver, agent.id);
+  const parts = buildSkillPromptParts(input.userText, boundSkills);
+  if (documentType !== "chat" && threadRow?.skill_id) {
+    const skill = await dbFirst<{ name: string; instructions: string | null }>(
+      `SELECT name, instructions FROM lexa_skills WHERE id = ?`,
+      threadRow.skill_id
+    );
+    if (skill && (skill.instructions ?? "").trim() !== "") {
+      parts.skillMarkdowns = [`## Skill: ${skill.name}\n${skill.instructions}`, ...parts.skillMarkdowns].slice(0, 3);
+    }
+  }
+
+  // Doc context: task/wiki only. Chat carries no document body.
+  let docContext: string | null = null;
+  if (documentType === "task") {
+    const task = await dbFirst<{ key: string; title: string; description: string | null }>(
+      `SELECT key, title, description FROM tasks WHERE id = ? AND project_id = ?`,
+      documentId,
+      input.projectId
+    );
+    if (task) {
+      const md = docToMarkdown(parseTipTap(task.description));
+      docContext = `Task: ${task.key} — ${task.title}${md ? `\nDescription:\n${md}` : ""}`;
+    }
+  } else if (documentType === "wiki") {
+    const page = await dbFirst<{ title: string; content: string | null }>(
+      `SELECT title, content FROM wiki_pages WHERE project_id = ? AND slug = ?`,
+      input.projectId,
+      documentId
+    );
+    if (page) {
+      const md = docToMarkdown(parseTipTap(page.content));
+      docContext = `Wiki page: ${page.title}${md ? `\n${md}` : ""}`;
+    }
+  }
+
+  // Repo content: task/wiki only; chat = no prefetch (wireframe contract).
+  const repoContent =
+    documentType === "chat" ? [] : await loadWorkerRepoContent(deps, documentType, documentId, input.projectId);
+
+  // Memory: FTS K=5 / 2000-char cap via the shared repo.
+  const memoryHits = await loadWorkerMemory(deps, input.projectId, extractMemoryTerms(input.userText, ""));
+  const memoryBlock = memoryBlockFromHits(memoryHits);
+
+  // Mention context: chat only (task/wiki carry their own doc context).
+  let mentionContext: string | null = null;
+  if (documentType === "chat") {
+    const block = await resolveMentionContext(workerMentionDeps(deps), input.projectId, input.userText);
+    mentionContext = block.trim() !== "" ? block : null;
+  }
+
+  // Tool gating: names + booleans only; secrets stay Worker-side.
+  const gating = await resolveWorkerTurnContext({ driver: deps.driver, base: deps.base }, input.projectId);
+
+  // Jev preflight: advisory, fail-open, skipped on resume, 3s cap (R2).
+  const advisory =
+    input.mode === "resume"
+      ? null
+      : await runWorkerPreflight(deps, input, documentType, threadRow?.title ?? null, docContext, memoryHits);
+
+  const summary = threadRow?.summary && threadRow.summary.trim() !== "" ? threadRow.summary : null;
+  return {
+    projectId: input.projectId,
+    threadKey: input.threadKey,
+    documentType,
+    agent,
+    skillMarkdowns: parts.skillMarkdowns,
+    skillCatalog: parts.skillCatalog,
+    memoryBlock,
+    docContext,
+    repoContent,
+    mentionContext,
+    advisory,
+    threadSummary: summary !== null ? { summary, summarizedCount: threadRow?.summarized_count ?? 0 } : null,
+    readTools: gating.readTools,
+    mcpTools: [],
+    writeTools: gating.writeTools,
+    primarySupportsImages: gating.primarySupportsImages,
+    hasSearchKey: gating.hasSearchKey,
+    jevConfigured: gating.jevConfigured,
+    delegation: { enabled: false, maxConcurrentRuns: 0 },
   };
 }
 

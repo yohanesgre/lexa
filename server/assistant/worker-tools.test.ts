@@ -23,6 +23,7 @@ import { encryptSecret, parseMasterKey } from "./secrets";
 import {
   buildWorkerReadToolExecutor,
   buildWorkerWriteToolExecutor,
+  resolveWorkerHarnessContext,
   resolveWorkerJevConfig,
   resolveWorkerTurnContext,
 } from "./worker-tools";
@@ -149,6 +150,27 @@ describe("resolveWorkerTurnContext gating", () => {
     const context = await resolveWorkerTurnContext({ driver: driver(), base: base() }, "p1");
     expect(context.readTools).toContain("jev_assess");
     expect(context.jevConfigured).toBe(true);
+  });
+});
+
+describe("resolveWorkerHarnessContext", () => {
+  it("returns a redacted chat bundle: booleans + names, never the key/allowlist", async () => {
+    seedSettings({ searchApiKey: "exa-secret", writeTools: "create_task" });
+    const context = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "turn" }
+    );
+    expect(context.documentType).toBe("chat");
+    expect(context.hasSearchKey).toBe(true);
+    expect(context.jevConfigured).toBe(false);
+    expect(context.writeTools).toEqual(["create_task"]);
+    expect(context.repoContent).toEqual([]);
+    expect(context.mentionContext).toBeNull();
+    expect(context.delegation).toEqual({ enabled: false, maxConcurrentRuns: 0 });
+    const raw = JSON.stringify(context);
+    expect(raw).not.toContain("exa-secret");
+    expect(raw).not.toContain("searchApiKey");
+    expect(raw).not.toContain("urlAllowlist");
   });
 });
 

@@ -35,6 +35,7 @@ import {
   type WriteTaskSnapshot,
 } from "./write-tools";
 import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
+import type { RepoContentEntry } from "../services/assistant-repo-content";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 
@@ -469,15 +470,40 @@ export interface InternalAssistantRouteResult {
   body: unknown;
 }
 
+/** Wire body for the per-turn harness context bundle (ADR-0004 §1). */
+export interface HarnessTurnContextRequest {
+  threadKey: string;
+  runId?: string | undefined;
+  userText: string;
+  mode: "turn" | "resume" | "runner";
+}
+
 /**
- * Per-turn settings the DO needs to offer only the tools the project has
- * configured (ADR-0003 §D). The Worker is the validation authority; this shape
- * is advisory gating for the offered tool set.
+ * The DO's per-turn context bundle (ADR-0004 §1, Appendix A). Assembled
+ * Worker-side; identity (project/actor/thread) is authoritative from the HMAC
+ * headers, never from the body. Redacted: no key material, no allowlist values
+ * — only the `hasSearchKey`/`jevConfigured` booleans cross the boundary.
  */
-export interface AssistantTurnContext {
+export interface HarnessTurnContext {
+  projectId: string;
+  threadKey: string;
+  documentType: "chat" | "task" | "wiki";
+  agent: { id: string; name: string; instructions: string } | null;
+  skillMarkdowns: string[];
+  skillCatalog: string | null;
+  memoryBlock: string | null;
+  docContext: string | null;
+  repoContent: RepoContentEntry[];
+  mentionContext: string | null;
+  advisory: string | null;
+  threadSummary: { summary: string; summarizedCount: number } | null;
   readTools: string[];
+  mcpTools: Array<{ name: string; description: string; inputSchema: unknown }>;
   writeTools: string[];
   primarySupportsImages: boolean;
+  hasSearchKey: boolean;
+  jevConfigured: boolean;
+  delegation: { enabled: boolean; maxConcurrentRuns: number };
 }
 
 /**
@@ -493,11 +519,14 @@ export interface InternalAssistantDeps {
    */
   resolveProviderConfigs?: ((projectId: string) => Promise<RegistryModelConfig[] | null>) | undefined;
   /**
-   * Resolve the project's per-turn tool gating (write tools, available read
-   * tools, image support). Unwired → 502; the DO then falls back to the core
-   * read set and no write tools.
+   * Resolve the project's per-turn harness context bundle (ADR-0004 §1). The
+   * Worker assembles agent/skill/memory/doc/mention/repo/Jev/summary + tool
+   * gating and returns it redacted. Unwired → 502; the DO then falls back to
+   * the core read set and no write tools.
    */
-  resolveTurnContext?: ((projectId: string) => Promise<AssistantTurnContext>) | undefined;
+  resolveHarnessTurnContext?:
+    | ((input: HarnessTurnContextRequest & { projectId: string }) => Promise<HarnessTurnContext>)
+    | undefined;
   /**
    * Execute one read tool in the Worker (project data, storage, Jev, Exa).
    * Unwired → 502 so the DO reports ASSISTANT_UNAVAILABLE rather than hanging.
@@ -553,24 +582,39 @@ export async function handleInternalAssistantRequest(input: {
     return { status: 200, body: { configs } };
   }
 
-  // Per-turn tool gating (ADR-0003 §D; P3 WS3): write tools enabled for the
-  // project and the read tools whose optional dependencies (Exa key, bound
-  // skills, Jev) actually resolve. The DO limits the offered tool set; the
-  // Worker routes stay the validation authority.
-  if (method === "GET" && path === "/api/internal/assistant/turn-context") {
+  // Per-turn harness context bundle (ADR-0004 §1; H1). The DO POSTs its
+  // thread/run/userText/mode; the signed identity is authoritative for the
+  // project/actor/thread, and the body may never override it. Redacted response:
+  // booleans (`hasSearchKey`/`jevConfigured`) and tool names/descriptors only.
+  if (method === "POST" && path === "/api/internal/assistant/turn-context") {
     const identity = input.identity;
-    if (!identity || identity.projectId.length === 0) {
-      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal project identity" } } };
+    if (!identity || identity.projectId.length === 0 || identity.threadKey.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
     }
-    const requested = input.query?.["projectId"] ?? "";
-    if (requested.length > 0 && requested !== identity.projectId) {
-      return { status: 403, body: { error: { code: "NO_USER_CONTEXT", message: "project identity mismatch" } } };
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const bodyThreadKey = typeof payload.threadKey === "string" ? payload.threadKey : "";
+    const userText = typeof payload.userText === "string" ? payload.userText : null;
+    const mode = payload.mode;
+    if (bodyThreadKey.length === 0 || userText === null || (mode !== "turn" && mode !== "resume" && mode !== "runner")) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid turn-context payload" } } };
     }
-    if (!input.deps?.resolveTurnContext) {
+    // Signed identity wins: a body thread that does not address this DO instance
+    // is rejected, never used.
+    if (bodyThreadKey !== identity.threadKey) {
+      return { status: 403, body: { error: { code: "NO_USER_CONTEXT", message: "identity mismatch" } } };
+    }
+    if (!input.deps?.resolveHarnessTurnContext) {
       return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Turn-context resolution not wired" } } };
     }
+    const runId = typeof payload.runId === "string" && payload.runId.length > 0 ? payload.runId : undefined;
     try {
-      const context = await input.deps.resolveTurnContext(identity.projectId);
+      const context = await input.deps.resolveHarnessTurnContext({
+        projectId: identity.projectId,
+        threadKey: identity.threadKey,
+        userText,
+        mode,
+        ...(runId !== undefined ? { runId } : {}),
+      });
       return { status: 200, body: { context } };
     } catch (e) {
       return {
