@@ -1321,7 +1321,8 @@ the run intact, and Jev emits no `task_activity` of its own.
   exported from `server/workers-entry.ts` under binding `ASSISTANT_AGENT`
   (`wrangler.jsonc` `durable_objects` + `new_sqlite_classes` migration). Instance
   name = threadKey `` `${documentType}:${documentId}` `` (`chat|task|wiki`).
-  **DO SQLite is canonical** (messages + `thread_meta` + import marker); D1
+  **DO SQLite is canonical** (messages + `thread_meta`, incl. the sticky
+  `permission_mode` + import marker); D1
   `assistant_threads` is a per-step **mirror** (list/search/export may lag ≤1
   mirror write). In-flight turns run via `runFiber` + `chatRecovery`, so a turn
   survives isolate eviction/redeploy; a second client queues instead of 409.
@@ -1334,15 +1335,45 @@ the run intact, and Jev emits no `task_activity` of its own.
   (`handleInternalAssistantRequest`), mounted in `server/workers-entry.ts`
   before the public middleware, authenticated only by the `X-Lexa-Internal` HMAC
   (≤120s skew). Surfaces: legacy import read, mirror write, read-tool execution,
-  write-tool proposal, provider config, turn context, call-log, run-status.
+  write-tool proposal, write execution (auto mode), provider config, turn
+  context, call-log, run-status.
   Writes that execute approved proposals run through the existing domain
   services (invariant #1 intact); terminal transitions emit activity in the
   same transaction (invariant #12).
 - **Inference** — `server/assistant/model-factory.ts` maps a registry row to an
   AI SDK provider, preserves the built-in `x-opencode-session` derivation, walks
   the ≤3 cross-kind fallback, and maps upstream 429 → `PROVIDER_RATE_LIMITED`.
-  Tools on AI SDK defs: `server/assistant/tools-ai.ts` (reads) +
-  `write-tools.ts` (proposals → D1 pending row → suspend → resume).
+  Tools on AI SDK defs: `server/assistant/tools-ai.ts` (reads; write dispatch is
+  mode-dependent) + `write-tools.ts` (proposal validation/diff → D1 pending row).
+
+- **Write-tool permission modes** — per-thread sticky `ask | auto | deny`
+  (`thread_meta.permission_mode`, default `ask`, with a guarded
+  `PRAGMA table_info` + `ALTER TABLE` upgrade for pre-mode DO stores; the
+  resolver lives in `shared/assistant.ts`). The mode is captured at TURN START
+  from the DO's sticky value, overridden by the send envelope's
+  `permissionMode` (chat threads only — a task/wiki run stays `ask`), and
+  persisted back as the new sticky value; a mid-turn change waits for the next
+  send (D2/D5/D6). Read tools are unaffected in every mode. Each write call
+  consumes one per-turn budget slot where a budget applies: `ask` is capped by
+  the Worker-side pending-row count, `auto` by the DO-side counter
+  (`MAX_WRITES_PER_TURN`); `deny` consumes none. A bulk call is one slot.
+  - `ask` — a write call proposes: a row in `assistant_pending_writes`,
+    `tool_pending` frames plus the persisted carrier, and the turn suspends on
+    `proposed === true` (below).
+  - `auto` — a write call executes immediately through the internal
+    `POST /api/internal/assistant/write-execute` route →
+    `applyAssistantWrite` (no pending row, no chips, no suspend). The result is
+    model-readable (`{ ok, applied, result?, error?, partial? }`); zero applied
+    is a tool error, a partially applied bulk still reports `partial`, and a
+    transport failure the DO cannot classify is marked `indeterminate` so the
+    model does not retry a possibly-applied write.
+  - `deny` — a write call returns a structured local refusal
+    (`{ ok:false, denied:true, error }`, no Worker call, no row, no suspend).
+    Write tools stay offered so the refusal is visible to the model, which may
+    suggest switching modes.
+  Emissions are unchanged: every task-mutating execution still calls the domain
+  services with `viaAssistant` (invariant #12); the other write paths are
+  unchanged.
 - **Legacy import** — `server/assistant/legacy-convert.ts` converts TanStack
   `ModelMessage[]` → `UIMessage[]` on first DO activation for a thread whose DO
   store is empty and whose D1 row has messages (lossy for tool-internal parts).
@@ -1444,7 +1475,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   approver sees; raw args ride the row for execution. Bulk reuses the existing
   diff type with summary strings (`taskRef: "52 tasks"`, `taskTitle` = first
   up-to-3 keys), so the approval chip target copy stays text, not a new kind.
-- **Approval protocol:** when a turn queued write proposals, the stream ends
+- **Approval protocol (ask mode):** when a turn queued write proposals, the stream ends
   at the suspend checkpoint instead of `done`: every pending row is emitted
   as a `tool_pending` frame (seq order), the assistant transcript entry is
   persisted with a `pendingBatch` marker — `{ batchId, approvals }` where
@@ -1465,7 +1496,10 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   the marker with `applyResumeResults`, and continues the stream from the
   existing transcript (no fresh user entry). Approval TTL is 24h
   (`APPROVAL_TTL_HOURS`, SQL-format `expires_at`) enforced lazily on
-  decide/resume/transcript reads — no timer.
+  decide/resume/transcript reads — no timer. This propose → pending-row →
+  suspend path is ask mode only; in `auto` a write executes immediately and in
+  `deny` it is refused locally, so neither reaches the approval protocol (see
+  the DO runtime section above).
 - **SSE bridge** (`sseHttpResponse` in `server/api/http.ts`): encodes
   StreamFrames as `event:`/`data:` pairs over a raw `HttpServerResponse.stream`
   (bypasses the JSON encoder) with a 15s `: ping` heartbeat comment. Exactly

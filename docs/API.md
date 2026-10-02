@@ -1607,8 +1607,15 @@ GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers
   data parts (the chat surface's replacement for the retained-legacy SSE chat
   stream — the route itself stays mounted on Workers, see `chat/stream` below).
   The chat send contract (attachments, `fromIndex` edit/regenerate/retry,
-  `@`-mention and `$`-skill resolution) is carried over the socket. A dropped
-  socket auto-resumes; the client surfaces a synthetic
+  `@`-mention and `$`-skill resolution) is carried over the socket. The send
+  body also carries an optional `permissionMode: "ask" | "auto" | "deny"` — the
+  composer's per-thread WRITE-tool permission. It is sent ONLY when the page has
+  an authoritative value for the thread (an in-session pick or a loaded
+  transcript); when unhydrated it is omitted, so the DO keeps its sticky
+  `thread_meta.permission_mode` (an absent/old-client send resolves to the
+  sticky value, default `ask`). The mode is captured at TURN START and
+  chat-only: a task/wiki run stays `ask` even if a crafted body carries a mode.
+  A dropped socket auto-resumes; the client surfaces a synthetic
   `ASSISTANT_CONNECTION_LOST` status while reconnecting (client-side only —
   never a server REST code).
 
@@ -1622,6 +1629,8 @@ GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers
     POST /api/internal/assistant/mirror             → { ok: true }        (per-step D1 mirror)
     POST /api/internal/assistant/tool               → { ok, result, error }   (read tool)
     POST /api/internal/assistant/write-tool         → { proposed, approvalId, error }
+    POST /api/internal/assistant/write-execute       → { ok, applied, result, error, partial }
+                                                       (auto-mode write; no pending row)
     GET  /api/internal/assistant/provider-config    → decrypted provider config per turn
     GET  /api/internal/assistant/turn-context       → prompt/Jev/memory context per turn
     POST /api/internal/assistant/call-log           → { ok: true }
@@ -2246,8 +2255,12 @@ body { projectId*, chatId*, message*, agentId?,
 
 GET    /api/assistant/chat/:chatId
 → 200 { chatId, projectId, ownerUserId, agentId, skillId, messages, summary,
-        summarizedCount, createdAt, updatedAt } | 404 ASSISTANT_THREAD_NOT_FOUND
-  Transcript for reload/scrollback. Persisted entries carry optional meta:
+        summarizedCount, permissionMode, createdAt, updatedAt }
+  | 404 ASSISTANT_THREAD_NOT_FOUND
+  Transcript for reload/scrollback. `permissionMode` is the sticky per-thread
+  WRITE permission (`"ask" | "auto" | "deny"`, DO canonical, `"ask"` fallback) —
+  the composer picker hydrates from it on load (D2/D5). Persisted entries carry
+  optional meta:
   user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
   failure an `error` {code,message} block or a `stopped:true` marker (client
   abort with partial text).
@@ -2266,6 +2279,9 @@ body { verdict*: "approve" | "reject" }
   Execution happens inside the resume stream (first act, before the provider
   call), so results stream as frames. `remaining` = unresolved rows left in
   the batch; the client opens the resume stream only when it reaches 0.
+  Decide/resume semantics are unchanged by the write permission mode: the mode
+  only decides whether a write call creates a pending row at all (`ask`) or
+  executes/refuses without one (`auto`/`deny`).
 
 POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-stream)
 POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
