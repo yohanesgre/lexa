@@ -2,7 +2,7 @@ name: publish-cli
 
 # CLI releases are INDEPENDENT of web app releases (see publish.yml):
 #   cli-vX.Y.Z tags → build the binary + attach it to the GitHub release
-#   vX.Y.Z tags     → web app image to ghcr.io (publish.yml)
+#   vX.Y.Z tags     → web app release tarballs on the GitHub release (publish.yml)
 # install-cli.sh and `lx upgrade` resolve the newest cli-v* release.
 
 on:
