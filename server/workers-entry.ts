@@ -566,8 +566,9 @@ function fallbackPage(): Response {
 }
 
 // ─── Scheduled (cron */15 * * * *): prune + backup retention ─────────────
-// Same SQL as the Bun host's setInterval prune (server/entry.ts). R2
-// retention uses the same stamp scheme as server/storage/backup.ts
+// Same SQL as the Bun host's setInterval prune (server/entry.ts):
+// webhook_events older than 7 days + device_login_requests past expires_at.
+// R2 retention uses the same stamp scheme as server/storage/backup.ts
 // (backups/lexa-<stamp>.db.gz + -blobs/ companions, lexical ==
 // chronological); snapshot creation itself is platform-impossible here.
 
@@ -614,6 +615,7 @@ export async function runScheduledCore(
   await Effect.runPromise(
     batchStmts(driver, [
       { sql: "DELETE FROM webhook_events WHERE received_at < datetime('now', '-7 days')", params: [] },
+      { sql: "DELETE FROM device_login_requests WHERE expires_at < datetime('now')", params: [] },
     ]).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] scheduled prune failed:", String(e)))))
   );
   if (runtimeEnv.LXK_BACKUP_ENABLED === "1" && blob) {

@@ -641,7 +641,9 @@ Rules:
   user-bound key. Replay is impossible — a later poll is 404. No in-memory
   transit store: approve and poll may land on different isolates.
 - Terminal states: denied (403 DEVICE_LOGIN_DENIED), expired (410 —
-  `expires_at` = 10 min; expired rows purged at boot with the webhook prune).
+  `expires_at` = 10 min; expired rows purged by the housekeeping prune
+  alongside `webhook_events` — Bun boot/`setInterval`, Workers `scheduled`
+  tick).
 - Middleware carve-out: create + poll are API-key exempt (the CLI has no
   credential yet) but stay rate-limited; approve/deny run through normal
   session auth — never exempt.
@@ -901,7 +903,7 @@ const moveHandler = (req) =>
   });
 ```
 
-The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days).
+The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days, and `device_login_requests` pruned past `expires_at`).
 
 ### Assistant run — repoContent delivery
 

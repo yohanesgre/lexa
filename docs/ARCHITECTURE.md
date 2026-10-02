@@ -776,7 +776,8 @@ replaying on D1:
   vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
   (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
-  `createAuth(env)` factory, `wrangler d1 migrations`, `scheduled` prune+backup.
+  `createAuth(env)` factory, `wrangler d1 migrations`, `scheduled` prune
+  (`webhook_events` >7 days + `device_login_requests` expired)+backup.
   Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays;
   read-dependent sites fold the read into the batch SQL or carry an explicit
   read-compute-retry window.
