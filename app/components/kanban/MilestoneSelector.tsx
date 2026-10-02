@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, ExternalLink } from "lucide-react";
 import { cn } from "../ui/cn";
@@ -14,8 +15,38 @@ interface MilestoneSelectorProps {
 // active milestone (first non-archived); "No milestone" shows loose sprints +
 // Backlog; archived milestones dimmed; "Manage milestones" deep-links.
 export function MilestoneSelector({ milestones, value, onChange, slug }: MilestoneSelectorProps) {
-  const active = milestones.find((m) => !m.archivedAt);
+  const [open, setOpen] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const selected = milestones.find((m) => m.id === value) ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(event: MouseEvent) {
+      if (detailsRef.current && !detailsRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        detailsRef.current?.querySelector("summary")?.focus();
+      }
+    }
+
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const select = (id: string | null) => {
+    onChange(id);
+    setOpen(false);
+  };
 
   const triggerLabel = selected ? (
     <>
@@ -35,7 +66,12 @@ export function MilestoneSelector({ milestones, value, onChange, slug }: Milesto
 
   return (
     <div className="ms-selector" style={{ marginLeft: 8 }}>
-      <details className="ms-selector-details">
+      <details
+        ref={detailsRef}
+        className="ms-selector-details"
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
         <summary className="ms-selector-trigger" title="Filter board by milestone">
           {triggerLabel}
           <ChevronDown size={12} strokeWidth={2} />
@@ -45,7 +81,7 @@ export function MilestoneSelector({ milestones, value, onChange, slug }: Milesto
             type="button"
             className={cn("ms-option", value === null && "active")}
             style={{ color: "var(--lx-text-secondary)", width: "100%" }}
-            onClick={() => onChange(null)}
+            onClick={() => select(null)}
           >
             No milestone
             <span className="ms-count">loose sprints + Backlog</span>
@@ -57,7 +93,7 @@ export function MilestoneSelector({ milestones, value, onChange, slug }: Milesto
               type="button"
               className={cn("ms-option", m.id === value && "active", !!m.archivedAt && "archived")}
               style={{ width: "100%" }}
-              onClick={() => onChange(m.id)}
+              onClick={() => select(m.id)}
             >
               {m.name}
               {m.archivedAt && <span className="ms-count">(archived)</span>}
