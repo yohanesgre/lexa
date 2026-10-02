@@ -313,7 +313,7 @@ function cachedBoard(qc: QueryClient, slug: string): Board | undefined {
 function findCachedTask(qc: QueryClient, slug: string, taskId: string): Task | undefined {
   const live = qc.getQueryData<Board>(["board", slug, false])?.tasks;
   const all = qc.getQueryData<Board>(["board", slug, true])?.tasks;
-  return all?.find((t) => t.id === taskId) ?? live?.find((t) => t.id === taskId);
+  return all?.find((t) => t.id === taskId) ?? live?.find((t) => t.id === taskId) ?? qc.getQueryData<Task>(["tasks", slug, taskId]);
 }
 
 function columnIsDone(qc: QueryClient, slug: string, columnId: string): boolean {
@@ -465,7 +465,10 @@ export function useDeleteTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
       });
-      applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, undefined));
+      // Unknown row (never cached): the server drops total and done, but the
+      // lane is unidentifiable — leave counts stale rather than synthesize an
+      // inflated delta.
+      if (prev) applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, undefined));
       qc.removeQueries({ queryKey: ["tasks", slug, id] });
       qc.removeQueries({ queryKey: ["task-activity", slug, id] });
       toast.push("success", "Task deleted");
@@ -525,7 +528,13 @@ export function useRestoreTask(slug: string) {
         return { ...old, tasks: [...old.tasks, task].sort(byPosition) };
       });
       qc.setQueryData(["tasks", slug, task.id], task);
-      applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, task));
+      // No cached source row: the restored task was counted done while archived
+      // but stayed in the same lane — total is unchanged and done drops by one.
+      // Deriving the lane from the response avoids a create-shaped +1 total.
+      const deltas = prev
+        ? taskTransitionDeltas(qc, slug, prev, task)
+        : [{ swimlaneId: task.swimlaneId, doneDelta: (isTaskDone(qc, slug, task) ? 1 : 0) - 1, totalDelta: 0 }];
+      applyProgressDeltas(qc, slug, deltas);
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task restored");
     },

@@ -769,6 +769,55 @@ describe("progress counts stay fresh after mutations (LX 63450bf5)", () => {
     expect(milestoneCounts()).toEqual({ tasksDone: 0, tasksTotal: 2 });
   });
 
+  // Regression: a restore whose archived row is in NO cache (only board(false)
+  // is seeded, no archived board, no task-detail cache). prev stays undefined,
+  // so the delta must be derived from the response lane — total unchanged, done
+  // drops by one — never the create-shaped +1 total.
+  it("useRestoreTask with no cached source row keeps total and drops done", async () => {
+    routes.set("POST /api/projects/demo/tasks/t3/restore", { data: { ...OPEN_TASK, id: "t3", archivedAt: null, position: "a2" }, activity: [] });
+    const board: Board = { ...BOARD, columns: [COLUMN, DONE_COLUMN], swimlanes: [LANE], milestones: [MILESTONE_PROGRESS], tasks: [OPEN_TASK, DONE_TASK] };
+    queryClient.setQueryData(["board", "demo", false], board);
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [LANE]);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE_PROGRESS]);
+    expect(queryClient.getQueryData(["board", "demo", true])).toBeUndefined();
+    const { result } = renderHook(() => useRestoreTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t3" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 0, tasksTotal: 3 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 0, tasksTotal: 3 });
+  });
+
+  // Regression: deleting a row that is in no cache must not synthesize a delta
+  // (the lane is unidentifiable) — counts stay stale rather than inflate.
+  it("useDeleteTask of an unknown row leaves lane counts untouched", async () => {
+    routes.set("DELETE /api/projects/demo/tasks/t9", 204);
+    const board: Board = { ...BOARD, columns: [COLUMN, DONE_COLUMN], swimlanes: [LANE], milestones: [MILESTONE_PROGRESS], tasks: [OPEN_TASK, DONE_TASK] };
+    queryClient.setQueryData(["board", "demo", false], board);
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [LANE]);
+    queryClient.setQueryData(["milestones", "demo"], [MILESTONE_PROGRESS]);
+    const { result } = renderHook(() => useDeleteTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t9" }); });
+    expect(laneCounts(false)).toEqual({ tasksDone: 1, tasksTotal: 3 });
+    expect(milestoneCounts()).toEqual({ tasksDone: 1, tasksTotal: 3 });
+  });
+
+  // Regression: the task-detail cache fallback localizes a cross-lane move even
+  // when neither board cache holds the row — one lane loses a task, the other
+  // gains it, totals stay balanced.
+  it("useMoveTask across lanes resolves the source row from the task cache", async () => {
+    routes.set("POST /api/projects/demo/tasks/t1/move", { data: { ...OPEN_TASK, swimlaneId: "s2" }, activity: [] });
+    const laneA: Swimlane = { ...LANE, id: "s1", tasksDone: 0, tasksTotal: 1 };
+    const laneB: Swimlane = { ...LANE, id: "s2", name: "Other", milestoneId: null, tasksDone: 0, tasksTotal: 0 };
+    const board: Board = { ...BOARD, columns: [COLUMN, DONE_COLUMN], swimlanes: [laneA, laneB], milestones: [], tasks: [] };
+    queryClient.setQueryData(["board", "demo", false], board);
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [laneA, laneB]);
+    queryClient.setQueryData(["tasks", "demo", "t1"], OPEN_TASK);
+    const { result } = renderHook(() => useMoveTask("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "t1", columnId: "c1", swimlaneId: "s2" }); });
+    const lanes = queryClient.getQueryData<Swimlane[]>(["projects", "demo", "swimlanes"])!;
+    expect(lanes.find((l) => l.id === "s1")).toMatchObject({ tasksDone: 0, tasksTotal: 0 });
+    expect(lanes.find((l) => l.id === "s2")).toMatchObject({ tasksDone: 0, tasksTotal: 1 });
+  });
+
   it("useMoveTask into a done column bumps done, keeps total", async () => {
     routes.set("POST /api/projects/demo/tasks/t1/move", { data: { ...OPEN_TASK, columnId: "c2", position: "a1" }, activity: [] });
     seedProgress();
