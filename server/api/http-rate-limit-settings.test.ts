@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createApiHandler } from "./http";
 import { apiRateLimiter, DEFAULT_RATE_LIMIT_MAX, DEFAULT_RATE_LIMIT_WINDOW_MS } from "./rate-limit";
+import { resetSettingsCache } from "./workers-ports";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -47,6 +48,10 @@ afterAll(() => {
   db.exec("DELETE FROM settings WHERE key IN ('rate_limit_max', 'rate_limit_window_ms')");
   db.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  resetSettingsCache();
 });
 
 const json = (method: string, path: string, body?: unknown, key: string = ADMIN_KEY) =>

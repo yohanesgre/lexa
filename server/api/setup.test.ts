@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
+import { resetSettingsCache } from "./workers-ports";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -29,6 +30,10 @@ beforeAll(async () => {
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  resetSettingsCache();
 });
 
 const setAdmin = (body: unknown) =>

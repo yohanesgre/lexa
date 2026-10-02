@@ -113,6 +113,22 @@ describe("TaskRepo.findUrgentAcrossAllProjects", () => {
   });
 });
 
+describe("TaskRepo.countsByColumnForProject", () => {
+  it("groups live tasks per column and reports zero for empty columns", async () => {
+    seed(db);
+    db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c2','p1','Doing',1,'open')").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c3','p1','Done',2,'closed')").run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at)
+                VALUES ('t-d1','p1','c2','s1','A','{"type":"doc","content":[]}','prio-1','type-1','a0','2026-01-04 10:00:00'),
+                       ('t-d2','p1','c2','s1','B','{"type":"doc","content":[]}','prio-1','type-1','a1','2026-01-05 10:00:00')`).run();
+    const repo = makeRepo(db);
+    const counts = await Effect.runPromise(repo.countsByColumnForProject("p1"));
+    expect(counts.get("c1")).toBe(1);
+    expect(counts.get("c2")).toBe(2);
+    expect(counts.has("c3")).toBe(false);
+  });
+});
+
 describe("TaskRepo GitHub issue title", () => {
   it("stores the title on link and refreshes it on upstream change", async () => {
     seed(db);

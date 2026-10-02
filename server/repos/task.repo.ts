@@ -549,6 +549,13 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           Effect.map((rows) => rows[0]!?.cnt ?? 0)
         ),
 
+      countsByColumnForProject: (projectId: string): Effect.Effect<Map<string, number>, DbError> =>
+        queryAll<{ column_id: string; cnt: number }>(
+          db,
+          `SELECT column_id, COUNT(*) as cnt FROM tasks WHERE project_id = ? AND archived_at IS NULL GROUP BY column_id`,
+          projectId
+        ).pipe(Effect.map((rows) => new Map(rows.map((r) => [r.column_id, r.cnt])))),
+
       findUrgentAcrossAllProjects: (limit: number): Effect.Effect<Array<{ id: string; title: string; project_name: string; project_slug: string; column_name: string; priority: string }>, DbError> =>
         queryAll<{ id: string; title: string; project_name: string; project_slug: string; column_name: string; priority: string }>(
           db,
