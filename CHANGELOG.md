@@ -7,6 +7,23 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.6.2] - 2026-10-03
+
+### Changed
+
+- **GitHub sync is configured only in the web app** — the env bootstrap is
+  gone. Legacy `GITHUB_*` vars are warned about and ignored at boot, the
+  installer's GitHub wizard is removed, and `lx github --local/--env-file` is
+  removed. Connect the App from Settings → Workspace → Integrations →
+  GitHub Sync (unchanged 2026.6.0 flow).
+
+### Fixed
+
+- **Milestone/swimlane UX** — the milestone selector light-dismisses, milestone
+  selection persists per session, sprint counts stay in sync across the
+  milestone and board views, "View on board" applies the swimlane filter, and
+  task-detail swimlane labels read `{swimlane} - {milestone}`.
+
 ## [2026.6.1] - 2026-10-02
 
 ### Added
