@@ -22,6 +22,7 @@ import { RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
 import { encryptSecret, parseMasterKey } from "./secrets";
 import {
   buildWorkerReadToolExecutor,
+  buildWorkerWriteToolExecutor,
   resolveWorkerJevConfig,
   resolveWorkerTurnContext,
 } from "./worker-tools";
@@ -204,5 +205,62 @@ describe("buildWorkerReadToolExecutor dispatch", () => {
   it("returns a typed error for an unknown tool", async () => {
     const res = await run("not_a_tool", {});
     expect(res).toEqual({ ok: false, error: "unknown read tool: not_a_tool" });
+  });
+});
+
+describe("buildWorkerWriteToolExecutor (auto mode, D4)", () => {
+  const exec = (name: string, args: Record<string, unknown>, ownerUserId = "u1") =>
+    buildWorkerWriteToolExecutor({ base: base() })({ name, args, projectId: "p1", ownerUserId });
+
+  // The auto path runs the full authz gate; a project grant is required for a
+  // non-superadmin owner. Uses the `user_project_roles` grant (decision order 2)
+  // so the test does not depend on team membership.
+  function grantAccess(userId = "u1"): void {
+    db.prepare("INSERT OR IGNORE INTO users (id, email, name, role) VALUES (?, ?, ?, 'member')").run(
+      userId,
+      `${userId}@test.dev`,
+      userId
+    );
+    db.prepare("INSERT OR IGNORE INTO user_project_roles (user_id, role, project_id) VALUES (?, 'member', 'p1')").run(userId);
+  }
+
+  it("applies a write immediately and returns the applied result", async () => {
+    seedBoard();
+    grantAccess();
+    const res = await exec("update_task", { ref: "P-1", title: "New title" });
+    expect(res.ok).toBe(true);
+    expect((res as { applied?: boolean }).applied).toBe(true);
+    const task = db.prepare("SELECT title FROM tasks WHERE id = 't1'").get() as { title: string };
+    expect(task.title).toBe("New title");
+  });
+
+  it("returns partial counts for a partially-applied bulk write", async () => {
+    seedBoard();
+    grantAccess();
+    const res = await exec("archive_task", { refs: ["P-1", "NOPE"] });
+    expect(res.ok).toBe(true);
+    expect((res as { applied?: boolean }).applied).toBe(true);
+    expect((res as { partial?: unknown }).partial).toEqual({
+      applied: 1,
+      failed: 1,
+      errors: [expect.stringContaining("TASK_NOT_FOUND")],
+    });
+    const task = db.prepare("SELECT archived_at FROM tasks WHERE id = 't1'").get() as { archived_at: string | null };
+    expect(task.archived_at).not.toBeNull();
+  });
+
+  it("fails a bulk write that applied zero items", async () => {
+    seedBoard();
+    grantAccess();
+    const res = await exec("archive_task", { refs: ["NOPE-1", "NOPE-2"] });
+    expect(res).toMatchObject({ ok: false, applied: false });
+    expect((res as { error?: string }).error).toContain("TASK_NOT_FOUND");
+  });
+
+  it("maps an authz denial to a FORBIDDEN tool error", async () => {
+    seedBoard();
+    const res = await exec("update_task", { ref: "P-1", title: "x" });
+    expect(res).toMatchObject({ ok: false, applied: false });
+    expect((res as { error?: string }).error).toContain("FORBIDDEN");
   });
 });

@@ -13,6 +13,7 @@ import {
   mirrorThread,
   readLegacyThread,
 } from "./internal-routes";
+import { applyAssistantWrite, type AssistantWriteApplyCtx } from "./write-execution";
 import type { RegistryModelConfig } from "./model-factory";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -355,6 +356,124 @@ describe("write-tool proposals (POST /api/internal/assistant/write-tool)", () =>
     expect((over.body as { error?: string }).error).toContain("write budget exceeded");
     const count = db.prepare("SELECT COUNT(*) AS n FROM assistant_pending_writes WHERE batch_id = 'budget-batch'").get() as { n: number };
     expect(count.n).toBe(8);
+  });
+});
+
+describe("auto-mode write execution (POST /api/internal/assistant/write-execute)", () => {
+  const driverOf = () => createBunSqliteDriver(db);
+
+  it("calls the injected executor, returns the result, and inserts no pending row", async () => {
+    seedTask();
+    const seen: Array<{ name: string; args: Record<string, unknown>; projectId: string; ownerUserId: string }> = [];
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { name: "update_task", args: { ref: "P-1", title: "New title" }, projectId: "p1", ownerUserId: "u1" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: {
+        executeWriteTool: async (input) => {
+          seen.push(input);
+          return { ok: true, applied: true, result: { id: "t1" } };
+        },
+      },
+    });
+    expect(result).toEqual({ status: 200, body: { ok: true, applied: true, result: { id: "t1" } } });
+    expect(seen).toEqual([
+      { name: "update_task", args: { ref: "P-1", title: "New title" }, projectId: "p1", ownerUserId: "u1" },
+    ]);
+    // Auto never takes the proposal path: no pending row exists.
+    const count = db.prepare("SELECT COUNT(*) AS n FROM assistant_pending_writes").get() as { n: number };
+    expect(count.n).toBe(0);
+  });
+
+  it("forwards a partial bulk result unchanged", async () => {
+    seedTask();
+    const partial = { applied: 1, failed: 1, errors: ["TASK_NOT_FOUND: missing"] };
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { name: "archive_task", args: { refs: ["P-1", "NOPE"] }, projectId: "p1", ownerUserId: "u1" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: { executeWriteTool: async () => ({ ok: true, applied: true, result: { applied: ["P-1"], failed: [] }, partial }) },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, applied: true, partial });
+  });
+
+  it("forwards a zero-applied failure unchanged", async () => {
+    seedTask();
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { name: "update_task", args: { ref: "NOPE", title: "x" }, projectId: "p1", ownerUserId: "u1" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: { executeWriteTool: async () => ({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" }) },
+    });
+    expect(result).toEqual({ status: 200, body: { ok: false, applied: false, error: "TASK_NOT_FOUND: nope" } });
+  });
+
+  it("403s an identity mismatch, 400s a malformed/unknown tool, 502s unwired", async () => {
+    seedTask();
+    const mismatch = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { name: "update_task", args: {}, projectId: "other", ownerUserId: "u1" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: { executeWriteTool: async () => ({ ok: true, applied: true }) },
+    });
+    expect(mismatch.status).toBe(403);
+
+    const malformed = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { args: {} },
+      driver: driverOf(),
+      identity: IDENTITY,
+    });
+    expect(malformed.status).toBe(400);
+
+    const unknown = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { name: "not_a_tool", args: {}, projectId: "p1", ownerUserId: "u1" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: { executeWriteTool: async () => ({ ok: true, applied: true }) },
+    });
+    expect(unknown.status).toBe(400);
+
+    const unwired = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/write-execute",
+      body: { name: "update_task", args: {}, projectId: "p1", ownerUserId: "u1" },
+      driver: driverOf(),
+      identity: IDENTITY,
+    });
+    expect(unwired.status).toBe(502);
+  });
+});
+
+describe("applyAssistantWrite authorization", () => {
+  it("denies before any service call when the owner has no project access", async () => {
+    const ctx = {
+      authz: { projectAccess: () => Effect.succeed(null) },
+    } as unknown as AssistantWriteApplyCtx;
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        applyAssistantWrite(
+          { toolName: "update_task", args: { ref: "P-1", title: "x" }, projectId: "p1", ownerUserId: "u1" },
+          ctx
+        )
+      )
+    );
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag === "Left") {
+      expect((outcome.left as { _tag: string })._tag).toBe("Forbidden");
+    }
   });
 });
 

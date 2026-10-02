@@ -23,7 +23,7 @@ import {
 import type { RegistryModelConfig } from "./model-factory";
 import type { AssistantCallLogInput } from "../../shared/assistant";
 import type { AssistantRunStatusInput, AssistantTurnContext } from "./internal-routes";
-import type { ReadToolResponse, WriteToolResponse } from "./tools-ai";
+import type { ReadToolResponse, WriteExecuteResponse, WriteToolResponse } from "./tools-ai";
 
 export const INTERNAL_LEGACY_PATH = "/api/internal/assistant/legacy";
 export const INTERNAL_MIRROR_PATH = "/api/internal/assistant/mirror";
@@ -33,6 +33,7 @@ export const INTERNAL_CALL_LOG_PATH = "/api/internal/assistant/call-log";
 export const INTERNAL_RUN_STATUS_PATH = "/api/internal/assistant/run-status";
 export const INTERNAL_TOOL_PATH = "/api/internal/assistant/tool";
 export const INTERNAL_WRITE_TOOL_PATH = "/api/internal/assistant/write-tool";
+export const INTERNAL_WRITE_EXECUTE_PATH = "/api/internal/assistant/write-execute";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -316,4 +317,77 @@ export async function proposeWrite(
   } catch (e) {
     return { ok: false, proposed: false, error: e instanceof Error ? e.message : "write proposal failed" };
   }
+}
+
+/** One auto-mode write sent to the Worker internal `/write-execute` route. */
+export interface AssistantWriteExecuteCallInput {
+  name: string;
+  args: Record<string, unknown>;
+  projectId: string;
+  ownerUserId: string;
+}
+
+/**
+ * Apply one write immediately in the Worker (auto mode, D4). NO retry: a lost
+ * response after the Worker applied the write would double-apply it on the
+ * second attempt (unlike a read, apply is not idempotent), so a transport
+ * failure returns an INDETERMINATE `{ ok: false, applied: false, indeterminate:
+ * true, error }` — the model is told the write may have landed and must not
+ * retry (reviewer MED). A Worker-decided 200 `{ ok: false }` is a definite
+ * failure and stays non-indeterminate. Zero applied is already a Worker-side
+ * failure.
+ */
+export async function callWriteExecute(
+  deps: AssistantInternalDeps,
+  input: AssistantWriteExecuteCallInput
+): Promise<WriteExecuteResponse> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input_, init) => fetch(input_, init));
+  const url = `${originOf(deps)}${INTERNAL_WRITE_EXECUTE_PATH}`;
+  try {
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: await signedHeaders(deps),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new AssistantInternalUnavailable(`write-execute ${input.name} failed (${res.status})`);
+    const body = (await res.json()) as {
+      ok?: unknown;
+      applied?: unknown;
+      result?: unknown;
+      error?: unknown;
+      partial?: unknown;
+    };
+    if (body.ok === true && body.applied === true) {
+      return {
+        ok: true,
+        applied: true,
+        ...(body.result !== undefined ? { result: body.result } : {}),
+        ...(isApprovalPartial(body.partial) ? { partial: body.partial } : {}),
+      } satisfies WriteExecuteResponse;
+    }
+    return {
+      ok: false,
+      applied: false,
+      error: typeof body.error === "string" ? body.error : "write failed",
+      ...(isApprovalPartial(body.partial) ? { partial: body.partial } : {}),
+    } satisfies WriteExecuteResponse;
+  } catch {
+    // The response was lost or the route errored: the Worker may or may not have
+    // applied the write. Never claim `applied: false` as fact and never retry.
+    return {
+      ok: false,
+      applied: false,
+      indeterminate: true,
+      error: `Write may have applied — do not retry. ${input.name} transport failed after the request was sent.`,
+    } satisfies WriteExecuteResponse;
+  }
+}
+
+function isApprovalPartial(value: unknown): value is { applied: number; failed: number; errors?: string[] } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { applied?: unknown }).applied === "number" &&
+    typeof (value as { failed?: unknown }).failed === "number"
+  );
 }

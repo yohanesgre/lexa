@@ -4,6 +4,42 @@ export type ProviderKind = "openai_compatible" | "anthropic_compatible" | "opena
 
 export type AssistantReasoningEffort = "minimal" | "low" | "medium" | "high";
 
+// Per-thread WRITE-tool permission mode (D1–D8). Read tools are unaffected.
+//   ask  → write tools propose; the turn suspends for per-chip approval (today)
+//   auto → write tools execute immediately (no pending row, no chips, no suspend)
+//   deny → write tools refuse with a model-readable result; reads still work
+export type AssistantToolPermissionMode = "ask" | "auto" | "deny";
+
+export const ASSISTANT_TOOL_PERMISSION_MODES: readonly AssistantToolPermissionMode[] = ["ask", "auto", "deny"];
+
+// Envelope validation: anything that is not a known mode (missing, null, a stale
+// value) resolves to "ask" — the conservative default (D5).
+export function parseAssistantToolPermissionMode(value: unknown): AssistantToolPermissionMode {
+  return value === "auto" || value === "deny" ? value : "ask";
+}
+
+// Turn-start capture (D2/D6): the send envelope overrides the thread's sticky
+// value; an absent envelope (a tool continuation, an old client) keeps sticky.
+// Unknown sticky (a pre-column DO row) resolves to "ask".
+export function resolveAssistantToolPermissionMode(
+  envelopeValue: unknown,
+  sticky: unknown
+): AssistantToolPermissionMode {
+  if (envelopeValue !== undefined) return parseAssistantToolPermissionMode(envelopeValue);
+  return sticky === "auto" || sticky === "deny" ? sticky : "ask";
+}
+
+// D5 scope: the picker is chat-only. A task/wiki run has no control and must
+// stay "ask" even when a crafted send envelope carries a mode.
+export function resolveThreadToolPermissionMode(
+  documentType: "chat" | "task" | "wiki" | null,
+  envelopeValue: unknown,
+  sticky: unknown
+): AssistantToolPermissionMode {
+  if (documentType !== "chat") return "ask";
+  return resolveAssistantToolPermissionMode(envelopeValue, sticky);
+}
+
 export const ASSISTANT_PRE_INGRESS_TIMEOUT_MS = 30_000;
 export const ASSISTANT_STALL_TIMEOUT_MS = 90_000;
 export const ASSISTANT_STALL_MESSAGE = "stream stalled — no response from provider";
@@ -232,6 +268,9 @@ export interface AssistantChatStreamRequest {
   attachments?: AssistantChatAttachment[] | undefined;
   fromIndex?: number | undefined;
   reasoningEffort?: AssistantReasoningEffort | null | undefined;
+  // Send envelope: the composer's current WRITE permission mode. Absent → the
+  // thread's sticky DO value (pre-mode threads default to "ask").
+  permissionMode?: AssistantToolPermissionMode | undefined;
 }
 
 export interface AssistantChatAttachment {
@@ -250,6 +289,9 @@ export interface AssistantChatTranscript {
   messages: unknown[];
   summary: string | null;
   summarizedCount: number;
+  // Sticky per-thread WRITE permission mode (D2/D5). The composer picker seeds
+  // from this on load; an absent/unknown DO value falls back to "ask".
+  permissionMode: AssistantToolPermissionMode;
   createdAt: ISODate;
   updatedAt: ISODate;
 }

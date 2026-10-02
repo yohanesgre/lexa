@@ -20,10 +20,11 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveTurnContext, recordCallLog, transitionRun, callReadTool, proposeWrite, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveTurnContext, recordCallLog, transitionRun, callReadTool, proposeWrite, callWriteExecute, type AssistantInternalDeps } from "./agent-runtime";
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
-import { buildReadTools, buildWriteTools, type AssistantToolTransport } from "./tools-ai";
-import { ASSISTANT_WRITE_TOOL_NAMES } from "./write-tool-names";
+import { buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
+import { MAX_WRITES_PER_TURN } from "./write-tool-names";
+import { resolveAssistantToolPermissionMode, resolveThreadToolPermissionMode, type AssistantToolPermissionMode } from "../../shared/assistant";
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
 import { withApprovalCarriers } from "./approval-carrier";
@@ -59,6 +60,7 @@ type ThreadMetaRow = {
   owner_user_id: string | null;
   imported_from_d1: number;
   created_at: string;
+  permission_mode: string | null;
 }
 
 const THREAD_META_DDL = `CREATE TABLE IF NOT EXISTS thread_meta (
@@ -66,6 +68,7 @@ const THREAD_META_DDL = `CREATE TABLE IF NOT EXISTS thread_meta (
   project_id TEXT NOT NULL,
   owner_user_id TEXT,
   imported_from_d1 INTEGER NOT NULL DEFAULT 0,
+  permission_mode TEXT NOT NULL DEFAULT 'ask',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
@@ -120,6 +123,16 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
 
   private ensureThreadMetaTable(): void {
     this.ctx.storage.sql.exec(THREAD_META_DDL);
+    // Pre-existing DOs created `thread_meta` without `permission_mode`; a
+    // `CREATE TABLE IF NOT EXISTS` cannot add a column. Guarded PRAGMA +
+    // ALTER gives those stores the sticky mode column (D2/E). The ALTER has a
+    // constant default, so existing rows become 'ask'.
+    const columns = this.ctx.storage.sql
+      .exec<{ name: string }>("PRAGMA table_info(thread_meta)")
+      .toArray();
+    if (!columns.some((column) => column.name === "permission_mode")) {
+      this.ctx.storage.sql.exec("ALTER TABLE thread_meta ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'ask'");
+    }
   }
 
   private readThreadMeta(threadKey: string): ThreadMetaRow | null {
@@ -280,7 +293,7 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // record the call log + terminal run status via the internal routes.
   override async onChatMessage(
     _onFinish?: unknown,
-    options?: { abortSignal?: AbortSignal | undefined } | undefined
+    options?: { abortSignal?: AbortSignal | undefined; body?: Record<string, unknown> | undefined } | undefined
   ): Promise<Response | undefined> {
     this.ensureThreadMetaTable();
     const threadKey = this.ctx.id.name ?? "";
@@ -289,8 +302,23 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     if (!meta || !deps) {
       return assistantErrorResponse(502, "ASSISTANT_UNAVAILABLE", "Assistant not configured");
     }
+    // Turn-start mode capture (D2/D6): the send envelope overrides the sticky
+    // thread value; the captured mode is then persisted as the new sticky value
+    // and held constant for the whole turn. A mid-turn change waits for the next
+    // send (or resume run). D5: the picker is chat-only, so a task/wiki run
+    // stays "ask" even if a crafted envelope carries a mode.
     const sessionId = threadKey.slice(threadKey.indexOf(":") + 1);
     const documentType = documentTypeOf(threadKey);
+    const permissionMode: AssistantToolPermissionMode = resolveThreadToolPermissionMode(
+      documentType,
+      options?.body?.permissionMode,
+      meta.permission_mode
+    );
+    try {
+      this.ctx.storage.sql.exec("UPDATE thread_meta SET permission_mode = ? WHERE thread_key = ?", permissionMode, threadKey);
+    } catch (e) {
+      console.warn("[Assistant] failed to persist permission mode:", e instanceof Error ? e.message : String(e));
+    }
     const runId = await this.loadRunId();
     const turnDeps: AssistantTurnDeps = {
       resolveProviderConfigs: (projectId) => resolveProviderConfigs(deps, projectId),
@@ -313,10 +341,15 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     };
 
     // Tool transport (ADR-0003 §B.5): read tools execute in the Worker; write
-    // tools persist a pending row and return `proposed:true`, which stops the
-    // tool loop (approval suspend). A write batch is minted per turn.
+    // tools are mode-dependent. Ask persists a pending row and returns
+    // `proposed:true` (approval suspend); auto applies immediately through
+    // `/write-execute`; deny never reaches here (the tool refuses locally).
+    // A write batch is minted per turn.
     const batchId = crypto.randomUUID();
     let writeSeq = 0;
+    // Per-turn auto-write budget (R5): the DO-side counter replicates the
+    // pending-row cap the ask path gets for free. A bulk call is one slot.
+    const writeBudget = createAssistantWriteBudget();
     const transport: AssistantToolTransport = {
       read: (name, args) => callReadTool(deps, name, args),
       propose: (name, args) =>
@@ -330,6 +363,17 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
           documentId: sessionId,
           ownerUserId: deps.identity.actorUserId,
         }),
+      execute: createBudgetedWriteExecutor(
+        writeBudget,
+        MAX_WRITES_PER_TURN,
+        (name, args) =>
+          callWriteExecute(deps, {
+            name,
+            args,
+            projectId: meta.project_id,
+            ownerUserId: deps.identity.actorUserId,
+          })
+      ),
     };
     // Per-turn tool gating (ADR-0003 §D; P3 WS3): the Worker resolves which
     // read tools have their dependencies (Exa key, bound skills, Jev) and which
@@ -339,23 +383,21 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     const enabledWrite = turnContext?.writeTools ?? [];
     const tools: ToolSet = {
       ...buildReadTools({ transport, available: availableRead }),
-      ...buildWriteTools({ transport, enabled: enabledWrite }),
+      ...buildWriteTools({ transport, enabled: enabledWrite, mode: permissionMode }),
     };
     const toolRoundCap = documentType === "chat" ? MAX_CHAT_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
     const stopWhen: StopCondition<ToolSet>[] = [stepCountIs(toolRoundCap)];
+    // Suspend only in ask mode on a SUCCESSFUL write proposal
+    // (`proposed === true`). Auto results carry no `proposed`; deny refuses
+    // locally — neither may stop the turn (D3/D4). A failed proposal is a
+    // recoverable tool error the model may retry; stopping on mere tool-call
+    // presence would end the turn on that failure (reviewer MED).
     if (enabledWrite.length > 0) {
-      // Suspend only on a SUCCESSFUL write proposal (`proposed === true`). A
-      // failed proposal is a recoverable tool error the model may retry; the Bun
-      // path loops until the round cap, so stopping on mere tool-call presence
-      // would end the turn on that failure (reviewer MED).
-      const enabled = new Set(enabledWrite);
       stopWhen.push(({ steps }) =>
-        steps.some((step) =>
-          step.toolResults.some((result) => {
-            if (!enabled.has(result.toolName)) return false;
-            const output = result.output as { proposed?: unknown } | null | undefined;
-            return output !== null && typeof output === "object" && output.proposed === true;
-          })
+        shouldSuspendOnProposal(
+          permissionMode,
+          enabledWrite,
+          steps.flatMap((step) => step.toolResults.map((result) => ({ toolName: result.toolName, output: result.output })))
         )
       );
     }
@@ -391,10 +433,24 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // Engine-backed run control (`resumeBatch`/`enqueueRun`/`abortRun`) is a
   // stub until P3; the invariants (one DO per thread, DO is canonical) hold now.
 
-  async getTranscript(): Promise<{ messages: UIMessage[]; summary: string | null; summarizedCount: number | null }> {
+  async getTranscript(): Promise<{
+    messages: UIMessage[];
+    summary: string | null;
+    summarizedCount: number | null;
+    permissionMode: AssistantToolPermissionMode;
+  }> {
     // summary/summarizedCount stay null until the P3 engine tracks them on the
-    // DO; the REST read prefers a non-null DO value over the D1 mirror.
-    return { messages: this.messages, summary: null, summarizedCount: null };
+    // DO; the REST read prefers a non-null DO value over the D1 mirror. The
+    // sticky permission mode hydrates the composer picker (D2/D5); a
+    // pre-column/uninitialized store falls back to "ask".
+    this.ensureThreadMetaTable();
+    const meta = this.readThreadMeta(this.ctx.id.name ?? "");
+    return {
+      messages: this.messages,
+      summary: null,
+      summarizedCount: null,
+      permissionMode: resolveAssistantToolPermissionMode(undefined, meta?.permission_mode),
+    };
   }
 
   async resumeBatch(_batchId: string | null): Promise<{ ok: true }> {

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   INTERNAL_LEGACY_PATH,
   INTERNAL_MIRROR_PATH,
+  INTERNAL_WRITE_EXECUTE_PATH,
   AssistantInternalUnavailable,
+  callWriteExecute,
   fetchLegacyTranscript,
   mirrorTranscript,
   type FetchLike,
@@ -143,5 +145,75 @@ describe("mirrorTranscript", () => {
     };
     await expect(mirrorTranscript(deps(fetchImpl), { messages: [], summary: null, summarizedCount: 0 })).resolves.toBe(true);
     expect(n).toBe(2);
+  });
+});
+
+describe("callWriteExecute (auto mode)", () => {
+  const INPUT = { name: "update_task", args: { ref: "P-1", title: "x" }, projectId: "proj-1", ownerUserId: "user-1" };
+
+  it("POSTs the write to the execute route and maps an applied result", async () => {
+    const calls: Array<{ url: string; method?: string | undefined; headers: Headers; body: unknown }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      calls.push({ url, method: init?.method, headers: new Headers(init?.headers), body: init?.body ? JSON.parse(String(init.body)) : null });
+      return jsonResponse({ ok: true, applied: true, result: { id: "t1" } });
+    };
+    const out = await callWriteExecute(deps(fetchImpl), INPUT);
+    expect(out).toEqual({ ok: true, applied: true, result: { id: "t1" } });
+    expect(calls[0]?.url).toBe(`https://lexa.test${INTERNAL_WRITE_EXECUTE_PATH}`);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toEqual(INPUT);
+    const headers = calls[0]!.headers;
+    await expect(
+      verifyInternalAuth(SECRET, headers.get(INTERNAL_AUTH_HEADER), IDENTITY, { nowMs: NOW_MS })
+    ).resolves.toBe(true);
+  });
+
+  it("preserves a partial batch count on an applied result", async () => {
+    const fetchImpl: FetchLike = async () =>
+      jsonResponse({ ok: true, applied: true, result: { applied: ["P-1"], failed: [] }, partial: { applied: 1, failed: 1, errors: ["x"] } });
+    const out = await callWriteExecute(deps(fetchImpl), INPUT);
+    expect(out).toEqual({
+      ok: true,
+      applied: true,
+      result: { applied: ["P-1"], failed: [] },
+      partial: { applied: 1, failed: 1, errors: ["x"] },
+    });
+  });
+
+  it("maps a zero-applied failure to a typed error the model reads", async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" });
+    await expect(callWriteExecute(deps(fetchImpl), INPUT)).resolves.toEqual({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" });
+  });
+
+  it("does NOT retry a failed write (a lost response must not double-apply)", async () => {
+    let n = 0;
+    const fetchImpl: FetchLike = async () => {
+      n += 1;
+      throw new Error("network down");
+    };
+    await expect(callWriteExecute(deps(fetchImpl), INPUT)).resolves.toMatchObject({ ok: false, applied: false });
+    expect(n).toBe(1);
+  });
+
+  it("marks a transport failure indeterminate (may have applied — do not retry)", async () => {
+    const fetchImpl: FetchLike = async () => {
+      throw new Error("network down");
+    };
+    const out = await callWriteExecute(deps(fetchImpl), INPUT);
+    expect(out).toMatchObject({ ok: false, applied: false, indeterminate: true });
+    expect((out as { error?: string }).error).toContain("may have applied");
+  });
+
+  it("marks a non-2xx route failure indeterminate too", async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse({ error: { code: "ASSISTANT_UNAVAILABLE" } }, 502);
+    const out = await callWriteExecute(deps(fetchImpl), INPUT);
+    expect(out).toMatchObject({ ok: false, applied: false, indeterminate: true });
+  });
+
+  it("does NOT mark a Worker-decided failure indeterminate", async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" });
+    const out = await callWriteExecute(deps(fetchImpl), INPUT);
+    expect(out).toEqual({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" });
+    expect((out as { indeterminate?: unknown }).indeterminate).toBeUndefined();
   });
 });

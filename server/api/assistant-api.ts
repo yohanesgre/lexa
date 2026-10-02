@@ -392,6 +392,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           messages,
           summary: doSummary ?? t.summary,
           summarizedCount: doSummarizedCount ?? t.summarizedCount,
+          permissionMode: doTranscript?.permissionMode ?? "ask",
           createdAt: t.createdAt,
           updatedAt: t.updatedAt,
         };

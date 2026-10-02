@@ -49,29 +49,40 @@ const taskRefsFromArgs = (args: Record<string, unknown>): string[] => {
   return out;
 };
 
-export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: AssistantWriteExecutionCtx) =>
+// The row-free core: the same authz + domain switch the approved-write path
+// runs, without a pending row to mark. The ask path wraps this (below) and
+// records failures on its row; the auto path (`internal-routes.ts`
+// `/write-execute`) applies it directly. Args are the already-validated tool
+// input; `projectId`/`ownerUserId` come from the verified identity, never the
+// model.
+export interface AssistantWriteApplyInput {
+  toolName: AssistantWriteToolName;
+  args: Record<string, unknown>;
+  projectId: string;
+  ownerUserId: string;
+}
+
+// `pendingWritesRepo` is a row concern, not an apply concern — the auto path
+// has no row. `executeAssistantWrite` passes the full ctx (structurally
+// compatible) so the ask path is unchanged.
+export type AssistantWriteApplyCtx = Omit<AssistantWriteExecutionCtx, "pendingWritesRepo">;
+
+export const applyAssistantWrite = (input: AssistantWriteApplyInput, ctx: AssistantWriteApplyCtx) =>
   Effect.gen(function* () {
-    const access = yield* ctx.authz.projectAccess(row.owner_user_id, row.project_id);
+    const access = yield* ctx.authz.projectAccess(input.ownerUserId, input.projectId);
     if (access === null) {
-      const message = "FORBIDDEN: Write denied: insufficient permissions.";
-      yield* ctx.pendingWritesRepo.markExecutionError(row.id, message);
-      return { approvalId: row.id, ok: false as const, error: message };
+      return yield* Effect.fail(new Forbidden({ message: "Write denied: insufficient permissions." }));
     }
-    const actor = assistantActor(row.owner_user_id);
-    let args: Record<string, unknown> = {};
-    try {
-      args = JSON.parse(row.args) as Record<string, unknown>;
-    } catch {
-      args = {};
-    }
+    const actor = assistantActor(input.ownerUserId);
+    const args = input.args;
     const resolveTaskRefRow = (ref: string) =>
       ctx.taskRepo.findById(ref).pipe(
         Effect.orElse(() => ctx.taskRepo.findByKey(ref)),
         Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: ref })),
-        // Proposal-time resolution scopes the ref to the pending row's
-        // project; re-check at execution time (the args are untrusted here).
+        // Proposal-time resolution scopes the ref to the write's project;
+        // re-check at execution time (the args are untrusted here).
         Effect.flatMap((t) =>
-          t.projectId !== row.project_id
+          t.projectId !== input.projectId
             ? Effect.fail(new Forbidden({ message: "Write denied: task is outside the approved project." }))
             : Effect.succeed(t)
         )
@@ -108,16 +119,16 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
         return { applied: appliedRefs, failed, ...(failed.length > 0 ? { partial: true as const } : {}) };
       });
     const applied = yield* Effect.gen(function* () {
-      switch (row.tool_name as AssistantWriteToolName) {
+      switch (input.toolName) {
         case "create_task": {
           const first = yield* Effect.promise(() =>
-            ctx.db.prepare(`SELECT id FROM columns WHERE project_id = ? ORDER BY position ASC LIMIT 1`).first<{ id: string }>(row.project_id)
+            ctx.db.prepare(`SELECT id FROM columns WHERE project_id = ? ORDER BY position ASC LIMIT 1`).first<{ id: string }>(input.projectId)
           );
           if (!first) return yield* new InvalidArgs({ reason: "project has no columns" });
           return yield* (ctx.taskService as unknown as { create(a: Actor, b: unknown, c: unknown): Effect.Effect<unknown, unknown> }).create(
             actor,
             {
-              projectId: row.project_id,
+              projectId: input.projectId,
               columnId: first.id,
               title: str(args.title ?? ""),
               ...(args.description !== undefined ? { description: args.description as TipTapDoc } : {}),
@@ -182,21 +193,21 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
           return yield* (ctx.commentService as unknown as { create(a: string, b: Actor, c: TipTapDoc, d: unknown): Effect.Effect<unknown, unknown> }).create((t as unknown as { id: string }).id, actor, args.body as TipTapDoc, { viaAssistant: true });
         }
         case "create_wiki_page":
-          return yield* (ctx.wikiService as unknown as { create(a: string, b: unknown): Effect.Effect<unknown, unknown> }).create(row.project_id, {
+          return yield* (ctx.wikiService as unknown as { create(a: string, b: unknown): Effect.Effect<unknown, unknown> }).create(input.projectId, {
             title: str(args.title ?? ""),
             ...(args.slug !== undefined ? { slug: str(args.slug) } : {}),
             ...(args.content !== undefined ? { content: args.content as TipTapDoc } : {}),
             ...(args.parentId !== undefined ? { parentId: str(args.parentId) } : {}),
           });
         case "edit_wiki_page": {
-          const page = yield* ctx.wikiRepo.findBySlug(row.project_id, str(args.slug ?? "")).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") })));
+          const page = yield* ctx.wikiRepo.findBySlug(input.projectId, str(args.slug ?? "")).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") })));
           return yield* (ctx.wikiService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown> }).update((page as unknown as { id: string }).id, {
             ...(args.title !== undefined ? { title: str(args.title) } : {}),
             ...(args.content !== undefined ? { content: JSON.stringify(args.content) } : {}),
           });
         }
         case "create_milestone":
-          return yield* (ctx.milestoneService as unknown as { create(a: unknown): Effect.Effect<unknown, unknown> }).create({ projectId: row.project_id, name: str(args.name ?? ""), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}) });
+          return yield* (ctx.milestoneService as unknown as { create(a: unknown): Effect.Effect<unknown, unknown> }).create({ projectId: input.projectId, name: str(args.name ?? ""), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}) });
         case "update_milestone":
           return yield* (ctx.milestoneService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown> }).update(str(args.milestoneId ?? ""), { ...(args.name !== undefined ? { name: str(args.name) } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}) });
         case "archive_milestone":
@@ -204,7 +215,7 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
         case "delete_milestone":
           return yield* (ctx.milestoneService as unknown as { delete(a: string): Effect.Effect<unknown, unknown> }).delete(str(args.milestoneId ?? ""));
         case "create_sprint":
-          return yield* (ctx.swimlaneService as unknown as { create(a: unknown): Effect.Effect<unknown, unknown> }).create({ projectId: row.project_id, name: str(args.name ?? ""), ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}), ...(args.milestoneId !== undefined ? { milestoneId: str(args.milestoneId) } : {}) });
+          return yield* (ctx.swimlaneService as unknown as { create(a: unknown): Effect.Effect<unknown, unknown> }).create({ projectId: input.projectId, name: str(args.name ?? ""), ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}), ...(args.milestoneId !== undefined ? { milestoneId: str(args.milestoneId) } : {}) });
         case "update_sprint":
           return yield* (ctx.swimlaneService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown> }).update(str(args.swimlaneId ?? ""), { ...(args.name !== undefined ? { name: str(args.name) } : {}), ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}) });
         case "archive_sprint":
@@ -212,7 +223,7 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
         case "delete_sprint":
           return yield* (ctx.swimlaneService as unknown as { delete(a: string): Effect.Effect<unknown, unknown> }).delete(str(args.swimlaneId ?? ""));
         case "delete_wiki_page": {
-          const page = yield* ctx.wikiRepo.findBySlug(row.project_id, str(args.slug ?? "")).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") })));
+          const page = yield* ctx.wikiRepo.findBySlug(input.projectId, str(args.slug ?? "")).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") })));
           return yield* (ctx.wikiService as unknown as { delete(a: string): Effect.Effect<unknown, unknown> }).delete((page as unknown as { id: string }).id);
         }
         case "move_swimlane": {
@@ -234,13 +245,37 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
           return yield* runBulkTaskOp(refs, (id) => (ctx.taskService as unknown as { delete(a: Actor, b: string): Effect.Effect<unknown, unknown> }).delete(actor, id));
         }
       }
-    }).pipe(Effect.either);
-    if (applied._tag === "Left") {
-      const err = applied.left as { _tag?: string; message?: string };
+    });
+    return applied;
+  });
+
+// Ask-path wrapper (unchanged behavior): parse the persisted args, run the
+// shared apply, and record a failure on the pending row. The `FORBIDDEN`
+// authz refusal still maps through `errorCodeMap` to the same string the
+// baseline produced.
+export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: AssistantWriteExecutionCtx) =>
+  Effect.gen(function* () {
+    let args: Record<string, unknown> = {};
+    try {
+      args = JSON.parse(row.args) as Record<string, unknown>;
+    } catch {
+      args = {};
+    }
+    const outcome = yield* applyAssistantWrite(
+      {
+        toolName: row.tool_name as AssistantWriteToolName,
+        args,
+        projectId: row.project_id,
+        ownerUserId: row.owner_user_id,
+      },
+      ctx
+    ).pipe(Effect.either);
+    if (outcome._tag === "Left") {
+      const err = outcome.left as { _tag?: string; message?: string };
       const code = errorCodeMap[err._tag ?? ""] ?? "ASSISTANT_WRITE_FAILED";
       const message = `${code}: ${str(err.message ?? "write failed")}`.slice(0, 2000);
       yield* ctx.pendingWritesRepo.markExecutionError(row.id, message);
       return { approvalId: row.id, ok: false as const, error: message };
     }
-    return { approvalId: row.id, ok: true as const, result: applied.right };
+    return { approvalId: row.id, ok: true as const, result: outcome.right };
   });

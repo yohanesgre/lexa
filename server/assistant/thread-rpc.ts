@@ -15,6 +15,7 @@
 // helper and also degrade to `null`.
 
 import { Context } from "effect";
+import type { AssistantToolPermissionMode } from "../../shared/assistant";
 
 export interface AssistantThreadRpcShape {
   /**
@@ -26,7 +27,13 @@ export interface AssistantThreadRpcShape {
   /** DO canonical transcript read; `null` = no DO (Bun) or unreachable. */
   getTranscript(
     threadKey: string
-  ): Promise<{ messages: unknown[]; summary: string | null; summarizedCount: number | null } | null>;
+  ): Promise<{
+    messages: unknown[];
+    summary: string | null;
+    summarizedCount: number | null;
+    /** Sticky per-thread WRITE permission mode (D2); "ask" fallback. */
+    permissionMode: AssistantToolPermissionMode;
+  } | null>;
   /** Resume the suspended approval batch for a thread (`null` batchId = current). */
   resumeBatch(threadKey: string, batchId: string | null): Promise<{ ok: true } | null>;
   /** Destroy a thread's DO storage (chat delete). */

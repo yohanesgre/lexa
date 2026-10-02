@@ -507,6 +507,80 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(seeded?.title).toBe("Seeded Title");
   }, 60_000);
 
+  it("upgrades a pre-existing thread_meta table by adding permission_mode (guarded ALTER)", async () => {
+    // Simulate a DO store created before the feature: `thread_meta` exists
+    // WITHOUT `permission_mode`, and a row already lives in it. A
+    // `CREATE TABLE IF NOT EXISTS` cannot add a column, so the guarded
+    // PRAGMA + ALTER must upgrade it and default the existing row to 'ask'.
+    // The DO is booted first (so the storage handle is named), then its
+    // `thread_meta` is replaced with the pre-feature schema.
+    const documentId = "pre-column";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const id = await durableObjectId(threadKey);
+    const storage = await mf!.unsafeGetDurableObjectStorage(WORKER_NAME, class_name, { id });
+    await waitFor<boolean>(async () => {
+      const rows = await storage.exec(`SELECT thread_key FROM thread_meta WHERE thread_key = '${threadKey}'`);
+      return rows.length > 0 ? true : null;
+    }, 20_000);
+
+    await storage.exec("DROP TABLE thread_meta");
+    await storage.exec(
+      "CREATE TABLE thread_meta (thread_key TEXT PRIMARY KEY, project_id TEXT NOT NULL, owner_user_id TEXT, imported_from_d1 INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+    );
+    await storage.exec(
+      `INSERT INTO thread_meta (thread_key, project_id, owner_user_id) VALUES ('${threadKey}', 'proj-1', 'user-1')`
+    );
+
+    // getTranscript re-runs ensureThreadMetaTable on the live instance: the
+    // guarded PRAGMA + ALTER must add the column.
+    const res = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+    );
+    const body = (await res.json()) as { permissionMode?: unknown };
+    expect(body.permissionMode).toBe("ask");
+
+    const cols = await storage.exec<{ name: string }>("PRAGMA table_info(thread_meta)");
+    expect(cols.some((c) => c.name === "permission_mode")).toBe(true);
+    const row = await storage.exec<{ permission_mode: string }>(
+      `SELECT permission_mode FROM thread_meta WHERE thread_key = '${threadKey}'`
+    );
+    expect(row[0]?.permission_mode).toBe("ask");
+  }, 60_000);
+
+  it("getTranscript hydrates the sticky permission mode and falls back to ask", async () => {
+    const documentId = "perm-hydrate";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const id = await durableObjectId(threadKey);
+    const storage = await mf!.unsafeGetDurableObjectStorage(WORKER_NAME, class_name, { id });
+    await waitFor<boolean>(async () => {
+      const rows = await storage.exec(`SELECT thread_key FROM thread_meta WHERE thread_key = '${threadKey}'`);
+      return rows.length > 0 ? true : null;
+    }, 20_000);
+
+    const readMode = async (): Promise<unknown> => {
+      const res = await mf!.dispatchFetch(
+        `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+      );
+      return ((await res.json()) as { permissionMode?: unknown }).permissionMode;
+    };
+    // Fresh thread: no column value yet → conservative default.
+    expect(await readMode()).toBe("ask");
+
+    await storage.exec(`UPDATE thread_meta SET permission_mode = 'auto' WHERE thread_key = '${threadKey}'`);
+    expect(await readMode()).toBe("auto");
+
+    await storage.exec(`UPDATE thread_meta SET permission_mode = 'bogus' WHERE thread_key = '${threadKey}'`);
+    expect(await readMode()).toBe("ask");
+  }, 60_000);
+
   it("load smoke: 10 concurrent threads connect, persist, and read back independently", async () => {
     // WS2 (P6): bounded local load smoke. Ten thread-keyed DO instances are
     // driven concurrently through the real WS gate + persistence + canonical

@@ -11,7 +11,7 @@
 
 import { Effect, Layer, ManagedRuntime } from "effect";
 import type { DbDriver } from "../db/db";
-import { queryAll, queryFirst, type Db } from "../db/db";
+import { Db, queryAll, queryFirst } from "../db/db";
 import type { RuntimeEnv } from "../env";
 import { RuntimeEnvTag } from "../runtime-env";
 import { TaskRepo } from "../repos/task.repo";
@@ -19,13 +19,23 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { Storage, StorageConfig } from "../storage/storage";
 import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "../storage/config";
 import { AssistantJevService } from "../services/assistant-jev.service";
+import { TaskService } from "../services/task.service";
+import { CommentService } from "../services/comment.service";
+import { WikiService } from "../services/wiki.service";
+import { MilestoneService } from "../services/milestone.service";
+import { SwimlaneService } from "../services/swimlane.service";
+import { AuthorizationService } from "../services/authorization.service";
+import { errorCodeMap } from "../api/errors";
+import { applyAssistantWrite, type AssistantWriteApplyCtx } from "./write-execution";
+import type { AssistantWriteToolName } from "./write-tool-names";
 import { BOUND_SKILLS_SQL, matchBoundSkillByName } from "../services/assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { parseWriteTools } from "./write-tools";
 import { buildAssistantTools, type AssistantToolDeps, type BoundSkill } from "./tools";
 import { resolveVisionMode } from "./vision";
 import type { JevRuntimeConfig } from "./jev";
-import type { ReadToolResponse } from "./tools-ai";
+import type { ApprovalPartial } from "../../shared/assistant";
+import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
 
 type BaseLayer = Layer.Layer<Db | RuntimeEnvTag>;
 
@@ -382,6 +392,110 @@ export function buildWorkerReadToolExecutor(
       return { ok: true, result };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "tool execution failed" };
+    }
+  };
+}
+
+// ── Auto-mode write executor (D4) ──────────────────────────────────────────
+// Mirrors the read executor: the Worker owns the domain switch (`applyAssistantWrite`)
+// behind the HMAC route, building the same service graph the Bun path uses over
+// the request's Db/RuntimeEnv layers. The route only forwards identity-verified
+// input; args are already schema-validated DO-side.
+
+export interface WorkerWriteToolExecutorInput {
+  name: string;
+  args: Record<string, unknown>;
+  projectId: string;
+  ownerUserId: string;
+}
+
+function partialOf(result: unknown): { partial?: ApprovalPartial } {
+  const failed = (result as { failed?: unknown } | null | undefined)?.failed;
+  const applied = (result as { applied?: unknown } | null | undefined)?.applied;
+  if (!Array.isArray(failed) || failed.length === 0) return {};
+  return {
+    partial: {
+      applied: Array.isArray(applied) ? applied.length : 0,
+      failed: failed.length,
+      errors: failed
+        .map((f) => (f as { error?: unknown } | null | undefined)?.error)
+        .filter((e): e is string => typeof e === "string"),
+    },
+  };
+}
+
+export function buildWorkerWriteToolExecutor(deps: {
+  base: BaseLayer;
+}): (input: WorkerWriteToolExecutorInput) => Promise<WriteExecuteResponse> {
+  const services = Layer.mergeAll(
+    TaskService.Default,
+    CommentService.Default,
+    WikiService.Default,
+    MilestoneService.Default,
+    SwimlaneService.Default,
+    AuthorizationService.Default,
+    TaskRepo.Default,
+    WikiRepo.Default
+  );
+  // `Db` rides the base layer, so `driver` is not a dependency here. The layer
+  // is provided per call and finalized after it, mirroring the read executor
+  // (reviewer NIT: the previous ManagedRuntime was never disposed).
+  const layer = Layer.mergeAll(Layer.provide(services, deps.base), deps.base);
+  return async (input) => {
+    try {
+      return await Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const db = yield* Db;
+            const taskService = yield* TaskService;
+            const commentService = yield* CommentService;
+            const wikiService = yield* WikiService;
+            const milestoneService = yield* MilestoneService;
+            const swimlaneService = yield* SwimlaneService;
+            const authz = yield* AuthorizationService;
+            const taskRepo = yield* TaskRepo;
+            const wikiRepo = yield* WikiRepo;
+            const ctx: AssistantWriteApplyCtx = {
+              db,
+              taskService,
+              commentService,
+              wikiService,
+              milestoneService,
+              swimlaneService,
+              authz,
+              taskRepo,
+              wikiRepo,
+            };
+            const outcome = yield* applyAssistantWrite(
+              {
+                toolName: input.name as AssistantWriteToolName,
+                args: input.args,
+                projectId: input.projectId,
+                ownerUserId: input.ownerUserId,
+              },
+              ctx
+            ).pipe(Effect.either);
+            if (outcome._tag === "Left") {
+              const err = outcome.left as { _tag?: string; message?: string };
+              const code = errorCodeMap[err._tag ?? ""] ?? "ASSISTANT_WRITE_FAILED";
+              return {
+                ok: false,
+                applied: false,
+                error: `${code}: ${String(err.message ?? "write failed")}`.slice(0, 2000),
+              } satisfies WriteExecuteResponse;
+            }
+            return {
+              ok: true,
+              applied: true,
+              result: outcome.right,
+              ...partialOf(outcome.right),
+            } satisfies WriteExecuteResponse;
+          }),
+          layer
+        )
+      );
+    } catch (e) {
+      return { ok: false, applied: false, error: e instanceof Error ? e.message : "write failed" };
     }
   };
 }
