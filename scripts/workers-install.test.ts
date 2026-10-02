@@ -369,4 +369,12 @@ describe("source order — account resolves before any resource is created", () 
     );
     expect(src).toContain("observability: resolveObservability(rootConfig)");
   });
+
+  test("main emits the ASSETS binding on the static-assets directory", () => {
+    const src = readFileSync(
+      new URL("./workers-install.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain('assets: { directory: "./assets", binding: "ASSETS" }');
+  });
 });

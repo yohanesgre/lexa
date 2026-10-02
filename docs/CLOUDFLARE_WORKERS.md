@@ -126,12 +126,20 @@ directly. Serving flow for non-API routes:
   workerd resolves it at runtime.
 - other non-API → `handleNonShare`: try the prerendered `_shell.html` from the
   static-assets binding when present, else fall back to `handleSsr`. The
-  generated config (`dist/server/wrangler.json`) emits no `assets.binding`, so
-  `env.ASSETS` is undefined and the fallback runs today — the Start handler
-  emits the full root document for `ssr: false` routes. `injectEntryScript`
-  patches each response individually; there is no module-global shell cache (the
-  old `patchedShell` served the first route's HTML to every later one, so
-  `/share/*` got the root shell).
+  install-generated per-deploy config binds the staged assets directory
+  (`assets: { directory: "./assets", binding: "ASSETS" }`), so `env.ASSETS`
+  exists and `getShellHtml` fetches `/_shell.html` — the fast path serves the
+  prerendered shell and `handleSsr` stays the fallback (the Start handler emits
+  the full root document for `ssr: false` routes). The Vite build manifest
+  (`dist/server/wrangler.json`) still declares only `assets.directory`; the
+  installer adds the binding. `injectEntryScript` patches each response
+  individually; there is no module-global shell cache (the old `patchedShell`
+  served the first route's HTML to every later one, so `/share/*` got the root
+  shell).
+- static files under `public/` land in `dist/client/` and are copied into the
+  deploy's `assets/` dir, so the static-assets layer serves them without
+  invoking the worker — `/favicon.svg` (declared in the root document head) and
+  `/_shell.html` both ride this path.
 
 The current split dev setup (`vite proxy /api → :3000` + `bun server/entry.ts`)
 disappears — single `vite dev`, API routes co-hosted with the handler.

@@ -857,7 +857,7 @@ async function main(): Promise<void> {
       compatibility_flags: ["nodejs_compat"],
       ...(manifest.no_bundle ? { no_bundle: true } : {}),
       ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
-      assets: { directory: "./assets" },
+      assets: { directory: "./assets", binding: "ASSETS" },
       vars: {
         LXK_ENV: "production",
         ...(publicUrl ? { LXK_PUBLIC_URL: publicUrl } : {}),
