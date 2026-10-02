@@ -27,6 +27,12 @@ if (typeof HTMLElement !== "undefined") {
 // tmp DB — tests that need a specific DB override the env before importing.
 process.env.DATABASE_PATH = join(mkdtempSync(join(tmpdir(), "lexa-vitest-auth-")), "auth.db");
 
+// server/auth.ts fails closed without a signing secret (better-auth would
+// otherwise use its forgeable library default). All test workers share this
+// fixed key; tests that exercise secrets-disabled behavior delete/override it
+// per-file (isolated workers keep that local).
+process.env.LXK_SECRETS_MASTER_KEY = Buffer.from("vitest-auth-secret-00000000000000").toString("base64");
+
 afterEach(() => {
   cleanup();
 });

@@ -35,6 +35,10 @@ const SESSION_B = {
 
 function buildHandler() {
   const db = new Database(":memory:");
+  // The middleware re-reads `users.role` per session request; seed the minimal
+  // row so the injected session identity resolves (a missing row → 401).
+  db.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'member')");
+  db.prepare("INSERT INTO users (id, role) VALUES ('u1', 'member')").run();
   const fsRoot = mkdtempSync(join(tmpdir(), "lexa-sessions-workers-"));
   const storage: StorageConfigShape = {
     driver: "fs",

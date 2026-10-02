@@ -29,14 +29,20 @@ export interface ApiMiddlewareDeps {
 const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
   HttpServerResponse.setHeaders(resp, { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
 
-// Session caller → identity. The session user's role maps superadmin→admin
-// so the legacy requireAdmin gates stay correct until the authorization
-// service replaces them (R14). Every getSession is try/catch'd (R1 — an
-// uncaught throw would crash the request). The getter is injected: the Bun
-// host passes the better-auth singleton (server/auth.ts), which can never be
-// imported on Workers — the Workers entry passes its own per-request
-// createAuth(env) getter or omits sessions (Bearer-only).
+// Session caller → identity. The role is re-read from the local `users` row on
+// every session-authenticated request, never trusted from the session payload:
+// with `session.cookieCache` enabled the signed session_data cookie can serve a
+// role up to its maxAge stale, so a demoted superadmin would otherwise keep
+// admin access until expiry. superadmin→admin maps to the legacy requireAdmin
+// gates (R14). A missing row (deleted account) or a failed lookup denies (null
+// identity → 401), so account deletion takes effect immediately. Every
+// getSession is try/catch'd (R1 — an uncaught throw would crash the request).
+// The getter is injected: the Bun host passes the better-auth singleton
+// (server/auth.ts), which can never be imported on Workers — the Workers entry
+// passes its own per-request createAuth(env) getter or omits sessions
+// (Bearer-only).
 const sessionIdentity = (
+  db: Database,
   headers: Headers,
   getSession?: (headers: Headers) => Promise<MiddlewareSession | null>
 ): Effect.Effect<AuthIdentityShape | null, never> => {
@@ -45,12 +51,19 @@ const sessionIdentity = (
     Effect.map((session) => {
       const user = session?.user;
       if (!user) return null;
+      let role: string | undefined;
+      try {
+        role = (db.prepare("SELECT role FROM users WHERE id = ?").get(user.id) as { role?: string } | undefined)?.role;
+      } catch {
+        return null;
+      }
+      if (role === undefined) return null;
       return {
         keyId: "",
         keyName: user.name,
         userId: user.id,
         userName: user.name,
-        role: user.role === "superadmin" ? ("admin" as const) : ("member" as const),
+        role: role === "superadmin" ? ("admin" as const) : ("member" as const),
       };
     }),
     Effect.catchAll(() => Effect.succeed(null))
@@ -115,7 +128,7 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       if (!isHealth && !isSetup && !isPublicShare && !isDeviceLogin) {
         // Dual-channel (R4): session cookie first (browsers), Bearer key
         // second (machines). The x-lxk-user header is removed — never read.
-        const session = yield* sessionIdentity(new Headers(request.headers), deps.getSession);
+        const session = yield* sessionIdentity(db, new Headers(request.headers), deps.getSession);
         if (session) {
           identity = session;
         } else {

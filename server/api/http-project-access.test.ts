@@ -44,6 +44,16 @@ async function signIn(email: string): Promise<string> {
   return (res.headers?.get("set-cookie") ?? "").split(";")[0]!;
 }
 
+// Full browser cookie jar: session_token AND the cached session_data cookie,
+// so getSession takes the cookieCache path (stale role/session).
+async function signInFull(email: string): Promise<string> {
+  const res = (await auth.api.signInEmail({
+    body: { email, password: "password123" },
+    returnHeaders: true,
+  })) as unknown as { headers?: Headers };
+  return (res.headers?.getSetCookie?.() ?? []).join("; ");
+}
+
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-project-access-api-"));
   dbPath = join(dir, "test.db");
@@ -123,6 +133,28 @@ describe("project access scoping (team membership)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { slug: string }[] };
     expect(body.data.map((p) => p.slug)).toEqual(["team-proj"]);
+  });
+
+  it("demoted superadmin loses the project-read admin bypass immediately (cookieCache staleness closed)", async () => {
+    // Full cookie jar: the cached session_data still reports superadmin after
+    // demotion, so only the middleware's per-request D1 role re-read denies.
+    const cookie = await signInFull("sa@lexa.test");
+    const before = await withCookie(cookie, "GET", "/api/projects/ghost-proj");
+    expect(before.status).toBe(200);
+    const db = new Database(dbPath);
+    db.prepare("UPDATE users SET role = 'member' WHERE id = ?").run(userIds["sa@lexa.test"]);
+    db.close();
+    const stale = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    expect((stale?.user as { role?: string } | undefined)?.role).toBe("superadmin");
+    try {
+      // No team membership / grant on ghost-proj → member scoping applies → 403.
+      const after = await withCookie(cookie, "GET", "/api/projects/ghost-proj");
+      expect(after.status).toBe(403);
+    } finally {
+      const restore = new Database(dbPath);
+      restore.prepare("UPDATE users SET role = 'superadmin' WHERE id = ?").run(userIds["sa@lexa.test"]);
+      restore.close();
+    }
   });
 
   it("member session gets 403 PROJECT_ACCESS_DENIED on a project they cannot open", async () => {

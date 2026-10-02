@@ -3,11 +3,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeSignature } from "better-auth/crypto";
 import { runMigrations } from "./db/migrate";
 import { auth, createAuth, authIpLimiter, authLimiterSizes, loginLimiter, sweepAuthLimiters, handleAuthSurface } from "./auth";
 import { getEnv, type RuntimeEnv } from "./env";
 
 const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
+
+// better-auth's fixed fallback when no `secret` is configured.
+const LIBRARY_DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
+const MASTER_KEY = Buffer.from("factory-test-master-key-000000000").toString("base64");
 
 let dir: string;
 let dbPath: string;
@@ -21,6 +26,7 @@ const baseEnv = (): RuntimeEnv => ({
   DATABASE_PATH: dbPath,
   LXK_PUBLIC_URL: "https://factory.test",
   LXK_ENV: "prod",
+  LXK_SECRETS_MASTER_KEY: MASTER_KEY,
 });
 
 beforeAll(() => {
@@ -64,7 +70,7 @@ describe("createAuth(env) per-request factory", () => {
   });
 
   it("falls back to Bun-host defaults when keys are absent", () => {
-    const lexa = createAuth({ DATABASE_PATH: dbPath });
+    const lexa = createAuth({ DATABASE_PATH: dbPath, LXK_SECRETS_MASTER_KEY: MASTER_KEY });
     expect(lexa.publicUrl).toBe("http://localhost:5173");
     expect(lexa.trustedOrigins).toEqual(["http://localhost:5173"]);
   });
@@ -82,6 +88,56 @@ describe("createAuth(env) per-request factory", () => {
     expect(typeof lexa.handler).toBe("function");
     expect(typeof lexa.authIpLimiter).toBe("function");
     expect(typeof lexa.loginLimiter.check).toBe("function");
+  });
+});
+
+describe("session cookie cache (perf/auth-cookie-cache)", () => {
+  it("enables cookieCache under session (not advanced) with a 300s maxAge", () => {
+    const lexa = createAuth(baseEnv());
+    const options = (lexa.auth as {
+      options: {
+        session: { freshAge?: number; cookieCache?: { enabled?: boolean; maxAge?: number } };
+        advanced?: { cookieCache?: unknown };
+      };
+    }).options;
+    // better-auth 1.6.27 reads `options.session.cookieCache`; an
+    // `advanced.cookieCache` block is a silent no-op.
+    expect(options.session.cookieCache).toEqual({ enabled: true, maxAge: 300 });
+    expect(options.session.freshAge).toBe(0);
+    expect(options.advanced?.cookieCache).toBeUndefined();
+  });
+});
+
+describe("auth signing secret (cookieCache forgery closed)", () => {
+  const ctxOf = async (lexa: ReturnType<typeof createAuth>) =>
+    (lexa.auth as {
+      $context: Promise<{
+        secret: string;
+        authCookies: { sessionToken: { name: string }; sessionData: { name: string } };
+      }>;
+    }).$context;
+
+  it("derives the secret from LXK_SECRETS_MASTER_KEY, never the library default", async () => {
+    const lexa = createAuth(baseEnv());
+    const ctx = await ctxOf(lexa);
+    expect(ctx.secret).toBe(`lexa-better-auth:${MASTER_KEY}`);
+    expect(ctx.secret).not.toBe(LIBRARY_DEFAULT_SECRET);
+  });
+
+  it("rejects a session cookie signed with better-auth's library-default secret", async () => {
+    const lexa = createAuth(baseEnv());
+    const ctx = await ctxOf(lexa);
+    const token = "forged-session-token";
+    const signature = await makeSignature(token, LIBRARY_DEFAULT_SECRET);
+    const session = await (lexa.auth as { api: { getSession: (o: { headers: Headers }) => Promise<unknown> } }).api.getSession({
+      headers: new Headers({ cookie: `${ctx.authCookies.sessionToken.name}=${token}.${signature}` }),
+    });
+    expect(session).toBeNull();
+  });
+
+  it("fails closed when LXK_SECRETS_MASTER_KEY is missing or blank", () => {
+    expect(() => createAuth({ DATABASE_PATH: dbPath, LXK_PUBLIC_URL: "https://factory.test" })).toThrow(/LXK_SECRETS_MASTER_KEY/);
+    expect(() => createAuth({ ...baseEnv(), LXK_SECRETS_MASTER_KEY: "   " })).toThrow(/LXK_SECRETS_MASTER_KEY/);
   });
 });
 
