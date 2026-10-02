@@ -8,7 +8,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NotLoggedIn, devicePollDeadline } from "./index";
+import { NotLoggedIn, devicePollDeadline, nextDevicePollDelayMs } from "./index";
 import { cleanupIsolationDirs, freshLexaDir, runCli } from "./test-utils";
 
 afterAll(cleanupIsolationDirs);
@@ -270,6 +270,38 @@ describe("device poll deadline", () => {
     expect(devicePollDeadline(undefined, now)).toBe(now + 5 * MIN);
     expect(devicePollDeadline(Number.NaN, now)).toBe(now + 5 * MIN);
     expect(devicePollDeadline(now - 1000, now)).toBe(now + 5 * MIN);
+  });
+});
+
+describe("device poll backoff", () => {
+  // rand() === 0.5 yields the exact base delay (no jitter).
+  const mid = () => 0.5;
+
+  it("grows 2s -> 5s -> 10s and stays capped at 10s", () => {
+    expect(nextDevicePollDelayMs(0, mid)).toBe(2000);
+    expect(nextDevicePollDelayMs(1, mid)).toBe(5000);
+    expect(nextDevicePollDelayMs(2, mid)).toBe(10_000);
+    expect(nextDevicePollDelayMs(3, mid)).toBe(10_000);
+    expect(nextDevicePollDelayMs(50, mid)).toBe(10_000);
+  });
+
+  it("keeps jitter within ±20% of the base delay", () => {
+    const bases = [2000, 5000, 10_000, 10_000, 10_000];
+    for (let attempt = 0; attempt < bases.length; attempt++) {
+      const base = bases[attempt]!;
+      expect(nextDevicePollDelayMs(attempt, () => 0)).toBe(Math.round(base * 0.8));
+      expect(nextDevicePollDelayMs(attempt, () => 1)).toBe(Math.round(base * 1.2));
+      for (const r of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]) {
+        const d = nextDevicePollDelayMs(attempt, () => r);
+        expect(d).toBeGreaterThanOrEqual(Math.round(base * 0.8));
+        expect(d).toBeLessThanOrEqual(Math.round(base * 1.2));
+      }
+    }
+  });
+
+  it("clamps negative and fractional attempts to the first delay", () => {
+    expect(nextDevicePollDelayMs(-1, mid)).toBe(2000);
+    expect(nextDevicePollDelayMs(0.9, mid)).toBe(2000);
   });
 });
 

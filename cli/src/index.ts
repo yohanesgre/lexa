@@ -232,7 +232,10 @@ function promptRequired(question: string, requiredMessage: string): Effect.Effec
   });
 }
 
-const DEVICE_POLL_INTERVAL_MS = 2000;
+// Growing poll cadence: 2s, then 5s, then 10s for every later attempt, each
+// scaled by ±20% jitter so logins don't resynchronize into a thundering herd.
+const DEVICE_POLL_DELAYS_MS = [2000, 5000, 10_000] as const;
+const DEVICE_POLL_JITTER = 0.2;
 const DEVICE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 // The server owns the pairing TTL; the CLI deadline derives from the create
 // response's expiresMs plus a small grace for clock skew and the in-flight
@@ -246,6 +249,15 @@ export function devicePollDeadline(expiresMs: number | undefined, now: number): 
     return Math.min(expiresMs + DEVICE_POLL_GRACE_MS, now + DEVICE_POLL_MAX_MS);
   }
   return now + DEVICE_POLL_TIMEOUT_MS;
+}
+
+// Delay before poll attempt N (0-based): 2s, 5s, then a 10s cap, with ±20%
+// jitter. `rand` is injectable for deterministic tests and defaults to Math.random.
+export function nextDevicePollDelayMs(attempt: number, rand: () => number = Math.random): number {
+  const index = Math.min(Math.max(Math.floor(attempt), 0), DEVICE_POLL_DELAYS_MS.length - 1);
+  const base = DEVICE_POLL_DELAYS_MS[index]!;
+  const factor = 1 - DEVICE_POLL_JITTER + rand() * DEVICE_POLL_JITTER * 2;
+  return Math.round(base * factor);
 }
 
 // Browser-approval login: create a pairing request, print the verify URL,
@@ -271,6 +283,7 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
     console.log("  Waiting for approval…");
     const startedAt = Date.now();
     const deadline = devicePollDeadline(req.expiresMs, startedAt);
+    let attempt = 0;
     while (Date.now() < deadline) {
       const result = yield* client.pollDeviceLoginRequest(req.id, token).pipe(
         Effect.catchAll((e) => {
@@ -297,7 +310,8 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
         console.log(`  Logged in to ${url}`);
         return;
       }
-      yield* Effect.sleep(DEVICE_POLL_INTERVAL_MS);
+      yield* Effect.sleep(Math.min(nextDevicePollDelayMs(attempt), Math.max(0, deadline - Date.now())));
+      attempt++;
     }
     const windowMin = Math.max(1, Math.round((deadline - startedAt) / 60000));
     console.error(`  Login request timed out after ${windowMin} minute${windowMin === 1 ? "" : "s"} — nobody approved it. Try again.`);
