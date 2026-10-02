@@ -739,6 +739,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
           showCreateSwimlane
           columns={columns}
           swimlanes={swimlanes}
+          milestones={board.milestones}
           columnRequiredFields={columns.map((column) => ({
             columnId: column.id,
             fields: column.requiredFields,

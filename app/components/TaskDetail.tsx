@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import type { Task, TipTapDoc, GithubIssue } from "../../shared/types";
+import type { Task, TipTapDoc, GithubIssue, Milestone, Swimlane } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
 import { GithubMark, TrashIcon, ArchiveIcon, LinkIcon } from "./icons";
@@ -39,7 +39,8 @@ interface TaskDetailProps {
   defaultSwimlaneId?: string | undefined;
   showCreateSwimlane?: boolean | undefined;
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
-  swimlanes?: { id: string; name: string }[];
+  swimlanes?: Swimlane[];
+  milestones?: Milestone[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
   taskTitles?: Map<string, string>;    // taskId → title, for link display
@@ -276,7 +277,7 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
   );
 }
 
-export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const navigate = useNavigate();
   const slug = params.slug;
@@ -413,6 +414,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           task={task ?? null}
           columns={columns}
           swimlanes={swimlanes}
+          milestones={milestones}
           fieldConfig={fieldConfig}
           missingFields={missingFields}
           currentColumnName={ctx.currentColumnName}

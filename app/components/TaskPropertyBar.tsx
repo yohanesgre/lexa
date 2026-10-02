@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import type { Task } from "../../shared/types";
+import type { Milestone, Swimlane, Task } from "../../shared/types";
 import { cn } from "./ui/cn";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { AssigneeChips } from "./AssigneeChips";
@@ -9,7 +9,8 @@ interface TaskPropertyBarProps {
   isCreate: boolean;
   task: Task | null;
   columns: { id: string; name: string }[] | undefined;
-  swimlanes: { id: string; name: string }[] | undefined;
+  swimlanes: Swimlane[] | undefined;
+  milestones: Milestone[] | undefined;
   fieldConfig: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] } | undefined;
   missingFields: string[];
   currentColumnName: string | null;
@@ -39,6 +40,13 @@ interface TaskPropertyBarProps {
 }
 
 type OptionItem = { id: string; label: string; color: string };
+
+function swimlaneLabel(lane: Swimlane, milestones: Milestone[] | undefined): string {
+  if (lane.milestoneId == null) return lane.name;
+  const milestone = milestones?.find((m) => m.id === lane.milestoneId);
+  if (!milestone) return lane.name;
+  return `${lane.name} - ${milestone.name}${milestone.archivedAt ? " (archived)" : ""}`;
+}
 
 function ColumnField(props: TaskPropertyBarProps) {
   return (
@@ -99,7 +107,7 @@ function CreateSwimlaneField(props: TaskPropertyBarProps) {
       >
         {(props.swimlanes ?? []).map((lane) => (
           <option key={lane.id} value={lane.id}>
-            {lane.name}
+            {swimlaneLabel(lane, props.milestones)}
           </option>
         ))}
       </select>
@@ -115,7 +123,7 @@ function SwimlaneField(props: TaskPropertyBarProps) {
         value={props.selectedSwimlaneId}
         options={(props.swimlanes ?? []).map((lane) => ({
           value: lane.id,
-          label: lane.name,
+          label: swimlaneLabel(lane, props.milestones),
         }))}
         onChange={(swimlaneId: string) => {
           props.setSelectedSwimlaneId(swimlaneId);

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { Task } from "../../shared/types";
+import type { Milestone, Swimlane, Task } from "../../shared/types";
 import { createQueryWrapper, createTestQueryClient, json } from "../test-utils";
 import { TaskDetail } from "./TaskDetail";
 
@@ -37,6 +37,37 @@ const TASK: Task = {
   createdAt: "t",
   updatedAt: "t",
 };
+
+function lane(overrides: Partial<Swimlane>): Swimlane {
+  return {
+    id: "sp",
+    projectId: "p1",
+    name: "Sprint 6",
+    description: "",
+    position: 0,
+    dueAt: null,
+    archivedAt: null,
+    startAt: null,
+    kind: "sprint",
+    milestoneId: null,
+    ...overrides,
+  };
+}
+
+function milestone(overrides: Partial<Milestone>): Milestone {
+  return {
+    id: "m1",
+    projectId: "p1",
+    name: "v1.0",
+    description: "",
+    position: 0,
+    dueAt: null,
+    archivedAt: null,
+    sprintCount: 1,
+    archivedSprintCount: 0,
+    ...overrides,
+  };
+}
 
 let queryClient: QueryClient;
 let wrapper: ReturnType<typeof createQueryWrapper>;
@@ -100,5 +131,43 @@ describe("TaskDetail expand", () => {
     const editorWrapper = container.querySelector(".editor-wrapper");
     expect(editorWrapper).not.toBeNull();
     expect(editorWrapper!.querySelector(".editor-toolbar")).not.toBeNull();
+  });
+});
+
+describe("TaskDetail swimlane labels", () => {
+  it("disambiguates same-name lanes in the view dropdown by milestone", () => {
+    renderDetail({
+      swimlanes: [
+        lane({ id: "sp1", name: "Sprint 6", milestoneId: "m1" }),
+        lane({ id: "sp2", name: "Sprint 6", milestoneId: null }),
+      ],
+      milestones: [milestone({ id: "m1", name: "v1.0" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sprint 6" }));
+    expect(screen.getByRole("button", { name: "Sprint 6 - v1.0" })).toBeInTheDocument();
+    expect(screen.getAllByText("Sprint 6")).toHaveLength(2);
+  });
+
+  it("labels create-mode options and falls back to bare names", () => {
+    renderDetail({
+      mode: "create",
+      task: undefined,
+      showCreateSwimlane: true,
+      defaultSwimlaneId: "sp1",
+      swimlanes: [
+        lane({ id: "sp1", name: "Sprint 6", milestoneId: "m1" }),
+        lane({ id: "sp2", name: "Sprint 6", milestoneId: "missing" }),
+        lane({ id: "sp3", name: "Sprint 7", milestoneId: "m2" }),
+      ],
+      milestones: [
+        milestone({ id: "m1", name: "v1.0" }),
+        milestone({ id: "m2", name: "v2.0", archivedAt: "2026-01-01" }),
+      ],
+    });
+
+    expect(screen.getByRole("option", { name: "Sprint 6 - v1.0" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Sprint 6" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Sprint 7 - v2.0 (archived)" })).toBeInTheDocument();
   });
 });
