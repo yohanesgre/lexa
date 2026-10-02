@@ -35,10 +35,7 @@ skills-lock.json
 status/
 
 # Installer scratch dirs (self-describing CWD targets) — never commit
-/dockers/
-/bare/
 /cf-workers/
-/lexa-workers-release/
 /.deployed-url
 # Deploy/verify scratch: local SQLite copies (with -wal/-shm sidecars) and
 # generated compose files from release verification runs — never commit

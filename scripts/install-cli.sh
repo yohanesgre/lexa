@@ -3,9 +3,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash
 #
-# The binary is standalone (bun-compiled) and embeds the Docker compose files
-# (image refs, volumes, tunnel), so `lx deploy` pulls a prebuilt image
-# from ghcr.io — no checkout, no build. Overrides:
+# The binary is standalone (bun-compiled) — no checkout, no build needed.
+# Overrides:
 #   LEXA_CLI_URL    URL of the prebuilt binary (default: latest cli-v* release)
 #   LEXA_CLI_DIR    install dir (default: ~/.local/bin)
 set -euo pipefail

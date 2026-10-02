@@ -1,4 +1,4 @@
-name: publish-image
+name: publish-workers
 
 on:
   push:
@@ -7,72 +7,12 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
-  group: publish-image-${{ github.ref }}
+  group: publish-workers-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  guard:
-    if: github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: No tag to publish
-        run: |
-          echo "::warning::non-tag dispatch — nothing to publish; no snapshot image is built"
-
-  build:
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: false
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4
-
-      - uses: docker/setup-buildx-action@v4
-
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve image tags
-        run: |
-          VER="${{ github.ref_name }}"
-          VER="${VER#v}"
-          {
-            echo "tags<<EOF"
-            echo "ghcr.io/yohanesgre/lexa:latest"
-            echo "ghcr.io/yohanesgre/lexa:v${VER}"
-            echo "ghcr.io/yohanesgre/lexa:${VER%.*}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-        id: tags
-
-      - name: Build and push
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: ${{ steps.tags.outputs.tags }}
-          sbom: true
-          labels: |
-            org.opencontainers.image.title=Lexa
-            org.opencontainers.image.description=Self-hosted project management for small teams
-            org.opencontainers.image.source=https://github.com/yohanesgre/lexa
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.licenses=MIT
-
   release-tarballs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -91,27 +31,6 @@ jobs:
         run: bun install --frozen-lockfile
         env:
           LXK_SKIP_PREPARE: "1"
-
-      - name: Build bun flavor
-        run: LEXA_FLAVOR=bun bun run build
-        env:
-          LXK_SKIP_PREPARE: "1"
-
-      - name: Write lexa-start.sh
-        run: |
-          cat > lexa-start.sh <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          cd "$(dirname "$0")"
-          exec bun server/entry.ts "$@"
-          EOF
-          chmod +x lexa-start.sh
-
-      - name: Package server tarball
-        run: |
-          tar czf "lexa-server-${{ github.ref_name }}.tar.gz" \
-            --exclude='*/.dev.vars' \
-            package.json bun.lock dist server shared migrations scripts/seed-dev.sql lexa-start.sh
 
       - name: Build workers flavor
         run: LEXA_FLAVOR=workers bun run build
@@ -135,8 +54,7 @@ jobs:
 
       - name: Checksums
         run: |
-          sha256sum "lexa-server-${{ github.ref_name }}.tar.gz" \
-                    "lexa-workers-${{ github.ref_name }}.tar.gz" > checksums.txt
+          sha256sum "lexa-workers-${{ github.ref_name }}.tar.gz" > checksums.txt
 
       - name: Attach artifacts to release
         env:
@@ -145,9 +63,9 @@ jobs:
         run: |
           gh release create "$TAG" \
             --title "$TAG" --generate-notes \
-            "lexa-server-${TAG}.tar.gz" "lexa-workers-${TAG}.tar.gz" checksums.txt \
+            "lexa-workers-${TAG}.tar.gz" checksums.txt \
           || gh release upload "$TAG" \
-            "lexa-server-${TAG}.tar.gz" "lexa-workers-${TAG}.tar.gz" checksums.txt --clobber
+            "lexa-workers-${TAG}.tar.gz" checksums.txt --clobber
 
       - name: Warm installer + smoke
         if: startsWith(github.ref, 'refs/tags/')

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Tests for scripts/install.sh / install-lib.sh / uninstall.sh.
 # No framework: assert helpers + PASS/FAIL counters, non-zero exit on any FAIL.
-# Dry-run test uses a fake `docker` shim on PATH to prove no mutating docker
-# call executes under INSTALL_DRY_RUN=1 (design-deploy-tooling.md §9 test-swap).
+# Dry-run tests prove no mutating command executes under INSTALL_DRY_RUN=1 and
+# no real Cloudflare call is made (design-deploy-tooling.md §9 test-swap).
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -103,8 +103,8 @@ fi
 
 echo "== parse_flags =="
 
-got="$(lib_eval 'parse_flags --ref v2026.2.9 --name lexa --port 9999; printf "%s:%s:%s" "$REF" "$NAME" "$PORT"')"
-assert_eq "parse_flags --ref --name --port sets REF:NAME:PORT" "v2026.2.9:lexa:9999" "$got"
+got="$(lib_eval 'parse_flags --ref v2026.2.9 --name lexa; printf "%s:%s" "$REF" "$NAME"')"
+assert_eq "parse_flags --ref --name sets REF:NAME" "v2026.2.9:lexa" "$got"
 
 got="$(lib_eval 'parse_flags --account acct-123; printf "%s" "$ACCOUNT"')"
 assert_eq "parse_flags --account sets ACCOUNT" "acct-123" "$got"
@@ -355,67 +355,6 @@ assert_grep "presence=unknown: warns it couldn't read the master key" "couldn't 
 assert_eq "presence=unknown: no custody file (no mint)" "absent" "$([ -f "${mk_unk_dir}/.env.toml" ] && echo present || echo absent)"
 assert_eq "presence=unknown: _WORKERS_MASTER_KEY empty" "" "$mk_unk_val"
 
-echo "== migrate_legacy_deploy_env =="
-
-mdir="$(mktemp -d)"
-printf 'LXK_ENV=production\nLXK_PUBLIC_URL=http://127.0.0.1:8080\nGITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY="line1\\nline2"\nLXK_S3_BUCKET="line1\\nline2"\nLXK_API_KEY=dead\n' > "${mdir}/.env"
-lib_call migrate_legacy_deploy_env "${mdir}" >/dev/null 2>&1
-assert_eq "migration renames .env to .env.legacy" "present" "$([ -f "${mdir}/.env.legacy" ] && echo present || echo absent)"
-assert_eq "migration removes .env" "absent" "$([ -f "${mdir}/.env" ] && echo present || echo absent)"
-mig_toml="$(cat "${mdir}/.env.toml")"
-assert_grep "migration carries app key" '^LXK_ENV = "production"$' "$mig_toml"
-assert_eq "migration drops GITHUB_APP_ID (dead key)" "0" "$(grep -c 'GITHUB_APP_ID' "${mdir}/.env.toml" || true)"
-assert_eq "migration drops GITHUB_PRIVATE_KEY (dead key)" "0" "$(grep -c 'GITHUB_PRIVATE_KEY' "${mdir}/.env.toml" || true)"
-assert_grep "migration unescapes quoted value" 'LXK_S3_BUCKET = "line1\\nline2"' "$mig_toml"
-assert_eq "migration drops dead key" "0" "$(grep -c 'LXK_API_KEY' "${mdir}/.env.toml" || true)"
-assert_eq "migration .env.legacy mode 0600" "600" "$(stat -c %a "${mdir}/.env.legacy")"
-
-# Idempotence: an existing .env.toml means no second migration.
-lib_call migrate_legacy_deploy_env "${mdir}" >/dev/null 2>&1
-assert_eq "migration skips when .env.toml exists" "absent" "$([ -f "${mdir}/.env" ] && echo present || echo absent)"
-
-# SEV1: a legacy .env carrying keys outside the installer whitelist must migrate,
-# not abort the install. These are loader-valid RuntimeEnv keys.
-migdir="$(mktemp -d)"
-printf 'LXK_SECRETS_MASTER_KEY=AAAA\nLOG_LEVEL=debug\nTANSTACK_AI_DEBUG=1\nLXK_S3_BUCKET=bucket\nPORT="3100"\nLXK_API_KEY=dead\n' > "${migdir}/.env"
-mig_rc=0
-lib_call migrate_legacy_deploy_env "${migdir}" >/dev/null 2>&1 || mig_rc=$?
-assert_rc "migration with non-whitelist keys does not die" 0 "$mig_rc"
-mig_body="$(cat "${migdir}/.env.toml" 2>/dev/null)"
-assert_grep "migration carries LXK_SECRETS_MASTER_KEY" '^LXK_SECRETS_MASTER_KEY = "AAAA"$' "$mig_body"
-assert_grep "migration carries LOG_LEVEL" '^LOG_LEVEL = "debug"$' "$mig_body"
-assert_grep "migration carries TANSTACK_AI_DEBUG" '^TANSTACK_AI_DEBUG = "1"$' "$mig_body"
-assert_grep "migration carries storage key" '^LXK_S3_BUCKET = "bucket"$' "$mig_body"
-assert_grep "migration carries PORT=3100" '^PORT = "3100"$' "$mig_body"
-assert_eq "migration still drops dead key" "0" "$(grep -c 'LXK_API_KEY' "${migdir}/.env.toml" || true)"
-
-# MED1: parser divergence — multi-line double-quoted values, inline `#` comments,
-# and `\\` before `n` unescape order (mirror server/env-file.ts parseDotenv).
-pardir="$(mktemp -d)"
-printf 'MULTI="line1\nline2"\nINLINE=value # trailing comment\nBACKSLASH="cmd\\\\nargs"\nQH="a#b"\nSQ=\x27sq#val\x27\n' > "${pardir}/.env"
-lib_call migrate_legacy_deploy_env "${pardir}" >/dev/null 2>&1
-par_toml="$(cat "${pardir}/.env.toml" 2>/dev/null)"
-assert_grep "migration spans a multi-line quoted value" '^MULTI = "line1\\nline2"$' "$par_toml"
-assert_grep "migration strips inline # comment for unquoted" '^INLINE = "value"$' "$par_toml"
-assert_grep "migration keeps quoted # verbatim" '^QH = "a#b"$' "$par_toml"
-bs_line="$(grep '^BACKSLASH' "${pardir}/.env.toml" 2>/dev/null || true)"
-assert_eq "migration unescapes \\\\n as literal backslash-n" 'BACKSLASH = "cmd\\nargs"' "$bs_line"
-assert_grep "migration single-quoted value has no escapes" '^SQ = "sq#val"$' "$par_toml"
-
-# MED2: compose-tooling keys stay in the flat .env (moving COMPOSE_PROJECT_NAME
-# would rename the compose project and orphan the volume; LXK_IMAGE_TAG must
-# keep its pin across the migration rename).
-toolleg="$(mktemp -d)"
-printf 'LXK_ENV=production\nCOMPOSE_PROJECT_NAME=myproj\nLXK_IMAGE_TAG=v2026.2.9\n' > "${toolleg}/.env"
-lib_call migrate_legacy_deploy_env "${toolleg}" >/dev/null 2>&1
-tleg_toml="$(cat "${toolleg}/.env.toml" 2>/dev/null)"
-tleg_env="$(cat "${toolleg}/.env" 2>/dev/null)"
-assert_eq "migration keeps COMPOSE_PROJECT_NAME out of .env.toml" "0" "$(grep -c 'COMPOSE_PROJECT_NAME' "${toolleg}/.env.toml" || true)"
-assert_eq "migration keeps LXK_IMAGE_TAG out of .env.toml" "0" "$(grep -c 'LXK_IMAGE_TAG' "${toolleg}/.env.toml" || true)"
-assert_grep "migration re-emits COMPOSE_PROJECT_NAME to flat .env" '^COMPOSE_PROJECT_NAME=myproj$' "$tleg_env"
-assert_grep "migration re-emits pinned LXK_IMAGE_TAG to flat .env" '^LXK_IMAGE_TAG=v2026.2.9$' "$tleg_env"
-assert_grep "migration still carries an app key" '^LXK_ENV = "production"$' "$tleg_toml"
-
 # MED5: the installer-written TOML must be APPLIED by the loader (not just
 # parse). Uses the real loader when bun + the checkout are present.
 if command -v bun >/dev/null 2>&1 && [ -f "${SCRIPT_DIR}/../server/env-file.ts" ]; then
@@ -427,312 +366,13 @@ else
   echo "SKIP: bun unavailable — loader-apply check needs the checkout"
 fi
 
-echo "== write_env_file =="
-
-envdir="$(mktemp -d)"
-lib_eval "write_env_file '${envdir}/.env' LXK_ENV=staging LXK_PUBLIC_URL=http://127.0.0.1:8080" >/dev/null 2>&1
-assert_eq "write_env_file mode 0600" "600" "$(stat -c %a "${envdir}/.env")"
-assert_grep "write_env_file content" '^LXK_ENV=staging$' "$(cat "${envdir}/.env")"
-
-lib_eval "write_env_file '${envdir}/.env' COMPOSE_PROJECT_NAME=lexa" >/dev/null 2>&1
-env_merged="$(cat "${envdir}/.env")"
-assert_grep "write_env_file preserves existing key" '^LXK_ENV=staging$' "$env_merged"
-assert_grep "write_env_file appends new key" '^COMPOSE_PROJECT_NAME=lexa$' "$env_merged"
-
-rogue_rc=0
-lib_eval "write_env_file '${envdir}/rogue.env' ROGUE_KEY=1" >/dev/null 2>&1 || rogue_rc=$?
-assert_rc "write_env_file rogue key dies" 1 "$rogue_rc"
-if [ -e "${envdir}/rogue.env" ]; then
-  assert_eq "write_env_file rogue key writes no file" "absent" "present"
-else
-  assert_eq "write_env_file rogue key writes no file" "absent" "absent"
-fi
-
-echo "== compose_render mounts .env.toml, tooling-only =="
-
-compdir="$(mktemp -d)"
-DEPLOY_DIR="${compdir}" lib_eval "compose_render direct 8080 127.0.0.1" >/dev/null 2>&1
-compose_body="$(cat "${compdir}/docker-compose.yml")"
-assert_grep "compose binds .env.toml (long form source)" 'source: \./\.env\.toml$' "$compose_body"
-assert_grep "compose binds .env.toml (target)" 'target: /app/\.env\.toml$' "$compose_body"
-assert_grep "compose bind is read-only" 'read_only: true$' "$compose_body"
-assert_grep "compose bind refuses host-path creation" 'create_host_path: false$' "$compose_body"
-assert_grep "compose uses LXK_IMAGE_TAG interpolation" 'ghcr.io/yohanesgre/lexa:\$\{LXK_IMAGE_TAG:-latest\}' "$compose_body"
-assert_eq "compose drops app-var interpolation" "0" "$(grep -c 'LXK_PUBLIC_URL=' "${compdir}/docker-compose.yml" || true)"
-assert_eq "compose drops DATABASE_PATH interpolation" "0" "$(grep -c 'DATABASE_PATH=' "${compdir}/docker-compose.yml" || true)"
-
-rc=0
-DEPLOY_DIR="${compdir}" lib_eval "compose_render staging 8080 127.0.0.1" >/dev/null 2>&1 || rc=$?
-assert_rc "compose_render invalid mode dies" 1 "$rc"
-
-echo "== grant_container_read =="
-
-# Non-root installer (uid 1001 != image uid 1000): the image's own uid:gid is
-# probed from the image, then the chown round-trips through a one-shot root
-# container. Hermetic: `id` and `docker` are PATH shims — the shim answers the
-# `--entrypoint sh` probe with the configured uid/gid and logs the chown argv,
-# so the host file's mode is the only real side effect (640 on claimed, 644 on
-# failure).
-gtroot="$(mktemp -d)"
-mkdir -p "${gtroot}/bin"
-cat > "${gtroot}/bin/id" <<'SHIM'
-#!/usr/bin/env bash
-if [ "$1" = "-u" ]; then
-  printf '1001\n'
-  exit 0
-fi
-exec /usr/bin/id "$@"
-SHIM
-chmod +x "${gtroot}/bin/id"
-cat > "${gtroot}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-[ -n "${DOCKER_SHIM_LOG:-}" ] && printf 'docker %s\n' "$*" >> "${DOCKER_SHIM_LOG}"
-case "$*" in
-  *"--entrypoint sh"*)
-    printf '%s\n' "${DOCKER_SHIM_UID:-1000}"
-    printf '%s\n' "${DOCKER_SHIM_GID:-1000}"
-    exit 0
-    ;;
-esac
-exit "${DOCKER_SHIM_RC:-0}"
-SHIM
-chmod +x "${gtroot}/bin/docker"
-
-gtfile="${gtroot}/.env.toml"
-: > "${gtfile}"
-chmod 600 "${gtfile}"
-( export PATH="${gtroot}/bin:${PATH}" DOCKER_SHIM_LOG="${gtroot}/docker.log" DOCKER_SHIM_RC=0
-  lib_call grant_container_read "${gtfile}" myimg >/dev/null 2>&1 ) || true
-gtlog="$(cat "${gtroot}/docker.log" 2>/dev/null || true)"
-assert_grep "grant_container_read probes the image for uid/gid" 'entrypoint sh' "$gtlog"
-assert_grep "grant_container_read chowns to group 1000 via docker" 'chown 1001:1000 /lexa-env\.toml' "$gtlog"
-assert_grep "grant_container_read runs the chown container as root" 'user 0' "$gtlog"
-assert_grep "grant_container_read mounts the env file" ':/lexa-env\.toml' "$gtlog"
-assert_eq "grant_container_read mode 640 after docker chown" "640" "$(stat -c %a "${gtfile}")"
-
-# An image whose gid is not 1000 (e.g. a rebuilt base image): the chown target
-# group must follow the image, not a hardcoded 1000.
-gtalt="${gtroot}/.env.alt"
-: > "${gtalt}"
-chmod 600 "${gtalt}"
-( export PATH="${gtroot}/bin:${PATH}" DOCKER_SHIM_LOG="${gtroot}/docker-alt.log" DOCKER_SHIM_RC=0 \
-    DOCKER_SHIM_UID=1000 DOCKER_SHIM_GID=2000
-  lib_call grant_container_read "${gtalt}" altimg >/dev/null 2>&1 ) || true
-gtaltlog="$(cat "${gtroot}/docker-alt.log" 2>/dev/null || true)"
-assert_grep "grant_container_read derives the group from the image (gid 2000)" 'chown 1001:2000 /lexa-env\.toml' "$gtaltlog"
-assert_eq "grant_container_read alt-image mode 640" "640" "$(stat -c %a "${gtalt}")"
-
-gtfail="${gtroot}/.env.fail"
-: > "${gtfail}"
-chmod 600 "${gtfail}"
-gtfail_out="$( export PATH="${gtroot}/bin:${PATH}" DOCKER_SHIM_RC=1
-  lib_call grant_container_read "${gtfail}" myimg 2>&1 )" || true
-assert_grep "grant_container_read warns when chown fails" "couldn't set owners on" "$gtfail_out"
-assert_eq "grant_container_read mode 644 on chown failure" "644" "$(stat -c %a "${gtfail}")"
-
-echo "== INSTALL_DRY_RUN=1 install.sh docker =="
-
-drydir="$(mktemp -d)"
-mkdir "${drydir}/bin"
-export FAKE_DOCKER_LOG="${drydir}/docker.log"
-: > "${FAKE_DOCKER_LOG}"
-cat > "${drydir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-echo "docker $*" >> "${FAKE_DOCKER_LOG}"
-exit 0
-SHIM
-chmod +x "${drydir}/bin/docker"
-
-containers_before=0
-if command -v docker >/dev/null 2>&1; then
-  containers_before=$(docker ps -q 2>/dev/null | wc -l)
-fi
-
-dry_rc=0
-dry_out="$(cd "${drydir}" && INSTALL_DRY_RUN=1 PATH="${drydir}/bin:${PATH}" bash "$INSTALL" docker --port 9191 2>&1)" || dry_rc=$?
-assert_rc "dry-run install.sh docker completes" 0 "$dry_rc"
-assert_grep "dry-run marks nodes with '#» DRY-RUN'" '#» DRY-RUN' "$dry_out"
-assert_grep "dry-run logs '[dry-run] docker compose pull'" '\[dry-run\] docker compose pull' "$dry_out"
-assert_grep "dry-run logs '[dry-run] docker compose up'" '\[dry-run\] docker compose up' "$dry_out"
-assert_grep "dry-run health-wait faked via mutate curl" '\[dry-run\] curl -fsS' "$dry_out"
-assert_grep "dry-run prints final banner" 'Lexa is running at http://127.0.0.1:9191' "$dry_out"
-assert_eq "dry-run renders docker-compose.yml" "present" "$([ -f "${drydir}/dockers/docker-compose.yml" ] && echo present || echo absent)"
-assert_grep "dry-run .env.toml writes LXK_TRUSTED_ORIGINS" '^LXK_TRUSTED_ORIGINS = ".*http://localhost:9191' "$(cat "${drydir}/dockers/.env.toml" 2>/dev/null)"
-assert_grep "dry-run .env.toml writes DATABASE_PATH" '^DATABASE_PATH = "/app/data/lexa.db"$' "$(cat "${drydir}/dockers/.env.toml" 2>/dev/null)"
-assert_grep "dry-run .env keeps tooling LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=latest$' "$(cat "${drydir}/dockers/.env" 2>/dev/null)"
-assert_eq "dry-run flat .env has no app keys" "0" "$(grep -c 'LXK_PUBLIC_URL' "${drydir}/dockers/.env" 2>/dev/null || true)"
-assert_eq "dry-run .env.toml mode 0600" "600" "$(stat -c %a "${drydir}/dockers/.env.toml")"
-dry_key="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${drydir}/dockers/.env.toml" | head -1)"
-assert_eq "dry-run install generates a 32-byte secrets key" "32" "$(printf '%s' "$dry_key" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
-assert_grep "dry-run marks env mount perms step" 'grant_container_read' "$dry_out"
-assert_grep "dry-run logs grant_container_read intent" '\[dry-run\] chmod 640' "$dry_out"
-
-fake_calls="$(grep -v -e 'compose version' -e 'docker info' "${FAKE_DOCKER_LOG}" || true)"
-assert_eq "no mutating docker calls executed (shim log)" "" "$fake_calls"
-
-echo "== INSTALL_DRY_RUN=1 install.sh docker --no-pull =="
-
-nopulldir="$(mktemp -d)"
-mkdir -p "${nopulldir}/bin"
-export FAKE_DOCKER_LOG="${nopulldir}/docker.log"
-: > "${FAKE_DOCKER_LOG}"
-cat > "${nopulldir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-echo "docker $*" >> "${FAKE_DOCKER_LOG}"
-exit 0
-SHIM
-chmod +x "${nopulldir}/bin/docker"
-
-nopull_rc=0
-nopull_out="$(cd "${nopulldir}" && INSTALL_DRY_RUN=1 PATH="${nopulldir}/bin:${PATH}" bash "$INSTALL" docker --port 9291 --no-pull 2>&1)" || nopull_rc=$?
-assert_rc "--no-pull dry-run install.sh docker completes" 0 "$nopull_rc"
-assert_grep "--no-pull announces the skipped pull" 'skipping image pull \(--no-pull\)' "$nopull_out"
-assert_eq "--no-pull logs no '[dry-run] docker compose pull'" "0" "$(printf '%s' "$nopull_out" | grep -c '\[dry-run\] docker compose pull' || true)"
-assert_grep "--no-pull still logs compose up" '\[dry-run\] docker compose up' "$nopull_out"
-nopull_pull="$(grep -c 'compose pull' "${FAKE_DOCKER_LOG}" || true)"
-assert_eq "--no-pull executes no 'docker compose pull'" "0" "$nopull_pull"
-nopull_inspect="$(grep -c 'image inspect' "${FAKE_DOCKER_LOG}" || true)"
-assert_eq "--no-pull dry-run skips 'docker image inspect'" "0" "$nopull_inspect"
-
-echo "== install.sh docker --no-pull dies on a missing local image =="
-
-missingdir="$(mktemp -d)"
-mkdir -p "${missingdir}/bin"
-cat > "${missingdir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-case "$1 $2" in
-  "image inspect") exit 1 ;;
-esac
-exit 0
-SHIM
-chmod +x "${missingdir}/bin/docker"
-missing_rc=0
-missing_out="$(cd "${missingdir}" && PATH="${missingdir}/bin:${PATH}" bash "$INSTALL" docker --port 9495 --no-pull 2>&1)" || missing_rc=$?
-assert_rc "--no-pull missing image exits non-zero" 1 "$missing_rc"
-assert_grep "--no-pull missing image names the local image" 'ghcr.io/yohanesgre/lexa:latest not found locally' "$missing_out"
-assert_grep "--no-pull missing image gives the fix" 'build it first, or drop --no-pull' "$missing_out"
-
-echo "== installer re-run preserves operator keys =="
-
-presdir="$(mktemp -d)"
-mkdir -p "${presdir}/bin" "${presdir}/dockers"
-cat > "${presdir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${presdir}/bin/docker"
-printf '[auth]\nLXK_ADMIN_EMAILS = "ops@example.com"\n\n[urls]\nLXK_PUBLIC_URL = "http://old.example"\n' > "${presdir}/dockers/.env.toml"
-pres_rc=0
-(cd "${presdir}" && INSTALL_DRY_RUN=1 PATH="${presdir}/bin:${PATH}" bash "$INSTALL" docker --port 9292 >/dev/null 2>&1) || pres_rc=$?
-assert_rc "re-run install.sh docker completes" 0 "$pres_rc"
-pres_body="$(cat "${presdir}/dockers/.env.toml")"
-assert_grep "re-run preserves operator-added key" '^LXK_ADMIN_EMAILS = "ops@example.com"$' "$pres_body"
-assert_grep "re-run updates installer-owned LXK_PUBLIC_URL" '^LXK_PUBLIC_URL = "http://127.0.0.1:9292"$' "$pres_body"
-pres_key1="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${presdir}/dockers/.env.toml" | head -1)"
-assert_eq "re-run .env.toml carries a 32-byte secrets key" "32" "$(printf '%s' "$pres_key1" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
-pres2_rc=0
-(cd "${presdir}" && INSTALL_DRY_RUN=1 PATH="${presdir}/bin:${PATH}" bash "$INSTALL" docker --port 9292 >/dev/null 2>&1) || pres2_rc=$?
-assert_rc "second re-run install.sh docker completes" 0 "$pres2_rc"
-pres_key2="$(sed -n 's/^LXK_SECRETS_MASTER_KEY = "\(.*\)"$/\1/p' "${presdir}/dockers/.env.toml" | head -1)"
-assert_eq "re-run preserves LXK_SECRETS_MASTER_KEY" "$pres_key1" "$pres_key2"
-
-echo "== dry-run never prints a master key =="
-
-# Regression: command substitution expands the key entry into step()'s argv, and
-# the dry-run branch echoes the whole argv. A preserved master key must never
-# reach stdout — it must be redacted to `=***`.
-redactdir="$(mktemp -d)"
-mkdir -p "${redactdir}/bin" "${redactdir}/dockers"
-cat > "${redactdir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${redactdir}/bin/docker"
-redact_fixture="SYNTHETICMASTERKEYVALUE"
-printf 'LXK_SECRETS_MASTER_KEY = "%s"\n' "${redact_fixture}" > "${redactdir}/dockers/.env.toml"
-redact_rc=0
-redact_out="$(cd "${redactdir}" && INSTALL_DRY_RUN=1 PATH="${redactdir}/bin:${PATH}" bash "$INSTALL" docker --port 9595 2>&1)" || redact_rc=$?
-assert_rc "redaction dry-run install.sh docker completes" 0 "$redact_rc"
-assert_eq "dry-run stdout does not leak the master key" "0" "$(printf '%s' "$redact_out" | grep -c "${redact_fixture}" || true)"
-assert_grep "dry-run redacts the master key entry to =***" 'LXK_SECRETS_MASTER_KEY=\*\*\*' "$redact_out"
-assert_grep "redacted key is on the write_env_toml dry-run line" '#» DRY-RUN write_env_toml .*LXK_SECRETS_MASTER_KEY=\*\*\*' "$redact_out"
-
-echo "== installer preserves pinned tooling keys =="
-
-pindir="$(mktemp -d)"
-mkdir -p "${pindir}/bin" "${pindir}/dockers"
-cat > "${pindir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${pindir}/bin/docker"
-printf '[core]\nLXK_ENV = "production"\n' > "${pindir}/dockers/.env.toml"
-printf 'COMPOSE_PROJECT_NAME=myproj\nLXK_IMAGE_TAG=v2026.2.9\n' > "${pindir}/dockers/.env"
-pin_rc=0
-(cd "${pindir}" && INSTALL_DRY_RUN=1 PATH="${pindir}/bin:${PATH}" bash "$INSTALL" docker --port 9494 >/dev/null 2>&1) || pin_rc=$?
-assert_rc "pinned-tag re-run install.sh docker completes" 0 "$pin_rc"
-pin_env="$(cat "${pindir}/dockers/.env")"
-assert_grep "re-run preserves COMPOSE_PROJECT_NAME" '^COMPOSE_PROJECT_NAME=myproj$' "$pin_env"
-assert_grep "re-run preserves pinned LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=v2026.2.9$' "$pin_env"
-
-pin2_rc=0
-(cd "${pindir}" && INSTALL_DRY_RUN=1 PATH="${pindir}/bin:${PATH}" bash "$INSTALL" docker --port 9494 --image vtest >/dev/null 2>&1) || pin2_rc=$?
-assert_rc "--image re-run install.sh docker completes" 0 "$pin2_rc"
-pin2_env="$(cat "${pindir}/dockers/.env")"
-assert_grep "--image overrides pinned LXK_IMAGE_TAG" '^LXK_IMAGE_TAG=vtest$' "$pin2_env"
-assert_grep "--image keeps COMPOSE_PROJECT_NAME" '^COMPOSE_PROJECT_NAME=myproj$' "$pin2_env"
-
-echo "== installer migrates a legacy deploy dir =="
-legdir="$(mktemp -d)"
-mkdir -p "${legdir}/bin" "${legdir}/dockers"
-cat > "${legdir}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${legdir}/bin/docker"
-printf 'LXK_ENV=production\nLXK_PUBLIC_URL=http://old.example\nGITHUB_APP_ID=42\nGITHUB_WEBHOOK_SECRET=shh\nLXK_API_KEY=dead\n' > "${legdir}/dockers/.env"
-leg_rc=0
-(cd "${legdir}" && INSTALL_DRY_RUN=1 PATH="${legdir}/bin:${PATH}" bash "$INSTALL" docker --port 9393 >/dev/null 2>&1) || leg_rc=$?
-assert_rc "legacy-dir install.sh docker completes" 0 "$leg_rc"
-assert_eq "legacy .env renamed to .env.legacy" "present" "$([ -f "${legdir}/dockers/.env.legacy" ] && echo present || echo absent)"
-leg_toml="$(cat "${legdir}/dockers/.env.toml")"
-assert_eq "legacy migration drops GITHUB_APP_ID (dead key)" "0" "$(grep -c 'GITHUB_APP_ID' "${legdir}/dockers/.env.toml" || true)"
-assert_eq "legacy migration drops GITHUB_WEBHOOK_SECRET (dead key)" "0" "$(grep -c 'GITHUB_WEBHOOK_SECRET' "${legdir}/dockers/.env.toml" || true)"
-assert_grep "legacy migration carries LXK_ENV" '^LXK_ENV = "production"$' "$leg_toml"
-assert_eq "legacy migration drops dead key" "0" "$(grep -c 'LXK_API_KEY' "${legdir}/dockers/.env.toml" || true)"
-assert_grep "legacy dir now has tooling-only .env" '^LXK_IMAGE_TAG=latest$' "$(cat "${legdir}/dockers/.env")"
-
-if command -v docker >/dev/null 2>&1; then
-  containers_after=$(docker ps -q 2>/dev/null | wc -l)
-  assert_eq "no container started (docker ps before/after)" "$containers_before" "$containers_after"
-fi
-
 echo "== T-dirs: self-describing target dirs in the CWD =="
 
-# Every target drops a self-describing dir in the CWD; the legacy names are gone.
 BASH_BIN="$(command -v bash)"
-have_bun=0
-command -v bun >/dev/null 2>&1 && have_bun=1
-[ "$have_bun" -eq 0 ] && [ -x "${HOME}/.bun/bin/bun" ] && have_bun=1
 # Workers dry-runs run with a temp HOME (wrangler-config isolation), so the
 # installer there can only resolve bun from PATH — guard them on PATH alone.
 have_bun_path=0
 command -v bun >/dev/null 2>&1 && have_bun_path=1
-
-dirs_docker="$(mktemp -d)"
-mkdir -p "${dirs_docker}/bin"
-cat > "${dirs_docker}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${dirs_docker}/bin/docker"
-dirs_rc=0
-(cd "${dirs_docker}" && INSTALL_DRY_RUN=1 PATH="${dirs_docker}/bin:${PATH}" bash "$INSTALL" docker --port 9101 >/dev/null 2>&1) || dirs_rc=$?
-assert_rc "T-dirs docker dry-run completes" 0 "$dirs_rc"
-assert_eq "T-dirs docker writes dockers/" "present" "$([ -d "${dirs_docker}/dockers" ] && echo present || echo absent)"
-assert_eq "T-dirs docker writes no lexa-deploy/" "absent" "$([ -e "${dirs_docker}/lexa-deploy" ] && echo present || echo absent)"
-assert_eq "T-dirs docker writes no bare/" "absent" "$([ -e "${dirs_docker}/bare" ] && echo present || echo absent)"
-assert_eq "T-dirs docker writes no cf-workers/" "absent" "$([ -e "${dirs_docker}/cf-workers" ] && echo present || echo absent)"
 
 if [ "$have_bun_path" -eq 1 ]; then
   dirs_workers="$(mktemp -d)"
@@ -742,21 +382,8 @@ if [ "$have_bun_path" -eq 1 ]; then
   assert_rc "T-dirs workers dry-run completes" 0 "$workers_rc"
   assert_eq "T-dirs workers writes cf-workers/" "present" "$([ -d "${dirs_workers}/cf-workers" ] && echo present || echo absent)"
   assert_eq "T-dirs workers writes no lexa-workers-release/" "absent" "$([ -e "${dirs_workers}/lexa-workers-release" ] && echo present || echo absent)"
-  assert_eq "T-dirs workers writes no dockers/" "absent" "$([ -e "${dirs_workers}/dockers" ] && echo present || echo absent)"
 else
   echo "SKIP: bun unavailable — T-dirs workers case needs the runtime"
-fi
-
-if [ "$have_bun" -eq 1 ]; then
-  dirs_bare="$(mktemp -d)"
-  bare_rc=0
-  (cd "${dirs_bare}" && INSTALL_DRY_RUN=1 bash "$INSTALL" bare --port 3101 >/dev/null 2>&1) || bare_rc=$?
-  assert_rc "T-dirs bare dry-run completes" 0 "$bare_rc"
-  assert_eq "T-dirs bare writes bare/" "present" "$([ -d "${dirs_bare}/bare" ] && echo present || echo absent)"
-  assert_eq "T-dirs bare ships lexa-start.sh" "present" "$([ -f "${dirs_bare}/bare/lexa-start.sh" ] && echo present || echo absent)"
-  assert_eq "T-dirs bare writes no lexa-deploy/" "absent" "$([ -e "${dirs_bare}/lexa-deploy" ] && echo present || echo absent)"
-else
-  echo "SKIP: bun unavailable — bare T-dirs case needs the runtime"
 fi
 
 echo "== T-dev-removed: dev target aborts with clone guidance =="
@@ -778,7 +405,7 @@ mkdir -p "${pftmp}/bin"
 # curl/tar/bun/sha256sum are then absent from PATH, and HOME hides ~/.bun.
 ln -s "$(command -v dirname)" "${pftmp}/bin/dirname"
 pf_rc=0
-pf_out="$(cd "${pftmp}" && PATH="${pftmp}/bin" HOME="${pftmp}/home" "$BASH_BIN" "$INSTALL" bare 2>&1)" || pf_rc=$?
+pf_out="$(cd "${pftmp}" && PATH="${pftmp}/bin" HOME="${pftmp}/home" "$BASH_BIN" "$INSTALL" workers 2>&1)" || pf_rc=$?
 assert_rc "T-preflight-missing exits non-zero" 1 "$pf_rc"
 assert_grep "T-preflight-missing header copy" 'Missing prerequisites — fix these, then re-run:' "$pf_out"
 assert_grep "T-preflight-missing lists curl + fix" 'curl — usually built in' "$pf_out"
@@ -786,57 +413,26 @@ assert_grep "T-preflight-missing lists tar + fix" 'tar — usually built in' "$p
 assert_grep "T-preflight-missing lists bun + install cmd" 'bun — curl -fsSL https://bun\.sh/install \| bash' "$pf_out"
 assert_grep "T-preflight-missing lists sha256 tool" 'sha256sum \(or shasum\) — install your distro' "$pf_out"
 assert_eq "T-preflight-missing lists ALL four tools" "4" "$(printf '%s' "$pf_out" | grep -c '^  • ' || true)"
-assert_eq "T-preflight-missing creates no target dir" "absent" "$([ -e "${pftmp}/bare" ] && echo present || echo absent)"
+assert_eq "T-preflight-missing creates no target dir" "absent" "$([ -e "${pftmp}/cf-workers" ] && echo present || echo absent)"
 
 echo "== T-secrets-file: --secrets-file applies, never prints values =="
 
-sec_tmp="$(mktemp -d)"
-mkdir -p "${sec_tmp}/bin"
-cat > "${sec_tmp}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${sec_tmp}/bin/docker"
 sec_fix_secret="SYNTHETICMASTERKEYVALUE"
-printf 'LXK_SECRETS_MASTER_KEY=%s\n' "${sec_fix_secret}" > "${sec_tmp}/secrets.env"
-sec_rc=0
-sec_out="$(cd "${sec_tmp}" && INSTALL_DRY_RUN=1 PATH="${sec_tmp}/bin:${PATH}" \
-  bash "$INSTALL" docker --port 9333 --secrets-file "${sec_tmp}/secrets.env" 2>&1)" || sec_rc=$?
-assert_rc "T-secrets-file docker dry-run completes" 0 "$sec_rc"
-sec_toml="$(cat "${sec_tmp}/dockers/.env.toml" 2>/dev/null)"
-assert_grep "T-secrets-file writes LXK_SECRETS_MASTER_KEY" "^LXK_SECRETS_MASTER_KEY = \"${sec_fix_secret}\"\$" "$sec_toml"
-assert_grep "T-secrets-file banner reports the master key" 'Secrets: master key' "$sec_out"
-assert_eq "T-secrets-file never prints the master key" "0" "$(printf '%s' "$sec_out" | grep -c "${sec_fix_secret}" || true)"
 
 # A GITHUB_* key is no longer allowed in --secrets-file: rejected, never skipped.
 gh_tmp="$(mktemp -d)"
-mkdir -p "${gh_tmp}/bin"
-cat > "${gh_tmp}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${gh_tmp}/bin/docker"
 printf 'GITHUB_APP_ID=123456\n' > "${gh_tmp}/secrets.env"
 gh_rc=0
-gh_out="$(cd "${gh_tmp}" && INSTALL_DRY_RUN=1 PATH="${gh_tmp}/bin:${PATH}" \
-  bash "$INSTALL" docker --port 9340 --secrets-file "${gh_tmp}/secrets.env" 2>&1)" || gh_rc=$?
+gh_out="$(cd "${gh_tmp}" && INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token --secrets-file "${gh_tmp}/secrets.env" 2>&1)" || gh_rc=$?
 assert_rc "T-secrets-file rejects a GitHub key" 1 "$gh_rc"
 assert_grep "T-secrets-file names the rejected GitHub key" 'Secrets file: key GITHUB_APP_ID not allowed — use the installer whitelist keys \(see docs/DEPLOYMENT\.md\), then re-run\.' "$gh_out"
-assert_eq "T-secrets-file GitHub key writes no GITHUB_APP_ID" "0" "$(grep -rl 'GITHUB_APP_ID' "${gh_tmp}/dockers" 2>/dev/null | wc -l | tr -d ' ')"
-
+assert_eq "T-secrets-file GitHub key writes no GITHUB_APP_ID" "0" "$(grep -rl 'GITHUB_APP_ID' "${gh_tmp}/cf-workers" 2>/dev/null | wc -l | tr -d ' ')"
 
 # A key outside the installer whitelist is refused (never written).
 bad_tmp="$(mktemp -d)"
-mkdir -p "${bad_tmp}/bin"
-cat > "${bad_tmp}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${bad_tmp}/bin/docker"
 printf 'ROGUE_KEY=1\n' > "${bad_tmp}/secrets.env"
 bad_rc=0
-bad_out="$(cd "${bad_tmp}" && INSTALL_DRY_RUN=1 PATH="${bad_tmp}/bin:${PATH}" \
-  bash "$INSTALL" docker --port 9335 --secrets-file "${bad_tmp}/secrets.env" 2>&1)" || bad_rc=$?
+bad_out="$(cd "${bad_tmp}" && INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token --secrets-file "${bad_tmp}/secrets.env" 2>&1)" || bad_rc=$?
 assert_rc "T-secrets-file rejects a non-whitelisted key" 1 "$bad_rc"
 assert_grep "T-secrets-file names the rejected key" 'Secrets file: key ROGUE_KEY not allowed — use the installer whitelist keys \(see docs/DEPLOYMENT\.md\), then re-run\.' "$bad_out"
 
@@ -846,16 +442,9 @@ assert_grep "T-secrets-file missing file names the path + next action" 'Secrets 
 
 # MED5: a malformed line reports only its number — never the line content.
 mal_tmp="$(mktemp -d)"
-mkdir -p "${mal_tmp}/bin"
-cat > "${mal_tmp}/bin/docker" <<'SHIM'
-#!/usr/bin/env bash
-exit 0
-SHIM
-chmod +x "${mal_tmp}/bin/docker"
 printf 'LXK_SECRETS_MASTER_KEY=1\nthis line has no equals sign\n' > "${mal_tmp}/secrets.env"
 mal_rc=0
-mal_out="$(cd "${mal_tmp}" && INSTALL_DRY_RUN=1 PATH="${mal_tmp}/bin:${PATH}" \
-  bash "$INSTALL" docker --port 9337 --secrets-file "${mal_tmp}/secrets.env" 2>&1)" || mal_rc=$?
+mal_out="$(cd "${mal_tmp}" && INSTALL_DRY_RUN=1 bash "$INSTALL" workers --cf-token test-token --secrets-file "${mal_tmp}/secrets.env" 2>&1)" || mal_rc=$?
 assert_rc "T-secrets-file malformed line exits non-zero" 1 "$mal_rc"
 assert_grep "T-secrets-file malformed line reports its number" 'line 2' "$mal_out"
 assert_eq "T-secrets-file malformed line never echoes the content" "0" "$(printf '%s' "$mal_out" | grep -c 'this line has no equals sign' || true)"
@@ -1165,98 +754,6 @@ assert_grep "T-workers-account plan passes --account through" \
   'bun scripts/workers-install\.ts --name lexa --account test-account' "$acct_out"
 assert_grep "T-workers-account usage documents the flag" \
   'account <id>' "$(lib_call usage)"
-
-echo "== T-bare-start: manual start is backgrounded + idempotent =="
-
-barestart_tmp="$(mktemp -d)"
-if [ "$have_bun" -eq 1 ]; then
-  bs_out="$(cd "${barestart_tmp}" && INSTALL_DRY_RUN=1 bash "$INSTALL" bare --port 9222 2>&1)" || true
-  assert_grep "T-bare-start dry-run backgrounds lexa-start.sh" 'nohup \./lexa-start\.sh > lexa\.log 2>&1' "$bs_out"
-  assert_grep "T-bare-start banner shows the log path" 'Running in the background — logs: bare/lexa\.log' "$bs_out"
-  assert_grep "T-bare-start banner shows the stop command" 'kill \$\(cat bare/lexa\.pid\)' "$bs_out"
-  assert_grep "T-bare-start health wait surfaces the log" 'wait_for http://localhost:9222/api/health 60 bare/lexa\.log' "$bs_out"
-else
-  echo "SKIP: bun unavailable — bare T-bare-start needs the runtime"
-fi
-
-# A live pid in lexa.pid makes the start a no-op (never double-start).
-bs_live_dir="$(mktemp -d)"
-sleep 60 &
-bs_live_pid=$!
-printf '%s\n' "${bs_live_pid}" > "${bs_live_dir}/lexa.pid"
-lib_call bare_start_manual "${bs_live_dir}" >/dev/null 2>&1 || true
-assert_eq "T-bare-start live pid is a no-op (no lexa.log)" "absent" "$([ -e "${bs_live_dir}/lexa.log" ] && echo present || echo absent)"
-kill "${bs_live_pid}" 2>/dev/null || true
-wait "${bs_live_pid}" 2>/dev/null || true
-
-# SEV: run the writer for real against a stub start script — the recorded pid
-# must be the server (recorded in ${dir}/lexa.pid), never a `bash` wrapper in
-# the caller's CWD.
-bs_real_dir="$(mktemp -d)"
-bs_real_cwd="$(mktemp -d)"
-cat > "${bs_real_dir}/lexa-start.sh" <<'STUB'
-#!/usr/bin/env bash
-exec sleep 30
-STUB
-chmod +x "${bs_real_dir}/lexa-start.sh"
-( cd "${bs_real_cwd}" && lib_call bare_start_manual "${bs_real_dir}" ) >/dev/null 2>&1 || true
-assert_eq "T-bare-start writes lexa.pid inside the install dir" "present" "$([ -f "${bs_real_dir}/lexa.pid" ] && echo present || echo absent)"
-assert_eq "T-bare-start writes no ./lexa.pid in the caller CWD" "absent" "$([ -e "${bs_real_cwd}/lexa.pid" ] && echo present || echo absent)"
-bs_real_pid="$(cat "${bs_real_dir}/lexa.pid" 2>/dev/null || true)"
-if [ -n "${bs_real_pid}" ] && kill -0 "${bs_real_pid}" 2>/dev/null; then
-  assert_eq "T-bare-start recorded pid is alive (kill -0)" "alive" "alive"
-  # The pid is recorded immediately, but the nohup→bash→server exec chain
-  # settles a few ms later: poll for the exec'd image (never a bash wrapper).
-  bs_real_cmd=""
-  bs_poll=0
-  while [ "$bs_poll" -lt 20 ]; do
-    bs_real_cmd="$(ps -o args= -p "${bs_real_pid}" 2>/dev/null || true)"
-    case "$bs_real_cmd" in *"sleep 30"*) break ;; esac
-    sleep 0.1
-    bs_poll=$((bs_poll + 1))
-  done
-  assert_grep "T-bare-start recorded pid is the exec'd server, not a bash wrapper" 'sleep 30' "${bs_real_cmd}"
-  kill "${bs_real_pid}" 2>/dev/null || true
-else
-  assert_eq "T-bare-start recorded pid is alive (kill -0)" "alive" "dead"
-fi
-
-echo "== T-from-repo-existing: --from-repo keeps an existing env, never claims secrets =="
-
-if [ "$have_bun" -eq 1 ]; then
-  bare_repo="$(mktemp -d)"
-  mkdir -p "${bare_repo}/scripts" "${bare_repo}/dist/client"
-  printf 'LXK_ENV = "production"\n' > "${bare_repo}/.env.toml"
-  fr_rc=0
-  fr_out="$(cd "${bare_repo}" && INSTALL_DRY_RUN=1 bash "$INSTALL" bare --from-repo "${bare_repo}" --port 9338 2>&1)" || fr_rc=$?
-  assert_rc "T-from-repo-existing bare dry-run completes" 0 "$fr_rc"
-  assert_grep "T-from-repo-existing keeps the existing env" 'exists — kept \(dev env untouched\)' "$fr_out"
-  assert_grep "T-from-repo-existing notes secrets are skipped" 'Skipping secrets setup' "$fr_out"
-  assert_eq "T-from-repo-existing drops the master-key banner line" "0" "$(printf '%s' "$fr_out" | grep -c 'master key' || true)"
-  assert_eq "T-from-repo-existing makes no GitHub banner claim" "0" "$(printf '%s' "$fr_out" | grep -c 'GitHub' || true)"
-  assert_eq "T-from-repo-existing never writes a master key" "0" "$(grep -c 'LXK_SECRETS_MASTER_KEY' "${bare_repo}/.env.toml" 2>/dev/null || true)"
-  assert_eq "T-from-repo-existing leaves the env untouched" "1" "$(grep -c '^LXK_ENV = "production"$' "${bare_repo}/.env.toml" 2>/dev/null || true)"
-
-  # Legacy GITHUB_* keys in an existing env are dead: --from-repo keeps the env
-  # untouched and the banner makes no GitHub claim.
-  bare_repo_trio="$(mktemp -d)"
-  mkdir -p "${bare_repo_trio}/scripts" "${bare_repo_trio}/dist/client"
-  {
-    printf 'LXK_ENV = "production"\n'
-    printf 'LXK_SECRETS_MASTER_KEY = "SYNTHETICMASTERKEYVALUE"\n'
-    printf 'GITHUB_APP_ID = "123456"\n'
-    printf 'GITHUB_WEBHOOK_SECRET = "whsec_SYNTH"\n'
-    printf 'GITHUB_PRIVATE_KEY = "-----BEGIN KEY-----\\nMIIBSYNTHETICKEYBODY\\n-----END KEY-----"\n'
-  } > "${bare_repo_trio}/.env.toml"
-  fr_trio_rc=0
-  fr_trio_out="$(cd "${bare_repo_trio}" && INSTALL_DRY_RUN=1 bash "$INSTALL" bare --from-repo "${bare_repo_trio}" --port 9339 2>&1)" || fr_trio_rc=$?
-  assert_rc "T-from-repo-existing legacy-env dry-run completes" 0 "$fr_trio_rc"
-  assert_eq "T-from-repo-existing makes no GitHub banner claim" "0" "$(printf '%s' "$fr_trio_out" | grep -c 'GitHub' || true)"
-  assert_eq "T-from-repo-existing leaves the legacy GITHUB_* env untouched" "1" "$(grep -c '^GITHUB_APP_ID = "123456"$' "${bare_repo_trio}/.env.toml" 2>/dev/null || true)"
-  assert_eq "T-from-repo-existing never rewrites the existing master key" "1" "$(grep -c '^LXK_SECRETS_MASTER_KEY = "SYNTHETICMASTERKEYVALUE"$' "${bare_repo_trio}/.env.toml" 2>/dev/null || true)"
-else
-  echo "SKIP: bun unavailable — T-from-repo-existing needs the runtime"
-fi
 
 echo "== T-oauth-fallback: wrangler login token chain =="
 oauth_home="$(mktemp -d)"

@@ -3,17 +3,16 @@
 #
 # Recommended (installer hub, newest release, BASE_URL pinned to its tag):
 #   curl -fsSL https://install.yohanesgre.com/lexa/install.sh \
-#     | bash -s -- [docker|bare|workers] [flags]
+#     | bash -s -- [workers] [flags]
 #
 # Direct (explicit tag, or main for bleeding edge):
 #   curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh \
-#     | bash -s -- [docker|bare|workers] [flags]
+#     | bash -s -- [workers] [flags]
 #
-# Targets: docker (default when docker exists) | bare | workers
-# Each target installs into a self-describing dir in the CWD: dockers/, bare/,
-# cf-workers/. Provisioning of the first superadmin is ALWAYS the web /setup
-# wizard — this script only prepares the runtime (R3: passwords never touch
-# argv/env).
+# Target: workers (Cloudflare Workers). Installs into a self-describing dir in
+# the CWD: cf-workers/. Provisioning of the first superadmin is ALWAYS the web
+# /setup wizard — this script only prepares the runtime (R3: passwords never
+# touch argv/env).
 set -euo pipefail
 
 BASE_URL="${INSTALL_BASE_URL:-https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts}"
@@ -49,29 +48,7 @@ if [ "${HELP}" = "1" ]; then
 fi
 
 if [ -z "${TARGET}" ]; then
-  if command -v docker >/dev/null 2>&1; then
-    if _tty_available; then
-      answer=$(tty_read "Docker found. Deploy Lexa with Docker? [Y/n]" "y")
-      case "${answer}" in [Nn]*) TARGET="" ;; *) TARGET="docker" ;; esac
-    else
-      TARGET="docker"
-    fi
-  fi
-  if [ -z "${TARGET}" ]; then
-    if _tty_available; then
-      echo "Docker isn't installed. Choose how to deploy:"
-      echo "  1) Bare — runs on this machine (needs bun)"
-      echo "  2) Cloudflare Workers — serverless on your Cloudflare account"
-      choice=$(tty_read "Choice [1]:" "1")
-      case "${choice}" in
-        1) TARGET="bare" ;;
-        2) TARGET="workers" ;;
-        *) die "Unknown choice '${choice}'. Available: 1, 2." ;;
-      esac
-    else
-      die "Docker isn't installed — re-run with an explicit target: bare | workers"
-    fi
-  fi
+  TARGET="workers"
 fi
 
 # dev was removed — development starts from a clone.
@@ -83,146 +60,17 @@ die_dev_removed() {
 }
 
 case "${TARGET}" in
-  docker|bare|workers) ;;
+  workers) ;;
   dev) die_dev_removed ;;
-  *) die "Unknown target '${TARGET}'. Available: docker, bare, workers." ;;
+  *) die "Unknown target '${TARGET}'. Available: workers." ;;
 esac
 
 CF_TOKEN="${CF_TOKEN:-}"
-PUBLIC_URL="${PUBLIC_URL:-}"
 RELEASE_TAG="${RELEASE_TAG:-}"
-BARE_PORT="${BARE_PORT:-3000}"
 # Read by final_banner() in install-lib.sh; export so shellcheck sees it as an
 # externally consumed rather than a dead assignment.
 BANNER_MASTER=""
 export BANNER_MASTER
-
-# ---------------------------------------------------------------------------
-# docker — compose render → up → health (dir: dockers/)
-# ---------------------------------------------------------------------------
-deploy_docker() {
-  preflight_docker
-  collect_optional_secrets
-  DEPLOY_DIR="${DEPLOY_DIR:-dockers}"
-  mkdir -p "${DEPLOY_DIR}"
-  cd "${DEPLOY_DIR}"
-  local public_url="${PUBLIC_URL:-http://127.0.0.1:${PORT}}"
-  # Local deploy — the operator may reach the app via either loopback
-  # hostname; trust both or Better Auth rejects one of them.
-  local trusted="${public_url},http://localhost:${PORT},http://127.0.0.1:${PORT}"
-  # One-time: a pre-P4 deploy dir keeps its app keys in a flat `.env`. Convert
-  # them to the canonical `.env.toml` (merge — operator keys survive) before the
-  # tooling-only `.env` is written.
-  migrate_legacy_deploy_env "${PWD}"
-  step "write config" write_env_toml "${PWD}/.env.toml" \
-    "LXK_ENV=production" \
-    "LXK_PUBLIC_URL=${public_url}" \
-    "LXK_TRUSTED_ORIGINS=${trusted}" \
-    "DATABASE_PATH=/app/data/lexa.db" \
-    "PORT=3000" \
-    "$(secrets_master_key_entry "${PWD}/.env.toml")"
-  step "apply secrets" apply_secrets_to_env "${PWD}/.env.toml"
-  # Flat `.env` = compose tooling only. COMPOSE_PROJECT_NAME (if already set by
-  # the operator) is preserved by the merge; setting it here would rename the
-  # compose project and orphan the existing `lexa-data` volume. A pinned
-  # LXK_IMAGE_TAG is likewise preserved and only overridden by --image.
-  local image_tag="${IMAGE_TAG:-$(env_file_value "${PWD}/.env" LXK_IMAGE_TAG)}"
-  image_tag="${image_tag:-latest}"
-  local tooling=("LXK_IMAGE_TAG=${image_tag}")
-  [ -n "${CF_TOKEN:-}" ] && tooling+=("CF_TUNNEL_TOKEN=${CF_TOKEN}")
-  step "write compose env" write_env_file "${PWD}/.env" "${tooling[@]}"
-  # Local docker deploy = direct semantics (host port mapping, no tunnel) —
-  # the wizard URL must be reachable on the host.
-  DEPLOY_DIR="${PWD}" step "generate compose file" compose_render direct "${PORT}" "${BIND}"
-  if [ "${NO_PULL:-0}" = "1" ]; then
-    echo "  skipping image pull (--no-pull)"
-    if [ "${INSTALL_DRY_RUN:-0}" != "1" ] \
-      && ! docker image inspect "ghcr.io/yohanesgre/lexa:${image_tag}" >/dev/null 2>&1; then
-      die "image ghcr.io/yohanesgre/lexa:${image_tag} not found locally — build it first, or drop --no-pull"
-    fi
-  else
-    step "compose pull" retry 3 mutate docker compose pull
-  fi
-  # The container runs as uid 1000 (USER bun); when the installer runs as a
-  # different uid a 0600 `.env.toml` would be unreadable and crash-loop.
-  step "container permissions" grant_container_read "${PWD}/.env.toml" "ghcr.io/yohanesgre/lexa:${image_tag}"
-  step "compose up" mutate docker compose up -d --wait
-  step "health check" wait_for "http://${BIND}:${PORT}/api/health"
-  BANNER_MASTER=""
-  if [ -f "${PWD}/.env.toml" ]; then
-    BANNER_MASTER="master key ✓ (${DEPLOY_DIR}/.env.toml)"
-  fi
-  final_banner "http://${BIND}:${PORT}"
-}
-
-# ---------------------------------------------------------------------------
-# bare — release tarball → env + start script (+ optional systemd); dir: bare/
-# ---------------------------------------------------------------------------
-deploy_bare() {
-  preflight_bare
-  BARE_PORT="${PORT:-3000}"
-  PUBLIC_URL="${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
-  INSTALL_DIR="${INSTALL_DIR:-bare}"
-  # A repo checkout with its own env keeps it untouched — collecting secrets
-  # here would silently drop them (nothing gets written), so skip collection
-  # and report the existing config as-is.
-  local keep_existing_env=0
-  local existing_env=""
-  if [ -n "${FROM_REPO}" ]; then
-    # Repo checkout flow: build must already exist (bun run build).
-    INSTALL_DIR="${REPO_ROOT}"
-    [ -d "${INSTALL_DIR}/dist/client" ] || die "No build found in ${FROM_REPO} — run 'bun run build' first, then re-run this script."
-    if [ -f "${INSTALL_DIR}/.env.toml" ] || [ -f "${INSTALL_DIR}/.env" ]; then
-      keep_existing_env=1
-    fi
-  else
-    fetch_release "server" "${INSTALL_DIR}"
-    unpack_release "${INSTALL_DIR}" "${INSTALL_DIR}" server
-    # The tarball ships package.json + bun.lock without node_modules —
-    # resolve them once so `bun server/entry.ts` can run. --ignore-scripts
-    # skips the prepare hook (the Effect checkout is not shipped in the
-    # tarball and is dev-only).
-    step "bun install" mutate bun install --frozen-lockfile --production --ignore-scripts
-  fi
-  if [ "${keep_existing_env}" != "1" ]; then
-    collect_optional_secrets
-  fi
-  if [ "${keep_existing_env}" = "1" ]; then
-    existing_env="${INSTALL_DIR}/.env.toml"
-    [ -f "${existing_env}" ] || existing_env="${INSTALL_DIR}/.env"
-    echo "  ✓ ${existing_env} exists — kept (dev env untouched)"
-    echo "  Skipping secrets setup — add secrets to ${existing_env} directly."
-  else
-    local bare_public="${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
-    migrate_legacy_deploy_env "${INSTALL_DIR}"
-    step "write config" write_env_toml "${INSTALL_DIR}/.env.toml" \
-      "LXK_ENV=production" \
-      "PORT=${BARE_PORT}" \
-      "DATABASE_PATH=${INSTALL_DIR}/data/lexa.db" \
-      "LXK_PUBLIC_URL=${bare_public}" \
-      "LXK_TRUSTED_ORIGINS=${bare_public},http://127.0.0.1:${BARE_PORT}" \
-      "$(secrets_master_key_entry "${INSTALL_DIR}/.env.toml")"
-    step "apply secrets" apply_secrets_to_env "${INSTALL_DIR}/.env.toml"
-    step "create data folder" mkdir -p "${INSTALL_DIR}/data"
-  fi
-  step "write start script" write_start_script "${INSTALL_DIR}"
-  if [ "${SYSTEMD}" = "1" ]; then
-    step "install systemd service" install_systemd_unit "${INSTALL_DIR}"
-  else
-    # Manual mode auto-starts before the health wait; a re-run with a live
-    # lexa.pid is a no-op (never double-start).
-    step "start server" bare_start_manual "${INSTALL_DIR}"
-  fi
-  step "health check" wait_for "http://localhost:${BARE_PORT}/api/health" 60 "${INSTALL_DIR}/lexa.log"
-  BANNER_MASTER=""
-  if [ "${keep_existing_env}" != "1" ]; then
-    BANNER_MASTER="master key ✓ (${INSTALL_DIR}/.env.toml)"
-  fi
-  final_banner "${PUBLIC_URL}"
-  if [ "${SYSTEMD}" != "1" ]; then
-    echo "  Running in the background — logs: ${INSTALL_DIR}/lexa.log · stop: kill \$(cat ${INSTALL_DIR}/lexa.pid)"
-  fi
-}
 
 # ---------------------------------------------------------------------------
 # workers — release tarball → bun scripts/workers-install.ts (provisioning,
@@ -386,7 +234,5 @@ deploy_workers() {
 }
 
 case "${TARGET}" in
-  docker)  deploy_docker ;;
-  bare)    deploy_bare ;;
   workers) deploy_workers ;;
 esac

@@ -5,7 +5,7 @@
 # Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli]  |  CRITICAL=1 bash scripts/ci-local.sh
 # Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only;
 # `--critical` is a local-only fast mode (no CI counterpart) — the default full path mirrors release CI.
-# Missing optional tools (docker, gitleaks) warn and skip.
+# Missing optional tools (gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
 set -euo pipefail
 
@@ -40,8 +40,6 @@ section() { echo ""; echo -e "${DIM}━━━ $* ━━━${RST}"; }
 ok()      { echo -e "${GREEN}✔ $*${RST}"; }
 warn()    { echo -e "${YELLOW}⚠ $*${RST}"; WARNS=$((WARNS+1)); }
 fail()    { echo -e "${RED}✘ $*${RST}"; HARD_FAILS=$((HARD_FAILS+1)); }
-
-trap 'docker rm -f lexa-ci >/dev/null 2>&1 || true' EXIT
 
 # ── Restore wireframes submodule gracefully ───────────────────────────
 section "wireframes submodule"
@@ -81,60 +79,6 @@ if bun run check:invariants; then ok "invariants"; else fail "invariants"; fi
 # ── Build (vite) ──────────────────────────────────────────────────────
 section "build"
 if bun run build; then ok "build"; else fail "build"; fi
-
-# ── Docker build smoke ────────────────────────────────────────────────
-section "docker build smoke"
-if ! command -v docker >/dev/null 2>&1; then
-  warn "docker not found - skipping docker smoke"
-else
-  docker rm -f lexa-ci >/dev/null 2>&1 || true
-  if docker build -t lexa:ci . 2>&1 | tee /tmp/docker-build.log; then
-    ok "docker build"
-    ENV_DIR="$(mktemp -d)"
-    cat > "$ENV_DIR/.env.toml" <<'TOML'
-[core]
-DATABASE_PATH = "/app/data/lexa.db"
-PORT = "3000"
-
-[auth]
-LXK_ADMIN_EMAILS = "ci@example.com"
-TOML
-    if docker run -d --name lexa-ci -p 3001:3000 -v "$ENV_DIR/.env.toml:/app/.env.toml:ro" lexa:ci >/dev/null; then
-      echo "waiting for /api/health..."
-      HEALTH_OK=0
-      for i in $(seq 1 30); do
-        if curl -sf http://localhost:3001/api/health 2>/dev/null | grep -q '"ok":true'; then
-          ok "docker health check passed"
-          HEALTH_OK=1
-          break
-        fi
-        sleep 1
-      done
-      if [ "$HEALTH_OK" -eq 0 ]; then
-        warn "docker health check failed - warn not hard"
-        docker logs lexa-ci 2>&1 || true
-        curl -v http://localhost:3001/api/health 2>&1 || true
-      elif docker logs lexa-ci 2>&1 | grep -q 'env-file: loaded'; then
-        ok "docker boot applied the mounted .env.toml"
-      else
-        warn "docker boot did not log 'env-file: loaded' - warn not hard"
-        docker logs lexa-ci 2>&1 || true
-      fi
-      docker rm -f lexa-ci >/dev/null 2>&1 || true
-      trap - EXIT
-      # re-arm trap for remainder (no-op if container already removed)
-      trap 'docker rm -f lexa-ci >/dev/null 2>&1 || true' EXIT
-    else
-      warn "docker run failed - warn not hard"
-    fi
-  else
-    if grep -qiE "network.*not supported|failed to create endpoint|operation not supported" /tmp/docker-build.log 2>/dev/null; then
-      warn "docker build failed (network not supported in this env) - warn not hard"
-    else
-      warn "docker build failed - warn not hard"
-    fi
-  fi
-fi
 
 # ── Audit dependencies (warn) ─────────────────────────────────────────
 section "audit (warn)"
