@@ -229,8 +229,8 @@ CREATE TABLE columns (
 -- 409, details { count }) — sprints must be loosened/reassigned first;
 -- ON DELETE SET NULL on swimlanes.milestone_id is the safety net for
 -- direct DB writes only. Archive cascade (milestone → its sprints → their
--- live tasks) is service-level, one transaction, per-task `archived`
--- activity rows; restore brings the milestone back only.
+-- live tasks) is service-level, one atomic set-based batch, per-task
+-- `archived` activity rows; restore brings the milestone back only.
 CREATE TABLE milestones (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -268,8 +268,9 @@ CREATE INDEX idx_milestones_proj ON milestones(project_id, position);
 --   CHECKs already applied (the pre-squash create-new / copy / drop / rename
 --   rebuild is folded in): legacy 'milestone' rows are loose sprints
 --   (kind 'sprint', milestone_id NULL); due_at survived.
--- archived_at: lane archive cascades to its live tasks (one transaction,
---   per-task `archived` activity rows); restore brings the lane back only.
+-- archived_at: lane archive cascades to its live tasks (one atomic
+--   set-based batch, per-task `archived` activity rows); restore brings
+--   the lane back only.
 CREATE TABLE swimlanes (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1341,7 +1342,7 @@ Priority and type are per-project option lists (`priority_options` / `type_optio
 Key generation is **deterministic** — regenerating with the same inputs yields the same key. Every retry path must therefore RE-READ the anchor rows before regenerating (the concurrent winner's row is now visible). The retry fires only on the `UNIQUE(column_id, position)` violation — never on FK/NOT NULL failures. At most one retry, then surface the error.
 
 ### Task ticket keys — prefix + monotonic number, immutable once written
-Every project gets a ticket-key prefix (`projects.key`, unique — e.g. "NIM" from the slug, derived by `server/task-key.ts`), and every task gets a stable key `PREFIX-n` (`tasks.key`, e.g. "NIM-12") with a per-project monotonic `tasks.number` (`UNIQUE(project_id, number)`). Keys are written once at create, immutable, never reused — the counter `projects.next_task_number` advances atomically (read-modify-write with a uniqueness backstop). The columns are nullable only for the boot-time backfill (`server/db/task-keys-backfill.ts`); the app enforces non-null on write. `PREFIX-n` is accepted as a lookup alias wherever a task id is accepted.
+Every project gets a ticket-key prefix (`projects.key`, unique — e.g. "NIM" from the slug, derived by `server/task-key.ts`), and every task gets a stable key `PREFIX-n` (`tasks.key`, e.g. "NIM-12") with a per-project monotonic `tasks.number` (`UNIQUE(project_id, number)`). Keys are written once at create, immutable, never reused — `projects.next_task_number` is advanced and read in ONE atomic batch (the task INSERT computes `number`/`key` from the counter the same batch increments, so a failed insert rolls the increment back; `UNIQUE(project_id, number)` is the backstop). The columns are nullable only for the boot-time backfill (`server/db/task-keys-backfill.ts`); the app enforces non-null on write. `PREFIX-n` is accepted as a lookup alias wherever a task id is accepted.
 
 - **Create:** read last key in column → `generateKeyAfter(last)` → insert. On position conflict: re-read last, regenerate, insert.
 - **Move with neighbors** (`beforeTaskId`/`afterTaskId` given): read both neighbors (validated to be in the TARGET column of the same project) → `generateKeyBetween(before, after)`. Position is always reassigned on move — never carried over from the source column.
@@ -1409,8 +1410,17 @@ A mention is a TipTap node `{ type: "mention", attrs: { refType: "task"|"wiki", 
 ### `updated_at` is app-maintained
 Every repo `update*` method sets `updated_at = datetime('now')` in the same statement. No triggers — the write path is already centralized in repositories.
 
-### No multi-statement ACID needed
-Every mutation is either a single statement or a SQLite transaction (`server/db/database.ts` `batch()` helper — `db.transaction()` wrapping prepared statements, atomic all-or-nothing). The one multi-write flow (move + update synced state) runs through `batch()`.
+### Atomicity: batch, not interactive transactions
+Every mutation is either a single statement or one `batch()`/`batchResults()`
+array (`server/db/db.ts`; the driver contract lives in `server/db/driver.ts`).
+`batch()` is atomic all-or-nothing on BOTH drivers — bun-sqlite wraps the array
+in `db.transaction`, D1 calls the binding's `batch()`. `withTx` is a Bun-only
+convenience and is a documented no-op on D1, so every multi-write site uses one
+batch. Read-dependent sites either fold the read into the batch SQL (task-create
+counter: the INSERT computes `number`/`key` from the counter it increments in
+the same batch; archive cascades: one set-based `UPDATE` + `INSERT ... SELECT`)
+or explicitly accept a read-compute-retry window (position anchoring, WIP move
+verification, `wiki` save validation).
 
 ### SQLite notes (unchanged from v1)
 - TEXT UUIDs via `crypto.randomUUID()` in Bun.

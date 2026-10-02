@@ -18,11 +18,13 @@ replaces the other; either or both can be live at any time.
    `server/db/drivers/d1.ts` both implement `DbDriver`. Repos are async; the
    `bun-sqlite` driver wraps the sync API in `Promise.resolve`, so existing code-shape
    is preserved.
-3. **Atomicity invariants re-expressed:** the emission invariant (mutation +
+3. **Atomicity invariants:** the emission invariant (mutation +
    `task_activity` in one atomic unit) and the webhook atomic move +
-   `github_synced_state` write become pre-computed `{ sql, params }[]` arrays passed
-   to `db.batch()`. The WIP-limit conditional UPDATE stays a single statement.
-   Read-modify-write sites that aren't strict emissions stay as-is.
+   `github_synced_state` write are pre-computed `{ sql, params }[]` arrays passed
+   to `db.batch()`. `batch()` is atomic on both drivers; `withTx` is a no-op on
+   D1. Read-dependent sites either fold the read into the batch SQL (task-create
+   counter, archive cascades) or accept an explicit read-compute-retry window.
+   The WIP-limit conditional UPDATE stays a single statement.
 4. **Env access:** `server/env.ts` returns a `RuntimeEnv` — `process.env` on Bun,
    `env` from `cloudflare:workers` on Workers. Every module-scope `process.env.X`
    read goes through this helper. `server/auth.ts` becomes `createAuth(env)`, a
@@ -165,16 +167,16 @@ and `UNIQUE(issue_id)` safe). Hard 10GB storage cap. Single-threaded sequential 
 execution — overload queues, then errors when the queue fills.
 
 **No interactive transactions** (`BEGIN/COMMIT/ROLLBACK` unsupported). Atomicity =
-`db.batch([stmts])` only; whole batch must resolve < 30s. Direct hit on two
-architectural invariants:
+`db.batch([stmts])` only; the whole batch must resolve < 30s. `withTx` is a no-op
+on D1, so multi-write sites use one batch. Direct hits, now handled:
 
-- Emission invariant (mutation + `task_activity` rows in the SAME transaction)
-- Webhook atomic move + synced-state write
+- Emission invariant — mutation + `task_activity` rows in the same batch.
+- Webhook atomic move + synced-state write — one batch.
+- Read-dependent sites — task-create counter and archive cascades fold the read
+  into the batch SQL; position anchoring / WIP verification keep an explicit
+  read-compute-retry window (retry only on `isPositionConflict`, once).
 
-Both must be re-expressed as pre-computed statement batches. Silent invariant
-breakage risk if any service interleaves reads between writes. The conditional WIP
-UPDATE stays fine (single statement). Read-anchor→generate-position stays two round
-trips; existing `isPositionConflict` retry-once maps cleanly.
+The conditional WIP UPDATE stays a single statement.
 
 ### Better Auth
 
@@ -363,10 +365,10 @@ POST /api/assistant/tasks → queue → server-side chat():
 
 ## Top risks
 
-1. **Sync→async DB rewrite + transaction semantics (L).** Every repo/service signature
-   changes; emission invariant and webhook atomic move+synced-state must become
-   pre-computed `batch()` statement arrays — silent invariant breakage if any service
-   interleaves reads between writes.
+1. **Sync→async DB rewrite + transaction semantics (L).** Every repo/service
+   signature changes; emission invariant and webhook atomic move+synced-state are
+   pre-computed `batch()` statement arrays. Read-dependent sites are either folded
+   into the batch SQL or carry an explicit read-compute-retry window.
 2. **Effect runtime lifecycle on workerd.** Lazy layer-build hang (#6319) wedges
    isolates; per-request bindings vs module-scope Layers forces architecture change.
    Mitigation: eager module-scope runtime build, pinned Effect versions.

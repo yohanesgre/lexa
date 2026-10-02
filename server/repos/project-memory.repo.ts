@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryFirst, queryAll, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryFirst, queryAll, batch, batchResults, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ID, ISODate } from "../../shared/types";
 
 export interface ProjectMemoryEntry {
@@ -38,29 +38,23 @@ export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
-    // FTS5 external-content table — the index is maintained here, in the same
-    // transaction as the content write (no triggers).
-    const syncFtsInsert = (id: string) =>
-      run(db, `INSERT INTO project_memory_fts(rowid, content) SELECT rowid, content FROM project_memory WHERE id = ?`, id);
-
     return {
       create: (input: { id: string; projectId: string; content: string; source?: "manual" | "assistant" }): Effect.Effect<ProjectMemoryEntry, ConstraintViolation | DbError> =>
-        withTx(
-          db,
-          Effect.gen(function* () {
-            yield* run(
-              db,
-              `INSERT INTO project_memory (id, project_id, content, source) VALUES (?, ?, ?, ?)`,
-              input.id,
-              input.projectId,
-              input.content,
-              input.source ?? "manual"
-            );
-            yield* syncFtsInsert(input.id);
-            const rows = yield* queryAll<ProjectMemoryRow>(db, `SELECT * FROM project_memory WHERE id = ?`, input.id);
-            return rowToEntry(rows[0]!);
-          })
-        ),
+        Effect.gen(function* () {
+          // Content write + FTS index update in one atomic batch (no triggers).
+          yield* batch(db, [
+            {
+              sql: `INSERT INTO project_memory (id, project_id, content, source) VALUES (?, ?, ?, ?)`,
+              params: [input.id, input.projectId, input.content, input.source ?? "manual"],
+            },
+            {
+              sql: `INSERT INTO project_memory_fts(rowid, content) SELECT rowid, content FROM project_memory WHERE id = ?`,
+              params: [input.id],
+            },
+          ]);
+          const rows = yield* queryAll<ProjectMemoryRow>(db, `SELECT * FROM project_memory WHERE id = ?`, input.id);
+          return rowToEntry(rows[0]!);
+        }),
 
       get: (id: string): Effect.Effect<ProjectMemoryEntry, RowNotFound | DbError> =>
         queryFirst<ProjectMemoryRow>(db, `SELECT * FROM project_memory WHERE id = ?`, id).pipe(Effect.map(rowToEntry)),
@@ -73,16 +67,17 @@ export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa
         ).pipe(Effect.map((rows) => rows.map(rowToEntry))),
 
       remove: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
-        withTx(
-          db,
-          Effect.gen(function* () {
-            const rows = yield* queryAll<{ rowid: number }>(db, `SELECT rowid FROM project_memory WHERE id = ?`, id);
-            const rowid = rows[0]!?.rowid;
-            if (rowid === undefined) return yield* Effect.fail(new RowNotFound({ table: "project_memory" }));
-            yield* run(db, `DELETE FROM project_memory WHERE id = ?`, id);
-            yield* run(db, `DELETE FROM project_memory_fts WHERE rowid = ?`, rowid);
-          })
-        ),
+        Effect.gen(function* () {
+          // FTS row first (its subquery needs the content row), then content.
+          const [, del] = yield* batchResults(db, [
+            {
+              sql: `DELETE FROM project_memory_fts WHERE rowid = (SELECT rowid FROM project_memory WHERE id = ?)`,
+              params: [id],
+            },
+            { sql: `DELETE FROM project_memory WHERE id = ?`, params: [id] },
+          ]);
+          if ((del?.changes ?? 0) === 0) return yield* new RowNotFound({ table: "project_memory" });
+        }),
 
       // FTS-match the given terms against one project's memories, best rank
       // first, at most k hits, cumulative content capped at charCap (the last

@@ -777,7 +777,9 @@ replaying on D1:
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
   (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
   `createAuth(env)` factory, `wrangler d1 migrations`, `scheduled` prune+backup.
-  Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays.
+  Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays;
+  read-dependent sites fold the read into the batch SQL or carry an explicit
+  read-compute-retry window.
 - **Bun standalone (frozen at current features):** `Bun.serve` + `bun:sqlite` (WAL)
   + cloudflared tunnel. `server/entry.ts` serves the prerendered SPA shell
   (`_shell.html`) directly for every route except `/api/*`, `/health`, `/assets/*`

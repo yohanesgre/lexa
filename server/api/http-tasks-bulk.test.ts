@@ -114,6 +114,20 @@ describe("bulk task actions — update", () => {
     expect((db.prepare("SELECT priority FROM tasks WHERE id = ?").get(a) as { priority: string }).priority).toBe("prio-2");
   });
 
+  it("a per-item failure does not roll back items applied before or after it (no request-level transaction)", async () => {
+    const a = addTask("c1");
+    const b = addTask("c1");
+    const res = await handler(bulk({ ids: ["nope", a, b], action: "update", priority: "prio-2" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.applied).toEqual([a, b]);
+    expect(body.failed).toEqual([{ id: "nope", code: "TASK_NOT_FOUND", message: "Task not found" }]);
+    for (const id of [a, b]) {
+      expect((db.prepare("SELECT priority FROM tasks WHERE id = ?").get(id) as { priority: string }).priority).toBe("prio-2");
+      expect(activityCount(id, "field_changed")).toBe(1);
+    }
+  });
+
   it("resolves the PREFIX-n ticket-key alias in ids", async () => {
     const a = addTask("c1");
     const key = (db.prepare("SELECT key FROM tasks WHERE id = ?").get(a) as { key: string }).key;
@@ -312,6 +326,30 @@ describe("bulk task actions — rejections write nothing", () => {
     const row = db.prepare("SELECT column_id, updated_at FROM tasks WHERE id = ?").get(a) as { column_id: string; updated_at: string };
     expect(row.column_id).toBe("c1");
     expect(row.updated_at).toBe("2020-01-01 00:00:00");
+  });
+});
+
+describe("bulk task actions — infrastructure failure mid-loop", () => {
+  it("propagates a DbError while items already committed stay applied", async () => {
+    const a = addTask("c1");
+    const b = addTask("c1");
+    // Force a deterministic infrastructure failure on the SECOND item: its
+    // activity insert aborts the item's atomic batch. The first item's batch
+    // has already committed and must survive the mid-loop abort.
+    db.exec(`CREATE TRIGGER block_bulk_activity BEFORE INSERT ON task_activity
+             WHEN NEW.task_id = '${b}'
+             BEGIN SELECT RAISE(ABORT, 'blocked bulk'); END`);
+    try {
+      const res = await handler(bulk({ ids: [a, b], action: "update", priority: "prio-2" }));
+      expect(res.status).toBe(500);
+      expect((db.prepare("SELECT priority FROM tasks WHERE id = ?").get(a) as { priority: string | null }).priority).toBe("prio-2");
+      expect(activityCount(a, "field_changed")).toBe(1);
+      // The failed item rolled back entirely — no partial write.
+      expect((db.prepare("SELECT priority FROM tasks WHERE id = ?").get(b) as { priority: string | null }).priority).not.toBe("prio-2");
+      expect(activityCount(b, "field_changed")).toBe(0);
+    } finally {
+      db.exec("DROP TRIGGER block_bulk_activity");
+    }
   });
 });
 

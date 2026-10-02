@@ -117,30 +117,32 @@ describe("emission builders (B2 batch re-expression)", () => {
       type: "type-1",
       position: "a0",
       dueAt: null,
-      number: 3,
-      key: "EG-3",
+      projectKey: "EG",
       assignees: ["Maria", "Jo"],
       subtaskOfParentId: "parent-1",
       activity: [actor],
     });
-    expect(stmts).toHaveLength(5);
-    expect(stmts[0]!.sql).toMatch(/INSERT INTO tasks/);
-    expect(stmts[0]!.params).toEqual(["t1", "p1", "c1", "s1", "T", "{}", "prio-1", "type-1", "a0", null, 3, "EG-3"]);
-    expect(stmts[1]!.sql).toMatch(/INSERT INTO task_assignees/);
+    expect(stmts).toHaveLength(6);
+    expect(stmts[0]!.sql).toMatch(/UPDATE projects SET next_task_number = next_task_number \+ 1/);
+    expect(stmts[0]!.params).toEqual(["p1"]);
+    expect(stmts[1]!.sql).toMatch(/INSERT INTO tasks/);
+    expect(stmts[1]!.sql).toMatch(/\(SELECT next_task_number FROM projects WHERE id = \?\)/);
+    expect(stmts[1]!.params).toEqual(["t1", "p1", "c1", "s1", "T", "{}", "prio-1", "type-1", "a0", null, "p1", "EG", "p1"]);
     expect(stmts[2]!.sql).toMatch(/INSERT INTO task_assignees/);
-    expect(stmts[3]!.sql).toMatch(/INSERT INTO task_links/);
-    expect(stmts[3]!.params).toEqual([expect.any(String), "p1", "t1", "parent-1"]);
-    expect(stmts[4]!.sql).toMatch(/INSERT INTO task_activity/);
-    expect(stmts[4]!.params).toEqual(["t1", "user", "Maria", "u1", "created", "Maria created this task", 0]);
+    expect(stmts[3]!.sql).toMatch(/INSERT INTO task_assignees/);
+    expect(stmts[4]!.sql).toMatch(/INSERT INTO task_links/);
+    expect(stmts[4]!.params).toEqual([expect.any(String), "p1", "t1", "parent-1"]);
+    expect(stmts[5]!.sql).toMatch(/INSERT INTO task_activity/);
+    expect(stmts[5]!.params).toEqual(["t1", "user", "Maria", "u1", "created", "Maria created this task", 0]);
   });
 
   it("buildTaskCreateBatch omits link and assignees when absent", () => {
     const stmts = buildTaskCreateBatch({
       id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T",
       description: "{}", priority: "p", type: "t", position: "a0", dueAt: null,
-      number: 1, key: "EG-1", assignees: [], activity: [actor],
+      projectKey: "EG", assignees: [], activity: [actor],
     });
-    expect(stmts).toHaveLength(2);
+    expect(stmts).toHaveLength(3);
   });
 
   it("buildTaskUpdateBatch: assignee replace + scalar sets + activity", () => {

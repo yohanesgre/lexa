@@ -7,8 +7,10 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { DbBunLive, batch } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { ProjectRepo } from "./project.repo";
+import { buildTaskCreateBatch } from "./task-batch";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -100,26 +102,31 @@ describe("ProjectRepo", () => {
     if (Either.isLeft(dupId)) expect(dupId.left._tag).toBe("ConstraintViolation");
   });
 
-  // DB-level assertion of the allocation statement TaskService.create runs
-  // (server/services/task.service.ts:203-208). ProjectRepo exposes no
-  // allocation method, so this pins the SQL directly.
-  it("the allocation UPDATE ... RETURNING advances next_task_number atomically and survives a reload", async () => {
+  // DB-level assertion of the create batch (`buildTaskCreateBatch`): the
+  // counter increment and the INSERT that reads it are one transaction, so a
+  // failed insert rolls the increment back (no burned numbers). TaskService
+  // consumes the same builder.
+  it("the create batch increments the counter and computes number/key atomically; a failed insert rolls back the increment", async () => {
     const repo = makeRepo(db);
     await Effect.runPromise(repo.create({ id: "p1", ...base }));
+    db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c1','p1','Todo',0,'open')").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1','p1','Default',0,'backlog')").run();
+    const driver = createBunSqliteDriver(db);
+    const mk = (id: string, position: string) => buildTaskCreateBatch({
+      id, projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T", description: "{}",
+      priority: "pr", type: "ty", position, dueAt: null, projectKey: "EG", assignees: [], activity: [],
+    });
 
-    const bump = "UPDATE projects SET next_task_number = next_task_number + 1 WHERE id = ? RETURNING next_task_number";
-    const first = db.query(bump).get("p1") as { next_task_number: number };
-    const second = db.query(bump).get("p1") as { next_task_number: number };
-    expect(first.next_task_number).toBe(1);
-    expect(second.next_task_number).toBe(2);
+    await Effect.runPromise(batch(driver, mk("t1", "a0")));
+    const first = db.query("SELECT number, key FROM tasks WHERE id='t1'").get() as { number: number; key: string };
+    expect(first).toEqual({ number: 1, key: "EG-1" });
 
-    const reader = new Database(dbPath);
-    try {
-      const reread = reader.query("SELECT next_task_number FROM projects WHERE id = 'p1'").get() as { next_task_number: number };
-      expect(reread.next_task_number).toBe(2);
-    } finally {
-      reader.close();
-    }
+    // Duplicate id → the INSERT fails → the whole batch (counter included) rolls back.
+    const failed = await Effect.runPromise(Effect.either(batch(driver, mk("t1", "a1"))));
+    expect(Either.isLeft(failed)).toBe(true);
+    const after = db.query("SELECT next_task_number FROM projects WHERE id='p1'").get() as { next_task_number: number };
+    expect(after.next_task_number).toBe(1);
+    expect(db.query("SELECT COUNT(*) c FROM tasks WHERE id='t1'").get()).toEqual({ c: 1 });
   });
 
   it("list orders by created_at DESC and listKeys skips NULL keys", async () => {

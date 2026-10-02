@@ -639,8 +639,8 @@ DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN | 409 
 
 POST   /api/projects/:slug/swimlanes/:id/archive  (admin)
 → 200 { data: Swimlane, activity: ActivityEvent[] } | 403 FORBIDDEN | 404 | 409 BACKLOG_PROTECTED
-  One transaction: lane archivedAt set + every live task in the lane archived
-  (one `archived` activity row per task). Idempotent.
+  One atomic batch (set-based): lane archivedAt set + every live task in the
+  lane archived (one `archived` activity row per task). Idempotent.
   Note: archiving tasks does NOT sync GitHub state.
 
 POST   /api/projects/:slug/swimlanes/:id/restore  (admin)
@@ -666,9 +666,9 @@ DELETE /api/projects/:slug/milestones/:id  (admin) → 204 | 403 FORBIDDEN | 404
 
 POST   /api/projects/:slug/milestones/:id/archive  (admin)
 → 200 { data: Milestone, activity: ActivityEvent[] } | 403 FORBIDDEN | 404
-  One transaction: milestone archivedAt set + every sprint in the milestone
-  archived, each archiving its live tasks (one `archived` activity row per
-  task). Idempotent — an already-archived milestone returns unchanged.
+  One atomic batch (set-based): milestone archivedAt set + every sprint in the
+  milestone archived, each archiving its live tasks (one `archived` activity
+  row per task). Idempotent — an already-archived milestone returns unchanged.
 
 POST   /api/projects/:slug/milestones/:id/restore  (admin)
 → 200 { data: Milestone, activity: ActivityEvent[] } | 403 FORBIDDEN | 404
@@ -751,9 +751,11 @@ POST   /api/projects/:slug/tasks/:id/restore
 POST   /api/projects/:slug/tasks/bulk
 body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueAt? }
   action = "move" | "update" | "archive" | "restore"
-  One transaction (invariant #12 parity): every applied task runs the SAME
+  Per-item atomic (invariant #12 parity): every applied task runs the SAME
   service path as its single-task endpoint, so activity rows, required_fields
-  and WIP guards match exactly. Position-only reorders emit nothing.
+  and WIP guards match exactly. Position-only reorders emit nothing. Each item
+  is one atomic batch; there is NO request-level transaction, so a later
+  item's infrastructure failure does not roll back earlier applied items.
   - ids accept the ticket key (PREFIX-N) alias like every other task-id
     surface (invariant #13); unresolvable keys pass through and fail per task.
     They are de-duped first-seen (so `applied` never echoes a repeated id) and
@@ -765,7 +767,7 @@ body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueA
     collected per task while the permitted tasks still move.
   - update: only the provided priority/type/assignees/dueAt change.
   - archive / restore: idempotent, exactly like the single-task endpoints.
-  Side effect (after the transaction commits, best-effort — a GitHub failure
+  Side effect (after the items commit, best-effort — a GitHub failure
   never fails the request): update pushes content for linked tasks
   (syncContentFromLexa), and move to a github-mapped target column pushes state
   (syncStateFromLexa). Same orchestration as the single-task routes; the
@@ -775,8 +777,8 @@ body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueA
   Per-task domain rejections are collected in `failed` while the rest apply:
   TASK_NOT_FOUND, COLUMN_NOT_FOUND, SWIMLANE_NOT_FOUND, WIP_LIMIT,
   REQUIRED_FIELD, NEIGHBOR_NOT_IN_COLUMN, INVALID_OPTION, DEADLINE_AFTER_LANE.
-  Request-level failures return the standard error envelope and abort the
-  transaction — NO task changes:
+  Request-level failures are raised before any item is applied, so NO task
+  changes:
   | 403 TASKS_BULK_DISABLED (`LXK_DISABLE_TASKS_BULK=1`)
   | 404 PROJECT_NOT_FOUND
   | 422 INVALID_ARGS (targetless move: neither columnId nor swimlaneId;
@@ -832,7 +834,7 @@ DELETE /api/attachments/:id
 → 204 | 404 ATTACHMENT_NOT_FOUND | 403 ATTACHMENT_DELETE_FORBIDDEN
   Authority: uploader OR project admin (superadmin / project grant admin /
   team admin of the owning org). Task attachments emit `attachment_removed`
-  in the same transaction. The blob is deleted only when no other row
+  in the same atomic batch. The blob is deleted only when no other row
   references its storage_key.
 ```
 
