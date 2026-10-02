@@ -103,7 +103,7 @@ function lineIsInsideWithTx(anchorLine: number, lines: string[]): boolean {
   for (let i = anchorLine - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (/^\s*\/\//.test(line)) continue;
-    if (/withTx\s*\(/.test(line) || /batch\s*\(/.test(line)) {
+    if (/(?:withTx|batch|batchResults)\s*\(/.test(line)) {
       // We found an open. Now walk forward tracking paren depth from the
       // `withTx(` position, ignoring string contents via a coarse heuristic.
       // The function body is `Effect.gen(function* () { ... })` — once we
@@ -513,7 +513,14 @@ const results: Invariant[] = [];
     const text = readText(f);
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      if (!/\.activityService\.append\s*\(/.test(lines[i]!) && !/activityService\.append\s*\(/.test(lines[i]!)) continue;
+      // Activity emissions now arrive two ways: the service-level
+      // `activityService.append` / `appendStmt` (the latter delegates to the
+      // repo builder) and a direct `activityRepo.insertStmt` inside a
+      // `batchResults([...])`. All must sit inside withTx/batch/batchResults.
+      if (!/(?:\.?activityService\.append(?:Stmt)?|\.?activityRepo\.insertStmt)\s*\(/.test(lines[i]!)) continue;
+      // A builder *definition* body (`const xStmt = (...) => activityRepo.insertStmt(...)`)
+      // is not an emission — only call sites are.
+      if (/=>\s*$/.test((lines[i - 1] ?? "").trim())) continue;
       if (lineIsInsideWithTx(i, lines)) { inTxCount++; continue; }
       // Helper resolution: walk backward to find the enclosing `const <name> =`
       // or `function <name>(` definition; if every call site of that name is

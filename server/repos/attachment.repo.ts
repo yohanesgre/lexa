@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, ConstraintViolation } from "../db/db";
 
 export interface AttachmentRow {
   id: string;
@@ -15,31 +15,40 @@ export interface AttachmentRow {
   created_at: string;
 }
 
+export interface AttachmentInsertInput {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  wikiPageId: string | null;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  storageKey: string;
+  uploadedBy: string | null;
+}
+
+const ATTACHMENT_INSERT_SQL = `INSERT INTO attachments (id, project_id, task_id, wiki_page_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const attachmentInsertParams = (input: AttachmentInsertInput): SqlParam[] => [
+  input.id, input.projectId, input.taskId, input.wikiPageId,
+  input.filename, input.mimeType, input.sizeBytes,
+  input.sha256, input.storageKey, input.uploadedBy,
+];
+
 export class AttachmentRepo extends Effect.Service<AttachmentRepo>()("Lexa/AttachmentRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
     return {
-      insert: (input: {
-        id: string;
-        projectId: string;
-        taskId: string | null;
-        wikiPageId: string | null;
-        filename: string;
-        mimeType: string;
-        sizeBytes: number;
-        sha256: string;
-        storageKey: string;
-        uploadedBy: string | null;
-      }): Effect.Effect<void, ConstraintViolation | DbError> =>
-        run(
-          db,
-          `INSERT INTO attachments (id, project_id, task_id, wiki_page_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          input.id, input.projectId, input.taskId, input.wikiPageId,
-          input.filename, input.mimeType, input.sizeBytes,
-          input.sha256, input.storageKey, input.uploadedBy
-        ).pipe(Effect.map(() => undefined)),
+      insertStmt: (input: AttachmentInsertInput): BatchStmt => ({
+        sql: ATTACHMENT_INSERT_SQL,
+        params: attachmentInsertParams(input),
+      }),
+
+      insert: (input: AttachmentInsertInput): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, ATTACHMENT_INSERT_SQL, ...attachmentInsertParams(input)).pipe(Effect.map(() => undefined)),
 
       findById: (id: string): Effect.Effect<AttachmentRow | null, DbError> =>
         queryFirst<AttachmentRow>(
@@ -74,6 +83,8 @@ export class AttachmentRepo extends Effect.Service<AttachmentRepo>()("Lexa/Attac
           `SELECT * FROM attachments WHERE wiki_page_id = ? ORDER BY created_at ASC, id ASC`,
           wikiPageId
         ),
+
+      deleteByIdStmt: (id: string): BatchStmt => ({ sql: `DELETE FROM attachments WHERE id = ?`, params: [id] }),
 
       deleteById: (id: string): Effect.Effect<boolean, ConstraintViolation | DbError> =>
         run(db, `DELETE FROM attachments WHERE id = ?`, id).pipe(Effect.map((changes) => changes > 0)),

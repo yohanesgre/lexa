@@ -17,7 +17,7 @@
 // encrypted row, so the last explicit write always wins.
 
 import { Effect } from "effect";
-import { queryAll, run, withTx, ConstraintViolation, DbError, type DbDriver } from "../db/db";
+import { queryAll, run, batch, ConstraintViolation, DbError, type BatchStmt, type DbDriver } from "../db/db";
 import { encryptSecret, decryptSecret, secretsKeyringFromEnv, type EncryptedSecret, type SecretKeyId, type SecretKeyring } from "../assistant/secrets";
 import { GithubSecretWriteFailed } from "../api/errors";
 import type { RuntimeEnv } from "../env";
@@ -51,16 +51,18 @@ const readSetting = (driver: DbDriver, key: string): Effect.Effect<string | null
     Effect.catchAll(() => Effect.succeed(null))
   );
 
-const writeSetting = (driver: DbDriver, key: string, value: string): Effect.Effect<void, ConstraintViolation | DbError> =>
-  run(
-    driver,
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-    key,
-    value
-  ).pipe(Effect.asVoid);
+const SETTING_UPSERT_SQL =
+  "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')";
 
-const clearSetting = (driver: DbDriver, key: string): Effect.Effect<void, ConstraintViolation | DbError> =>
-  run(driver, "DELETE FROM settings WHERE key = ?", key).pipe(Effect.asVoid);
+const settingUpsertStmt = (key: string, value: string): BatchStmt => ({
+  sql: SETTING_UPSERT_SQL,
+  params: [key, value],
+});
+
+const settingClearStmt = (key: string): BatchStmt => ({
+  sql: "DELETE FROM settings WHERE key = ?",
+  params: [key],
+});
 
 // Missing table (an older test DB that never ran 0017) reads as "no row",
 // never an error — the fallback settings rows still work.
@@ -144,20 +146,19 @@ export function storeGithubAppCredentials(
     const sealedPrivate = yield* seal(input.privateKey, "private_key", keyring);
     const sealedWebhook = yield* seal(input.webhookSecret, "webhook_secret", keyring);
 
-    yield* withTx(
-      driver,
-      Effect.gen(function* () {
-        yield* writeSetting(driver, "github_app_id", input.appId);
-        if (nonEmpty(input.slug) !== "") yield* writeSetting(driver, "github_app_slug", input.slug);
-        else yield* clearSetting(driver, "github_app_slug");
-        yield* upsertSecret(driver, "private_key", sealedPrivate);
-        yield* upsertSecret(driver, "webhook_secret", sealedWebhook);
-        // The encrypted rows are authoritative now; a legacy plaintext row
-        // must never be able to shadow them.
-        yield* clearSetting(driver, "github_private_key");
-        yield* clearSetting(driver, "github_webhook_secret");
-      })
-    ).pipe(
+    const stmts: BatchStmt[] = [
+      settingUpsertStmt("github_app_id", input.appId),
+      nonEmpty(input.slug) !== ""
+        ? settingUpsertStmt("github_app_slug", input.slug)
+        : settingClearStmt("github_app_slug"),
+      secretUpsertStmt("private_key", sealedPrivate),
+      secretUpsertStmt("webhook_secret", sealedWebhook),
+      // The encrypted rows are authoritative now; a legacy plaintext row
+      // must never be able to shadow them.
+      settingClearStmt("github_private_key"),
+      settingClearStmt("github_webhook_secret"),
+    ];
+    yield* batch(driver, stmts).pipe(
       Effect.catchAll((e) =>
         Effect.fail(new GithubSecretWriteFailed({ message: e instanceof Error ? e.message : String(e) }))
       )
@@ -172,27 +173,26 @@ function seal(plaintext: string, name: GithubSecretName, keyring: SecretKeyring)
   });
 }
 
-function upsertSecret(
-  driver: DbDriver,
+function secretUpsertStmt(
   name: GithubSecretName,
   sealed: EncryptedSecret
-): Effect.Effect<void, ConstraintViolation | DbError> {
-  return run(
-    driver,
-    `INSERT INTO github_app_secrets (name, ciphertext, iv, key_id)
+): BatchStmt {
+  return {
+    sql: `INSERT INTO github_app_secrets (name, ciphertext, iv, key_id)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(name) DO UPDATE SET
        ciphertext = excluded.ciphertext, iv = excluded.iv, key_id = excluded.key_id,
        updated_at = datetime('now')`,
-    name,
-    sealed.ciphertextB64,
-    sealed.ivB64,
-    sealed.keyId
-  ).pipe(Effect.asVoid);
+    params: [name, sealed.ciphertextB64, sealed.ivB64, sealed.keyId],
+  };
 }
 
 // Used by the manual PUT path to clear a credential from BOTH stores. Missing
 // table (older DB) is not an error — there is nothing to clear.
+export function deleteGithubSecretStmt(name: GithubSecretName): BatchStmt {
+  return { sql: "DELETE FROM github_app_secrets WHERE name = ?", params: [name] };
+}
+
 export function deleteGithubSecret(driver: DbDriver, name: GithubSecretName): Effect.Effect<void, DbError> {
   return run(driver, "DELETE FROM github_app_secrets WHERE name = ?", name).pipe(
     Effect.asVoid,

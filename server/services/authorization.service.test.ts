@@ -7,8 +7,10 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { DbBunLive, run } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { AuthorizationService } from "./authorization.service";
+import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -47,6 +49,17 @@ function makeAuthz(db: Database) {
   const layer = AuthorizationService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, AuthorizationService);
+}
+
+function makeRoleRepo(db: Database) {
+  const layer = UserProjectRoleRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
+  return Context.get(ctx, UserProjectRoleRepo);
+}
+
+function roleRowCount(db: Database, userId: string, projectId: string): number {
+  const row = db.query("SELECT COUNT(*) AS n FROM user_project_roles WHERE user_id = ? AND project_id = ?").get(userId, projectId) as { n: number };
+  return row.n;
 }
 
 // World:
@@ -150,9 +163,6 @@ describe("AuthorizationService", () => {
 
   it("projectAccessForProjects matches projectAccess per id in one batch", async () => {
     seed(db);
-    // Duplicate grant rows are legal (PK includes role) and reachable on D1;
-    // admin must win deterministically in both paths.
-    db.prepare("INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('grantee', 'member', 'p2')").run();
     // Comma-joined multi-role org membership must read as team admin.
     db.prepare("UPDATE member SET role = 'owner,admin' WHERE id = 'm4'").run();
     const authz = makeAuthz(db);
@@ -170,6 +180,31 @@ describe("AuthorizationService", () => {
     expect((await Effect.runPromise(authz.projectAccessForProjects("outsider", ["p2"]))).get("p2")).toBe("admin");
     const empty = await Effect.runPromise(authz.projectAccessForProjects("sa", []));
     expect(empty.size).toBe(0);
+  });
+
+  it("one role row per (user, project): duplicate insert rejects, setRole switches in place and both read paths agree", async () => {
+    seed(db);
+    const authz = makeAuthz(db);
+    const repo = makeRoleRepo(db);
+
+    // grantee already holds admin on p2 from seed; a second direct insert violates
+    // UNIQUE(user_id, project_id) (0018) and leaves the single row untouched.
+    const dup = await Effect.runPromise(
+      Effect.either(
+        run(createBunSqliteDriver(db), "INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('grantee','member','p2')")
+      )
+    );
+    expect(dup).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "ConstraintViolation" }) });
+    expect(roleRowCount(db, "grantee", "p2")).toBe(1);
+    expect(await Effect.runPromise(authz.projectAccess("grantee", "p2"))).toBe("admin");
+
+    // setRole updates the one row admin→member in place; both read paths agree.
+    await Effect.runPromise(repo.setRole("grantee", "p2", "member"));
+    expect(roleRowCount(db, "grantee", "p2")).toBe(1);
+    const single = await Effect.runPromise(authz.projectAccess("grantee", "p2"));
+    const batched = (await Effect.runPromise(authz.projectAccessForProjects("grantee", ["p2"]))).get("p2");
+    expect(single).toBe("member");
+    expect(batched).toBe("member");
   });
 
   it("projectAccessForProjects chunks the projects lookup past 90 ids", async () => {

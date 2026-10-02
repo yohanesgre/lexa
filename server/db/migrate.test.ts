@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1338,6 +1338,40 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     `);
     after.prepare("DELETE FROM projects WHERE id = 'p1'").run();
     expect(after.prepare("SELECT COUNT(*) AS n FROM chat_attachments").get()).toEqual({ n: 0 });
+    expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
+
+  // ── 0018 user_project_roles unique ───────────────────────────────────────
+  it("0018 de-dups (keeps admin) and adds the one-role-per-(user,project) index", () => {
+    const dir = stageThrough("0017");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0018_user_project_roles_unique.sql");
+
+    const seed = new Database(dbPath);
+    seed.exec("PRAGMA foreign_keys = ON");
+    seed.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+      INSERT INTO users (id, email, name, role) VALUES ('u1', 'u1@x', 'U1', 'superadmin');
+      INSERT INTO user_project_roles (user_id, role, project_id) VALUES
+        ('u1', 'admin', 'p1'),
+        ('u1', 'member', 'p1');
+    `);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    expect(appliedMigrations(dbPath)).toContain("0018_user_project_roles_unique.sql");
+    // De-dup kept exactly the admin row.
+    expect(after.prepare("SELECT role FROM user_project_roles WHERE user_id = 'u1' AND project_id = 'p1'").all()).toEqual([{ role: "admin" }]);
+    // The unique index exists and enforces one row per (user, project).
+    const idx = (after.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toContain("ux_user_project_roles_user_project");
+    expect(() =>
+      after.prepare("INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u1', 'member', 'p1')").run()
+    ).toThrow(/UNIQUE constraint failed/i);
     expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     after.close();
   });

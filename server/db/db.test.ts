@@ -5,6 +5,8 @@ import {
   Db,
   DbBunLive,
   batch,
+  batchResults,
+  requireRow,
   mapDbError,
   queryAll,
   queryFirst,
@@ -140,16 +142,81 @@ describe("async wrappers over the bun driver", () => {
     }
   });
 
-  it("batch-only driver (D1 shape) runs withTx bodies sequentially", async () => {
+  it("batchResults returns positional results (incl. inside a Bun withTx)", async () => {
+    const { driver, close } = memDriver();
+    try {
+      const [ins, upd, del] = await runEff(batchResults(driver, [
+        { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", params: ["a", "1"] },
+        { sql: "UPDATE t SET v = ? WHERE id = ?", params: ["2", "a"] },
+        { sql: "DELETE FROM t WHERE id = ?", params: ["nope"] },
+      ]));
+      expect(ins!.results).toEqual([{ id: "a", v: "1" }]);
+      expect(ins!.changes).toBe(1);
+      expect(upd!.changes).toBe(1);
+      expect(upd!.results).toEqual([]);
+      expect(del!.changes).toBe(0);
+
+      await runEff(withTx(driver, Effect.gen(function* () {
+        const [row] = yield* batchResults(driver, [
+          { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", params: ["b", "2"] },
+        ]);
+        expect(row!.results).toEqual([{ id: "b", v: "2" }]);
+        yield* run(driver, "INSERT INTO t (id, v) VALUES (?, ?)", "c", "3");
+      })));
+      expect(await runEff(queryAll<{ id: string }>(driver, "SELECT id FROM t ORDER BY id"))).toEqual([
+        { id: "a" },
+        { id: "b" },
+        { id: "c" },
+      ]);
+    } finally {
+      close();
+    }
+  });
+
+  it("batch-only driver (D1 shape): batch() rolls back atomically; withTx bodies do NOT roll back", async () => {
     const { driver: bun, close } = memDriver();
     const d1shaped: DbDriver = { ...bun, supportsInteractiveTx: false };
     try {
-      const value = await runEff(withTx(d1shaped, Effect.gen(function* () {
-        yield* batch(d1shaped, [{ sql: "INSERT INTO t (id, v) VALUES (?, ?)", params: ["a", "1"] }]);
-        return "ok";
-      })));
-      expect(value).toBe("ok");
-      expect(await runEff(queryAll<{ id: string }>(d1shaped, "SELECT id FROM t"))).toEqual([{ id: "a" }]);
+      const res = await Effect.runPromise(Effect.either(
+        batch(d1shaped, [
+          { sql: "INSERT INTO t (id, v) VALUES (?, ?)", params: ["a", "1"] },
+          { sql: "INSERT INTO t (id, v) VALUES (?, ?)", params: ["a", "dup"] },
+        ])
+      ));
+      expect(res._tag).toBe("Left");
+      expect(await runEff(queryAll(d1shaped, "SELECT id FROM t"))).toEqual([]);
+
+      const failed = await Effect.runPromise(Effect.either(
+        withTx(d1shaped, Effect.gen(function* () {
+          yield* run(d1shaped, "INSERT INTO t (id, v) VALUES (?, ?)", "b", "2");
+          return yield* Effect.fail(new DbError({ message: "boom" }));
+        }))
+      ));
+      expect(failed._tag).toBe("Left");
+      expect(await runEff(queryAll(d1shaped, "SELECT id FROM t"))).toEqual([{ id: "b" }]);
+    } finally {
+      close();
+    }
+  });
+
+  it("requireRow returns the RETURNING row and fails DbError when absent", async () => {
+    const { driver, close } = memDriver();
+    try {
+      const [ins] = await runEff(batchResults(driver, [
+        { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", params: ["a", "1"] },
+      ]));
+      expect(await runEff(requireRow<{ id: string; v: string }>(ins, "test.insert"))).toEqual({ id: "a", v: "1" });
+
+      const empty = await Effect.runPromise(Effect.either(requireRow({ results: [], changes: 0 }, "test.empty")));
+      expect(empty._tag).toBe("Left");
+      if (empty._tag === "Left") {
+        expect(empty.left).toBeInstanceOf(DbError);
+        expect(empty.left.message).toContain("test.empty");
+      }
+
+      const missing = await Effect.runPromise(Effect.either(requireRow(undefined, "test.missing")));
+      expect(missing._tag).toBe("Left");
+      if (missing._tag === "Left") expect(missing.left).toBeInstanceOf(DbError);
     } finally {
       close();
     }

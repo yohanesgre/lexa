@@ -1,17 +1,15 @@
-// Batch-array builders for the D1 atomicity re-expression (Phase 5).
+// Batch-array builders for the atomic multi-statement writes.
 //
-// Each helper returns the `{ sql, params }[]` pair that the existing
-// `withTx` path produces on Bun, AND that the D1 driver consumes
-// directly via `db.batch(stmts)`. The Bun-side services continue to
-// use `withTx { ... }`; the Workers-side services call
-// `db.batch(buildXxxBatch(input))` and skip `withTx` entirely.
+// Each helper returns the `{ sql, params }[]` array that `db.batch()` /
+// `db.batchResults()` consumes directly on BOTH drivers (bun-sqlite wraps
+// the array in a transaction; D1 calls the binding's `batch()`). Converted
+// services call `batch(db, buildXxxBatch(input))` / `batchResults(...)` and
+// no longer use `withTx`; the remaining read-dependent `withTx` sites are
+// tracked for a follow-up.
 //
-// These helpers are the single source of truth for both paths. They
-// are pure functions of the input — no database access, no side
-// effects — which makes them trivially testable. The existing
-// `withTx` call sites can be refactored to call these builders and
-// thread the result through `batch(db, ...)` once Phase 6 wires the
-// D1 driver into the HTTP layer.
+// These helpers are the single source of truth for both paths. They are
+// pure functions of the input — no database access, no side effects —
+// which makes them trivially testable.
 
 import type { SqlParam } from "../db/driver";
 

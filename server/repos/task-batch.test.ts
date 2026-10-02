@@ -1,8 +1,7 @@
 // Tests for the batch-array builders in `task-batch.ts`. The
 // builders are pure functions of the input — these tests verify they
-// return the same `{ sql, params }` pairs the existing `withTx` path
-// produces on the Bun side. Phase 6 will route the Workers-side
-// services through these same arrays via `db.batch(stmts)`.
+// return the same `{ sql, params }` pairs the services run through
+// `db.batch(stmts)` / `db.batchResults(stmts)`.
 
 import { describe, expect, it } from "vitest";
 import {

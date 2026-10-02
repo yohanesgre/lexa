@@ -36,16 +36,28 @@ function makeD1Like(db: Database): D1Like {
         },
         async run() {
           const r = stmt.run(...bound);
-          return { success: true, meta: { changes: r.changes } };
+          return { success: true, meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } };
         },
       };
       return self;
     },
     async batch(statements: D1BatchItem[]) {
-      db.transaction(() => {
-        for (const s of statements) db.prepare(s.sql).run(...(s.params ?? []));
-      })();
-      return { length: statements.length, duration: 0, results: [], success: true };
+      return db.transaction(() =>
+        statements.map((s) => {
+          const stmt = db.prepare(s.sql);
+          if (stmt.columnNames.length > 0) {
+            const rows = stmt.all(...(s.params ?? []));
+            const last = (db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
+            return { success: true, results: rows, meta: { changes: rows.length, duration: 0, last_row_id: last } };
+          }
+          const r = stmt.run(...(s.params ?? []));
+          return {
+            success: true,
+            results: [],
+            meta: { changes: r.changes, duration: 0, last_row_id: Number(r.lastInsertRowid) },
+          };
+        }),
+      )();
     },
   };
 }
@@ -118,6 +130,23 @@ function conformance(label: string, make: () => { driver: DbDriver; close: () =>
           ]),
         ).rejects.toThrow();
         expect(await count(driver)).toBe(0);
+      } finally {
+        close();
+      }
+    });
+
+    it("batch() returns positional results: RETURNING rows and per-statement changes", async () => {
+      const { driver, close } = make();
+      try {
+        const [ins, upd, del] = await driver.batch([
+          { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", params: ["a", 1] },
+          { sql: "UPDATE t SET v = 2 WHERE id = 'a'", params: [] },
+          { sql: "DELETE FROM t WHERE id = 'nope'", params: [] },
+        ]);
+        expect(ins!.results).toEqual([{ id: "a", v: 1 }]);
+        expect(upd!.changes).toBe(1);
+        expect(upd!.results).toEqual([]);
+        expect(del!.changes).toBe(0);
       } finally {
         close();
       }
@@ -219,27 +248,36 @@ describe("d1 driver specifics", () => {
   it("batch() maps success=false to DbError", async () => {
     const d1: D1Like = {
       ...makeD1Like(makeDb()),
-      batch: async (stmts: D1BatchItem[]) => ({
-        length: stmts.length,
-        duration: 1,
-        results: [],
-        success: false,
-      }),
+      batch: async (stmts: D1BatchItem[]) =>
+        stmts.map(() => ({ success: false, results: [], meta: { duration: 1 } })),
     };
     await expect(createD1Driver(d1).batch([{ sql: "SELECT 1", params: [] }])).rejects.toBeInstanceOf(DbError);
   });
 
-  it("batch() maps an over-budget duration to BatchTimeout", async () => {
+  it("batch() maps an over-budget summed duration to BatchTimeout with postCommit marker", async () => {
     const d1: D1Like = {
       ...makeD1Like(makeDb()),
-      batch: async (stmts: D1BatchItem[]) => ({
-        length: stmts.length,
-        duration: 29_000,
-        results: [],
-        success: true,
-      }),
+      batch: async (stmts: D1BatchItem[]) =>
+        stmts.map(() => ({ success: true, results: [], meta: { duration: 29_000 } })),
     };
-    await expect(createD1Driver(d1).batch([{ sql: "SELECT 1", params: [] }])).rejects.toBeInstanceOf(BatchTimeout);
+    const err = await createD1Driver(d1).batch([{ sql: "SELECT 1", params: [] }]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BatchTimeout);
+    expect((err as BatchTimeout).postCommit).toBe(true);
+  });
+
+  it("batch() preserves positional order and surfaces last_row_id", async () => {
+    const db = makeDb();
+    const driver = createD1Driver(makeD1Like(db));
+    try {
+      const out = await driver.batch([
+        { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id", params: ["a", 1] },
+        { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id", params: ["b", 2] },
+      ]);
+      expect(out.map((r) => r.results)).toEqual([[{ id: "a" }], [{ id: "b" }]]);
+      expect(out[0]!.lastInsertRowid).toBeDefined();
+    } finally {
+      db.close();
+    }
   });
 
   it("close() is a no-op", () => {

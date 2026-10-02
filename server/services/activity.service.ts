@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, DbError, ConstraintViolation } from "../db/db";
+import { Db, type BatchStmt, DbError, ConstraintViolation } from "../db/db";
 import { ActivityRepo } from "../repos/activity.repo";
 import { CommentRepo } from "../repos/comment.repo";
 import { ActivityItem, Actor, ActivityType, ActivityEvent } from "../../shared/types";
@@ -15,6 +15,15 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
       // Single-statement insert (no BEGIN) — inherently joins an outer
       // withTx/batch transaction on the shared connection.
       activityRepo.insert({
+        taskId, actorKind: actor.kind, actorLabel: actor.label,
+        actorUserId: actor.userId ?? null, type, message,
+        viaAssistant: opts?.viaAssistant === true,
+      });
+
+    /** Write-only builder for `batch()`/`batchResults()` — the inserted row
+     *  is read back from the positional batch results (RETURNING kept). */
+    const appendStmt = (taskId: string, actor: Actor, type: ActivityType, message: string, opts?: { viaAssistant?: boolean }): BatchStmt =>
+      activityRepo.insertStmt({
         taskId, actorKind: actor.kind, actorLabel: actor.label,
         actorUserId: actor.userId ?? null, type, message,
         viaAssistant: opts?.viaAssistant === true,
@@ -59,6 +68,6 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
         return { items, nextCursor };
       });
 
-    return { append, listMerged, listLatest };
+    return { append, appendStmt, listMerged, listLatest };
   }),
 }) {}

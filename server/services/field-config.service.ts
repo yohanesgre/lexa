@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
+import { DbError, RowNotFound, ConstraintViolation, Db, batch } from "../db/db";
 import { ProjectNotFound, OptionInUse, InvalidOption } from "../api/errors";
 import type { FieldConfig, FieldOption } from "../../shared/types";
 
@@ -81,14 +81,11 @@ export class FieldConfigService extends Effect.Service<FieldConfigService>()("Le
           validateList("type", input.types),
         ]);
 
-        // One tx: a crash mid-way can't leave priorities new / types old.
-        yield* withTx(
-          db,
-          Effect.all([
-            repo.replaceList(projectId, "priority", priorities),
-            repo.replaceList(projectId, "type", types),
-          ])
-        );
+        // One batch: a crash mid-way can't leave priorities new / types old.
+        yield* batch(db, [
+          ...repo.buildReplaceListStmts(projectId, "priority", priorities),
+          ...repo.buildReplaceListStmts(projectId, "type", types),
+        ]);
         yield* Effect.logInfo(`[FieldConfig] Replaced options for project ${projectId}`);
         return yield* repo.findByProject(projectId);
       });

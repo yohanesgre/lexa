@@ -3,10 +3,11 @@ import { SourceRepo } from "../repos/source.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { TaskRepo } from "../repos/task.repo";
-import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
+import { DbError, RowNotFound, ConstraintViolation, Db, batchResults, requireRow, withTx } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable, TaskNotFound } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
+import { rowToDocumentSource, rowToActivityEvent, type DocumentSourceRow, type ActivityRow } from "../../shared/db";
 import { extractText } from "../../shared/tiptap-text";
 import { isPrivateIp, isPublicUrl } from "../ssrf";
 import type { DocumentSource, TipTapDoc, Actor, ActivityEvent } from "../../shared/types";
@@ -170,24 +171,28 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
           } else {
             yield* assertPublicUrl(input.ref);
           }
-          return yield* withTx(db, Effect.gen(function* () {
-            const source = yield* repo.create({
-              id: crypto.randomUUID(),
+          const sourceId = crypto.randomUUID();
+          const results = yield* batchResults(db, [
+            repo.createStmt({
+              id: sourceId,
               projectId: input.projectId,
               documentType: input.documentType,
               documentId: input.documentId,
               kind: input.kind,
               title,
               ref: input.ref,
-            });
-            let activity: ActivityEvent[] = [];
-            if (input.documentType === "task") {
-              const ev = yield* activityService.append(input.documentId, actor, "source_added",
-                msg.sourceAdded(title, input.kind === "wiki" ? "wiki" : "url"));
-              activity = [ev];
-            }
-            return { source, activity };
-          }));
+            }),
+            ...(input.documentType === "task"
+              ? [activityService.appendStmt(input.documentId, actor, "source_added",
+                  msg.sourceAdded(title, input.kind === "wiki" ? "wiki" : "url"))]
+              : []),
+          ]);
+          const source = yield* repo.findById(sourceId);
+          let activity: ActivityEvent[] = [];
+          if (input.documentType === "task") {
+            activity = [rowToActivityEvent(yield* requireRow<ActivityRow>(results[1], "source.add activity"))];
+          }
+          return { source, activity };
         }),
 
       remove: (actor: Actor, projectId: string, id: string): Effect.Effect<{ activity: ActivityEvent[] }, SourceNotFound | ConstraintViolation | DbError | RowNotFound> =>

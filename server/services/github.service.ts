@@ -9,7 +9,8 @@ import { TaskService } from "./task.service";
 import { ProjectService } from "./project.service";
 import { ActivityService } from "./activity.service";
 import { GithubIssueAlreadyLinked, TaskNotFound, GithubApiError, ProjectNotFound, ColumnNotFound, SwimlaneNotFound, RequiredFieldMissing, InvalidOption, DeadlineAfterLane } from "../api/errors";
-import { Db, withTx, DbError, ConstraintViolation, RowNotFound } from "../db/db";
+import { Db, batchResults, requireRow, DbError, ConstraintViolation, RowNotFound } from "../db/db";
+import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { PUBLIC_URL } from "../auth";
 import { extractText } from "../../shared/tiptap-text";
 import { docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "../../shared/markdown";
@@ -288,16 +289,19 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             });
           }
           const issue = yield* client.createIssue(repo, task.title, extractText(task.description));
-          return yield* withTx(db, Effect.gen(function* () {
-            yield* taskRepo.setGithubLink(taskId, {
+          const [, activityRes] = yield* batchResults(db, [
+            taskRepo.setGithubLinkStmt(taskId, {
               issueId: issue.nodeId,
               issueNumber: issue.number,
               repo, // stored "owner/name" — used by all future syncs
               title: task.title,
-            });
-            const ev = yield* activityService.append(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number));
-            return { issueId: issue.nodeId, issueNumber: issue.number, repo, activity: [ev] };
-          }));
+            }),
+            activityService.appendStmt(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number)),
+          ]);
+          return {
+            issueId: issue.nodeId, issueNumber: issue.number, repo,
+            activity: [rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.createLinkedIssue activity"))],
+          };
         }),
 
       // Link an EXISTING GitHub issue to a task (the autocomplete flow). The
@@ -327,16 +331,19 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           if (alreadyLinked) {
             return yield* new GithubIssueAlreadyLinked({ taskId: alreadyLinked.id });
           }
-          return yield* withTx(db, Effect.gen(function* () {
-            yield* taskRepo.setGithubLink(taskId, {
+          const [, activityRes] = yield* batchResults(db, [
+            taskRepo.setGithubLinkStmt(taskId, {
               issueId: issue.nodeId,
               issueNumber: issue.number,
               repo,
               title: issue.title,
-            });
-            const ev = yield* activityService.append(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number));
-            return { issueId: issue.nodeId, issueNumber: issue.number, repo, activity: [ev] };
-          }));
+            }),
+            activityService.appendStmt(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number)),
+          ]);
+          return {
+            issueId: issue.nodeId, issueNumber: issue.number, repo,
+            activity: [rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.linkExistingIssue activity"))],
+          };
         }),
 
       // Pick up a GitHub issue as a Lexa task: creates the task (title from
@@ -372,16 +379,16 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             title: issue.title,
             description: markdownToDoc(issue.body),
           });
-          const ev = yield* withTx(db, Effect.gen(function* () {
-            yield* taskRepo.setGithubLink(task.id, {
+          const [, activityRes] = yield* batchResults(db, [
+            taskRepo.setGithubLinkStmt(task.id, {
               issueId: issue.nodeId,
               issueNumber: issue.number,
               repo,
               title: issue.title,
-            });
-            return yield* activityService.append(task.id, actor, "github_linked", msg.githubLinked(repo, issue.number));
-          }));
-          return { taskId: task.id, activity: [ev] };
+            }),
+            activityService.appendStmt(task.id, actor, "github_linked", msg.githubLinked(repo, issue.number)),
+          ]);
+          return { taskId: task.id, activity: [rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.createTaskFromIssue activity"))] };
         }),
     };
   }),

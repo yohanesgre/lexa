@@ -14,19 +14,19 @@
 import { Effect } from "effect";
 import type { D1Database } from "@cloudflare/workers-types";
 import { mapDbError, queryFirst, run, type BatchStmt, type DbDriver, type SqlParam } from "../db/db";
-import { BatchTimeout, ConstraintViolation, DbError, RowNotFound } from "../db/driver";
-import type { D1BatchItem, D1Like, D1PreparedLike } from "../db/drivers/d1";
+import { ConstraintViolation, DbError, RowNotFound } from "../db/driver";
+import type { D1BatchItem, D1BatchItemResult, D1Like, D1PreparedLike } from "../db/drivers/d1";
 import type { RuntimeEnv } from "../env";
 
 // ─── D1 binding → D1Like adapter (B1 concern #3) ──────────────────────────
 // The real D1 binding differs from the `D1Like` test shape in two ways:
-// `batch()` takes prepared statements (not { sql, params }) and returns
-// `D1Result[]` (not { success, duration, results }) — and, critically, it
-// THROWS on constraint violation instead of returning success=false. The
-// throw is translated to a typed error (ConstraintViolation incl. the
-// isPositionConflict bit, else DbError) so the async `batch()` atomic-
-// rollback detection and the position-conflict retry-once (invariant #4)
-// read it correctly.
+// `batch()` takes prepared statements (not { sql, params }) and returns a
+// positional `D1Result[]`. Critically, it THROWS on constraint violation
+// instead of returning success=false; the throw is translated to a typed
+// error (ConstraintViolation incl. the isPositionConflict bit, else DbError)
+// so the async `batch()` atomic-rollback detection and the position-conflict
+// retry-once (invariant #4) read it correctly. The driver owns the
+// duration/success checks and positional mapping.
 interface RealD1Prepared {
   bind(...params: unknown[]): RealD1Prepared;
   all<T>(): Promise<{ results: T[] }>;
@@ -36,12 +36,11 @@ interface RealD1Prepared {
 
 interface RealD1Database {
   prepare(query: string): RealD1Prepared;
-  batch<T>(statements: RealD1Prepared[]): Promise<Array<{ success: boolean; meta?: { duration?: number } | undefined; results?: T }>>;
+  batch(statements: RealD1Prepared[]): Promise<D1BatchItemResult[]>;
 }
 
-function translateThrow(e: unknown): ConstraintViolation | DbError | BatchTimeout {
-  const mapped = mapDbError(e);
-  return mapped;
+function translateThrow(e: unknown): ConstraintViolation | DbError {
+  return mapDbError(e);
 }
 
 export function d1DatabaseToD1Like(db: D1Database): D1Like {
@@ -76,22 +75,13 @@ export function d1DatabaseToD1Like(db: D1Database): D1Like {
     prepare(query: string): D1PreparedLike {
       return wrapPrepared(real.prepare(query));
     },
-    async batch<T = unknown>(statements: D1BatchItem[]): Promise<{ length: number; duration: number; results: T[]; success: boolean }> {
+    async batch(statements: D1BatchItem[]): Promise<D1BatchItemResult[]> {
       const prepared = statements.map((s) => real.prepare(s.sql).bind(...(s.params ?? [])));
-      let results: Array<{ success: boolean; meta?: { duration?: number } | undefined; results?: T }>;
       try {
-        results = await real.batch<T>(prepared);
+        return await real.batch(prepared);
       } catch (e: unknown) {
         throw translateThrow(e);
       }
-      const duration = results.reduce((sum, r) => sum + (r.meta?.duration ?? 0), 0);
-      if (duration > 28_000) {
-        throw new BatchTimeout({ message: `D1 batch exceeded 28s budget (${duration}ms)` });
-      }
-      if (results.some((r) => !r.success)) {
-        throw new DbError({ message: "D1 batch returned success=false" });
-      }
-      return { length: results.length, duration, results: results.map((r) => r.results as T), success: true };
     },
   };
 }
@@ -122,6 +112,27 @@ export function resetSettingsCache(): void {
   settingsCache.clear();
   settingsCacheGeneration++;
 }
+
+/** Drop specific keys after a commit that bypassed the set/delete helpers
+ *  (e.g. an atomic `batch()` write). Bumps the generation so an in-flight
+ *  read cannot repopulate a stale value. */
+export function invalidateSettingsCache(keys: readonly string[]): void {
+  for (const key of keys) settingsCache.delete(key);
+  settingsCacheGeneration++;
+}
+
+const SETTING_UPSERT_SQL =
+  "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')";
+
+export const settingUpsertStmt = (key: string, value: string): BatchStmt => ({
+  sql: SETTING_UPSERT_SQL,
+  params: [key, value],
+});
+
+export const settingDeleteStmt = (key: string): BatchStmt => ({
+  sql: "DELETE FROM settings WHERE key = ?",
+  params: [key],
+});
 
 export function getSettingAsync(
   driver: DbDriver,
@@ -155,12 +166,12 @@ export function setSettingAsync(
 ): Effect.Effect<void, ConstraintViolation | DbError> {
   return run(
     driver,
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+    SETTING_UPSERT_SQL,
     key,
     value
   ).pipe(
     Effect.asVoid,
-    Effect.tap(() => Effect.sync(() => { settingsCache.delete(key); settingsCacheGeneration++; }))
+    Effect.tap(() => Effect.sync(() => invalidateSettingsCache([key])))
   );
 }
 
@@ -170,7 +181,7 @@ export function deleteSettingAsync(
 ): Effect.Effect<void, ConstraintViolation | DbError> {
   return run(driver, "DELETE FROM settings WHERE key = ?", key).pipe(
     Effect.asVoid,
-    Effect.tap(() => Effect.sync(() => { settingsCache.delete(key); settingsCacheGeneration++; }))
+    Effect.tap(() => Effect.sync(() => invalidateSettingsCache([key])))
   );
 }
 

@@ -1,10 +1,11 @@
 import { Effect } from "effect";
 import { createHash, randomUUID } from "node:crypto";
-import { Db, withTx, run, DbError, ConstraintViolation } from "../db/db";
+import { Db, batch, batchResults, requireRow, DbError, ConstraintViolation } from "../db/db";
 import { AttachmentRepo, AttachmentRow } from "../repos/attachment.repo";
 import { ChatAttachmentRepo, ChatAttachmentRow } from "../repos/chat-attachment.repo";
 import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
 import { ActivityService } from "./activity.service";
+import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { UserRepo } from "../repos/user.repo";
 import { WikiShareRepo } from "../repos/wiki-share.repo";
@@ -131,8 +132,8 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         yield* storage.put(key, input.bytes);
         const filename = sanitizeFilename(input.filename);
         const id = randomUUID();
-        return yield* withTx(db, Effect.gen(function* () {
-          yield* attachmentRepo.insert({
+        const results = yield* batchResults(db, [
+          attachmentRepo.insertStmt({
             id,
             projectId: input.projectId,
             taskId: input.taskId,
@@ -143,22 +144,24 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
             sha256,
             storageKey: key,
             uploadedBy: input.actor.userId ?? null,
-          });
-          let activity: ActivityEvent | null = null;
-          if (input.taskId) {
-            activity = yield* activityService.append(
-              input.taskId,
-              input.actor,
-              "attachment_added",
-              msg.attachmentAdded(input.actor.label, filename)
-            );
-          }
-          const row = yield* attachmentRepo.findById(id).pipe(
-            Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "attachment row vanished after insert" })))
-          );
-          const attachment = yield* toAttachment(row);
-          return { attachment, activity };
-        }));
+          }),
+          ...(input.taskId
+            ? [activityService.appendStmt(
+                input.taskId,
+                input.actor,
+                "attachment_added",
+                msg.attachmentAdded(input.actor.label, filename)
+              )]
+            : []),
+        ]);
+        const activity: ActivityEvent | null = input.taskId
+          ? rowToActivityEvent(yield* requireRow<ActivityRow>(results[1], "attachment.upload activity"))
+          : null;
+        const row = yield* attachmentRepo.findById(id).pipe(
+          Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "attachment row vanished after insert" })))
+        );
+        const attachment = yield* toAttachment(row);
+        return { attachment, activity };
       });
 
     const isProjectAdmin = (identity: AuthIdentityShape, projectId: string): Effect.Effect<boolean> =>
@@ -182,17 +185,17 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         if (!uploader && !admin) {
           return yield* new AttachmentDeleteForbidden({ id: attachmentId });
         }
-        yield* withTx(db, Effect.gen(function* () {
-          yield* attachmentRepo.deleteById(attachmentId);
-          if (row.task_id) {
-            yield* activityService.append(
-              row.task_id,
-              { kind: identity.userId ? "user" : "agent", label: identity.userName ?? identity.keyName ?? "unknown", userId: identity.userId },
-              "attachment_removed",
-              msg.attachmentRemoved(identity.userName ?? identity.keyName ?? "unknown", row.filename)
-            );
-          }
-        }));
+        yield* batch(db, [
+          attachmentRepo.deleteByIdStmt(attachmentId),
+          ...(row.task_id
+            ? [activityService.appendStmt(
+                row.task_id,
+                { kind: identity.userId ? "user" : "agent", label: identity.userName ?? identity.keyName ?? "unknown", userId: identity.userId },
+                "attachment_removed",
+                msg.attachmentRemoved(identity.userName ?? identity.keyName ?? "unknown", row.filename)
+              )]
+            : []),
+        ]);
         // Blob delete AFTER commit — only when this was the last referencing
         // row across BOTH tables (a blob may still back a chat attachment).
         // Failure leaves an orphan blob (harmless by design).
@@ -341,15 +344,15 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         const key = storageKeyFor(sha256);
         yield* storage.put(key, input.bytes);
         const id = randomUUID();
-        return yield* withTx(db, Effect.gen(function* () {
-          // The thread row is created lazily on first send, but an attachment
-          // can arrive first — ensure it exists before the composite FK fires.
-          yield* run(
-            db,
-            `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, ?, ?, '[]') ON CONFLICT(document_type, document_id) DO NOTHING`,
-            input.chatId, input.projectId, input.actor.userId ?? null
-          ).pipe(Effect.map(() => undefined));
-          yield* chatRepo.insert({
+        // The thread row is created lazily on first send, but an attachment
+        // can arrive first — ensure it exists before the composite FK fires.
+        // Both writes run as one atomic batch.
+        yield* batch(db, [
+          {
+            sql: `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, ?, ?, '[]') ON CONFLICT(document_type, document_id) DO NOTHING`,
+            params: [input.chatId, input.projectId, input.actor.userId ?? null],
+          },
+          chatRepo.insertStmt({
             id,
             projectId: input.projectId,
             documentType: "chat",
@@ -360,12 +363,12 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
             sha256,
             storageKey: key,
             uploadedBy: input.actor.userId ?? null,
-          });
-          const row = yield* chatRepo.findById(id).pipe(
-            Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "chat attachment row vanished after insert" })))
-          );
-          return yield* toChatAttachment(row);
-        }));
+          }),
+        ]);
+        const row = yield* chatRepo.findById(id).pipe(
+          Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "chat attachment row vanished after insert" })))
+        );
+        return yield* toChatAttachment(row);
       });
 
     const listChat = (chatId: string, projectId: string, userId: string | null): Effect.Effect<ChatAttachmentView[],

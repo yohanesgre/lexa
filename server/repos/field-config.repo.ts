@@ -13,6 +13,17 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
+    const buildReplaceListStmts = (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): BatchStmt[] => {
+      const t = table(kind);
+      return [
+        { sql: `DELETE FROM ${t} WHERE project_id = ?`, params: [projectId] },
+        ...options.map((o) => ({
+          sql: `INSERT INTO ${t} (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`,
+          params: [o.id, projectId, o.label, o.color, o.position],
+        })),
+      ];
+    };
+
     return {
       findByProject: (projectId: string): Effect.Effect<FieldConfig, DbError> =>
         Effect.gen(function* () {
@@ -86,17 +97,10 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
         ).pipe(Effect.map((rows) => rows[0]?.c ?? 0)),
 
       // Replace the whole list for a project atomically (used by PUT field-config).
-      replaceList: (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): Effect.Effect<void, ConstraintViolation | DbError> => {
-        const t = table(kind);
-        const stmts: BatchStmt[] = [
-          { sql: `DELETE FROM ${t} WHERE project_id = ?`, params: [projectId] },
-          ...options.map((o) => ({
-            sql: `INSERT INTO ${t} (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`,
-            params: [o.id, projectId, o.label, o.color, o.position],
-          })),
-        ];
-        return batch(db, stmts);
-      },
+      buildReplaceListStmts,
+
+      replaceList: (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): Effect.Effect<void, ConstraintViolation | DbError> =>
+        batch(db, buildReplaceListStmts(projectId, kind, options)),
 
       // Create the default 4+4 options for a brand-new project.
       seedDefaults: (projectId: string): Effect.Effect<void, ConstraintViolation | DbError> =>

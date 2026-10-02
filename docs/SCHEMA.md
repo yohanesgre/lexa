@@ -72,8 +72,9 @@ CREATE TABLE users (
   banExpires     TEXT
 );
 
--- Per-project roles. PRIMARY KEY includes role: a user holds at most one
--- row per (project, role) — admin + member rows can coexist.
+-- Per-project roles. One row per (user, project): PRIMARY KEY
+-- (user_id, role, project_id) plus UNIQUE INDEX ux_user_project_roles_user_project
+-- (user_id, project_id), added in 0018.
 CREATE TABLE user_project_roles (
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   role       TEXT NOT NULL CHECK(role IN ('admin', 'member')),
@@ -1170,6 +1171,10 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- settings rows are NOT migrated and stay readable as a fallback). 0016 is
 -- reserved by `0016_drop_provider_api_key.sql` (Release N+1) and is absent from
 -- the chain; future migrations continue at 0018_*.sql.
+-- 0018_user_project_roles_unique.sql de-dups `user_project_roles` (keeping the
+-- admin row when both exist) and adds `ux_user_project_roles_user_project`
+-- (user_id, project_id) so the one-role-per-(user, project) invariant is
+-- enforceable without a PK rebuild (D1 has no ALTER).
 ```
 
 ## Design Notes

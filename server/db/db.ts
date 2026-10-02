@@ -1,13 +1,14 @@
 import { Context, Effect, Layer } from "effect";
 import type { Database } from "bun:sqlite";
-import type { DbDriver, DbStmt, LexaRow, SqlParam } from "./driver";
-import { ConstraintViolation, DbError, RowNotFound } from "./driver";
+import type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam } from "./driver";
+import { ConstraintViolation, DbError, RowNotFound, mapDbError } from "./driver";
 import { createBunSqliteDriver } from "./drivers/bun-sqlite";
 import type { D1Like } from "./drivers/d1";
 import { createD1Driver } from "./drivers/d1";
 
 export { ConstraintViolation, DbError, RowNotFound };
-export type { DbDriver, DbStmt, LexaRow, SqlParam };
+export { mapDbError } from "./driver";
+export type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam };
 
 export class Db extends Context.Tag("Lexa/Db")<Db, DbDriver>() {}
 
@@ -16,18 +17,6 @@ export const DbBunLive = (db: Database): Layer.Layer<Db> =>
 
 export const DbD1Live = (d1: D1Like): Layer.Layer<Db> =>
   Layer.succeed(Db, createD1Driver(d1));
-
-export function mapDbError(e: unknown): ConstraintViolation | DbError {
-  const msg = String(e);
-  if (e instanceof ConstraintViolation || e instanceof DbError) return e;
-  if (msg.includes("SQLITE_CONSTRAINT") || /constraint failed/i.test(msg)) {
-    return new ConstraintViolation({
-      message: msg,
-      isPositionConflict: /tasks\.column_id.*tasks\.position/.test(msg),
-    });
-  }
-  return new DbError({ message: msg, cause: e });
-}
 
 const stmtOf = (driver: DbDriver, sql: string): Effect.Effect<DbStmt, DbError> =>
   Effect.try({
@@ -155,21 +144,69 @@ export interface BatchStmt {
 
 const txDepth = new WeakMap<DbDriver, number>();
 
-export function batch(
+/** Result-bearing batch. On a nested (`withTx`) Bun path the statements run
+ *  sequentially with the same synthesis as the driver; otherwise the driver's
+ *  atomic `batch()` is used and its positional results returned. */
+export function batchResults(
   driver: DbDriver,
   stmts: BatchStmt[]
-): Effect.Effect<void, ConstraintViolation | DbError> {
+): Effect.Effect<BatchStmtResult[], ConstraintViolation | DbError> {
   if ((txDepth.get(driver) ?? 0) > 0) {
     return Effect.gen(function* () {
-      for (const s of stmts) yield* run(driver, s.sql, ...s.params);
+      const out: BatchStmtResult[] = [];
+      for (const s of stmts) {
+        const stmt = yield* stmtOf(driver, s.sql);
+        if (stmt.columnNames && stmt.columnNames.length > 0) {
+          const rows = yield* Effect.tryPromise({
+            try: () => stmt.all(...s.params),
+            catch: mapDbError,
+          });
+          out.push({ results: rows, changes: rows.length });
+        } else {
+          const changes = yield* Effect.tryPromise({
+            try: () => stmt.run(...s.params).then((r) => r.changes),
+            catch: mapDbError,
+          });
+          out.push({ results: [], changes });
+        }
+      }
+      return out;
     });
   }
   return Effect.tryPromise({
     try: () => driver.batch(stmts),
-    catch: (e) => mapDbError(e),
+    catch: mapDbError,
   });
 }
 
+/** Void-compatible batch — the existing ~50 callers keep their signature. */
+export function batch(
+  driver: DbDriver,
+  stmts: BatchStmt[]
+): Effect.Effect<void, ConstraintViolation | DbError> {
+  return batchResults(driver, stmts).pipe(Effect.asVoid);
+}
+
+/** Checked access to a batch statement's `RETURNING` row. `batchResults`
+ *  yields positional results; a statement that was expected to return a row
+ *  but did not (driver divergence, unexpected SQL) must not be silently cast
+ *  away. `result` may be `undefined` when the caller destructured the
+ *  positional array under `noUncheckedIndexedAccess`. */
+export function requireRow<T = LexaRow>(
+  result: BatchStmtResult | undefined,
+  op: string
+): Effect.Effect<T, DbError> {
+  const row = result?.results[0];
+  return row === undefined
+    ? Effect.fail(new DbError({ message: `${op}: batch statement returned no row` }))
+    : Effect.succeed(row as unknown as T);
+}
+
+// Interactive transaction. Bun-only: on D1 (`supportsInteractiveTx === false`)
+// this is a documented no-op — the body runs SEQUENTIALLY with no BEGIN/
+// ROLLBACK, so a mid-body failure leaves prior writes committed. Every
+// multi-write site MUST therefore use one `batch()`/`batchResults()` call;
+// `withTx` remains only as Bun isolation for sites not yet converted.
 export function withTx<A, E, R>(
   driver: DbDriver,
   effect: Effect.Effect<A, E, R>

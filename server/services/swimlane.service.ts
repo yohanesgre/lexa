@@ -142,14 +142,12 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
         Effect.gen(function* () {
           const lane = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
           if (!lane.archivedAt) return { lane, activity: [] };   // idempotent
-          const restored = yield* withTx(db, Effect.gen(function* () {
-            const r = yield* repo.setArchived(id, null).pipe(
-              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id }))
-            );
-            return { lane: r, activity: [] as ActivityEvent[] };
-          }));
-          yield* Effect.logInfo(`[Swimlane] Restored ${restored.lane.id}`);
-          return restored;
+          // Single statement — already atomic; no withTx needed.
+          const r = yield* repo.setArchived(id, null).pipe(
+            Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id }))
+          );
+          yield* Effect.logInfo(`[Swimlane] Restored ${r.id}`);
+          return { lane: r, activity: [] as ActivityEvent[] };
         }),
     };
   }),

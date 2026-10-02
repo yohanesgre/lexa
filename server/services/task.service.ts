@@ -347,7 +347,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null), viaAssistant));
           }
 
-          const updated = yield* withTx(db, Effect.gen(function* () {
+          const updated = yield* Effect.gen(function* () {
             const stmts = buildTaskUpdateBatch({
               id,
               ...(input.title !== undefined ? { title: input.title } : {}),
@@ -364,7 +364,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
             const activity = rows.length === 0 ? [] : yield* activityService.listLatest(id, rows.length);
             return { task: u, activity };
-          }));
+          });
           yield* Effect.logInfo(`[Task] Updated ${updated.task.id}`);
           return updated;
         }),
@@ -583,14 +583,13 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         Effect.gen(function* () {
           yield* taskRepo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id })));
           // The batch is a single DELETE: task_activity rows cascade with the
-          // task (FK ON DELETE CASCADE), and withTx keeps the delete atomic —
-          // if it fails (children), the transaction rolls back with nothing
-          // removed.
-          yield* withTx(db, batch(db, buildTaskDeleteBatch({
+          // task (FK ON DELETE CASCADE), so a failing delete (children) leaves
+          // nothing removed — the batch is atomic on both drivers.
+          yield* batch(db, buildTaskDeleteBatch({
             taskId: id,
           })).pipe(
             Effect.catchTag("ConstraintViolation", () => new TaskHasChildren({ taskId: id }))
-          ));
+          );
           yield* Effect.logInfo(`[Task] Deleted ${id}`);
           return undefined;
         }),
@@ -602,7 +601,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           );
           if (task.archivedAt) return { task, activity: [] };
           const archivedAt = new Date().toISOString();
-          const archived = yield* withTx(db, Effect.gen(function* () {
+          const archived = yield* Effect.gen(function* () {
             yield* batch(db, buildTaskArchiveBatch({
               taskId: id,
               archivedAt,
@@ -612,7 +611,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
             );
             return { task: a, activity: yield* activityService.listLatest(id, 1) };
-          }));
+          });
           yield* Effect.logInfo(`[Task] Archived ${archived.task.id}`);
           return archived;
         }),
@@ -623,7 +622,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
           if (!task.archivedAt) return { task, activity: [] };
-          const restored = yield* withTx(db, Effect.gen(function* () {
+          const restored = yield* Effect.gen(function* () {
             yield* batch(db, buildTaskArchiveBatch({
               taskId: id,
               archivedAt: null,
@@ -633,7 +632,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
             );
             return { task: r, activity: yield* activityService.listLatest(id, 1) };
-          }));
+          });
           yield* Effect.logInfo(`[Task] Restored ${restored.task.id}`);
           return restored;
         }),
@@ -647,11 +646,11 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
           const issue = task.githubs.find((g) => g.issueId === issueId);
-          yield* withTx(db, batch(db, buildUnlinkBatch({
+          yield* batch(db, buildUnlinkBatch({
             taskId,
             issueId,
             activity: issue ? asInput(actor, "github_unlinked", msg.githubUnlinked(issue.repo, issue.issueNumber), false) : null,
-          })));
+          }));
           yield* Effect.logInfo(`[Task] Unlinked GitHub issue ${issueId} from ${taskId}`);
           return { unlinked: true };
         }),

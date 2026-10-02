@@ -10,6 +10,6 @@ export function resolveMaxApiBody(env: RuntimeEnv): number {
   return (Number.isFinite(bodyMb) && bodyMb > 0 ? bodyMb : 16) * 1024 * 1024;
 }
 
-// Backward-compat: pre-Phase-3 callers import `MAX_API_BODY` as a constant.
-// Phase 6+ migrates those callers to `resolveMaxApiBody(env)`.
+// Boot-time body cap snapshot for the Bun-path callers (middleware/entry).
+// The per-request Workers path calls `resolveMaxApiBody(env)` instead.
 export const MAX_API_BODY: number = resolveMaxApiBody(getEnv());

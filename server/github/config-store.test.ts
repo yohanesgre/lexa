@@ -184,4 +184,28 @@ describe("github config store", () => {
     expect(db.prepare("SELECT COUNT(*) c FROM github_app_secrets WHERE name = 'private_key'").get()).toEqual({ c: 0 });
     await expect(resolve()).resolves.toEqual({ privateKey: "", webhookSecret: "whsec-1" });
   });
+
+  it("storeGithubAppCredentials is all-or-nothing: a mid-batch failure rolls back every write", async () => {
+    // Force the private_key upsert (statement 3 of 6) to abort. ABORT raises to
+    // the JS run(), so the Bun driver's transaction rolls the whole array back.
+    db.exec(`CREATE TRIGGER fail_private_key BEFORE INSERT ON github_app_secrets
+             WHEN NEW.name = 'private_key' BEGIN SELECT RAISE(ABORT, 'forced-failure'); END;`);
+    // A legacy plaintext row the batch would clear on success — it must survive.
+    db.prepare("INSERT INTO settings (key, value) VALUES ('github_private_key', 'legacy-pem')").run();
+
+    expect(await leftTag(storeGithubAppCredentials(driver, ENV_A, {
+      appId: "4242",
+      slug: "lexa-test",
+      privateKey: PEM,
+      webhookSecret: "whsec-1",
+    }))).toBe("GithubSecretWriteFailed");
+
+    // Nothing from the failed batch survived: no app id/slug, no secrets, and
+    // the legacy plaintext row was not cleared.
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'github_app_id'").get()).toBeNull();
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'github_app_slug'").get()).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) c FROM github_app_secrets").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'github_private_key'").get()).toEqual({ value: "legacy-pem" });
+    db.exec("DROP TRIGGER fail_private_key");
+  });
 });
