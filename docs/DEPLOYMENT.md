@@ -3,7 +3,9 @@
 This doc is the single source of truth for deploying Lexa and configuring its
 environment. Deployment goes through **`scripts/install.sh`** — one script,
 three targets (`docker | bare | workers`), zero clone for the hosted targets,
-each installing into a self-describing dir in the current directory. The first
+each installing into a self-describing dir in the current directory. Staging is
+the exception: a second Workers environment runs from a clone with plain
+`wrangler` (see §Staging from a clone). The first
 superadmin is provisioned **only** by the web `/setup` wizard (email + password
 ≥8) — the script never handles passwords.
 
@@ -147,6 +149,60 @@ normally.
   no CLI — see below) or manual dashboard clicks
   (`docs/DEPLOYMENT_DASHBOARD.md`). Same bindings, same migrations,
   no secrets to paste — machine keys are minted post-setup.
+
+### Staging from a clone (no install.sh)
+
+A second, isolated Workers environment deploys straight from a repo checkout —
+no release tarball, no `install.sh`. Use it to rehearse migrations and let a
+branch soak before production; every resource is named after the deploy name,
+so nothing touches the prod worker, database, or bucket.
+
+```bash
+git clone https://github.com/yohanesgre/lexa && cd lexa
+bun install
+bun x wrangler d1 create lexa-staging
+bun x wrangler r2 bucket create lexa-staging-blobs
+bun x wrangler kv namespace create lexa-staging
+cp wrangler.staging.example.jsonc wrangler.staging.local.jsonc  # fill the 3 ids
+bun run build:workers
+bun x wrangler d1 migrations apply DB --remote --config wrangler.staging.local.jsonc
+bun x wrangler deploy --config wrangler.staging.local.jsonc
+bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local.jsonc
+```
+
+- `wrangler.staging.example.jsonc` (repo root) mirrors the config
+  `workers-install.ts` generates: worker `lexa-staging`, D1 `lexa-staging`, R2
+  `lexa-staging-blobs`, KV, the Assistant Durable Object with its self service
+  binding, `main`/`assets` from the built `dist/`, `no_bundle`
+  plus the ESModule rule, and the crons + observability from the root
+  `wrangler.jsonc`. Fill `<ACCOUNT_ID>` (multi-account tokens only),
+  `<D1_DATABASE_ID>`, and `<KV_NAMESPACE_ID>` in the copied file.
+- `LXK_SECRETS_MASTER_KEY` is **required** — Better Auth's session-signing
+  secret derives from it (see the variable table) — mint it as base64 of exactly
+  32 bytes (`openssl rand -base64 32`). Optional GitHub sync secrets:
+  `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_PRIVATE_KEY` (inline PEM),
+  or use the in-app GitHub connect flow. Point staging at its own GitHub App —
+  one webhook URL belongs to one App.
+- `LXK_PUBLIC_URL` is optional (workers.dev URL or custom domain); a custom
+  domain needs a zone in the same Cloudflare account.
+- First superadmin: open `<url>/setup`.
+- Updating staging: check out the branch or commit, `bun run build:workers`,
+  and re-run the migrate + deploy commands with the same config. Resources,
+  data, and secrets persist.
+
+Rules:
+
+- Never deploy staging with the root `wrangler.jsonc` — it names the prod
+  worker and prod resources. Never run `bun run db:migrations:apply` or
+  `bun run deploy:workers` for staging; both ignore the staging config.
+- One method per database: this path writes wrangler's `d1_migrations` journal.
+  A database migrated by `install.sh workers` (`_migrations`) must keep using
+  that method, and vice versa — mixing the two double-applies migrations.
+- The filled `wrangler.staging.local.jsonc` carries account and resource ids —
+  gitignored, never committed.
+
+`install.sh workers --name lexa-staging` remains the tarball-based route to the
+same isolation (`--name` keys the resource names).
 
 ### Optional secrets at install
 

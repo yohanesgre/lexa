@@ -43,7 +43,9 @@ replaces the other; either or both can be live at any time.
    Cloudflare API, applies D1 migrations, and deploys the prebuilt bundle via
    `bun x wrangler` (helper: `scripts/workers-install.ts`, `--name` keys the
    resource names). Repo deploys
-   use `install.sh workers --from-repo <dir>`. The Bun
+   use `install.sh workers --from-repo <dir>`. A staging Workers environment
+   deploys from a clone with plain `wrangler` (`wrangler.staging.example.jsonc`)
+   — see `docs/DEPLOYMENT.md` §Staging from a clone. The Bun
    flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
    targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
 8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup (cron
