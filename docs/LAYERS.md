@@ -1353,9 +1353,10 @@ the run intact, and Jev emits no `task_activity` of its own.
   from the DO's sticky value, overridden by the send envelope's
   `permissionMode` (chat threads only — a task/wiki run stays `ask`), and
   persisted back as the new sticky value; a mid-turn change waits for the next
-  send (D2/D5/D6). Read tools are unaffected in every mode. Exactly one slot
-  from the per-turn write budget is consumed per write call regardless of mode
-  (a bulk call is one slot).
+  send (D2/D5/D6). Read tools are unaffected in every mode. Each write call
+  consumes one per-turn budget slot where a budget applies: `ask` is capped by
+  the Worker-side pending-row count, `auto` by the DO-side counter
+  (`MAX_WRITES_PER_TURN`); `deny` consumes none. A bulk call is one slot.
   - `ask` — a write call proposes: a row in `assistant_pending_writes`,
     `tool_pending` frames plus the persisted carrier, and the turn suspends on
     `proposed === true` (below).
@@ -1370,8 +1371,9 @@ the run intact, and Jev emits no `task_activity` of its own.
     (`{ ok:false, denied:true, error }`, no Worker call, no row, no suspend).
     Write tools stay offered so the refusal is visible to the model, which may
     suggest switching modes.
-  Emissions are unchanged: every execution still calls the domain services with
-  `viaAssistant` (invariant #12).
+  Emissions are unchanged: every task-mutating execution still calls the domain
+  services with `viaAssistant` (invariant #12); the other write paths are
+  unchanged.
 - **Legacy import** — `server/assistant/legacy-convert.ts` converts TanStack
   `ModelMessage[]` → `UIMessage[]` on first DO activation for a thread whose DO
   store is empty and whose D1 row has messages (lossy for tool-internal parts).
