@@ -74,23 +74,23 @@ describe("AssistantProjectMcpSection", () => {
   it("defaults to off and disables globally-off clients with 'Global off'", () => {
     render(<AssistantProjectMcpSection project={PROJECT} />);
     const notionRow = screen.getByRole("row", { name: /Notion/ });
-    expect(within(notionRow).getByRole("button", { name: "Notion not enabled for this project" })).toBeDisabled();
+    expect(within(notionRow).getByRole("button", { name: "Notion" })).toBeDisabled();
     expect(within(notionRow).getByText("Global off")).toBeInTheDocument();
 
     const linearRow = screen.getByRole("row", { name: /Linear/ });
-    expect(within(linearRow).getByRole("button", { name: "Linear not enabled for this project" })).not.toHaveClass("is-on");
+    expect(within(linearRow).getByRole("button", { name: "Linear" })).not.toHaveClass("is-on");
   });
 
   it("reflects a stored project row as enabled", () => {
     h.rows = [{ projectId: "p1", serverId: "linear", enabled: true, createdAt: "t", updatedAt: "t" }];
     render(<AssistantProjectMcpSection project={PROJECT} />);
-    expect(screen.getByRole("button", { name: "Linear enabled for this project" })).toHaveClass("is-on");
+    expect(screen.getByRole("button", { name: "Linear" })).toHaveClass("is-on");
   });
 
   it("toggling sends the full replace-set with the flipped value", async () => {
     const user = userEvent.setup();
     render(<AssistantProjectMcpSection project={PROJECT} />);
-    await user.click(screen.getByRole("button", { name: "Linear not enabled for this project" }));
+    await user.click(screen.getByRole("button", { name: "Linear" }));
     expect(h.saved).toEqual([[
       { serverId: "notion", enabled: false },
       { serverId: "linear", enabled: true },

@@ -110,7 +110,7 @@ function JevConfigForm({ config, secretsEnabled }: { config: AssistantJevMasked;
         <button
           type="button"
           className={`toggle-switch${enabled ? " is-on" : ""}`}
-          aria-label={enabled ? "Jev enabled" : "Jev disabled"}
+          aria-label="Enabled"
           aria-pressed={enabled}
           onClick={() => setEnabled((v) => !v)}
         />

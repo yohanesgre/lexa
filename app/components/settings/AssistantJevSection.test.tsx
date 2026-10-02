@@ -116,7 +116,7 @@ describe("AssistantJevSection — save intent", () => {
   it("toggling Enabled is reflected in the PATCH body", async () => {
     const user = userEvent.setup();
     render(<AssistantJevSection />);
-    await user.click(screen.getByRole("button", { name: "Jev disabled" }));
+    await user.click(screen.getByRole("button", { name: "Enabled" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(h.updated[0]).toMatchObject({ enabled: true });
   });

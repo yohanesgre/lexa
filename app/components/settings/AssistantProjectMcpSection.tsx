@@ -62,7 +62,7 @@ export function AssistantProjectMcpSection({ project }: { project: Project }) {
                       <button
                         type="button"
                         className={`toggle-switch${projectOn ? " is-on" : ""}`}
-                        aria-label={globalOn ? `${server.label} ${projectOn ? "enabled" : "not enabled"} for this project` : `${server.label} not enabled for this project`}
+                        aria-label={server.label}
                         aria-pressed={projectOn}
                         disabled={!globalOn || save.isPending}
                         onClick={() => toggle(server.id)}

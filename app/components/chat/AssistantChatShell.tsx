@@ -213,7 +213,7 @@ export function ChatHeader({
             className={`icon-btn${pinned ? " is-pinned" : ""}`}
             aria-pressed={pinned}
             title={pinned ? "Unpin thread" : "Pin thread"}
-            aria-label={pinned ? "Unpin thread" : "Pin thread"}
+            aria-label="Pin thread"
             disabled={actionsDisabled}
             onClick={onPinToggle}
           >

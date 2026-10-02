@@ -509,7 +509,7 @@ describe("AssistantMcpSection — registry actions", () => {
   it("toggling enabled sends the inverted value", async () => {
     const user = userEvent.setup();
     render(<AssistantMcpSection />);
-    await user.click(within(row(/Linear/)).getByRole("button", { name: "Linear enabled" }));
+    await user.click(within(row(/Linear/)).getByRole("button", { name: "Linear" }));
     expect(h.updated).toEqual([{ id: "linear", enabled: false }]);
   });
 

@@ -77,8 +77,8 @@ describe("PageSettingsPanel autosave", () => {
     const { props, rerender } = renderPanel();
     openPanel();
 
-    const toggle = screen.getByRole("switch", { name: "Autosave" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
+    const toggle = screen.getByRole("button", { name: "Autosave" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("button", { name: "500 ms" })).toBeNull();
 
     fireEvent.click(toggle);

@@ -44,8 +44,8 @@ describe("ChatHeader", () => {
 
   it("toggles pin with aria-pressed and confirms delete through the dialog", () => {
     const { onPinToggle, onDelete } = renderHeader({ pinned: true });
-    expect(screen.getByLabelText("Unpin thread").getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByLabelText("Unpin thread"));
+    expect(screen.getByLabelText("Pin thread").getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByLabelText("Pin thread"));
     expect(onPinToggle).toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText("Delete thread"));
     expect(screen.getByRole("dialog")).toBeTruthy();
