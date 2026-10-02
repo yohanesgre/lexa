@@ -49,18 +49,14 @@ const req = (method: string, path: string, body?: unknown) =>
   });
 
 const savedEnv: Record<string, string | undefined> = {};
-for (const key of ["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET", "LXK_SECRETS_MASTER_KEY", "LXK_PUBLIC_URL"]) {
+for (const key of ["LXK_SECRETS_MASTER_KEY", "LXK_PUBLIC_URL"]) {
   savedEnv[key] = process.env[key];
 }
 
 beforeAll(async () => {
   // The Bun handler resolves RuntimeEnv from process.env at request time, so the
-  // test pins the env it needs (and clears the GITHUB_* bootstrap vars) rather
-  // than passing a RuntimeEnv — which the Bun path uses for storage only.
-  delete process.env.GITHUB_APP_ID;
-  delete process.env.GITHUB_PRIVATE_KEY;
-  delete process.env.GITHUB_PRIVATE_KEY_FILE;
-  delete process.env.GITHUB_WEBHOOK_SECRET;
+  // test pins the env it needs rather than passing a RuntimeEnv — which the Bun
+  // path uses for storage only.
   process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
   process.env.LXK_PUBLIC_URL = PUBLIC_URL;
 

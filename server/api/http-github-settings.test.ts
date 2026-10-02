@@ -33,16 +33,7 @@ let dir: string;
 let db: Database;
 let handler: (req: Request) => Promise<Response>;
 
-const savedEnv: Record<string, string | undefined> = {};
-
 beforeAll(async () => {
-  // The endpoints report DB-only state — pin the env to empty so the
-  // assertions hold regardless of the machine's shell environment.
-  for (const key of ["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]) {
-    savedEnv[key] = process.env[key];
-    delete process.env[key];
-  }
-
   dir = mkdtempSync(join(tmpdir(), "lexa-github-settings-api-"));
   const dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
@@ -62,9 +53,6 @@ afterAll(async () => {
   // global settings rows so this file's mutations don't leak anywhere.
   db.exec("DELETE FROM settings WHERE key LIKE 'github_%'");
   db.exec("DELETE FROM github_app_secrets");
-  for (const key of ["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]) {
-    if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key]!; else delete process.env[key];
-  }
   await Effect.runPromise(syncGitHubConfigFromDbAsync(createBunSqliteDriver(db)));
   db.close();
   rmSync(dir, { recursive: true, force: true });
@@ -92,32 +80,6 @@ describe("settings github endpoints", () => {
       webhookSecretSet: false,
       source: "none",
     });
-  });
-
-  it("GET ignores env vars at runtime (DB is the single source of truth, no 'env' state)", async () => {
-    const keys = ["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"];
-    const saved: Record<string, string | undefined> = {};
-    for (const key of keys) saved[key] = process.env[key];
-    process.env.GITHUB_APP_ID = "999";
-    process.env.GITHUB_PRIVATE_KEY = "env-pem";
-    process.env.GITHUB_PRIVATE_KEY_FILE = "/x.pem";
-    process.env.GITHUB_WEBHOOK_SECRET = "env-secret";
-    try {
-      db.exec("DELETE FROM settings WHERE key LIKE 'github_%'");
-      const res = await handler(json("GET", "/api/settings/github"));
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({
-        appId: "",
-        appSlug: "",
-        privateKeySet: false,
-        webhookSecretSet: false,
-        source: "none",
-      });
-    } finally {
-      for (const key of keys) {
-        if (saved[key] !== undefined) process.env[key] = saved[key]!; else delete process.env[key];
-      }
-    }
   });
 
   it("PUT with valid values saves, applies, and GET reflects them (source 'settings')", async () => {

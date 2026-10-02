@@ -41,62 +41,28 @@ describe("syncGitHubConfigFromDbAsync", () => {
     db.close();
   });
 
-  it("DB wins even when env vars differ (env is bootstrap-only, ignored at runtime)", async () => {
-    const saved = {
-      appId: process.env.GITHUB_APP_ID,
-      key: process.env.GITHUB_PRIVATE_KEY,
-      file: process.env.GITHUB_PRIVATE_KEY_FILE,
-      secret: process.env.GITHUB_WEBHOOK_SECRET,
-    };
-    process.env.GITHUB_APP_ID = "999";
-    process.env.GITHUB_PRIVATE_KEY = "env-pem";
-    process.env.GITHUB_WEBHOOK_SECRET = "env-secret";
-    try {
-      const db = freshDb();
-      setSetting(db, "github_app_id", "111");
-      setSetting(db, "github_private_key", PEM);
-      setSetting(db, "github_webhook_secret", "db-secret");
-      await sync(db);
-      const cfg = await liveConfig();
-      expect(cfg).toEqual({ appId: "111", privateKey: PEM, webhookSecret: "db-secret" });
-      db.close();
-    } finally {
-      if (saved.appId !== undefined) process.env.GITHUB_APP_ID = saved.appId; else delete process.env.GITHUB_APP_ID;
-      if (saved.key !== undefined) process.env.GITHUB_PRIVATE_KEY = saved.key; else delete process.env.GITHUB_PRIVATE_KEY;
-      if (saved.file !== undefined) process.env.GITHUB_PRIVATE_KEY_FILE = saved.file; else delete process.env.GITHUB_PRIVATE_KEY_FILE;
-      if (saved.secret !== undefined) process.env.GITHUB_WEBHOOK_SECRET = saved.secret; else delete process.env.GITHUB_WEBHOOK_SECRET;
-    }
-  });
-
-  it("env vars are ignored when the DB is empty → not configured", async () => {
-    const saved = {
-      appId: process.env.GITHUB_APP_ID,
-      key: process.env.GITHUB_PRIVATE_KEY,
-      file: process.env.GITHUB_PRIVATE_KEY_FILE,
-      secret: process.env.GITHUB_WEBHOOK_SECRET,
-    };
-    process.env.GITHUB_APP_ID = "999";
-    process.env.GITHUB_PRIVATE_KEY = "env-pem";
-    process.env.GITHUB_PRIVATE_KEY_FILE = "/some/file.pem";
-    process.env.GITHUB_WEBHOOK_SECRET = "env-secret";
-    try {
-      const db = freshDb();
-      await sync(db); // no settings rows
-      const cfg = await liveConfig();
-      expect(cfg).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
-      db.close();
-    } finally {
-      if (saved.appId !== undefined) process.env.GITHUB_APP_ID = saved.appId; else delete process.env.GITHUB_APP_ID;
-      if (saved.key !== undefined) process.env.GITHUB_PRIVATE_KEY = saved.key; else delete process.env.GITHUB_PRIVATE_KEY;
-      if (saved.file !== undefined) process.env.GITHUB_PRIVATE_KEY_FILE = saved.file; else delete process.env.GITHUB_PRIVATE_KEY_FILE;
-      if (saved.secret !== undefined) process.env.GITHUB_WEBHOOK_SECRET = saved.secret; else delete process.env.GITHUB_WEBHOOK_SECRET;
-    }
-  });
-
   it("missing settings rows are a no-op (not configured, no throw)", async () => {
     const db = freshDb();
     await expect(sync(db)).resolves.toBeUndefined();
     expect(await liveConfig()).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
     db.close();
+  });
+
+  it("ignores GITHUB_* env vars — config is DB/web-only", async () => {
+    const prevAppId = process.env.GITHUB_APP_ID;
+    const prevPrivateKey = process.env.GITHUB_PRIVATE_KEY;
+    process.env.GITHUB_APP_ID = "99999";
+    process.env.GITHUB_PRIVATE_KEY = PEM;
+    try {
+      const db = freshDb();
+      await sync(db);
+      expect(await liveConfig()).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
+      db.close();
+    } finally {
+      if (prevAppId === undefined) delete process.env.GITHUB_APP_ID;
+      else process.env.GITHUB_APP_ID = prevAppId;
+      if (prevPrivateKey === undefined) delete process.env.GITHUB_PRIVATE_KEY;
+      else process.env.GITHUB_PRIVATE_KEY = prevPrivateKey;
+    }
   });
 });

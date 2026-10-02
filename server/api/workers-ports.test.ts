@@ -183,60 +183,49 @@ describe("mirrorSettingsFromEnvAsync", () => {
   it("mirrors absent keys and reports them", async () => {
     const driver = tmpDriver();
     const mirrored = await runEff(
-      mirrorSettingsFromEnvAsync(driver, { GITHUB_APP_ID: "123", LXK_RATE_LIMIT_MAX: "77" })
+      mirrorSettingsFromEnvAsync(driver, { LXK_RATE_LIMIT_MAX: "77", LXK_ASSISTANT_REPO_CAP: "3" })
     );
-    expect(mirrored.sort()).toEqual(["github_app_id", "rate_limit_max"]);
-    expect(await runEff(getSettingAsync(driver, "github_app_id"))).toBe("123");
+    expect(mirrored.sort()).toEqual(["assistant_repo_cap", "rate_limit_max"]);
+    expect(await runEff(getSettingAsync(driver, "rate_limit_max"))).toBe("77");
   });
 
   it("never overwrites existing DB values", async () => {
     const driver = tmpDriver();
-    await runEff(setSettingAsync(driver, "github_app_id", "db-wins"));
-    const mirrored = await runEff(mirrorSettingsFromEnvAsync(driver, { GITHUB_APP_ID: "env-loses" }));
+    await runEff(setSettingAsync(driver, "rate_limit_max", "db-wins"));
+    const mirrored = await runEff(mirrorSettingsFromEnvAsync(driver, { LXK_RATE_LIMIT_MAX: "env-loses" }));
     expect(mirrored).toEqual([]);
-    expect(await runEff(getSettingAsync(driver, "github_app_id"))).toBe("db-wins");
+    expect(await runEff(getSettingAsync(driver, "rate_limit_max"))).toBe("db-wins");
   });
 
-  it("inline private key wins; FILE branch warns and skips without a reader", async () => {
-    const driver = tmpDriver();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      const mirrored = await runEff(
-        mirrorSettingsFromEnvAsync(driver, { GITHUB_PRIVATE_KEY_FILE: "/nope.pem" })
-      );
-      expect(mirrored).toEqual([]);
-      expect(warn).toHaveBeenCalledOnce();
-      await runEff(mirrorSettingsFromEnvAsync(driver, { GITHUB_PRIVATE_KEY: "inline", GITHUB_PRIVATE_KEY_FILE: "/nope.pem" }));
-      expect(await runEff(getSettingAsync(driver, "github_private_key"))).toBe("inline");
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("FILE branch mirrors content when a reader is provided", async () => {
+  it("ignores legacy GitHub env vars — no github_% rows", async () => {
     const driver = tmpDriver();
     const mirrored = await runEff(
-      mirrorSettingsFromEnvAsync(
-        driver,
-        { GITHUB_PRIVATE_KEY_FILE: "/app/key.pem" },
-        () => "file-pem"
-      )
+      mirrorSettingsFromEnvAsync(driver, {
+        GITHUB_APP_ID: "123",
+        GITHUB_PRIVATE_KEY: "pem",
+        GITHUB_PRIVATE_KEY_FILE: "/x.pem",
+        GITHUB_WEBHOOK_SECRET: "whsec",
+        LXK_RATE_LIMIT_MAX: "5",
+      })
     );
-    expect(mirrored).toEqual(["github_private_key"]);
-    expect(await runEff(getSettingAsync(driver, "github_private_key"))).toBe("file-pem");
+    expect(mirrored).toEqual(["rate_limit_max"]);
+    const row = await runEff(
+      queryFirst<{ c: number }>(driver, "SELECT COUNT(*) c FROM settings WHERE key LIKE 'github_%'")
+    );
+    expect(row.c).toBe(0);
   });
 });
 
 describe("stringEnvFromRuntimeEnv", () => {
   it("projects string keys only, dropping bindings and undefined", () => {
     const out = stringEnvFromRuntimeEnv({
-      GITHUB_APP_ID: "1",
-      LXK_RATE_LIMIT_MAX: undefined,
+      LXK_RATE_LIMIT_MAX: "100",
+      LXK_RATE_LIMIT_WINDOW_MS: undefined,
       DB: { prepare: () => undefined } as never,
       BLOB: undefined,
       LXK_ENV: "production",
     });
-    expect(out).toEqual({ GITHUB_APP_ID: "1" });
+    expect(out).toEqual({ LXK_RATE_LIMIT_MAX: "100" });
   });
 });
 
