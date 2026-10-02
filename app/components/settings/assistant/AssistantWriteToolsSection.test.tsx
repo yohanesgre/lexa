@@ -92,10 +92,45 @@ describe("AssistantWriteToolsSection — canonical write-tool list", () => {
     const before = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(before.some((box) => box.checked)).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "Write tools on" }));
+    await user.click(screen.getByRole("button", { name: "Write tools enabled" }));
 
     const after = screen.getAllByRole("checkbox") as HTMLInputElement[];
     expect(after).toHaveLength(19);
     expect(after.every((box) => box.checked)).toBe(true);
+  });
+
+  it("exposes a stable accessible name and carries toggle state on aria-pressed", async () => {
+    const user = userEvent.setup();
+    render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    const toggle = screen.getByRole("button", { name: "Write tools enabled" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveAccessibleName("Write tools enabled");
+  });
+
+  it("documents the two gates, three modes and each mode's behavior", () => {
+    const { container } = render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    expect(screen.getByText("Two gates, three modes.")).toBeInTheDocument();
+
+    const note = container.querySelector(".responsive-note");
+    expect(note).not.toBeNull();
+    const text = note?.textContent ?? "";
+    expect(text).toContain("Ask");
+    expect(text).toContain("the model proposes, the turn suspends");
+    expect(text).toContain("Auto");
+    expect(text).toContain("executes immediately, with no proposal chips and no suspend");
+    expect(text).toContain("Blocked");
+    expect(text).toContain("writes are refused");
+  });
+
+  it("does not claim per-change approval is universal (no auto-approve copy)", () => {
+    const { container } = render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    expect(container.textContent).not.toMatch(/auto-approve/i);
+    expect(container.textContent).not.toMatch(/every proposed write still requires/i);
   });
 });

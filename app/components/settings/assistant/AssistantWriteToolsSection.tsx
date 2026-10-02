@@ -7,8 +7,8 @@ import type { Project } from "../../../../shared/types";
 // ── Write tools (assistant-write-approvals.html State 4) ──
 // Which mutating tools Assistant may propose at all. One stored field
 // (write_tools): master OFF = empty array; EMPTY SELECTION = writes off —
-// behaves exactly like master off. Every proposed write still requires
-// explicit per-change approval in chat.
+// behaves exactly like master off. The composer's per-thread Writes mode
+// (Ask / Auto / Blocked) decides whether a proposed write executes.
 
 export function AssistantWriteToolsSection({ project }: { project: Project }) {
   const { data: settings, isLoading } = useAssistantSettings(project.id);
@@ -53,21 +53,21 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Assistant write tools</h2>
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Write tools</h2>
         <span className="text-xs text-lx-text-muted">Per project</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Which mutating tools Assistant may propose at all. Every proposed write still requires explicit per-change approval in chat — this gate only decides whether Assistant can ask.
+        Which mutating tools Assistant may propose at all. This project gate decides what may be PROPOSED; the composer&apos;s Writes mode (Ask / Auto / Blocked) decides whether a proposed write executes. Read tools are unaffected by either gate.
       </p>
 
       <div className="card-panel card-panel--elevated">
         {/* Master toggle */}
         <div className="field">
           <div className="flex items-center gap-3">
-            <button type="button" className={`toggle-switch${enabled ? " is-on" : ""}`} aria-label="Write tools on" aria-pressed={enabled} onClick={toggleMaster} />
+            <button type="button" className={`toggle-switch${enabled ? " is-on" : ""}`} aria-label="Write tools enabled" aria-pressed={enabled} onClick={toggleMaster} />
             <span className="text-sm font-medium text-lx-text-primary">Write tools enabled</span>
           </div>
-          <div className="field-hint">Master gate for all mutating Assistant tools. Off — Assistant never proposes writes and the per-tool list below is ignored.</div>
+          <div className="field-hint">Master gate for all mutating Assistant tools. Off — Assistant never proposes writes and the per-tool list below is ignored. Master OFF wins in every composer mode; changes apply from the next turn — a suspended batch finishes under the mode it started with.</div>
         </div>
 
         {/* Per-tool checkboxes */}
@@ -91,7 +91,11 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
         </div>
 
         <div className="responsive-note" style={{ maxWidth: 640 }}>
-          <strong>Two gates, always both.</strong> This settings list decides what Assistant MAY propose; the in-chat approval chips decide what actually HAPPENS. There is no &quot;auto-approve&quot; anywhere — a ticked tool still suspends the turn and waits for a human decision on every single write.
+          <strong>Two gates, three modes.</strong> This settings list decides what Assistant MAY propose. The composer&apos;s{" "}
+          <span className="font-mono">Writes</span> mode decides what actually HAPPENS, per chat thread:{" "}
+          <strong>Ask</strong> — the model proposes, the turn suspends, chips ask per change, and only an approve resumes and executes;{" "}
+          <strong>Auto</strong> — every write the project gate allows executes immediately, with no proposal chips and no suspend;{" "}
+          <strong>Blocked</strong> — writes are refused, the model is told reads still work, and the reply suggests switching modes. A ticked tool can still be refused by the composer mode, and an unticked tool can never be proposed in any mode. Read tools are unaffected everywhere.
         </div>
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>
