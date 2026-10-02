@@ -180,8 +180,8 @@ trips; existing `isPositionConflict` retry-once maps cleanly.
 
 Native D1 support since v1.5 (Feb 2026): pass the binding directly
 (`database: env.DB`), Kysely D1 dialect, uses `batch()` internally. Cookie sessions
-need no Node APIs. Required refactor: auth instance becomes a **per-request factory**
-taking `env.DB`. Pass `ctx.waitUntil` via `advanced.backgroundTasks` (post-response
+need no Node APIs. Required refactor: the auth instance is built once per isolate,
+keyed by an env fingerprint, taking `env.DB`. Pass `ctx.waitUntil` via `advanced.backgroundTasks` (post-response
 writes otherwise die with "Network connection lost"). Gotchas: `@better-auth/cli
 generate` introspection hits forbidden `_cf_METADATA`; `cookieCache` + KV secondary
 storage broken ([better-auth#4203](https://github.com/better-auth/better-auth/issues/4203)) — disable cookieCache.

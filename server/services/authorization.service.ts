@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, DbError, RowNotFound, queryFirst } from "../db/db";
+import { Db, DbError, RowNotFound, queryAll, queryFirst } from "../db/db";
 
 export type ProjectAccessRole = "admin" | "member";
 
@@ -41,7 +41,7 @@ export class AuthorizationService extends Effect.Service<AuthorizationService>()
       Effect.gen(function* () {
         if (yield* isSuperadmin(userId)) return "admin" as const;
         const grant = yield* firstOrNull(
-          queryFirst<{ role: "admin" | "member" }>(db, "SELECT role FROM user_project_roles WHERE user_id = ? AND project_id = ?", userId, projectId)
+          queryFirst<{ role: "admin" | "member" }>(db, "SELECT role FROM user_project_roles WHERE user_id = ? AND project_id = ? ORDER BY role LIMIT 1", userId, projectId)
         );
         if (grant) return grant.role;
         const team = yield* firstOrNull(
@@ -56,6 +56,72 @@ export class AuthorizationService extends Effect.Service<AuthorizationService>()
         return roles.includes("owner") || roles.includes("admin") ? "admin" : "member";
       });
 
+    // Batched projectAccess: same decision order and role values, four queries
+    // max (superadmin once, grants, project teams, member roles). Grants and
+    // memberships are fetched by user only and filtered in JS so no id list
+    // binds; the projects lookup chunks at 90 (D1 caps bound parameters at 100
+    // per query; Bun/SQLite allows more, so local tests do not catch it).
+    // Absent key = deny, matching projectAccess' null.
+    const projectAccessForProjects = (
+      userId: string,
+      projectIds: string[]
+    ): Effect.Effect<Map<string, ProjectAccessRole>, DbError> =>
+      Effect.gen(function* () {
+        const access = new Map<string, ProjectAccessRole>();
+        if (projectIds.length === 0) return access;
+        if (yield* isSuperadmin(userId)) {
+          for (const id of projectIds) access.set(id, "admin");
+          return access;
+        }
+        const requested = new Set(projectIds);
+        const grants = yield* queryAll<{ project_id: string; role: ProjectAccessRole }>(
+          db,
+          "SELECT project_id, role FROM user_project_roles WHERE user_id = ? ORDER BY role",
+          userId
+        );
+        for (const grant of grants) {
+          if (!requested.has(grant.project_id)) continue;
+          if (access.has(grant.project_id)) continue; // first-row wins; ORDER BY role puts admin first
+          access.set(grant.project_id, grant.role);
+        }
+        const remaining = projectIds.filter((id) => !access.has(id));
+        if (remaining.length === 0) return access;
+        const teamByProject = new Map<string, string>();
+        const CHUNK = 90;
+        for (let i = 0; i < remaining.length; i += CHUNK) {
+          const chunk = remaining.slice(i, i + CHUNK);
+          const placeholders = chunk.map(() => "?").join(",");
+          const projectRows = yield* queryAll<{ id: string; team_id: string | null }>(
+            db,
+            `SELECT id, team_id FROM projects WHERE id IN (${placeholders})`,
+            ...chunk
+          );
+          for (const row of projectRows) {
+            if (row.team_id) teamByProject.set(row.id, row.team_id);
+          }
+        }
+        const teamIds = new Set(teamByProject.values());
+        if (teamIds.size === 0) return access;
+        const members = yield* queryAll<{ organizationId: string; role: string }>(
+          db,
+          "SELECT organizationId, role FROM member WHERE userId = ?",
+          userId
+        );
+        const roleByTeam = new Map<string, ProjectAccessRole>();
+        for (const member of members) {
+          if (!teamIds.has(member.organizationId)) continue;
+          const roles = member.role.split(",").map((r) => r.trim());
+          roleByTeam.set(member.organizationId, roles.includes("owner") || roles.includes("admin") ? "admin" : "member");
+        }
+        for (const id of remaining) {
+          const teamId = teamByProject.get(id);
+          if (!teamId) continue;
+          const role = roleByTeam.get(teamId);
+          if (role) access.set(id, role);
+        }
+        return access;
+      });
+
     // Team gate: superadmin, or org owner/admin on that team.
     const canManageTeam = (userId: string, teamId: string): Effect.Effect<boolean, DbError> =>
       Effect.gen(function* () {
@@ -66,6 +132,6 @@ export class AuthorizationService extends Effect.Service<AuthorizationService>()
     // Settings gate (R14): superadmin only.
     const canManageSettings = isSuperadmin;
 
-    return { isSuperadmin, isTeamAdmin, projectAccess, canManageTeam, canManageSettings };
+    return { isSuperadmin, isTeamAdmin, projectAccess, projectAccessForProjects, canManageTeam, canManageSettings };
   }),
 }) {}

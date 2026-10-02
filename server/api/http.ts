@@ -1638,19 +1638,21 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         const service = yield* ProjectService;
-        let projects = yield* service.list();
+        let projects: (DomainProject & { teamId?: string | null })[] = yield* service.list();
         // Member sessions see only projects they can access (superadmin >
         // user_project_roles grant > team membership). Admins (incl. bare API
-        // keys) see everything.
+        // keys) see everything. Access is resolved in one batch, not per row.
         if (identity.role !== "admin" && identity.userId) {
           const authz = yield* AuthorizationService;
-          const visible: DomainProject[] = [];
-          for (const p of projects) {
-            if (yield* authz.projectAccess(identity.userId, p.id)) visible.push(p);
-          }
-          projects = visible;
+          const access = yield* authz.projectAccessForProjects(identity.userId, projects.map((p) => p.id));
+          projects = projects.filter((p) => access.has(p.id));
         }
-        return { data: yield* Effect.forEach(projects, withRepos), nextCursor: null };
+        const reposRepo = yield* ProjectReposRepo;
+        const reposByProject = yield* reposRepo.listByProjects(projects.map((p) => p.id));
+        return {
+          data: projects.map((p) => ({ ...p, repos: reposByProject.get(p.id) ?? [], teamId: p.teamId ?? null })),
+          nextCursor: null,
+        };
       }))
     )
     .handle("create", (req) =>
@@ -2508,14 +2510,20 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const taskLinkRepo = yield* TaskLinkRepo;
       const project = yield* requireProjectRead(req.path.slug);
       const includeArchived = searchParams(req).get("includeArchived") === "true";
-      const columns = yield* columnService.findByProject(project.id);
-      const swimlanes = yield* swimlaneService.findByProject(project.id, { includeArchived });
-      const milestones = yield* milestoneService.findByProject(project.id, { includeArchived });
-      const fieldConfig = yield* fieldConfigService.findByProject(project.id);
-      const links = yield* taskLinkRepo.findByProject(project.id);
-      const tasks = yield* taskService.findAllByProject(project.id, { includeArchived });
+      const [columns, swimlanes, milestones, fieldConfig, links, tasks, projectWithRepos] = yield* Effect.all(
+        [
+          columnService.findByProject(project.id),
+          swimlaneService.findByProject(project.id, { includeArchived }),
+          milestoneService.findByProject(project.id, { includeArchived }),
+          fieldConfigService.findByProject(project.id),
+          taskLinkRepo.findByProject(project.id),
+          taskService.findAllByProject(project.id, { includeArchived }),
+          withRepos(project),
+        ],
+        { concurrency: 7 }
+      );
       return {
-        project: yield* withRepos(project),
+        project: projectWithRepos,
         columns: columns.map(formatColumn),
         swimlanes: swimlanes.map(formatSwimlane),
         milestones: milestones.map(formatMilestone),

@@ -1,9 +1,9 @@
 // Cloudflare Workers entry — the workerd handler for the Workers flavor
 // (see wrangler.jsonc's `main` and docs/CLOUDFLARE_WORKERS.md). Builds a
-// per-request runtime from the workerd `env` binding: D1 over `env.DB`
-// (DbD1Live), per-request env (RuntimeEnvLive via getEnvFromWorkers),
-// per-request better-auth over D1 (session cookies + invites), and the
-// full HttpApi app over the async Db driver (B6).
+// per-isolate runtime from the workerd `env` binding (rebuilt only when the
+// env fingerprint changes): D1 over `env.DB` (DbD1Live), env
+// (RuntimeEnvLive via getEnvFromWorkers), better-auth over D1 (session
+// cookies + invites), and the full HttpApi app over the async Db driver (B6).
 //
 // Routes: /health + /api/health (D1 deep check) + the GitHub webhook route
 // (HMAC verify before parse, ack 200 immediately, process in ctx.waitUntil
@@ -159,13 +159,33 @@ const WEBHOOK_BODY_CAP = 10_000_000;
 // sync. Concurrent cold-start requests share one boot promise.
 let bootPromise: Promise<void> | null = null;
 
-function requestLayers(env: WorkersEnv) {
-  const runtimeEnv = getEnvFromWorkers(env as unknown as Record<string, unknown>);
+function buildRequestLayers(env: WorkersEnv, runtimeEnv: RuntimeEnv) {
   if (!env.DB) throw new Error("D1 binding missing — [d1_databases] not configured for this worker");
   const like = d1DatabaseToD1Like(env.DB);
   const driver = createD1Driver(like);
   const base: BaseLayers = Layer.mergeAll(DbD1Live(like), RuntimeEnvLive(runtimeEnv));
   return { runtimeEnv, driver, base };
+}
+
+// Same isolate-stability contract as apiCache/getRuntimeAuth below: bindings
+// and env vars don't change within an isolate, so build the layers once per
+// env fingerprint. Construction is synchronous at first use and memoized
+// before any query runs, so no async lazy-layer promise can be left pending
+// and wedge the isolate (docs/CLOUDFLARE_WORKERS.md).
+let requestLayersCache: { fingerprint: string; value: ReturnType<typeof buildRequestLayers> } | null = null;
+
+export function requestLayers(env: WorkersEnv) {
+  const runtimeEnv = getEnvFromWorkers(env as unknown as Record<string, unknown>);
+  const fingerprint = apiFingerprint(runtimeEnv);
+  if (!requestLayersCache || requestLayersCache.fingerprint !== fingerprint) {
+    requestLayersCache = { fingerprint, value: buildRequestLayers(env, runtimeEnv) };
+  }
+  return requestLayersCache.value;
+}
+
+// Test-only: drop the per-isolate caches so a test can observe a rebuild.
+export function resetRequestLayersCache(): void {
+  requestLayersCache = null;
 }
 
 function ensureBoot(env: WorkersEnv): Promise<void> {
@@ -319,7 +339,7 @@ function json(data: unknown, status = 200): Response {
 }
 
 // ─── Request routing ───────────────────────────────────────────────────
-// /api/auth/* is served by the per-request better-auth handler directly
+// /api/auth/* is served by the per-isolate better-auth handler directly
 // (it owns its own cookie auth; the HttpApi middleware would 401 it).
 // Every other /api/* goes through the full HttpApi app (B6a Workers
 // factory: same groups, async Db, Bearer + session-cookie middleware).
@@ -367,12 +387,17 @@ function apiFingerprint(runtimeEnv: RuntimeEnv): string {
 // session call is byte-for-byte the one the API middleware uses.
 let authCache: { fingerprint: string; value: { auth: BetterAuthApi } } | null = null;
 
-function getRuntimeAuth(runtimeEnv: RuntimeEnv): { auth: BetterAuthApi } {
+export function getRuntimeAuth(runtimeEnv: RuntimeEnv): { auth: BetterAuthApi } {
   const fingerprint = apiFingerprint(runtimeEnv);
   if (!authCache || authCache.fingerprint !== fingerprint) {
     authCache = { fingerprint, value: createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi } };
   }
   return authCache.value;
+}
+
+// Test-only: drop the per-isolate auth cache so a test can observe a rebuild.
+export function resetAuthCache(): void {
+  authCache = null;
 }
 
 async function handleApi(
@@ -643,8 +668,10 @@ const handler: ExportedHandler<WorkersEnv> = {
       }
       if (path.startsWith("/api/auth/")) {
         // Same /api/auth/* middleware semantics as the Bun host (server/auth.ts):
-        // per-IP throttle → body cap → sign-in email limiter → handler.
-        const lexaAuth = createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi };
+        // per-IP throttle → body cap → sign-in email limiter → handler. The
+        // better-auth instance is the cached per-isolate one; `ip` and the body
+        // cap stay per request.
+        const lexaAuth = getRuntimeAuth(runtimeEnv);
         const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
         const res = await handleAuthSurface(req as unknown as Request, {
           ip,
