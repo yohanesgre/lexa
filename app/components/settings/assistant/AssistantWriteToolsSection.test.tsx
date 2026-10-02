@@ -98,4 +98,26 @@ describe("AssistantWriteToolsSection — canonical write-tool list", () => {
     expect(after).toHaveLength(19);
     expect(after.every((box) => box.checked)).toBe(true);
   });
+
+  it("documents the two gates, three modes and each mode's behavior", () => {
+    const { container } = render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    expect(screen.getByText("Two gates, three modes.")).toBeInTheDocument();
+
+    const note = container.querySelector(".responsive-note");
+    expect(note).not.toBeNull();
+    const text = note?.textContent ?? "";
+    expect(text).toContain("Ask");
+    expect(text).toContain("the model proposes, the turn suspends");
+    expect(text).toContain("Auto");
+    expect(text).toContain("executes immediately, with no proposal chips and no suspend");
+    expect(text).toContain("Blocked");
+    expect(text).toContain("writes are refused");
+  });
+
+  it("does not claim per-change approval is universal (no auto-approve copy)", () => {
+    const { container } = render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    expect(container.textContent).not.toMatch(/no "auto-approve" anywhere|Every proposed write still requires explicit per-change approval/i);
+  });
 });
