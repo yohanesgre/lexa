@@ -6,6 +6,7 @@ import { batch } from "./db/db";
 import { getEnvFromWorkers } from "./env";
 import {
   getRuntimeAuth,
+  loadAssistantThread,
   pruneR2Backups,
   requestLayers,
   resetAuthCache,
@@ -109,6 +110,43 @@ describe("pruneR2Backups", () => {
     const r2 = fakeR2(["backups/lexa-b.db.gz", "backups/lexa-a.db.gz", "backups/lexa-a-blobs/f"]);
     const deleted = await pruneR2Backups(r2.binding as never, 1);
     expect(deleted.sort()).toEqual(["backups/lexa-a-blobs/f", "backups/lexa-a.db.gz"]);
+  });
+});
+
+describe("loadAssistantThread", () => {
+  const createThreads = (driver: ReturnType<typeof memDriver>) =>
+    Effect.runPromise(
+      batch(driver, [
+        {
+          sql: "CREATE TABLE assistant_threads (document_type TEXT NOT NULL, document_id TEXT NOT NULL, project_id TEXT NOT NULL, owner_user_id TEXT, PRIMARY KEY (document_type, document_id))",
+          params: [],
+        },
+      ])
+    );
+
+  it("returns null for a missing row instead of leaking the typed rejection", async () => {
+    const driver = memDriver();
+    await createThreads(driver);
+    await expect(loadAssistantThread(driver, "chat", "missing")).resolves.toBeNull();
+  });
+
+  it("maps a present row to the gate shape", async () => {
+    const driver = memDriver();
+    await createThreads(driver);
+    await Effect.runPromise(
+      batch(driver, [
+        {
+          sql: "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id) VALUES ('chat', 'chat-1', 'proj-1', 'user-1')",
+          params: [],
+        },
+      ])
+    );
+    await expect(loadAssistantThread(driver, "chat", "chat-1")).resolves.toEqual({
+      documentType: "chat",
+      documentId: "chat-1",
+      projectId: "proj-1",
+      ownerUserId: "user-1",
+    });
   });
 });
 

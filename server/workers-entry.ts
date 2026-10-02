@@ -46,7 +46,7 @@ import { getAgentByName } from "agents";
 import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
 import { getEnvFromWorkers, type RuntimeEnv } from "./env";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
-import { Db, DbD1Live, RowNotFound, batch as batchStmts, queryFirst, run } from "./db/db";
+import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
 import { createD1Driver } from "./db/drivers/d1";
 import type { DbDriver } from "./db/db";
 import {
@@ -221,31 +221,27 @@ interface AssistantThreadRowRaw {
   owner_user_id: string | null;
 }
 
-async function loadAssistantThread(
+export async function loadAssistantThread(
   driver: DbDriver,
   documentType: AssistantThreadType,
   documentId: string
 ): Promise<AssistantThreadRow | null> {
-  try {
-    const row = await Effect.runPromise(
-      queryFirst<AssistantThreadRowRaw>(
-        driver,
-        `SELECT document_type, document_id, project_id, owner_user_id
-         FROM assistant_threads WHERE document_type = ? AND document_id = ?`,
-        documentType,
-        documentId
-      )
-    );
-    return {
-      documentType: row.document_type,
-      documentId: row.document_id,
-      projectId: row.project_id,
-      ownerUserId: row.owner_user_id,
-    };
-  } catch (e) {
-    if (e instanceof RowNotFound) return null;
-    throw e;
-  }
+  const row = await Effect.runPromise(
+    queryFirst<AssistantThreadRowRaw>(
+      driver,
+      `SELECT document_type, document_id, project_id, owner_user_id
+       FROM assistant_threads WHERE document_type = ? AND document_id = ?`,
+      documentType,
+      documentId
+    ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)))
+  );
+  if (row === null) return null;
+  return {
+    documentType: row.document_type,
+    documentId: row.document_id,
+    projectId: row.project_id,
+    ownerUserId: row.owner_user_id,
+  };
 }
 
 // Connect-upsert for a chat thread with no D1 row (ADR-0003 §B.2). DO NOTHING
