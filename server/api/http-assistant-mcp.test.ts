@@ -96,6 +96,11 @@ afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, for
 beforeEach(() => {
   db.exec("DELETE FROM assistant_mcp_project_servers");
   db.exec("DELETE FROM assistant_mcp_servers");
+  // This suite's default env has no master key (the capability must read
+  // false). vitest.setup sets one globally so better-auth can sign sessions,
+  // so clear it here; tests that need it set it explicitly.
+  delete process.env.LXK_SECRETS_MASTER_KEY;
+  delete process.env.LXK_SECRETS_MASTER_KEY_PREV;
 });
 
 async function createClient(label: string, transportType: "http" | "sse" = "http", extra: Record<string, unknown> = {}) {

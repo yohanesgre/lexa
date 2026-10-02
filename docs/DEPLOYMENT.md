@@ -247,7 +247,7 @@ re-runs.
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs like `GITHUB_*` | no — but **required to store any managed secret** (MCP token, provider key, or Jev API key) and, **on Workers, required for the assistant** (internal HMAC derivation); unset allows secret-less MCP clients and keyless providers, leaves Jev disabled, and reports `assistant:false` |
+| `LXK_SECRETS_MASTER_KEY` | minted by the installer into `<target>/.env.toml` (docker `dockers/`, bare `bare/`) and pushed/custodied on Workers (`cf-workers/.env.toml`); preserved across install-script re-runs like `GITHUB_*` | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and, **on Workers, the assistant's** internal HMAC derivation |
 
 ## Full variable reference
 
@@ -265,7 +265,7 @@ re-runs.
 | `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3); **Workers-only assistant** — inert on Docker/bare metal, which serve no assistant routes |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
-| `LXK_SECRETS_MASTER_KEY` | **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key — and, **on Workers, required for the assistant** (its internal `X-Lexa-Internal` HMAC key is derived from it; unset ⇒ `/api/capabilities` reports `assistant:false`). The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). **Unset → managed secret storage is disabled**: an MCP save carrying a token is refused with 400 `MCP_INVALID_TRANSPORT_CONFIG`, a provider/Jev save carrying a key with 400 `SECRET_KEY_UNAVAILABLE`; secret-less MCP clients and keyless providers stay legal, an already-stored secret is never silently dropped, and Jev simply stays disabled. Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart, then re-enter secrets in the webapp over time — existing rows stay readable through the PREV slot, so there is no outage and no rewrap step. |
+| `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key — and, **on Workers**, the assistant's internal `X-Lexa-Internal` HMAC key derives from it. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -337,8 +337,8 @@ no email transport anywhere.
   `outcome`, `code`, `latencyMs`, and returned `usage` — never state text.
 - `LXK_SECRETS_MASTER_KEY` (and its read-only `LXK_SECRETS_MASTER_KEY_PREV`) is
   the envelope key for every managed secret — MCP tokens, provider API keys, and
-  the Jev API key. It is **required to store a secret** (secret-less clients and
-  keyless providers stay legal; Jev stays disabled without one). It is set by
+  the Jev API key — and the source of Better Auth's session-signing secret, so
+  it is **required** (the server fails closed without it). It is set by
   hand in the server environment (or
   `wrangler secret put` on Workers — see `docs/CLOUDFLARE_WORKERS.md`), **never
   committed, never written into a committed `.env.toml` or into a log line**,
@@ -440,12 +440,12 @@ receiving new features; Docker/bare metal stay frozen at their current features.
    the files; then install the Workers target and re-import manually if needed.
    The `assistant_*` tables are **not dropped** on Docker (they remain inert, so
    a downgrade/backup still has them), but nothing reads or writes them there.
-3. **Workers requires `LXK_SECRETS_MASTER_KEY`.** The assistant derives its
-   internal HMAC key (`HMAC(master, "lexa-internal-v1")`) and decrypts provider
-   secrets from it. Without it, `/api/capabilities` reports `assistant:false` and
-   the WS gate / internal routes fail `502 ASSISTANT_UNAVAILABLE`. The installer
-   mints and preserves this key in `cf-workers/.env.toml` custody (see the
-   Upgrade section); no manual step is needed on a normal install.
+3. **All targets require `LXK_SECRETS_MASTER_KEY`.** Better Auth's session
+   signing secret derives from it (`lexa-better-auth:<key>`), so the server fails
+   closed without it. The Workers assistant additionally derives its internal HMAC
+   key (`HMAC(master, "lexa-internal-v1")`) and decrypts provider secrets from it.
+   The installer mints and preserves this key in `cf-workers/.env.toml` custody
+   (see the Upgrade section); no manual step is needed on a normal install.
 4. **Workers upgrade is a normal re-run** of `install.sh` from the new release
    tag: it applies the D1 migrations (none required for the assistant move —
    the tables already exist) and deploys the DO class. Threads stay readable via

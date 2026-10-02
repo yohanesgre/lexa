@@ -183,8 +183,23 @@ Native D1 support since v1.5 (Feb 2026): pass the binding directly
 need no Node APIs. Required refactor: the auth instance is built once per isolate,
 keyed by an env fingerprint, taking `env.DB`. Pass `ctx.waitUntil` via `advanced.backgroundTasks` (post-response
 writes otherwise die with "Network connection lost"). Gotchas: `@better-auth/cli
-generate` introspection hits forbidden `_cf_METADATA`; `cookieCache` + KV secondary
-storage broken ([better-auth#4203](https://github.com/better-auth/better-auth/issues/4203)) — disable cookieCache.
+generate` introspection hits forbidden `_cf_METADATA`. Session cookie cache is
+enabled (`session.cookieCache = { enabled: true, maxAge: 300 }` — it is read from
+`session`, not `advanced`, where it would be a silent no-op): the signed
+`better-auth.session_data` cookie (HMAC, compact strategy, keyed by a secret
+derived from `LXK_SECRETS_MASTER_KEY` — fail closed if it is unset, never the
+library-default secret) serves session+user without the D1 `session`+`users`
+reads, hard-expires after `maxAge`, and transparently falls back to the database
+on miss/expiry. No secondary storage is configured (D1 only), so
+[better-auth#4203](https://github.com/better-auth/better-auth/issues/4203)
+(`secondaryStorage` without `storeSessionInDatabase`: the DB session row was
+never written → logout after `maxAge`) cannot apply. Tradeoff: session validity
+(revocation) can be stale for up to `maxAge` — the middleware does not re-check
+the session row. Role-based authorization is not stale: the API middleware
+re-reads `users.role` from D1 on every session-authenticated request (a missing
+row or failed lookup denies → 401), so a demoted superadmin loses admin access
+immediately. cookieCache staleness therefore applies to session validity and to
+session-payload fields, not to role-based authorization.
 
 ### Webhooks — maps natively
 

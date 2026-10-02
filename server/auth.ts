@@ -321,6 +321,21 @@ export function buildAuthOptions(env: RuntimeEnv) {
   const databasePath = resolveDatabasePath(env);
   const trustedOrigins = resolveTrustedOrigins(env, publicUrl);
 
+  // Session cookies — and the cookieCache HMAC in particular — are only as
+  // trustworthy as the signing secret. better-auth falls back to a fixed
+  // library constant when none is given (anyone can forge with it), so derive
+  // a secret from the high-entropy master key and fail closed when it is
+  // absent. The `lexa-better-auth:` prefix domain-separates this use from the
+  // managed-secret envelope; rotating LXK_SECRETS_MASTER_KEY invalidates every
+  // existing session. Sync string work only — safe in the workerd isolate.
+  const masterKey = typeof env.LXK_SECRETS_MASTER_KEY === "string" ? env.LXK_SECRETS_MASTER_KEY.trim() : "";
+  if (!masterKey) {
+    throw new Error(
+      "LXK_SECRETS_MASTER_KEY is required to sign Better Auth sessions. Run `bun run setup` to mint it (or set it in the environment), then restart."
+    );
+  }
+  const secret = `lexa-better-auth:${masterKey}`;
+
   // Workers D1 (B6b): pass the D1 binding straight through — installed
   // better-auth 1.6.27 auto-detects it (`"batch" in db && "exec" in db &&
   // "prepare" in db` → vendored D1SqliteDialect in
@@ -339,6 +354,7 @@ export function buildAuthOptions(env: RuntimeEnv) {
 
   const options = {
     baseURL: publicUrl,
+    secret,
     trustedOrigins,
     database,
     emailAndPassword: {
@@ -364,7 +380,20 @@ export function buildAuthOptions(env: RuntimeEnv) {
     // (blocked: no social providers + last-account guard) and delete-user
     // without password (disabled: user.deleteUser.enabled unset → 404).
     // Re-verify on any better-auth bump.
-    session: { freshAge: 0 },
+    //
+    // cookieCache lives under `session`, NOT `advanced` (better-auth reads it
+    // from `options.session.cookieCache` — an `advanced.cookieCache` block is a
+    // silent no-op). Enabled with the default 300s maxAge: the signed
+    // `better-auth.session_data` cookie (HMAC, compact strategy, keyed by the
+    // derived `secret` above) serves session+user without the D1 `session`+
+    // `users` reads; it hard-expires after maxAge and transparently falls back
+    // to the database. better-auth's own sensitive routes (revoke, account
+    // updates, admin) force an authoritative DB read, and Lexa's `requireAdmin`
+    // / `requireSuperadmin` gates re-read the role from D1 — but ordinary API
+    // authorization on a revoked session, and any gate that still trusts
+    // `identity.role`, can be stale for up to maxAge. No secondary storage is
+    // configured (D1 only), so better-auth#4203 cannot apply.
+    session: { freshAge: 0, cookieCache: { enabled: true, maxAge: 300 } },
     // tanstackStartCookies is Bun/Start-SSR only: the real subpath imports
     // Vite-virtual modules unresolvable in a direct workerd bundle (hence
     // the B4 shim), and its only job is mirroring Set-Cookie into Start's
@@ -393,7 +422,7 @@ export function buildAuthOptions(env: RuntimeEnv) {
       }),
       ...(env.DB ? [] : [tanstackStartCookies()]),
     ],
-    advanced: { useSecureCookies: publicUrl.startsWith("https"), cookieCache: { enabled: false } },
+    advanced: { useSecureCookies: publicUrl.startsWith("https") },
   };
 
   authRefMap.set(options, authRef);

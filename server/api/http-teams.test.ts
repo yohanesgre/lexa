@@ -47,6 +47,16 @@ async function signIn(email: string): Promise<string> {
   return (res.headers?.get("set-cookie") ?? "").split(";")[0]!;
 }
 
+// Full browser cookie jar: session_token AND the cached session_data cookie.
+// Tests that want the cookieCache path (stale role/session) must send both.
+async function signInFull(email: string): Promise<string> {
+  const res = (await auth.api.signInEmail({
+    body: { email, password: "password123" },
+    returnHeaders: true,
+  })) as unknown as { headers?: Headers };
+  return (res.headers?.getSetCookie?.() ?? []).join("; ");
+}
+
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-teams-api-"));
   dbPath = join(dir, "test.db");
@@ -57,7 +67,7 @@ beforeAll(async () => {
 
   // Provision accounts through better-auth (real credential rows) so
   // sign-in works; then bind the admin key to the superadmin.
-  const emails = ["sa@lexa.test", "member2@lexa.test", "member3@lexa.test", "member4@lexa.test"];
+  const emails = ["sa@lexa.test", "member2@lexa.test", "member3@lexa.test", "member4@lexa.test", "ghostuser@lexa.test"];
   for (const email of emails) {
     const u = await auth.api.createUser({
       body: { email, password: "password123", name: email.split("@")[0]!, data: { role: email.startsWith("sa") ? "superadmin" : "member" } },
@@ -89,6 +99,43 @@ describe("teams + workspace + sessions endpoints", () => {
     const owner = db.prepare("SELECT role FROM member WHERE organizationId = ? AND userId = ?").get(team.id, userIds["sa@lexa.test"]) as { role: string } | null;
     expect(owner?.role).toBe("owner");
     db.close();
+  });
+
+  it("demoted superadmin session is 403 on an admin endpoint immediately (cookieCache staleness closed)", async () => {
+    // Full cookie jar so the middleware resolves identity from the cached
+    // session_data (stale superadmin); the middleware must still re-read D1.
+    const cookie = await signInFull("sa@lexa.test");
+    const before = await withCookie(cookie, "POST", "/api/projects", { name: "Demotion Probe", slug: "demotion-probe" });
+    expect(before.status).toBe(201);
+    const db = new Database(dbPath);
+    db.prepare("UPDATE users SET role = 'member' WHERE id = ?").run(userIds["sa@lexa.test"]);
+    db.close();
+    // The cached session still reports superadmin — proving the request above
+    // took the cookieCache path, so the middleware's DB re-read is what denies.
+    const stale = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    expect((stale?.user as { role?: string } | undefined)?.role).toBe("superadmin");
+    try {
+      const after = await withCookie(cookie, "POST", "/api/projects", { name: "Demotion Probe 2", slug: "demotion-probe-2" });
+      expect(after.status).toBe(403);
+      expect(((await after.json()) as { error: { code: string } }).error.code).toBe("FORBIDDEN");
+    } finally {
+      const restore = new Database(dbPath);
+      restore.prepare("UPDATE users SET role = 'superadmin' WHERE id = ?").run(userIds["sa@lexa.test"]);
+      restore.close();
+    }
+  });
+
+  it("deleted account fails closed: cached session → 401 on an authenticated endpoint", async () => {
+    const cookie = await signInFull("ghostuser@lexa.test");
+    const db = new Database(dbPath);
+    db.prepare("DELETE FROM users WHERE id = ?").run(userIds["ghostuser@lexa.test"]);
+    db.close();
+    // The cached session still resolves the user (cookieCache hit, no DB) —
+    // the middleware's per-request role re-read finds no row → null identity.
+    const cached = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    expect(cached?.user?.id).toBe(userIds["ghostuser@lexa.test"]);
+    const res = await withCookie(cookie, "GET", "/api/sessions");
+    expect(res.status).toBe(401);
   });
 
   it("member session cannot create a team (403)", async () => {
@@ -225,7 +272,13 @@ describe("teams + workspace + sessions endpoints", () => {
       body: { email: "member3@lexa.test", password: "password123" },
       returnHeaders: true,
     })) as unknown as { headers?: Headers };
-    const preCookie = (preSignIn.headers?.get?.("set-cookie") ?? "").split(";")[0]!;
+    const preCookies = preSignIn.headers?.getSetCookie?.() ?? [];
+    // Sign-in emits the cached session_data cookie alongside session_token.
+    // This test deliberately sends only session_token so getSession falls back
+    // to the DB and observes the deactivation; a real browser also sends
+    // session_data, which stays valid until its maxAge (the documented bound).
+    expect(preCookies.some((c) => c.startsWith("__Secure-better-auth.session_data="))).toBe(true);
+    const preCookie = (preCookies.find((c) => c.startsWith("__Secure-better-auth.session_token=")) ?? "").split(";")[0]!;
     expect(preCookie).toMatch(/^__Secure-better-auth\.session_token=/);
     const deactivate = await withKey("PATCH", `/api/workspace/members/${userIds["member3@lexa.test"]}`, { action: "deactivate" });
     expect(deactivate.status).toBe(200);

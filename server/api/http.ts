@@ -1372,6 +1372,9 @@ export function bootOrCrash<T>(promise: Promise<T>): Promise<T> {
 // Admin-only gate: consumes the caller identity resolved by the API
 // middleware (member keys are 403'd there already — this is belt-and-braces
 // for any handler reached through a path that skips the middleware check).
+// The middleware is the single authority for `identity.role`: it re-reads the
+// role from the users row on every session-authenticated request, so a stale
+// cookieCache payload cannot leak admin access here.
 export const requireAdmin = Effect.gen(function* () {
   const identity = yield* AuthIdentity;
   if (identity.role !== "admin") {
@@ -1383,7 +1386,8 @@ export const requireAdmin = Effect.gen(function* () {
 // Superadmin-only gate (Assistant Gateway): same identity check as
 // Workspace/Teams requireSuperadmin — superadmin sessions (role "admin"
 // after middleware mapping) and bare API keys (role "admin") pass; member
-// sessions (role "member") get 403 FORBIDDEN.
+// sessions (role "member") get 403 FORBIDDEN. The middleware re-reads the
+// role from the users row per request, so this is not cookieCache-stale.
 export const requireSuperadmin = Effect.gen(function* () {
   const identity = yield* AuthIdentity;
   if (identity.role !== "admin") {
@@ -3450,21 +3454,27 @@ export function workersClientIp(
 }
 
 const workersSessionIdentity = (
+  driver: DbDriver,
   headers: Headers,
   getSession?: (headers: Headers) => Promise<MiddlewareSession | null>
 ): Effect.Effect<AuthIdentityShape | null, never> => {
   if (!getSession) return Effect.succeed(null);
   return Effect.tryPromise(() => getSession(headers)).pipe(
-    Effect.map((session) => {
+    Effect.flatMap((session) => {
       const user = session?.user;
-      if (!user) return null;
-      return {
-        keyId: "",
-        keyName: user.name,
-        userId: user.id,
-        userName: user.name,
-        role: user.role === "superadmin" ? ("admin" as const) : ("member" as const),
-      };
+      if (!user) return Effect.succeed(null);
+      // Role is re-read from D1 on every session request, never trusted from
+      // the cookieCache payload (up to maxAge stale). A missing row (deleted
+      // account) or a failed lookup denies (null identity → 401).
+      return queryFirst<{ role: string }>(driver, "SELECT role FROM users WHERE id = ?", user.id).pipe(
+        Effect.map((row) => ({
+          keyId: "",
+          keyName: user.name,
+          userId: user.id,
+          userName: user.name,
+          role: row.role === "superadmin" ? ("admin" as const) : ("member" as const),
+        }))
+      );
     }),
     Effect.catchAll(() => Effect.succeed(null))
   );
@@ -3518,7 +3528,7 @@ export function createWorkersApiMiddleware(
 
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !isPublicShare && !isDeviceLogin) {
-        const session = yield* workersSessionIdentity(new Headers(request.headers), deps.getSession);
+        const session = yield* workersSessionIdentity(driver, new Headers(request.headers), deps.getSession);
         if (session) {
           identity = session;
         } else {

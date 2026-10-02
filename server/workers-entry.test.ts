@@ -172,6 +172,7 @@ describe("per-isolate caches", () => {
     DB: fakeD1() as never,
     LXK_ENV: "dev",
     LXK_PUBLIC_URL: "http://localhost:5173",
+    LXK_SECRETS_MASTER_KEY: Buffer.from("workers-entry-test-master-key-0000").toString("base64"),
   });
 
   it("requestLayers returns the identical value across same-fingerprint calls", () => {
