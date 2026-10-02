@@ -6,6 +6,7 @@ import {
   DbBunLive,
   batch,
   batchResults,
+  requireRow,
   mapDbError,
   queryAll,
   queryFirst,
@@ -193,6 +194,29 @@ describe("async wrappers over the bun driver", () => {
       ));
       expect(failed._tag).toBe("Left");
       expect(await runEff(queryAll(d1shaped, "SELECT id FROM t"))).toEqual([{ id: "b" }]);
+    } finally {
+      close();
+    }
+  });
+
+  it("requireRow returns the RETURNING row and fails DbError when absent", async () => {
+    const { driver, close } = memDriver();
+    try {
+      const [ins] = await runEff(batchResults(driver, [
+        { sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", params: ["a", "1"] },
+      ]));
+      expect(await runEff(requireRow<{ id: string; v: string }>(ins, "test.insert"))).toEqual({ id: "a", v: "1" });
+
+      const empty = await Effect.runPromise(Effect.either(requireRow({ results: [], changes: 0 }, "test.empty")));
+      expect(empty._tag).toBe("Left");
+      if (empty._tag === "Left") {
+        expect(empty.left).toBeInstanceOf(DbError);
+        expect(empty.left.message).toContain("test.empty");
+      }
+
+      const missing = await Effect.runPromise(Effect.either(requireRow(undefined, "test.missing")));
+      expect(missing._tag).toBe("Left");
+      if (missing._tag === "Left") expect(missing.left).toBeInstanceOf(DbError);
     } finally {
       close();
     }

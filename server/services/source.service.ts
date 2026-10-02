@@ -3,7 +3,7 @@ import { SourceRepo } from "../repos/source.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { TaskRepo } from "../repos/task.repo";
-import { DbError, RowNotFound, ConstraintViolation, Db, batchResults, withTx } from "../db/db";
+import { DbError, RowNotFound, ConstraintViolation, Db, batchResults, requireRow, withTx } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable, TaskNotFound } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
@@ -190,7 +190,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
           const source = yield* repo.findById(sourceId);
           let activity: ActivityEvent[] = [];
           if (input.documentType === "task") {
-            activity = [rowToActivityEvent(results[1]!.results[0] as unknown as ActivityRow)];
+            activity = [rowToActivityEvent(yield* requireRow<ActivityRow>(results[1], "source.add activity"))];
           }
           return { source, activity };
         }),

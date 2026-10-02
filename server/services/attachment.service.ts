@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { createHash, randomUUID } from "node:crypto";
-import { Db, batch, batchResults, DbError, ConstraintViolation } from "../db/db";
+import { Db, batch, batchResults, requireRow, DbError, ConstraintViolation } from "../db/db";
 import { AttachmentRepo, AttachmentRow } from "../repos/attachment.repo";
 import { ChatAttachmentRepo, ChatAttachmentRow } from "../repos/chat-attachment.repo";
 import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
@@ -155,7 +155,7 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
             : []),
         ]);
         const activity: ActivityEvent | null = input.taskId
-          ? rowToActivityEvent(results[1]!.results[0] as unknown as ActivityRow)
+          ? rowToActivityEvent(yield* requireRow<ActivityRow>(results[1], "attachment.upload activity"))
           : null;
         const row = yield* attachmentRepo.findById(id).pipe(
           Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new DbError({ message: "attachment row vanished after insert" })))

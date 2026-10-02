@@ -5,7 +5,7 @@ import { Cause, Effect, Either, Layer, ManagedRuntime, Schema, Stream } from "ef
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Db, run, queryAll, batch, batchResults, type BatchStmt, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
+import { Db, run, queryAll, batch, batchResults, requireRow, type BatchStmt, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
 import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
@@ -2481,7 +2481,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
             msg.githubUnlinked(issue.repo, issue.issueNumber)));
         }
         const [, activityRes] = yield* batchResults(db, stmts);
-        const ev = issue ? rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow) : null;
+        const ev = issue
+          ? rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.unlinkIssue activity"))
+          : null;
         const updated = yield* taskService.getById(task.id);
         return { data: formatTask(updated), activity: ev ? activityPayload([ev]) : [] };
       }))

@@ -66,7 +66,7 @@ describe("fs driver", () => {
 // The real R2 binding only exists inside workerd. These tests stand up an
 // in-process stub that implements the same `R2Bucket` interface our driver
 // consumes; end-to-end verification against workerd's R2 namespace happens
-// via `bunx wrangler dev` in Phase 8.
+// via `bunx wrangler dev`.
 import type { R2Bucket, R2ListPage, R2StorageOptions } from "./config";
 import { createR2Driver } from "./drivers";
 

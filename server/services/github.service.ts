@@ -9,7 +9,7 @@ import { TaskService } from "./task.service";
 import { ProjectService } from "./project.service";
 import { ActivityService } from "./activity.service";
 import { GithubIssueAlreadyLinked, TaskNotFound, GithubApiError, ProjectNotFound, ColumnNotFound, SwimlaneNotFound, RequiredFieldMissing, InvalidOption, DeadlineAfterLane } from "../api/errors";
-import { Db, batchResults, DbError, ConstraintViolation, RowNotFound } from "../db/db";
+import { Db, batchResults, requireRow, DbError, ConstraintViolation, RowNotFound } from "../db/db";
 import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { PUBLIC_URL } from "../auth";
 import { extractText } from "../../shared/tiptap-text";
@@ -300,7 +300,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           ]);
           return {
             issueId: issue.nodeId, issueNumber: issue.number, repo,
-            activity: [rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow)],
+            activity: [rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.createLinkedIssue activity"))],
           };
         }),
 
@@ -342,7 +342,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           ]);
           return {
             issueId: issue.nodeId, issueNumber: issue.number, repo,
-            activity: [rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow)],
+            activity: [rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.linkExistingIssue activity"))],
           };
         }),
 
@@ -388,7 +388,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             }),
             activityService.appendStmt(task.id, actor, "github_linked", msg.githubLinked(repo, issue.number)),
           ]);
-          return { taskId: task.id, activity: [rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow)] };
+          return { taskId: task.id, activity: [rowToActivityEvent(yield* requireRow<ActivityRow>(activityRes, "github.createTaskFromIssue activity"))] };
         }),
     };
   }),

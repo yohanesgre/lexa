@@ -4,8 +4,9 @@
 //
 // Differences from bun-sqlite:
 //   * No interactive transaction — D1 has no BEGIN/COMMIT. The
-//     `transaction()` method throws; the atomicity invariants are
-//     re-expressed as pre-computed `db.batch()` arrays (see Phase 5).
+//     `transaction()` method throws; atomicity is expressed as
+//     pre-computed `db.batch()` arrays, the same `batch()`/
+//     `batchResults()` path both drivers use.
 //   * `lastInsertRowid` is not reliable on D1 — the D1 binding's `run()`
 //     returns the meta-changes count but does not surface the rowid.
 //     Callers that need the rowid use a `RETURNING` clause on the
@@ -19,9 +20,10 @@
 //       - a returned `success=false` item → DbError (defensive — real D1
 //         throws instead);
 //       - summed `meta.duration > 28_000` → BatchTimeout, raised AFTER the
-//         batch returned. This means the batch MAY HAVE COMMITTED — do not
-//         blindly retry. Only `ConstraintViolation.isPositionConflict` is
-//         retryable (the abort precedes commit). No behavior change here.
+//         batch returned and carrying `postCommit: true`. This means the
+//         batch MAY HAVE COMMITTED — do not blindly retry. Only
+//         `ConstraintViolation.isPositionConflict` is retryable (the abort
+//         precedes commit). No behavior change here.
 //     Bun: `db.transaction` wraps the whole array; throw → rollback; mapped
 //     the same. No BatchTimeout on Bun.
 //
@@ -94,7 +96,7 @@ export function createD1Driver(d1: D1Like): DbDriver {
       // so the batch MAY HAVE COMMITTED — callers must not blindly retry.
       const duration = items.reduce((sum, r) => sum + (r.meta?.duration ?? 0), 0);
       if (duration > 28_000) {
-        throw new BatchTimeout({ message: `D1 batch exceeded 28s budget (${duration}ms)` });
+        throw new BatchTimeout({ message: `D1 batch exceeded 28s budget (${duration}ms)`, postCommit: true });
       }
       for (const r of items) {
         if (!r.success) throw new DbError({ message: "D1 batch returned success=false" });
@@ -106,10 +108,10 @@ export function createD1Driver(d1: D1Like): DbDriver {
       }));
     },
     async transaction<T>(): Promise<T> {
-      // D1 has no BEGIN/COMMIT. Atomicity is expressed via `batch()`
-      // (pre-computed `{ sql, params }[]` arrays). See Phase 5 for the
-      // sites that move from `withTx { repo.x(); repo.y(); }` to
-      // `repo.updateAndEmit(diff)` returning a batch array.
+      // D1 has no BEGIN/COMMIT. Atomicity is expressed via `batch()` —
+      // the same `batch()`/`batchResults()` path both drivers use;
+      // converted sites no longer use `withTx`. The remaining
+      // read-dependent `withTx` sites are tracked for a follow-up.
       throw new DbError({
         message: "D1 has no interactive transactions; use db.batch([{sql, params}, ...]) for atomicity",
       });

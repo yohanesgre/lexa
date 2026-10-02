@@ -187,6 +187,21 @@ export function batch(
   return batchResults(driver, stmts).pipe(Effect.asVoid);
 }
 
+/** Checked access to a batch statement's `RETURNING` row. `batchResults`
+ *  yields positional results; a statement that was expected to return a row
+ *  but did not (driver divergence, unexpected SQL) must not be silently cast
+ *  away. `result` may be `undefined` when the caller destructured the
+ *  positional array under `noUncheckedIndexedAccess`. */
+export function requireRow<T = LexaRow>(
+  result: BatchStmtResult | undefined,
+  op: string
+): Effect.Effect<T, DbError> {
+  const row = result?.results[0];
+  return row === undefined
+    ? Effect.fail(new DbError({ message: `${op}: batch statement returned no row` }))
+    : Effect.succeed(row as unknown as T);
+}
+
 // Interactive transaction. Bun-only: on D1 (`supportsInteractiveTx === false`)
 // this is a documented no-op — the body runs SEQUENTIALLY with no BEGIN/
 // ROLLBACK, so a mid-body failure leaves prior writes committed. Every

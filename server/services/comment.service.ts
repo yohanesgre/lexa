@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { batchResults, type BatchStmt, Db, DbError, ConstraintViolation, RowNotFound } from "../db/db";
+import { batchResults, requireRow, type BatchStmt, Db, DbError, ConstraintViolation, RowNotFound } from "../db/db";
 import { CommentRepo } from "../repos/comment.repo";
 import { ActivityRepo } from "../repos/activity.repo";
 import { TaskRepo } from "../repos/task.repo";
@@ -54,9 +54,11 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
               viaAssistant: opts?.viaAssistant === true,
             }),
           ]);
+          const commentRow = yield* requireRow<CommentRow>(commentRes, "comment.create comment");
+          const activityRow = yield* requireRow<ActivityRow>(activityRes, "comment.create activity");
           return {
-            comment: rowToComment(commentRes!.results[0] as unknown as CommentRow),
-            activity: rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow),
+            comment: rowToComment(commentRow),
+            activity: rowToActivityEvent(activityRow),
           };
         });
       });
@@ -118,11 +120,13 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
           activityStmt,
           commentRepo.softDeleteStmt(commentId),
         ]);
-        const deletedRow = deleteRes!.results[0];
-        if (!deletedRow) return yield* new CommentNotFound({ id: commentId });
+        const deletedRow = yield* requireRow<CommentRow>(deleteRes, "comment.remove comment").pipe(
+          Effect.catchTag("DbError", () => Effect.fail(new CommentNotFound({ id: commentId }))),
+        );
+        const activityRow = yield* requireRow<ActivityRow>(activityRes, "comment.remove activity");
         return {
-          comment: rowToComment(deletedRow as unknown as CommentRow),
-          activity: rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow),
+          comment: rowToComment(deletedRow),
+          activity: rowToActivityEvent(activityRow),
         };
       });
 

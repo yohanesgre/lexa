@@ -2,9 +2,13 @@
 // implementations: `bun-sqlite.ts` (wraps the sync `bun:sqlite` API in
 // `Promise.resolve`, byte-identical behavior) and `d1.ts` (wraps a
 // `D1Database` binding for Cloudflare Workers). The D1 driver does NOT
-// implement `transaction()` — D1 has no BEGIN/COMMIT, so atomic multi-
-// statement sites use `db.batch()` arrays of `{ sql, params }` instead
-// (see Phase 5 for the invariant re-expression).
+// implement `transaction()` — D1 has no BEGIN/COMMIT — so atomic multi-
+// statement sites use `db.batch()` arrays of `{ sql, params }` on BOTH
+// drivers: `batch()`/`batchResults()` in `db.ts` are the atomic path, and
+// converted sites no longer use `withTx`. Repos expose their write SQL
+// through pure builders (`server/repos/*-batch.ts`) — the single source of
+// truth both drivers consume. The remaining read-dependent `withTx` sites
+// are tracked for a follow-up.
 //
 // The two drivers also produce a different `lastInsertRowid` shape. Bun
 // surfaces a stable `lastInsertRowid` on every run; D1 does not surface
@@ -66,7 +70,12 @@ export interface DbDriver {
 export class DbError extends Data.TaggedError("DbError")<{ message: string; cause?: unknown }> {}
 export class RowNotFound extends Data.TaggedError("RowNotFound")<{ table: string }> {}
 export class ConstraintViolation extends Data.TaggedError("ConstraintViolation")<{ message: string; isPositionConflict: boolean }> {}
-export class BatchTimeout extends Data.TaggedError("BatchTimeout")<{ message: string }> {}
+/** Raised when the D1 binding returned a batch over its time budget. It is
+ *  thrown AFTER the binding returned, so the batch MAY HAVE COMMITTED;
+ *  `postCommit: true` is the typed marker of that ambiguity — callers must
+ *  not blindly retry. Only `ConstraintViolation.isPositionConflict` is
+ *  retryable (the abort precedes commit). Bun never raises this. */
+export class BatchTimeout extends Data.TaggedError("BatchTimeout")<{ message: string; postCommit: true }> {}
 
 /** Map a raw driver/SQLite throw to a typed driver error. Lives here (not in
  *  `db.ts`) so the drivers can use it without importing the Effect layer —

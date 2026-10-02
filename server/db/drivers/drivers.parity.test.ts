@@ -254,13 +254,15 @@ describe("d1 driver specifics", () => {
     await expect(createD1Driver(d1).batch([{ sql: "SELECT 1", params: [] }])).rejects.toBeInstanceOf(DbError);
   });
 
-  it("batch() maps an over-budget summed duration to BatchTimeout", async () => {
+  it("batch() maps an over-budget summed duration to BatchTimeout with postCommit marker", async () => {
     const d1: D1Like = {
       ...makeD1Like(makeDb()),
       batch: async (stmts: D1BatchItem[]) =>
         stmts.map(() => ({ success: true, results: [], meta: { duration: 29_000 } })),
     };
-    await expect(createD1Driver(d1).batch([{ sql: "SELECT 1", params: [] }])).rejects.toBeInstanceOf(BatchTimeout);
+    const err = await createD1Driver(d1).batch([{ sql: "SELECT 1", params: [] }]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BatchTimeout);
+    expect((err as BatchTimeout).postCommit).toBe(true);
   });
 
   it("batch() preserves positional order and surfaces last_row_id", async () => {

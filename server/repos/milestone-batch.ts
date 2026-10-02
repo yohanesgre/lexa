@@ -1,4 +1,4 @@
-// Batch-array builder for the milestone archive cascade (Phase 5).
+// Batch-array builder for the milestone archive cascade.
 //
 // The Bun path's existing `milestone.service.ts` archive cascade is:
 //   1. UPDATE milestones SET archived_at = ?

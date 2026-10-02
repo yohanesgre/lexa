@@ -1,10 +1,9 @@
 // Bun-SQLite driver — wraps the synchronous `bun:sqlite` `Database` in
 // an async `DbDriver` so the repos can use the same shape on both the
-// Bun host and the Workers host (D1). The wrappers in `database.ts`
-// (queryAll / queryFirst / run / batch / withTx) gain their async
-// signatures here; the existing repos that take a `Database` argument
-// continue to compile until Phase 6 wires the HTTP layer through
-// `createApiHandler({ driver, env, ... })`.
+// Bun host and the Workers host (D1). The wrappers in `db.ts`
+// (queryAll / queryFirst / run / batch / batchResults / withTx) gain
+// their async signatures here; the repos and the HTTP layer consume the
+// driver through `createApiHandler({ driver, env, ... })`.
 //
 // On the Bun host this driver is a thin shim — every method's promise
 // resolves on the next microtask, so behavior is byte-identical to the

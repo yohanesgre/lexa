@@ -58,7 +58,7 @@ if (dbPath) {
   runMigrations(dbPath);
   console.log("Migrations complete");
 }
-// ─── D1 migration entry (Phase 8) ─────────────────────────────────────────
+// ─── D1 migration entry ───────────────────────────────────────────────────
 //
 // The Bun path above iterates the migrations directory in one process
 // via `bun:sqlite` synchronous transactions. The Workers path uses

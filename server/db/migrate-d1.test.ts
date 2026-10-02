@@ -1,4 +1,4 @@
-// Tests for `runMigrationsD1` (Phase 8). The function takes a
+// Tests for `runMigrationsD1`. The function takes a
 // `D1MigrationRunner` interface; this test implements an in-process
 // stub that mimics the D1 binding's `prepare`/`batch` surface. Real
 // workerd D1 verification happens via `bunx wrangler dev` and

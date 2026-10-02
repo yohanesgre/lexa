@@ -344,8 +344,8 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
 
       // Webhook-only path: bypass-guard move + synced-state write as ONE
       // repo-level batch() — atomic (SCHEMA.md §No multi-statement ACID).
-      // Shipped (Phase 6): webhook moves skip archived tasks — archived-guard
-      // on archived_at IS NOT NULL.
+      // Webhook moves skip archived tasks — archived-guard on
+      // archived_at IS NOT NULL.
       moveFromWebhook: (taskId: string, columnId: string, syncedState: "open" | "closed") => ...,
 
       delete: (id: string) => ...,
