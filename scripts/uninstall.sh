@@ -18,15 +18,19 @@ else
 fi
 
 parse_flags "$@"
-[ -n "${TARGET}" ] || die "target required: docker | bare | workers | dev"
+[ -n "${TARGET}" ] || die "target required: workers | dev"
 case "${TARGET}" in
-  docker|bare|workers|dev) ;;
-  *) die "unknown target '${TARGET}' (docker|bare|workers|dev)" ;;
+  workers|dev) ;;
+  *) die "unknown target '${TARGET}' (workers|dev)" ;;
 esac
 
 if [ "${PURGE}" = "1" ]; then
   if _tty_available; then
-    answer=$(tty_read "This DELETES data (volume/DB). Type 'purge' to confirm" "")
+    if [ "${TARGET}" = "workers" ]; then
+      answer=$(tty_read "This removes local credentials; D1/R2/KV resources are KEPT (delete them in the Cloudflare dashboard). Type 'purge' to confirm" "")
+    else
+      answer=$(tty_read "This DELETES the clone and its data. Type 'purge' to confirm" "")
+    fi
     [ "${answer}" = "purge" ] || die "confirmation did not match — aborted (data intact)"
   else
     die "--purge is destructive — re-run on a terminal to confirm, or drop the flag to keep data"
@@ -34,35 +38,6 @@ if [ "${PURGE}" = "1" ]; then
 fi
 
 case "${TARGET}" in
-  docker)
-    DEPLOY_DIR="${DEPLOY_DIR:-dockers}"
-    [ -d "${DEPLOY_DIR}" ] || die "deploy dir '${DEPLOY_DIR}' not found — pass DEPLOY_DIR env or cd next to it"
-    DEPLOY_DIR="$(cd "${DEPLOY_DIR}" && pwd)"
-    (cd "${DEPLOY_DIR}" && step "compose down" mutate docker compose down)
-    if [ "${PURGE}" = "1" ]; then
-      step "remove data volume" mutate docker volume rm lexa-data
-    else
-      echo "  ✓ data volume 'lexa-data' KEPT"
-    fi
-    step "remove deploy dir" rm -rf "${DEPLOY_DIR}"
-    ;;
-
-  bare)
-    if [ "${SYSTEMD}" = "1" ]; then
-      step "systemd stop" mutate systemctl disable --now lexa
-      step "remove unit" rm -f /etc/systemd/system/lexa.service && mutate systemctl daemon-reload
-    fi
-    pkill -f "server/entry.ts" 2>/dev/null || true
-    INSTALL_DIR="${INSTALL_DIR:-bare}"
-    [ -d "${INSTALL_DIR}" ] || die "install dir '${INSTALL_DIR}' not found"
-    if [ "${PURGE}" = "1" ]; then
-      step "remove install dir + data" rm -rf "${INSTALL_DIR}"
-    else
-      echo "  ✓ install dir '${INSTALL_DIR}' KEPT (data inside)"
-      echo "    remove manually when ready: rm -rf ${INSTALL_DIR}"
-    fi
-    ;;
-
   workers)
     require_bun
     WORK_DIR="${WORK_DIR:-cf-workers}"

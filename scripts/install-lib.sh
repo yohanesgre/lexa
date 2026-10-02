@@ -17,12 +17,11 @@
 #     path stays clean.
 #   - Boundary: parse_flags is the ONLY place argv is read. tty_read never
 #     reads stdin (script may be piped) — /dev/tty only, flag > env > default.
-#   - write_env_file / write_env_toml / compose_render accept whitelisted
-#     keys/values only. Env writes merge (never truncate) so operator-added
-#     keys survive a re-run.
+#   - write_env_toml accepts whitelisted keys/values only. Env writes merge
+#     (never truncate) so operator-added keys survive a re-run.
 #   - Dry-run (§9 test-swap): INSTALL_DRY_RUN=1 swaps R — mutating commands
-#     route through mutate() (docker/systemctl/curl -X/-f) and are logged,
-#     not executed; step() marks nodes with "#» DRY-RUN". Same graph.
+#     route through mutate() (wrangler/curl -X/-f) and are logged, not
+#     executed; step() marks nodes with "#» DRY-RUN". Same graph.
 
 # shellcheck shell=bash
 
@@ -34,9 +33,9 @@ LIB_INSTALLED_GUARD=1
 # ---------------------------------------------------------------------------
 usage() {
   cat <<'EOF'
-Usage: install.sh <target> [flags]
+Usage: install.sh [workers] [flags]
 
-Targets: docker | bare | workers
+Target: workers (Cloudflare Workers)
 
 Flags:
   --ref <tag|branch>             script + artifact source (default: newest v* tag;
@@ -44,20 +43,13 @@ Flags:
   --name <name>                  workers deploy name (default lexa)
   --account <id>                 Cloudflare account id (workers; skips the
                                  account prompt and disambiguates the token)
-  --port <n>                       host port (docker, default 8080)
-  --bind <addr>                    bind address (default 127.0.0.1)
   --domain <d>                     custom domain (workers; skips prompt)
-  --image <tag>                    container image tag
-  --no-pull                        docker only: skip `docker compose pull` and
-                                   use a locally available image
-  --systemd                        bare: write + enable systemd unit
   --secrets-file <path>            optional secrets (KEY=value, e.g.
                                    LXK_SECRETS_MASTER_KEY) applied at install
   --reset-db                       workers: drop the existing D1 database and
                                    start migrations fresh (data is lost)
   --yes                            assume yes for confirmations
   --purge                          uninstall: also delete data
-  --clean                          docker: remove lexa-data volume
   --from-repo <dir>                install from a local repo checkout
   --help                           show this help
 EOF
@@ -126,25 +118,9 @@ step() {
 }
 
 # ---------------------------------------------------------------------------
-# retry <n> <cmd...> — bounded retry with linear backoff (compose pull)
-# ---------------------------------------------------------------------------
-retry() {
-  local tries="$1"
-  shift
-  local attempt=1
-  until "$@"; do
-    if [ "$attempt" -ge "$tries" ]; then
-      return 1
-    fi
-    sleep $((attempt * 2))
-    attempt=$((attempt + 1))
-  done
-}
-
-# ---------------------------------------------------------------------------
 # wait_for <url> [tries] [log_file] — health-wait loop, 1s interval, default 60
 # tries. On timeout a log_file (when given and present) is tailed before the
-# escape, so a bare manual start surfaces its lexa.log.
+# escape, so the manual start surfaces its lexa.log.
 # ---------------------------------------------------------------------------
 wait_for() {
   local url="$1"
@@ -230,18 +206,12 @@ verify_checksum() {
 # ---------------------------------------------------------------------------
 # env-file writers
 #
-# Keys the installer may write (whitelist, never free-form). The app keys are
-# written to `.env.toml`; the compose-tooling keys to the flat `.env` that
-# compose itself interpolates.
-# Keys the app no longer reads — migration drops them, never carries them.
+# Keys the installer may write (whitelist, never free-form). Written to
+# `.env.toml` (app config + Worker-secret custody).
+# Keys the app no longer reads — never accepted, never carried.
 # ---------------------------------------------------------------------------
-ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT LXK_SECRETS_MASTER_KEY COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
+ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS LXK_TRUSTED_PROXY_CIDRS LXK_ADMIN_EMAILS DATABASE_PATH PORT LXK_SECRETS_MASTER_KEY "
 ENV_FILE_DEAD_KEYS=" VITE_LXK_API_KEY LXK_API_KEY LXK_ACCESS_AUD LXK_ACCESS_TEAM LXK_RUNTIME_DAEMON_TOKEN LXK_RUNTIME_REPO_CAP RUNTIME_STALE_RUN_MIN GITHUB_APP_ID GITHUB_PRIVATE_KEY GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET "
-# Compose-tooling keys: compose itself interpolates these from the flat `.env`,
-# so migration must NOT move them into `.env.toml` (that would drop the compose
-# project name and orphan the `lexa-data` volume, or silently unpin the image).
-# They are preserved in the flat `.env` across a legacy migration.
-ENV_FILE_TOOLING_KEYS=" COMPOSE_PROJECT_NAME LXK_IMAGE_TAG CF_TUNNEL_TOKEN "
 
 # _scan_basic_string <body> — mirror of `scanBasicString` in server/env-file.ts.
 # Single left-to-right pass (never a chain of ${v//} replacements: order would
@@ -280,16 +250,6 @@ _scan_basic_string() {
   _SCAN_AFTER=""
 }
 
-# _env_key_loader_valid <key> — the loader's leaf-key contract
-# (LEAF_KEY_RE in server/env-file.ts: ^[A-Z][A-Z0-9_]*$). Migration carries any
-# such key; the installer's own writes stay on the stricter whitelist.
-_env_key_loader_valid() {
-  case "$1" in
-    ''|[!A-Z]*|*[!A-Z0-9_]*) return 1 ;;
-  esac
-  return 0
-}
-
 # _env_key_allowed <key> — installer write whitelist membership.
 _env_key_allowed() {
   case "$ENV_FILE_ALLOWED_KEYS" in
@@ -299,8 +259,8 @@ _env_key_allowed() {
 }
 
 # _kv_replace_line <file> <key> <replacement-line>
-# Replaces the first `KEY=`/`KEY =` line in place, or appends. Used by both
-# writers so an existing file is merged, never truncated.
+# Replaces the first `KEY=`/`KEY =` line in place, or appends. Used by the
+# writer so an existing file is merged, never truncated.
 _kv_replace_line() {
   local file="$1" key="$2" repl="$3"
   local ln done=0 lhs
@@ -372,7 +332,7 @@ env_to_toml() {
     esac
     line="${key} = \"$(toml_escape "${kv#*=}")\""
     case "$key" in
-      DATABASE_PATH|PORT|COMPOSE_PROJECT_NAME|LXK_IMAGE_TAG|CF_TUNNEL_TOKEN) core+="${line}"$'\n' ;;
+      DATABASE_PATH|PORT) core+="${line}"$'\n' ;;
       LXK_ADMIN_EMAILS) auth+="${line}"$'\n' ;;
       LXK_ENV|LXK_PUBLIC_URL|LXK_TRUSTED_ORIGINS|LXK_TRUSTED_PROXY_CIDRS) urls+="${line}"$'\n' ;;
       *) other+="${line}"$'\n' ;;
@@ -428,44 +388,6 @@ write_env_toml() {
   _env_toml_write "$path" _env_key_allowed "$@"
 }
 
-# write_env_toml_loader <path> <key=value...>
-# Migration write path: accepts every key the loader can represent
-# (^[A-Z][A-Z0-9_]*$), not just the installer whitelist, so a legacy `.env`
-# carrying LXK_SECRETS_MASTER_KEY / LOG_LEVEL / TANSTACK_AI_* / storage keys survives.
-write_env_toml_loader() {
-  local path="$1"
-  shift
-  _env_toml_write "$path" _env_key_loader_valid "$@"
-}
-
-# write_env_file <path> <key=value...>
-# Flat dotenv writer for compose-tooling vars. Whitelisted keys only; merge
-# semantics (existing keys preserved, passed keys replaced/appended), 0600.
-write_env_file() {
-  local path="$1"
-  shift
-  local kv key val tmp="${path}.tmp" dir
-  for kv in "$@"; do
-    key="${kv%%=*}"
-    case "$ENV_FILE_ALLOWED_KEYS" in
-      *" $key "*) ;;
-      *) rm -f "$tmp"; die "write_env_file: key not allowed: ${key}" ;;
-    esac
-  done
-  dir="$(dirname "$path")"
-  [ "$dir" = "." ] || mkdir -p "$dir"
-  if [ -f "$path" ]; then ( umask 077; cp -f "$path" "$tmp" ); else ( umask 077; : > "$tmp" ); fi
-  chmod 600 "$tmp"
-  for kv in "$@"; do
-    key="${kv%%=*}"
-    val="${kv#*=}"
-    _kv_replace_line "$tmp" "$key" "${key}=${val}"
-  done
-  mv -f "$tmp" "$path"
-  chmod 600 "$path"
-  return 0
-}
-
 # dotenv_raw_value <value> — strip flat-dotenv quoting and unescape so the value
 # can be re-encoded as a TOML basic string. Mirrors parseDotenv in
 # server/env-file.ts: single-pass unescape for double quotes, no escapes inside
@@ -490,7 +412,7 @@ dotenv_raw_value() {
 }
 
 # env_file_value <file> <key> — first flat-dotenv value for KEY, or empty.
-# Used to read back operator-pinned tooling vars (e.g. LXK_IMAGE_TAG).
+# Used to read back operator-pinned env-file values (e.g. LXK_SECRETS_MASTER_KEY).
 env_file_value() {
   local file="$1" key="$2" line=""
   [ -f "$file" ] || return 0
@@ -515,193 +437,16 @@ secrets_master_key_entry() {
   printf 'LXK_SECRETS_MASTER_KEY=%s\n' "$existing"
 }
 
-# migrate_legacy_deploy_env <dir>
-# Pre-P4 deploy dirs keep app keys in a flat `.env`. When no `.env.toml` exists
-# yet, carry every live, loader-representable key into `.env.toml` and keep the
-# original as `.env.legacy` (0600) so the tooling-only `.env` can be written
-# after. Compose-tooling keys (ENV_FILE_TOOLING_KEYS) stay in the flat `.env`.
-# Parser mirrors server/env-file.ts parseDotenv: multi-line double-quoted
-# values, inline `#` comments, single-pass escapes.
-migrate_legacy_deploy_env() {
-  local dir="$1"
-  local toml="${dir}/.env.toml" legacy="${dir}/.env" dest="${dir}/.env.legacy"
-  [ -f "$legacy" ] || return 0
-  [ -f "$toml" ] && return 0
-  if [ -e "$dest" ]; then
-    echo "  (found an existing ${dest} — leaving ${legacy} untouched)"
-    return 0
-  fi
-  local -a lines=() app_entries=() tooling_entries=() skipped=()
-  local line=""
-  while IFS= read -r line || [ -n "$line" ]; do
-    lines+=("$line")
-  done < "$legacy"
-
-  local total=${#lines[@]} idx=0
-  local key raw body acc value unterminated
-  while [ "$idx" -lt "$total" ]; do
-    line="${lines[$idx]}"
-    idx=$((idx + 1))
-    line="${line#"${line%%[![:space:]]*}"}"
-    [ -z "$line" ] && continue
-    case "$line" in '#'*) continue ;; esac
-    case "$line" in
-      export[[:space:]]*)
-        line="${line#export}"
-        line="${line#"${line%%[![:space:]]*}"}"
-        ;;
-    esac
-    case "$line" in
-      *=*) ;;
-      *) continue ;;
-    esac
-    key="${line%%=*}"
-    key="${key%"${key##*[![:space:]]}"}"
-    case "$key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
-    case "$ENV_FILE_DEAD_KEYS" in *" $key "*) continue ;; esac
-    raw="${line#*=}"
-    raw="${raw#"${raw%%[![:space:]]*}"}"
-    case "$raw" in
-      '"'*)
-        body="${raw#\"}"
-        acc=""
-        value=""
-        unterminated=0
-        while :; do
-          _scan_basic_string "$body"
-          acc+="$_SCAN_TEXT"
-          if [ "$_SCAN_CLOSED" = "1" ]; then
-            value="$acc"
-            break
-          fi
-          acc+=$'\n'
-          if [ "$idx" -ge "$total" ]; then
-            unterminated=1
-            break
-          fi
-          body="${lines[$idx]}"
-          idx=$((idx + 1))
-        done
-        if [ "$unterminated" = "1" ]; then
-          skipped+=("$key")
-          continue
-        fi
-        ;;
-      "'"*)
-        body="${raw#\'}"
-        value="${body%%\'*}"
-        if [ "$body" = "$value" ]; then
-          skipped+=("$key")
-          continue
-        fi
-        ;;
-      *)
-        raw="${raw%%#*}"
-        value="${raw%"${raw##*[![:space:]]}"}"
-        ;;
-    esac
-    case "$ENV_FILE_TOOLING_KEYS" in
-      *" $key "*)
-        tooling_entries+=("${key}=${value}")
-        continue
-        ;;
-    esac
-    if ! _env_key_loader_valid "$key"; then
-      skipped+=("$key")
-      continue
-    fi
-    app_entries+=("${key}=${value}")
-  done
-
-  # No app keys: leave the flat `.env` in place — the later tooling write merges
-  # into it and preserves any operator tooling keys untouched.
-  if [ "${#app_entries[@]}" -eq 0 ]; then
-    return 0
-  fi
-  write_env_toml_loader "$toml" "${app_entries[@]}"
-  mv -f "$legacy" "$dest"
-  chmod 600 "$dest"
-  # Re-emit surviving tooling keys into a fresh flat `.env` (compose reads it).
-  if [ "${#tooling_entries[@]}" -gt 0 ]; then
-    write_env_file "${dir}/.env" "${tooling_entries[@]}"
-  fi
-  echo "  migrated ${legacy} to ${toml} (original kept at ${dest})"
-  if [ "${#skipped[@]}" -gt 0 ]; then
-    printf '  (skipped %d key(s) the loader cannot represent: %s)\n' "${#skipped[@]}" "${skipped[*]}" >&2
-  fi
-  return 0
-}
-
-# _container_ids <image> — the uid:gid the runtime image actually runs as,
-# quoted from the image itself (never hardcoded: a base-image change must not
-# silently make the env mount unreadable). Cached per image for the run. Falls
-# back to 1000:1000 when the probe cannot run (no shell in the image, offline).
-_container_ids() {
-  local image="$1"
-  if [ "${_GRANT_IDS_IMAGE:-}" = "$image" ] && [ -n "${_GRANT_IDS_VALUE:-}" ]; then
-    printf '%s\n' "$_GRANT_IDS_VALUE"
-    return 0
-  fi
-  local probe="" uid="" gid=""
-  probe="$(docker run --rm --entrypoint sh "$image" -c 'id -u; id -g' 2>/dev/null || true)"
-  uid="$(printf '%s\n' "$probe" | sed -n '1p' | tr -cd '0-9')"
-  gid="$(printf '%s\n' "$probe" | sed -n '2p' | tr -cd '0-9')"
-  [ -n "$uid" ] || uid=1000
-  [ -n "$gid" ] || gid=1000
-  _GRANT_IDS_IMAGE="$image"
-  _GRANT_IDS_VALUE="${uid}:${gid}"
-  printf '%s\n' "$_GRANT_IDS_VALUE"
-}
-
-# grant_container_read <path> <image>
-# The runtime image runs as an unprivileged uid (Dockerfile `USER bun`); when
-# the installer runs as a different uid, a 0600 host file is unreadable in the
-# container and the app crash-loops. Resolve the image's own uid:gid (never a
-# hardcode), then re-own the file so the container reads it:
-#   - non-root installer: host-uid:<image-gid> mode 0640 — the host keeps
-#     read/write, the container reads via its group. The chown round-trips
-#     through a one-shot root container (works unprivileged).
-#   - root installer: <image-uid>:<image-gid> mode 0640.
-# Falls back to 0644 only if the chown cannot run (keeps the mount readable).
-# Dry-run: logs the intent, changes nothing.
-grant_container_read() {
-  local path="$1" image="$2"
-  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf '[dry-run] chmod 640 %s && chown %s:<image-gid> %s\n' "$path" "$(id -u)" "$path"
-    return 0
-  fi
-  local ids uid gid
-  ids="$(_container_ids "$image")"
-  uid="${ids%%:*}"
-  gid="${ids##*:}"
-  [ -n "$uid" ] || uid=1000
-  [ -n "$gid" ] || gid=1000
-  local claimed=0
-  if [ "$(id -u)" = "0" ]; then
-    chown "${uid}:${gid}" "$path" && claimed=1
-  elif docker run --rm --user 0 -v "${path}:/lexa-env.toml" "$image" \
-    chown "$(id -u):${gid}" /lexa-env.toml >/dev/null 2>&1; then
-    claimed=1
-  fi
-  if [ "$claimed" = "1" ]; then
-    chmod 640 "$path" || true
-    return 0
-  fi
-  echo "  (couldn't set owners on ${path}; made it world-readable — keep this folder private)"
-  chmod 644 "$path" || true
-  return 0
-}
-
 # ---------------------------------------------------------------------------
 # parse_flags — whitelist-style parser; the ONLY reader of argv.
-# Sets: TARGET REF NAME PORT BIND DOMAIN IMAGE_TAG
-#       SYSTEMD ASSUME_YES PURGE CLEAN FROM_REPO HELP NO_PULL
+# Sets: TARGET REF NAME DOMAIN ASSUME_YES PURGE RESET_DB
+#       FROM_REPO HELP CF_TOKEN SECRETS_FILE ACCOUNT
 # Unknown flag -> usage + die. Positional target accepted (first one only).
 # ---------------------------------------------------------------------------
 parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
-  TARGET="" REF="" NAME="" PORT=8080 BIND=127.0.0.1 DOMAIN=""
-  IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0 NO_PULL=0
+  TARGET="" REF="" NAME="" DOMAIN=""
+  ASSUME_YES=0 PURGE=0 RESET_DB=0
   FROM_REPO="" HELP=0 CF_TOKEN="" SECRETS_FILE="" ACCOUNT=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -723,16 +468,6 @@ parse_flags() {
       --staging|--prod|--flavor)
         die "$1 was removed: flavors are gone — use --ref <tag|branch> to pick main or a release tag"
         ;;
-      --port)
-        [ $# -ge 2 ] || die "--port requires a value"
-        PORT=$2
-        shift 2
-        ;;
-      --bind)
-        [ $# -ge 2 ] || die "--bind requires a value"
-        BIND=$2
-        shift 2
-        ;;
       --domain)
         [ $# -ge 2 ] || die "--domain requires a value"
         DOMAIN=$2
@@ -746,22 +481,14 @@ parse_flags() {
         CF_TOKEN=$2
         shift 2
         ;;
-      --image)
-        [ $# -ge 2 ] || die "--image requires a value"
-        IMAGE_TAG=$2
-        shift 2
-        ;;
-      --no-pull) NO_PULL=1; shift ;;
       --from-repo)
         [ $# -ge 2 ] || die "--from-repo requires a value"
         FROM_REPO=$2
         shift 2
         ;;
-      --systemd) SYSTEMD=1; shift ;;
       --reset-db) RESET_DB=1; shift ;;
       --yes) ASSUME_YES=1; shift ;;
       --purge) PURGE=1; shift ;;
-      --clean) CLEAN=1; shift ;;
       --secrets-file)
         [ $# -ge 2 ] || die "--secrets-file requires a value"
         SECRETS_FILE=$2
@@ -858,95 +585,6 @@ deploy_worker_name() {
   esac
 }
 
-# ---------------------------------------------------------------------------
-# compose_render <mode> <port> <bind>
-# Emits docker-compose.yml into ${DEPLOY_DIR} (default: .). Modeled on the
-# repo's docker-compose.yml; mode != direct adds the cloudflared tunnel
-# service. Values validated before interpolation.
-#
-# The app reads its config from the mounted `./.env.toml` (loader applies it
-# at boot); the compose `environment:` interpolation block is gone. The flat
-# `.env` is compose-tooling only: COMPOSE_PROJECT_NAME (compose itself),
-# LXK_IMAGE_TAG (image tag interpolation), CF_TUNNEL_TOKEN (tunnel command).
-# ---------------------------------------------------------------------------
-compose_render() {
-  local flavor="$1"
-  local port="$2"
-  local bind="$3"
-  local deploy_dir="${DEPLOY_DIR:-.}"
-  case "$flavor" in
-    direct) ;;
-    *) die "compose_render: invalid mode: ${flavor}" ;;
-  esac
-  case "$port" in
-    ''|*[!0-9]*) die "compose_render: invalid port: ${port}" ;;
-  esac
-  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-    die "compose_render: port out of range: ${port}"
-  fi
-  case "$bind" in
-    ''|*[!A-Za-z0-9._-]*) die "compose_render: invalid bind address: ${bind}" ;;
-  esac
-  mkdir -p "$deploy_dir"
-  if [ "$flavor" = "direct" ] || [ -z "${CF_TUNNEL_TOKEN:-}" ]; then
-    cat > "${deploy_dir}/docker-compose.yml" <<EOF
-services:
-  app:
-    image: ghcr.io/yohanesgre/lexa:\${LXK_IMAGE_TAG:-latest}
-    ports:
-      - "${bind}:${port}:3000"
-    volumes:
-      - lexa-data:/app/data
-      - type: bind
-        source: ./.env.toml
-        target: /app/.env.toml
-        read_only: true
-        bind:
-          create_host_path: false
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').catch(() => process.exit(1))"]
-      interval: 30s
-      retries: 3
-      start_period: 10s
-
-volumes:
-  lexa-data:
-EOF
-  else
-    cat > "${deploy_dir}/docker-compose.yml" <<EOF
-services:
-  app:
-    image: ghcr.io/yohanesgre/lexa:\${LXK_IMAGE_TAG:-latest}
-    volumes:
-      - lexa-data:/app/data
-      - type: bind
-        source: ./.env.toml
-        target: /app/.env.toml
-        read_only: true
-        bind:
-          create_host_path: false
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').catch(() => process.exit(1))"]
-      interval: 30s
-      retries: 3
-      start_period: 10s
-
-  tunnel:
-    image: cloudflare/cloudflared
-    command: tunnel --no-autoupdate run --token \${CF_TUNNEL_TOKEN}
-    depends_on:
-      app:
-        condition: service_healthy
-    restart: unless-stopped
-
-volumes:
-  lexa-data:
-EOF
-  fi
-}
-
 # Guard: this file is a library — refuse direct execution.
 if [ "${BASH_SOURCE[0]:-}" = "$0" ]; then
   printf 'install-lib.sh is a library: source it, never execute it\n' >&2
@@ -956,12 +594,6 @@ fi
 # ---------------------------------------------------------------------------
 # Preflights (R per target — explicit, per-OS hints, fail-fast)
 # ---------------------------------------------------------------------------
-preflight_docker() {
-  command -v docker >/dev/null 2>&1 || die "Docker isn't installed — install it, then re-run: https://docs.docker.com/engine/install/"
-  docker compose version >/dev/null 2>&1 || die "Docker Compose isn't installed — add the compose plugin, then re-run: https://docs.docker.com/compose/install/"
-  docker info >/dev/null 2>&1 || die 'Docker Engine isn'"'"'t running — start Docker Desktop (or `sudo systemctl start docker`), then re-run.'
-}
-
 require_bun() {
   command -v bun >/dev/null 2>&1 && return 0
   if [ -x "${HOME}/.bun/bin/bun" ]; then
@@ -1000,14 +632,6 @@ preflight_common() {
 
 preflight_workers() {
   preflight_common
-}
-
-preflight_bare() {
-  preflight_common
-  if [ "${SYSTEMD}" = "1" ]; then
-    [ "$(uname -s)" = "Linux" ] || die "systemd isn't available on this OS — start with: ${INSTALL_DIR:-bare}/lexa-start.sh"
-    [ "$(id -u)" = "0" ] || die "--systemd needs root — run with sudo, or start with: ${INSTALL_DIR:-bare}/lexa-start.sh"
-  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1082,74 +706,9 @@ unpack_release() {
 }
 
 # ---------------------------------------------------------------------------
-# bare helpers — start script + systemd unit
-# ---------------------------------------------------------------------------
-write_start_script() {
-  local dir="$1"
-  cat > "${dir}/lexa-start.sh" <<START
-#!/usr/bin/env bash
-cd "${dir}"
-exec bun server/entry.ts
-START
-  chmod +x "${dir}/lexa-start.sh"
-  return 0
-}
-
-install_systemd_unit() {
-  local dir="$1"
-  [ "$(uname -s)" = "Linux" ] || die "systemd isn't available on this OS — start with: ${dir}/lexa-start.sh"
-  [ "$(id -u)" = "0" ] || die "--systemd needs root — run with sudo, or start with: ${dir}/lexa-start.sh"
-  cat > /etc/systemd/system/lexa.service <<UNIT
-[Unit]
-Description=Lexa server
-After=network.target
-
-[Service]
-User=bun
-WorkingDirectory=${dir}
-ExecStart=$(command -v bun) server/entry.ts
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-  mutate systemctl daemon-reload
-  mutate systemctl enable --now lexa
-}
-
-# ---------------------------------------------------------------------------
-# bare helpers — manual start
-# ---------------------------------------------------------------------------
-# bare_start_manual <dir> — nohup the start script from inside the install dir
-# and record its pid. A re-run with a live pid is a no-op (never double-start);
-# a stale pid file is replaced.
-bare_start_manual() {
-  local dir="$1"
-  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    printf '[dry-run] (cd %s && nohup ./lexa-start.sh > lexa.log 2>&1 & echo $! > lexa.pid)\n' "$dir"
-    return 0
-  fi
-  local pidfile="${dir}/lexa.pid"
-  if [ -f "$pidfile" ]; then
-    local pid
-    pid="$(cat "$pidfile" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      return 0
-    fi
-  fi
-  # `exec` replaces the backgrounded subshell with the server itself, so `$!`
-  # is the server's pid (not a bash wrapper). The pid file is written with an
-  # explicit path — `cd` happens inside the backgrounded list only, so a bare
-  # `lexa.pid` would land in the caller's CWD.
-  ( cd "$dir" && exec nohup ./lexa-start.sh > lexa.log 2>&1 ) & echo $! > "${dir}/lexa.pid"
-  return 0
-}
-
-# ---------------------------------------------------------------------------
 # final_banner <url>
-# Per-target summary: URL, /setup, CLI keys, and the secrets state. Callers set
-# BANNER_MASTER (e.g. `master key ✓ (dockers/.env.toml)`); the Secrets block is
+# Summary: URL, /setup, CLI keys, and the secrets state. Callers set
+# BANNER_MASTER (e.g. `master key ✓ (cf-workers/.env.toml)`); the Secrets block is
 # printed only when it is non-empty. An empty url means the address was not
 # recorded (workers without a captured .deployed-url) — the banner points at the
 # dashboard instead of inventing one.
@@ -1381,9 +940,8 @@ _tty_available() {
   { : > /dev/tty; } 2>/dev/null
 }
 
-# SECRET_ENTRIES — "KEY=value" pairs collected from --secrets-file; applied per
-# target (docker/bare: merged into .env.toml; workers: pushed as Worker secrets
-# + written to custody).
+# SECRET_ENTRIES — "KEY=value" pairs collected from --secrets-file; pushed as
+# Worker secrets + written to custody.
 SECRET_ENTRIES=()
 
 # secrets_load_file <path> — KEY=value lines, each key validated against
