@@ -126,14 +126,6 @@ function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; 
             This removes the stored App ID, private key, and webhook secret. GitHub sync stops immediately — already-linked issues stay linked but stop syncing. This action cannot be undone.
           </p>
 
-          <p className="text-sm text-lx-text-secondary mt-2 leading-5">
-            If{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              GITHUB_*
-            </span>
-            {" "}environment variables are set on the server, they are re-imported on the next restart.
-          </p>
-
           <div className="flex items-center gap-2 mt-4 justify-end">
             <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
             <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
