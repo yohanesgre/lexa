@@ -20,12 +20,13 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveTurnContext, recordCallLog, transitionRun, callReadTool, proposeWrite, callWriteExecute, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, transitionRun, callReadTool, proposeWrite, callWriteExecute, type AssistantInternalDeps } from "./agent-runtime";
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
 import { buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
 import { MAX_WRITES_PER_TURN } from "./write-tool-names";
 import { resolveAssistantToolPermissionMode, resolveThreadToolPermissionMode, type AssistantToolPermissionMode } from "../../shared/assistant";
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
+import { lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
 import { withApprovalCarriers } from "./approval-carrier";
 
@@ -375,12 +376,16 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
           })
       ),
     };
-    // Per-turn tool gating (ADR-0003 §D; P3 WS3): the Worker resolves which
-    // read tools have their dependencies (Exa key, bound skills, Jev) and which
-    // write tools the project enabled. Unreachable → core reads, no writes.
-    const turnContext = await resolveTurnContext(deps, meta.project_id);
-    const availableRead = new Set(turnContext?.readTools ?? CORE_READ_TOOLS);
-    const enabledWrite = turnContext?.writeTools ?? [];
+    // Per-turn harness context (ADR-0004 §1; H1): one Worker round trip carries
+    // agent/skill/memory/doc/mention/repo/Jev/summary plus tool gating. The
+    // signed identity wins; `userText` is only what the model will see.
+    const harness = await resolveHarnessContext(deps, {
+      threadKey,
+      userText: lastUserText(this.messages),
+      mode: "turn",
+    });
+    const availableRead = new Set(harness?.readTools ?? CORE_READ_TOOLS);
+    const enabledWrite = harness?.writeTools ?? [];
     const tools: ToolSet = {
       ...buildReadTools({ transport, available: availableRead }),
       ...buildWriteTools({ transport, enabled: enabledWrite, mode: permissionMode }),
@@ -404,8 +409,16 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     const system = systemPromptText(
       buildSystemPrompts({
         identity: documentType === "chat" ? CHAT_IDENTITY : IDENTITY,
-        memoryBlock: null,
-        agentMarkdown: null,
+        memoryBlock: harness?.memoryBlock ?? null,
+        agentMarkdown: harness?.agent?.instructions ?? null,
+        skillMarkdowns: harness?.skillMarkdowns ?? [],
+        skillCatalog: harness?.skillCatalog ?? null,
+        repoContent: harness?.repoContent ?? [],
+        docContext: harness?.docContext ?? "",
+        mentionContext: harness?.mentionContext ?? "",
+        writeTools: enabledWrite,
+        advisory: harness?.advisory ?? null,
+        threadSummary: harness?.threadSummary ?? null,
       })
     );
     try {

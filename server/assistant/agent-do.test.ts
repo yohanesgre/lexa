@@ -100,6 +100,33 @@ async function handleInternal(request, env) {
       .run();
     return Response.json({ ok: true });
   }
+  if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "provider-config")) {
+    return Response.json({ configs: [{ kind: "openai_compatible", baseUrl: "https://provider.test", apiKey: "sk-test", model: "test-model", providerId: "prov-1" }] });
+  }
+  if (request.method === "POST" && url.pathname === INTERNAL + "turn-context") {
+    const body = await request.json();
+    return Response.json({ context: {
+      projectId: "proj-1",
+      threadKey: body.threadKey,
+      documentType: "chat",
+      agent: { id: "assistant", name: "Assistant Agent", instructions: "AGENT-MARKDOWN" },
+      skillMarkdowns: ["## Skill: Status\\nSKILL-MARKDOWN"],
+      skillCatalog: "CATALOG-MARKDOWN",
+      memoryBlock: "MEMORY-BLOCK",
+      docContext: null,
+      repoContent: [],
+      mentionContext: null,
+      advisory: "ADVISORY-BLOCK",
+      threadSummary: { summary: "SUMMARY-BLOCK", summarizedCount: 3 },
+      readTools: ["get_task"],
+      mcpTools: [],
+      writeTools: [],
+      primarySupportsImages: false,
+      hasSearchKey: false,
+      jevConfigured: false,
+      delegation: { enabled: false, maxConcurrentRuns: 0 }
+    } });
+  }
   return Response.json({ error: { code: "ASSISTANT_THREAD_NOT_FOUND" } }, { status: 404 });
 }
 
@@ -129,6 +156,12 @@ export default {
       const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
       return Response.json(await stub.destroyThread());
     }
+    if (url.pathname === "/__test/turn") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.saveMessages(body.messages));
+    }
     const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
     const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
     return stub.fetch(request);
@@ -148,6 +181,32 @@ interface D1LikeTest {
 
 let mf: Miniflare | undefined;
 let d1: D1LikeTest;
+// Captured raw provider request body (the AI SDK sends the system prompt as the
+// first `system` role message). Set by the worker's `outboundService`.
+let capturedProviderRequest: string | null = null;
+
+function providerChunk(delta: Record<string, unknown>, finish: string | null, usage?: Record<string, number>): string {
+  return JSON.stringify({
+    id: "c1",
+    object: "chat.completion.chunk",
+    created: 0,
+    model: "test-model",
+    choices: [{ index: 0, delta, finish_reason: finish }],
+    ...(usage ? { usage } : {}),
+  });
+}
+
+function providerSse(): Response {
+  const body =
+    [
+      providerChunk({ role: "assistant", content: "" }, null),
+      providerChunk({ content: "ok" }, null),
+      providerChunk({}, "stop", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+    ]
+      .map((part) => `data: ${part}\n\n`)
+      .join("") + "data: [DONE]\n\n";
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
 
 interface Connection {
   status: number;
@@ -265,6 +324,12 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
             d1Databases: { DB: DB_NAME },
             serviceBindings: { ASSISTANT_SERVICE: kCurrentWorker },
             bindings: { LXK_SECRETS_MASTER_KEY: MASTER_KEY },
+            // Provider calls go through global fetch; capture the request body
+            // and answer with a valid SSE stream so the turn completes offline.
+            outboundService: async (request: Request) => {
+              capturedProviderRequest = await request.text();
+              return providerSse();
+            },
           },
         ],
       })),
@@ -579,6 +644,36 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
 
     await storage.exec(`UPDATE thread_meta SET permission_mode = 'bogus' WHERE thread_key = '${threadKey}'`);
     expect(await readMode()).toBe("ask");
+  }, 60_000);
+
+  it("injects the harness bundle into the model request (agent/skill/memory/advisory/summary)", async () => {
+    const documentId = "harness-prompt";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+    capturedProviderRequest = null;
+
+    const res = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/turn?threadKey=${encodeURIComponent(threadKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ id: "h1", role: "user", parts: [{ type: "text", text: "hello there" }] }],
+        }),
+      }
+    );
+    expect(res.status).toBe(200);
+    await waitFor<string>(() => Promise.resolve(capturedProviderRequest), 20_000);
+
+    const body = capturedProviderRequest ?? "";
+    expect(body).toContain("AGENT-MARKDOWN");
+    expect(body).toContain("SKILL-MARKDOWN");
+    expect(body).toContain("MEMORY-BLOCK");
+    expect(body).toContain("ADVISORY-BLOCK");
+    expect(body).toContain("SUMMARY-BLOCK");
+    expect(body).toContain("[Conversation summary — the 3 earlier turns were condensed]");
   }, 60_000);
 
   it("load smoke: 10 concurrent threads connect, persist, and read back independently", async () => {

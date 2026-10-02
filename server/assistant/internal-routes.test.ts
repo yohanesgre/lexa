@@ -3,20 +3,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
+import { DbBunLive } from "../db/db";
+import { RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
 import {
   executeAssistantWriteTool,
   handleInternalAssistantRequest,
   mirrorThread,
   readLegacyThread,
+  type HarnessTurnContext,
 } from "./internal-routes";
 import { applyAssistantWrite, type AssistantWriteApplyCtx } from "./write-execution";
+import { resolveWorkerHarnessContext } from "./worker-tools";
 import type { RegistryModelConfig } from "./model-factory";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
+const baseLayer = () => Layer.mergeAll(DbBunLive(db), RuntimeEnvLive({} as RuntimeEnv));
 
 let dir: string;
 let db: Database;
@@ -39,6 +44,7 @@ beforeEach(() => {
   db.exec("DELETE FROM assistant_tasks");
   db.exec("DELETE FROM assistant_pending_writes");
   db.exec("DELETE FROM assistant_threads");
+  db.exec("DELETE FROM assistant_settings");
   db.exec("DELETE FROM tasks");
   db.exec("DELETE FROM columns");
   db.exec("DELETE FROM swimlanes");
@@ -580,73 +586,140 @@ describe("read-tool execution (POST /api/internal/assistant/tool)", () => {
   });
 });
 
-describe("turn context (GET /api/internal/assistant/turn-context)", () => {
+describe("turn context (POST /api/internal/assistant/turn-context)", () => {
   const driverOf = () => createBunSqliteDriver(db);
-  const context = { readTools: ["get_task"], writeTools: ["create_task"], primarySupportsImages: false };
-
-  it("400s without a projectId", async () => {
-    const result = await handleInternalAssistantRequest({
-      method: "GET",
-      path: "/api/internal/assistant/turn-context",
-      body: null,
-      driver: driverOf(),
-    });
-    expect(result.status).toBe(400);
+  const bundle = (over: Partial<HarnessTurnContext> = {}): HarnessTurnContext => ({
+    projectId: "p1",
+    threadKey: "chat:c1",
+    documentType: "chat",
+    agent: { id: "assistant", name: "Assistant Agent", instructions: "AGENT RULES" },
+    skillMarkdowns: [],
+    skillCatalog: null,
+    memoryBlock: null,
+    docContext: null,
+    repoContent: [],
+    mentionContext: null,
+    advisory: null,
+    threadSummary: null,
+    readTools: ["get_task"],
+    mcpTools: [],
+    writeTools: ["create_task"],
+    primarySupportsImages: false,
+    hasSearchKey: true,
+    jevConfigured: false,
+    delegation: { enabled: false, maxConcurrentRuns: 0 },
+    ...over,
   });
 
-  it("502s when turn-context resolution is not wired", async () => {
-    const result = await handleInternalAssistantRequest({
-      method: "GET",
+  const call = (body: unknown, identity?: typeof IDENTITY) =>
+    handleInternalAssistantRequest({
+      method: "POST",
       path: "/api/internal/assistant/turn-context",
-      query: { projectId: "p1" },
-      body: null,
+      body,
+      driver: driverOf(),
+      ...(identity ? { identity } : {}),
+      deps: { resolveHarnessTurnContext: async () => bundle() },
+    });
+
+  it("400s a missing signed identity", async () => {
+    const res = await call({ threadKey: "chat:c1", userText: "hi", mode: "turn" });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s a malformed payload (missing userText / bad mode / missing threadKey)", async () => {
+    for (const body of [
+      { threadKey: "chat:c1", mode: "turn" },
+      { threadKey: "chat:c1", userText: "hi", mode: "bogus" },
+      { userText: "hi", mode: "turn" },
+    ]) {
+      const res = await call(body, IDENTITY);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+    }
+  });
+
+  it("403s a body threadKey that does not match the signed identity", async () => {
+    const res = await call({ threadKey: "chat:other", userText: "hi", mode: "turn" }, IDENTITY);
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: { code: "NO_USER_CONTEXT" } });
+  });
+
+  it("502s when the harness resolver is not wired", async () => {
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/turn-context",
+      body: { threadKey: "chat:c1", userText: "hi", mode: "turn" },
       driver: driverOf(),
       identity: IDENTITY,
     });
-    expect(result.status).toBe(502);
+    expect(res.status).toBe(502);
   });
 
   it("returns the resolved context", async () => {
-    const result = await handleInternalAssistantRequest({
-      method: "GET",
-      path: "/api/internal/assistant/turn-context",
-      query: { projectId: "p1" },
-      body: null,
-      driver: driverOf(),
-      identity: IDENTITY,
-      deps: { resolveTurnContext: async () => context },
-    });
-    expect(result).toEqual({ status: 200, body: { context } });
+    const res = await call({ threadKey: "chat:c1", userText: "hi", mode: "turn" }, IDENTITY);
+    expect(res).toEqual({ status: 200, body: { context: bundle() } });
   });
 
-  it("403s a query project that does not match the signed identity", async () => {
-    const result = await handleInternalAssistantRequest({
-      method: "GET",
+  it("forwards threadKey/runId/userText/mode and the signed project — never a body projectId", async () => {
+    const seen: unknown[] = [];
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
       path: "/api/internal/assistant/turn-context",
-      query: { projectId: "other" },
-      body: null,
-      driver: driverOf(),
-      identity: IDENTITY,
-      deps: { resolveTurnContext: async () => context },
-    });
-    expect(result.status).toBe(403);
-  });
-
-  it("maps a resolver failure to 500", async () => {
-    const result = await handleInternalAssistantRequest({
-      method: "GET",
-      path: "/api/internal/assistant/turn-context",
-      query: { projectId: "p1" },
-      body: null,
+      body: { threadKey: "chat:c1", runId: "run-9", userText: "hi", mode: "resume", projectId: "attacker" },
       driver: driverOf(),
       identity: IDENTITY,
       deps: {
-        resolveTurnContext: async () => {
+        resolveHarnessTurnContext: async (input) => {
+          seen.push(input);
+          return bundle();
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([{ projectId: "p1", threadKey: "chat:c1", runId: "run-9", userText: "hi", mode: "resume" }]);
+  });
+
+  it("maps a resolver failure to 500", async () => {
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/turn-context",
+      body: { threadKey: "chat:c1", userText: "hi", mode: "turn" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: {
+        resolveHarnessTurnContext: async () => {
           throw new Error("boom");
         },
       },
     });
-    expect(result.status).toBe(500);
+    expect(res.status).toBe(500);
+  });
+
+  it("redacts: the response carries booleans and tool names, never the Exa key or allowlist", async () => {
+    db.prepare(
+      `INSERT INTO assistant_settings (project_id, search_api_key, url_allowlist, write_tools, primary_supports_images)
+       VALUES ('p1', ?, ?, 'create_task', 0)`
+    ).run("exa-SUPER-SECRET", "https://only.example");
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/turn-context",
+      body: { threadKey: "chat:c1", userText: "hi", mode: "turn" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: {
+        resolveHarnessTurnContext: (input) =>
+          resolveWorkerHarnessContext({ driver: driverOf(), base: baseLayer() }, input),
+      },
+    });
+    expect(res.status).toBe(200);
+    const raw = JSON.stringify(res.body);
+    expect(raw).not.toContain("exa-SUPER-SECRET");
+    expect(raw).not.toContain("only.example");
+    expect(raw).not.toContain("searchApiKey");
+    expect(raw).not.toContain("urlAllowlist");
+    const context = (res.body as { context: HarnessTurnContext }).context;
+    expect(context.hasSearchKey).toBe(true);
+    expect(context.jevConfigured).toBe(false);
+    expect(context.writeTools).toEqual(["create_task"]);
   });
 });
 

@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import {
   INTERNAL_LEGACY_PATH,
   INTERNAL_MIRROR_PATH,
+  INTERNAL_TURN_CONTEXT_PATH,
   INTERNAL_WRITE_EXECUTE_PATH,
   AssistantInternalUnavailable,
   callWriteExecute,
   fetchLegacyTranscript,
   mirrorTranscript,
+  resolveHarnessContext,
   type FetchLike,
 } from "./agent-runtime";
+import type { HarnessTurnContext } from "./internal-routes";
 import {
   INTERNAL_AUTH_HEADER,
   INTERNAL_AUTH_THREAD_HEADER,
@@ -215,5 +218,90 @@ describe("callWriteExecute (auto mode)", () => {
     const out = await callWriteExecute(deps(fetchImpl), INPUT);
     expect(out).toEqual({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" });
     expect((out as { indeterminate?: unknown }).indeterminate).toBeUndefined();
+  });
+});
+
+const CONTEXT: HarnessTurnContext = {
+  projectId: "proj-1",
+  threadKey: "chat:abc",
+  documentType: "chat",
+  agent: null,
+  skillMarkdowns: [],
+  skillCatalog: null,
+  memoryBlock: null,
+  docContext: null,
+  repoContent: [],
+  mentionContext: null,
+  advisory: null,
+  threadSummary: null,
+  readTools: ["get_task"],
+  mcpTools: [],
+  writeTools: [],
+  primarySupportsImages: false,
+  hasSearchKey: false,
+  jevConfigured: false,
+  delegation: { enabled: false, maxConcurrentRuns: 0 },
+};
+
+describe("resolveHarnessContext", () => {
+  it("POSTs the turn request with a signed identity and maps the context", async () => {
+    const calls: Array<{ url: string; method?: string | undefined; headers: Headers; body: unknown }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      calls.push({
+        url,
+        method: init?.method,
+        headers: new Headers(init?.headers),
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      return jsonResponse({ context: CONTEXT });
+    };
+
+    const out = await resolveHarnessContext(deps(fetchImpl), {
+      threadKey: "chat:spoofed",
+      runId: "run-7",
+      userText: "hi",
+      mode: "turn",
+    });
+
+    expect(out).toEqual(CONTEXT);
+    expect(calls[0]?.url).toBe(`https://lexa.test${INTERNAL_TURN_CONTEXT_PATH}`);
+    expect(calls[0]?.method).toBe("POST");
+    // The signed identity's thread wins over the request body; no projectId on
+    // the wire at all.
+    expect(calls[0]?.body).toEqual({ threadKey: "chat:abc", runId: "run-7", userText: "hi", mode: "turn" });
+    const headers = calls[0]!.headers;
+    await expect(
+      verifyInternalAuth(SECRET, headers.get(INTERNAL_AUTH_HEADER), IDENTITY, { nowMs: NOW_MS })
+    ).resolves.toBe(true);
+  });
+
+  it("omits runId when not supplied", async () => {
+    const bodies: unknown[] = [];
+    const fetchImpl: FetchLike = async (_url, init) => {
+      bodies.push(init?.body ? JSON.parse(String(init.body)) : null);
+      return jsonResponse({ context: CONTEXT });
+    };
+    await resolveHarnessContext(deps(fetchImpl), { threadKey: "chat:abc", userText: "hi", mode: "resume" });
+    expect(bodies[0]).toEqual({ threadKey: "chat:abc", userText: "hi", mode: "resume" });
+  });
+
+  it("returns null on a non-ok or malformed response", async () => {
+    const notOk: FetchLike = async () => jsonResponse({}, 502);
+    await expect(
+      resolveHarnessContext(deps(notOk), { threadKey: "chat:abc", userText: "hi", mode: "turn" })
+    ).resolves.toBeNull();
+    const malformed: FetchLike = async () => jsonResponse({ context: { readTools: "nope" } });
+    await expect(
+      resolveHarnessContext(deps(malformed), { threadKey: "chat:abc", userText: "hi", mode: "turn" })
+    ).resolves.toBeNull();
+  });
+
+  it("returns null when the transport throws", async () => {
+    const boom: FetchLike = async () => {
+      throw new Error("network down");
+    };
+    await expect(
+      resolveHarnessContext(deps(boom), { threadKey: "chat:abc", userText: "hi", mode: "turn" })
+    ).resolves.toBeNull();
   });
 });

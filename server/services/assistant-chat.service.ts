@@ -26,16 +26,14 @@ import { WikiService } from "./wiki.service";
 import { MilestoneService } from "./milestone.service";
 import { SwimlaneService } from "./swimlane.service";
 import { AuthorizationService } from "./authorization.service";
-import { parseTaskKey } from "../task-key";
-import { parseSkillTokens } from "../../shared/skill-tokens";
-import { columnMentionSublabel, mentionSlug, milestoneMentionSublabel, swimlaneMentionSublabel } from "../../shared/mention-entities";
 import { extractText } from "../../shared/tiptap-text";
+import { buildSkillPromptParts, lastUserText, resolveMentionContextEffect, type MentionResolverDeps } from "../assistant/context";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
 import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
 import { collectResumeResults } from "../assistant/resume-results";
-import { scanMentionTokens, buildMentionContextBlock, MENTION_CAPS, type ResolvedMention, resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
+import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
@@ -82,31 +80,6 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
     const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
     const loadBoundSkills = (agentId: string): Promise<BoundSkill[]> => dbAll<BoundSkill>(BOUND_SKILLS_SQL, agentId);
-    // Per-message skill context: the ≤3 `$mentioned` skills bound to the agent,
-    // injected under `## Skill: {name}`, plus the compact catalog of every bound
-    // skill (≤20 with descriptions, the rest counted). Catalog is null when the
-    // agent has nothing bound.
-    const buildSkillPromptParts = (message: string, boundSkills: BoundSkill[]): { skillMarkdowns: string[]; skillCatalog: string | null } => {
-      const mentioned = parseSkillTokens(message)
-        .map((t) => matchBoundSkillByName(boundSkills, t))
-        .filter((s): s is BoundSkill => s !== null)
-        .slice(0, 3);
-      const skillMarkdowns = mentioned
-        .filter((s) => (s.instructions ?? "").trim() !== "")
-        .map((s) => `## Skill: ${s.name}\n${s.instructions}`);
-      const skillCatalog = boundSkills.length === 0 ? null
-        : `Available skills — invoke with $name, or call get_skill for details:\n` +
-          boundSkills.slice(0, 20).map((s) => { const d = (s.description ?? "").trim(); return d ? `- ${s.name} — ${d}` : `- ${s.name}`; }).join("\n") +
-          (boundSkills.length > 20 ? `\n… and ${boundSkills.length - 20} more` : "");
-      return { skillMarkdowns, skillCatalog };
-    };
-    const lastUserText = (messages: readonly unknown[]): string => {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i] as { role?: unknown; content?: unknown } | null;
-        if (m && m.role === "user" && typeof m.content === "string") return m.content;
-      }
-      return "";
-    };
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
     const loadImageBase64 = (key: string): Promise<string | null> => Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
     // Chat documents are extracted once per key and cached for THAT RUN only:
@@ -131,81 +104,28 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         return value;
       };
     };
-    const resolveMentionContext = (projectId: string, message: string): Effect.Effect<string, DbError> => Effect.gen(function* () {
-      const tokens = scanMentionTokens(message);
-      if (tokens.length === 0) return "";
-      const seen = new Set<string>();
-      const resolved: ResolvedMention[] = [];
-      // One token may match SEVERAL kinds — a wiki page and a milestone/column
-      // can share a derived slug — so a hit never consumes the token: every
-      // kind is tried for every token, dedupe is by `kind:id`, and the overall
-      // cap stays at MENTION_CAPS.maxMentions.
-      const add = (m: ResolvedMention): void => {
-        const key = `${m.kind}:${m.id}`;
-        if (seen.has(key) || resolved.length >= MENTION_CAPS.maxMentions) return;
-        seen.add(key);
-        resolved.push(m);
-      };
-      // Milestones/swimlanes/columns have no `slug` column, so a token is
-      // matched against the derived slug (mentionSlug) of each name. Loaded
-      // lazily and once per message; archived milestones/swimlanes are skipped
-      // for matching but kept in the list so a swimlane's owning milestone name
-      // still resolves.
-      let entities: {
-        milestones: Array<{ id: string; name: string; due_at: string | null; archived_at: string | null; sprint_count: number }>;
-        swimlanes: Array<{ id: string; name: string; kind: "backlog" | "sprint"; due_at: string | null; archived_at: string | null; milestone_id: string | null }>;
-        columns: Array<{ id: string; name: string; position: number; github_state: "open" | "closed" | null; is_done: number }>;
-      } | null = null;
-      const loadEntities = () => Effect.gen(function* () {
-        const rows = <T>(sql: string): Effect.Effect<T[], DbError> =>
-          Effect.tryPromise({ try: () => dbAll<T>(sql, projectId), catch: () => new DbError({ message: "failed to load mention entities" }) })
-            .pipe(Effect.catchAll(() => Effect.succeed([] as T[])));
-        const milestones = yield* rows<{ id: string; name: string; due_at: string | null; archived_at: string | null; sprint_count: number }>(
-          `SELECT m.id, m.name, m.due_at, m.archived_at,
-                  (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id) AS sprint_count
-           FROM milestones m WHERE m.project_id = ? ORDER BY m.position`
-        );
-        const swimlanes = yield* rows<{ id: string; name: string; kind: "backlog" | "sprint"; due_at: string | null; archived_at: string | null; milestone_id: string | null }>(
-          `SELECT id, name, kind, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`
-        );
-        const columns = yield* rows<{ id: string; name: string; position: number; github_state: "open" | "closed" | null; is_done: number }>(
-          `SELECT id, name, position, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`
-        );
-        return { milestones, swimlanes, columns };
-      });
-      for (const token of tokens) {
-        if (resolved.length >= MENTION_CAPS.maxMentions) break;
-        const parsed = parseTaskKey(token);
-        if (parsed) {
-          const t = yield* taskRepo.findByKey(`${parsed.prefix}-${parsed.number}`).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)), Effect.catchAll(() => Effect.succeed(null)));
-          if (!t || (t as unknown as { projectId: string }).projectId !== projectId) continue;
-          add({ kind: "task", id: (t as unknown as { id: string }).id, label: `${(t as unknown as { key: string }).key} — ${(t as unknown as { title: string }).title}`, text: extractText((t as unknown as { description: TipTapDoc }).description as TipTapDoc) });
-        } else {
-          const slug = token.toLowerCase();
-          const page = yield* wikiRepo.findBySlug(projectId, token).pipe(Effect.catchTag("RowNotFound", () => wikiRepo.findBySlug(projectId, slug).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)), Effect.catchAll(() => Effect.succeed(null)))), Effect.catchAll(() => Effect.succeed(null)));
-          if (page) {
-            add({ kind: "wiki", id: (page as unknown as { id: string }).id, label: (page as unknown as { title: string }).title, text: extractText((page as unknown as { content: TipTapDoc }).content as TipTapDoc) });
-          }
-          if (entities === null) entities = yield* loadEntities();
-          const target = mentionSlug(token);
-          if (target === "") continue;
-          const milestone = entities.milestones.find((m) => m.archived_at === null && mentionSlug(m.name) === target);
-          if (milestone) {
-            add({ kind: "milestone", id: milestone.id, label: milestone.name, text: milestoneMentionSublabel({ dueAt: milestone.due_at, archivedAt: milestone.archived_at, sprintCount: milestone.sprint_count }) });
-          }
-          const swimlane = entities.swimlanes.find((l) => l.archived_at === null && mentionSlug(l.name) === target);
-          if (swimlane) {
-            const owningMilestone = swimlane.milestone_id !== null ? entities.milestones.find((m) => m.id === swimlane.milestone_id)?.name ?? null : null;
-            add({ kind: "swimlane", id: swimlane.id, label: swimlane.name, text: swimlaneMentionSublabel({ kind: swimlane.kind, dueAt: swimlane.due_at, archivedAt: swimlane.archived_at }, owningMilestone) });
-          }
-          const column = entities.columns.find((c) => mentionSlug(c.name) === target);
-          if (column) {
-            add({ kind: "column", id: column.id, label: column.name, text: columnMentionSublabel({ position: column.position, isDone: column.is_done !== 0, githubState: column.github_state }) });
-          }
+    // Shared @-mention resolver over the service's repos. RowNotFound maps to
+    // `null` (a miss); any other error throws so the shared resolver's control
+    // flow matches the previous in-service Effect version exactly.
+    const mentionDeps: MentionResolverDeps = {
+      dbAll: <T>(sql: string, ...params: unknown[]) => dbAll<T>(sql, ...(params as SqlParam[])),
+      findTaskByKey: async (key) => {
+        const outcome = await Effect.runPromise(Effect.either(taskRepo.findByKey(key)));
+        if (outcome._tag === "Left") {
+          if (outcome.left._tag === "RowNotFound") return null;
+          throw outcome.left;
         }
-      }
-      return buildMentionContextBlock(resolved);
-    });
+        return { id: outcome.right.id, projectId: outcome.right.projectId, key: outcome.right.key, title: outcome.right.title, description: outcome.right.description as TipTapDoc };
+      },
+      findWikiBySlug: async (projectId, slug) => {
+        const outcome = await Effect.runPromise(Effect.either(wikiRepo.findBySlug(projectId, slug)));
+        if (outcome._tag === "Left") {
+          if (outcome.left._tag === "RowNotFound") return null;
+          throw outcome.left;
+        }
+        return { id: outcome.right.id, title: outcome.right.title, content: outcome.right.content as TipTapDoc };
+      },
+    };
     // Chat refs are validated against `chat_attachments` (not project
     // `attachments`): the row must belong to this project and its stored
     // server-sniffed mime must match the client-declared one. Caps are the
@@ -371,7 +291,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           const text = yield* Effect.promise(() => loadDocumentText(a.storageKey));
           if (text === null) return yield* new AttachmentExtractionFailed({ filename: a.name, reason: "could not extract readable text" });
         }
-        const mentionContext = yield* resolveMentionContext(req.projectId, req.message);
+        const mentionContext = yield* resolveMentionContextEffect(mentionDeps, req.projectId, req.message);
         const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
         const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(req.message, boundSkills);
         yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));

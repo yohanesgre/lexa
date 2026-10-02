@@ -53,6 +53,11 @@ function docContextBlock(docContext: string): string | null {
   return `Current document content:\n\n${docContext}`;
 }
 
+function threadSummaryBlock(summary: { summary: string; summarizedCount: number } | null | undefined): string | null {
+  if (!summary || summary.summary.trim() === "") return null;
+  return `[Conversation summary — the ${summary.summarizedCount} earlier turns were condensed]\n${summary.summary.trim()}\n[end of summary]`;
+}
+
 export const WRITE_POLICY =
   "You have write tools gated by approval. Never claim created/updated/archived before tool returns proposed:true and user approves. If user asks to create/update, call tool immediately with required args; do not ask for confirmation unless missing required field. Never hallucinate success.";
 
@@ -77,6 +82,9 @@ export interface SystemPromptInput {
   // call failed open) and nothing is emitted — the cached slots and the other
   // context blocks are then byte-identical to a run without it.
   advisory?: string | null | undefined;
+  // Thread compaction summary produced on the DO (H2). Rides in the last,
+  // uncached context slot; absent/null/blank emits nothing.
+  threadSummary?: { summary: string; summarizedCount: number } | null | undefined;
 }
 
 // Order is cache-friendly: [0] identity+style+memory changes rarely,
@@ -106,6 +114,7 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
     docContextBlock(input.docContext ?? ""),
     input.mentionContext && input.mentionContext.trim() !== "" ? input.mentionContext : null,
     input.advisory && input.advisory.trim() !== "" ? input.advisory : null,
+    threadSummaryBlock(input.threadSummary),
   ].filter((b): b is string => b !== null);
   if (contextBlocks.length > 0) prompts.push({ content: contextBlocks.join("\n\n") });
 

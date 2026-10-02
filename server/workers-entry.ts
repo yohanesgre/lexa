@@ -83,7 +83,7 @@ import {
   INTERNAL_AUTH_THREAD_HEADER,
 } from "./assistant/internal-auth";
 import { handleInternalAssistantRequest } from "./assistant/internal-routes";
-import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerTurnContext } from "./assistant/worker-tools";
+import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerHarnessContext } from "./assistant/worker-tools";
 import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
 import type { AssistantThreadType, AssistantToolPermissionMode } from "../shared/assistant";
 
@@ -766,7 +766,7 @@ const handler: ExportedHandler<WorkersEnv> = {
           identity,
           deps: {
             resolveProviderConfigs: (projectId) => resolveAssistantProviderConfigs(base, projectId),
-            resolveTurnContext: (projectId) => resolveWorkerTurnContext({ driver, base }, projectId),
+            resolveHarnessTurnContext: (input) => resolveWorkerHarnessContext({ driver, base }, input),
             executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB }),
             executeWriteTool: buildWorkerWriteToolExecutor({ base }),
           },
