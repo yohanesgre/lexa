@@ -23,7 +23,16 @@ export default defineConfig({
   test: {
     include: ["shared/**/*.test.ts", "server/**/*.test.ts", "app/**/*.test.{ts,tsx}", "cli/src/**/*.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
+    // Migration + HTTP integration suites exceed Vitest's 5s default under
+    // parallel workers; a genuine hang still fails at 15s.
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
     passWithNoTests: true,
+    // Migration + HTTP integration suites run real SQLite migrations and HTTP
+    // round-trips under parallel workers; they routinely exceed Vitest's 5s
+    // default. A genuine hang still fails at 15s.
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
     server: {
       deps: {
         // node_modules are externalized by default, so the `cloudflare:workers`
