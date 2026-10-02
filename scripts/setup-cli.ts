@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Lexa CLI setup wizard (dev bootstrap / bare-metal bootstrap).
+ * Lexa CLI setup wizard (dev bootstrap).
  *
  *   bun run setup                                      # interactive, dev (.env.toml)
  *   bun run setup --env-file .env.prod.toml --admin-email ops@x.com --yes

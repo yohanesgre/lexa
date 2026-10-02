@@ -68,6 +68,10 @@ escape() {
   exit 2
 }
 
+# NOTE: no node calls escape() today — wait_for (its last caller) was removed
+# with the retired non-Workers deploy surface. Kept as the documented exit-2
+# E-path helper so a future runtime/env-breakage node can route through it.
+
 # mutate <cmd...> — dry-run-aware mutator (§9 test-swap: swap R, same graph).
 # INSTALL_DRY_RUN=1: log "[dry-run] <cmd>" and return 0 — nothing executes.
 # Otherwise exec the command unchanged.
@@ -115,39 +119,6 @@ step() {
     "$FAILURE_HANDLER" "$name" "$rc"
   fi
   die "step failed: ${name} (exit ${rc})"
-}
-
-# ---------------------------------------------------------------------------
-# wait_for <url> [tries] [log_file] — health-wait loop, 1s interval, default 60
-# tries. On timeout a log_file (when given and present) is tailed before the
-# escape, so the manual start surfaces its lexa.log.
-# ---------------------------------------------------------------------------
-wait_for() {
-  local url="$1"
-  local tries="${2:-60}"
-  local log_file="${3:-}"
-  if [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
-    mutate curl -fsS -o /dev/null --max-time 5 "$url"
-    return 0
-  fi
-  local i=1
-  local err=""
-  while [ "$i" -le "$tries" ]; do
-    if err=$(curl -fsS -o /dev/null --max-time 5 "$url" 2>&1); then
-      return 0
-    fi
-    sleep 1
-    i=$((i + 1))
-  done
-  local msg="Lexa didn't respond at ${url} after ${tries} tries (last error: ${err}). Check the log below and re-run."
-  if [ -n "$log_file" ] && [ -f "$log_file" ]; then
-    # The message names the log "below", so it must precede the tail.
-    printf 'install: FATAL: %s\n' "$msg" >&2
-    printf -- '--- last lines of %s ---\n' "$log_file" >&2
-    tail -n 20 "$log_file" >&2 || true
-    exit 2
-  fi
-  escape "$msg"
 }
 
 # ---------------------------------------------------------------------------
@@ -428,6 +399,9 @@ env_file_value() {
 # existing value is kept when present (merge preserves an operator/previous key
 # verbatim), otherwise a fresh 32-byte base64 key is generated. A brand-new
 # install therefore always ships a key; a re-run never rotates it.
+# No production caller — the workers flow resolves the key through
+# workers_resolve_master_key. Kept because scripts/test-install.sh pins the
+# merge-preserve + fresh-mint contract; delete together with those tests.
 secrets_master_key_entry() {
   local path="$1" existing=""
   existing="$(env_file_value "$path" LXK_SECRETS_MASTER_KEY || true)"
@@ -578,6 +552,10 @@ deploy_worker_name() {
       return 0
     fi
   fi
+  # Deprecated flavor aliases: flavors are gone (parse_flags rejects
+  # --staging/--prod/--flavor) and no production path passes them, so this map
+  # only serves scripts/test-install.sh, which pins the fallbacks. Delete with
+  # those tests.
   case "$flavor" in
     staging) printf 'lexa-staging\n' ;;
     prod) printf 'lexa\n' ;;

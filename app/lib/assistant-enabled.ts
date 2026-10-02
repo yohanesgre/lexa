@@ -2,8 +2,8 @@ import { useCapabilities } from "./queries";
 
 // Capability gate (ADR-0003 §F.3): `GET /api/capabilities` is the single
 // honest signal for whether the assistant surface exists on this deployment.
-// `assistant:true` only on the Cloudflare Workers flavor with the secrets
-// master key; Docker/Bun reports false. While the read is in flight the surface
+// `assistant:true` only on the Cloudflare Workers deployment with the secrets
+// master key; Bun reports false. While the read is in flight the surface
 // stays hidden/gated rather than optimistically rendering dead controls, so
 // `enabled` is strictly true only once the flag has resolved true.
 export interface AssistantEnabled {

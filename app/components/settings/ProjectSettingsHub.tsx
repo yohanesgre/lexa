@@ -28,7 +28,7 @@ import type { Project } from "../../../shared/types";
 export function ProjectSettingsHub({ projectId }: { projectId: string }) {
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
   const project = projects.find((p) => p.id === projectId);
-  // Capability gate (ADR-0003 §F.3): on Docker/Bun the whole Assistant
+  // Capability gate (ADR-0003 §F.3): on Bun the whole Assistant
   // provider/settings block is hidden and the capability-false notice renders
   // in its place. While the read is in flight the block stays empty — never the
   // notice — so Workers does not flash "unavailable" before the flag resolves.

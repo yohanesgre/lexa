@@ -3,7 +3,8 @@
 set -eu
 
 # The Effect-TS checkout is only needed by `doctor` (react-doctor research).
-# Skip it in Docker image builds — a live clone there is a fragile network dep.
+# Skip it in CI / offline builds — a live clone there is a fragile network dep.
+# (CI sets LXK_SKIP_PREPARE=1.)
 if [ "${LXK_SKIP_PREPARE:-0}" = "1" ]; then
   exit 0
 fi

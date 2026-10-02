@@ -50,7 +50,7 @@ export function AssistantShell() {
   }
 
   // Capability gate (ADR-0003 §F.3): the admin panels are mounted only on the
-  // Cloudflare Workers flavor. A direct URL on Docker/Bun renders the notice
+  // Cloudflare Workers deployment. A direct URL on Bun renders the notice
   // instead of the shell. Gate while capabilities resolve.
   if (capabilitiesLoading) return null;
   if (!assistantEnabled) {
