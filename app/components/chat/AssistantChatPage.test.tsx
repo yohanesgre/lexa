@@ -17,6 +17,10 @@ const composerCapture = vi.hoisted(() => ({
   onSend: null as ((message: string, attachments: ChatAttachmentRef[]) => boolean) | null,
 }));
 
+// Captured transport calls: the send envelope the page builds (new thread via
+// the keyed bridge, existing thread via the live socket).
+const transportCapture = vi.hoisted(() => ({ sendForKey: vi.fn(), send: vi.fn() }));
+
 // Mutable assistant-stream snapshot: the page test drives the live session
 // state (idle / suspended) for the key it subscribes to, so a nav-return test
 // can assert a run that survived unmount re-attaches with its pending batch.
@@ -115,12 +119,12 @@ vi.mock("../../lib/api", () => ({
 }));
 
 vi.mock("../../lib/use-assistant-agent", () => ({
-  assistantSendForKey: vi.fn(),
+  assistantSendForKey: transportCapture.sendForKey,
   useAssistantAgent: (key: string | null) => {
     const snapshot = key ? streamFx.state.current : streamFx.idle();
     return {
       ...snapshot,
-      send: vi.fn(),
+      send: transportCapture.send,
       abort: vi.fn(),
       reset: vi.fn(),
       subscribe: () => () => {},
@@ -169,6 +173,7 @@ const TRANSCRIPT = {
   messages: [],
   summary: null,
   summarizedCount: 0,
+  permissionMode: "ask",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -247,6 +252,8 @@ beforeEach(() => {
   shellCapture.turns = null;
   composerCapture.seed = null;
   composerCapture.onSend = null;
+  transportCapture.sendForKey.mockReset();
+  transportCapture.send.mockReset();
 });
 
 describe("AssistantChatPage thread selection", () => {
@@ -624,5 +631,44 @@ describe("AssistantChatPage — zero-turn landing", () => {
     resolveTranscript({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
     await waitFor(() => expect(shellCapture.turns ?? []).toHaveLength(1));
     expect(container.querySelector(".chat-landing")).toBeNull();
+  });
+});
+
+describe("AssistantChatPage — permissionMode envelope", () => {
+  it("omits permissionMode on a brand-new thread before any transcript or pick", async () => {
+    const { container } = renderPage();
+    expect(container.querySelector(".chat-landing")).toBeTruthy();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    act(() => {
+      expect(composerCapture.onSend!("hi there", [])).toBe(true);
+    });
+
+    expect(transportCapture.sendForKey).toHaveBeenCalledTimes(1);
+    const [key, body] = transportCapture.sendForKey.mock.calls[0] as [string, Record<string, unknown>];
+    expect(key).toMatch(/^assistant-chat:/);
+    // Unhydrated and un-picked: the envelope must NOT carry a mode, so the DO
+    // keeps its sticky value (a fresh thread resolves to "ask" server-side).
+    expect(body).not.toHaveProperty("permissionMode");
+    expect(transportCapture.send).not.toHaveBeenCalled();
+  });
+
+  it("includes the transcript's permissionMode once this thread is hydrated", async () => {
+    getAssistantChatMock.mockResolvedValue({
+      ...TRANSCRIPT,
+      permissionMode: "auto",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    renderPage({ thread: "A" });
+    await waitFor(() => expect(shellCapture.turns ?? []).toHaveLength(1));
+
+    act(() => {
+      composerCapture.onSend!("next", []);
+    });
+
+    expect(transportCapture.send).toHaveBeenCalledWith(
+      "/api/assistant/chat/stream",
+      expect.objectContaining({ permissionMode: "auto" })
+    );
   });
 });

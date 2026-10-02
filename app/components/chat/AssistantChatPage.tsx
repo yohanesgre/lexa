@@ -15,7 +15,7 @@ import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { ThreadsSidebar } from "./ThreadsSidebar";
-import type { AssistantReasoningEffort } from "../../../shared/assistant";
+import type { AssistantReasoningEffort, AssistantToolPermissionMode } from "../../../shared/assistant";
 import { useChatSidebar, useChatAutoScroll } from "./assistant-chat-hooks";
 import { useChatQueue } from "./useChatQueue";
 import { ChatLanding } from "./ChatLanding";
@@ -28,6 +28,9 @@ import {
   orphanThreadNeedsRecovery,
   dropUnknownThread,
   resolveChatId,
+  resolvePermissionMode,
+  isPermissionAuthoritative,
+  noWriteToolsAllowed,
   staleThreadNeedsRecovery,
   isThreadNotFound,
 } from "./assistant-chat-logic";
@@ -223,6 +226,34 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     (value: AssistantReasoningEffort | "") => setEffortSelection({ chatId, value }),
     [chatId]
   );
+  // Per-thread WRITE-tool permission mode (herald-chat.html rail, beside
+  // Effort). Sticky: the in-session pick wins for the active thread; a thread
+  // without a pick seeds from its transcript value (fallback "ask"). Keyed by
+  // chatId so switching threads shows that thread's own mode.
+  const [permissionSelection, setPermissionSelection] = useState<{ chatId: string; value: AssistantToolPermissionMode } | null>(null);
+  const transcriptPermissionMode = transcript.data?.chatId === chatId ? transcript.data.permissionMode : undefined;
+  const permissionMode = resolvePermissionMode({
+    chatId,
+    selection: permissionSelection,
+    transcriptChatId: transcript.data?.chatId,
+    transcriptMode: transcriptPermissionMode,
+  });
+  // Envelope guard: only an in-session pick for this thread or a loaded
+  // transcript proves the mode; otherwise the send omits `permissionMode` so
+  // the DO keeps its sticky value. Display still falls back to "ask".
+  const permissionAuthoritative = isPermissionAuthoritative({
+    chatId,
+    selection: permissionSelection,
+    transcriptChatId: transcript.data?.chatId,
+  });
+  const setPermissionMode = useCallback(
+    (value: AssistantToolPermissionMode) => setPermissionSelection({ chatId, value }),
+    [chatId]
+  );
+  // The project allowlist gate (W1 State 4): with no write tools allowed, the
+  // Writes control locks and shows its hint line. Only a settled, successful
+  // settings read can prove the list is empty.
+  const noWriteTools = noWriteToolsAllowed(settings, settingsLoading);
   // Chips filter to the Assistant Agent junction list — chat ALWAYS runs the
   // assistant lane, regardless of the project engine. The `$` popup consumes
   // this bound list.
@@ -272,6 +303,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     qc,
     effort,
     setEffort,
+    permissionMode: permissionAuthoritative ? permissionMode : undefined,
     pendingTitleRef,
     ingressInsertedRef,
   });
@@ -309,10 +341,15 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     (message: string, attachments: ChatAttachmentRef[]): boolean => {
       if (!message || streaming || suspendedLock) return false;
       setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
-      startStream(message, attachments);
+      const threadId = startStream(message, attachments);
+      // Carry an AUTHORITATIVE mode onto the (possibly just-minted) thread so
+      // the picker stays in sync before its transcript is read back. A display
+      // fallback must NOT be stored — it would later override transcript
+      // hydration and stamp a spurious "ask" onto the thread's sticky value.
+      if (permissionAuthoritative) setPermissionSelection({ chatId: threadId, value: permissionMode });
       return true;
     },
-    [streaming, suspendedLock, startStream, setTurns]
+    [streaming, suspendedLock, startStream, setTurns, permissionMode, permissionAuthoritative]
   );
 
   // Client-only one-message queue (assistant-chat-deck §3.3): a message typed
@@ -443,6 +480,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             effort={effort}
             projectEffort={settings?.reasoningEffort}
             onEffortChange={setEffort}
+            permissionMode={permissionMode}
+            onPermissionModeChange={setPermissionMode}
+            noWriteTools={noWriteTools}
             onSend={send}
             onAbort={handleAbort}
             landing={isLanding}
@@ -501,6 +541,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             effort={effort}
             projectEffort={settings?.reasoningEffort}
             onEffortChange={setEffort}
+            permissionMode={permissionMode}
+            onPermissionModeChange={setPermissionMode}
+            noWriteTools={noWriteTools}
             onSend={send}
             onAbort={handleAbort}
             landing={isLanding}

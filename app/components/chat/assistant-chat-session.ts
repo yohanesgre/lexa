@@ -12,6 +12,7 @@ import { settleTurns } from "./assistant-chat-turns-state";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
 import type { ChatAttachmentRef } from "../../lib/assistant-image";
+import type { AssistantToolPermissionMode } from "../../../shared/assistant";
 import {
   applyChipPatch,
   chatStreamBody,
@@ -200,12 +201,16 @@ export function useChatStartStream(args: {
   qc: QueryClient;
   effort: string;
   setEffort: (e: "") => void;
+  // Send envelope: the thread's authoritative WRITE mode, or undefined when
+  // the page has none (unhydrated / un-picked) so the DO keeps its sticky
+  // value. The DO captures it at turn start and persists it.
+  permissionMode?: AssistantToolPermissionMode | undefined;
   pendingTitleRef: React.RefObject<string | null>;
   ingressInsertedRef: React.RefObject<Set<string>>;
 }) {
-  const { stream, projectId, chatId, applyChatId, openThreadParam, qc, effort, setEffort, pendingTitleRef, ingressInsertedRef } = args;
+  const { stream, projectId, chatId, applyChatId, openThreadParam, qc, effort, setEffort, permissionMode, pendingTitleRef, ingressInsertedRef } = args;
   return useCallback(
-    (message: string, attachments: ChatAttachmentRef[], fromIndex?: number) => {
+    (message: string, attachments: ChatAttachmentRef[], fromIndex?: number): string => {
       let threadId = chatId;
       const isNewThread = !threadId;
       if (!threadId) {
@@ -221,15 +226,16 @@ export function useChatStartStream(args: {
       } else {
         ingressInsertedRef.current?.delete(threadId);
       }
-      const body = chatStreamBody({ projectId, chatId: threadId, message, effort, attachments, fromIndex });
+      const body = chatStreamBody({ projectId, chatId: threadId, message, effort, permissionMode, attachments, fromIndex });
       if (isNewThread) {
         assistantSendForKey(`assistant-chat:${threadId}`, body);
       } else {
         stream.send("/api/assistant/chat/stream", body);
       }
       setEffort("");
+      return threadId;
     },
-    [stream, projectId, chatId, effort, applyChatId, openThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
+    [stream, projectId, chatId, effort, permissionMode, applyChatId, openThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
   );
 }
 

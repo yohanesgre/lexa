@@ -125,7 +125,8 @@ const SHEET_ID = "deck-controls-sheet";
 
 // Shared bottom-sheet pattern (wireframes: wiki-sheet over wiki-sheet-scrim):
 // Esc or the scrim dismisses, Tab is trapped, focus returns to the trigger.
-function DeckSheet({ id, title, onClose, children }: { id?: string; title: string; onClose: () => void; children: ReactNode }) {
+// Shared by the Effort sheet and the Writes sheet (WritesModePicker).
+export function DeckSheet({ id, title, onClose, children }: { id?: string; title: string; onClose: () => void; children: ReactNode }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
