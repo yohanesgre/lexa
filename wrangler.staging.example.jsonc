@@ -1,0 +1,96 @@
+// Staging Workers deploy template — clone-and-deploy path, no install.sh.
+//
+// One-time resource setup (isolated from prod):
+//   bun x wrangler d1 create lexa-staging
+//   bun x wrangler r2 bucket create lexa-staging-blobs
+//   bun x wrangler kv namespace create lexa-staging
+//
+// Deploy:
+//   cp wrangler.staging.example.jsonc wrangler.staging.local.jsonc
+//   # fill in <ACCOUNT_ID>, <D1_DATABASE_ID>, <KV_NAMESPACE_ID>
+//   bun install
+//   bun run build:workers
+//   bun x wrangler d1 migrations apply DB --remote --config wrangler.staging.local.jsonc
+//   bun x wrangler deploy --config wrangler.staging.local.jsonc
+//   bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local.jsonc
+//   # optional GitHub sync secrets (same names as prod):
+//   #   GITHUB_APP_ID, GITHUB_WEBHOOK_SECRET, GITHUB_PRIVATE_KEY (inline PEM)
+//
+// Rules:
+// - Never commit the filled copy; never deploy with the root wrangler.jsonc
+//   (it targets the prod worker and prod resources).
+// - This path uses wrangler's `_cf` migration journal. Do not point it at a
+//   database that scripts/workers-install.ts migrated (`_migrations` journal).
+// - `bun run db:migrations:apply` / `bun run deploy:workers` ignore this file
+//   and hit the root config — don't use them for staging.
+// - Superadmin is created by the web /setup wizard after first deploy.
+{
+  "name": "lexa-staging",
+  "account_id": "<ACCOUNT_ID>",
+  "main": "./dist/server/index.js",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "no_bundle": true,
+  "rules": [
+    {
+      "type": "ESModule",
+      "globs": ["**/*.js", "**/*.mjs"]
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client"
+  },
+  "vars": {
+    "LXK_ENV": "production"
+    // "LXK_PUBLIC_URL": "https://lexa-staging.<your-subdomain>.workers.dev"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lexa-staging",
+      "database_id": "<D1_DATABASE_ID>",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BLOB",
+      "bucket_name": "lexa-staging-blobs"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "<KV_NAMESPACE_ID>"
+    }
+  ],
+  "services": [
+    { "binding": "ASSISTANT_SERVICE", "service": "lexa-staging" }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "ASSISTANT_AGENT", "class_name": "LexaAssistantAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] }],
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    },
+    "issues": {
+      "enabled": true
+    }
+  }
+}

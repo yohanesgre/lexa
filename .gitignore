@@ -44,6 +44,8 @@ status/
 # generated compose files from release verification runs — never commit
 /.staging-data/
 /lexa-deploy/
+# Staging Workers deploy config — filled copy of wrangler.staging.example.jsonc
+/wrangler.staging.local.jsonc
 
 # Slim worktrees — local orchestration checkouts, never commit
 .slim/worktrees/
