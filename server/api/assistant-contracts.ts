@@ -42,6 +42,9 @@ const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compat
 
 const AssistantReasoningEffortSchema = Schema.Literal("minimal", "low", "medium", "high");
 
+// Per-thread WRITE permission mode (D2): ask | auto | deny.
+const AssistantToolPermissionModeSchema = Schema.Literal("ask", "auto", "deny");
+
 const AssistantSettingsPath = Schema.Struct({ projectId: Schema.String });
 
 // Keys are write-only: omitted apiKey/searchApiKey keep the stored values.
@@ -128,6 +131,7 @@ const AssistantChatTranscriptSchema = Schema.Struct({
   messages: Schema.Array(Schema.Any),
   summary: Schema.NullOr(Schema.String),
   summarizedCount: Schema.Number,
+  permissionMode: AssistantToolPermissionModeSchema,
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });

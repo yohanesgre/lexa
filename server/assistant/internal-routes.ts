@@ -8,6 +8,7 @@
 //   POST /api/internal/assistant/mirror              → { ok: true }
 //   POST /api/internal/assistant/tool                → { ok, result, error }   (read tool)
 //   POST /api/internal/assistant/write-tool          → { proposed, approvalId, error } (write proposal)
+//   POST /api/internal/assistant/write-execute       → { ok, applied, result, error, partial } (auto-mode write)
 
 import { Effect } from "effect";
 import type { DbDriver } from "../db/db";
@@ -33,7 +34,7 @@ import {
   type AssistantWriteToolDeps,
   type WriteTaskSnapshot,
 } from "./write-tools";
-import type { ReadToolResponse } from "./tools-ai";
+import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 
@@ -504,6 +505,13 @@ export interface InternalAssistantDeps {
   executeReadTool?:
     | ((input: { name: string; args: Record<string, unknown>; projectId: string; actorUserId: string }) => Promise<ReadToolResponse>)
     | undefined;
+  /**
+   * Apply one write immediately in the Worker (auto mode, D4). Owns the
+   * extracted `applyAssistantWrite` path; unwired → 502.
+   */
+  executeWriteTool?:
+    | ((input: { name: string; args: Record<string, unknown>; projectId: string; ownerUserId: string }) => Promise<WriteExecuteResponse>)
+    | undefined;
 }
 
 /**
@@ -632,6 +640,41 @@ export async function handleInternalAssistantRequest(input: {
       documentId,
       ownerUserId: identity.actorUserId,
     });
+  }
+
+  // Auto-mode write execution (D4): the DO's write tool maps straight to the
+  // extracted apply path — no pending row, no suspend. Identity/project are
+  // enforced exactly like the proposal route; the Worker executor owns the
+  // domain switch and reports `{ ok, applied, result?, error?, partial? }`.
+  if (method === "POST" && path === "/api/internal/assistant/write-execute") {
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0 || identity.actorUserId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
+    }
+    const name = typeof payload.name === "string" ? payload.name : "";
+    const bodyProjectId = typeof payload.projectId === "string" ? payload.projectId : "";
+    const bodyOwnerUserId = typeof payload.ownerUserId === "string" ? payload.ownerUserId : "";
+    if (name.length === 0 || bodyProjectId.length === 0 || bodyOwnerUserId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid write-execute payload" } } };
+    }
+    if (!isAssistantWriteTool(name)) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: `Unknown write tool: ${name}` } } };
+    }
+    if (bodyProjectId !== identity.projectId || bodyOwnerUserId !== identity.actorUserId) {
+      return { status: 403, body: { error: { code: "NO_USER_CONTEXT", message: "identity mismatch" } } };
+    }
+    if (!input.deps?.executeWriteTool) {
+      return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Write execution not wired" } } };
+    }
+    const args = (typeof payload.args === "object" && payload.args !== null ? payload.args : {}) as Record<string, unknown>;
+    const result = await input.deps.executeWriteTool({
+      name,
+      args,
+      projectId: identity.projectId,
+      ownerUserId: identity.actorUserId,
+    });
+    return { status: 200, body: result };
   }
 
   // One `assistant_call_logs` row per provider call (engine onEnd/onError).

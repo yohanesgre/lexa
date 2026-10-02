@@ -83,9 +83,9 @@ import {
   INTERNAL_AUTH_THREAD_HEADER,
 } from "./assistant/internal-auth";
 import { handleInternalAssistantRequest } from "./assistant/internal-routes";
-import { buildWorkerReadToolExecutor, resolveWorkerTurnContext } from "./assistant/worker-tools";
+import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerTurnContext } from "./assistant/worker-tools";
 import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
-import type { AssistantThreadType } from "../shared/assistant";
+import type { AssistantThreadType, AssistantToolPermissionMode } from "../shared/assistant";
 
 export { LexaAssistantAgent };
 
@@ -97,7 +97,7 @@ type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
 // in `server/assistant/agent.ts`.
 function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadRpcShape {
   interface Stub {
-    getTranscript(): Promise<{ messages: unknown[]; summary: string | null; summarizedCount: number | null }>;
+    getTranscript(): Promise<{ messages: unknown[]; summary: string | null; summarizedCount: number | null; permissionMode: AssistantToolPermissionMode }>;
     resumeBatch(batchId: string | null): Promise<{ ok: true }>;
     destroyThread(): Promise<{ ok: true }>;
     resetThread(): Promise<{ ok: true }>;
@@ -742,6 +742,7 @@ const handler: ExportedHandler<WorkersEnv> = {
             resolveProviderConfigs: (projectId) => resolveAssistantProviderConfigs(base, projectId),
             resolveTurnContext: (projectId) => resolveWorkerTurnContext({ driver, base }, projectId),
             executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB }),
+            executeWriteTool: buildWorkerWriteToolExecutor({ base }),
           },
         });
         return json(result.body, result.status) as unknown as WorkersResponse;

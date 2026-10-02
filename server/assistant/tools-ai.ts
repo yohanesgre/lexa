@@ -10,13 +10,21 @@
 //
 // Read-tool results are returned verbatim; a transport failure is surfaced as
 // `{ error }` so the model can recover, mirroring the Worker tools' own
-// domain-error outputs. Write tools return the Worker's proposal result
-// (`{ proposed, approvalId, error }`); the model never mutates anything.
+// domain-error outputs.
+//
+// Write tools are mode-dependent (D2–D4):
+//   ask  → the Worker persists a proposal; the turn suspends for per-chip
+//          approval (`{ proposed, approvalId, error }`)
+//   auto → the Worker applies the write immediately (`{ ok, applied, result,
+//          error? }`); no pending row, no suspend
+//   deny → a local structured refusal, no Worker call; suspend never fires
+//          (it only fires on `proposed === true`).
 
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { TipTapDoc } from "../../shared/types";
-import { ASSISTANT_WRITE_TOOL_NAMES, MAX_BULK_TASK_REFS } from "./write-tool-names";
+import type { ApprovalPartial, AssistantToolPermissionMode } from "../../shared/assistant";
+import { ASSISTANT_WRITE_TOOL_NAMES, MAX_BULK_TASK_REFS, MAX_WRITES_PER_TURN } from "./write-tool-names";
 
 export const READ_TOOL_NAMES = [
   "web_search",
@@ -61,11 +69,100 @@ export type WriteToolResponse =
     }
   | { ok: false; proposed: false; error: string };
 
+/**
+ * Auto-mode write result from the Worker `/write-execute` route. `applied` is
+ * false only on a failure; a bulk call that partially applied still returns
+ * `ok: true` with `partial` counts (D4/§E). Zero applied is a tool error.
+ *
+ * `indeterminate` marks a transport failure where the DO cannot know whether
+ * the Worker applied the write before the response was lost: the model must NOT
+ * retry, since a retry may double-apply (reviewer MED).
+ */
+export type WriteExecuteResponse =
+  | { ok: true; applied: true; result?: unknown; partial?: ApprovalPartial }
+  | { ok: false; applied: false; error: string; partial?: ApprovalPartial; indeterminate?: boolean };
+
+/** Deny-mode local refusal (D3): model-readable, never a Worker call. */
+export interface WriteDeniedResponse {
+  ok: false;
+  denied: true;
+  error: string;
+}
+
+// Final copy pinned by D3; the model reads this and can suggest a mode switch.
+export const BLOCKED_WRITE_ERROR =
+  "Write tools are blocked for this thread (composer mode: Blocked). Reads still work — the user can switch to Ask or Auto.";
+
 export interface AssistantToolTransport {
   /** Execute one read tool in the Worker. Never rejects for a domain failure. */
   read(name: string, args: Record<string, unknown>): Promise<ReadToolResponse>;
   /** Persist one write proposal in the Worker; the turn suspends on success. */
   propose(name: string, args: Record<string, unknown>): Promise<WriteToolResponse>;
+  /** Apply one write immediately in the Worker (auto mode). */
+  execute(name: string, args: Record<string, unknown>): Promise<WriteExecuteResponse>;
+}
+
+/**
+ * DO-side per-turn write budget (R5). The ask path is capped by the count of
+ * persisted pending rows; the auto path has no row, so the DO counts its own
+ * executions. One bulk tool call = one slot (same rule as the ask cap).
+ */
+export interface AssistantWriteBudget {
+  /** Consume one slot; `false` when the per-turn limit is exhausted. */
+  tryTake(): boolean;
+}
+
+export function createAssistantWriteBudget(limit: number = MAX_WRITES_PER_TURN): AssistantWriteBudget {
+  let used = 0;
+  return {
+    tryTake: () => {
+      if (used >= limit) return false;
+      used += 1;
+      return true;
+    },
+  };
+}
+
+/**
+ * Wrap an auto-mode executor with the per-turn budget (R5). A refused call
+ * never reaches the Worker and returns the same recoverable tool error the
+ * constant-copy budget produced before; one bulk call consumes one slot.
+ */
+export function createBudgetedWriteExecutor(
+  budget: AssistantWriteBudget,
+  limit: number,
+  execute: (name: string, args: Record<string, unknown>) => Promise<WriteExecuteResponse>
+): (name: string, args: Record<string, unknown>) => Promise<WriteExecuteResponse> {
+  return (name, args) => {
+    if (!budget.tryTake()) {
+      return Promise.resolve({
+        ok: false,
+        applied: false,
+        error: `write budget exceeded — at most ${limit} writes per turn`,
+      });
+    }
+    return execute(name, args);
+  };
+}
+
+/**
+ * D3/D6 suspend gate: the turn stops only on a SUCCESSFUL write proposal in ask
+ * mode (`proposed === true`). Auto results carry no `proposed`; deny refuses
+ * locally — neither may stop the turn. A failed proposal is a recoverable tool
+ * error the model may retry, so mere tool-call presence must not suspend.
+ */
+export function shouldSuspendOnProposal(
+  mode: AssistantToolPermissionMode,
+  enabled: readonly string[],
+  results: ReadonlyArray<{ toolName: string; output: unknown }>
+): boolean {
+  if (mode !== "ask") return false;
+  const enabledSet = new Set(enabled);
+  return results.some((result) => {
+    if (!enabledSet.has(result.toolName)) return false;
+    const output = result.output as { proposed?: unknown } | null | undefined;
+    return output !== null && typeof output === "object" && output.proposed === true;
+  });
 }
 
 const tipTapDoc = z
@@ -220,6 +317,22 @@ const WRITE_TOOL_SPECS: Record<
   },
 };
 
+// Ask-only phrasing: these sentences describe the propose→approve flow and are
+// wrong for auto (executes now) and deny (refused). Stripped outside ask mode so
+// the model is not told a write requires approval that will never happen.
+const ASK_ONLY_SENTENCES: readonly RegExp[] = [
+  /The write is NOT applied until the user approves it\.\s*/,
+  /Requires user approval\.\s*/,
+];
+
+function descriptionForMode(description: string, mode: AssistantToolPermissionMode): string {
+  if (mode === "ask") return description;
+  let out = description;
+  for (const pattern of ASK_ONLY_SENTENCES) out = out.replace(pattern, "");
+  out = out.replace(/^Propose (\w)/, (_match, first: string) => first.toUpperCase());
+  return out.replace(/\s{2,}/g, " ").trim();
+}
+
 const READ_TOOL_SPECS: Record<
   AssistantReadToolName,
   { description: string; inputSchema: z.ZodType<unknown> }
@@ -325,19 +438,33 @@ export function buildReadTools(opts: {
   return tools;
 }
 
-/** Build the write ToolSet from the enabled names (`parseWriteTools` output). */
+/**
+ * Build the write ToolSet from the enabled names (`parseWriteTools` output),
+ * dispatching per the captured turn mode (D2–D4). In every mode the tools are
+ * offered (deny deliberately keeps them so the model gets a readable refusal,
+ * D3); only `execute` differs.
+ */
 export function buildWriteTools(opts: {
   transport: AssistantToolTransport;
   enabled: readonly string[];
+  mode: AssistantToolPermissionMode;
 }): ToolSet {
   const tools: ToolSet = {};
   for (const name of ASSISTANT_WRITE_TOOL_NAMES) {
     if (!opts.enabled.includes(name)) continue;
     const spec = WRITE_TOOL_SPECS[name];
+    const execute = (args: unknown): Promise<unknown> => {
+      const input = (args ?? {}) as Record<string, unknown>;
+      if (opts.mode === "deny") {
+        return Promise.resolve({ ok: false, denied: true, error: BLOCKED_WRITE_ERROR } satisfies WriteDeniedResponse);
+      }
+      if (opts.mode === "auto") return opts.transport.execute(name, input);
+      return opts.transport.propose(name, input);
+    };
     tools[name] = tool({
-      description: spec.description,
+      description: descriptionForMode(spec.description, opts.mode),
       inputSchema: spec.inputSchema,
-      execute: (args: unknown) => opts.transport.propose(name, (args ?? {}) as Record<string, unknown>),
+      execute,
     });
   }
   return tools;
