@@ -12,15 +12,6 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
-## [2026.5.2] - 2026-10-02
-
-### Performance
-
-- **Device-login polling backs off** — a fixed 2s poll issued ~900 requests per
-  login across the full device-login window. The cadence now grows
-  2s / 5s / 10s with ±20% jitter, and each sleep is capped by the remaining
-  deadline. (#210)
-
 ## [2026.5.1] - 2026-10-01
 
 ### Fixed
