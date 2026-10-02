@@ -216,7 +216,7 @@ not `cf-workers/`.
 
 **Re-run `install.sh` from the new release tag — that is the whole upgrade.**
 The script is idempotent: it reuses the Cloudflare resources and applies only
-new D1 migrations. DB migrations run at server boot. Env writes merge, so
+new D1 migrations. Env writes merge, so
 operator-added keys are preserved and a previous install upgrades cleanly.
 
 Workers upgrades resume the previous deploy: run from the same directory
@@ -321,7 +321,8 @@ no email transport anywhere.
   rewritten, operator-added keys (`LXK_SECRETS_MASTER_KEY`, …) are preserved.
   DB-minted API keys survive in D1.
 - The GitHub App private key is stored encrypted in the DB via the web app
-  (Settings → GitHub Sync) — never written to the env file or on disk.
+  (Settings → GitHub Sync) — never written in plaintext to an env file or any
+  operator-managed file.
 - `/api/*` accepts a session cookie OR a Bearer key (dual-channel);
   `/api/webhooks/*` is HMAC-only. Keys are `lxk_` + 43 base62 chars
   (256-bit), rate-limited per IP, revocable per-named-key (Settings → API
@@ -423,8 +424,8 @@ flavor, which serves no assistant routes.
    `/api/admin/assistant/*` return **404** (the groups are not mounted), the
    assistant UI is hidden, and `GET /api/capabilities` reports
    `{ "assistant": false, "flavor": "bun" }`. Everything else keeps working.
-2. **There is no cross-flavor data sync** (`docs/CLOUDFLARE_WORKERS.md` §"Data
-   does not cross flavors"). The `assistant_*` tables are **not dropped** on the
+2. **There is no cross-flavor data sync** (`docs/CLOUDFLARE_WORKERS.md`). The
+   `assistant_*` tables are **not dropped** on the
    Bun flavor (they remain inert, so a downgrade/backup still has them), but
    nothing reads or writes them there.
 3. **Workers requires `LXK_SECRETS_MASTER_KEY`.** Better Auth's session
@@ -532,7 +533,7 @@ tier is the Workers-only Assistant (ADR-0003); the Bun flavor serves none. See
 > baseline already contains; fresh installs get it directly.
 
 The baseline carries the renamed DB tables and activity types (`hearth_*`);
-migrations apply it at boot. This rename is history only — the
+migrations apply it. This rename is history only — the
 listener/daemon it described was removed in 2026-09-26 (see above); no
 `lx machine` command exists to reinstall.
 
