@@ -200,3 +200,85 @@ describe("provider model sync", () => {
     }
   });
 });
+
+const jsonBody = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+const urlOf = (input: string | URL | Request): string =>
+  typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+describe("provider test fallback when the listing route is absent", () => {
+  it("GET /models 405 then chat ping 200 → { ok: true }", async () => {
+    const { id } = await createProvider();
+    const calls: Array<{ url: string; method?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      calls.push({ url, ...(init?.method !== undefined ? { method: init.method } : {}) });
+      if (init?.method === "POST" && url.endsWith("/chat/completions")) return jsonBody(200, { choices: [] });
+      return jsonBody(405, { code: 7001, message: "GET not supported for requested URI." });
+    }));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/test`));
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ok: boolean; latencyMs: number };
+      expect(body.ok).toBe(true);
+      expect(typeof body.latencyMs).toBe("number");
+      const ping = calls.find((c) => c.method === "POST");
+      expect(ping?.url).toContain("/chat/completions");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("GET /models 404 then chat ping 401 → 502 PROVIDER_AUTH_FAILED", async () => {
+    const { id } = await createProvider();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      if (init?.method === "POST" && url.endsWith("/chat/completions")) return jsonBody(401, {});
+      return jsonBody(404, {});
+    }));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/test`));
+      expect(res.status).toBe(502);
+      const body = await res.json() as { error: { code: string } };
+      expect(body.error.code).toBe("PROVIDER_AUTH_FAILED");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("unsaved models: GET /models 405 then chat ping 200 → { models: [] }", async () => {
+    const calls: Array<{ url: string; method?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      calls.push({ url, ...(init?.method !== undefined ? { method: init.method } : {}) });
+      if (init?.method === "POST" && url.endsWith("/chat/completions")) return jsonBody(200, { choices: [] });
+      return jsonBody(405, { code: 7001, message: "GET not supported for requested URI." });
+    }));
+    try {
+      const res = await handler(authed("POST", "/api/assistant/settings/p1/models", { kind: "openai_compatible", baseUrl: "https://api.test", model: "m1" }));
+      expect(res.status).toBe(200);
+      const body = await res.json() as { models: Array<{ id: string }> };
+      expect(body.models).toEqual([]);
+      expect(calls.some((c) => c.method === "POST")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("unsaved models: GET /models 405 then chat ping 403 → 502 PROVIDER_AUTH_FAILED", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      if (init?.method === "POST" && url.endsWith("/chat/completions")) return jsonBody(403, {});
+      return jsonBody(405, {});
+    }));
+    try {
+      const res = await handler(authed("POST", "/api/assistant/settings/p1/models", { kind: "openai_compatible", baseUrl: "https://api.test", model: "m1" }));
+      expect(res.status).toBe(502);
+      const body = await res.json() as { error: { code: string } };
+      expect(body.error.code).toBe("PROVIDER_AUTH_FAILED");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
