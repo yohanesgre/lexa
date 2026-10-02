@@ -8,7 +8,7 @@
 ## Decision summary (merged from ADR-0002)
 
 Add a second, fully independent hosting flavor — **Workers + D1 + R2** — that
-coexists with the existing Bun+Docker flavor. Two flavors are peer-level; neither
+coexists with the existing Bun flavor. Two flavors are peer-level; neither
 replaces the other; either or both can be live at any time.
 
 1. **Runtime split:** two flavors, separate users. Each flavor has its own domain,
@@ -46,8 +46,8 @@ replaces the other; either or both can be live at any time.
    use `install.sh workers --from-repo <dir>`. A staging Workers environment
    deploys from a clone with plain `wrangler` (`wrangler.staging.example.jsonc`)
    — see `docs/DEPLOYMENT.md` §Staging from a clone. The Bun
-   flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
-   targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
+   flavor is frozen and installs from a source checkout. See `docs/DEPLOYMENT.md`
+   for the deploy flow. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
 8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup
    (cron `*/15 * * * *`): `webhook_events` older than 7 days and
    `device_login_requests` past `expires_at` (same SQL as the Bun host's
@@ -287,10 +287,10 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   `MCP_CONNECT_FAILED` (never an anonymous connect) until it is cleared — the
   migration clears every row, and any write to a client nulls its ref too.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it; the
-  old `lexa-cli deploy` compose flow is gone (removed in cli-v2026.2.0).
+  old `lexa-cli deploy` flow is gone (removed in cli-v2026.2.0).
 - The AI path runs on Workers-only `@cloudflare/ai-chat` `AIChatAgent` Durable
   Objects (ADR-0003; the pre-ADR in-process SSE transport is retired and the
-  agent-runtime tier is removed, so the assistant does not exist on Bun/Docker) —
+  agent-runtime tier is removed, so the assistant does not exist on Bun) —
   no external runner to host; outbound subrequest budget 50/request free, 1000 paid.
 
 ## Object storage (R2)
@@ -318,7 +318,7 @@ Fits the agreed `Lexa/Storage` design (fs + s3 drivers):
 > This section is **superseded by ADR-0003** (accepted 2026-10-01): the assistant on this flavor
 > is `@cloudflare/ai-chat` `AIChatAgent` Durable Objects (one DO per conversation
 > thread, WebSocket transport, DO SQLite canonical + D1 `assistant_threads`
-> mirror), and the Bun/Docker flavor ships without the assistant. The TanStack AI
+> mirror), and the Bun flavor ships without the assistant. The TanStack AI
 > tier described below is the pre-ADR state and is transcribed in a later phase.
 
 Current state (Aug 2026): `@tanstack/ai` 0.47.x, MIT, still 0.x (~24 minors in 3

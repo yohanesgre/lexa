@@ -6,11 +6,10 @@ release.
 
 ## Deploy targets — policy
 
-**Cloudflare Workers is the only actively developed deploy target.** New features
-land on the Workers flavor; Docker and bare-metal installs keep running at their
-current features and receive no new work (existing installs keep working, and
-releases continue to ship them). The AI Assistant is Workers-only — Docker/bare
-users should read `docs/DEPLOYMENT.md` → *Deploy targets frozen*.
+**Cloudflare Workers is the only deploy target.** New features land on the
+Workers flavor; the Bun standalone flavor is frozen at its current features and
+receives no new work (existing installs keep running). Releases ship the Workers
+bundle — see *Web app release flow* below. The AI Assistant is Workers-only.
 
 ## Versioning — CalVer `YYYY.MINOR.MICRO`
 
@@ -53,7 +52,7 @@ all handle `YYYY.MINOR.MICRO` as-is (verified at adoption).
 |---|---|---|
 | Manifest (single source) | `package.json` | `cli/package.json` (read statically by `cli/src/version.ts` — never regenerated) |
 | Tag format | `vYYYY.MINOR.MICRO` (e.g. `v2026.1.0`) | `cli-vYYYY.MINOR.MICRO` (e.g. `cli-v2026.1.0`) |
-| CI | `.github/workflows/publish.yml` → `ghcr.io/yohanesgre/lexa` | `.github/workflows/publish-cli.yml` → GitHub release `bin/lx` (legacy `lexa-cli` asset published for one transition cycle) |
+| CI | `.github/workflows/publish.yml` (`publish-workers`) → GitHub release `lexa-workers-<tag>.tar.gz` + `checksums.txt` | `.github/workflows/publish-cli.yml` → GitHub release assets `lx` (binary) and, for one transition cycle, legacy `lexa-cli` |
 | Changelog | `CHANGELOG.md` (root) | `cli/CHANGELOG.md` |
 | Failure guard | — | `publish-cli.yml` fails if the tag doesn't match `cli/package.json` |
 
@@ -71,7 +70,7 @@ CLI asset.
    The submodule must be pushed for clones to resolve the pointer.
 3. **Build artifacts.** `bun run compile:cli` produces `bin/lx` locally
    only — the shipped binary is built by `publish-cli.yml` from the tag.
-   Nothing embed-related is committed (the daemon/compose embed tier was
+   Nothing embed-related is committed (the daemon embed tier was
    removed 2026-09-26); `bin/` stays untracked.
 4. **Gate.** `tsc --noEmit`, full `vitest run`, and `bash wireframes/build.sh`
    green before tagging. A push to the release-prep branch (`chore/release-*`
@@ -89,40 +88,50 @@ CLI asset.
    tags for the version being released (e.g. `git push origin v2026.4.0
    cli-v2026.5.0`). Both publish workflows are tag-triggered — an unpushed
    tag ships nothing.
-8. **Verify the release:** `publish-image` and `publish-cli` green on the tags;
-   image tags `ghcr.io/yohanesgre/lexa:{latest,v<version>,<YYYY.MINOR>}`
-   exist; the `v<version>` release carries `lexa-server-*.tar.gz`,
-   `lexa-workers-*.tar.gz`, `checksums.txt`; the `cli-v<version>` release
-   carries `bin/lx` (check the workflow for any legacy asset). The
+8. **Verify the release:** `publish-workers` and `publish-cli` green on the
+   tags; the `v<version>` release carries
+   `lexa-workers-v<version>.tar.gz` + `checksums.txt`; the `cli-v<version>`
+   release carries the `lx` asset (check the workflow for any legacy asset). The
    workflows' installer warm + smoke step covers the rest.
 
-## Web app image flow
+## Web app release flow
 
 - `main` pushes publish nothing. Stable channels are tag-built; a main snapshot
-  is a self-serve local build — `docker build -t ghcr.io/yohanesgre/lexa:dev .`
-  from a checkout, then install with `--image dev --no-pull` (see
+  is a self-serve local build — `LEXA_FLAVOR=workers bun run build` from a
+  checkout, then `scripts/install.sh workers --from-repo .` (see
   `docs/DEPLOYMENT.md`).
-- `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` + `ghcr.io/yohanesgre/lexa:<YYYY.MINOR>` (where `<version>` is the tag name, e.g. `v2026.1.0` + floating `2026.1` for patch-auto pins).
-- The web wizard at `/setup` offers sample data on local installs;
-  `LXK_ENV=dev` + `LXK_SEED_DEV=1` seeds at boot.
-- Remote deploy uses `scripts/install.sh` (`curl -fsSL …/scripts/install.sh |
-  bash -s -- <target> [flags]`). It pulls the image — **no checkout, no
-  build, no git**. Upgrade = re-run with a newer tag; the `lexa-data` volume
-  survives because the compose project name and the pinned image tag are
-  preserved.
-- Removing a deploy is `scripts/uninstall.sh`: the `lexa-data` volume is kept
-  by default, and `--purge` deletes it (DB wiped) after a TTY confirmation
-  that requires typing `purge`.
-- The CLI `upgrade` command self-updates only the CLI binary; web app
-  upgrades re-run `scripts/install.sh` with a newer tag (there is no
-  `lx deploy` — see Deploy state below).
+- `v*` tags → the `publish-workers` workflow (`.github/workflows/publish.yml`,
+  job `release-tarballs`) builds the Workers flavor (`LEXA_FLAVOR=workers bun
+  run build`) and attaches two assets to the GitHub release:
+  `lexa-workers-<tag>.tar.gz` + `checksums.txt`.
+- The tarball is the whole deploy artifact: `dist/` (the prebuilt worker
+  bundle), `wrangler.jsonc` (placeholder `database_id` stripped), `migrations/`,
+  and `scripts/workers-install.ts`. No image is built or published.
+- Remote deploy uses `scripts/install.sh workers` (`curl -fsSL
+  …/scripts/install.sh | bash -s -- workers [flags]`). It fetches the tarball
+  by scanning the release list for the newest `v*` web-app tag (the `v[0-9]`
+  anchor excludes `cli-v*`, and it never uses `releases/latest`, which a newer
+  CLI release could win), verifies `checksums.txt`, unpacks, and runs
+  `scripts/workers-install.ts` — provisioning D1+R2+KV via the Cloudflare API,
+  applying D1 migrations, and deploying the prebuilt bundle. Upgrade = re-run
+  from a newer tag; the D1/R2/KV resources survive (keyed by `--name`).
+- The `/setup` wizard's optional sample-data step is a local (Bun) install
+  feature — `/api/setup/seed` has no `LXK_ENV` gate. On Workers, seed D1
+  explicitly via `wrangler d1 execute --file`.
+- Removing a deploy is `scripts/uninstall.sh workers`: D1/R2/KV are kept by
+  default, and `--purge` removes local credentials (delete the resources from
+  the Cloudflare dashboard) after a TTY confirmation that requires typing
+  `purge`.
+- The CLI `upgrade` command self-updates only the CLI binary; web app upgrades
+  re-run `scripts/install.sh workers` with a newer tag (there is no `lx deploy` —
+  see Deploy state below).
 
 ## CLI build flow
 
 - `prod` = compiled binary. `bun run compile:cli` is a plain
-  `bun build --compile --minify cli/src/index.ts` → `bin/lx`. No daemon or
-  compose embed (the agent-runtime tier was removed 2026-09-26), and no
-  systemd listener unit is installed by the CLI.
+  `bun build --compile --minify cli/src/index.ts` → `bin/lx`. No daemon embed
+  (the agent-runtime tier was removed 2026-09-26), and the CLI installs no
+  listener unit.
 - `dev` = `bun run lx-dev` or `bun run install:cli-dev` →
   `~/.local/bin/lx-dev` (a pure "run repo source via bun" wrapper —
   no `LEXA_DIR` export or flavor logic, identical behavior and state paths
@@ -132,7 +141,7 @@ CLI asset.
 
 **There is no CLI deploy state.** `lx deploy` / `lx undeploy` were removed in
 cli-v2026.2.0 — `lx` is operate-only. Self-hosting goes through
-`scripts/install.sh` (`curl -fsSL …/scripts/install.sh | bash -s -- <target>`,
+`scripts/install.sh workers` (`curl -fsSL …/scripts/install.sh | bash -s -- workers`,
 upgrade = re-run from a newer tag) plus the `/setup` wizard for the first
 superadmin.
 

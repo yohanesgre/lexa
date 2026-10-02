@@ -77,9 +77,13 @@ Behavior when enabled (`server/entry.ts`):
 `s3` also requires all three of `LXK_S3_BUCKET`, `LXK_S3_ACCESS_KEY_ID` and
 `LXK_S3_SECRET_ACCESS_KEY` at boot — the server refuses to start otherwise.
 
-## 4. Restore procedure
+## 4. Restore procedure (Bun host)
 
-1. **Stop the server** (`docker compose down` or the systemd unit).
+Snapshot restore applies only to the Bun host, where the DB is a local
+`data/lexa.db` file. Workers has no local DB; its backups are managed by
+D1 point-in-time recovery instead.
+
+1. **Stop the server process** so nothing writes during the restore.
 2. **Fetch the snapshot** you want from the storage location:
    - fs driver: `<volume>/backups/lexa-<ts>.db.gz`
    - s3 driver: `s3://<bucket>/backups/lexa-<ts>.db.gz`
