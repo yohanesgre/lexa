@@ -42,6 +42,9 @@
   "homepage": "https://github.com/yohanesgre/lexa#readme",
   "type": "module",
   "private": "true",
+  "overrides": {
+    "prosemirror-view": "1.42.3"
+  },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.71",
     "@ai-sdk/openai": "4.0.83",
