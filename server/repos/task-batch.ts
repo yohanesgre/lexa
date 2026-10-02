@@ -13,8 +13,8 @@
 
 import type { SqlParam } from "../db/driver";
 
-/** A single batch statement — both `withTx` (Bun, via `batch()`)
- *  and `db.batch()` (D1, native) consume this shape. */
+/** A single batch statement — `db.batch()` / `batchResults()` consume this
+ *  shape on BOTH drivers. */
 export interface BatchStmt {
   sql: string;
   params: SqlParam[];
@@ -48,20 +48,28 @@ export function buildTaskCreateBatch(input: {
   type: string;
   position: string;
   dueAt: string | null;
-  number: number;
-  key: string;
+  /** Ticket prefix (`projects.key`); `number`/`key` are computed inside the
+   *  batch from the counter this same batch increments, so a failed insert
+   *  rolls the increment back (no burned numbers). */
+  projectKey: string;
   assignees: string[];
   subtaskOfParentId?: string | null;
   activity: ActivityInput[];
 }): BatchStmt[] {
   const stmts: BatchStmt[] = [
     {
+      sql: `UPDATE projects SET next_task_number = next_task_number + 1 WHERE id = ?`,
+      params: [input.projectId],
+    },
+    {
       sql: `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, due_at, number, key)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     (SELECT next_task_number FROM projects WHERE id = ?),
+                     ? || '-' || (SELECT next_task_number FROM projects WHERE id = ?))`,
       params: [
         input.id, input.projectId, input.columnId, input.swimlaneId,
         input.title, input.description, input.priority, input.type,
-        input.position, input.dueAt, input.number, input.key,
+        input.position, input.dueAt, input.projectId, input.projectKey, input.projectId,
       ],
     },
   ];
@@ -199,8 +207,8 @@ export function buildUnlinkBatch(input: {
 }
 
 /** Build the batch for: update a task's archive state + emit one
- *  `archived` (or `restored`) activity row. The Bun path runs this
- *  inside `withTx`; the D1 path runs `db.batch(stmts)`. */
+ *  `archived` (or `restored`) activity row. Both drivers run it via
+ *  `db.batch(stmts)` — one atomic batch. */
 export function buildSetArchivedAndEmitBatch(input: {
   taskId: string;
   archivedAt: string | null;   // null = restore
@@ -236,9 +244,8 @@ export function buildSetArchivedAndEmitBatch(input: {
 
 /** Build the batch for: the webhook move (UPDATE tasks + UPDATE
  *  task_github_issues synced_state). The plan's #2 invariant requires
- *  both writes to land atomically. The Bun path already does this via
- *  `withTx` + `batch()`; the D1 path does the same via a single
- *  `db.batch([...stmts])` call. */
+ *  both writes to land atomically — a single `db.batch(stmts)` call on
+ *  either driver. */
 export function buildWebhookMoveBatch(input: {
   taskId: string;
   issueId: string;

@@ -4,19 +4,17 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { ActivityService } from "./activity.service";
-import { DbError, ConstraintViolation, withTx, Db } from "../db/db";
+import { DbError, ConstraintViolation, batchResults, Db } from "../db/db";
 import { ProjectNotFound, MilestoneNotFound, HasChildren, TaskNotFound } from "../api/errors";
 import * as msg from "../activity-messages";
+import { buildMilestoneArchiveBatch, activityFromBatchResults } from "../repos/cascade-batch";
 import type { Milestone, Actor, ActivityEvent } from "../../shared/types";
 
 export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/MilestoneService", {
   dependencies: [MilestoneRepo.Default, SwimlaneRepo.Default, TaskRepo.Default, ProjectRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* MilestoneRepo;
-    const swimlaneRepo = yield* SwimlaneRepo;
-    const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
-    const activityService = yield* ActivityService;
     const db = yield* Db;
 
     return {
@@ -71,31 +69,27 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
         Effect.gen(function* () {
           const milestone = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id })));
           if (milestone.archivedAt) return { milestone, activity: [] };   // idempotent
-          const done = yield* withTx(db, Effect.gen(function* () {
-            const a = yield* repo.setArchived(id, new Date().toISOString()).pipe(
-              Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
-            );
-            const sprints = yield* repo.findByMilestone(id);
-            const events: ActivityEvent[] = [];
-            for (const s of sprints) {
-              yield* swimlaneRepo.setArchived(s.id, a.archivedAt ?? new Date().toISOString()).pipe(
-                Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
-              );
-              const tasks = yield* taskRepo.findBySwimlane(s.id);   // live tasks only
-              for (const t of tasks) {
-                yield* taskRepo.setArchived(t.id, a.archivedAt ?? new Date().toISOString()).pipe(
-                  Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
-                );
-                // task_activity.task_id has an FK to tasks(id) — activity rows
-                // are emitted per task only (deviation from design doc §5.2's
-                // per-sprint/per-milestone rows, which the FK forbids).
-                events.push(yield* activityService.append(t.id, actor, "archived", msg.archived(actor.label), { viaAssistant: opts?.viaAssistant === true }));
-              }
-            }
-            return { milestone: a, activity: events };
+          const archivedAt = new Date().toISOString();
+          // One set-based atomic batch: activity rows for every live task in
+          // every sprint of the milestone, then the task + sprint + milestone
+          // archive updates. Constant statement count.
+          const results = yield* batchResults(db, buildMilestoneArchiveBatch({
+            milestoneId: id,
+            archivedAt,
+            actor: {
+              actorKind: actor.kind,
+              actorLabel: actor.label,
+              actorUserId: actor.userId ?? null,
+              message: msg.archived(actor.label),
+              viaAssistant: opts?.viaAssistant === true,
+            },
           }));
-          yield* Effect.logInfo(`[Milestone] Archived ${done.milestone.id} (${done.activity.length} activity rows)`);
-          return done;
+          const activity = activityFromBatchResults(results[0]?.results ?? []);
+          const updated = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
+          );
+          yield* Effect.logInfo(`[Milestone] Archived ${updated.id} (${activity.length} activity rows)`);
+          return { milestone: updated, activity };
         }),
 
       restore: (actor: Actor, id: string): Effect.Effect<{ milestone: Milestone; activity: ActivityEvent[] },

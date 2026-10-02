@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryFirst, queryAll, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryFirst, queryAll, run, runReturning, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ID, ISODate } from "../../shared/types";
 import type { AssistantThreadType } from "../../shared/assistant";
 
@@ -140,30 +140,26 @@ export class AssistantThreadRepo extends Effect.Service<AssistantThreadRepo>()("
           userId
         ).pipe(Effect.map(rowToThread)),
 
+      // Atomic append — the prior transcript is read and rewritten in ONE
+      // statement (no read-compute-write window, so a concurrent append cannot
+      // be lost). `json_valid`/`json_type` guard a malformed or non-array
+      // stored value: it is replaced with `[]` before the append.
       appendChatMessage: (chatId: string, userId: string, message: unknown): Effect.Effect<AssistantThread, RowNotFound | ConstraintViolation | DbError> =>
-        withTx(
+        runReturning<AssistantThreadRow>(
           db,
-          Effect.gen(function* () {
-            const existing = yield* queryFirst<AssistantThreadRow>(
-              db,
-              `SELECT * FROM assistant_threads WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ?`,
-              chatId,
-              userId
-            );
-            const prior = rowToThread(existing);
-            return yield* Effect.map(
-              run(
-                db,
-                `UPDATE assistant_threads SET messages = ?, updated_at = datetime('now')
-                 WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ?`,
-                JSON.stringify([...prior.messages, message]),
-                chatId,
-                userId
-              ),
-              () => ({ ...prior, messages: [...prior.messages, message] })
-            );
-          })
-        ),
+          `UPDATE assistant_threads
+              SET messages = json_insert(
+                    CASE WHEN json_valid(messages)
+                         THEN (CASE WHEN json_type(messages) = 'array' THEN messages ELSE '[]' END)
+                         ELSE '[]' END,
+                    '$[#]', json(?)),
+                  updated_at = datetime('now')
+            WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ?
+            RETURNING *`,
+          JSON.stringify(message),
+          chatId,
+          userId
+        ).pipe(Effect.map(rowToThread)),
 
       // Owner-scoped chat list for the sidebar: pinned threads first, then
       // newest activity. Optional q = case-exact LIKE substring prefilter
@@ -231,30 +227,39 @@ export class AssistantThreadRepo extends Effect.Service<AssistantThreadRepo>()("
 
       // Owner-scoped transcript truncation for edit/regenerate/retry: keeps
       // messages[0..fromIndex), drops the rest. fromIndex === length is a
-      // no-op write (still bumps updated_at).
+      // no-op write (still bumps updated_at). SQLite has no array-slice
+      // function, so the write is a compare-and-swap on the exact prior
+      // `messages` string: a concurrent append steals the CAS, we re-read and
+      // re-slice, bounded to 3 attempts. No read-compute-write window is left
+      // open — the CAS only writes when the value it computed from is current.
       truncateChatFrom: (chatId: string, userId: string, fromIndex: number): Effect.Effect<AssistantThread, RowNotFound | ConstraintViolation | DbError> =>
-        withTx(
-          db,
-          Effect.gen(function* () {
+        Effect.gen(function* () {
+          for (let attempt = 0; attempt < 3; attempt++) {
             const existing = yield* queryFirst<AssistantThreadRow>(
               db,
               `SELECT * FROM assistant_threads WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ?`,
               chatId,
               userId
             );
-            const prior = rowToThread(existing);
-            const kept = prior.messages.slice(0, fromIndex);
-            yield* run(
+            const kept = rowToThread(existing).messages.slice(0, fromIndex);
+            const updated = yield* runReturning<AssistantThreadRow>(
               db,
               `UPDATE assistant_threads SET messages = ?, updated_at = datetime('now')
-               WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ?`,
+               WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ? AND messages = ?
+               RETURNING *`,
               JSON.stringify(kept),
               chatId,
-              userId
-            );
-            return { ...prior, messages: kept };
-          })
-        ),
+              userId,
+              existing.messages
+            ).pipe(Effect.either);
+            if (updated._tag === "Right") return rowToThread(updated.right);
+            // CAS miss: a concurrent writer changed `messages` (or deleted the
+            // row). Re-read and retry; a deleted/foreign row fails RowNotFound
+            // on the next read.
+            if (updated.left._tag !== "RowNotFound") return yield* Effect.fail(updated.left);
+          }
+          return yield* new DbError({ message: "truncateChatFrom: compare-and-swap retries exhausted" });
+        }),
     };
   }),
 }) {}

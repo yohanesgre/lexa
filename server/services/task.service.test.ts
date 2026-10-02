@@ -15,13 +15,14 @@ import type { Actor, TipTapDoc } from "../../shared/types";
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 let dir: string;
+let dbPath: string;
 let db: Database;
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "lexa-task-svc-"));
-  const path = join(dir, "test.db");
-  runMigrations(path, MIGRATIONS);
-  const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
+  dbPath = join(dir, "test.db");
+  runMigrations(dbPath, MIGRATIONS);
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(dbPath))));
   db = Context.get(ctx, Sqlite);
 });
 
@@ -518,5 +519,54 @@ describe("TaskService ticket keys", () => {
         expect(t.key).toBe("WC-1");
       })
     );
+  });
+
+  it("a failed insert rolls back the counter increment (no burned number)", async () => {
+    seed(db);
+    // Pin the counter so the incremented value collides with an existing
+    // ticket number: the INSERT fails and the whole batch must roll back.
+    db.prepare("UPDATE projects SET next_task_number = 0 WHERE id = 'p1'").run();
+    db.prepare(
+      `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, number, key)
+       VALUES ('blocker','p1','c-todo','s1','B','{}','prio-1','type-1','a1',1,'EG-1')`
+    ).run();
+    const svc = makeService(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const res = yield* Effect.either(svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "X" }));
+        expect(Either.isLeft(res)).toBe(true);
+        if (Either.isLeft(res)) expect(res.left._tag).toBe("ConstraintViolation");
+      })
+    );
+    const project = db.prepare("SELECT next_task_number FROM projects WHERE id = 'p1'").get() as { next_task_number: number };
+    expect(project.next_task_number).toBe(0);
+    const created = db.prepare("SELECT COUNT(*) c FROM tasks WHERE title = 'X'").get() as { c: number };
+    expect(created.c).toBe(0);
+  });
+
+  it("concurrent creates from two connections allocate distinct, unique keys", async () => {
+    seed(db);
+    const second = new Database(dbPath);
+    second.exec("PRAGMA busy_timeout = 5000");
+    second.exec("PRAGMA foreign_keys = ON");
+    try {
+      const svcA = makeService(db);
+      const svcB = makeService(second);
+      const [a, b] = await Effect.runPromise(
+        Effect.all(
+          [
+            svcA.create(maria, { projectId: "p1", columnId: "c-todo", title: "A" }),
+            svcB.create(maria, { projectId: "p1", columnId: "c-todo", title: "B" }),
+          ],
+          { concurrency: 2 }
+        )
+      );
+      const keys = [a.task.key, b.task.key].sort();
+      expect(keys).toEqual(["EG-1", "EG-2"]);
+      const rows = db.prepare("SELECT number FROM tasks WHERE project_id = 'p1' AND number IS NOT NULL ORDER BY number").all() as { number: number }[];
+      expect(rows.map((r) => r.number)).toEqual([1, 2]);
+    } finally {
+      second.close();
+    }
   });
 });

@@ -349,6 +349,26 @@ describe("SwimlaneService archive", () => {
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
+
+  it("a failure mid-cascade rolls back the whole batch (no partial archive, no activity)", async () => {
+    seed(db);
+    const svc = makeService(db);
+    db.exec(`CREATE TRIGGER block_lane_archive BEFORE UPDATE ON swimlanes
+             WHEN NEW.archived_at IS NOT NULL AND NEW.id = 'm1'
+             BEGIN SELECT RAISE(ABORT, 'blocked archive'); END`);
+    try {
+      const res = await Effect.runPromise(Effect.either(svc.archive(maria, "m1")));
+      expect(Either.isLeft(res)).toBe(true);
+      const lane = db.prepare("SELECT archived_at FROM swimlanes WHERE id = 'm1'").get() as { archived_at: string | null };
+      expect(lane.archived_at).toBeNull();
+      const tasks = db.prepare("SELECT COUNT(*) n FROM tasks WHERE swimlane_id = 'm1' AND archived_at IS NOT NULL").get() as { n: number };
+      expect(tasks.n).toBe(0);
+      const activity = db.prepare("SELECT COUNT(*) n FROM task_activity").get() as { n: number };
+      expect(activity.n).toBe(0);
+    } finally {
+      db.exec("DROP TRIGGER block_lane_archive");
+    }
+  });
 });
 
 describe("SwimlaneService restore", () => {

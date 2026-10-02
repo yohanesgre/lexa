@@ -176,6 +176,31 @@ describe("MilestoneService archive/restore", () => {
     expect(res.milestone.archivedAt).toBeNull();
     expect(res.activity).toEqual([]);
   });
+
+  it("a failure mid-cascade rolls back the whole batch (no partial sprint/task archive, no activity)", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const m = await Effect.runPromise(svc.create({ projectId: "p1", name: "v1" }));
+    db.prepare(`INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id)
+                VALUES ('sp1','p1','Sprint 1',0,'sprint','${m.id}')`).run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position)
+                VALUES ('t1','p1','c1','sp1','T1','a0')`).run();
+    db.exec(`CREATE TRIGGER block_milestone_archive BEFORE UPDATE ON milestones
+             WHEN NEW.archived_at IS NOT NULL AND NEW.id = '${m.id}'
+             BEGIN SELECT RAISE(ABORT, 'blocked archive'); END`);
+    try {
+      const res = await Effect.runPromise(Effect.either(svc.archive(maria, m.id)));
+      expect(Either.isLeft(res)).toBe(true);
+      const lane = db.prepare("SELECT archived_at FROM swimlanes WHERE id = 'sp1'").get() as { archived_at: string | null };
+      expect(lane.archived_at).toBeNull();
+      const task = db.prepare("SELECT archived_at FROM tasks WHERE id = 't1'").get() as { archived_at: string | null };
+      expect(task.archived_at).toBeNull();
+      const activity = db.prepare("SELECT COUNT(*) n FROM task_activity").get() as { n: number };
+      expect(activity.n).toBe(0);
+    } finally {
+      db.exec("DROP TRIGGER block_milestone_archive");
+    }
+  });
 });
 
 describe("MilestoneService delete", () => {

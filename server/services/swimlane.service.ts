@@ -3,9 +3,10 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ActivityService } from "./activity.service";
-import { queryAll, DbError, ConstraintViolation, withTx, Db } from "../db/db";
+import { queryAll, DbError, ConstraintViolation, batchResults, Db } from "../db/db";
 import { ProjectNotFound, SwimlaneNotFound, HasChildren, BacklogProtected, DeadlineAfterLane, TaskNotFound, MilestoneNotFound, InvalidArgs } from "../api/errors";
 import * as msg from "../activity-messages";
+import { buildSwimlaneArchiveBatch, activityFromBatchResults } from "../repos/cascade-batch";
 import type { Swimlane, Actor, ActivityEvent } from "../../shared/types";
 
 export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/SwimlaneService", {
@@ -13,8 +14,6 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
   effect: Effect.gen(function* () {
     const repo = yield* SwimlaneRepo;
     const projectRepo = yield* ProjectRepo;
-    const taskRepo = yield* TaskRepo;
-    const activityService = yield* ActivityService;
     const db = yield* Db;
 
     // start_at must not be later than due_at (both YYYY-MM-DD — string compare is fine).
@@ -119,22 +118,26 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           const lane = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
           if (lane.kind === "backlog") return yield* new BacklogProtected({ action: "archive" });
           if (lane.archivedAt) return { lane, activity: [] };   // idempotent
-          const done = yield* withTx(db, Effect.gen(function* () {
-            const a = yield* repo.setArchived(id, new Date().toISOString()).pipe(
-              Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
-            );
-            const tasks = yield* taskRepo.findBySwimlane(id);   // live tasks in lane
-            const events: ActivityEvent[] = [];
-            for (const t of tasks) {
-              yield* taskRepo.setArchived(t.id, a.archivedAt ?? new Date().toISOString()).pipe(
-                Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
-              );
-              events.push(yield* activityService.append(t.id, actor, "archived", msg.archived(actor.label)));
-            }
-            return { lane: a, activity: events };
+          const archivedAt = new Date().toISOString();
+          // One set-based atomic batch: activity rows for every live task,
+          // then the task + lane archive updates. Constant statement count.
+          const results = yield* batchResults(db, buildSwimlaneArchiveBatch({
+            swimlaneId: id,
+            archivedAt,
+            actor: {
+              actorKind: actor.kind,
+              actorLabel: actor.label,
+              actorUserId: actor.userId ?? null,
+              message: msg.archived(actor.label),
+              viaAssistant: false,
+            },
           }));
-          yield* Effect.logInfo(`[Swimlane] Archived ${done.lane.id} with ${done.activity.length} tasks`);
-          return done;
+          const activity = activityFromBatchResults(results[0]?.results ?? []);
+          const updated = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
+          );
+          yield* Effect.logInfo(`[Swimlane] Archived ${updated.id} with ${activity.length} tasks`);
+          return { lane: updated, activity };
         }),
 
       restore: (actor: Actor, id: string): Effect.Effect<{ lane: Swimlane; activity: ActivityEvent[] },

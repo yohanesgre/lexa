@@ -36,10 +36,15 @@
 ## Infrastructure
 
 ```typescript
-// The SQLite connection is created at boot from DATABASE_PATH and injected
-// as a layer (server/db/database.ts). One connection, WAL mode, FK pragmas on.
-export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
-export const initSqlite = (dbPath: string) => Layer.succeed(Sqlite, new Database(dbPath));
+// The SQLite connection is opened at boot from DATABASE_PATH inside
+// createApiHandler (server/api/http.ts) — WAL, FK pragmas, busy_timeout —
+// and injected through the `Db` driver tag (server/db/db.ts):
+// createBunSqliteDriver on Bun, createD1Driver on Workers. One connection.
+// (server/db/database.ts's `Sqlite`/`initSqlite` is the deprecated sync test
+// harness, not a production path.)
+export class Db extends Context.Tag("Lexa/Db")<Db, DbDriver>() {}
+export const DbBunLive = (db: Database): Layer.Layer<Db> => Layer.succeed(Db, createBunSqliteDriver(db));
+export const DbD1Live = (d1: D1Like): Layer.Layer<Db> => Layer.succeed(Db, createD1Driver(d1));
 
 // GitHub App credentials — the DB is the SINGLE source of truth at runtime.
 // The non-secret identifiers are plaintext settings rows (github_app_id /
@@ -343,7 +348,8 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
         }),
 
       // Webhook-only path: bypass-guard move + synced-state write as ONE
-      // repo-level batch() — atomic (SCHEMA.md §No multi-statement ACID).
+      // repo-level batch() — atomic (SCHEMA.md §Atomicity: batch, not
+      // interactive transactions).
       // Webhook moves skip archived tasks — archived-guard on
       // archived_at IS NOT NULL.
       moveFromWebhook: (taskId: string, columnId: string, syncedState: "open" | "closed") => ...,
@@ -358,22 +364,25 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
       restore: (id: string) => ...,
 
       // Bulk actions (POST /projects/:slug/tasks/bulk). Every id runs the
-      // matching single-task method (move/update/archive/restore) inside ONE
-      // withTx, so each task emits the SAME activity rows as the single-task
-      // path (invariant #12 parity). Per-task DOMAIN rejections (not-found,
-      // WIP_LIMIT, REQUIRED_FIELD, NEIGHBOR_NOT_IN_COLUMN, INVALID_OPTION,
+      // matching single-task method (move/update/archive/restore), so each
+      // task emits the SAME activity rows as the single-task path (invariant
+      // #12 parity). Each item's writes are one atomic batch() (mutation +
+      // activity); there is NO request-level transaction on D1 — `withTx` is
+      // a no-op there, so a later item's failure does NOT roll back earlier
+      // items. Per-task DOMAIN rejections (not-found, WIP_LIMIT,
+      // REQUIRED_FIELD, NEIGHBOR_NOT_IN_COLUMN, INVALID_OPTION,
       // DEADLINE_AFTER_LANE) are caught and COLLECTED in `failed` while the
-      // permitted tasks still apply; DbError / ConstraintViolation are NOT
-      // caught and abort the whole transaction — a request-level failure
-      // changes NOTHING. A targetless move (no columnId and no swimlaneId)
+      // permitted tasks still apply; DbError / ConstraintViolation are
+      // infrastructure errors and propagate (aborting the request, not
+      // rolling it back). A targetless move (no columnId and no swimlaneId)
       // fails with InvalidArgs before any write. Failure codes/messages come
       // from the error catalog via errorCodeMap/errorMessage, never
       // hand-rolled. ids are de-duped first-seen and capped at 100
-      // (BULK_TASK_ID_CAP) BEFORE withTx. GitHub sync stays
-      // route-orchestrated: after the transaction commits the ROUTE
-      // best-effort syncs linked tasks (content push for update, state push
-      // for a move to a github-mapped column) exactly as the single-task
-      // handlers do — the service makes no GitHub calls (invariant #1).
+      // (BULK_TASK_ID_CAP) before any write. GitHub sync stays
+      // route-orchestrated: after the items commit the ROUTE best-effort
+      // syncs linked tasks (content push for update, state push for a move to
+      // a github-mapped column) exactly as the single-task handlers do — the
+      // service makes no GitHub calls (invariant #1).
       bulk: (projectId: string, input: BulkTaskInput) => ...,
     };
   }),
@@ -713,7 +722,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
     // create(taskId, actor, body: TipTapDoc) → { comment, activity }
     //   validateBody (TipTap doc + isEmptyDoc + ≤64KB) → CommentInvalid;
     //   existence pre-check → TaskNotFound (never a raw FK violation);
-    //   comment insert + 'commented' activity in ONE withTx.
+    //   comment insert + 'commented' activity in one atomic batch.
     // edit(commentId, identity, body) → author-only (authorKind 'user' AND
     //   authorId === identity.userId) else CommentEditForbidden. Sets
     //   edited_at; NO activity row (marker only).
@@ -721,7 +730,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
     //   (identity.role === 'superadmin' OR user_project_roles.role === 'admin'
     //   OR team admin of the project's owning team — R14/Q13: superadmin all
     //   comments, team admin own team's projects); soft delete +
-    //   'comment_deleted' activity in ONE withTx.
+    //   'comment_deleted' activity in one atomic batch.
   }),
 }) {}
 ```
@@ -736,15 +745,18 @@ Messages are frozen at write time via the catalog
 (`server/activity-messages.ts`) — never hand-rolled at call sites.
 
 **Bulk parity:** `TaskService.bulk` runs each id through the matching
-single-task method inside ONE transaction, so the emission rule above holds
-per applied task; a per-task rejection collects into `failed` and writes
-nothing for that id. That no-partial-write guarantee rests on error ordering:
-every caught domain error is raised before the task's first write (all
-validation runs ahead of the inner `withTx`; the WIP guard is a conditional
-UPDATE that changes 0 rows when it rejects) — pinned by a regression test.
-The route then best-effort syncs GitHub after the transaction commits, so a
-bulk edit does not leave `pushed_*` stale and a bulk move still closes/opens
-linked issues.
+single-task method, whose writes are one per-item atomic batch; there is NO
+request-level transaction on either driver (on D1 `withTx` is a no-op), so a
+per-task rejection collects into `failed` and writes nothing for that id while
+items applied before and after it stay committed. That no-partial-write
+guarantee rests on error ordering: every caught domain error is raised before
+the task's first write (all validation runs ahead of the item's `batch()`; the
+WIP guard is a conditional UPDATE that changes 0 rows when it rejects) —
+pinned by a regression test. A `DbError`/`ConstraintViolation` is an
+infrastructure failure and propagates mid-loop, aborting the request without
+rolling back the items already committed. The route then best-effort syncs
+GitHub after the items commit, so a bulk edit does not leave `pushed_*` stale
+and a bulk move still closes/opens linked issues.
 
 **Content-sync emission:** the Lexa→GitHub content push (`syncContentFromLexa`)
 emits NOTHING — it runs after the mutation commits and the mutation's
@@ -770,14 +782,14 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
     //   2. sha256 hex + magic-byte mime sniff (client mime NEVER stored).
     //   3. Dedupe lookup UNIQUE(project_id, sha256): hit → existing row
     //      UNCHANGED — no blob rewrite, no activity row.
-    //   4. Miss → storage.put("blobs/<sha256>") OUTSIDE the tx, then ONE
-    //      withTx: attachments INSERT + attachment_added activity row
+    //   4. Miss → storage.put("blobs/<sha256>") OUTSIDE the batch, then ONE
+    //      atomic batch: attachments INSERT + attachment_added activity row
     //      (task attachments only — wiki-page uploads emit nothing).
     //   5. filename sanitized (basename, control chars stripped, ≤255 chars).
     // remove(attachmentId, identity)
     //   Authority = uploader OR project admin (mirror CommentService.remove:
     //   superadmin / user_project_roles admin / team admin of owning org).
-    //   ONE withTx: DELETE row + attachment_removed activity (task only);
+    //   ONE atomic batch: DELETE row + attachment_removed activity (task only);
     //   AFTER commit, refcount(storage_key) === 0 → storage.delete best-effort
     //   (failure logs a warn — orphan blobs are harmless by design).
     // serve(attachmentId) → { row, bytes } for GET routes; missing blob →
@@ -815,14 +827,14 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
     // delete(id) → MilestoneNotFound | HasChildren — blocked while sprints
     //   reference the milestone (countSprints > 0); ON DELETE SET NULL on
     //   swimlanes.milestone_id is the safety net for direct DB writes only.
-    // archive(actor, id) → { milestone, activity } — CASCADE in ONE withTx:
-    //   milestone archivedAt + every sprint archived + each sprint's live
-    //   tasks archived, one `archived` activity row per task + one per
-    //   sprint + one per milestone (catalog msg.archived). Idempotent —
-    //   an already-archived milestone returns unchanged, no rows.
-    //   NO nested withTx (txDepth guard), NO service-to-service calls —
-    //   deps are repos + ActivityService only (TaskService/SwimlaneService
-    //   each wrap their own withTx; calling them here would nest).
+    // archive(actor, id) → { milestone, activity } — set-based atomic batch:
+    //   first an `INSERT ... SELECT` writes one `archived` activity row per
+    //   live task (catalog msg.archived, frozen at write time), then scoped
+    //   UPDATEs archive the tasks, the sprints, and the milestone — constant
+    //   statement count, fully atomic, any cascade size. Per-task activity
+    //   only (no per-sprint / per-milestone rows); `viaAssistant` passes
+    //   through. Idempotent — an already-archived milestone returns
+    //   unchanged, no rows.
     // restore(actor, id) → milestone only; its sprints stay archived
     //   (restore individually, mirroring lane-restore semantics).
     //   Idempotent.
@@ -1698,7 +1710,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `McpConnectFailed` | 502 | MCP connector could not connect or `tools/list` failed (folded into the test report); also a legacy stored `secret_ref` or an undecryptable managed blob — never a silent anonymous connect |
 | `McpToolCallFailed` | 502 | MCP tool invocation failed (tool-loop phase) |
 
-Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
+Note: `RowNotFound` (server/db/driver.ts) is a repo-level error with no
 `errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
 `INTERNAL` / 500.
 

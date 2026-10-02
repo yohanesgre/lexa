@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, batch, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { BatchStmt } from "../db/db";
 import type { ProviderKind, AssistantModelRow } from "../../shared/assistant";
 
@@ -81,24 +81,27 @@ export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("
         }).pipe(Effect.map(() => undefined)),
 
       reorder: (providerId: string, orderedIds: string[]): Effect.Effect<AssistantModelRow[], ConstraintViolation | DbError | RowNotFound> =>
-        withTx(db,
-          Effect.gen(function* () {
-            const rows = yield* queryAll<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, providerId);
-            const existingIds = new Set(rows.map((r) => r.id));
-            if (orderedIds.length !== rows.length || orderedIds.some((id) => !existingIds.has(id))) {
-              return yield* new RowNotFound({ table: "assistant_models" });
-            }
-            const tempOffset = 100000;
-            for (let i = 0; i < orderedIds.length; i++) {
-              yield* run(db, `UPDATE assistant_models SET priority = ? WHERE id = ? AND provider_id = ?`, tempOffset + i, orderedIds[i], providerId);
-            }
-            for (let i = 0; i < orderedIds.length; i++) {
-              yield* run(db, `UPDATE assistant_models SET priority = ? WHERE id = ? AND provider_id = ?`, i, orderedIds[i], providerId);
-            }
-            const updated = yield* queryAll<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, providerId);
-            return updated.map(toDomain);
-          })
-        ),
+        Effect.gen(function* () {
+          const rows = yield* queryAll<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, providerId);
+          const existingIds = new Set(rows.map((r) => r.id));
+          if (orderedIds.length !== rows.length || orderedIds.some((id) => !existingIds.has(id))) {
+            return yield* new RowNotFound({ table: "assistant_models" });
+          }
+          // Two-phase priority rewrite as one atomic batch: move every row to
+          // a temp offset first, then to its final index, so a swap never
+          // trips a (provider_id, priority) uniqueness check mid-sequence.
+          const tempOffset = 100000;
+          const stmts: BatchStmt[] = [];
+          for (let i = 0; i < orderedIds.length; i++) {
+            stmts.push({ sql: `UPDATE assistant_models SET priority = ? WHERE id = ? AND provider_id = ?`, params: [tempOffset + i, orderedIds[i]!, providerId] });
+          }
+          for (let i = 0; i < orderedIds.length; i++) {
+            stmts.push({ sql: `UPDATE assistant_models SET priority = ? WHERE id = ? AND provider_id = ?`, params: [i, orderedIds[i]!, providerId] });
+          }
+          if (stmts.length > 0) yield* batch(db, stmts);
+          const updated = yield* queryAll<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, providerId);
+          return updated.map(toDomain);
+        }),
     };
   }),
 }) {}
