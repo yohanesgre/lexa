@@ -1,19 +1,39 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { SwimlaneRow, rowToSwimlane } from "../../shared/db";
 import type { Swimlane } from "../../shared/types";
+
+export interface SwimlaneCreateInput {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  position: number;
+  kind?: "backlog" | "sprint";
+  dueAt?: string | null;
+  startAt?: string | null;
+  milestoneId?: string | null;
+}
+
+const SWIMLANE_INSERT_SQL = `INSERT INTO swimlanes (id, project_id, name, description, position, kind, due_at, start_at, milestone_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const swimlaneInsertParams = (input: SwimlaneCreateInput): SqlParam[] => [
+  input.id, input.projectId, input.name, input.description ?? "", input.position, input.kind ?? "sprint", input.dueAt ?? null, input.startAt ?? null, input.milestoneId ?? null
+];
 
 export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
     return {
-      create: (input: { id: string; projectId: string; name: string; description?: string; position: number; kind?: "backlog" | "sprint"; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, ConstraintViolation | DbError | RowNotFound> =>
+      createStmt: (input: SwimlaneCreateInput): BatchStmt => ({
+        sql: SWIMLANE_INSERT_SQL,
+        params: swimlaneInsertParams(input),
+      }),
+
+      create: (input: SwimlaneCreateInput): Effect.Effect<Swimlane, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
-          yield* run(db,
-            `INSERT INTO swimlanes (id, project_id, name, description, position, kind, due_at, start_at, milestone_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            input.id, input.projectId, input.name, input.description ?? "", input.position, input.kind ?? "sprint", input.dueAt ?? null, input.startAt ?? null, input.milestoneId ?? null
-          );
+          yield* run(db, SWIMLANE_INSERT_SQL, ...swimlaneInsertParams(input));
           return yield* queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, input.id)
             .pipe(Effect.map(rowToSwimlane));
         }),

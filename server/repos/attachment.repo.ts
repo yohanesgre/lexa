@@ -31,6 +31,11 @@ export interface AttachmentInsertInput {
 const ATTACHMENT_INSERT_SQL = `INSERT INTO attachments (id, project_id, task_id, wiki_page_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// Same insert, deduped on the natural key: a concurrent upload of identical
+// bytes loses the UNIQUE(project_id, sha256) race quietly, and `RETURNING id`
+// tells the caller whether THIS row was the winner.
+const ATTACHMENT_INSERT_DEDUPE_SQL = `${ATTACHMENT_INSERT_SQL} ON CONFLICT(project_id, sha256) DO NOTHING RETURNING id`;
+
 const attachmentInsertParams = (input: AttachmentInsertInput): SqlParam[] => [
   input.id, input.projectId, input.taskId, input.wikiPageId,
   input.filename, input.mimeType, input.sizeBytes,
@@ -44,6 +49,11 @@ export class AttachmentRepo extends Effect.Service<AttachmentRepo>()("Lexa/Attac
     return {
       insertStmt: (input: AttachmentInsertInput): BatchStmt => ({
         sql: ATTACHMENT_INSERT_SQL,
+        params: attachmentInsertParams(input),
+      }),
+
+      insertDedupeStmt: (input: AttachmentInsertInput): BatchStmt => ({
+        sql: ATTACHMENT_INSERT_DEDUPE_SQL,
         params: attachmentInsertParams(input),
       }),
 

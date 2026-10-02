@@ -1,17 +1,24 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { ProjectRow, rowToProject } from "../../shared/db";
 import type { DomainProject } from "../../shared/types";
+
+const PROJECT_INSERT_SQL = `INSERT INTO projects (id, name, slug, key, description, team_id) VALUES (?, ?, ?, ?, ?, ?)`;
 
 export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
     return {
+      createStmt: (input: { id: string; name: string; slug: string; key: string; description: string; teamId?: string | null }): BatchStmt => ({
+        sql: PROJECT_INSERT_SQL,
+        params: [input.id, input.name, input.slug, input.key, input.description, input.teamId ?? null],
+      }),
+
       create: (input: { id: string; name: string; slug: string; key: string; description: string; teamId?: string | null }): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(
           db,
-          `INSERT INTO projects (id, name, slug, key, description, team_id) VALUES (?, ?, ?, ?, ?, ?)`,
+          PROJECT_INSERT_SQL,
           input.id,
           input.name,
           input.slug,

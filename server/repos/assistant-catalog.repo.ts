@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, batch, type BatchStmt, type SqlParam, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { LexaAgentRow, LexaSkillRow, rowToLexaAgent, rowToLexaSkill } from "../../shared/db";
 import type { LexaAgent, LexaSkill } from "../../shared/types";
 
@@ -10,11 +10,37 @@ const AGENT_SELECT = `
   FROM lexa_agents fa
 `;
 
+const buildUpdateAgentStmt = (
+  id: string,
+  patch: { name?: string; description?: string; instructions?: string }
+): BatchStmt | null => {
+  const sets: string[] = [];
+  const params: SqlParam[] = [];
+  if (patch.name !== undefined) { sets.push("name = ?"); params.push(patch.name); }
+  if (patch.description !== undefined) { sets.push("description = ?"); params.push(patch.description); }
+  if (patch.instructions !== undefined) { sets.push("instructions = ?"); params.push(patch.instructions); }
+  if (sets.length === 0) return null;
+  sets.push("updated_at = datetime('now')");
+  params.push(id);
+  return { sql: `UPDATE lexa_agents SET ${sets.join(", ")} WHERE id = ?`, params };
+};
+
+export const buildReplaceAgentSkillsStmts = (agentId: string, skillIds: string[]): BatchStmt[] => [
+  { sql: `DELETE FROM lexa_agent_skills WHERE agent_id = ?`, params: [agentId] },
+  ...skillIds.map((skillId) => ({
+    sql: `INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES (?, ?)`,
+    params: [agentId, skillId],
+  })),
+];
+
 export class AssistantCatalogRepo extends Effect.Service<AssistantCatalogRepo>()("Lexa/AssistantCatalogRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
     return {
+      updateAgentStmt: buildUpdateAgentStmt,
+      replaceAgentSkillsStmts: buildReplaceAgentSkillsStmts,
+
       // ── Agents & skills (global rule bundles) ──
       listAgents: (): Effect.Effect<LexaAgent[], DbError> =>
         queryAll<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} ORDER BY fa.is_builtin DESC, fa.created_at`).pipe(
@@ -44,19 +70,13 @@ export class AssistantCatalogRepo extends Effect.Service<AssistantCatalogRepo>()
 
       updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaAgent, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
-          const sets: string[] = [];
-          const params: unknown[] = [];
-          if (patch.name !== undefined) { sets.push("name = ?"); params.push(patch.name); }
-          if (patch.description !== undefined) { sets.push("description = ?"); params.push(patch.description); }
-          if (patch.instructions !== undefined) { sets.push("instructions = ?"); params.push(patch.instructions); }
-          if (sets.length === 0) {
+          const stmt = buildUpdateAgentStmt(id, patch);
+          if (stmt === null) {
             return yield* queryFirst<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
               Effect.map((r) => rowToLexaAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
             );
           }
-          sets.push("updated_at = datetime('now')");
-          params.push(id);
-          yield* run(db, `UPDATE lexa_agents SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          yield* run(db, stmt.sql, ...stmt.params);
           return yield* queryFirst<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
             Effect.map((r) => rowToLexaAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
           );
@@ -68,13 +88,7 @@ export class AssistantCatalogRepo extends Effect.Service<AssistantCatalogRepo>()
         ),
 
       replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<void, ConstraintViolation | DbError> =>
-        batch(db, [
-          { sql: `DELETE FROM lexa_agent_skills WHERE agent_id = ?`, params: [agentId] },
-          ...skillIds.map((skillId) => ({
-            sql: `INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES (?, ?)`,
-            params: [agentId, skillId],
-          })),
-        ]),
+        batch(db, buildReplaceAgentSkillsStmts(agentId, skillIds)),
 
       listSkills: (): Effect.Effect<LexaSkill[], DbError> =>
         queryAll<LexaSkillRow>(db, `SELECT * FROM lexa_skills ORDER BY is_builtin DESC, created_at`).pipe(

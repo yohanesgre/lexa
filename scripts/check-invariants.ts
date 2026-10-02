@@ -24,7 +24,7 @@
  *   #9  Column→GitHub state via columns.github_state — no column.name read to map state.
  *   #10 Required fields enforced — required_fields check on create/move/update.
  *   #11 One-way link integrity — UNIQUE(issue_id) + per-repo guard preserved.
- *   #12 Emission invariant — every activityService.append paired with withTx/batch.
+ *   #12 Emission invariant — every task_activity emission flows into a withTx/batch.
  *   #13 Ticket keys immutable — no UPDATE tasks SET number=.
  *   #14 Milestone/sprint rules — ON DELETE SET NULL, archive cascade preserved.
  *
@@ -191,6 +191,103 @@ function enclosingHelperName(lines: string[], anchorLine: number): string | null
     }
   }
   return null;
+}
+
+/**
+ * The builder patterns the converted services use. An emission is inside an
+ * atomic unit when it is lexically inside a `withTx`/`batch`/`batchResults`
+ * call (array-literal form), or when its statement flows into one of those
+ * calls through a builder:
+ *   - `<arr>.push(<stmt>)` — the anchor line holds the push, or the push
+ *     opening is on the line above — where `<arr>` is passed to `batch()` /
+ *     `batchResults()`;
+ *   - `const <name>: BatchStmt = { ... }` where `<name>` is passed to one of
+ *     those calls.
+ * This is the shape every read-then-batch service uses, so the static check
+ * must follow the statement into its consuming batch call.
+ */
+/**
+ * The line span `[start, end]` of the innermost function body enclosing
+ * `anchorLine`. Scoping the builder-array flow to this span stops a
+ * `batch(stmts)` in a sibling function from satisfying an emission that
+ * pushes into a different, unbatched `stmts` in the same file. Coarse
+ * (brace/`=>`/`function` heuristics, no string awareness) like the rest of
+ * the scanner — false positives are accepted, missed violations are the
+ * failure mode.
+ */
+function enclosingFunctionSpan(lines: string[], anchorLine: number): { start: number; end: number } {
+  let depthBrace = 0;
+  let start = 0;
+  outer: for (let i = anchorLine - 1; i >= 0; i--) {
+    const t = lines[i]!;
+    if (/^\s*\/\//.test(t)) continue;
+    for (let k = t.length - 1; k >= 0; k--) {
+      const c = t[k]!;
+      if (c === "}") {
+        depthBrace++;
+      } else if (c === "{") {
+        if (depthBrace > 0) {
+          depthBrace--;
+        } else if (isFunctionBodyOpen(t, k)) {
+          start = i;
+          break outer;
+        }
+        // A non-function opener (object literal / block) — we are now outside
+        // it; stay at depth 0 and keep scanning up for the function body.
+      }
+    }
+  }
+  let depth = 0;
+  let end = lines.length - 1;
+  outer2: for (let i = start; i < lines.length; i++) {
+    const t = lines[i]!;
+    for (let k = 0; k < t.length; k++) {
+      const c = t[k]!;
+      if (c === "{") {
+        depth++;
+      } else if (c === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break outer2;
+        }
+      }
+    }
+  }
+  return { start, end };
+}
+
+/** True when the `{` at `col` in `line` opens a function body — an arrow
+ *  (`=> {`), a `function` body, or a method (`) {`) — not an `if`/`for`/
+ *  `while`/`switch`/`catch` block or an object literal. */
+function isFunctionBodyOpen(line: string, col: number): boolean {
+  const before = line.slice(0, col);
+  if (/=>\s*$/.test(before) || /\bfunction\b/.test(before)) return true;
+  if (/\)\s*$/.test(before) && !/\b(?:if|for|while|switch|catch)\s*\(/.test(before)) return true;
+  return false;
+}
+
+function emissionIsBatched(lines: string[], anchorLine: number): boolean {
+  if (lineIsInsideWithTx(anchorLine, lines)) return true;
+  let arr: string | null = null;
+  const pushOnLine = /([A-Za-z_$][\w$]*)\.push\(/.exec(lines[anchorLine] ?? "");
+  if (pushOnLine) arr = pushOnLine[1]!;
+  if (!arr) {
+    const pushAbove = /([A-Za-z_$][\w$]*)\.push\(/.exec(lines[anchorLine - 1] ?? "");
+    if (pushAbove) arr = pushAbove[1]!;
+  }
+  if (!arr) {
+    for (let j = anchorLine; j >= Math.max(0, anchorLine - 15); j--) {
+      const m = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*BatchStmt\b/.exec(lines[j]!);
+      if (m) { arr = m[1]!; break; }
+    }
+  }
+  if (!arr) return false;
+  // Scope the flow to the emission's enclosing function: a same-named array
+  // batched in a sibling function must not satisfy this emission.
+  const { start, end } = enclosingFunctionSpan(lines, anchorLine);
+  const body = lines.slice(start, end + 1).join("\n");
+  return new RegExp(`(?:withTx|batch|batchResults)\\s*\\([^;]*\\b${arr}\\b`).test(body);
 }
 
 /**
@@ -499,10 +596,13 @@ const results: Invariant[] = [];
   });
 }
 
-// #12 Emission invariant — every activityService.append paired with withTx.
-// Two-step: (a) check lexical containment directly; (b) for any append that
-// sits inside a helper definition, check whether any call to that helper is
-// inside a withTx — closure-transitively in-tx.
+// #12 Emission invariant — every task_activity emission paired with an atomic
+// batch. Emissions arrive as `activityService.append` / `appendStmt` (the
+// latter delegates to the repo builder), a direct `activityRepo.insertStmt`,
+// or a raw `INSERT INTO task_activity ...` statement object. Two-step: (a)
+// check lexical containment / builder-array flow directly; (b) for any append
+// that sits inside a helper definition, check whether any call to that helper
+// is inside a withTx — closure-transitively in-tx.
 {
   const serviceFiles = FILES.filter(
     (f) => f.includes(`${sep}services${sep}`) && f.endsWith(".ts") && !f.endsWith(".test.ts"),
@@ -513,15 +613,16 @@ const results: Invariant[] = [];
     const text = readText(f);
     const lines = text.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      // Activity emissions now arrive two ways: the service-level
+      // Activity emissions now arrive four ways: the service-level
       // `activityService.append` / `appendStmt` (the latter delegates to the
-      // repo builder) and a direct `activityRepo.insertStmt` inside a
-      // `batchResults([...])`. All must sit inside withTx/batch/batchResults.
-      if (!/(?:\.?activityService\.append(?:Stmt)?|\.?activityRepo\.insertStmt)\s*\(/.test(lines[i]!)) continue;
+      // repo builder), a direct `activityRepo.insertStmt`, and raw
+      // `INSERT INTO task_activity` statement literals. All must flow into a
+      // withTx/batch/batchResults unit.
+      if (!/(?:\.?activityService\.append(?:Stmt)?|\.?activityRepo\.insertStmt)\s*\(|INSERT\s+INTO\s+task_activity\b/.test(lines[i]!)) continue;
       // A builder *definition* body (`const xStmt = (...) => activityRepo.insertStmt(...)`)
-      // is not an emission — only call sites are.
+      // is not an emission — only call sites / statement literals are.
       if (/=>\s*$/.test((lines[i - 1] ?? "").trim())) continue;
-      if (lineIsInsideWithTx(i, lines)) { inTxCount++; continue; }
+      if (emissionIsBatched(lines, i)) { inTxCount++; continue; }
       // Helper resolution: walk backward to find the enclosing `const <name> =`
       // or `function <name>(` definition; if every call site of that name is
       // inside a withTx, count as in-tx.
@@ -535,10 +636,10 @@ const results: Invariant[] = [];
   }
   results.push({
     id: "#12",
-    title: "Emission invariant (activityService.append inside withTx/batch)",
+    title: "Emission invariant (task_activity write inside withTx/batch)",
     status: outOfTx.length === 0 ? "ok" : "fail",
     evidence: outOfTx.length === 0
-      ? `all ${inTxCount} activityService.append sites inside withTx/batch`
+      ? `all ${inTxCount} activity emissions inside withTx/batch`
       : `out-of-tx: ${outOfTx.slice(0, 5).join("; ")}`,
   });
 }

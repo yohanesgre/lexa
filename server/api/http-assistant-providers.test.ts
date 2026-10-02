@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll, afterEach, beforeAll } from "vitest";
+import { describe, it, expect, afterAll, afterEach, beforeAll, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,5 +149,54 @@ describe("providers API", () => {
   it("member key → 403", async () => {
     const res = await handler(authed("GET", "/api/admin/assistant/providers", undefined, MEMBER_KEY));
     expect(res.status).toBe(403);
+  });
+});
+
+describe("provider model sync", () => {
+  const catalog = (ids: string[]) =>
+    vi.fn(async () => new Response(JSON.stringify({ data: ids.map((id) => ({ id })) }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+
+  it("creates the catalog in one batch and kind-corrects existing rows on the next sync", async () => {
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
+    const { id } = await createProvider(PLAINTEXT_KEY);
+    vi.stubGlobal("fetch", catalog(["gpt-4o", "plain-model"]));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/models`));
+      expect(res.status).toBe(200);
+      const rows = db.prepare("SELECT model_id, kind, priority, enabled FROM assistant_models WHERE provider_id = ? ORDER BY priority").all(id) as Array<{ model_id: string; kind: string; priority: number; enabled: number }>;
+      expect(rows.map((r) => r.model_id)).toEqual(["gpt-4o", "plain-model"]);
+      expect(rows.map((r) => r.kind)).toEqual(["openai_responses", "openai_compatible"]);
+      expect(rows.every((r) => r.enabled === 0)).toBe(true);
+
+      db.prepare("UPDATE assistant_models SET kind = 'openai_responses' WHERE provider_id = ? AND model_id = 'plain-model'").run(id);
+      vi.stubGlobal("fetch", catalog(["gpt-4o", "plain-model"]));
+      const again = await handler(authed("POST", `/api/admin/assistant/providers/${id}/models`));
+      expect(again.status).toBe(200);
+      const after = db.prepare("SELECT COUNT(*) AS n FROM assistant_models WHERE provider_id = ?").get(id) as { n: number };
+      expect(after.n).toBe(2);
+      const corrected = db.prepare("SELECT kind FROM assistant_models WHERE provider_id = ? AND model_id = 'plain-model'").get(id) as { kind: string };
+      expect(corrected.kind).toBe("openai_compatible");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a forced failure in the update-or-create batch rolls every write back", async () => {
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
+    const { id } = await createProvider(PLAINTEXT_KEY);
+    db.exec("CREATE TRIGGER fail_model BEFORE INSERT ON assistant_models WHEN NEW.model_id = 'second-model' BEGIN SELECT RAISE(ABORT, 'forced model failure'); END");
+    vi.stubGlobal("fetch", catalog(["first-model", "second-model"]));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/models`));
+      expect(res.status).not.toBe(200);
+      const n = (db.prepare("SELECT COUNT(*) AS n FROM assistant_models WHERE provider_id = ?").get(id) as { n: number }).n;
+      expect(n).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      db.exec("DROP TRIGGER fail_model");
+    }
   });
 });

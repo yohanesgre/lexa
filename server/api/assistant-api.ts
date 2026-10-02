@@ -12,7 +12,7 @@ import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import { Cause, Effect, Either, Layer, Stream } from "effect";
 import { dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Db, queryAll, withTx, RowNotFound, DbError, type DbDriver } from "../db/db";
+import { Db, queryAll, batch, RowNotFound, DbError, type BatchStmt, type DbDriver } from "../db/db";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import {
   AssistantGenerationFailed,
@@ -818,42 +818,46 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
         const service = yield* AssistantProvidersService;
         const mRepo = yield* AssistantModelsRepo;
         const prov = yield* service.view(req.path.id);
-        const existing = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean }>)));
-        const enabledKind = (existing as Array<{ kind: string; enabled: boolean }>).find((m) => m.enabled)?.kind;
+        // One pre-read serves both the test config (kind/model) and the
+        // update-or-create set below.
+        const rows = (yield* mRepo.listByProvider(req.path.id).pipe(
+          Effect.catchAll(() => Effect.succeed([] as Array<{ id: string; modelId: string; priority: number; kind: string; enabled: boolean }>))
+        )) as Array<{ id: string; modelId: string; priority: number; kind: string; enabled: boolean }>;
+        const enabledKind = rows.find((m) => m.enabled)?.kind;
         const kind: ProviderConfig["kind"] = normalizeProviderKind(enabledKind ?? "openai_compatible");
-        const existingModels = existing as Array<{ modelId: string; enabled: boolean }>;
-        const firstEnabledModel = existingModels.find((m) => m.enabled)?.modelId;
-        const model = firstEnabledModel ?? existingModels[0]?.modelId ?? "test";
+        const firstEnabledModel = rows.find((m) => m.enabled)?.modelId;
+        const model = firstEnabledModel ?? rows[0]?.modelId ?? "test";
         const cfg: ProviderConfig = { kind, baseUrl: prov.baseUrl, apiKey: yield* service.resolveApiKey(req.path.id), model, sessionId: `provider-models-${req.path.id}` };
         const catalog = yield* Effect.tryPromise({
           try: () => listModels(cfg),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
         });
         const db = yield* Db;
-        yield* withTx(
-          db,
-          Effect.gen(function* () {
-            const rows = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ modelId: string; priority: number; kind: string; id: string }>)));
-            const existingById = new Map((rows as Array<{ modelId: string; kind: string; id: string }>).map((r) => [r.modelId, r]));
-            const maxPriority = (rows as Array<{ priority: number }>).reduce((m, r) => Math.max(m, r.priority), -1);
-            let nextPriority = maxPriority + 1;
-            for (const m of catalog.models) {
-              const inferred = inferModelKind(m.id);
-              const found = existingById.get(m.id);
-              if (found) {
-                if (normalizeProviderKind(found.kind) !== inferred) {
-                  yield* mRepo.update(found.id, { kind: inferred });
-                  assistantLog("WARN", "assistant model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });
-                }
-                continue;
-              }
-              const id = crypto.randomUUID();
-              yield* mRepo.create({ id, providerId: req.path.id, modelId: m.id, kind: inferred, priority: nextPriority++, enabled: false });
+        const existingById = new Map(rows.map((r) => [r.modelId, r]));
+        const maxPriority = rows.reduce((m, r) => Math.max(m, r.priority), -1);
+        let nextPriority = maxPriority + 1;
+        // All kind auto-corrections and new models ride ONE atomic batch. The
+        // read above sits outside the batch, so a concurrent reorder/model sync
+        // between the read and the batch can trip UNIQUE(provider_id, priority);
+        // the whole batch then rolls back and the request fails (retryable) —
+        // same contract as the other converted read-then-batch sites.
+        const stmts: BatchStmt[] = [];
+        for (const m of catalog.models) {
+          const inferred = inferModelKind(m.id);
+          const found = existingById.get(m.id);
+          if (found) {
+            if (normalizeProviderKind(found.kind) !== inferred) {
+              const stmt = mRepo.updateStmt(found.id, { kind: inferred });
+              if (stmt) stmts.push(stmt);
+              assistantLog("WARN", "assistant model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });
             }
-          })
-        );
-        const rows = yield* mRepo.listByProvider(req.path.id);
-        return { data: rows };
+            continue;
+          }
+          stmts.push(mRepo.createStmt({ id: crypto.randomUUID(), providerId: req.path.id, modelId: m.id, kind: inferred, priority: nextPriority++, enabled: false }));
+        }
+        if (stmts.length > 0) yield* batch(db, stmts);
+        const fresh = yield* mRepo.listByProvider(req.path.id);
+        return { data: fresh };
       }))
     )
     .handle("adminAssistantUpdateModel", (req) =>

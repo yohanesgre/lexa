@@ -102,6 +102,46 @@ describe("SourceService", () => {
     expect(acts.n).toBe(0);
   });
 
+  it("remove an existing task source writes the source_removed activity and deletes the row in one batch", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const { source } = await Effect.runPromise(svc.add(actor, {
+      projectId: "p1",
+      documentType: "task",
+      documentId: "t1",
+      kind: "wiki",
+      ref: "page",
+    }));
+
+    const { activity } = await Effect.runPromise(svc.remove(actor, "p1", source.id));
+    expect(activity).toHaveLength(1);
+    expect(activity[0]!.type).toBe("source_removed");
+
+    const gone = db.prepare("SELECT COUNT(*) AS n FROM document_sources WHERE id = ?").get(source.id) as { n: number };
+    expect(gone.n).toBe(0);
+    const acts = db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'source_removed'").get() as { n: number };
+    expect(acts.n).toBe(1);
+  });
+
+  it("remove a wiki source deletes the row and emits no task activity", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const { source } = await Effect.runPromise(svc.add(actor, {
+      projectId: "p1",
+      documentType: "wiki",
+      documentId: "w1",
+      kind: "wiki",
+      ref: "page",
+    }));
+
+    const { activity } = await Effect.runPromise(svc.remove(actor, "p1", source.id));
+    expect(activity).toEqual([]);
+    const gone = db.prepare("SELECT COUNT(*) AS n FROM document_sources WHERE id = ?").get(source.id) as { n: number };
+    expect(gone.n).toBe(0);
+    const acts = db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number };
+    expect(acts.n).toBe(0);
+  });
+
   it("remove after the row is gone → SourceNotFound with zero orphan activity", async () => {
     seed(db);
     const svc = makeService(db);

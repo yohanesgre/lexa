@@ -1,20 +1,30 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { TaskLinkRow, rowToTaskLink } from "../../shared/db";
 import type { TaskLink, TaskLinkRelation } from "../../shared/types";
+
+export interface TaskLinkInsertInput {
+  id: string;
+  projectId: string;
+  fromTaskId: string;
+  toTaskId: string;
+  relation: TaskLinkRelation;
+}
 
 export class TaskLinkRepo extends Effect.Service<TaskLinkRepo>()("Lexa/TaskLinkRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
+    const createStmt = (input: TaskLinkInsertInput): BatchStmt => ({
+      sql: `INSERT INTO task_links (id, project_id, from_task_id, to_task_id, relation)
+             VALUES (?, ?, ?, ?, ?)`,
+      params: [input.id, input.projectId, input.fromTaskId, input.toTaskId, input.relation],
+    });
+
     return {
-      create: (input: {
-        id: string;
-        projectId: string;
-        fromTaskId: string;
-        toTaskId: string;
-        relation: TaskLinkRelation;
-      }): Effect.Effect<TaskLink, ConstraintViolation | DbError> =>
+      createStmt,
+
+      create: (input: TaskLinkInsertInput): Effect.Effect<TaskLink, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* run(
             db,
@@ -70,6 +80,8 @@ export class TaskLinkRepo extends Effect.Service<TaskLinkRepo>()("Lexa/TaskLinkR
 
       delete: (id: string): Effect.Effect<number, ConstraintViolation | DbError> =>
         run(db, `DELETE FROM task_links WHERE id = ?`, id),
+
+      deleteStmt: (id: string): BatchStmt => ({ sql: `DELETE FROM task_links WHERE id = ?`, params: [id] }),
 
       // Task search for @-autocomplete (title match, exclude archived + self).
       search: (projectId: string, query: string, excludeTaskId: string, limit = 10): Effect.Effect<Array<{ id: string; title: string; column_name: string; type: string; priority: string }>, DbError> =>

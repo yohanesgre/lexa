@@ -1,37 +1,50 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { ColumnRow, rowToColumn } from "../../shared/db";
 import type { Column } from "../../shared/types";
+
+export interface ColumnCreateInput {
+  id: string;
+  projectId: string;
+  name: string;
+  position: number;
+  color?: string;
+  wipLimit?: number | null;
+  requiredFields?: string[];
+  githubState?: "open" | "closed" | null;
+}
+
+const COLUMN_INSERT_SQL = `INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const columnInsertParams = (input: ColumnCreateInput): unknown[] => [
+  input.id,
+  input.projectId,
+  input.name,
+  input.position,
+  input.color ?? "#6b7280",
+  input.wipLimit ?? null,
+  JSON.stringify(input.requiredFields ?? []),
+  input.githubState ?? null,
+];
 
 export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
     return {
-      create: (input: {
-        id: string;
-        projectId: string;
-        name: string;
-        position: number;
-        color?: string;
-        wipLimit?: number | null;
-        requiredFields?: string[];
-        githubState?: "open" | "closed" | null;
-      }): Effect.Effect<Column, ConstraintViolation | DbError | RowNotFound> =>
+      createStmt: (input: ColumnCreateInput): BatchStmt => ({
+        sql: COLUMN_INSERT_SQL,
+        params: columnInsertParams(input) as BatchStmt["params"],
+      }),
+
+      create: (input: ColumnCreateInput): Effect.Effect<Column, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* Effect.logDebug("[ColumnRepo] create");
           yield* run(
             db,
-            `INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            input.id,
-            input.projectId,
-            input.name,
-            input.position,
-            input.color ?? "#6b7280",
-            input.wipLimit ?? null,
-            JSON.stringify(input.requiredFields ?? []),
-            input.githubState ?? null
+            COLUMN_INSERT_SQL,
+            ...columnInsertParams(input)
           );
           return yield* queryFirst<ColumnRow>(db, `SELECT * FROM columns WHERE id = ?`, input.id).pipe(
             Effect.map(rowToColumn)

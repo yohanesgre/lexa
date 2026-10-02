@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Db, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/db";
-import type { BatchStmt } from "../db/db";
+import type { BatchStmt, SqlParam } from "../db/db";
 import type { ProviderKind, AssistantModelRow } from "../../shared/assistant";
 
 export interface AssistantModelDbRow {
@@ -25,16 +25,55 @@ function toDomain(row: AssistantModelDbRow): AssistantModelRow {
   };
 }
 
+export interface AssistantModelCreateInput {
+  id: string;
+  providerId: string;
+  modelId: string;
+  kind: ProviderKind;
+  priority?: number;
+  enabled?: boolean;
+}
+
+const MODEL_INSERT_SQL = `INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES (?, ?, ?, ?, ?, ?)`;
+
+const modelInsertParams = (input: AssistantModelCreateInput): SqlParam[] => [
+  input.id, input.providerId, input.modelId, input.kind, input.priority ?? 0, input.enabled === true ? 1 : 0,
+];
+
+// Builds the same dynamic UPDATE as `update` without executing it; `null` when
+// no column is set.
+const buildUpdateModelStmt = (
+  id: string,
+  patch: { modelId?: string; kind?: ProviderKind; priority?: number; enabled?: boolean }
+): BatchStmt | null => {
+  const sets: string[] = [];
+  const params: SqlParam[] = [];
+  if (patch.modelId !== undefined) { sets.push("model_id = ?"); params.push(patch.modelId); }
+  if (patch.kind !== undefined) { sets.push("kind = ?"); params.push(patch.kind); }
+  if (patch.priority !== undefined) { sets.push("priority = ?"); params.push(patch.priority); }
+  if (patch.enabled !== undefined) { sets.push("enabled = ?"); params.push(patch.enabled ? 1 : 0); }
+  if (sets.length === 0) return null;
+  params.push(id);
+  return { sql: `UPDATE assistant_models SET ${sets.join(", ")} WHERE id = ?`, params };
+};
+
 export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("Lexa/AssistantModelsRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
     return {
-      create: (input: { id: string; providerId: string; modelId: string; kind: ProviderKind; priority?: number; enabled?: boolean }): Effect.Effect<AssistantModelRow, ConstraintViolation | DbError | RowNotFound> =>
+      createStmt: (input: AssistantModelCreateInput): BatchStmt => ({
+        sql: MODEL_INSERT_SQL,
+        params: modelInsertParams(input),
+      }),
+
+      updateStmt: buildUpdateModelStmt,
+
+      create: (input: AssistantModelCreateInput): Effect.Effect<AssistantModelRow, ConstraintViolation | DbError | RowNotFound> =>
         run(
           db,
-          `INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES (?, ?, ?, ?, ?, ?)`,
-          input.id, input.providerId, input.modelId, input.kind, input.priority ?? 0, input.enabled === true ? 1 : 0
+          MODEL_INSERT_SQL,
+          ...modelInsertParams(input)
         ).pipe(
           Effect.flatMap(() => queryFirst<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE id = ?`, input.id)),
           Effect.map(toDomain)
@@ -54,15 +93,9 @@ export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("
 
       update: (id: string, patch: { modelId?: string; kind?: ProviderKind; priority?: number; enabled?: boolean }): Effect.Effect<AssistantModelRow, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
-          const sets: string[] = [];
-          const params: unknown[] = [];
-          if (patch.modelId !== undefined) { sets.push("model_id = ?"); params.push(patch.modelId); }
-          if (patch.kind !== undefined) { sets.push("kind = ?"); params.push(patch.kind); }
-          if (patch.priority !== undefined) { sets.push("priority = ?"); params.push(patch.priority); }
-          if (patch.enabled !== undefined) { sets.push("enabled = ?"); params.push(patch.enabled ? 1 : 0); }
-          if (sets.length === 0) return yield* Effect.map(queryFirst<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE id = ?`, id), toDomain);
-          params.push(id);
-          yield* run(db, `UPDATE assistant_models SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          const stmt = buildUpdateModelStmt(id, patch);
+          if (stmt === null) return yield* Effect.map(queryFirst<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE id = ?`, id), toDomain);
+          yield* run(db, stmt.sql, ...stmt.params);
           return yield* Effect.map(queryFirst<AssistantModelDbRow>(db, `SELECT * FROM assistant_models WHERE id = ?`, id), toDomain);
         }),
 

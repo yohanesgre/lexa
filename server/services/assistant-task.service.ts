@@ -14,7 +14,7 @@ import { AssistantCatalogRepo } from "../repos/assistant-catalog.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
-import { Db, DbError, RowNotFound, queryFirst, run, withTx, ConstraintViolation, type SqlParam } from "../db/db";
+import { Db, DbError, RowNotFound, batchResults, requireRow, ConstraintViolation, type BatchStmt, type SqlParam } from "../db/db";
 import { AssistantCatalogService } from "./assistant-catalog.service";
 import { AssistantJevService } from "./assistant-jev.service";
 import { loadTaskRepoContent } from "./assistant-repo-content";
@@ -51,7 +51,6 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     const threadRepo = yield* AssistantThreadRepo;
     const pendingWritesRepo = yield* AssistantPendingWritesRepo;
     const memoryRepo = yield* ProjectMemoryRepo;
-    const activityService = yield* ActivityService;
     const storage = yield* Storage;
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
@@ -90,18 +89,52 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         Effect.catchAll(() => Effect.succeed(agentId))
       );
 
-    // Terminal statuses emit a task-activity row (document_type 'task' only)
-    // in the SAME transaction as the status write. Message builds with the
-    // RESOLVED agent name.
-    const emitTerminal = (task: AssistantTask, type: ActivityType, buildMessage: (agentName: string) => string): Effect.Effect<void, never> =>
-      task.documentType === "task"
-        ? Effect.gen(function* () {
-            const name = yield* agentName(task.agentId);
-            yield* activityService.append(task.documentId, { kind: "agent", label: name }, type, buildMessage(name));
-          }).pipe(
-            Effect.catchAll(() => Effect.void) // a timeline row must never fail the stream round-trip
-          )
-        : Effect.void;
+    // Terminal status transitions. The pre-read gates existence (RowNotFound →
+    // AssistantTaskNotFound) and idempotency: a run already terminal for this
+    // target is a clean no-op with NO activity row (mirrors the Workers path
+    // `transitionAssistantRun`). Otherwise the status write and the terminal
+    // activity emission (document_type 'task' only) ride ONE atomic batch
+    // (invariant #12); the INSERT is gated on `changes() > 0` so a
+    // concurrently-lost transition cannot emit a spurious row. The loser of a
+    // concurrent terminal transition re-reads and returns the current row
+    // rather than a false NotFound. Message builds with the RESOLVED agent name.
+    const runTerminal = (
+      id: string,
+      status: AssistantTask["status"],
+      result: string | null,
+      error: string | null,
+      type: ActivityType,
+      buildMessage: (agentName: string) => string
+    ): Effect.Effect<AssistantTask, AssistantTaskNotFound | ConstraintViolation | DbError> =>
+      Effect.gen(function* () {
+        const task = yield* queueRepo.findTaskById(id).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
+        );
+        const transitionable =
+          status === "cancelled"
+            ? task.status === "queued" || task.status === "running"
+            : task.status === "running";
+        if (!transitionable) return task;
+        const name = yield* agentName(task.agentId);
+        const stmts: BatchStmt[] = [queueRepo.updateTaskStatusStmt(id, status, result, error)];
+        if (task.documentType === "task") {
+          stmts.push({
+            sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+                  SELECT ?, 'agent', ?, NULL, ?, ?, 0
+                  WHERE changes() > 0`,
+            params: [task.documentId, name, type, buildMessage(name)],
+          });
+        }
+        const results = yield* batchResults(db, stmts);
+        // A lost race (a concurrent writer transitioned the task first) leaves
+        // the conditional UPDATE with no RETURNING row. That is benign — the
+        // gated INSERT emitted no activity — so re-read and return the current
+        // row; only a task that is genuinely gone maps to NotFound.
+        yield* requireRow(results[0], "assistant-task.runTerminal").pipe(Effect.ignore);
+        return yield* queueRepo.findTaskById(id).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
+        );
+      });
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
     const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
@@ -208,32 +241,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
 
     // Terminal transitions. Local so the stream callbacks (onDone/onFail/
     // onCancel) and the public methods share one path; terminal activity
-    // emission stays inside the SAME transaction as the status write
-    // (invariant #12).
+    // emission stays in the SAME batch as the status write (invariant #12).
     const completeTask = (id: string, result: string) =>
-      withTx(db, Effect.gen(function* () {
-        const updated = yield* queueRepo.updateTaskStatus(id, "completed", result, null).pipe(
-          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
-        );
-        yield* emitTerminal(updated, "assistant_completed", (name) => msg.assistantCompleted(name));
-        return updated;
-      }));
+      runTerminal(id, "completed", result, null, "assistant_completed", (name) => msg.assistantCompleted(name));
     const failTask = (id: string, error: string) =>
-      withTx(db, Effect.gen(function* () {
-        const updated = yield* queueRepo.updateTaskStatus(id, "failed", null, error).pipe(
-          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
-        );
-        yield* emitTerminal(updated, "assistant_failed", () => msg.assistantFailed());
-        return updated;
-      }));
+      runTerminal(id, "failed", null, error, "assistant_failed", () => msg.assistantFailed());
     const cancelTask = (id: string) =>
-      withTx(db, Effect.gen(function* () {
-        const updated = yield* queueRepo.updateTaskStatus(id, "cancelled", null, null).pipe(
-          Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
-        );
-        yield* emitTerminal(updated, "assistant_cancelled", () => msg.assistantCancelled());
-        return updated;
-      }));
+      runTerminal(id, "cancelled", null, null, "assistant_cancelled", () => msg.assistantCancelled());
 
     return {
       activeTasks,

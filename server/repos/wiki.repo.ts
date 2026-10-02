@@ -1,13 +1,68 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta, WikiPageRevisionRow, rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/db";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
+
+const WIKI_REVISION_INSERT_SQL = `INSERT INTO wiki_page_revisions (id, page_id, title, slug, content, content_text, save_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+const WIKI_REVISION_PRUNE_SQL = `DELETE FROM wiki_page_revisions WHERE page_id = ? AND id NOT IN
+             (SELECT id FROM wiki_page_revisions WHERE page_id = ?
+              ORDER BY created_at DESC, id DESC LIMIT ?)`;
 
 export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
+    // Builds the same UPDATE as `update` without executing it; `null` when no
+    // column is set. `updated_at` is always bumped when a SET exists.
+    const updateStmt = (
+      id: string,
+      input: {
+        title?: string;
+        slug?: string;
+        content?: string;
+        contentText?: string;
+        parentId?: string | null;
+        position?: number;
+        updatedBy?: string | null;
+      }
+    ): BatchStmt | null => {
+      const sets: string[] = [];
+      const params: SqlParam[] = [];
+      if (input.title !== undefined) { sets.push("title = ?"); params.push(input.title); }
+      if (input.slug !== undefined) { sets.push("slug = ?"); params.push(input.slug); }
+      if (input.content !== undefined) { sets.push("content = ?"); params.push(input.content); }
+      if (input.contentText !== undefined) { sets.push("content_text = ?"); params.push(input.contentText); }
+      if (input.parentId !== undefined) { sets.push("parent_id = ?"); params.push(input.parentId); }
+      if (input.position !== undefined) { sets.push("position = ?"); params.push(input.position); }
+      if (input.updatedBy) { sets.push("updated_by = ?"); params.push(input.updatedBy); }
+      if (sets.length === 0) return null;
+      sets.push("updated_at = datetime('now')");
+      params.push(id);
+      return { sql: `UPDATE wiki_pages SET ${sets.join(", ")} WHERE id = ?`, params };
+    };
+
     return {
+      updateStmt,
+
+      createRevisionStmt: (
+        pageId: string,
+        title: string,
+        slug: string,
+        content: string,
+        contentText: string,
+        saveType: "autosave" | "manual"
+      ): BatchStmt => ({
+        sql: WIKI_REVISION_INSERT_SQL,
+        params: [crypto.randomUUID(), pageId, title, slug, content, contentText, saveType],
+      }),
+
+      pruneRevisionsStmt: (pageId: string, keep = 100): BatchStmt => ({
+        sql: WIKI_REVISION_PRUNE_SQL,
+        params: [pageId, pageId, keep],
+      }),
+
       create: (input: {
         id: string;
         projectId: string;
@@ -197,9 +252,7 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
       pruneRevisions: (pageId: string, keep = 100): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(
           db,
-          `DELETE FROM wiki_page_revisions WHERE page_id = ? AND id NOT IN
-             (SELECT id FROM wiki_page_revisions WHERE page_id = ?
-              ORDER BY created_at DESC, id DESC LIMIT ?)`,
+          WIKI_REVISION_PRUNE_SQL,
           pageId,
           pageId,
           keep
@@ -216,8 +269,7 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           const id = crypto.randomUUID();
           yield* run(
             db,
-            `INSERT INTO wiki_page_revisions (id, page_id, title, slug, content, content_text, save_type)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            WIKI_REVISION_INSERT_SQL,
             id, pageId, title, slug, content, contentText, saveType
           );
           return yield* queryFirst<WikiPageRevisionRow>(
