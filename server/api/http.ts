@@ -321,6 +321,8 @@ const SwimlaneSchema = Schema.Struct({
   startAt: Schema.NullOr(Schema.String),
   kind: Schema.Literal("backlog", "sprint"),
   milestoneId: Schema.NullOr(Schema.String),
+  tasksDone: Schema.Number,
+  tasksTotal: Schema.Number,
 });
 
 const SwimlaneDataResponse = Schema.Struct({ data: Schema.Array(SwimlaneSchema) });
@@ -356,6 +358,8 @@ const MilestoneSchema = Schema.Struct({
   archivedAt: Schema.NullOr(Schema.String),
   sprintCount: Schema.Number,
   archivedSprintCount: Schema.Number,
+  tasksDone: Schema.Number,
+  tasksTotal: Schema.Number,
 });
 
 const MilestoneDataResponse = Schema.Struct({ data: Schema.Array(MilestoneSchema) });

@@ -333,6 +333,8 @@ const ARCHIVED_LANE: Swimlane = {
   archivedAt: "2026-01-01T00:00:00.000Z",
   kind: "sprint",
   milestoneId: null,
+  tasksDone: 0,
+  tasksTotal: 0,
 };
 
 describe("SwimlaneHeader archived lane", () => {
@@ -362,6 +364,8 @@ const LANE: Swimlane = {
   archivedAt: null,
   kind: "sprint",
   milestoneId: null,
+  tasksDone: 0,
+  tasksTotal: 0,
 };
 
 describe("SwimlaneForm delete", () => {
@@ -406,8 +410,8 @@ describe("SwimlaneForm delete", () => {
 });
 
 const SELECTOR_MILESTONES: Milestone[] = [
-  { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 4, archivedSprintCount: 2 },
-  { id: "m2", projectId: "p1", name: "Beta milestone", description: "", position: 1, dueAt: null, archivedAt: null, sprintCount: 3, archivedSprintCount: 1 },
+  { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 4, archivedSprintCount: 2, tasksDone: 0, tasksTotal: 0 },
+  { id: "m2", projectId: "p1", name: "Beta milestone", description: "", position: 1, dueAt: null, archivedAt: null, sprintCount: 3, archivedSprintCount: 1, tasksDone: 0, tasksTotal: 0 },
 ];
 
 describe("MilestoneSelector light-dismiss", () => {

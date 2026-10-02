@@ -184,14 +184,16 @@ describe("TimelineTab", () => {
     archivedAt: null,
     sprintCount: 1,
     archivedSprintCount: 0,
+    tasksDone: 0,
+    tasksTotal: 0,
   };
 
   function makeBoard(): Board {
     return makeBoardFixture({
       swimlanes: [
-        { id: "s1", projectId: "p1", name: "Sprint 7", description: "", position: 0, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m1" },
-        { id: "s9", projectId: "p1", name: "Backlog", description: "", position: 1, dueAt: null, startAt: null, archivedAt: null, kind: "backlog", milestoneId: null },
-        { id: "s10", projectId: "p1", name: "Old lane", description: "", position: 2, dueAt: null, startAt: null, archivedAt: "2026-01-01", kind: "sprint", milestoneId: null },
+        { id: "s1", projectId: "p1", name: "Sprint 7", description: "", position: 0, dueAt: null, startAt: null, archivedAt: null, kind: "sprint", milestoneId: "m1", tasksDone: 0, tasksTotal: 0 },
+        { id: "s9", projectId: "p1", name: "Backlog", description: "", position: 1, dueAt: null, startAt: null, archivedAt: null, kind: "backlog", milestoneId: null, tasksDone: 0, tasksTotal: 0 },
+        { id: "s10", projectId: "p1", name: "Old lane", description: "", position: 2, dueAt: null, startAt: null, archivedAt: "2026-01-01", kind: "sprint", milestoneId: null, tasksDone: 0, tasksTotal: 0 },
       ],
       milestones: [MILESTONE],
     });

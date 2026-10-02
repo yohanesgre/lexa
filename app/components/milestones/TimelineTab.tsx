@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUpdateSwimlane, useUpdateMilestone, useBoard, useDeleteSwimlane, useDeleteMilestone } from "../../lib/queries";
-import { sprintProgress } from "../../lib/progress";
 import type { Board, Milestone, Swimlane } from "../../../shared/types";
 import { GanttChart, type TimelineLane } from "./GanttChart";
 import { MilestoneForm } from "./MilestoneForm";
@@ -28,8 +27,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
     const out: TimelineLane[] = [];
     for (const lane of b.swimlanes) {
       if (lane.archivedAt || (lane.kind !== "sprint" && lane.kind !== "backlog")) continue;
-      const p = sprintProgress(b, lane.id);
-      out.push({ lane, done: p.done, total: p.total });
+      out.push({ lane, done: lane.tasksDone, total: lane.tasksTotal });
     }
     return out;
   }, [b]);
@@ -157,7 +155,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
       {deleteTarget && (
         <DeleteSwimlaneDialog
           target={deleteTarget}
-          taskCount={b ? b.tasks.filter((t) => t.swimlaneId === deleteTarget.id).length : 0}
+          taskCount={deleteTarget.tasksTotal}
           onClose={() => setDeleteTarget(null)}
           onDelete={() => {
             deleteSwimlane.mutate({ id: deleteTarget.id });

@@ -1,23 +1,21 @@
 import { Link } from "@tanstack/react-router";
 import { formatDueChip } from "../../lib/dates";
-import { milestoneTaskProgress } from "../../lib/progress";
 import { cn } from "../ui/cn";
 import { MilestoneProgress } from "./MilestoneProgress";
-import type { Board, Milestone } from "../../../shared/types";
+import type { Milestone } from "../../../shared/types";
 
 interface MilestoneCardProps {
   slug: string;
   milestone: Milestone | null;
-  board: Board | undefined;
 }
 
 // Read-only active-milestone summary card (wireframe home.html §6.6): name,
 // sprints archived X/Y + tasks-done progress, due date (red when overdue),
 // "Manage milestones" link. Hidden entirely when there's no active milestone.
-export function MilestoneCard({ slug, milestone, board }: MilestoneCardProps) {
+export function MilestoneCard({ slug, milestone }: MilestoneCardProps) {
   if (!milestone) return null;
   const due = milestone.dueAt ? formatDueChip(milestone.dueAt) : null;
-  const tasks = board ? milestoneTaskProgress(board, milestone.id) : { done: 0, total: 0 };
+  const tasks = { done: milestone.tasksDone, total: milestone.tasksTotal };
   const overdue = due?.overdue ?? false;
 
   return (

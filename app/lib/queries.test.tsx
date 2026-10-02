@@ -20,7 +20,7 @@ const { fetchMock, routes, mockFetch } = createFetchMock();
 
 const PROJECT: Project = { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
-const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
+const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog", tasksDone: 0, tasksTotal: 0 };
 const FIELD_CONFIG: FieldConfig = {
   priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }],
   types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }],

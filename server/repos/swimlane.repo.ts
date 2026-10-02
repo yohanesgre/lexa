@@ -17,6 +17,18 @@ export interface SwimlaneCreateInput {
 
 const SWIMLANE_INSERT_SQL = `INSERT INTO swimlanes (id, project_id, name, description, position, kind, due_at, start_at, milestone_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// Every swimlane read (list AND mutation readbacks) carries the task counts
+// so the API is the single source of truth for X/Y progress — toggle-independent
+// (archived tasks count done, archived lanes keep their totals).
+export const SWIMLANE_SELECT_WITH_COUNTS = `
+SELECT s.*,
+  (SELECT COUNT(*) FROM tasks t
+     WHERE t.project_id = s.project_id AND t.swimlane_id = s.id) AS tasks_total,
+  (SELECT COUNT(*) FROM tasks t JOIN columns c ON c.id = t.column_id
+     WHERE t.project_id = s.project_id AND t.swimlane_id = s.id
+       AND (t.archived_at IS NOT NULL OR c.is_done = 1)) AS tasks_done
+FROM swimlanes s`;
+
 const swimlaneInsertParams = (input: SwimlaneCreateInput): SqlParam[] => [
   input.id, input.projectId, input.name, input.description ?? "", input.position, input.kind ?? "sprint", input.dueAt ?? null, input.startAt ?? null, input.milestoneId ?? null
 ];
@@ -34,19 +46,19 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
       create: (input: SwimlaneCreateInput): Effect.Effect<Swimlane, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* run(db, SWIMLANE_INSERT_SQL, ...swimlaneInsertParams(input));
-          return yield* queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, input.id)
+          return yield* queryFirst<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.id = ?`, input.id)
             .pipe(Effect.map(rowToSwimlane));
         }),
 
       findById: (id: string): Effect.Effect<Swimlane, RowNotFound | DbError> =>
-        queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, id).pipe(Effect.map(rowToSwimlane)),
+        queryFirst<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.id = ?`, id).pipe(Effect.map(rowToSwimlane)),
 
       findBacklog: (projectId: string): Effect.Effect<Swimlane, RowNotFound | DbError> =>
-        queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE project_id = ? AND kind = 'backlog'`, projectId)
+        queryFirst<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.project_id = ? AND s.kind = 'backlog'`, projectId)
           .pipe(Effect.map(rowToSwimlane)),
 
       findByProject: (projectId: string): Effect.Effect<Swimlane[], DbError> =>
-        queryAll<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE project_id = ? ORDER BY position`, projectId)
+        queryAll<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.project_id = ? ORDER BY s.position`, projectId)
           .pipe(Effect.map((rows) => rows.map(rowToSwimlane))),
 
       update: (id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, RowNotFound | DbError | ConstraintViolation> => {
@@ -59,10 +71,10 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
         if (input.startAt !== undefined) { sets.push("start_at = ?"); params.push(input.startAt); }
         if (input.milestoneId !== undefined) { sets.push("milestone_id = ?"); params.push(input.milestoneId); }
         if (sets.length === 0)
-          return queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, id).pipe(Effect.map(rowToSwimlane));
+          return queryFirst<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.id = ?`, id).pipe(Effect.map(rowToSwimlane));
         params.push(id);
         return run(db, `UPDATE swimlanes SET ${sets.join(", ")} WHERE id = ?`, ...params)
-          .pipe(Effect.flatMap(() => queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, id)))
+          .pipe(Effect.flatMap(() => queryFirst<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.id = ?`, id)))
           .pipe(Effect.map(rowToSwimlane));
       },
 
@@ -73,7 +85,7 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
         run(db, `UPDATE swimlanes SET archived_at = ? WHERE id = ?`, archivedAt, id)
           .pipe(
             Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: "Database error", cause: e })),
-            Effect.flatMap(() => queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, id))
+            Effect.flatMap(() => queryFirst<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.id = ?`, id))
           )
           .pipe(Effect.map(rowToSwimlane)),
 
