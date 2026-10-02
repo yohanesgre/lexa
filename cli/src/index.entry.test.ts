@@ -5,8 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NotLoggedIn, devicePollDeadline, nextDevicePollDelayMs } from "./index";
 import { cleanupIsolationDirs, freshLexaDir, runCli } from "./test-utils";
@@ -47,29 +46,32 @@ describe("entry point (bun subprocess)", () => {
     expect(r.stderr).toContain("Not logged in. Run: lx login");
   });
 
-  it("github status --local without login is now gated (NotLoggedIn + exit 1)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "lexa-index-"));
-    const pem = join(dir, "app-key.pem");
-    writeFileSync(pem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n", { mode: 0o600 });
-    writeFileSync(join(dir, ".env"), `GITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY_FILE=${pem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
-    const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")], { LEXA_URL: "", LEXA_API_KEY: "" });
+  it("github status --local is rejected with the web-app message (exit 1)", async () => {
+    const r = await runCli(["github", "status", "--local"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Not logged in. Run: lx login");
-    rmSync(dir, { recursive: true, force: true });
+    expect(r.stderr).toContain("--local/--env-file were removed");
+    expect(r.stderr).toContain("Run: lx github setup");
   });
 
-  it("github status --local validates an env file with credentials present", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "lexa-index-"));
-    const pem = join(dir, "app-key.pem");
-    writeFileSync(pem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n", { mode: 0o600 });
-    writeFileSync(join(dir, ".env"), `GITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY_FILE=${pem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
-    const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")], {
+  it("github status --local is rejected even with credentials present", async () => {
+    const r = await runCli(["github", "status", "--local"], {
       LEXA_URL: "http://127.0.0.1:1",
       LEXA_API_KEY: "lxk_key_1234567890123456789012345678901234567890",
     });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("Config looks complete");
-    rmSync(dir, { recursive: true, force: true });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("--local/--env-file were removed");
+  });
+
+  it("github status --env-file is rejected with the web-app message (exit 1)", async () => {
+    const r = await runCli(["github", "status", "--env-file", "/tmp/lexa.env"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("--local/--env-file were removed");
+  });
+
+  it("github setup --local is rejected with the web-app message (exit 1)", async () => {
+    const r = await runCli(["github", "setup", "--local"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("--local/--env-file were removed");
   });
 
   it("github status without login fails pointing at login", async () => {
