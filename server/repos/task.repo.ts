@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, batch, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { TaskRow, rowToTask, rowToTaskSlim } from "../../shared/db";
 import type { Task } from "../../shared/types";
 
@@ -387,6 +387,11 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           link.title ?? null
         ).pipe(Effect.map(() => undefined)),
 
+      setGithubLinkStmt: (taskId: string, link: { issueId: string; issueNumber: number; repo: string; title?: string | null }): BatchStmt => ({
+        sql: `INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, issue_title) VALUES (?, ?, ?, ?, ?)`,
+        params: [taskId, link.issueId, link.issueNumber, link.repo, link.title ?? null],
+      }),
+
       // Refreshes the last-known upstream title (webhook edit / post-push).
       // Strict: a missing link row is RowNotFound, never a silent no-op.
       setGithubIssueTitle: (taskId: string, issueId: string, title: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
@@ -448,6 +453,11 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           taskId,
           issueId
         ).pipe(Effect.map(() => undefined)),
+
+      unlinkGithubIssueStmt: (taskId: string, issueId: string): BatchStmt => ({
+        sql: `DELETE FROM task_github_issues WHERE task_id = ? AND issue_id = ?`,
+        params: [taskId, issueId],
+      }),
 
       createSubtaskLink: (projectId: string, fromTaskId: string, toTaskId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(

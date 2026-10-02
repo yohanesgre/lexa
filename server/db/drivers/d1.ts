@@ -12,21 +12,32 @@
 //     INSERT and read the first column via `first()`. The `run()` result
 //     has `lastInsertRowid` as `undefined`.
 //   * `batch()` calls the binding's `batch()` directly, with a 30s
-//     budget (D1 raises a `BatchTimeout` if `meta?.duration > 28_000`).
+//     budget. Error semantics (all post-commit on the binding's side):
+//       - any statement error aborts/rolls back the whole batch; the throw
+//         is mapped by `mapDbError` (ConstraintViolation, incl.
+//         `isPositionConflict`, else DbError);
+//       - a returned `success=false` item → DbError (defensive — real D1
+//         throws instead);
+//       - summed `meta.duration > 28_000` → BatchTimeout, raised AFTER the
+//         batch returned. This means the batch MAY HAVE COMMITTED — do not
+//         blindly retry. Only `ConstraintViolation.isPositionConflict` is
+//         retryable (the abort precedes commit). No behavior change here.
+//     Bun: `db.transaction` wraps the whole array; throw → rollback; mapped
+//     the same. No BatchTimeout on Bun.
 //
 // The driver takes a `D1Database` typed via `unknown` so this file
 // compiles without pulling in `@cloudflare/workers-types` at the type
 // level — the entry on Workers narrows `env.DB` to `D1Database` and
 // hands the instance to this factory.
 
-import type { DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver";
-import { BatchTimeout, ConstraintViolation, DbError, RowNotFound } from "../driver";
+import type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver";
+import { BatchTimeout, ConstraintViolation, DbError, RowNotFound, mapDbError } from "../driver";
 
 /** D1 binding surface — the subset the driver calls. Matches
  *  `@cloudflare/workers-types` `D1Database` + `D1PreparedStatement`. */
 export interface D1Like {
   prepare(query: string): D1PreparedLike;
-  batch<T = unknown>(statements: D1BatchItem[]): Promise<D1BatchResult<T>>;
+  batch(statements: D1BatchItem[]): Promise<D1BatchItemResult[]>;
 }
 
 export interface D1PreparedLike {
@@ -41,11 +52,10 @@ export interface D1BatchItem {
   params?: unknown[];
 }
 
-export interface D1BatchResult<T> {
-  length: number;
-  duration: number;
-  results: T[];
+export interface D1BatchItemResult {
   success: boolean;
+  results?: unknown[];
+  meta?: { changes?: number; duration?: number; last_row_id?: number };
 }
 
 class D1Stmt implements DbStmt {
@@ -71,18 +81,29 @@ export function createD1Driver(d1: D1Like): DbDriver {
     prepare(sql: string): DbStmt {
       return new D1Stmt(d1.prepare(sql));
     },
-    async batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<void> {
-      const result = await d1.batch(
-        stmts.map((s) => ({ sql: s.sql, params: s.params })),
-      );
-      // D1's batch enforces a 30s wall-clock ceiling per call. Surface
-      // a typed `BatchTimeout` if the meta duration approaches the cap.
-      if (result.duration > 28_000) {
-        throw new BatchTimeout({ message: `D1 batch exceeded 28s budget (${result.duration}ms)` });
+    async batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<BatchStmtResult[]> {
+      let items: D1BatchItemResult[];
+      try {
+        items = await d1.batch(stmts.map((s) => ({ sql: s.sql, params: s.params })));
+      } catch (e) {
+        throw mapDbError(e);
       }
-      if (!result.success) {
-        throw new DbError({ message: "D1 batch returned success=false" });
+      // D1's batch enforces a 30s wall-clock ceiling per call. Surface a
+      // typed `BatchTimeout` if the summed meta duration approaches the cap.
+      // Post-commit ambiguity: this throw happens after the binding returned,
+      // so the batch MAY HAVE COMMITTED — callers must not blindly retry.
+      const duration = items.reduce((sum, r) => sum + (r.meta?.duration ?? 0), 0);
+      if (duration > 28_000) {
+        throw new BatchTimeout({ message: `D1 batch exceeded 28s budget (${duration}ms)` });
       }
+      for (const r of items) {
+        if (!r.success) throw new DbError({ message: "D1 batch returned success=false" });
+      }
+      return items.map((r): BatchStmtResult => ({
+        results: (r.results ?? []) as LexaRow[],
+        changes: r.meta?.changes ?? 0,
+        ...(r.meta?.last_row_id !== undefined ? { lastInsertRowid: r.meta.last_row_id } : {}),
+      }));
     },
     async transaction<T>(): Promise<T> {
       // D1 has no BEGIN/COMMIT. Atomicity is expressed via `batch()`

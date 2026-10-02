@@ -1,7 +1,24 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, type BatchStmt, type SqlParam, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { DocumentSourceRow, rowToDocumentSource } from "../../shared/db";
 import type { DocumentSource } from "../../shared/types";
+
+export interface SourceCreateInput {
+  id: string;
+  projectId: string;
+  documentType: "task" | "wiki";
+  documentId: string;
+  kind: "wiki" | "external";
+  title: string;
+  ref: string;
+}
+
+const SOURCE_CREATE_SQL = `INSERT INTO document_sources (id, project_id, document_type, document_id, kind, title, ref)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+const sourceCreateParams = (input: SourceCreateInput): SqlParam[] => [
+  input.id, input.projectId, input.documentType, input.documentId, input.kind, input.title, input.ref,
+];
 
 export class SourceRepo extends Effect.Service<SourceRepo>()("Lexa/SourceRepo", {
   effect: Effect.gen(function* () {
@@ -22,31 +39,19 @@ export class SourceRepo extends Effect.Service<SourceRepo>()("Lexa/SourceRepo", 
           documentId
         ).pipe(Effect.map((rows) => rows.map(rowToDocumentSource))),
 
-      create: (input: {
-        id: string;
-        projectId: string;
-        documentType: "task" | "wiki";
-        documentId: string;
-        kind: "wiki" | "external";
-        title: string;
-        ref: string;
-      }): Effect.Effect<DocumentSource, ConstraintViolation | RowNotFound | DbError> =>
+      createStmt: (input: SourceCreateInput): BatchStmt => ({
+        sql: SOURCE_CREATE_SQL,
+        params: sourceCreateParams(input),
+      }),
+
+      create: (input: SourceCreateInput): Effect.Effect<DocumentSource, ConstraintViolation | RowNotFound | DbError> =>
         Effect.gen(function* () {
-          yield* run(
-            db,
-            `INSERT INTO document_sources (id, project_id, document_type, document_id, kind, title, ref)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            input.id,
-            input.projectId,
-            input.documentType,
-            input.documentId,
-            input.kind,
-            input.title,
-            input.ref
-          );
+          yield* run(db, SOURCE_CREATE_SQL, ...sourceCreateParams(input));
           const row = yield* queryFirst<DocumentSourceRow>(db, `SELECT * FROM document_sources WHERE id = ?`, input.id);
           return rowToDocumentSource(row);
         }),
+
+      deleteStmt: (id: string): BatchStmt => ({ sql: `DELETE FROM document_sources WHERE id = ?`, params: [id] }),
 
       delete: (id: string): Effect.Effect<number, ConstraintViolation | DbError> =>
         run(db, `DELETE FROM document_sources WHERE id = ?`, id),

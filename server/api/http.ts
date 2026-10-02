@@ -5,11 +5,12 @@ import { Cause, Effect, Either, Layer, ManagedRuntime, Schema, Stream } from "ef
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Db, run, queryAll, withTx, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
+import { Db, run, queryAll, batch, batchResults, type BatchStmt, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
+import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
-import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
+import { getSettingAsync, setSettingAsync, deleteSettingAsync, settingUpsertStmt, settingDeleteStmt, invalidateSettingsCache } from "./workers-ports";
 import { ProjectNotFound, WikiPageNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, AssistantTaskActive, AssistantThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed, HasChildren, TasksBulkDisabled } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
@@ -23,7 +24,7 @@ import { auth } from "../auth";
 import { createApiMiddleware, type MiddlewareSession } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDbAsync } from "./rate-limit";
 import { syncGitHubConfigFromDbAsync, resetGithubCaches } from "../github/client";
-import { deleteGithubSecret, githubSettingsSummary, storeGithubAppCredentials } from "../github/config-store";
+import { deleteGithubSecretStmt, githubSettingsSummary, storeGithubAppCredentials } from "../github/config-store";
 import { buildManifest, createManifestState, consumeManifestState, exchangeManifestCode, assertRequiredPermissions, manifestPostUrl } from "../github/manifest";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
@@ -2470,17 +2471,17 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const task = yield* requireTaskInProject(req.path.slug, req.path.id);
         const issue = task.githubs.find((g) => g.issueId === req.path.issueId);
         const db = yield* Db;
-        // Does NOT close or delete the GitHub issue.
-        const ev = yield* withTx(db, Effect.gen(function* () {
-          yield* taskRepo.unlinkGithubIssue(task.id, req.path.issueId);
-          if (issue) {
-            // Handler-level emission — the unlink lives in the route, not a
-            // service (documented deviation: services-only rule).
-            return yield* activityService.append(task.id, actorFromIdentity(identity), "github_unlinked",
-              msg.githubUnlinked(issue.repo, issue.issueNumber));
-          }
-          return null;
-        }));
+        // Does NOT close or delete the GitHub issue. Unlink + optional
+        // activity row run as one atomic batch.
+        const stmts: BatchStmt[] = [taskRepo.unlinkGithubIssueStmt(task.id, req.path.issueId)];
+        if (issue) {
+          // Handler-level emission — the unlink lives in the route, not a
+          // service (documented deviation: services-only rule).
+          stmts.push(activityService.appendStmt(task.id, actorFromIdentity(identity), "github_unlinked",
+            msg.githubUnlinked(issue.repo, issue.issueNumber)));
+        }
+        const [, activityRes] = yield* batchResults(db, stmts);
+        const ev = issue ? rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow) : null;
         const updated = yield* taskService.getById(task.id);
         return { data: formatTask(updated), activity: ev ? activityPayload([ev]) : [] };
       }))
@@ -3051,21 +3052,26 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
           else yield* setSettingAsync(db, "github_app_slug", appSlug.trim());
         }
         if (privateKey !== undefined) {
-          // Write the plaintext row FIRST, then drop the encrypted one inside
-          // the same transaction: a failed write must never lose the only copy
-          // of the credential.
-          yield* withTx(db, Effect.gen(function* () {
-            if (privateKey.trim() === "") yield* deleteSettingAsync(db, "github_private_key");
-            else yield* setSettingAsync(db, "github_private_key", privateKey);
-            yield* deleteGithubSecret(db, "private_key");
-          }));
+          // Write the plaintext row and drop the encrypted one as ONE atomic
+          // batch: a failed write must never lose the only copy of the
+          // credential. Invalidate the settings cache after commit (the
+          // set/delete helpers' invalidation tap is bypassed by the batch).
+          yield* batch(db, [
+            privateKey.trim() === ""
+              ? settingDeleteStmt("github_private_key")
+              : settingUpsertStmt("github_private_key", privateKey),
+            deleteGithubSecretStmt("private_key"),
+          ]);
+          invalidateSettingsCache(["github_private_key"]);
         }
         if (webhookSecret !== undefined) {
-          yield* withTx(db, Effect.gen(function* () {
-            if (webhookSecret.trim() === "") yield* deleteSettingAsync(db, "github_webhook_secret");
-            else yield* setSettingAsync(db, "github_webhook_secret", webhookSecret.trim());
-            yield* deleteGithubSecret(db, "webhook_secret");
-          }));
+          yield* batch(db, [
+            webhookSecret.trim() === ""
+              ? settingDeleteStmt("github_webhook_secret")
+              : settingUpsertStmt("github_webhook_secret", webhookSecret.trim()),
+            deleteGithubSecretStmt("webhook_secret"),
+          ]);
+          invalidateSettingsCache(["github_webhook_secret"]);
         }
         yield* syncGitHubConfigFromDbAsync(db, env);
         resetGithubCaches();

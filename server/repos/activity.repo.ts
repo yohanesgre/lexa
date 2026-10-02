@@ -1,25 +1,40 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, runReturning, DbError, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, runReturning, type BatchStmt, type SqlParam, DbError, ConstraintViolation } from "../db/db";
 import { ActivityRow, rowToActivityEvent } from "../../shared/db";
 import type { ActivityEvent, ActivityType, ActorKind } from "../../shared/types";
+
+export interface ActivityInsertInput {
+  taskId: string; actorKind: ActorKind; actorLabel: string;
+  actorUserId: string | null; type: ActivityType; message: string;
+  viaAssistant?: boolean;
+}
+
+const ACTIVITY_INSERT_SQL = `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`;
+
+const activityInsertParams = (input: ActivityInsertInput): SqlParam[] => [
+  input.taskId, input.actorKind, input.actorLabel, input.actorUserId,
+  input.type, input.message, input.viaAssistant === true ? 1 : 0,
+];
 
 export class ActivityRepo extends Effect.Service<ActivityRepo>()("Lexa/ActivityRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
 
-    const insert = (input: {
-      taskId: string; actorKind: ActorKind; actorLabel: string;
-      actorUserId: string | null; type: ActivityType; message: string;
-      viaAssistant?: boolean;
-    }): Effect.Effect<ActivityEvent, DbError | ConstraintViolation> =>
+    /** Write-only builder for `batch()`/`batchResults()` — RETURNING kept so
+     *  the caller can read the inserted row back from the positional results. */
+    const insertStmt = (input: ActivityInsertInput): BatchStmt => ({
+      sql: ACTIVITY_INSERT_SQL,
+      params: activityInsertParams(input),
+    });
+
+    const insert = (input: ActivityInsertInput): Effect.Effect<ActivityEvent, DbError | ConstraintViolation> =>
       Effect.gen(function* () {
         const row = yield* runReturning<ActivityRow>(
           db,
-          `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`,
-          input.taskId, input.actorKind, input.actorLabel, input.actorUserId,
-          input.type, input.message, input.viaAssistant === true ? 1 : 0
+          ACTIVITY_INSERT_SQL,
+          ...activityInsertParams(input)
         ).pipe(
           Effect.catchTag("RowNotFound", () => Effect.fail(new DbError({ message: "activity row vanished after insert" })))
         );
@@ -39,6 +54,6 @@ export class ActivityRepo extends Effect.Service<ActivityRepo>()("Lexa/ActivityR
         cursor?.createdAt ?? null, cursor?.id ?? null, limit
       ).pipe(Effect.map((rows) => rows.map(rowToActivityEvent)));
 
-    return { insert, listByTaskKeyset };
+    return { insert, insertStmt, listByTaskKeyset };
   }),
 }) {}

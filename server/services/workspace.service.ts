@@ -1,5 +1,5 @@
 import { Effect, Data } from "effect";
-import { Db, DbError, ConstraintViolation, RowNotFound, queryAll, queryFirst, run, withTx } from "../db/db";
+import { Db, DbError, ConstraintViolation, RowNotFound, queryAll, queryFirst, run, batch } from "../db/db";
 import { WorkspaceInvitesService } from "./workspace-invites.service";
 import { PasswordLinksService } from "./password-links.service";
 import type { LexaUser, TeamMemberRole } from "../../shared/types";
@@ -97,16 +97,14 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/W
             return yield* Effect.fail(new CannotDeleteSelf({ message: "Cannot delete the last superadmin" }));
           }
         }
-        // Atomic: keys + user row in one transaction (a mid-way failure must
-        // not leave the keys revoked with the user still active).
-        yield* withTx(db, Effect.gen(function* () {
-          yield* run(db, "DELETE FROM api_keys WHERE user_id = ?", userId).pipe(
-            Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
-          );
-          yield* run(db, "DELETE FROM users WHERE id = ?", userId).pipe(
-            Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
-          );
-        }));
+        // Atomic: keys + user row in one batch (a mid-way failure must not
+        // leave the keys revoked with the user still active).
+        yield* batch(db, [
+          { sql: "DELETE FROM api_keys WHERE user_id = ?", params: [userId] },
+          { sql: "DELETE FROM users WHERE id = ?", params: [userId] },
+        ]).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
       });
 
     const createInvite = (email: string, createdBy: string) => invites.create(email, createdBy);

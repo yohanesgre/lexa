@@ -85,6 +85,25 @@ describe("AssistantCatalogRepo agents", () => {
     );
   });
 
+  it("replaceAgentSkills duplicate skillIds rolls back, prior set unchanged", async () => {
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* repo.createAgent({ id: "a1", name: "A1", description: "", instructions: "" });
+        yield* repo.createSkill({ id: "s1", name: "S1", description: "", instructions: "" });
+        yield* repo.createSkill({ id: "s2", name: "S2", description: "", instructions: "" });
+        yield* repo.replaceAgentSkills("a1", ["s1", "s2"]);
+
+        const dup = yield* Effect.either(repo.replaceAgentSkills("a1", ["s1", "s1"]));
+        expect(dup._tag).toBe("Left");
+        if (dup._tag === "Left") expect(dup.left._tag).toBe("ConstraintViolation");
+
+        // The batch rolled back atomically — the DELETE did not survive.
+        expect([...(yield* repo.findAgentById("a1")).skillIds].sort()).toEqual(["s1", "s2"]);
+      })
+    );
+  });
+
   it("lists agents with builtins first", async () => {
     const repo = makeRepo(db);
     db.exec("INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('assistant', 'Assistant Agent', '', '', 1)");

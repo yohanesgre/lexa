@@ -1,9 +1,10 @@
 import { Effect } from "effect";
-import { withTx, Db, DbError, ConstraintViolation, RowNotFound } from "../db/db";
+import { batchResults, type BatchStmt, Db, DbError, ConstraintViolation, RowNotFound } from "../db/db";
 import { CommentRepo } from "../repos/comment.repo";
 import { ActivityRepo } from "../repos/activity.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
+import { rowToComment, rowToActivityEvent, type CommentRow, type ActivityRow } from "../../shared/db";
 import { TipTapDoc, Actor, TaskComment, ActivityEvent } from "../../shared/types";
 import type { AuthIdentityShape } from "../api/auth";
 import { TaskNotFound, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "../api/errors";
@@ -40,19 +41,24 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         yield* taskRepo.findById(taskId).pipe(
           Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
         );
-        return yield* withTx(db, Effect.gen(function* () {
-          const comment = yield* commentRepo.insert({
-            taskId, authorId: actor.userId ?? null, authorKind: actor.kind,
-            authorLabel: actor.label, body: JSON.stringify(body),
-            viaAssistant: opts?.viaAssistant === true,
-          });
-          const activity = yield* activityRepo.insert({
-            taskId, actorKind: actor.kind, actorLabel: actor.label,
-            actorUserId: actor.userId ?? null, type: "commented", message: msg.commented(actor.label),
-            viaAssistant: opts?.viaAssistant === true,
-          });
-          return { comment, activity };
-        }));
+        return yield* Effect.gen(function* () {
+          const [commentRes, activityRes] = yield* batchResults(db, [
+            commentRepo.insertStmt({
+              taskId, authorId: actor.userId ?? null, authorKind: actor.kind,
+              authorLabel: actor.label, body: JSON.stringify(body),
+              viaAssistant: opts?.viaAssistant === true,
+            }),
+            activityRepo.insertStmt({
+              taskId, actorKind: actor.kind, actorLabel: actor.label,
+              actorUserId: actor.userId ?? null, type: "commented", message: msg.commented(actor.label),
+              viaAssistant: opts?.viaAssistant === true,
+            }),
+          ]);
+          return {
+            comment: rowToComment(commentRes!.results[0] as unknown as CommentRow),
+            activity: rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow),
+          };
+        });
       });
 
     const isProjectAdmin = (identity: AuthIdentityShape, projectId: string): Effect.Effect<boolean> =>
@@ -89,17 +95,35 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         const admin = yield* isProjectAdmin(identity, projectId);
         const author = comment.authorKind === "user" && comment.authorId === identity.userId;
         if (!author && !admin) return yield* new CommentDeleteForbidden({ id: commentId });
-        return yield* withTx(db, Effect.gen(function* () {
-          const removed = yield* commentRepo.softDelete(commentId).pipe(
-            Effect.catchTag("RowNotFound", () => new CommentNotFound({ id: commentId }))
-          );
-          const activity = yield* activityRepo.insert({
-            taskId: removed.taskId, actorKind: identity.userId ? "user" : "agent",
-            actorLabel: identity.userName ?? "unknown", actorUserId: identity.userId,
-            type: "comment_deleted", message: msg.commentDeleted(identity.userName ?? "unknown"),
-          });
-          return { comment: removed, activity };
-        }));
+        // Activity first, conditional on a live row, then the soft-delete.
+        // Expressing the guard in SQL (not a JS branch) keeps the batch
+        // fixed-array while still emitting no orphan activity for a row that
+        // another writer deleted between the pre-read and this batch.
+        const activityStmt: BatchStmt = {
+          sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+                SELECT ?, ?, ?, ?, ?, ?, 0
+                WHERE EXISTS (SELECT 1 FROM task_comments WHERE id = ? AND deleted_at IS NULL)
+                RETURNING id, task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant, created_at`,
+          params: [
+            comment.taskId,
+            identity.userId ? "user" : "agent",
+            identity.userName ?? "unknown",
+            identity.userId,
+            "comment_deleted",
+            msg.commentDeleted(identity.userName ?? "unknown"),
+            commentId,
+          ],
+        };
+        const [activityRes, deleteRes] = yield* batchResults(db, [
+          activityStmt,
+          commentRepo.softDeleteStmt(commentId),
+        ]);
+        const deletedRow = deleteRes!.results[0];
+        if (!deletedRow) return yield* new CommentNotFound({ id: commentId });
+        return {
+          comment: rowToComment(deletedRow as unknown as CommentRow),
+          activity: rowToActivityEvent(activityRes!.results[0] as unknown as ActivityRow),
+        };
       });
 
     return { create, edit, remove, isProjectAdmin };

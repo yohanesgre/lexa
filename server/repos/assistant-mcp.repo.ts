@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, batch, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 
 // Stored column domain — mirrors the 0009 CHECK, which still names 'stdio'
 // because D1 cannot DROP COLUMN / rebuild the table safely. Migration 0010
@@ -254,31 +254,26 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
         ),
 
       // Replace-set: drop the project's rows and re-insert the given set in one
-      // interactive transaction. Mirrors assistant-settings.repo.ts's write
-      // contract (D1 has no interactive tx — executes sequentially, each
-      // statement still atomic).
+      // atomic batch. JS de-dupe keeps a duplicate serverId from tripping the
+      // composite PK mid-batch (which would roll the whole replace back).
       setProjectServers: (
         projectId: string,
         entries: Array<{ serverId: string; enabled: boolean }>
-      ): Effect.Effect<void, ConstraintViolation | DbError> =>
-        withTx(
-          db,
-          Effect.gen(function* () {
-            yield* run(db, `DELETE FROM assistant_mcp_project_servers WHERE project_id = ?`, projectId);
-            const seen = new Set<string>();
-            for (const entry of entries) {
-              if (seen.has(entry.serverId)) continue;
-              seen.add(entry.serverId);
-              yield* run(
-                db,
-                `INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES (?, ?, ?)`,
-                projectId,
-                entry.serverId,
-                entry.enabled ? 1 : 0
-              );
-            }
-          })
-        ),
+      ): Effect.Effect<void, ConstraintViolation | DbError> => {
+        const seen = new Set<string>();
+        const stmts: BatchStmt[] = [
+          { sql: `DELETE FROM assistant_mcp_project_servers WHERE project_id = ?`, params: [projectId] },
+        ];
+        for (const entry of entries) {
+          if (seen.has(entry.serverId)) continue;
+          seen.add(entry.serverId);
+          stmts.push({
+            sql: `INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES (?, ?, ?)`,
+            params: [projectId, entry.serverId, entry.enabled ? 1 : 0],
+          });
+        }
+        return batch(db, stmts);
+      },
     };
   }),
 }) {}

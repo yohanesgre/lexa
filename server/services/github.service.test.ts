@@ -10,6 +10,15 @@ import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
 import { GitHubClient } from "../github/client";
 import { GitHubService } from "./github.service";
+import { WebhookEventRepo } from "../repos/webhook-event.repo";
+import { TaskRepo } from "../repos/task.repo";
+import { ProjectRepo } from "../repos/project.repo";
+import { ProjectReposRepo } from "../repos/project-repos.repo";
+import { ColumnRepo } from "../repos/column.repo";
+import { TaskService } from "./task.service";
+import { ProjectService } from "./project.service";
+import { ActivityService } from "./activity.service";
+import type { Actor } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -51,12 +60,25 @@ function seed() {
   db.prepare("INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES ('t1','ghi1',7,'owner/repo','closed')").run();
 }
 
-function makeService(db: Database) {
-  const layer = GitHubService.Default.pipe(Layer.provide(Layer.mergeAll(
-    Layer.succeed(Sqlite, db),
-    DbBunLive(db),
-    Layer.succeed(GitHubClient, {} as unknown as never),
-  )));
+function makeService(db: Database, client: unknown = {}) {
+  // `GitHubService.Default` bakes in `GitHubClient.Default` (the real client),
+  // so an external `Layer.succeed(GitHubClient, ...)` cannot override it. Build
+  // from `DefaultWithoutDependencies` and wire the deps explicitly to inject a
+  // stub client. The Db layer is provided over the whole dep set so each
+  // `.Default` repo/service layer resolves its Db requirement.
+  const dbLayer = Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db));
+  const deps = Layer.mergeAll(
+    Layer.succeed(GitHubClient, client as never),
+    WebhookEventRepo.Default,
+    TaskRepo.Default,
+    ProjectRepo.Default,
+    ProjectReposRepo.Default,
+    ColumnRepo.Default,
+    TaskService.Default,
+    ProjectService.Default,
+    ActivityService.Default,
+  ).pipe(Layer.provideMerge(dbLayer));
+  const layer = GitHubService.DefaultWithoutDependencies.pipe(Layer.provide(deps));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, GitHubService);
 }
@@ -87,5 +109,43 @@ describe("GitHubService.handleWebhook delivery recording", () => {
     await Effect.runPromise(svc.handleWebhook("del-notarget", "issues", { action: "closed", issue: { node_id: "ghi1" } }));
     expect(deliveryCount("del-notarget")).toBe(1);
     expect((db.prepare("SELECT column_id FROM tasks WHERE id = 't1'").get() as { column_id: string }).column_id).toBe("c-todo");
+  });
+});
+
+describe("GitHubService.createLinkedIssue link atomicity", () => {
+  const actor: Actor = { kind: "agent", label: "bot" };
+
+  function seedSecondTask() {
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES ('t2','p1','c-todo','s1','T2','{\"type\":\"doc\",\"content\":[]}','prio-1','type-1','a1','2026-01-02 10:00:00')").run();
+    db.prepare("INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES ('pr1','p1','owner/repo',0,1)").run();
+  }
+
+  it("links the created issue and appends github_linked in one batch", async () => {
+    seed();
+    seedSecondTask();
+    const client = { createIssue: () => Effect.succeed({ nodeId: "ghi-new", number: 9 }) };
+    const svc = makeService(db, client);
+
+    const res = await Effect.runPromise(svc.createLinkedIssue(actor, "t2", "owner/repo"));
+    expect(res.issueId).toBe("ghi-new");
+    expect(res.activity).toHaveLength(1);
+    expect(res.activity[0]!.type).toBe("github_linked");
+    expect(db.prepare("SELECT COUNT(*) n FROM task_github_issues WHERE task_id = 't2'").get()).toEqual({ n: 1 });
+    expect(db.prepare("SELECT COUNT(*) n FROM task_activity WHERE task_id = 't2'").get()).toEqual({ n: 1 });
+  });
+
+  it("rolls back the link and the activity when the created issue is already linked elsewhere", async () => {
+    seed(); // t1 already owns issue ghi1 — UNIQUE(issue_id) is the backstop
+    seedSecondTask();
+    const client = { createIssue: () => Effect.succeed({ nodeId: "ghi1", number: 8 }) };
+    const svc = makeService(db, client);
+
+    const res = await Effect.runPromise(Effect.either(svc.createLinkedIssue(actor, "t2", "owner/repo")));
+    expect(res._tag).toBe("Left");
+    if (res._tag === "Left") expect(res.left._tag).toBe("ConstraintViolation");
+
+    // No partial link row and no activity row for the failed batch.
+    expect(db.prepare("SELECT COUNT(*) n FROM task_github_issues WHERE task_id = 't2'").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) n FROM task_activity WHERE task_id = 't2'").get()).toEqual({ n: 0 });
   });
 });

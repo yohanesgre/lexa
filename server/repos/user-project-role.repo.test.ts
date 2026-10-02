@@ -7,7 +7,8 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { DbBunLive, run } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { UserProjectRoleRepo } from "./user-project-role.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -52,6 +53,20 @@ describe("UserProjectRoleRepo", () => {
   it("findByUserAndProject returns null when no grant exists", async () => {
     setup();
     expect(await Effect.runPromise(repo.findByUserAndProject("u1", "p1"))).toBeNull();
+  });
+
+  it("enforces one role row per (user, project): direct insert rejects, setRole switches in place", async () => {
+    setup();
+    await Effect.runPromise(repo.setRole("u1", "p1", "admin"));
+    const err = await Effect.runPromise(Effect.either(
+      run(createBunSqliteDriver(db), "INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u1','member','p1')")
+    ));
+    expect(err).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "ConstraintViolation" }) });
+    expect(roleCount("u1", "p1")).toBe(1);
+
+    await Effect.runPromise(repo.setRole("u1", "p1", "member"));
+    expect((await Effect.runPromise(repo.findByUserAndProject("u1", "p1")))!.role).toBe("member");
+    expect(roleCount("u1", "p1")).toBe(1);
   });
 
   it("findByUserId orders by role then project and scopes to the user", async () => {

@@ -9,7 +9,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { createD1Driver, type D1Like } from "../db/drivers/d1";
-import { batch, queryFirst, run, type DbDriver } from "../db/db";
+import { batch, batchResults, queryFirst, run, type DbDriver } from "../db/db";
 import { BatchTimeout, ConstraintViolation } from "../db/driver";
 import { resolveApiKeyIdentityAsync } from "./auth-key";
 import {
@@ -241,7 +241,7 @@ describe("stringEnvFromRuntimeEnv", () => {
 });
 
 describe("d1DatabaseToD1Like", () => {
-  it("shapes batch items into prepared statements and maps results", async () => {
+  it("shapes batch items into prepared statements and passes positional results through", async () => {
     const preparedSql: string[] = [];
     const preparedParams: unknown[][] = [];
     const binding = {
@@ -256,18 +256,22 @@ describe("d1DatabaseToD1Like", () => {
         return stmt;
       },
       batch: () => Promise.resolve([
-        { success: true, meta: { duration: 2 }, results: undefined },
-        { success: true, meta: { duration: 3 }, results: undefined },
+        { success: true, meta: { changes: 1, duration: 2, last_row_id: 7 }, results: [{ id: "a" }] },
+        { success: true, meta: { changes: 0, duration: 3 }, results: [] },
       ]),
     };
     const like: D1Like = d1DatabaseToD1Like(binding as never);
     const driver = createD1Driver(like);
-    await Effect.runPromise(batch(driver, [
-      { sql: "INSERT INTO t (a) VALUES (?)", params: ["x"] },
+    const out = await Effect.runPromise(batchResults(driver, [
+      { sql: "INSERT INTO t (a) VALUES (?) RETURNING id", params: ["x"] },
       { sql: "DELETE FROM t WHERE a = ?", params: ["y"] },
     ]));
-    expect(preparedSql).toEqual(["INSERT INTO t (a) VALUES (?)", "DELETE FROM t WHERE a = ?"]);
+    expect(preparedSql).toEqual(["INSERT INTO t (a) VALUES (?) RETURNING id", "DELETE FROM t WHERE a = ?"]);
     expect(preparedParams).toEqual([["x"], ["y"]]);
+    expect(out).toEqual([
+      { results: [{ id: "a" }], changes: 1, lastInsertRowid: 7 },
+      { results: [], changes: 0, lastInsertRowid: undefined },
+    ]);
   });
 
   it("translates a batch throw into ConstraintViolation with isPositionConflict", async () => {
@@ -310,7 +314,7 @@ describe("d1DatabaseToD1Like", () => {
     expect((err as ConstraintViolation).isPositionConflict).toBe(false);
   });
 
-  it("raises BatchTimeout when summed durations exceed the budget", async () => {
+  it("driver raises BatchTimeout when summed durations exceed the budget", async () => {
     const binding = {
       prepare: (sql: string) => {
         const stmt = {
@@ -321,10 +325,30 @@ describe("d1DatabaseToD1Like", () => {
         };
         return stmt;
       },
-      batch: () => Promise.resolve([{ success: true, meta: { duration: 29_000 }, results: undefined }]),
+      batch: () => Promise.resolve([{ success: true, meta: { duration: 29_000 }, results: [] }]),
     };
-    const like = d1DatabaseToD1Like(binding as never);
-    await expect(like.batch([{ sql: "SELECT 1", params: [] }])).rejects.toBeInstanceOf(BatchTimeout);
+    const driver = createD1Driver(d1DatabaseToD1Like(binding as never));
+    await expect(driver.batch([{ sql: "SELECT 1", params: [] }])).rejects.toBeInstanceOf(BatchTimeout);
+  });
+
+  it("passes RETURNING results through the adapter and driver", async () => {
+    const binding = {
+      prepare: (sql: string) => {
+        const stmt = {
+          bind: () => stmt,
+          all: () => Promise.resolve({ results: [] }),
+          first: () => Promise.resolve(null),
+          run: () => Promise.resolve({ success: true, meta: { changes: 1 } }),
+        };
+        return stmt;
+      },
+      batch: () => Promise.resolve([
+        { success: true, meta: { changes: 1, duration: 1 }, results: [{ id: "r1", v: 9 }] },
+      ]),
+    };
+    const driver = createD1Driver(d1DatabaseToD1Like(binding as never));
+    const [row] = await driver.batch([{ sql: "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", params: ["r1", 9] }]);
+    expect(row!.results).toEqual([{ id: "r1", v: 9 }]);
   });
 
   it("delegates first() through bind", async () => {

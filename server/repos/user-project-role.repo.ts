@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, run, withTx, DbError, ConstraintViolation } from "../db/db";
+import { Db, queryAll, run, DbError, ConstraintViolation } from "../db/db";
 import type { UserProjectRoleRow } from "../../shared/db";
 
 export class UserProjectRoleRepo extends Effect.Service<UserProjectRoleRepo>()("Lexa/UserProjectRoleRepo", {
@@ -16,13 +16,14 @@ export class UserProjectRoleRepo extends Effect.Service<UserProjectRoleRepo>()("
         ),
 
       setRole: (userId: string, projectId: string, role: "admin" | "member"): Effect.Effect<void, DbError | ConstraintViolation> =>
-        withTx(
+        run(
           db,
-          Effect.gen(function* () {
-            yield* run(db, `DELETE FROM user_project_roles WHERE user_id = ? AND project_id = ?`, userId, projectId);
-            yield* run(db, `INSERT INTO user_project_roles (user_id, role, project_id) VALUES (?, ?, ?)`, userId, role, projectId);
-          })
-        ),
+          `INSERT INTO user_project_roles (user_id, role, project_id) VALUES (?, ?, ?)
+           ON CONFLICT(user_id, project_id) DO UPDATE SET role = excluded.role`,
+          userId,
+          role,
+          projectId
+        ).pipe(Effect.asVoid),
 
       removeAccess: (userId: string, projectId: string): Effect.Effect<void, DbError | ConstraintViolation> =>
         run(db, `DELETE FROM user_project_roles WHERE user_id = ? AND project_id = ?`, userId, projectId),

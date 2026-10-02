@@ -103,14 +103,12 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
         Effect.gen(function* () {
           const milestone = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id })));
           if (!milestone.archivedAt) return { milestone, activity: [] };   // idempotent
-          const restored = yield* withTx(db, Effect.gen(function* () {
-            const r = yield* repo.setArchived(id, null).pipe(
-              Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id }))
-            );
-            return { milestone: r, activity: [] as ActivityEvent[] };
-          }));
-          yield* Effect.logInfo(`[Milestone] Restored ${restored.milestone.id}`);
-          return restored;
+          // Single statement — already atomic; no withTx needed.
+          const r = yield* repo.setArchived(id, null).pipe(
+            Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id }))
+          );
+          yield* Effect.logInfo(`[Milestone] Restored ${r.id}`);
+          return { milestone: r, activity: [] as ActivityEvent[] };
         }),
     };
   }),

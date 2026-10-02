@@ -28,17 +28,32 @@ export interface StmtResult {
   lastInsertRowid?: number | bigint;
 }
 
+export interface BatchStmtResult {
+  /** Rows produced by the statement (SELECT or ...RETURNING); [] otherwise. */
+  results: LexaRow[];
+  /** Rows changed by the statement (D1: meta.changes; Bun: synthesized).
+   *  Divergence: on Bun a row-returning statement reports `rows.length`,
+   *  while D1 reports 0 for a SELECT — no consumer reads `changes` from a
+   *  SELECT. */
+  changes: number;
+  /** Bun path only (from run()); D1 leaves undefined — use RETURNING. */
+  lastInsertRowid?: number | bigint;
+}
+
 export interface DbStmt {
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]>;
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null>;
   run(...params: SqlParam[]): Promise<StmtResult>;
+  /** Bun only: result column names (empty = no row output). Used by the
+   *  nested-batch synthesis in db.ts; D1 omits it. */
+  readonly columnNames?: string[];
 }
 
 export interface DbDriver {
   prepare(sql: string): DbStmt;
   /** Atomic batch — bun-sqlite wraps `db.transaction`, D1 calls the binding's
-   *  `batch()` method. Failures roll back the whole array. */
-  batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<void>;
+   *  `batch()`. Failures roll back the whole array. Positional results. */
+  batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<BatchStmtResult[]>;
   /** Interactive transaction — bun-sqlite only. D1 throws (use `batch` instead). */
   transaction<T>(fn: (tx: DbDriver) => Promise<T>): Promise<T>;
   /** Capability flag for the async `withTx` helper (`server/db/db.ts`).
@@ -52,3 +67,18 @@ export class DbError extends Data.TaggedError("DbError")<{ message: string; caus
 export class RowNotFound extends Data.TaggedError("RowNotFound")<{ table: string }> {}
 export class ConstraintViolation extends Data.TaggedError("ConstraintViolation")<{ message: string; isPositionConflict: boolean }> {}
 export class BatchTimeout extends Data.TaggedError("BatchTimeout")<{ message: string }> {}
+
+/** Map a raw driver/SQLite throw to a typed driver error. Lives here (not in
+ *  `db.ts`) so the drivers can use it without importing the Effect layer —
+ *  `db.ts` re-exports it for the existing import paths. */
+export function mapDbError(e: unknown): ConstraintViolation | DbError {
+  const msg = String(e);
+  if (e instanceof ConstraintViolation || e instanceof DbError) return e;
+  if (msg.includes("SQLITE_CONSTRAINT") || /constraint failed/i.test(msg)) {
+    return new ConstraintViolation({
+      message: msg,
+      isPositionConflict: /tasks\.column_id.*tasks\.position/.test(msg),
+    });
+  }
+  return new DbError({ message: msg, cause: e });
+}

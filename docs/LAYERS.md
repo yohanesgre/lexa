@@ -946,7 +946,7 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
   //   the service encrypts, this layer only stores); remove deletes the secret row explicitly because the Bun runner
   //   has foreign keys OFF and the cascade would not fire. Every read goes through one LEFT JOIN projection
   //   (SELECT_WITH_SECRET), so the blob never lands in a bare SELECT * of the registry.
-  // thin: list/getById/create/update/remove/listForProject/setProjectServers (withTx replace-set); update sets updated_at = datetime('now')
+  // thin: list/getById/create/update/remove/listForProject/setProjectServers (single batch replace-set); update sets updated_at = datetime('now')
   // toPublic/projectToPublic ignore secret_ref AND drop the ciphertext columns → hasSecret + secretSource
   //   ("managed"|"none") — legacy `secret_ref` is never a credential; hasSecret is true exactly when a managed
   //   ciphertext row exists (managed-only since 2026-09-28; migration 0012 cleared every stored ref)

@@ -7,7 +7,8 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { Db, DbBunLive, type DbDriver } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { CommentService } from "./comment.service";
 import { CommentInvalid, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, TaskNotFound } from "../api/errors";
 import type { AuthIdentityShape } from "../api/auth";
@@ -160,5 +161,41 @@ describe("CommentService", () => {
         if (Either.isLeft(agent)) expect(agent.left).toBeInstanceOf(CommentDeleteForbidden);
       })
     );
+  });
+
+  it("remove is conditional: a row deleted before the batch → CommentNotFound, zero orphan activity", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const { comment } = await Effect.runPromise(svc.create("t1", maria, BODY));
+
+    // Force the race the SQL guard exists for: the pre-read sees a live row,
+    // then another writer deletes it immediately before the batch. The activity
+    // INSERT ... WHERE EXISTS must select nothing and the soft-delete must match
+    // nothing — no orphan comment_deleted row.
+    const base = createBunSqliteDriver(db);
+    let fired = false;
+    const hooked: DbDriver = {
+      ...base,
+      batch: async (stmts) => {
+        if (!fired) {
+          fired = true;
+          db.prepare("DELETE FROM task_comments WHERE id = ?").run(comment.id);
+        }
+        return base.batch(stmts);
+      },
+    };
+    const hookedLayer = CommentService.Default.pipe(
+      Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), Layer.succeed(Db, hooked)))
+    );
+    const hookedSvc = Context.get(Effect.runSync(Effect.scoped(Layer.build(hookedLayer))), CommentService);
+
+    const removed = await Effect.runPromise(Effect.either(hookedSvc.remove(comment.id, idOf("u1"), "p1", "t1")));
+    expect(Either.isLeft(removed)).toBe(true);
+    if (Either.isLeft(removed)) expect(removed.left).toBeInstanceOf(CommentNotFound);
+
+    const deleted = (db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE type = 'comment_deleted'").get() as { n: number }).n;
+    expect(deleted).toBe(0);
+    const commented = (db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE type = 'commented'").get() as { n: number }).n;
+    expect(commented).toBe(1);
   });
 });

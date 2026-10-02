@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Db, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import { Db, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { LexaAgentRow, LexaSkillRow, rowToLexaAgent, rowToLexaSkill } from "../../shared/db";
 import type { LexaAgent, LexaSkill } from "../../shared/types";
 
@@ -68,15 +68,13 @@ export class AssistantCatalogRepo extends Effect.Service<AssistantCatalogRepo>()
         ),
 
       replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<void, ConstraintViolation | DbError> =>
-        withTx(
-          db,
-          Effect.gen(function* () {
-            yield* run(db, `DELETE FROM lexa_agent_skills WHERE agent_id = ?`, agentId);
-            for (const skillId of skillIds) {
-              yield* run(db, `INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES (?, ?)`, agentId, skillId);
-            }
-          })
-        ),
+        batch(db, [
+          { sql: `DELETE FROM lexa_agent_skills WHERE agent_id = ?`, params: [agentId] },
+          ...skillIds.map((skillId) => ({
+            sql: `INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES (?, ?)`,
+            params: [agentId, skillId],
+          })),
+        ]),
 
       listSkills: (): Effect.Effect<LexaSkill[], DbError> =>
         queryAll<LexaSkillRow>(db, `SELECT * FROM lexa_skills ORDER BY is_builtin DESC, created_at`).pipe(
