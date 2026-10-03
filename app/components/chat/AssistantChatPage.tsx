@@ -200,7 +200,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   }, [chatId, qc]);
 
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
-  const stream = useAssistantAgent(streamKey);
+  const stream = useAssistantAgent(streamKey, { projectId });
   const streaming = stream.status === "connecting" || stream.status === "streaming";
 
   const { turns, setTurns } = useSettledTurns({

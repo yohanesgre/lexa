@@ -1,0 +1,67 @@
+// @vitest-environment jsdom
+// Fresh chat threads have no `assistant_threads` row yet; the WS gate requires
+// `?projectId=` on the handshake to upsert it (ADR-0003 §B.2), otherwise the
+// upgrade 404s and the first send is dropped. These tests pin the query wiring
+// at the `useAgent` boundary.
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { renderHook } from "@testing-library/react";
+
+const h = vi.hoisted(() => ({
+  useAgent: vi.fn(),
+}));
+
+vi.mock("agents/react", () => ({
+  useAgent: h.useAgent,
+}));
+
+vi.mock("@cloudflare/ai-chat/react", () => ({
+  useAgentChat: () => ({
+    messages: [],
+    status: "idle",
+    error: null,
+    connectionError: null,
+    isStreaming: false,
+    isRecovering: false,
+    sendMessage: vi.fn(),
+    stop: vi.fn(),
+    setMessages: vi.fn(),
+    clearError: vi.fn(),
+  }),
+}));
+
+import { useAssistantAgent } from "./use-assistant-agent";
+
+type UseAgentArgs = { basePath?: string; query?: { projectId?: string } | undefined };
+
+function lastArgs(): UseAgentArgs {
+  return h.useAgent.mock.calls[h.useAgent.mock.calls.length - 1]![0] as UseAgentArgs;
+}
+
+beforeEach(() => {
+  h.useAgent.mockReset();
+  h.useAgent.mockReturnValue({ identified: false, connectionError: null });
+});
+
+describe("useAssistantAgent query wiring", () => {
+  it("passes projectId through to useAgent's query for a chat thread", () => {
+    renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(h.useAgent).toHaveBeenCalledTimes(1);
+    expect(lastArgs().basePath).toBe("/api/assistant/agent/chat:c1");
+    expect(lastArgs().query).toEqual({ projectId: "p1" });
+  });
+
+  it("omits the query when projectId is undefined (task/wiki/panel)", () => {
+    renderHook(() => useAssistantAgent("assistant-task:t1"));
+    expect(lastArgs().query).toBeUndefined();
+  });
+
+  it("keeps the query object referentially stable across renders", () => {
+    const { rerender } = renderHook(
+      ({ projectId }: { projectId: string }) => useAssistantAgent("assistant-chat:c1", { projectId }),
+      { initialProps: { projectId: "p1" } }
+    );
+    const first = lastArgs().query;
+    rerender({ projectId: "p1" });
+    expect(lastArgs().query).toBe(first);
+  });
+});

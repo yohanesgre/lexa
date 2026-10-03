@@ -60,6 +60,11 @@ export interface AssistantAgentOptions {
   // Streaming snapshot coalescing window (ms). Mirrors the SSE hook's rAF
   // batching: markdown re-parse must not run per chunk.
   throttle?: number | undefined;
+  // Chat thread with no server row yet: the WS gate requires `?projectId=` to
+  // upsert the `assistant_threads` row on connect (ADR-0003 §B.2), else the
+  // upgrade 404s and the first send is dropped. Omitted for task/wiki threads
+  // and the document panel, which always have a server-created row.
+  projectId?: string | undefined;
 }
 
 // A no-op `subscribe` surface keeps the hook structurally compatible with the
@@ -82,10 +87,20 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   const threadKey = threadKeyOf(key);
   const basePath = threadKey ? `/api/assistant/agent/${threadKey}` : `/api/assistant/agent/__idle__`;
 
+  // `?projectId=` rides the WS handshake for a fresh chat thread. Keep the
+  // object referentially stable across renders: PartySocket memoizes its socket
+  // on JSON.stringify(query), but a fresh literal would still churn the option
+  // memo upstream. `null` (not undefined) so the memo dep stays a single value.
+  const projectId = options?.projectId;
+  const query = useMemo(() => (projectId ? { projectId } : null), [projectId]);
+
   const agent = useAgent({
     agent: "LexaAssistantAgent",
     name: threadKey ?? "idle",
     basePath,
+    // Omitted (never an explicit `undefined`) when there is no projectId:
+    // exactOptionalPropertyTypes rejects undefined on UseAgentOptions["query"].
+    ...(query ? { query } : {}),
     // No thread yet (fresh landing): keep the socket closed instead of
     // connecting to a bogus key the gate would 404.
     enabled: threadKey !== null,
