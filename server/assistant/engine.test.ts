@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { stepCountIs, tool, type UIMessage } from "ai";
 import { z } from "zod";
-import { AssistantTurnError, runAssistantTurn, turnErrorFor, type AssistantTurnDeps } from "./engine";
+import { AssistantTurnError, runAssistantTurn, turnErrorFor, type AssistantTurnDeps, type RunStatusTransition } from "./engine";
 import type { RegistryModelConfig } from "./model-factory";
 import type { AssistantCallLogInput } from "../../shared/assistant";
-import type { AssistantRunStatusInput } from "./internal-routes";
 
 const MESSAGES: UIMessage[] = [{ id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] }];
 
@@ -50,7 +49,7 @@ function config(over: Partial<RegistryModelConfig> = {}): RegistryModelConfig {
 
 interface Recorded {
   logs: AssistantCallLogInput[];
-  runs: AssistantRunStatusInput[];
+  runs: RunStatusTransition[];
 }
 
 function deps(configs: RegistryModelConfig[] | null, recorded: Recorded): AssistantTurnDeps {
@@ -104,7 +103,7 @@ describe("runAssistantTurn", () => {
     });
     await drain(response);
 
-    expect(recorded.runs).toEqual([{ runId: "run-1", status: "completed", result: "done", error: null }]);
+    expect(recorded.runs).toEqual([{ runId: "run-1", status: "completed", result: "done", error: null, stepsUsed: 1 }]);
   });
 
   it("walks to a fallback on a retryable (429) primary failure and records both attempts", async () => {
@@ -130,7 +129,7 @@ describe("runAssistantTurn", () => {
     // The retried primary failure must NOT latch the run `failed`; only the
     // winning fallback attempt owns the terminal transition.
     expect(recorded.runs).toEqual([
-      { runId: "run-1", status: "completed", result: "from fallback", error: null },
+      { runId: "run-1", status: "completed", result: "from fallback", error: null, stepsUsed: 1 },
     ]);
   });
 

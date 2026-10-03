@@ -8,7 +8,7 @@
 // per request, so the SQL and the layer composition — not just the pure
 // helpers — are exercised.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,16 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { DbBunLive } from "../db/db";
 import { RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
 import { encryptSecret, parseMasterKey } from "./secrets";
+
+// H1 carry-over: pin the Jev preflight seam so a `mode: "resume"` turn can be
+// proven to skip it (the real call is a network round trip).
+vi.mock("./jev", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./jev")>();
+  return {
+    ...actual,
+    runJevPreflight: vi.fn(async () => ({ segment: "JEV-ADVISORY" })),
+  };
+});
 import {
   buildWorkerReadToolExecutor,
   buildWorkerWriteToolExecutor,
@@ -65,6 +75,7 @@ beforeEach(() => {
   db.exec("DELETE FROM assistant_jev_secrets");
   db.exec("DELETE FROM assistant_jev_projects");
   db.exec("DELETE FROM assistant_settings");
+  db.exec("DELETE FROM settings WHERE key = 'assistant_delegation_enabled'");
   db.exec("DELETE FROM lexa_agent_skills");
   db.exec("DELETE FROM lexa_skills");
   db.exec("DELETE FROM lexa_agents");
@@ -166,11 +177,71 @@ describe("resolveWorkerHarnessContext", () => {
     expect(context.writeTools).toEqual(["create_task"]);
     expect(context.repoContent).toEqual([]);
     expect(context.mentionContext).toBeNull();
-    expect(context.delegation).toEqual({ enabled: false, maxConcurrentRuns: 0 });
+    expect(context.mcpTools).toEqual([]);
+    // Dark launch: the global flag is absent, so delegation defaults off.
+    expect(context.delegation).toEqual({ enabled: false, maxConcurrentRuns: 3 });
     const raw = JSON.stringify(context);
     expect(raw).not.toContain("exa-secret");
     expect(raw).not.toContain("searchApiKey");
     expect(raw).not.toContain("urlAllowlist");
+  });
+
+  it("enables delegation only when the global assistant_delegation_enabled setting is on", async () => {
+    seedSettings();
+    const off = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "turn" }
+    );
+    expect(off.delegation.enabled).toBe(false);
+
+    db.prepare("INSERT INTO settings (key, value) VALUES ('assistant_delegation_enabled', '1')").run();
+    const on = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "turn" }
+    );
+    expect(on.delegation).toEqual({ enabled: true, maxConcurrentRuns: 3 });
+  });
+
+  it("assembles a task bundle: doc context + bound-skill markdown", async () => {
+    seedSettings();
+    seedBoard();
+    seedBoundSkill();
+    db.exec(
+      `INSERT INTO assistant_threads (document_type, document_id, project_id, agent_id, skill_id, messages)
+       VALUES ('task', 't1', 'p1', 'assistant', 'sk', '[]')`
+    );
+    db.prepare("UPDATE tasks SET description = ? WHERE id = 't1'").run(
+      JSON.stringify({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Repro steps here" }] }],
+      })
+    );
+
+    const context = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "task:t1", userText: "help with this", mode: "turn" }
+    );
+    expect(context.documentType).toBe("task");
+    expect(context.agent?.id).toBe("assistant");
+    expect(context.docContext).toContain("Task: P-1 — Fix login");
+    expect(context.docContext).toContain("Repro steps here");
+    expect(context.skillMarkdowns[0]).toContain("## Skill: Test Skill");
+    // Chat-only blocks stay empty on a document thread.
+    expect(context.mentionContext).toBeNull();
+  });
+
+  it("skips the Jev preflight on mode:resume (and runs it on mode:turn)", async () => {
+    seedJev();
+    const turn = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "turn" }
+    );
+    expect(turn.advisory).toBe("JEV-ADVISORY");
+    const resume = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "resume" }
+    );
+    expect(resume.advisory).toBeNull();
   });
 });
 
@@ -227,6 +298,12 @@ describe("buildWorkerReadToolExecutor dispatch", () => {
   it("returns a typed error for an unknown tool", async () => {
     const res = await run("not_a_tool", {});
     expect(res).toEqual({ ok: false, error: "unknown read tool: not_a_tool" });
+  });
+
+  it("fails a prefixed mcp__ call open when MCP is not configured", async () => {
+    const res = await run("mcp__srv__read", { q: "x" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Unknown MCP tool mcp__srv__read");
   });
 });
 

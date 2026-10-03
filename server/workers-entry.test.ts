@@ -14,6 +14,8 @@ import {
   runScheduledCore,
   type WorkersEnv,
 } from "./workers-entry";
+import { LexaAssistantRunner as RunnerFromModule } from "./assistant/runner";
+import { LexaAssistantRunner as RunnerFromEntry } from "./workers-entry";
 
 function memDriver(): ReturnType<typeof createBunSqliteDriver> {
   const db = new Database(":memory:");
@@ -115,6 +117,70 @@ describe("runScheduledCore", () => {
     expect(r2.deleted.sort()).toEqual([
       "backups/lexa-2026-09-01-00-00-00.db.gz",
     ]);
+  });
+
+  it("reconciles stale runs and fires due schedules through the enqueue callback", async () => {
+    const driver = memDriver();
+    await Effect.runPromise(
+      batch(driver, [
+        { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
+        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
+        {
+          sql: `CREATE TABLE assistant_runs (
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_key TEXT NOT NULL,
+            parent_run_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+            goal TEXT NOT NULL, result TEXT, error TEXT, budget_ms INTEGER,
+            steps_used INTEGER NOT NULL DEFAULT 0, created_by TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT)`,
+          params: [],
+        },
+        {
+          sql: `CREATE TABLE assistant_schedules (
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_key TEXT, created_by TEXT,
+            title TEXT NOT NULL, prompt TEXT NOT NULL, cron TEXT, interval_seconds INTEGER,
+            enabled INTEGER NOT NULL DEFAULT 1, next_run_at TEXT NOT NULL, last_run_at TEXT,
+            last_run_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')))`,
+          params: [],
+        },
+        {
+          sql: `INSERT INTO assistant_runs (id, project_id, thread_key, kind, status, goal, budget_ms, created_at)
+                VALUES ('stale-1', 'p1', 'chat:stale', 'chat_run', 'running', 'old', 1000, datetime('now', '-1 hour'))`,
+          params: [],
+        },
+        {
+          sql: `INSERT INTO assistant_schedules (id, project_id, thread_key, created_by, title, prompt, interval_seconds, enabled, next_run_at)
+                VALUES ('sched-1', 'p1', 'chat:schedule-sched-1', 'u1', 'Nightly', 'do it', 60, 1, datetime('now', '-1 minute'))`,
+          params: [],
+        },
+      ])
+    );
+
+    const enqueued: Array<{ id: string; kind: string; projectId: string; threadKey: string; goal: string; createdBy: string | null }> = [];
+    await runScheduledCore(driver, {}, undefined, async (run) => {
+      enqueued.push(run);
+    });
+
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0]).toMatchObject({
+      kind: "schedule",
+      projectId: "p1",
+      threadKey: "chat:schedule-sched-1",
+      goal: "do it",
+      createdBy: "u1",
+    });
+
+    const stale = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { queryFirst } = yield* Effect.promise(() => import("./db/db"));
+        return yield* queryFirst<{ status: string; error: string | null }>(
+          driver,
+          "SELECT status, error FROM assistant_runs WHERE id = 'stale-1'"
+        );
+      })
+    );
+    expect(stale.status).toBe("failed");
+    expect(stale.error).toBe("run exceeded its wall-clock budget");
   });
 
   it("skips R2 pruning when backups are not enabled", async () => {
@@ -234,5 +300,14 @@ describe("per-isolate caches", () => {
     const first = getRuntimeAuth(runtimeEnv);
     expect(getRuntimeAuth(runtimeEnv)).toBe(first);
     expect(getRuntimeAuth({ ...runtimeEnv, LXK_ENV: "prod" })).not.toBe(first);
+  });
+});
+
+describe("delegation facet export", () => {
+  it("re-exports the runner class from the worker entry for ctx.exports resolution", () => {
+    expect(RunnerFromEntry).toBe(RunnerFromModule);
+    expect(typeof RunnerFromEntry).toBe("function");
+    const proto = RunnerFromEntry.prototype as unknown as { onChatMessage?: unknown };
+    expect(typeof proto.onChatMessage).toBe("function");
   });
 });

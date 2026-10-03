@@ -44,6 +44,7 @@ interface ProposalOutput {
   name?: unknown;
   detail?: unknown;
   diff?: unknown;
+  proposedByRunId?: unknown;
   status?: unknown;
 }
 
@@ -53,6 +54,7 @@ function approvalFromProposal(output: ProposalOutput, fallbackName: string): Ass
   const seq = readSeq(output.seq) ?? 0;
   const name = readString(output, "name") ?? fallbackName;
   const detail = readString(output, "detail");
+  const proposedByRunId = readString(output, "proposedByRunId");
   const status = output.status;
   return {
     approvalId,
@@ -60,6 +62,7 @@ function approvalFromProposal(output: ProposalOutput, fallbackName: string): Ass
     name,
     ...(detail ? { detail } : {}),
     ...(output.diff !== undefined ? { diff: output.diff as AssistantWriteDiff } : {}),
+    ...(proposedByRunId ? { proposedByRunId } : {}),
     ...(status === "pending" || status === "approved" || status === "rejected" || status === "expired"
       ? { status }
       : {}),
@@ -140,6 +143,7 @@ export function approvalCarriersOf(message: unknown): AssistantApprovalCarrier[]
       if (!approvalId || !name) continue;
       const seq = readSeq(entry.seq) ?? parsed.length;
       const detail = readString(entry, "detail");
+      const proposedByRunId = readString(entry, "proposedByRunId");
       const status = entry.status;
       parsed.push({
         approvalId,
@@ -147,6 +151,7 @@ export function approvalCarriersOf(message: unknown): AssistantApprovalCarrier[]
         name,
         ...(detail ? { detail } : {}),
         ...(entry.diff !== undefined ? { diff: entry.diff as AssistantWriteDiff } : {}),
+        ...(proposedByRunId ? { proposedByRunId } : {}),
         ...(status === "pending" || status === "approved" || status === "rejected" || status === "expired"
           ? { status }
           : {}),
@@ -176,6 +181,7 @@ export interface CarrierDecisionRow {
   seq?: number | undefined;
   name?: string | undefined;
   diff?: unknown;
+  proposedByRunId?: string | undefined;
 }
 
 /**
@@ -223,6 +229,7 @@ export function reconcileApprovalCarriers(
             name: row.name ?? "write",
             status: row.status,
             ...(row.diff !== undefined ? { diff: row.diff } : {}),
+            ...(row.proposedByRunId ? { proposedByRunId: row.proposedByRunId } : {}),
           }));
         messageTouched = true;
         return { ...raw, data: { ...data, approvals: rebuilt } };
@@ -240,6 +247,9 @@ export function reconcileApprovalCarriers(
         if (a.seq === undefined && typeof row.seq === "number") patch.seq = row.seq;
         if (a.name === undefined && typeof row.name === "string") patch.name = row.name;
         if (a.diff === undefined && row.diff !== undefined) patch.diff = row.diff;
+        if ((a as { proposedByRunId?: unknown }).proposedByRunId === undefined && row.proposedByRunId) {
+          patch.proposedByRunId = row.proposedByRunId;
+        }
         if (Object.keys(patch).length === 0) return a;
         changed = true;
         return { ...a, ...patch };

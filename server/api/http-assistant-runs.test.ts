@@ -42,12 +42,18 @@ beforeAll(async () => {
 
 afterAll(() => { try { db.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });
 
-beforeEach(() => { db.prepare("DELETE FROM assistant_tasks").run(); });
+beforeEach(() => { db.prepare("DELETE FROM assistant_tasks").run(); db.prepare("DELETE FROM assistant_runs").run(); });
 
 function insertTask(id: string, status: string, projectId: string, createdAt: string) {
   db.prepare(
     "INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, error, created_at) VALUES (?, ?, 'task', 't1', 'a1', 'sk1', ?, ?, ?)"
   ).run(id, projectId, status, status === "failed" ? "boom" : null, createdAt);
+}
+
+function insertRun(id: string, kind: string, status: string, projectId: string, createdAt: string, threadKey = "chat:c1") {
+  db.prepare(
+    "INSERT INTO assistant_runs (id, project_id, thread_key, kind, status, goal, created_at) VALUES (?, ?, ?, ?, ?, 'g', ?)"
+  ).run(id, projectId, threadKey, kind, status, createdAt);
 }
 
 describe("GET /api/admin/assistant/runs", () => {
@@ -63,9 +69,40 @@ describe("GET /api/admin/assistant/runs", () => {
     const first = body.data[0]!;
     expect(first.error).toBe("boom");
     expect(first.documentTitle).toBe("");
+    expect(first.kind).toBe("document");
+    expect(first.threadKey).toBe("task:t1");
     expect("result" in first).toBe(false);
     expect("extraPrompt" in first).toBe(false);
     expect("selection" in first).toBe(false);
+  });
+
+  it("unions registry runs (kind chat_run/schedule) with nullable document fields", async () => {
+    insertTask("t1", "completed", "p1", "2026-01-01 10:00:00");
+    insertRun("r1", "chat_run", "running", "p1", "2026-01-02 10:00:00", "chat:c9");
+    insertRun("s1", "schedule", "queued", "p1", "2026-01-03 10:00:00");
+    const res = await handler(authed("/api/admin/assistant/runs"));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: Array<Record<string, unknown>>; counts: Record<string, number> };
+    expect(body.data.map((r) => r.id)).toEqual(["s1", "r1", "t1"]);
+    const run = body.data.find((r) => r.id === "r1")!;
+    expect(run.kind).toBe("chat_run");
+    expect(run.documentType).toBeNull();
+    expect(run.documentId).toBe("");
+    expect(run.threadKey).toBe("chat:c9");
+    expect(run.key).toBe("r1");
+    // counts span both tables (union GROUP BY): 1 completed + 1 running + 1 queued.
+    expect(body.counts).toEqual({ queued: 1, running: 1, completed: 1, failed: 0, cancelled: 0 });
+  });
+
+  it("filters by kind", async () => {
+    insertTask("t1", "completed", "p1", "2026-01-01 10:00:00");
+    insertRun("r1", "chat_run", "completed", "p1", "2026-01-02 10:00:00");
+    insertRun("s1", "schedule", "completed", "p1", "2026-01-03 10:00:00");
+    const res = await handler(authed("/api/admin/assistant/runs?kind=schedule"));
+    const body = await res.json() as { data: Array<{ id: string }> };
+    expect(body.data.map((r) => r.id)).toEqual(["s1"]);
+    const bad = await handler(authed("/api/admin/assistant/runs?kind=bogus"));
+    expect(bad.status).toBe(422);
   });
 
   it("member → 403", async () => {

@@ -20,7 +20,7 @@
 //   deny → a local structured refusal, no Worker call; suspend never fires
 //          (it only fires on `proposed === true`).
 
-import { tool, type ToolSet } from "ai";
+import { jsonSchema, tool, type FlexibleSchema, type JSONSchema7, type ToolSet } from "ai";
 import { z } from "zod";
 import type { TipTapDoc } from "../../shared/types";
 import type { ApprovalPartial, AssistantToolPermissionMode } from "../../shared/assistant";
@@ -40,6 +40,8 @@ export const READ_TOOL_NAMES = [
   "get_skill",
   "analyze_image",
   "jev_assess",
+  "list_repo_files",
+  "read_repo_file",
 ] as const;
 
 export type AssistantReadToolName = (typeof READ_TOOL_NAMES)[number];
@@ -66,6 +68,9 @@ export type WriteToolResponse =
       name: string;
       detail?: string;
       diff?: unknown;
+      // Run attribution (ADR-0004 §3; plan line 140): echoed by the Worker when
+      // the proposal belongs to a delegated run.
+      proposedByRunId?: string;
     }
   | { ok: false; proposed: false; error: string };
 
@@ -409,6 +414,19 @@ const READ_TOOL_SPECS: Record<
       ),
     }),
   },
+  list_repo_files: {
+    description:
+      "List files in this project's SOURCE-ROLE linked GitHub repositories (capped). Returns repo/path entries; use read_repo_file to read one.",
+    inputSchema: z.object({}),
+  },
+  read_repo_file: {
+    description:
+      "Read one file from a source-role linked GitHub repository by repo (owner/name) and path. Content is capped; only source-role repos are readable.",
+    inputSchema: z.object({
+      repo: z.string().min(1).describe("owner/name from list_repo_files"),
+      path: z.string().min(1).describe("File path from list_repo_files"),
+    }),
+  },
 };
 
 function readResult(response: ReadToolResponse): unknown {
@@ -433,6 +451,41 @@ export function buildReadTools(opts: {
       description: spec.description,
       inputSchema: spec.inputSchema,
       execute: (args: unknown) => opts.transport.read(name, (args ?? {}) as Record<string, unknown>).then(readResult),
+    });
+  }
+  return tools;
+}
+
+/** One read-only MCP descriptor from the Worker (ADR-0004 §5; H6). */
+export interface McpToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Build the dynamic `mcp__*` read ToolSet from Worker-discovered descriptors.
+ * The DO has no MCP client or secret — every call dispatches through the
+ * read-tool transport, which executes Worker-side (default-deny read-only).
+ */
+export function buildMcpToolSet(
+  descriptors: readonly McpToolDescriptor[],
+  transport: AssistantToolTransport
+): ToolSet {
+  const tools: ToolSet = {};
+  for (const descriptor of descriptors) {
+    if (typeof descriptor.name !== "string" || !descriptor.name.startsWith("mcp__") || tools[descriptor.name]) continue;
+    const schema: FlexibleSchema = isJsonObject(descriptor.inputSchema)
+      ? jsonSchema(descriptor.inputSchema as JSONSchema7)
+      : z.object({}).passthrough();
+    tools[descriptor.name] = tool({
+      description: descriptor.description,
+      inputSchema: schema,
+      execute: (args: unknown) => transport.read(descriptor.name, (args ?? {}) as Record<string, unknown>).then(readResult),
     });
   }
   return tools;

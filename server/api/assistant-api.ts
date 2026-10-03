@@ -16,6 +16,7 @@ import { Db, queryAll, batch, RowNotFound, DbError, type BatchStmt, type DbDrive
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import {
   AssistantGenerationFailed,
+  AssistantScheduleNotFound,
   AssistantTaskActive,
   AssistantThreadNotFound,
   HasChildren,
@@ -34,7 +35,7 @@ import { ProjectService } from "../services/project.service";
 import { AssistantService, buildChatExport } from "../services/assistant.service";
 import { AssistantChatService } from "../services/assistant-chat.service";
 import { AssistantTaskService } from "../services/assistant-task.service";
-import { AssistantTaskRepo } from "../repos/assistant-task.repo";
+import { AssistantTaskRepo, type AdminAssistantRunKind } from "../repos/assistant-task.repo";
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
@@ -46,12 +47,14 @@ import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
 import { AssistantMcpService, McpConnector, type McpUpdateInput } from "../services/assistant-mcp.service";
+import { invalidateMcpDescriptorCache } from "../assistant/mcp-descriptors";
 import { AssistantProvidersService, type ProviderUpdateInput } from "../services/assistant-providers.service";
 import { AssistantJevService, type JevConfigInput } from "../services/assistant-jev.service";
 import { AssistantJevRepo } from "../repos/assistant-jev.repo";
 import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
+import { createSchedule, deleteSchedule, getSchedule, listSchedules, updateSchedule } from "../scheduled/schedules";
 import { AssistantThreadRpc, assistantThreadRpcNoop, type AssistantThreadRpcShape } from "../assistant/thread-rpc";
 import { convertStoredMessages, type LegacyStoredMessage } from "../assistant/legacy-convert";
 import { AuthorizationService } from "../services/authorization.service";
@@ -225,6 +228,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
         const service = yield* AssistantService;
+        const identity = yield* AuthIdentity;
         const task = yield* service.enqueue({
           projectId: project.id,
           documentType: req.payload.documentType,
@@ -236,7 +240,11 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           ...(req.payload.attachments !== undefined ? { attachments: [...req.payload.attachments] } : {}),
         });
         const enqueue = yield* threadRpcControl((rpc) =>
-          rpc.enqueueRun(`${req.payload.documentType}:${req.payload.documentId}`, project.id, task.id)
+          rpc.enqueueRun(`${req.payload.documentType}:${req.payload.documentId}`, {
+            projectId: project.id,
+            runId: task.id,
+            actorUserId: identity.userId ?? "",
+          })
         );
         // ADR-0003 §B.4: `enqueueRun` RPC failure → task marked `failed` + 502
         // ASSISTANT_UNAVAILABLE. TODO(P3): the DO `enqueueRun` is still a P2
@@ -718,6 +726,15 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           }
           status = statusRaw as AssistantTaskStatus;
         }
+        const kindRaw = sp.get("kind");
+        const kinds: ReadonlyArray<AdminAssistantRunKind> = ["chat_run", "document", "schedule"];
+        let kind: AdminAssistantRunKind | null = null;
+        if (kindRaw) {
+          if (!kinds.includes(kindRaw as AdminAssistantRunKind)) {
+            return yield* new InvalidArgs({ reason: "kind must be one of chat_run, document, schedule" });
+          }
+          kind = kindRaw as AdminAssistantRunKind;
+        }
         let limit = 50;
         const limitRaw = sp.get("limit");
         if (limitRaw !== null) {
@@ -737,29 +754,9 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           cursor = { createdAt: cursorRaw.slice(0, sep), id: cursorRaw.slice(sep + 1) };
         }
         const projectId = sp.get("projectId");
-        const { tasks, nextCursor } = yield* repo.listRecent({ status, projectId: projectId || null, limit, cursor });
-        const counts = yield* repo.countByStatus();
-        return {
-          data: tasks.map((t) => ({
-            id: t.id,
-            key: t.key,
-            projectId: t.projectId,
-            documentType: t.documentType,
-            documentId: t.documentId,
-            documentTitle: t.documentTitle,
-            agentId: t.agentId,
-            skillId: t.skillId,
-            agentName: t.agentName,
-            skillName: t.skillName,
-            status: t.status,
-            error: t.error,
-            createdAt: t.createdAt,
-            startedAt: t.startedAt,
-            finishedAt: t.finishedAt,
-          })),
-          nextCursor: nextCursor ? `${nextCursor.createdAt}|${nextCursor.id}` : null,
-          counts,
-        };
+        const { runs, nextCursor } = yield* repo.listRecentRuns({ status, projectId: projectId || null, kind, limit, cursor });
+        const counts = yield* repo.countRunsByStatus();
+        return { data: runs, nextCursor: nextCursor ? `${nextCursor.createdAt}|${nextCursor.id}` : null, counts };
       }))
     )
     .handle("adminAssistantBindings", () =>
@@ -1013,7 +1010,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         yield* requireSuperadmin;
         warnIgnoredMcpSecretRef("create", req.payload.secretRef);
         const service = yield* AssistantMcpService;
-        return yield* service.create({
+        const created = yield* service.create({
           label: req.payload.label,
           transportType: req.payload.transportType,
           url: req.payload.url ?? null,
@@ -1024,6 +1021,9 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
           ...(req.payload.secret !== undefined && req.payload.secret !== null ? { secret: req.payload.secret } : {}),
           ...(req.payload.enabled !== undefined ? { enabled: req.payload.enabled } : {}),
         });
+        // Registry write → the DO descriptor cache is stale (H6).
+        invalidateMcpDescriptorCache();
+        return created;
       }))
     )
     .handle("updateMcpServer", (req) =>
@@ -1040,7 +1040,9 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         if (req.payload.secret !== undefined && req.payload.secret !== null) patch.secret = req.payload.secret;
         if (req.payload.clearSecret !== undefined) patch.clearSecret = req.payload.clearSecret;
         if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;
-        return yield* service.update(req.path.id, patch);
+        const updated = yield* service.update(req.path.id, patch);
+        invalidateMcpDescriptorCache();
+        return updated;
       }))
     )
     .handle("deleteMcpServer", (req) =>
@@ -1048,6 +1050,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         yield* requireSuperadmin;
         const service = yield* AssistantMcpService;
         yield* service.remove(req.path.id);
+        invalidateMcpDescriptorCache();
         return undefined;
       }))
     )
@@ -1073,6 +1076,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
           req.path.id,
           req.payload.entries.map((e) => ({ serverId: e.serverId, enabled: e.enabled }))
         );
+        invalidateMcpDescriptorCache(req.path.id);
         return { data: yield* service.listForProject(req.path.id) };
       }))
     )
@@ -1131,6 +1135,57 @@ const assistantJevLive = HttpApiBuilder.group(LexaApi, "assistantJev", (handlers
 );
 
 
+// Scheduled assistant runs (ADR-0004 §4; H7): CRUD over the per-project
+// `assistant_schedules` rows. Reads are member-gated; writes admin-gated and
+// attributed to the caller. Timing validity is enforced by the service
+// (`InvalidArgs` → 422); an unknown/other-project row maps to 404.
+const assistantSchedulesLive = HttpApiBuilder.group(LexaApi, "assistantSchedules", (handlers) =>
+  handlers
+    .handle("listAssistantSchedules", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.projectId);
+        const db = yield* Db;
+        return { data: yield* listSchedules(db, req.path.projectId) };
+      }))
+    )
+    .handle("getAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.projectId);
+        const db = yield* Db;
+        return yield* getSchedule(db, req.path.id, req.path.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantScheduleNotFound({ id: req.path.id }))
+        );
+      }))
+    )
+    .handle("createAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.projectId);
+        const identity = yield* AuthIdentity;
+        const db = yield* Db;
+        return yield* createSchedule(db, req.path.projectId, { ...req.payload }, identity.userId);
+      }))
+    )
+    .handle("updateAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.projectId);
+        const db = yield* Db;
+        return yield* updateSchedule(db, req.path.id, req.path.projectId, { ...req.payload }).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantScheduleNotFound({ id: req.path.id }))
+        );
+      }))
+    )
+    .handle("deleteAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.projectId);
+        const db = yield* Db;
+        yield* deleteSchedule(db, req.path.id, req.path.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantScheduleNotFound({ id: req.path.id }))
+        );
+        return undefined;
+      }))
+    )
+);
+
 // ── Assistant service layer (Workers-only) ──────────────────────────────
 // Engine, gateway, MCP bridge, and the assistant-only repos/services. Kept
 // out of `http.ts`'s base layer so the Bun bundle never imports
@@ -1172,7 +1227,7 @@ const apiLayer = HttpApiBuilder.api(LexaApi);
 function fullRouteGroups() {
   return Layer.mergeAll(
     baseRouteGroups(),
-    assistantLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, assistantJevLive
+    assistantLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, assistantJevLive, assistantSchedulesLive
   );
 }
 

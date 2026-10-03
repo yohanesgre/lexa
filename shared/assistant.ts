@@ -170,6 +170,115 @@ export interface AssistantCallLogInput {
   estimated?: boolean | undefined;
 }
 
+// ── Delegation run registry (ADR-0004 §3; H3) ──────────────────────────────
+// One row per background/facet run. `chat_run`/`schedule` never emit
+// task_activity; `document` rows are the legacy document-run tier. Status
+// transitions are atomic conditional UPDATEs and idempotent.
+export type AssistantRunKind = "chat_run" | "document" | "schedule";
+export type AssistantRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export const ASSISTANT_RUN_TERMINAL_STATUSES: readonly AssistantRunStatus[] = [
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+export interface AssistantRunRow {
+  id: ID;
+  projectId: ID;
+  threadKey: string;
+  parentRunId: string | null;
+  kind: AssistantRunKind;
+  status: AssistantRunStatus;
+  goal: string;
+  result: string | null;
+  error: string | null;
+  budgetMs: number | null;
+  stepsUsed: number;
+  createdBy: ID | null;
+  createdAt: ISODate;
+  startedAt: ISODate | null;
+  finishedAt: ISODate | null;
+}
+
+export interface AssistantRunCreateInput {
+  projectId: ID;
+  threadKey: string;
+  kind: AssistantRunKind;
+  goal: string;
+  /** Explicit registry id (the SDK run id); generated when absent. */
+  id?: string | undefined;
+  parentRunId?: string | null | undefined;
+  budgetMs?: number | null | undefined;
+  createdBy?: ID | null | undefined;
+  /**
+   * Optional concurrency caps enforced inside the registry INSERT (`WHERE
+   * (SELECT COUNT(*) …) < cap`), so the check and the write are one atomic
+   * statement and parallel spawns cannot both win the last slot.
+   */
+  maxActiveThread?: number | undefined;
+  maxActiveProject?: number | undefined;
+}
+
+export interface AssistantRunTransitionInput {
+  runId: string;
+  projectId: ID;
+  status: AssistantRunStatus;
+  result?: string | null | undefined;
+  error?: string | null | undefined;
+  stepsUsed?: number | undefined;
+}
+
+// ── Scheduled runs (ADR-0004 §4; H7) ───────────────────────────────────────
+export interface AssistantScheduleRow {
+  id: ID;
+  projectId: ID;
+  threadKey: string | null;
+  createdBy: ID | null;
+  title: string;
+  prompt: string;
+  cron: string | null;
+  intervalSeconds: number | null;
+  enabled: boolean;
+  nextRunAt: ISODate;
+  lastRunAt: ISODate | null;
+  lastRunId: string | null;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export interface AssistantScheduleInput {
+  title: string;
+  prompt: string;
+  cron?: string | null | undefined;
+  intervalSeconds?: number | null | undefined;
+  threadKey?: string | null | undefined;
+  enabled?: boolean | undefined;
+}
+
+export interface AssistantSchedulePatch {
+  title?: string | undefined;
+  prompt?: string | undefined;
+  cron?: string | null | undefined;
+  intervalSeconds?: number | null | undefined;
+  threadKey?: string | null | undefined;
+  enabled?: boolean | undefined;
+}
+
+/**
+ * Serializable payload the parent thread DO dispatches into the runner facet
+ * (ADR-0004 §3; H3). The runner reconstructs the signed internal identity from
+ * `projectId`/`threadKey`/`createdBy` and runs the goal as a background turn.
+ */
+export interface AssistantRunnerInput {
+  runId: string;
+  projectId: ID;
+  threadKey: string;
+  goal: string;
+  mode: AssistantToolPermissionMode;
+  budgetMs: number;
+  createdBy: ID | null;
+}
+
 export interface AssistantModelPrice {
   model: string;
   promptPrice: number;
@@ -225,6 +334,9 @@ export interface PendingBatchApproval {
   name?: string;
   detail?: string;
   diff?: AssistantWriteDiff;
+  // Run attribution (ADR-0004 §3; plan line 140): the run that proposed this
+  // write, so the approval carousel can show which run a chip came from.
+  proposedByRunId?: string;
   // Live decision status, reconciled by the transcript read so another tab's
   // decisions surface on fetch. Absent → treated as pending.
   status?: "pending" | "approved" | "rejected" | "expired";
@@ -248,6 +360,9 @@ export interface AssistantApprovalCarrierApproval {
   name: string;
   detail?: string;
   diff?: AssistantWriteDiff;
+  // Run attribution (ADR-0004 §3; plan line 140): the run that proposed this
+  // write. Absent for regular turns; present on run proposals.
+  proposedByRunId?: string;
   // Live decision status, reconciled by the transcript read so another tab's
   // decisions surface on fetch. Absent → treated as pending.
   status?: "pending" | "approved" | "rejected" | "expired";

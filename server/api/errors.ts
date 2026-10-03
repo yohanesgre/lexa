@@ -115,6 +115,11 @@ export class AssistantGenerationFailed extends Data.TaggedError("AssistantGenera
   errorTag?: string | null;
 }> {}
 export class AssistantToolBudgetExceeded extends Data.TaggedError("AssistantToolBudgetExceeded")<{ rounds: number }> {}
+// Delegation run registry (ADR-0004 §3; H3).
+export class AssistantRunNotFound extends Data.TaggedError("AssistantRunNotFound")<{ id: string }> {}
+export class AssistantRunBudgetExceeded extends Data.TaggedError("AssistantRunBudgetExceeded")<{ budgetMs: number }> {}
+export class AssistantRunCapExceeded extends Data.TaggedError("AssistantRunCapExceeded")<{ scope: "thread" | "project"; limit: number }> {}
+export class AssistantScheduleNotFound extends Data.TaggedError("AssistantScheduleNotFound")<{ id: string }> {}
 export class AssistantTaskActive extends Data.TaggedError("AssistantTaskActive")<{}> {}
 export class AssistantThreadNotFound extends Data.TaggedError("AssistantThreadNotFound")<{ documentType: string; documentId: string }> {}
 export class VisionNotConfigured extends Data.TaggedError("VisionNotConfigured")<{}> {}
@@ -216,6 +221,10 @@ export const errorCodeMap: Record<string, string> = {
   ProviderUnreachable: "PROVIDER_UNREACHABLE",
   AssistantGenerationFailed: "ASSISTANT_GENERATION_FAILED",
   AssistantToolBudgetExceeded: "ASSISTANT_TOOL_BUDGET_EXCEEDED",
+  AssistantRunNotFound: "ASSISTANT_RUN_NOT_FOUND",
+  AssistantRunBudgetExceeded: "ASSISTANT_RUN_BUDGET_EXCEEDED",
+  AssistantRunCapExceeded: "ASSISTANT_RUN_CAP_EXCEEDED",
+  AssistantScheduleNotFound: "ASSISTANT_SCHEDULE_NOT_FOUND",
   AssistantTaskActive: "ASSISTANT_TASK_ACTIVE",
   AssistantThreadNotFound: "ASSISTANT_THREAD_NOT_FOUND",
   VisionNotConfigured: "VISION_NOT_CONFIGURED",
@@ -275,6 +284,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ShareLinkNotFound":
     case "SourceNotFound":
     case "AssistantTaskNotFound":
+    case "AssistantRunNotFound":
+    case "AssistantScheduleNotFound":
     case "AgentNotFound":
     case "SkillNotFound":
     case "ApiKeyNotFound":
@@ -304,6 +315,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "AgentEntityInUse":
     case "ProviderNotConfigured":
     case "AssistantTaskActive":
+    case "AssistantRunCapExceeded":
     case "VisionNotConfigured":
     case "ApprovalExpired":
     case "ApprovalAlreadyDecided":
@@ -358,6 +370,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ProviderUnreachable":
     case "AssistantGenerationFailed":
     case "AssistantToolBudgetExceeded":
+    case "AssistantRunBudgetExceeded":
     case "McpConnectFailed":
     case "McpToolCallFailed":
     case "JevAuthFailed":

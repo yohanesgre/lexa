@@ -73,9 +73,22 @@ const useSQLite = sqliteMigration?.new_sqlite_classes?.includes(class_name) ?? f
 // entry pulls the whole app and is exercised by the workers build.
 const ENTRY = `
 import { LexaAssistantAgent } from "./server/assistant/agent";
-export { LexaAssistantAgent };
+import { LexaAssistantRunner } from "./server/assistant/runner";
+export { LexaAssistantAgent, LexaAssistantRunner };
+
+// Test-only seam: list the DO's KV keys so the enqueue branch can be asserted
+// on its durable cursors. Not part of the production surface (declared on the
+// bundle's class, not in agent.ts).
+LexaAssistantAgent.prototype.__testStorageKeys = async function () {
+  const entries = await this.ctx.storage.list();
+  return Array.from(entries.keys());
+};
 
 const INTERNAL = "/api/internal/assistant/";
+// Captured run-update bodies (the DO posts here from onRunFinished / dispatch).
+const RUN_UPDATES = [];
+// The one schedule run the inline run-get route answers for.
+const SCHEDULE_RUN_ID = "schedule-run-1";
 
 async function handleInternal(request, env) {
   const url = new URL(request.url);
@@ -102,6 +115,21 @@ async function handleInternal(request, env) {
   }
   if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "provider-config")) {
     return Response.json({ configs: [{ kind: "openai_compatible", baseUrl: "https://provider.test", apiKey: "sk-test", model: "test-model", providerId: "prov-1" }] });
+  }
+  if (request.method === "POST" && url.pathname === INTERNAL + "run-update") {
+    RUN_UPDATES.push(await request.json());
+    return Response.json({ ok: true });
+  }
+  if (request.method === "GET" && url.pathname === INTERNAL + "run") {
+    if (url.searchParams.get("id") === SCHEDULE_RUN_ID) {
+      return Response.json({ run: {
+        id: SCHEDULE_RUN_ID, projectId: "proj-1", threadKey: "chat:schedule-do", parentRunId: null,
+        kind: "schedule", status: "queued", goal: "scheduled goal", result: null, error: null,
+        budgetMs: 5000, stepsUsed: 0, createdBy: "user-sched", createdAt: "2026-01-01T00:00:00Z",
+        startedAt: null, finishedAt: null,
+      } });
+    }
+    return Response.json({ error: { code: "ASSISTANT_RUN_NOT_FOUND" } }, { status: 404 });
   }
   if (request.method === "POST" && url.pathname === INTERNAL + "turn-context") {
     const body = await request.json();
@@ -162,6 +190,34 @@ export default {
       const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
       return Response.json(await stub.saveMessages(body.messages));
     }
+    if (url.pathname === "/__test/runner") {
+      return Response.json({
+        kind: typeof LexaAssistantRunner,
+        name: LexaAssistantRunner?.name ?? null,
+        hasOnChatMessage: typeof LexaAssistantRunner?.prototype?.onChatMessage === "function",
+      });
+    }
+    if (url.pathname === "/__test/run-updates") {
+      return Response.json(RUN_UPDATES);
+    }
+    if (url.pathname === "/__test/storage-keys") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.__testStorageKeys());
+    }
+    if (url.pathname === "/__test/enqueue") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.enqueueRun(body));
+    }
+    if (url.pathname === "/__test/onRunFinished") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      await stub.onRunFinished(body.run, body.result);
+      return Response.json({ ok: true });
+    }
     const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
     const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
     return stub.fetch(request);
@@ -184,6 +240,24 @@ let d1: D1LikeTest;
 // Captured raw provider request body (the AI SDK sends the system prompt as the
 // first `system` role message). Set by the worker's `outboundService`.
 let capturedProviderRequest: string | null = null;
+// H2 summary accounting: non-stream provider calls are the compaction
+// `generateText`; `summaryShouldFail` makes the next one 500 (skip-on-failure).
+let summaryCalls = 0;
+let summaryShouldFail = false;
+
+function providerJson(text: string): Response {
+  return new Response(
+    JSON.stringify({
+      id: "c1",
+      object: "chat.completion",
+      created: 0,
+      model: "test-model",
+      choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+}
 
 function providerChunk(delta: Record<string, unknown>, finish: string | null, usage?: Record<string, number>): string {
   return JSON.stringify({
@@ -264,6 +338,40 @@ async function callThreadControl(op: "reset" | "destroy", threadKey: string) {
   return mf!.dispatchFetch(`http://assistant-smoke/__test/${op}?threadKey=${encodeURIComponent(threadKey)}`);
 }
 
+async function enqueueRun(threadKey: string, input: unknown) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/enqueue?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+async function callOnRunFinished(threadKey: string, run: unknown, result: unknown) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/onRunFinished?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run, result }),
+  });
+}
+
+async function capturedRunUpdates(): Promise<Array<Record<string, unknown>>> {
+  const res = await mf!.dispatchFetch("http://assistant-smoke/__test/run-updates");
+  return (await res.json()) as Array<Record<string, unknown>>;
+}
+
+// Read the DO's KV keys through the bundle's test-only seam: proves which
+// durable cursor keys an enqueue wrote without exposing a production RPC.
+async function storageKeys(threadKey: string): Promise<string[]> {
+  const res = await mf!.dispatchFetch(
+    `http://assistant-smoke/__test/storage-keys?threadKey=${encodeURIComponent(threadKey)}`
+  );
+  return (await res.json()) as string[];
+}
+
+function messageIds(messages: unknown[]): Array<string | undefined> {
+  return messages.map((m) => (m as { id?: string }).id);
+}
+
 async function durableObjectId(threadKey: string): Promise<string> {
   const namespace = await mf!.getDurableObjectNamespace("ASSISTANT_AGENT", WORKER_NAME);
   return namespace.idFromName(threadKey).toString();
@@ -326,8 +434,22 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
             bindings: { LXK_SECRETS_MASTER_KEY: MASTER_KEY },
             // Provider calls go through global fetch; capture the request body
             // and answer with a valid SSE stream so the turn completes offline.
+            // Summary (`generateText`) is a non-stream JSON call: count it and
+            // answer with a compact completion.
             outboundService: async (request: Request) => {
-              capturedProviderRequest = await request.text();
+              const body = await request.text();
+              const isStream = /"stream"\s*:\s*true/.test(body);
+              if (!isStream) {
+                summaryCalls += 1;
+                if (summaryShouldFail) {
+                  return new Response(JSON.stringify({ error: { message: "summary boom" } }), {
+                    status: 500,
+                    headers: { "content-type": "application/json" },
+                  });
+                }
+                return providerJson("CONDENSED-SUMMARY");
+              }
+              capturedProviderRequest = body;
               return providerSse();
             },
           },
@@ -350,6 +472,16 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(binding).toEqual({ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" });
     expect(sqliteMigration).toEqual({ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] });
     expect(useSQLite).toBe(true);
+  });
+
+  it("bundles the delegation runner facet class and keeps it out of new_sqlite_classes", async () => {
+    const res = await mf!.dispatchFetch("http://assistant-smoke/__test/runner");
+    const body = (await res.json()) as { kind: string; name: string; hasOnChatMessage: boolean };
+    expect(body.kind).toBe("function");
+    expect(body.name).toBe("LexaAssistantRunner");
+    expect(body.hasOnChatMessage).toBe(true);
+    // A facet class needs no top-level migration entry (ADR-0004 §3/R5).
+    expect(sqliteMigration?.new_sqlite_classes ?? []).not.toContain("LexaAssistantRunner");
   });
 
   it("rejects an unsigned websocket with 1008", async () => {
@@ -610,6 +742,10 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
 
     const cols = await storage.exec<{ name: string }>("PRAGMA table_info(thread_meta)");
     expect(cols.some((c) => c.name === "permission_mode")).toBe(true);
+    // H2: the same guarded ALTER pass adds the compaction columns to a
+    // pre-existing store.
+    expect(cols.some((c) => c.name === "summary")).toBe(true);
+    expect(cols.some((c) => c.name === "summarized_count")).toBe(true);
     const row = await storage.exec<{ permission_mode: string }>(
       `SELECT permission_mode FROM thread_meta WHERE thread_key = '${threadKey}'`
     );
@@ -675,6 +811,121 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(body).toContain("SUMMARY-BLOCK");
     expect(body).toContain("[Conversation summary — the 3 earlier turns were condensed]");
   }, 60_000);
+
+  it("compacts past the threshold once, persists real summary/count on the DO and D1", async () => {
+    const documentId = "h2-compact";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = Array.from({ length: 41 }, (_, i) => ({
+      id: `h2-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      parts: [{ type: "text", text: `message ${i}` }],
+    }));
+    summaryCalls = 0;
+    expect((await persistStep(threadKey, messages)).status).toBe(200);
+    expect(summaryCalls).toBe(1);
+
+    const transcriptRes = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+    );
+    const transcript = (await transcriptRes.json()) as {
+      messages?: unknown[];
+      summary?: string | null;
+      summarizedCount?: number | null;
+    };
+    expect(transcript.summary).toBe("CONDENSED-SUMMARY");
+    expect(transcript.summarizedCount).toBe(41 - 8);
+    expect(transcript.messages).toHaveLength(41);
+
+    const mirrored = await d1
+      .prepare("SELECT summary, summarized_count FROM assistant_threads WHERE document_id = ?")
+      .bind(documentId)
+      .first<{ summary: string | null; summarized_count: number }>();
+    expect(mirrored?.summary).toBe("CONDENSED-SUMMARY");
+    expect(mirrored?.summarized_count).toBe(41 - 8);
+
+    // Repeat persist of the SAME transcript: the window is already summarized,
+    // so no second provider call ("threshold once").
+    expect((await persistStep(threadKey, messages)).status).toBe(200);
+    expect(summaryCalls).toBe(1);
+  }, 90_000);
+
+  it("compaction survives a wake (summary/count read back from durable thread_meta)", async () => {
+    const documentId = "h2-wake";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = Array.from({ length: 41 }, (_, i) => ({
+      id: `w-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      parts: [{ type: "text", text: `message ${i}` }],
+    }));
+    expect((await persistStep(threadKey, messages)).status).toBe(200);
+
+    await evictThread(threadKey);
+
+    const res = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+    );
+    const body = (await res.json()) as { summary?: string | null; summarizedCount?: number | null };
+    expect(body.summary).toBe("CONDENSED-SUMMARY");
+    expect(body.summarizedCount).toBe(41 - 8);
+  }, 90_000);
+
+  it("skips compaction on a provider failure and leaves the D1 summary untouched", async () => {
+    const documentId = "h2-fail";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, summary, summarized_count, messages) VALUES ('chat', ?, 'proj-1', 'user-1', 'PRIOR-SUMMARY', 3, '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = Array.from({ length: 41 }, (_, i) => ({
+      id: `f-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      parts: [{ type: "text", text: `message ${i}` }],
+    }));
+    summaryCalls = 0;
+    summaryShouldFail = true;
+    try {
+      expect((await persistStep(threadKey, messages)).status).toBe(200);
+    } finally {
+      summaryShouldFail = false;
+    }
+    expect(summaryCalls).toBe(1);
+
+    const mirrored = await d1
+      .prepare("SELECT summary, summarized_count FROM assistant_threads WHERE document_id = ?")
+      .bind(documentId)
+      .first<{ summary: string | null; summarized_count: number }>();
+    expect(mirrored?.summary).toBe("PRIOR-SUMMARY");
+    expect(mirrored?.summarized_count).toBe(3);
+  }, 90_000);
 
   it("load smoke: 10 concurrent threads connect, persist, and read back independently", async () => {
     // WS2 (P6): bounded local load smoke. Ten thread-keyed DO instances are
@@ -752,5 +1003,133 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
       20_000
     );
     expect(after).toEqual(appended);
+  }, 60_000);
+
+  it("appends the run card when a detached schedule run completes", async () => {
+    const documentId = "schedule-complete";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const res = await callOnRunFinished(
+      threadKey,
+      { runId: "schedule-run-1" },
+      { status: "completed", summary: "all done" }
+    );
+    expect(res.status).toBe(200);
+
+    const messages = await waitFor<unknown[]>(
+      () =>
+        transcriptOf(documentId).then((m) =>
+          messageIds(m).includes("run-schedule-run-1-completed") ? m : null
+        ),
+      20_000
+    );
+    const card = messages.find((m) => (m as { id?: string }).id === "run-schedule-run-1-completed") as {
+      parts: Array<{ text?: string }>;
+    };
+    expect(card.parts[0]?.text).toBe("Background run finished: all done");
+  }, 60_000);
+
+  it("soft-seals an interrupted run and dedupes the late completion card", async () => {
+    const documentId = "soft-seal";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    // Child may still run → no card, no terminal registry transition.
+    await callOnRunFinished(
+      threadKey,
+      { runId: "run-soft" },
+      { status: "interrupted", childStillRunning: true, reason: "budget" }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(messageIds(await transcriptOf(documentId))).not.toContain("run-run-soft-completed");
+
+    // The real terminal supersedes and emits the card exactly once.
+    await callOnRunFinished(threadKey, { runId: "run-soft" }, { status: "completed", summary: "late" });
+    await waitFor<unknown[]>(
+      () => transcriptOf(documentId).then((m) => (messageIds(m).includes("run-run-soft-completed") ? m : null)),
+      20_000
+    );
+    await callOnRunFinished(threadKey, { runId: "run-soft" }, { status: "completed", summary: "late" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const ids = messageIds(await transcriptOf(documentId));
+    expect(ids.filter((id) => id === "run-run-soft-completed")).toHaveLength(1);
+  }, 60_000);
+
+  it("lands a hard interrupt (childStillRunning === false) as failed with no card", async () => {
+    const documentId = "hard-interrupt";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    await callOnRunFinished(
+      threadKey,
+      { runId: "run-hard" },
+      { status: "interrupted", childStillRunning: false, reason: "budget exceeded" }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await transcriptOf(documentId)).toEqual([]);
+
+    const updates = await capturedRunUpdates();
+    expect(updates).toContainEqual(
+      expect.objectContaining({ runId: "run-hard", status: "failed", error: "budget exceeded" })
+    );
+  }, 60_000);
+
+  it("routes a kind='schedule' enqueue through the schedule branch without pinning a document run id", async () => {
+    // A cron-created schedule DO never connects: the fixed service-binding
+    // origin must carry the dispatch and the identity must be persisted for the
+    // detached completion hook.
+    const threadKey = "chat:schedule-do";
+    const res = await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "schedule-run-1",
+      actorUserId: "user-sched",
+      kind: "schedule",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    const keys = await storageKeys(threadKey);
+    expect(keys).not.toContain("assistantRunId");
+    expect(keys).toContain("internalOrigin");
+    expect(keys).toContain("internalIdentity");
+
+    // The schedule branch dispatched the registered run (the document fallback
+    // never touches the registry).
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "schedule-run-1" })
+    );
+
+    // A completion hook on this never-connected DO still authenticates: the
+    // identity enqueueRun persisted is what `loadInternalDeps` rebuilds from.
+    await callOnRunFinished(
+      threadKey,
+      { runId: "manual-schedule-hook" },
+      { status: "completed", summary: "done" }
+    );
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "manual-schedule-hook", status: "completed" })
+    );
+  }, 60_000);
+
+  it("pins the document run cursor only for a document enqueue", async () => {
+    const threadKey = "chat:doc-run";
+    const res = await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "doc-run-1",
+      actorUserId: "user-1",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    expect(await storageKeys(threadKey)).toContain("assistantRunId");
+    // The document path never dispatches a facet run.
+    expect((await capturedRunUpdates()).some((u) => u.runId === "doc-run-1")).toBe(false);
   }, 60_000);
 });

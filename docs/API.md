@@ -1648,7 +1648,12 @@ GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers
     POST /api/internal/assistant/write-execute       → { ok, applied, result, error, partial }
                                                        (auto-mode write; no pending row)
     GET  /api/internal/assistant/provider-config    → decrypted provider config per turn
-    GET  /api/internal/assistant/turn-context       → prompt/Jev/memory context per turn
+    POST /api/internal/assistant/turn-context       → { context: HarnessTurnContext }
+                                                       body { threadKey, runId?, userText,
+                                                              mode: "turn"|"resume"|"runner" }
+                                                       (project/actor/thread identity from the
+                                                        HMAC headers is authoritative; the body
+                                                        never overrides signed identity)
     POST /api/internal/assistant/call-log           → { ok: true }
     POST /api/internal/assistant/run-status         → { ok: true }        (terminal task transitions)
   A missing/malformed HMAC → 401 NO_USER_CONTEXT; no master key → 502
@@ -2055,32 +2060,85 @@ assistant run proceeds unchanged. Storing a key is refused with 400
 `SECRET_KEY_UNAVAILABLE` when the master key is unset or malformed; clearing one
 never needs it.
 
-GET    /api/admin/assistant/runs?status=&projectId=&limit=&cursor=   (superadmin)
+GET    /api/admin/assistant/runs?status=&kind=&projectId=&limit=&cursor=   (superadmin)
 → 200 { data: AssistantRunRow[], nextCursor: string|null,
         counts: { queued, running, completed, failed, cancelled } }
   AssistantRunRow = { id, key, projectId,
-                      documentType: "task"|"wiki", documentId, documentTitle,
+                      kind: "chat_run"|"document"|"schedule",
+                      documentType: "task"|"wiki"|null,
+                      documentId, documentTitle,
                       agentId, skillId, agentName, skillName,
+                      threadKey: string|null,
                       status: "queued"|"running"|"completed"|"failed"|"cancelled",
                       error: string|null, createdAt, startedAt, finishedAt }
-  Recent assistant runs (assistant_tasks), metadata only — `result`,
-  `extraPrompt` and `selection` are never serialized; `error` is included.
-  `error` is null unless status = failed.
-  createdAt/startedAt/finishedAt are the raw assistant_tasks columns — SQLite
-  UTC text ("YYYY-MM-DD HH:MM:SS" from datetime('now')), NOT JS ISO. Parse the
-  space form as UTC, exactly like the assistant_calls timestamps.
+  Recent assistant runs, metadata only — `result`, `extraPrompt` and `selection`
+  are never serialized; `error` is included. `error` is null unless status =
+  failed.
+  The listing is the UNION of the document-run tier (`assistant_tasks`, kind
+  `document`, non-null documentType/documentId/agentId/skillId/threadKey) and
+  the delegation/schedule registry (`assistant_runs`, kind `chat_run`|`document`
+  |`schedule`, null documentType/documentId/agentId/skillId, `threadKey` from
+  the registry). Registry rows surface `key` = the run id and empty
+  document/agent/skill strings.
+  createdAt/startedAt/finishedAt are the raw SQLite columns — UTC text
+  ("YYYY-MM-DD HH:MM:SS" from datetime('now')), NOT JS ISO. Parse the space
+  form as UTC, exactly like the assistant_calls timestamps.
   | 403 FORBIDDEN | 422 INVALID_ARGS
   Filters (all optional): `status` (one of the five statuses; unknown value →
-  422), `projectId` (exact match, unfiltered when empty/omitted), `limit`
-  (positive integer, default 50, capped at 200), `cursor` (opaque keyset token
-  from the previous page's nextCursor; malformed token → 422).
-  Keyset pagination on (created_at DESC, id DESC) — matches
-  idx_assistant_tasks_created. `nextCursor` is "<createdAt>|<id>" of the last
-  row, or null on the last page. The page is fetched with one extra row to
-  decide nextCursor, so `data.length` may be `limit` on a full page.
-  `counts` is the unfiltered GROUP BY over all statuses (assistant-task repo
-  countByStatus) — always all five keys, zero-filled. It is a status tab total,
-  not a total for the current filter or page.
+  422), `kind` (`chat_run`|`document`|`schedule`; unknown value → 422),
+  `projectId` (exact match, unfiltered when empty/omitted), `limit` (positive
+  integer, default 50, capped at 200), `cursor` (opaque keyset token from the
+  previous page's nextCursor; malformed token → 422).
+  Keyset pagination on (created_at DESC, id DESC) over the union. `nextCursor`
+  is "<createdAt>|<id>" of the last row, or null on the last page. The page is
+  fetched with one extra row to decide nextCursor, so `data.length` may be
+  `limit` on a full page.
+  `counts` is the unfiltered GROUP BY over BOTH tables (union of statuses) —
+  always all five keys, zero-filled. It is a status tab total, not a total for
+  the current filter or page.
+
+### Assistant schedules
+
+Per-project cron/interval schedules that fire a `kind='schedule'` assistant run
+on the 15-minute Worker tick. Reads are member-gated (`requireProjectReadById`);
+writes are project-admin-gated (`requireProjectAdminById`). A schedule needs a
+valid five-field UTC cron expression OR a positive `intervalSeconds`; neither
+present (or both cleared by a PATCH) → 422 INVALID_ARGS, and a malformed cron
+that yields no occurrence is refused up front rather than stored. `createdBy`
+is the session/API-key user; `nextRunAt` is recomputed on create and whenever
+timing changes or the schedule is re-enabled. `ASSISTANT_SCHEDULE_NOT_FOUND`
+and a cross-project id both surface as 404 (no existence oracle).
+
+```
+AssistantSchedule = { id, projectId, threadKey: string|null, createdBy: string|null,
+                      title, prompt, cron: string|null, intervalSeconds: number|null,
+                      enabled: boolean, nextRunAt, lastRunAt: string|null,
+                      lastRunId: string|null, createdAt, updatedAt }
+
+GET    /api/assistant/schedules/:projectId   (project member)
+→ 200 { data: AssistantSchedule[] }   // created_at DESC
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+
+GET    /api/assistant/schedules/:projectId/:id   (project member)
+→ 200 AssistantSchedule
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND / ASSISTANT_SCHEDULE_NOT_FOUND
+
+POST   /api/assistant/schedules/:projectId   (project admin)
+body { title*, prompt*, cron?: string|null, intervalSeconds?: number|null,
+       threadKey?: string|null, enabled? }
+  `title` ≤300 chars, `prompt` ≤4000 (sliced); `enabled` defaults true.
+→ 201 AssistantSchedule | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND | 422 INVALID_ARGS
+
+PATCH  /api/assistant/schedules/:projectId/:id   (project admin)
+body { title?, prompt?, cron?: string|null, intervalSeconds?: number|null,
+       threadKey?: string|null, enabled? }
+  Merged timing is re-validated: clearing both timing fields → 422 INVALID_ARGS.
+→ 200 AssistantSchedule | 403 FORBIDDEN
+  | 404 PROJECT_NOT_FOUND / ASSISTANT_SCHEDULE_NOT_FOUND | 422 INVALID_ARGS
+
+DELETE /api/assistant/schedules/:projectId/:id   (project admin)
+→ 204 | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND / ASSISTANT_SCHEDULE_NOT_FOUND
+```
 
 GET    /api/admin/assistant/bindings   (superadmin)
 → 200 { data: [{ projectId, projectName, projectSlug,

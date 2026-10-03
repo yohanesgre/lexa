@@ -9,7 +9,8 @@
 // The real engine/tools arrive in P3.
 
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { stepCountIs, type StopCondition, type ToolSet, type UIMessage } from "ai";
+import { stepCountIs, tool, type StopCondition, type ToolSet, type UIMessage } from "ai";
+import { z } from "zod";
 import type { Connection, ConnectionContext } from "agents";
 import type { Ai, DurableObjectState, Fetcher } from "@cloudflare/workers-types";
 import {
@@ -20,15 +21,20 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, transitionRun, callReadTool, proposeWrite, callWriteExecute, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, type AssistantInternalDeps } from "./agent-runtime";
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
-import { buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
+import { buildMcpToolSet, buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
 import { MAX_WRITES_PER_TURN } from "./write-tool-names";
 import { resolveAssistantToolPermissionMode, resolveThreadToolPermissionMode, type AssistantToolPermissionMode } from "../../shared/assistant";
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
 import { lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
 import { withApprovalCarriers } from "./approval-carrier";
+import { summaryWindow, summarizeTranscript } from "./summarize";
+import { assistantTraceParams, tracedAI } from "./tracing";
+import { LexaAssistantRunner } from "./runner";
+import { abortDelegatedRun, dispatchRegisteredRun, isTerminalAgentToolStatus, runStatusForTerminal, spawnDelegatedRun, DEFAULT_RUN_BUDGET_MS, PROJECT_RUN_LIMIT, THREAD_RUN_LIMIT, type AgentToolTerminalStatus, type DelegationDeps, type RunDispatcher } from "./delegation";
+import type { AssistantCallLogInput } from "../../shared/assistant";
 import { attachWorkersAiBinding } from "./model-factory";
 
 // Read tools available without per-project settings resolution (project data +
@@ -50,6 +56,10 @@ const CORE_READ_TOOLS: ReadonlySet<string> = new Set<string>([
 
 export interface LexaAssistantEnv {
   LXK_SECRETS_MASTER_KEY?: string | undefined;
+  // Public worker origin. Used to reach the Worker internal routes for a run
+  // dispatched without a connect (cron schedule ticks); the connect path
+  // persists its own origin, which wins when present.
+  LXK_PUBLIC_URL?: string | undefined;
   // Optional self service binding back to the Worker that hosts the internal
   // assistant routes (ADR-0003 §B.2/R7). When absent the DO falls back to a
   // global fetch against the public origin (the ADR alternative).
@@ -67,6 +77,8 @@ type ThreadMetaRow = {
   imported_from_d1: number;
   created_at: string;
   permission_mode: string | null;
+  summary: string | null;
+  summarized_count: number;
 }
 
 const THREAD_META_DDL = `CREATE TABLE IF NOT EXISTS thread_meta (
@@ -75,6 +87,8 @@ const THREAD_META_DDL = `CREATE TABLE IF NOT EXISTS thread_meta (
   owner_user_id TEXT,
   imported_from_d1 INTEGER NOT NULL DEFAULT 0,
   permission_mode TEXT NOT NULL DEFAULT 'ask',
+  summary TEXT,
+  summarized_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
@@ -108,6 +122,37 @@ function assistantErrorResponse(status: number, code: string, message: string): 
   });
 }
 
+/**
+ * Build the signed internal deps for one DO operation. `storedOrigin` (persisted
+ * at connect) wins; a cron-dispatched `enqueueRun` never connected, so it falls
+ * back to `env.LXK_PUBLIC_URL`. Reuses the same HMAC identity/origin derivation
+ * the connect path persists — no `onConnect` requirement.
+ */
+export function buildInternalDepsForRun(
+  env: LexaAssistantEnv,
+  identity: InternalAuthIdentity | null,
+  storedOrigin?: string
+): AssistantInternalDeps | null {
+  const masterKey = env.LXK_SECRETS_MASTER_KEY;
+  if (!masterKey || !identity) return null;
+  // A reachable origin: the connect-persisted one wins; a cron-dispatched
+  // `enqueueRun` never connected and a default workers.dev install has no
+  // `LXK_PUBLIC_URL`, so fall back to the fixed origin the service binding
+  // proves (the runner uses the same constant — `runner.ts`). Without the
+  // binding there is no origin and the caller degrades (logged, not silent).
+  const service = env.ASSISTANT_SERVICE;
+  const origin = storedOrigin ?? env.LXK_PUBLIC_URL ?? (service ? "https://assistant.internal" : undefined);
+  if (!origin) return null;
+  return {
+    origin,
+    identity,
+    masterKey,
+    ...(service
+      ? { fetchImpl: (input: string, init?: RequestInit) => service.fetch(input, init as never) as unknown as Promise<Response> }
+      : {}),
+  };
+}
+
 export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // TS 7's preview compiler does not surface the protected `ctx`/`env` fields
   // inherited through `DurableObject` (an `export =` module); re-declaring them
@@ -129,15 +174,21 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
 
   private ensureThreadMetaTable(): void {
     this.ctx.storage.sql.exec(THREAD_META_DDL);
-    // Pre-existing DOs created `thread_meta` without `permission_mode`; a
-    // `CREATE TABLE IF NOT EXISTS` cannot add a column. Guarded PRAGMA +
-    // ALTER gives those stores the sticky mode column (D2/E). The ALTER has a
-    // constant default, so existing rows become 'ask'.
+    // Pre-existing DOs created `thread_meta` without the later columns; a
+    // `CREATE TABLE IF NOT EXISTS` cannot add a column. Guarded PRAGMA + ALTER
+    // gives those stores the sticky mode (D2/E) and the compaction state (H2).
+    // Every ALTER has a constant default, so existing rows get safe values.
     const columns = this.ctx.storage.sql
       .exec<{ name: string }>("PRAGMA table_info(thread_meta)")
       .toArray();
     if (!columns.some((column) => column.name === "permission_mode")) {
       this.ctx.storage.sql.exec("ALTER TABLE thread_meta ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'ask'");
+    }
+    if (!columns.some((column) => column.name === "summary")) {
+      this.ctx.storage.sql.exec("ALTER TABLE thread_meta ADD COLUMN summary TEXT");
+    }
+    if (!columns.some((column) => column.name === "summarized_count")) {
+      this.ctx.storage.sql.exec("ALTER TABLE thread_meta ADD COLUMN summarized_count INTEGER NOT NULL DEFAULT 0");
     }
   }
 
@@ -198,20 +249,27 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // wake. Origin + identity are persisted at connect, so a mirror triggered by
   // a later persist still authenticates.
   private async loadInternalDeps(): Promise<AssistantInternalDeps | null> {
-    const masterKey = this.env.LXK_SECRETS_MASTER_KEY;
-    if (!masterKey) return null;
     const origin = await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY);
     const identity = await this.ctx.storage.get<InternalAuthIdentity>(INTERNAL_IDENTITY_KEY);
-    if (!origin || !identity) return null;
-    const service = this.env.ASSISTANT_SERVICE;
-    return {
-      origin,
-      identity,
-      masterKey,
-      ...(service
-        ? { fetchImpl: (input: string, init?: RequestInit) => service.fetch(input, init as never) as unknown as Promise<Response> }
-        : {}),
-    };
+    return buildInternalDepsForRun(this.env, identity ?? null, origin ?? undefined);
+  }
+
+  // Persist the reachable origin + signed identity when absent. `onConnect`
+  // writes them for an interactive thread; a cron-dispatched schedule run never
+  // connects, so `enqueueRun` writes the same keys before dispatching so the
+  // detached completion hook (`onRunFinished`) can rebuild deps after a cold
+  // wake. An existing connect value wins — never overwrite it.
+  private async persistInternalContext(origin: string, identity: InternalAuthIdentity): Promise<void> {
+    try {
+      if ((await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY)) == null) {
+        await this.ctx.storage.put(INTERNAL_ORIGIN_KEY, origin);
+      }
+      if ((await this.ctx.storage.get<InternalAuthIdentity>(INTERNAL_IDENTITY_KEY)) == null) {
+        await this.ctx.storage.put(INTERNAL_IDENTITY_KEY, identity);
+      }
+    } catch (e) {
+      console.warn("[Assistant] failed to persist internal context:", e instanceof Error ? e.message : String(e));
+    }
   }
 
   // Migrate-on-read (ADR-0003 §B.3): the first activation of a thread whose DO
@@ -243,17 +301,63 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     return true;
   }
 
-  // Send `null` for summary/count/title until the P3 engine supplies real
-  // values: the mirror SQL COALESCEs, so `null` means "keep the D1 column".
-  // A literal 0 would clobber a seeded `summarized_count` on every persist.
+  // Persist the DO's canonical compaction state to the D1 mirror with real
+  // values (H2). A `null` summary/count means "no engine value yet" — the SQL
+  // COALESCEs, so a pre-existing D1 row keeps its seeded columns until the DO
+  // actually summarizes.
   private async mirrorCurrent(): Promise<boolean> {
     const deps = await this.loadInternalDeps();
     if (!deps) return false;
-    const ok = await mirrorTranscript(deps, { messages: this.messages, summary: null, summarizedCount: null, title: null });
+    const meta = this.readThreadMeta(this.ctx.id.name ?? "");
+    const hasSummary = meta?.summary != null && meta.summary.trim() !== "";
+    const ok = await mirrorTranscript(deps, {
+      messages: this.messages,
+      summary: hasSummary ? meta!.summary : null,
+      summarizedCount: hasSummary ? meta!.summarized_count : null,
+      title: null,
+    });
     if (!ok) {
       console.warn(`[Assistant] mirror failed for ${this.ctx.id.name ?? "unknown"} (will re-mirror on next step)`);
     }
     return ok;
+  }
+
+  // H2 compaction: when the transcript crosses 40 messages / 64 KiB, condense
+  // everything outside the last-8 window (incrementally since the last summary)
+  // with one cheap `generateText`, then persist the summary + count on the DO.
+  // Fully fail-open: no deps, no provider binding, or a provider failure simply
+  // skips this event and the next persist retries. Idempotent for an unchanged
+  // transcript ("threshold once"); survives wake because the state lives in
+  // `thread_meta`, not in memory.
+  private async maybeSummarize(): Promise<void> {
+    const threadKey = this.ctx.id.name ?? "";
+    const meta = this.readThreadMeta(threadKey);
+    if (!meta) return;
+    const window = summaryWindow(this.messages, meta.summarized_count);
+    if (!window) return;
+    const deps = await this.loadInternalDeps();
+    if (!deps) return;
+    try {
+      const configs = await resolveProviderConfigs(deps, meta.project_id);
+      if (!configs || configs.length === 0) return;
+      const summary = await summarizeTranscript(window.older, meta.summary, configs, {
+        generateTextImpl: tracedAI.generateText,
+        trace: assistantTraceParams({
+          agentId: this.ctx.id.toString(),
+          conversationId: threadKey,
+          purpose: "summary",
+        }),
+      });
+      if (summary === null) return;
+      this.ctx.storage.sql.exec(
+        "UPDATE thread_meta SET summary = ?, summarized_count = ? WHERE thread_key = ?",
+        summary,
+        window.summarizedCount,
+        threadKey
+      );
+    } catch (e) {
+      console.warn("[Assistant] summary failed (skipping):", e instanceof Error ? e.message : String(e));
+    }
   }
 
   override async persistMessages(
@@ -267,6 +371,8 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     const withCarriers = withApprovalCarriers(messages);
     await super.persistMessages(withCarriers, excludeBroadcastIds, options);
     this.messages = withCarriers;
+    // Compact first, then mirror the freshened summary/count to D1.
+    await this.maybeSummarize();
     await this.mirrorCurrent();
   }
 
@@ -357,8 +463,11 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // Per-turn auto-write budget (R5): the DO-side counter replicates the
     // pending-row cap the ask path gets for free. A bulk call is one slot.
     const writeBudget = createAssistantWriteBudget();
+    // Resolved agent id for the read-tool executor (H1 nit); filled from the
+    // harness bundle once it resolves (the tools only execute after that).
+    let readAgentId: string | undefined;
     const transport: AssistantToolTransport = {
-      read: (name, args) => callReadTool(deps, name, args),
+      read: (name, args) => callReadTool(deps, name, args, readAgentId),
       propose: (name, args) =>
         proposeWrite(deps, {
           name,
@@ -369,6 +478,9 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
           documentType: documentType ?? "chat",
           documentId: sessionId,
           ownerUserId: deps.identity.actorUserId,
+          // Run attribution (ADR-0004 §3; plan line 140): a document run pins a
+          // run id cursor, so its proposals carry it; a plain chat turn has none.
+          ...(runId !== null ? { runId } : {}),
         }),
       execute: createBudgetedWriteExecutor(
         writeBudget,
@@ -384,18 +496,30 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     };
     // Per-turn harness context (ADR-0004 §1; H1): one Worker round trip carries
     // agent/skill/memory/doc/mention/repo/Jev/summary plus tool gating. The
-    // signed identity wins; `userText` is only what the model will see.
+    // signed identity wins; `userText` is only what the model will see. A
+    // resume continuation (`resumeBatch`) passes `resumeBatchId`, switching the
+    // Worker to `mode: "resume"` (Jev preflight skipped, R2).
+    const turnMode: "turn" | "resume" = options?.body && "resumeBatchId" in options.body ? "resume" : "turn";
     const harness = await resolveHarnessContext(deps, {
       threadKey,
       userText: lastUserText(this.messages),
-      mode: "turn",
+      mode: turnMode,
     });
     const availableRead = new Set(harness?.readTools ?? CORE_READ_TOOLS);
+    readAgentId = harness?.agent?.id;
     const enabledWrite = harness?.writeTools ?? [];
     const tools: ToolSet = {
       ...buildReadTools({ transport, available: availableRead }),
+      ...buildMcpToolSet(harness?.mcpTools ?? [], transport),
       ...buildWriteTools({ transport, enabled: enabledWrite, mode: permissionMode }),
     };
+    // Delegation tools (ADR-0004 §3; H3): offered only when the Worker reports
+    // delegation enabled for this turn. The Worker reads the global
+    // `assistant_delegation_enabled` setting, which defaults off (dark launch;
+    // H5 flips it on).
+    if (harness?.delegation.enabled && harness.delegation.maxConcurrentRuns > 0) {
+      Object.assign(tools, this.buildDelegationTools(deps, meta.project_id, threadKey, permissionMode));
+    }
     const toolRoundCap = documentType === "chat" ? MAX_CHAT_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
     const stopWhen: StopCondition<ToolSet>[] = [stepCountIs(toolRoundCap)];
     // Suspend only in ask mode on a SUCCESSFUL write proposal
@@ -424,7 +548,12 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         mentionContext: harness?.mentionContext ?? "",
         writeTools: enabledWrite,
         advisory: harness?.advisory ?? null,
-        threadSummary: harness?.threadSummary ?? null,
+        // The DO's own compaction state is fresher than the mirrored D1 value
+        // the Worker read for this turn; prefer it when present (H2).
+        threadSummary:
+          meta.summary != null && meta.summary.trim() !== ""
+            ? { summary: meta.summary, summarizedCount: meta.summarized_count }
+            : harness?.threadSummary ?? null,
       })
     );
     try {
@@ -437,6 +566,13 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         system,
         stopWhen,
         runId,
+        streamTextImpl: tracedAI.streamText,
+        trace: assistantTraceParams({
+          agentId: this.ctx.id.toString(),
+          conversationId: threadKey,
+          purpose: turnMode,
+          ...(runId !== null ? { runId } : {}),
+        }),
         ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
       });
     } catch (e) {
@@ -445,6 +581,186 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       console.error("[Assistant] engine turn failed:", e instanceof Error ? e.message : String(e));
       return assistantErrorResponse(502, "ASSISTANT_GENERATION_FAILED", "Assistant generation failed");
     }
+  }
+
+  // ─── Delegation (ADR-0004 §3; H3) ──────────────────────────────────────
+  // The parent owns the SDK facet dispatch + the D1 run registry bridge. The
+  // facet child reaches the Worker internal routes through the `relay*` methods
+  // below (it has no HMAC identity of its own).
+
+  private delegationDeps(deps: AssistantInternalDeps): DelegationDeps {
+    const dispatcher: RunDispatcher = {
+      dispatch: async (input) => {
+        try {
+          const result = await this.runAgentTool(LexaAssistantRunner, {
+            runId: input.runId,
+            input: {
+              runId: input.runId,
+              goal: input.goal,
+              projectId: input.projectId,
+              threadKey: input.threadKey,
+              mode: input.mode,
+              budgetMs: input.budgetMs,
+              createdBy: deps.identity.actorUserId,
+            },
+            detached: { onFinish: "onRunFinished", maxBudgetMs: input.budgetMs },
+          });
+          return result.status === "error"
+            ? { status: "error", error: result.error ?? "dispatch rejected" }
+            : { status: "running" };
+        } catch (e) {
+          return { status: "error", error: e instanceof Error ? e.message : "dispatch failed" };
+        }
+      },
+      cancel: async (runId) => {
+        await this.cancelAgentTool(runId);
+      },
+    };
+    return {
+      dispatcher,
+      createRun: async (input) =>
+        createRunRemote(deps, {
+          id: input.id,
+          kind: "chat_run",
+          goal: input.goal,
+          threadKey: input.threadKey,
+          budgetMs: input.budgetMs,
+          createdBy: input.createdBy,
+          // Caps ride the create so the registry INSERT is the atomic authority
+          // (the DO's pre-read is only a fast path).
+          maxActiveThread: THREAD_RUN_LIMIT,
+          maxActiveProject: PROJECT_RUN_LIMIT,
+        }),
+      updateRun: async (input) =>
+        updateRunRemote(deps, {
+          runId: input.runId,
+          status: input.status,
+          result: input.result ?? null,
+          error: input.error ?? null,
+        }),
+      getRun: async (runId) => getRunRemote(deps, runId),
+      counts: async () => (await countRunsRemote(deps)) ?? { thread: 0, project: 0 },
+    };
+  }
+
+  private buildDelegationTools(
+    deps: AssistantInternalDeps,
+    projectId: string,
+    threadKey: string,
+    mode: AssistantToolPermissionMode
+  ): ToolSet {
+    const runDeps = this.delegationDeps(deps);
+    return {
+      spawn_run: tool({
+        description:
+          "Spawn a background run that works on one goal independently and reports back later. Returns a run id; use check_run to poll status. Runs inherit this thread's write mode and are budget-capped.",
+        inputSchema: z.object({
+          goal: z.string().min(1).max(2000).describe("What the background run should accomplish"),
+          budgetMs: z.number().int().positive().optional().describe("Optional wall-clock budget in ms"),
+        }),
+        execute: (args) =>
+          spawnDelegatedRun(runDeps, {
+            goal: args.goal,
+            projectId,
+            threadKey,
+            mode,
+            createdBy: deps.identity.actorUserId,
+            ...(args.budgetMs !== undefined ? { budgetMs: args.budgetMs } : {}),
+          }),
+      }),
+      check_run: tool({
+        description: "Check the status and result of a background run by its run id.",
+        inputSchema: z.object({ runId: z.string().min(1) }),
+        execute: async ({ runId }) => {
+          const row = await runDeps.getRun(runId);
+          return row ?? { error: "run not found" };
+        },
+      }),
+    };
+  }
+
+  // Durable completion hook for detached runs (referenced by method name in the
+  // detached config). Idempotent: a repeated terminal delivery is a no-op in the
+  // registry's conditional UPDATE.
+  async onRunFinished(
+    run: { runId: string },
+    result: { status: AgentToolTerminalStatus; summary?: string; error?: string; reason?: string; childStillRunning?: boolean }
+  ): Promise<void> {
+    // `interrupted` is a SOFT seal (agents SDK) only while the child may still
+    // run: the parent stopped waiting but the child may reach a real terminal
+    // and fire this hook again with `completed`. Leave the registry row
+    // `running` and emit no terminal card so the late real result supersedes;
+    // the stale-run reconciliation tick fails a row whose child never returns.
+    // `interrupted` with `childStillRunning === false` is HARD: the child is
+    // gone, so land the `failed` transition immediately and emit no card.
+    const hardInterrupt = result.status === "interrupted" && result.childStillRunning === false;
+    if (result.status === "interrupted" && !hardInterrupt) return;
+    const deps = await this.loadInternalDeps();
+    if (!deps) return;
+    let status: "completed" | "failed" | "cancelled";
+    let error: string | null;
+    if (hardInterrupt) {
+      status = "failed";
+      error = result.reason ?? result.error ?? "interrupted";
+    } else {
+      if (!isTerminalAgentToolStatus(result.status)) return;
+      status = runStatusForTerminal(result.status);
+      error = result.error ?? null;
+    }
+    await updateRunRemote(deps, {
+      runId: run.runId,
+      status,
+      result: result.summary ?? null,
+      error,
+    });
+    // A hard interrupt is reported through the registry only (no card), so it
+    // never races a later real terminal's card.
+    if (hardInterrupt) return;
+    // Server-driven result card (ADR-0004 §3): append the completion to the
+    // parent transcript WITHOUT triggering a model turn. Dedupe is per terminal
+    // kind, so an earlier non-terminal/interrupted delivery can never block a
+    // later real terminal's card.
+    const messageId = `run-${run.runId}-${status}`;
+    if (this.messages.some((m) => m.id === messageId)) return;
+    const label =
+      status === "completed"
+        ? "Background run finished"
+        : status === "cancelled"
+          ? "Background run cancelled"
+          : "Background run failed";
+    const detail = (result.summary ?? result.error ?? "").trim();
+    const message: UIMessage = {
+      id: messageId,
+      role: "assistant",
+      parts: [{ type: "text", text: detail === "" ? label : `${label}: ${detail}` }],
+    };
+    try {
+      await this.persistMessages([...this.messages, message]);
+    } catch (e) {
+      console.warn("[Assistant] failed to append run completion:", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // ─── Parent relay RPC (facet → parent) ─────────────────────────────────
+  async relayProviderConfigs(projectId: string) {
+    const deps = await this.loadInternalDeps();
+    if (!deps) return null;
+    return resolveProviderConfigs(deps, projectId);
+  }
+
+  async relayCallLog(input: AssistantCallLogInput): Promise<void> {
+    const deps = await this.loadInternalDeps();
+    if (deps) await recordCallLog(deps, input);
+  }
+
+  async relayRunUpdate(input: {
+    runId: string;
+    status: "running" | "completed" | "failed" | "cancelled";
+    result?: string | null;
+    error?: string | null;
+  }): Promise<void> {
+    const deps = await this.loadInternalDeps();
+    if (deps) await updateRunRemote(deps, input);
   }
 
   // ─── Thread lifecycle RPC surface (ADR-0003 §B.4) ──────────────────────
@@ -458,37 +774,109 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     summarizedCount: number | null;
     permissionMode: AssistantToolPermissionMode;
   }> {
-    // summary/summarizedCount stay null until the P3 engine tracks them on the
-    // DO; the REST read prefers a non-null DO value over the D1 mirror. The
-    // sticky permission mode hydrates the composer picker (D2/D5); a
-    // pre-column/uninitialized store falls back to "ask".
+    // H2: the DO now owns the compaction state; the REST read prefers a
+    // non-null DO value over the D1 mirror. `null` still means "no engine value
+    // yet" (never a literal 0) so a seeded D1 count is not clobbered.
     this.ensureThreadMetaTable();
     const meta = this.readThreadMeta(this.ctx.id.name ?? "");
+    const summary = meta?.summary != null && meta.summary.trim() !== "" ? meta.summary : null;
     return {
       messages: this.messages,
-      summary: null,
-      summarizedCount: null,
+      summary,
+      summarizedCount: summary !== null ? (meta?.summarized_count ?? null) : null,
       permissionMode: resolveAssistantToolPermissionMode(undefined, meta?.permission_mode),
     };
   }
 
-  async resumeBatch(_batchId: string | null): Promise<{ ok: true }> {
+  async resumeBatch(batchId: string | null): Promise<{ ok: true }> {
+    // Real resume: continue the last assistant turn so the model sees the
+    // approved writes. `resumeBatchId` in the turn body switches the Worker
+    // context to `mode: "resume"` (Jev preflight skipped, R2). Best-effort:
+    // an RPC from the approval route must never fail the decision.
+    try {
+      if (this.messages.some((m) => m.role === "assistant")) {
+        await this.continueLastTurn({ resumeBatchId: batchId });
+      }
+    } catch (e) {
+      console.warn("[Assistant] resumeBatch continuation failed:", e instanceof Error ? e.message : String(e));
+    }
     return { ok: true };
   }
 
-  async enqueueRun(_projectId: string, taskId: string): Promise<{ ok: true }> {
-    // The run id keys the terminal status transition the engine reports back
-    // through `/api/internal/assistant/run-status`. Full background run start
-    // (`runFiber`) lands with the tools/run-control pass.
+  async enqueueRun(input: {
+    projectId: string;
+    runId: string;
+    actorUserId: string;
+    /**
+     * Explicit routing hint. `"schedule"` (set by the cron tick, which owns the
+     * registry row's kind) never takes the document fallback below; omitted or
+     * `"document"` is the legacy document-run path. The kind is passed rather
+     * than inferred so a null `getRunRemote` (not-found vs unreachable) cannot
+     * misroute a schedule run into a document run.
+     */
+    kind?: "document" | "schedule";
+  }): Promise<{ ok: true }> {
+    // Identity-object entry point (ADR-0004 §4): a cron tick hands over the
+    // run coordinates; the DO derives its own thread key from the instance name.
+    const threadKey = this.ctx.id.name ?? "";
+    const identity: InternalAuthIdentity = { actorUserId: input.actorUserId, projectId: input.projectId, threadKey };
+    const storedOrigin = await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY);
+    const deps = buildInternalDepsForRun(this.env, identity, storedOrigin ?? undefined);
+    if (input.kind === "schedule") {
+      // Schedule dispatch has its own branch: a missing/unreachable registry
+      // row must never pin a run-id cursor on a schedule thread (that cursor
+      // belongs to document runs). Log rather than silently degrade.
+      if (!deps) {
+        console.warn(
+          `[Assistant] schedule run ${input.runId} could not dispatch: internal deps unavailable (missing master key or origin)`
+        );
+        return { ok: true };
+      }
+      const run = await getRunRemote(deps, input.runId);
+      if (!run || run.kind !== "schedule") {
+        console.warn(
+          `[Assistant] schedule run ${input.runId} not found in the registry; left queued for reconciliation`
+        );
+        return { ok: true };
+      }
+      // The registry row already exists (created by the schedule tick): drive
+      // the detached facet and land the running/failed transition. No insert,
+      // no cap check. Detached runs have no interactive approver → `auto`.
+      // Persist origin/identity first so the detached completion hook can
+      // rebuild deps without an interactive connect (fix 2).
+      await this.persistInternalContext(deps.origin, identity);
+      await dispatchRegisteredRun(this.delegationDeps(deps), {
+        runId: run.id,
+        goal: run.goal,
+        projectId: run.projectId,
+        threadKey: run.threadKey,
+        mode: "auto",
+        budgetMs: run.budgetMs ?? DEFAULT_RUN_BUDGET_MS,
+      });
+      return { ok: true };
+    }
+    // Document run: pin the run-id cursor the engine's terminal transition
+    // uses. `assistant_tasks` remains the document source of truth — the DO
+    // creates no registry row for a document run. Only document runs reach
+    // here; a schedule run never writes this key.
     try {
-      await this.ctx.storage.put(RUN_ID_KEY, taskId);
+      await this.ctx.storage.put(RUN_ID_KEY, input.runId);
     } catch (e) {
       console.warn("[Assistant] failed to persist run id:", e instanceof Error ? e.message : String(e));
     }
     return { ok: true };
   }
 
-  async abortRun(_taskId: string): Promise<{ ok: true }> {
+  async abortRun(taskId: string): Promise<{ ok: true }> {
+    const deps = await this.loadInternalDeps();
+    if (deps) {
+      try {
+        await this.cancelAgentTool(taskId);
+      } catch (e) {
+        console.warn("[Assistant] cancelAgentTool failed:", e instanceof Error ? e.message : String(e));
+      }
+      await updateRunRemote(deps, { runId: taskId, status: "cancelled" });
+    }
     return { ok: true };
   }
 

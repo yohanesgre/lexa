@@ -84,10 +84,22 @@ import {
 } from "./assistant/internal-auth";
 import { handleInternalAssistantRequest } from "./assistant/internal-routes";
 import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerHarnessContext } from "./assistant/worker-tools";
+import { dispatchDueSchedules } from "./scheduled/schedules";
+import { reconcileStaleRuns } from "./assistant/run-registry";
 import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
-import type { AssistantThreadType, AssistantToolPermissionMode } from "../shared/assistant";
+import type {
+  AssistantRunRow,
+  AssistantScheduleRow,
+  AssistantThreadType,
+  AssistantToolPermissionMode,
+} from "../shared/assistant";
 
 export { LexaAssistantAgent };
+// Delegation facet child (ADR-0004 §3; H3). Exported from the worker entry so
+// the SDK's dynamic-agents machinery can resolve it via `ctx.exports`; facets
+// need no `new_sqlite_classes` migration entry (they are not top-level DO
+// bindings). The export name must match the class name exactly.
+export { LexaAssistantRunner } from "./assistant/runner";
 
 type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
 
@@ -101,7 +113,12 @@ function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadR
     resumeBatch(batchId: string | null): Promise<{ ok: true }>;
     destroyThread(): Promise<{ ok: true }>;
     resetThread(): Promise<{ ok: true }>;
-    enqueueRun(projectId: string, taskId: string): Promise<{ ok: true }>;
+    enqueueRun(input: {
+      projectId: string;
+      runId: string;
+      actorUserId: string;
+      kind?: "document" | "schedule";
+    }): Promise<{ ok: true }>;
     abortRun(taskId: string): Promise<{ ok: true }>;
   }
   const stubFor = async (threadKey: string): Promise<Stub> =>
@@ -112,7 +129,7 @@ function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadR
     resumeBatch: async (threadKey, batchId) => (await stubFor(threadKey)).resumeBatch(batchId),
     destroyThread: async (threadKey) => (await stubFor(threadKey)).destroyThread(),
     resetThread: async (threadKey) => (await stubFor(threadKey)).resetThread(),
-    enqueueRun: async (threadKey, projectId, taskId) => (await stubFor(threadKey)).enqueueRun(projectId, taskId),
+    enqueueRun: async (threadKey, input) => (await stubFor(threadKey)).enqueueRun(input),
     abortRun: async (threadKey, taskId) => (await stubFor(threadKey)).abortRun(taskId),
   };
 }
@@ -601,17 +618,38 @@ export async function pruneR2Backups(blob: R2Bucket, retention: number): Promise
   return Array.from(doomed).sort();
 }
 
+type ScheduleEnqueue = (run: AssistantRunRow, schedule: AssistantScheduleRow) => Promise<void>;
+
 async function runScheduled(env: WorkersEnv): Promise<void> {
   await ensureBoot(env);
   const { runtimeEnv, driver } = requestLayers(env);
-  await runScheduledCore(driver, runtimeEnv, env.BLOB);
+  const enqueue: ScheduleEnqueue | undefined = env.ASSISTANT_AGENT
+    ? async (run) => {
+        const agent = (await getAgentByName(env.ASSISTANT_AGENT!, run.threadKey)) as unknown as {
+          enqueueRun(input: {
+            projectId: string;
+            runId: string;
+            actorUserId: string;
+            kind?: "document" | "schedule";
+          }): Promise<{ ok: true }>;
+        };
+        await agent.enqueueRun({
+          projectId: run.projectId,
+          runId: run.id,
+          actorUserId: run.createdBy ?? "",
+          kind: "schedule",
+        });
+      }
+    : undefined;
+  await runScheduledCore(driver, runtimeEnv, env.BLOB, enqueue);
 }
 
 // Exported for tests: the scheduled tick minus boot/env plumbing.
 export async function runScheduledCore(
   driver: DbDriver,
   runtimeEnv: RuntimeEnv,
-  blob: R2Bucket | undefined
+  blob: R2Bucket | undefined,
+  enqueue?: ScheduleEnqueue | undefined
 ): Promise<void> {
   await Effect.runPromise(
     batchStmts(driver, [
@@ -628,6 +666,25 @@ export async function runScheduledCore(
     } catch (e) {
       console.error("[Workers] backup retention prune failed:", e instanceof Error ? e.message : String(e));
     }
+  }
+  // Stale run reconciliation (ADR-0004 §3): fail runs that outlived their
+  // wall-clock budget. Fail-open: a reconciliation error must never break the
+  // prune tick.
+  try {
+    const reconciled = await Effect.runPromise(reconcileStaleRuns(driver));
+    if (reconciled.failed > 0) console.log(`[Workers] assistant stale runs failed: ${reconciled.failed}`);
+  } catch (e) {
+    console.error("[Workers] assistant run reconciliation failed:", e instanceof Error ? e.message : String(e));
+  }
+  // Scheduled assistant runs (ADR-0004 §4; H7): fire due schedules, each of
+  // which creates a `kind='schedule'` run row and advances its next fire in one
+  // atomic batch, then hands the run to the thread DO via `enqueue`. Fail-open:
+  // a dispatch error must never break the prune tick.
+  try {
+    const result = await dispatchDueSchedules(driver, { enqueue });
+    if (result.dispatched > 0) console.log(`[Workers] assistant schedules dispatched: ${result.dispatched}`);
+  } catch (e) {
+    console.error("[Workers] assistant schedule dispatch failed:", e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -766,8 +823,8 @@ const handler: ExportedHandler<WorkersEnv> = {
           identity,
           deps: {
             resolveProviderConfigs: (projectId) => resolveAssistantProviderConfigs(base, projectId),
-            resolveHarnessTurnContext: (input) => resolveWorkerHarnessContext({ driver, base }, input),
-            executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB }),
+            resolveHarnessTurnContext: (input) => resolveWorkerHarnessContext({ driver, base, env: runtimeEnv }, input),
+            executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB, env: runtimeEnv }),
             executeWriteTool: buildWorkerWriteToolExecutor({ base }),
           },
         });

@@ -40,6 +40,7 @@ afterAll(() => {
 
 beforeEach(() => {
   db.exec("DELETE FROM assistant_call_logs");
+  db.exec("DELETE FROM assistant_runs");
   db.exec("DELETE FROM task_activity");
   db.exec("DELETE FROM assistant_tasks");
   db.exec("DELETE FROM assistant_pending_writes");
@@ -570,6 +571,43 @@ describe("read-tool execution (POST /api/internal/assistant/tool)", () => {
     expect(seen).toEqual([{ name: "get_task", args: { ref: "P-1" }, projectId: "p1", actorUserId: "u1" }]);
   });
 
+  it("forwards a prefixed mcp__ call by name", async () => {
+    const seen: Array<{ name: string }> = [];
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/tool",
+      body: { name: "mcp__srv__read", args: { q: "x" } },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: {
+        executeReadTool: async (input) => {
+          seen.push({ name: input.name });
+          return { ok: true, result: "R" };
+        },
+      },
+    });
+    expect(result).toEqual({ status: 200, body: { ok: true, result: "R" } });
+    expect(seen).toEqual([{ name: "mcp__srv__read" }]);
+  });
+
+  it("forwards the resolved agent id to the read-tool executor", async () => {
+    const seen: Array<{ agentId?: string }> = [];
+    await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/tool",
+      body: { name: "get_skill", args: { name: "x" }, agentId: "agent-7" },
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: {
+        executeReadTool: async (input) => {
+          seen.push({ ...(input.agentId !== undefined ? { agentId: input.agentId } : {}) });
+          return { ok: true };
+        },
+      },
+    });
+    expect(seen).toEqual([{ agentId: "agent-7" }]);
+  });
+
   it("502s when the read-tool executor is not wired", async () => {
     const result = await handleInternalAssistantRequest({
       method: "POST",
@@ -923,5 +961,150 @@ describe("terminal run status (POST /api/internal/assistant/run-status)", () => 
       driver: driverOf(),
     });
     expect(malformed.status).toBe(400);
+  });
+});
+
+describe("delegation run registry routes (H3)", () => {
+  const driverOf = () => createBunSqliteDriver(db);
+  const identity = { actorUserId: "u1", projectId: "p1", threadKey: "chat:c1" };
+
+  it("POST run-create records a queued run from the signed identity", async () => {
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "research x", id: "run-1" },
+      driver: driverOf(),
+      identity,
+    });
+    expect(result.status).toBe(200);
+    const run = (result.body as { run: { id: string; status: string; threadKey: string } }).run;
+    expect(run).toMatchObject({ id: "run-1", status: "queued", threadKey: "chat:c1" });
+  });
+
+  it("400s run-create without identity or with a bad payload", async () => {
+    const noIdentity = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x" },
+      driver: driverOf(),
+    });
+    expect(noIdentity.status).toBe(400);
+    const badKind = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "nope", goal: "x" },
+      driver: driverOf(),
+      identity,
+    });
+    expect(badKind.status).toBe(400);
+  });
+
+  it("POST run-update transitions and 404s an unknown run", async () => {
+    await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "run-2" },
+      driver: driverOf(),
+      identity,
+    });
+    const running = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-update",
+      body: { runId: "run-2", status: "running" },
+      driver: driverOf(),
+      identity,
+    });
+    expect(running.status).toBe(200);
+    expect((running.body as { run: { status: string } }).run.status).toBe("running");
+
+    const missing = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-update",
+      body: { runId: "nope", status: "completed" },
+      driver: driverOf(),
+      identity,
+    });
+    expect(missing.status).toBe(404);
+    expect((missing.body as { error: { code: string } }).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
+  });
+
+  it("400s a run-update to queued (never a valid target)", async () => {
+    await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "run-q" },
+      driver: driverOf(),
+      identity,
+    });
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-update",
+      body: { runId: "run-q", status: "queued" },
+      driver: driverOf(),
+      identity,
+    });
+    expect(result.status).toBe(400);
+    expect((result.body as { error: { code: string } }).error.code).toBe("INVALID_PAYLOAD");
+  });
+
+  it("409s a run-create refused by the atomic cap", async () => {
+    const first = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "cap-1", maxActiveThread: 1 },
+      driver: driverOf(),
+      identity,
+    });
+    expect(first.status).toBe(200);
+    const second = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "cap-2", maxActiveThread: 1 },
+      driver: driverOf(),
+      identity,
+    });
+    expect(second.status).toBe(409);
+    expect((second.body as { error: { code: string } }).error.code).toBe("ASSISTANT_RUN_CAP_EXCEEDED");
+  });
+
+  it("POST run-counts and GET run are project/thread scoped", async () => {
+    for (const id of ["run-a", "run-b"]) {
+      await handleInternalAssistantRequest({
+        method: "POST",
+        path: "/api/internal/assistant/run-create",
+        body: { kind: "chat_run", goal: "x", id },
+        driver: driverOf(),
+        identity,
+      });
+    }
+    const counts = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-counts",
+      body: {},
+      driver: driverOf(),
+      identity,
+    });
+    expect(counts).toEqual({ status: 200, body: { thread: 2, project: 2 } });
+
+    const get = await handleInternalAssistantRequest({
+      method: "GET",
+      path: "/api/internal/assistant/run",
+      query: { id: "run-a" },
+      body: null,
+      driver: driverOf(),
+      identity,
+    });
+    expect(get.status).toBe(200);
+    expect((get.body as { run: { id: string } }).run.id).toBe("run-a");
+
+    const missing = await handleInternalAssistantRequest({
+      method: "GET",
+      path: "/api/internal/assistant/run",
+      query: { id: "nope" },
+      body: null,
+      driver: driverOf(),
+      identity,
+    });
+    expect(missing.status).toBe(404);
   });
 });
