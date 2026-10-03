@@ -12,6 +12,8 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.6.1] - 2026-10-03
+
 ### Added
 
 - **`lx worker upgrade` wrangler-login fallback** — the credentials chain now
@@ -20,7 +22,13 @@ release the app image. The version lives in `cli/package.json` —
   `--use-keyring`, where the plaintext `default.toml` is absent). Explicit
   `--cf-token` / `CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN` / `.cf-token` values
   still win; a failed or empty lookup falls through to the existing error. The
-  token value is never printed. (#269)
+  token value is never printed. `LXK_UPGRADE_OFFLINE` skips the probe entirely,
+  so an offline run never spawns `bun x wrangler`. (#269)
+
+- **`install-lib.sh` `_cf_token_from_wrangler` uses the same lookup** — the
+  installer tries `bun x wrangler auth token` first and keeps the raw
+  `default.toml` grep only as a fallback for wrangler installs that cannot
+  resolve that subcommand. (#269)
 
 ## [2026.6.0] - 2026-10-03
 
