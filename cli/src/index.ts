@@ -124,7 +124,16 @@ function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<C
     // host, or when no LEXA_URL hint exists and there is no saved login at
     // all. --url X must never ship another host's ambient key to X. Env beats
     // a saved login when allowed (a matching LEXA_URL is an explicit ask).
-    const envKeyAllowed = envUrl !== "" ? normalizeHost(envUrl) === host : logins.length === 0;
+    let envKeyAllowed: boolean;
+    if (envUrl === "") {
+      envKeyAllowed = logins.length === 0;
+    } else {
+      try {
+        envKeyAllowed = normalizeHost(resolveServerUrl(envUrl)) === host;
+      } catch {
+        envKeyAllowed = false;
+      }
+    }
     const apiKey = keyFlag || (envKeyAllowed ? ENV_KEY : "") || saved?.apiKey || "";
     if (!url || !apiKey) return null;
     return { url, apiKey };

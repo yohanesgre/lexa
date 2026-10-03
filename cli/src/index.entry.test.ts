@@ -130,6 +130,13 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     expect(r.stdout).toContain("Server:   reachable (health ok)");
   });
 
+  it("LEXA_URL with a trailing slash trusts the ambient key against the resolved host", async () => {
+    const trailing = `127.0.0.1:${new URL(base).port}/`;
+    const r = await runCli(["status"], { LEXA_URL: trailing, LEXA_API_KEY: "lxk_env_key_1234567890123456789012345678901234567890", LEXA_DIR: freshLexaDir() });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Server:   reachable (health ok)");
+  });
+
   it("bare-host --url (no scheme) is resolved for non-login commands too", async () => {
     const bare = `127.0.0.1:${new URL(base).port}`;
     const r = await runCli(["status", "--url", bare], { LEXA_URL: "", LEXA_API_KEY: "lxk_flag_key_1234567890123456789012345678901234567890", LEXA_DIR: freshLexaDir() });
