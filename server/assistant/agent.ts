@@ -25,9 +25,9 @@ import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolv
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
 import { buildMcpToolSet, buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
 import { MAX_WRITES_PER_TURN } from "./write-tool-names";
-import { resolveAssistantToolPermissionMode, resolveThreadToolPermissionMode, type AssistantToolPermissionMode } from "../../shared/assistant";
+import { deriveChatTitle, resolveAssistantToolPermissionMode, resolveThreadToolPermissionMode, type AssistantToolPermissionMode } from "../../shared/assistant";
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
-import { lastUserText } from "./context";
+import { firstUserText, lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
 import { withApprovalCarriers } from "./approval-carrier";
 import { summaryWindow, summarizeTranscript } from "./summarize";
@@ -305,16 +305,22 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // values (H2). A `null` summary/count means "no engine value yet" — the SQL
   // COALESCEs, so a pre-existing D1 row keeps its seeded columns until the DO
   // actually summarizes.
+  //
+  // Title: the DO owns no title column, so it derives one from the opening user
+  // turn and sends it every mirror; the Worker's `COALESCE(assistant_threads.title,
+  // ?)` backfills only while the D1 title is still NULL (ADR-0003 §B.3), so a
+  // rename or an existing title is never overwritten. No user message → null.
   private async mirrorCurrent(): Promise<boolean> {
     const deps = await this.loadInternalDeps();
     if (!deps) return false;
     const meta = this.readThreadMeta(this.ctx.id.name ?? "");
     const hasSummary = meta?.summary != null && meta.summary.trim() !== "";
+    const derivedTitle = deriveChatTitle(firstUserText(this.messages));
     const ok = await mirrorTranscript(deps, {
       messages: this.messages,
       summary: hasSummary ? meta!.summary : null,
       summarizedCount: hasSummary ? meta!.summarized_count : null,
-      title: null,
+      title: derivedTitle.length > 0 ? derivedTitle : null,
     });
     if (!ok) {
       console.warn(`[Assistant] mirror failed for ${this.ctx.id.name ?? "unknown"} (will re-mirror on next step)`);

@@ -326,6 +326,14 @@ async function d1Messages(documentId: string): Promise<string | null> {
   return row ? row.messages : null;
 }
 
+async function d1Title(documentId: string): Promise<string | null> {
+  const row = await d1
+    .prepare("SELECT title FROM assistant_threads WHERE document_id = ?")
+    .bind(documentId)
+    .first<{ title: string | null }>();
+  return row ? row.title : null;
+}
+
 async function persistStep(threadKey: string, messages: unknown[]) {
   return mf!.dispatchFetch(`http://assistant-smoke/__test/persist?threadKey=${encodeURIComponent(threadKey)}`, {
     method: "POST",
@@ -1131,5 +1139,86 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(await storageKeys(threadKey)).toContain("assistantRunId");
     // The document path never dispatches a facet run.
     expect((await capturedRunUpdates()).some((u) => u.runId === "doc-run-1")).toBe(false);
+  }, 60_000);
+
+  it("backfills the derived title from the first user turn on the first mirror", async () => {
+    // The Workers DO path previously hard-coded `title: null`, so
+    // `assistant_threads.title` stayed NULL and the terminal list refetch
+    // replaced the optimistic title with "New chat". The DO now derives the
+    // title from the opening user message and the mirror COALESCEs it in.
+    const documentId = "title-backfill";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const persisted = [
+      { id: "t1", role: "user", parts: [{ type: "text", text: "  Plan the\nquarterly   review  " }] },
+      { id: "t2", role: "assistant", parts: [{ type: "text", text: "sure" }] },
+    ];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+
+    const title = await waitFor<string>(
+      () => d1Title(documentId).then((t) => (t !== null ? t : null)),
+      20_000
+    );
+    // deriveChatTitle collapses whitespace/newlines.
+    expect(title).toBe("Plan the quarterly review");
+  }, 60_000);
+
+  it("keeps an existing title when a later turn mirrors a derived one (COALESCE)", async () => {
+    const documentId = "title-preserve";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, messages) VALUES ('chat', ?, 'proj-1', 'user-1', 'Kept Title', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const persisted = [{ id: "p1", role: "user", parts: [{ type: "text", text: "a brand new derived title" }] }];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+
+    await waitFor<string>(
+      () => d1Messages(documentId).then((raw) => (raw !== null && raw !== "[]" ? raw : null)),
+      20_000
+    );
+    // COALESCE(assistant_threads.title, ?) must never overwrite a set title.
+    expect(await d1Title(documentId)).toBe("Kept Title");
+  }, 60_000);
+
+  it("mirrors a null title when the transcript has no user message", async () => {
+    const documentId = "title-none";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const persisted = [{ id: "a1", role: "assistant", parts: [{ type: "text", text: "no user turn yet" }] }];
+    expect((await persistStep(threadKey, persisted)).status).toBe(200);
+
+    await waitFor<string>(
+      () => d1Messages(documentId).then((raw) => (raw !== null && raw !== "[]" ? raw : null)),
+      20_000
+    );
+    expect(await d1Title(documentId)).toBeNull();
   }, 60_000);
 });
