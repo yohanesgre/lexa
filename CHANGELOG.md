@@ -7,6 +7,127 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.7.0] - 2026-10-03
+
+### Migration notes — BREAKING
+
+**Cloudflare Workers is now the only deploy target.** Bare-metal (Bun
+standalone) and Docker deployment have been removed. Workers + D1 is the sole
+supported install path. Before upgrading:
+
+- **Bare-metal / Bun standalone installs** — there is no in-place upgrade path.
+  Reinstall with `scripts/install.sh workers`
+  (`curl -fsSL …/scripts/install.sh | bash -s -- workers`). Data does **not**
+  carry over automatically: the old SQLite database is not a D1 database. Export
+  what you need from the Bun instance, provision D1 (+ R2/KV) via the installer,
+  and re-import. Create the first superadmin with the `/setup` wizard afterwards.
+- **Docker installs** — `Dockerfile`, `docker-compose*.yml`, and the
+  `docker compose` paths are gone; no replacement image is published. Releases
+  ship a Workers tarball
+  (`lexa-workers-<tag>.tar.gz` + `checksums.txt`), which is the whole deploy
+  artifact: `dist/`, `wrangler.jsonc`, `migrations/`, and
+  `scripts/workers-install.ts`. Redeploy from a `v*` tag instead of an image.
+- **Upgrade path going forward** — remote Workers deploys upgrade by re-running
+  `scripts/install.sh workers` from a newer tag (D1/R2/KV survive, keyed by
+  `--name`). A local checkout of a deployed Worker upgrades with
+  **`lx worker upgrade`** (see `cli/CHANGELOG.md` for `cli-v2026.6.0`): it
+  verifies the bundle checksum, backs up the deploy dir, preserves account /
+  bindings / custody / `LXK_VERSION`, and pre-flights ordered D1 migrations.
+  There is no `lx deploy`.
+- **Sample data** — `/setup`'s seed step is a local-install feature. On Workers,
+  seed D1 explicitly via `wrangler d1 execute --file`.
+- Removal of a deploy is `scripts/uninstall.sh workers` (keeps D1/R2/KV;
+  `--purge` drops local credentials after a typed confirmation).
+
+### Added
+
+- **Assistant harness runtime (H2–H7)** — context-aware assistant turns now get
+  memory, thread summary + compaction (40 msgs / 64 KiB, window 8, mirrored
+  from DO SQLite to D1), delegation with a persisted run registry, MCP/repo
+  tools, and scheduled runs:
+  - `assistant_runs` D1 registry with idempotent conditional-UPDATE
+    transitions, `spawn_run`/`check_run`, real enqueue/abort/resume, per-run
+    budgets, concurrency 1 per thread and 3 per project, a 16-step runner cap.
+    Ask-mode proposals carry `proposedByRunId`.
+  - MCP descriptors execute Worker-side (`mcp__<server>__<tool>`, 60s cache,
+    default-deny/fail-open) plus `list_repo_files` / `read_repo_file`.
+  - `assistant_schedules` + cron dispatcher (`runScheduled`) with REST CRUD.
+  - Harness context (agent instructions, bound skills, memory, doc/repo/mention
+    context, Jev preflight, thread summary) is injected into Durable Object
+    turns via a redacted internal turn-context endpoint — booleans only, no
+    project key or URL allowlist leaves the worker. (#236, #246)
+- **`workers_ai` provider kind (H9)** — zero-key Workers AI inference via the
+  `env.AI` binding, alongside the existing REST provider row. The `ai` binding
+  is provisioned by the installer; model ids are entered manually (no catalog
+  listing). Model `kind` stays server-inferred, so there is no UI change. (#243)
+- **Assistant observability, costs, and health (H8)** — per-call attribution
+  (`thread_key`, `run_id`, `purpose`), CF model prices imported from
+  `properties.price` into `assistant_model_prices`, per-turn cost computed from
+  usage, and a per-turn provider-health probe that feeds Overview health between
+  manual probes. (#250)
+- **Delegation run cards in chat (H5)** — delegated runs render as cards with
+  dispatching/running/completed/failed/stopped states, an open-run drill-in
+  (run id, captured mode, budget/steps, event log, result), an indeterminate
+  running bar, an auto-writes line, and a replay boundary after reload (frames
+  are session-memory-only; nothing is reconstructed from the DO transcript).
+  Run read + abort endpoints added, and admin run listing is now the
+  `assistant_runs` ∪ `assistant_tasks` union with a `kind` filter. (#237, #249)
+- **Workers-flavor dev flow** — `bun run dev:workers` applies local D1
+  migrations and starts vite under `LEXA_FLAVOR=workers`; the launcher derives
+  `.dev.vars` from `.env.toml` (mode 0600, never overwriting an existing file)
+  and propagates the full runtime key set. The Bun `dev` / `dev:server` /
+  `dev:full` scripts are untouched. (#244, #248, #253)
+
+### Changed
+
+- **Cloudflare is the only documented deploy** — `README` and `docs/DEPLOYMENT.md`
+  describe Workers + D1 only, the release flow documents the Workers tarball
+  artifacts, and Docker-era wording is swept from docs, wireframes, and app
+  surfaces (assistant-enabled flag, settings routes, `AppShell`,
+  `AssistantUnavailableNotice`). (#238, #239, #240, #255, #261)
+- **Sprint and milestone progress counts are server-side** — archived tasks
+  count as done (invariant 14), so counts are computed on the server and are
+  independent of the `includeArchived` toggle. Swimlane and milestone payloads
+  carry the counts; caches stay fresh via deltas on every task/column/lane/
+  milestone mutation. (#241)
+- **Installer surface** — the Cloudflare provisioning core moved to an
+  importable `scripts/lib/cf-deploy.ts` (account resolution, D1/R2/KV
+  provisioning, migrations, deploy, route rebind) with `workers-install.ts` as a
+  thin wrapper; `verify-gate.sh` runs the installer suite on
+  installer-related changes and the installer suite now runs in CI. (#240, #258)
+
+### Fixed
+
+- **Assistant cost accuracy** — cache-write pricing is modelled separately
+  (`cached_write_in`), cost mirrors the gateway's fresh-in / cached-in /
+  cached-write split, partially-priced CF model rows are skipped instead of
+  clobbering good prices, `estimated` marks turns with no usage, and the
+  provider-health body is `{ok, circuitState}`. (#251, #252)
+- **Cloudflare model listing** — models are listed via `ai/models/search` with
+  URL-parsed, query/fragment-safe ping/list URLs, a non-Cloudflare JSON parse
+  guard, and a documented fallback qualifier. (#235, #242)
+- **`dev-workers.sh` hardening** — `.dev.vars` is created 0600 from birth
+  (umask 077, `chmod 600` retained as backstop), a loader failure reports the
+  real error instead of telling you to run setup, and `LOG_LEVEL`,
+  `TANSTACK_AI_*`, and `CRON_SECRET` reach the Workers runtime. (#253)
+- **Installer edge cases** — a missing `checksums.txt` entry warns instead of
+  failing, and `install.sh` no longer treats `.workers.dev` as a custom domain.
+  Deployment docs no longer tell operators to run `wrangler d1 migrations apply`
+  on an install-script-managed database. (#254, #260, #262)
+- **Documentation accuracy** — three authoritative-sounding doc/comment claims
+  corrected: CLI installer checksum verification only applies when the release's
+  `checksums.txt` lists the asset, unknown env-file keys render under `other`
+  (not `core`), and the D1 migration note carries the one-method qualifier. (#254)
+
+### Removed
+
+- **Bare-metal (Bun standalone) and Docker deployment** — `Dockerfile`,
+  `docker-compose*.yml`, `.dockerignore`, the Docker jobs in `ci.yml`,
+  `publish.yml`, and `publish-cli.yml`, and the `docker` block in
+  `scripts/ci-local.sh`. The installer scripts (`install.sh`,
+  `install-lib.sh`, `uninstall.sh`, `install-cli.sh`, `test-install.sh`) are
+  Workers-only. See the migration notes above. (#234, #240)
+
 ## [2026.6.2] - 2026-10-03
 
 ### Changed

@@ -12,12 +12,60 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.6.0] - 2026-10-03
+
+### Migration notes
+
+Web app `2026.7.0` removed bare-metal and Docker deployment, so
+`lx worker upgrade` is now the supported way to move a local Workers deploy
+forward. Self-hosting a fresh install still goes through
+`scripts/install.sh workers`; there is no `lx deploy`.
+
 ### Added
 
+- **`lx worker upgrade`** — upgrades a local Workers deploy in place. Resolves
+  the deploy target (deploy dir required; single or multiple `wrangler.jsonc`
+  configs; requires the login host to match `LXK_PUBLIC_URL`), fetches the
+  newest `v*` release, and verifies the bundle's `sha256` against
+  `checksums.txt`. Before replacing anything it takes a `deploy-<flavor>.bak`
+  backup and restores it on failure. It preserves account, bindings, and
+  custody, stamps `LXK_VERSION`, and pre-flights pending D1 migrations in
+  order — refusing to ship a Worker against an out-of-order schema. Safety
+  flags `--dry-run`, `--yes`, `--version`, and `--force` are presence-checked,
+  so `--flag=false` stays opt-out. Credentials may also come from
+  `<dir>/.cf-token`. A `lx worker upgrade` runbook ships with the CLI. (#259,
+  #263, #264)
+- **Web-app release resolver** — scans `v*` tags (excluding `cli-v*`, never
+  `/releases/latest`) and returns the tag, tarball URL, and checksums URL.
+  (#257)
 - **`lx skill install`** — installs the embedded `lexa-cli` agent skill into
   `~/.agents/skills/lexa-cli/SKILL.md` (`--global`) or
   `./.agents/skills/lexa-cli/SKILL.md` (`--local`); prompts in a TTY when no
-  target is given, and refuses an existing file unless `--force` is passed.
+  target is given, refuses to overwrite an existing file unless `--force` is
+  passed, and refuses a non-TTY session with no flag. The skill itself is an
+  agent-facing guide to auth (including the device flow), the command surface,
+  `lx upgrade` vs `lx worker upgrade`, exit codes, and stability levels. (#266)
+
+### Changed
+
+- **Bare hosts resolve everywhere** — a scheme-less host in `--url`, the
+  positional argument, `LEXA_URL`, or the `lx login` TTY prompt resolves to
+  `https://` by default (`http://` for loopback), trailing slashes are
+  stripped, and invalid input fails with a clear error. `resolveConfig` and
+  `lx logout` now share that resolver instead of only the login flow, so
+  `lx status --url lexa.example.com` works. Userinfo is stripped before
+  loopback classification. (#256, #265)
+- **Version comparison helpers** — `cli/src/version.ts` gains deploy-config
+  reads, latest-release resolution, `compareVersions`, and `sameVersion`; the
+  deploy config always stamps `LXK_VERSION` (and `LXK_PUBLIC_URL`). (#260)
+
+### Fixed
+
+- **`install.sh` domain default** — a previous `.workers.dev` URL is ignored
+  when picking the default domain, and `cf-deploy` treats `.workers.dev` as no
+  custom domain, so a dev URL can no longer leak into production deploys. (#260)
+- **Stale `lx` docs** — `AGENTS.md` and `cli/README.md` describe the current
+  command surface. (#266)
 
 ## [2026.5.2] - 2026-10-03
 
