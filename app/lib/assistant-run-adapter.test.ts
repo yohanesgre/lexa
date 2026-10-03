@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   RUN_LOG_REPLAY_BOUNDARY,
-  countAutoWrites,
+  eventLinesFromParts,
   extractSpawnedRuns,
+  formatRunDuration,
   liveStatusToCardState,
   mergeRunCard,
+  parseRunTimestamp,
   partToEventLine,
+  runBudgetDetail,
   runCardFromLive,
   runCardFromPersisted,
+  runElapsedMs,
   runStatusToCardState,
 } from "./assistant-run-adapter";
 import type { AssistantRunRow } from "../../shared/assistant";
@@ -87,8 +91,7 @@ describe("extractSpawnedRuns", () => {
 });
 
 describe("event lines + auto-writes", () => {
-  it("projects a tool part to an event line and flags applied writes", () => {
-    expect(partToEventLine(toolPart())).toEqual({ name: "update_wiki", text: "Added rollback section", auto: false });
+  it("flags an applied write as auto and keeps its proposal detail", () => {
     expect(partToEventLine(toolPart({ output: { detail: "Tightened checklist", applied: true } }))).toEqual({
       name: "update_wiki",
       text: "Tightened checklist",
@@ -101,8 +104,110 @@ describe("event lines + auto-writes", () => {
     expect(partToEventLine(null)).toBeNull();
   });
 
-  it("counts only applied writes", () => {
-    expect(countAutoWrites([toolPart({ output: { applied: true } }), toolPart({ output: { detail: "read" } }), toolPart({ output: { applied: true } })])).toBe(2);
+  // ── Fixtures copied from real tool outputs (server/assistant/tools.ts,
+  //    write-tools.ts) — the shapes the adapter previously keyed wrong. ──
+
+  it("summarises a real search_wiki read from its input (wireframe shape)", () => {
+    expect(
+      partToEventLine({
+        type: "tool-search_wiki",
+        toolCallId: "tc1",
+        state: "output-available",
+        input: { query: "cutover-runbook" },
+        output: { pages: [{ title: "Cutover runbook", slug: "cutover-runbook", snippet: "…" }] },
+      })
+    ).toEqual({ name: "search_wiki", text: 'Reading "cutover-runbook"', auto: false });
+  });
+
+  it("summarises a real read_repo_file call", () => {
+    expect(
+      partToEventLine({
+        type: "tool-read_repo_file",
+        toolCallId: "tc2",
+        state: "output-available",
+        input: { repo: "lexa/app", path: "scripts/cutover.sh" },
+        output: { content: "# cutover", mimeType: "text/plain" },
+      })
+    ).toEqual({ name: "read_repo_file", text: "Reading scripts/cutover.sh", auto: false });
+  });
+
+  it("uses an auto-write result id/key when no proposal detail is carried", () => {
+    expect(
+      partToEventLine({
+        type: "tool-edit_wiki_page",
+        toolCallId: "tc3",
+        state: "output-available",
+        input: { slug: "release-runbook", content: { type: "doc", content: [] } },
+        output: { ok: true, applied: true, result: { id: "w1", slug: "release-runbook", title: "Release runbook" } },
+      })
+    ).toEqual({ name: "edit_wiki_page", text: "release-runbook", auto: true });
+  });
+
+  it("carries an ask-mode proposal detail and never flags it auto", () => {
+    expect(
+      partToEventLine({
+        type: "tool-edit_wiki_page",
+        toolCallId: "tc4",
+        state: "output-available",
+        input: { slug: "release-runbook", content: { type: "doc" } },
+        output: {
+          ok: true,
+          proposed: true,
+          approvalId: "ap1",
+          batchId: "b1",
+          seq: 0,
+          name: "edit_wiki_page",
+          detail: "Added rollback section",
+        },
+      })
+    ).toEqual({ name: "edit_wiki_page", text: "Added rollback section", auto: false });
+  });
+
+  it("falls back to a non-empty line for an unknown tool (MCP descriptor)", () => {
+    expect(
+      partToEventLine({
+        type: "tool-mcp__github__create_issue",
+        toolCallId: "tc5",
+        state: "output-available",
+        input: { repo: "lexa/app" },
+        output: { content: "created" },
+      })
+    ).toEqual({ name: "mcp__github__create_issue", text: "created", auto: false });
+  });
+
+  it("surfaces a tool error and a write failure", () => {
+    expect(
+      partToEventLine({
+        type: "tool-fetch_url",
+        toolCallId: "tc6",
+        state: "output-available",
+        input: { url: "http://10.0.0.1" },
+        output: { content: "", error: "blocked: private address" },
+      })
+    ).toEqual({ name: "fetch_url", text: "blocked: private address", auto: false });
+    expect(
+      partToEventLine({
+        type: "tool-create_task",
+        toolCallId: "tc7",
+        state: "output-available",
+        input: { title: "Ship it" },
+        output: { ok: false, applied: false, error: "TASK_CREATE_FAILED" },
+      })
+    ).toEqual({ name: "create_task", text: "TASK_CREATE_FAILED", auto: false });
+  });
+
+  it("builds a non-empty line for every runner tool call in a batch", () => {
+    const lines = [
+      {
+        type: "tool-get_board_structure",
+        toolCallId: "b1",
+        state: "output-available",
+        input: {},
+        output: { columns: [{ id: "c1" }], swimlanes: [], milestones: [] },
+      },
+      { type: "tool-spawn_run", toolCallId: "b2", state: "input-available", input: {} },
+    ];
+    for (const line of eventLinesFromParts(lines)) expect(line.text.length).toBeGreaterThan(0);
   });
 });
 
@@ -153,5 +258,75 @@ describe("run card models", () => {
     expect(RUN_LOG_REPLAY_BOUNDARY).toBe(
       "Persisted run columns are all that reload returns (status · steps_used · started_at · result/error); the live event log is never replayed."
     );
+  });
+
+  it("slices replayed leading parts off the live event log", () => {
+    const card = runCardFromLive(
+      row(),
+      {
+        status: "running",
+        parts: [
+          toolPart({ output: { detail: "replayed read" } }),
+          toolPart({ output: { detail: "live read" } }),
+          toolPart({ output: { detail: "live write", applied: true } }),
+        ],
+      },
+      1
+    );
+    expect(card.events.map((line) => line.text)).toEqual(["live read", "live write"]);
+    expect(card.autoWrites).toBe(1);
+  });
+
+  it("carries the persisted timing + live progress fraction onto the card", () => {
+    const live = runCardFromLive(row(), { status: "running", progress: { fraction: 0.56 } });
+    expect(live.startedAt).toBe("2026-01-01 10:00:01");
+    expect(live.finishedAt).toBeNull();
+    expect(live.budgetMs).toBe(600_000);
+    expect(live.progressFraction).toBe(0.56);
+
+    const persisted = runCardFromPersisted(row({ status: "completed", result: "Done." }));
+    expect(persisted.progressFraction).toBeNull();
+    expect(persisted.budgetMs).toBe(600_000);
+  });
+
+  it("passes the liveFrom slice through mergeRunCard", () => {
+    const card = mergeRunCard(
+      row(),
+      { status: "running", parts: [toolPart({ output: { detail: "replayed" } }), toolPart({ output: { detail: "live" } })] },
+      true,
+      1
+    );
+    expect(card.events.map((line) => line.text)).toEqual(["live"]);
+  });
+});
+
+describe("run timing + budget copy", () => {
+  it("parses SQLite space-form timestamps as UTC", () => {
+    expect(parseRunTimestamp("2026-01-01 10:00:00")).toBe(Date.parse("2026-01-01T10:00:00Z"));
+    expect(parseRunTimestamp("2026-01-01T10:00:00Z")).toBe(Date.parse("2026-01-01T10:00:00Z"));
+    expect(parseRunTimestamp(null)).toBeNull();
+    expect(parseRunTimestamp("not-a-date")).toBeNull();
+  });
+
+  it("uses finishedAt for terminal runs and now for live runs", () => {
+    expect(runElapsedMs("2026-01-01 10:00:00", "2026-01-01 10:00:38", 0)).toBe(38_000);
+    expect(runElapsedMs("2026-01-01 10:00:00", null, Date.parse("2026-01-01T10:04:12Z"))).toBe(252_000);
+    expect(runElapsedMs(null, null, 0)).toBeNull();
+  });
+
+  it("formats compact wireframe-style durations", () => {
+    expect(formatRunDuration(38_000)).toBe("38s");
+    expect(formatRunDuration(252_000)).toBe("4m 12s");
+    expect(formatRunDuration(600_000)).toBe("10m");
+    expect(formatRunDuration(3_900_000)).toBe("1h 5m");
+  });
+
+  it("builds the drill-in budget row", () => {
+    const card = runCardFromPersisted(
+      row({ status: "completed", startedAt: "2026-01-01 10:00:00", finishedAt: "2026-01-01 10:00:38", stepsUsed: 16, budgetMs: 600_000 })
+    );
+    expect(runBudgetDetail(card, 0)).toBe("38s / 10m · 16 / 16 steps");
+    const unknown = runCardFromPersisted(row({ startedAt: null, budgetMs: null, stepsUsed: 0 }));
+    expect(runBudgetDetail(unknown, 0)).toBe("— / — · 0 / 16 steps");
   });
 });

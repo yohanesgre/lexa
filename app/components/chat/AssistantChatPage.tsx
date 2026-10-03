@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as api from "../../lib/api";
 import {
@@ -11,6 +11,8 @@ import {
   useUploadChatAttachment,
 } from "../../lib/queries";
 import { useAssistantAgent } from "../../lib/use-assistant-agent";
+import { useAssistantRunEvents } from "../../lib/use-assistant-runs";
+import { mergeRunCard, type SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
@@ -50,6 +52,7 @@ import {
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
+import { AssistantRunCard } from "./AssistantRunCard";
 import type { ChatAttachment } from "../../lib/api";
 import type { ChatAttachmentRef } from "../../lib/assistant-image";
 
@@ -209,6 +212,33 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
 
+  // Delegated runs (ADR-0004): live state taps the SAME thread socket the chat
+  // stream rides; the durable rows come from `assistant_runs` per spawn ref
+  // discovered in the transcript. A card renders as a sibling of the spawning
+  // bubble (renderRunCard → ChatTranscriptArea).
+  const runs = useAssistantRunEvents(stream.agent, streamKey);
+  const spawnedRuns = useMemo(
+    () => (turns ?? []).flatMap((turn) => turn.spawnedRuns ?? []),
+    [turns]
+  );
+  const runQueries = useQueries({
+    queries: spawnedRuns.map((ref) => ({
+      queryKey: ["assistant-run", ref.runId],
+      queryFn: () => api.getAssistantRun(ref.runId),
+      staleTime: Infinity,
+      retry: false,
+      throwOnError: false,
+    })),
+  });
+  const runRowsByRunId = useMemo(() => {
+    const rows: Record<string, api.AssistantDelegatedRun> = {};
+    runQueries.forEach((query, i) => {
+      const ref = spawnedRuns[i];
+      if (query.data && ref) rows[ref.runId] = query.data;
+    });
+    return rows;
+  }, [runQueries, spawnedRuns]);
+
   const { data: agents = [] } = useAgents();
   const { data: skills = [] } = useSkills();
   // Mobile composer treatment: collapse the rail to the effort summary chip
@@ -350,6 +380,49 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       return true;
     },
     [streaming, suspendedLock, startStream, setTurns, permissionMode, permissionAuthoritative]
+  );
+
+  // Run-card actions. Abort stops the supervised child and flips the cached row
+  // to cancelled so the card leaves Running without waiting for a refetch.
+  const handleRunAbort = useCallback(
+    (runId: string) => {
+      void api
+        .abortAssistantRun(runId)
+        .then(() => {
+          qc.setQueryData(["assistant-run", runId], (prev: api.AssistantDelegatedRun | undefined) =>
+            prev ? { ...prev, status: "cancelled" as const } : prev
+          );
+        })
+        .catch(() => {});
+    },
+    [qc]
+  );
+  // Retry is a fresh run from the same goal — never a resumption of the failed
+  // run (the failed card stays in the transcript).
+  const handleRunRetry = useCallback(
+    (goal: string) => {
+      send(goal, []);
+    },
+    [send]
+  );
+  const renderRunCard = useCallback(
+    (ref: SpawnedRunRef): ReactNode => {
+      const row = runRowsByRunId[ref.runId];
+      if (!row) return null;
+      return (
+        <AssistantRunCard
+          model={mergeRunCard(
+            row,
+            runs.runsById[ref.runId],
+            runs.liveRunIds.has(ref.runId),
+            runs.liveFromByRunId[ref.runId] ?? 0
+          )}
+          onAbort={handleRunAbort}
+          onRetry={handleRunRetry}
+        />
+      );
+    },
+    [runRowsByRunId, runs, handleRunAbort, handleRunRetry]
   );
 
   // Client-only one-message queue (assistant-chat-deck §3.3): a message typed
@@ -527,6 +600,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             atBottom={atBottom}
             onJump={() => scrollToBottom(true)}
             attachmentIndex={attachmentIndex}
+            renderRunCard={renderRunCard}
           />
 
           <ChatComposerArea

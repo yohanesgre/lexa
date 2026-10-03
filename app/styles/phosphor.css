@@ -8894,5 +8894,3 @@
 .run-event { display:flex; align-items:baseline; gap:6px; padding-left:2px; font-family:var(--lx-font-mono); font-size:11px; line-height:17px; color:var(--lx-text-muted); }
 .run-event-name { flex-shrink:0; font-weight:500; color:var(--lx-text-secondary); }
 .run-card-missing { font-family:var(--lx-font-mono); font-size:11px; line-height:17px; color:var(--lx-text-muted); }
-.run-attrib { display:inline-flex; align-items:center; gap:5px; margin-top:3px; font-family:var(--lx-font-micro); font-size:10px; text-transform:uppercase; letter-spacing:0.04em; color:var(--lx-text-muted); }
-.run-attrib-goal { font-family:var(--lx-font-mono); font-size:10px; font-weight:500; text-transform:none; letter-spacing:normal; color:var(--lx-text-secondary); }

@@ -2419,9 +2419,10 @@ GET    /api/assistant/runs/:runId
   | 404 ASSISTANT_RUN_NOT_FOUND | 404 PROJECT_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
   The durable `assistant_runs` registry row behind one delegated run card
   (ADR-0004 §3). Reads are project-member-gated from `row.projectId`; the row is
-  loaded by id first, then gated, so a foreign project's run is never disclosed.
-  Only persisted columns are returned — the live step/event log is
-  session-memory-only and is never reconstructed from the transcript.
+  loaded by id first, then gated, so a foreign project's run answers 403 and its
+  contents are never disclosed. Only persisted columns are returned — the live
+  step/event log is session-memory-only and is never reconstructed from the
+  transcript.
 
 POST   /api/assistant/runs/:runId/abort
 → 200 { ok: true }

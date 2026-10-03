@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
+import type { AssistantRunAgent } from "./use-assistant-runs";
 import type { AssistantStream, AssistantStreamSnapshot } from "./use-assistant-stream";
 import {
   agentSendMetadata,
@@ -70,6 +71,11 @@ const noopSubscribe = (): (() => void) => () => {};
 export interface AssistantAgentStream extends AssistantStream {
   reconnecting: boolean;
   resumed: boolean;
+  // The thread's single PartySocket. Exposed so the delegated-run hook taps the
+  // SAME connection instead of opening a second one. Typed structurally to the
+  // `useAgentToolEvents` agent view (`useAgent`'s overloads don't survive
+  // `ReturnType`, so the minimal event surface is the honest type here).
+  agent: AssistantRunAgent;
 }
 
 export function useAssistantAgent(key: string | null, options?: AssistantAgentOptions): AssistantAgentStream {
@@ -202,7 +208,8 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
       reset,
       reconnecting,
       resumed,
+      agent,
     }),
-    [snapshot, send, abort, reset, reconnecting, resumed]
+    [snapshot, send, abort, reset, reconnecting, resumed, agent]
   );
 }

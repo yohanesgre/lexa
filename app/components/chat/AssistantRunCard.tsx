@@ -2,6 +2,11 @@ import { useState } from "react";
 import { AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
 import {
   RUN_LOG_REPLAY_BOUNDARY,
+  RUN_FAILED_MESSAGE,
+  RUNNER_STEPS_CAP,
+  formatRunDuration,
+  runBudgetDetail,
+  runElapsedMs,
   type RunCardModel,
   type RunCardState,
 } from "../../lib/assistant-run-adapter";
@@ -30,11 +35,40 @@ const STATE_CLASS: Record<RunCardState, string> = {
 
 const ERROR_CODE = /^[A-Z][A-Z0-9_]+$/;
 
-function stepsLabel(model: RunCardModel): string {
+// A card is determinate only once THIS tab has a live step frame (the runner's
+// progress fraction, or at least one live tool part). A reloaded card has no
+// live frames, so it stays indeterminate — "unknown mid-flight", never a
+// guessed percentage (herald-chat-upgrades.html BOUNDARY).
+function hasLiveProgress(model: RunCardModel): boolean {
+  return model.live && (model.progressFraction !== null || model.events.length > 0);
+}
+
+function progressFraction(model: RunCardModel): number {
+  if (model.progressFraction !== null) return Math.min(1, Math.max(0, model.progressFraction));
+  return Math.min(1, Math.max(0, (model.stepsUsed ?? 0) / RUNNER_STEPS_CAP));
+}
+
+function elapsedLabel(model: RunCardModel, now: number): string | null {
+  const elapsed = runElapsedMs(model.startedAt, model.finishedAt, now);
+  return elapsed === null ? null : formatRunDuration(elapsed);
+}
+
+function stepsLabel(model: RunCardModel, now: number): string {
   if (model.state === "dispatching") return "starting…";
   const n = model.stepsUsed ?? 0;
-  if (model.state === "running") return `step ${n}`;
-  return `${n} steps`;
+  const elapsed = elapsedLabel(model, now);
+  if (model.state === "running") {
+    if (hasLiveProgress(model)) {
+      const parts = [`step ${n}/${RUNNER_STEPS_CAP}`];
+      if (elapsed) parts.push(elapsed);
+      if (model.budgetMs !== null) parts.push(`${formatRunDuration(model.budgetMs)} budget`);
+      return parts.join(" · ");
+    }
+    // Reloaded / other tab: persisted columns only (status · steps_used ·
+    // started_at), no guessed denominator.
+    return elapsed ? `step ${n} · ${elapsed}` : `step ${n}`;
+  }
+  return elapsed ? `${n} steps · ${elapsed}` : `${n} steps`;
 }
 
 function autoWritesLabel(model: RunCardModel): string {
@@ -46,16 +80,19 @@ export interface AssistantRunCardProps {
   model: RunCardModel;
   onAbort?: ((runId: string) => void) | undefined;
   onRetry?: ((goal: string) => void) | undefined;
+  /** Injected clock for deterministic elapsed rendering in tests. */
+  now?: number | undefined;
 }
 
-export function AssistantRunCard({ model, onAbort, onRetry }: AssistantRunCardProps) {
+export function AssistantRunCard({ model, onAbort, onRetry, now }: AssistantRunCardProps) {
   const [open, setOpen] = useState(false);
-  const [eventsOpen, setEventsOpen] = useState(true);
+  const nowMs = now ?? Date.now();
   const meta = STATE_META[model.state];
   const active = model.state === "dispatching" || model.state === "running";
   const terminal = model.state === "done" || model.state === "failed" || model.state === "stopped";
   const showAuto = terminal && model.live && model.autoWrites > 0;
   const failedCode = model.state === "failed" && model.error !== null && ERROR_CODE.test(model.error);
+  const determinate = active && hasLiveProgress(model);
 
   return (
     <div className={`run-card ${STATE_CLASS[model.state]}`.trim()}>
@@ -73,35 +110,33 @@ export function AssistantRunCard({ model, onAbort, onRetry }: AssistantRunCardPr
       <div className="run-card-progress">
         {active ? (
           <>
-            <span className="run-card-bar is-indeterminate">
-              <span />
+            <span className={`run-card-bar${determinate ? "" : " is-indeterminate"}`}>
+              <span style={determinate ? { width: `${Math.round(progressFraction(model) * 100)}%` } : undefined} />
             </span>
-            <span className="run-card-steps">{stepsLabel(model)}</span>
+            <span className="run-card-steps">{stepsLabel(model, nowMs)}</span>
           </>
         ) : (
           <span className="run-card-steps" style={{ flex: 1 }}>
-            {stepsLabel(model)}
+            {stepsLabel(model, nowMs)}
           </span>
         )}
       </div>
 
       {model.state === "done" && model.result && <div className="run-card-summary">{model.result}</div>}
 
-      {model.state === "failed" && model.error && (
+      {model.state === "failed" && (
         <div className="notice notice-danger" style={{ marginTop: 8, alignItems: "flex-start" }}>
           <AlertCircle size={14} strokeWidth={1.5} aria-hidden="true" />
           <span style={{ display: "block" }}>
-            {failedCode ? (
+            {failedCode && (
               <>
                 <span className="font-mono" style={{ fontWeight: 500 }}>
                   {model.error}
                 </span>
                 <br />
-                The run stopped before finishing.
               </>
-            ) : (
-              model.error
             )}
+            {RUN_FAILED_MESSAGE}
           </span>
         </div>
       )}
@@ -179,9 +214,9 @@ export function AssistantRunCard({ model, onAbort, onRetry }: AssistantRunCardPr
             </div>
           )}
           <div className="run-detail-row">
-            <span className="run-detail-label">Steps</span>
+            <span className="run-detail-label">Budget</span>
             <span className="font-mono" style={{ fontSize: 12, color: "var(--lx-text-secondary)" }}>
-              {stepsLabel(model)}
+              {runBudgetDetail(model, nowMs)}
             </span>
           </div>
           <div className="run-detail-row">
@@ -192,34 +227,15 @@ export function AssistantRunCard({ model, onAbort, onRetry }: AssistantRunCardPr
           </div>
 
           {model.live ? (
-            <>
-              {model.events.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    aria-expanded={eventsOpen}
-                    style={{ alignSelf: "flex-start", marginTop: 2 }}
-                    onClick={() => setEventsOpen((v) => !v)}
-                  >
-                    {eventsOpen ? "Hide events" : "Show events"}
-                  </button>
-                  {eventsOpen &&
-                    model.events.map((line, i) => (
-                      <div className="run-event" key={`${line.name}-${i}`}>
-                        <span className="run-event-name">[{line.name}]</span>
-                        <span>
-                          {line.text}
-                          {line.auto && <span style={{ color: "var(--lx-text-warning)" }}> · auto-write</span>}
-                        </span>
-                      </div>
-                    ))}
-                </>
-              )}
-              {model.events.length === 0 && (
-                <div className="run-card-missing">No events yet.</div>
-              )}
-            </>
+            model.events.map((line, i) => (
+              <div className="run-event" key={`${line.name}-${line.text}-${i}`}>
+                <span className="run-event-name">[{line.name}]</span>
+                <span>
+                  {line.text}
+                  {line.auto && <span style={{ color: "var(--lx-text-warning)" }}> · auto-write</span>}
+                </span>
+              </div>
+            ))
           ) : (
             <div className="run-card-missing">{RUN_LOG_REPLAY_BOUNDARY}</div>
           )}
