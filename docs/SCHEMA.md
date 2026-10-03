@@ -653,11 +653,11 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- Assistant (Cloudflare Workers only — ADR-0003)
 -- ============================================================
 -- Every `assistant_*` table below stays in the shared, flavor-agnostic
--- migration set (Docker keeps them inert; D1 cannot drop columns cheaply).
+-- migration set (the Bun flavor keeps them inert; D1 cannot drop columns cheaply).
 -- On Workers the assistant runs on `@cloudflare/ai-chat` Durable Objects: DO
 -- SQLite is the CANONICAL message store (replay/resume/recovery), and the D1
 -- `assistant_threads` row is a per-step MIRROR (list/search/export may lag by
--- one mirror write). The Bun/Docker flavor serves no assistant routes and
+-- one mirror write). The Bun flavor serves no assistant routes and
 -- reports `assistant:false` from `/api/capabilities`.
 -- ============================================================
 -- Assistant task queue (document Generate)
@@ -848,7 +848,7 @@ SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
 -- canonical DO SQLite store — the per-thread Durable Object is authoritative
 -- for replay/resume/recovery and writes this row per persisted step. List,
 -- search, and export read the mirror and may lag by one mirror write; the
--- canonical transcript read goes to the DO with a D1 fallback. On Bun/Docker
+-- canonical transcript read goes to the DO with a D1 fallback. On the Bun flavor
 -- the table is inert (the flavor serves no assistant routes).
 --
 -- Multi-thread chat: chat rows are N-per-(project_id, owner_user_id), each

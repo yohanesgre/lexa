@@ -1335,7 +1335,7 @@ the run intact, and Jev emits no `task_activity` of its own.
 
 > **Workers-only (ADR-0003).** The assistant executor is one Durable Object per
 > conversation thread, reached over a session-authenticated WebSocket. The
-> Bun/Docker flavor mounts no assistant groups (`server/api/http.ts`
+> Bun flavor mounts no assistant groups (`server/api/http.ts`
 > `baseRouteGroups()` only; `assistant-api.ts` is imported solely by
 > `server/workers-entry.ts`), so `/api/assistant/*` + `/api/admin/assistant/*`
 > 404 there and no `agents` / `@tanstack/ai*` package enters the Bun module
@@ -1430,7 +1430,7 @@ the run intact, and Jev emits no `task_activity` of its own.
 
 > This tier backs the REST/SSE surface that remains mounted on Workers. The
 > chat surface has moved to the Durable Object socket above; the document panel
-> still uses it. It is **not** part of the Bun/Docker flavor.
+> still uses it. It is **not** part of the Bun flavor.
 
 ```typescript
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
