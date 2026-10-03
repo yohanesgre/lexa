@@ -1,7 +1,7 @@
 // lx skill install — write the embedded lexa-cli SKILL.md into a harness skill
 // directory (global ~/.agents/skills or the project's ./.agents/skills).
 import { Effect } from "effect";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promptLogin } from "./index";
@@ -52,12 +52,18 @@ export function cmdSkillInstall(flags: Record<string, string | boolean>): Effect
       process.exit(1);
     }
     const path = skillTarget(target);
-    if (existsSync(path) && !force) {
-      console.error(`  ${path} already exists. Pass --force to overwrite.`);
-      process.exit(1);
-    }
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, SKILL_MD);
+    if (force) {
+      writeFileSync(path, SKILL_MD);
+    } else {
+      try {
+        writeFileSync(path, SKILL_MD, { flag: "wx" });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+        console.error(`  ${path} already exists. Pass --force to overwrite.`);
+        process.exit(1);
+      }
+    }
     console.log(`Installed lexa-cli skill to ${path}`);
     console.log("  Harnesses auto-discover ~/.agents/skills (global) and ./.agents/skills (project).");
   });

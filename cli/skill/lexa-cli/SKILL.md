@@ -88,7 +88,7 @@ lx milestone update <ref> --project <slug> [--name <n>] [--description <s>] \
                     [--due <YYYY-MM-DD>|--clear-due] [--position <n>]
 ```
 
-Admin-only. Columns, swimlanes, and milestones resolve by name
+Admin-only for create/update/delete. Columns, swimlanes, and milestones resolve by name
 (case-insensitive) or id; `none` clears a WIP limit / date / milestone.
 
 ### Wiki
