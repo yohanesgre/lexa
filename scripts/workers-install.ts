@@ -491,9 +491,11 @@ export function resolveAiBinding(root: RootWorkerConfig): Record<string, unknown
     );
   }
   const binding = (ai as { binding?: unknown }).binding;
-  if (typeof binding !== "string" || binding.length === 0) {
+  // The runtime reads `env.AI` (server/assistant/agent.ts), so any other
+  // binding name would type-check here but never reach the worker.
+  if (binding !== "AI") {
     throw new Error(
-      "root wrangler.jsonc 'ai' must carry a non-empty string 'binding' (e.g. { binding: \"AI\" })",
+      "root wrangler.jsonc 'ai' must declare { binding: \"AI\" } — the runtime resolves env.AI",
     );
   }
   return { ai };

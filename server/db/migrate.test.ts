@@ -1417,6 +1417,14 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
       ])
     );
 
+    // …and the priority index is still UNIQUE, not merely present by name.
+    const priorityIdx = (after.prepare("PRAGMA index_list('assistant_models')").all() as { name: string; unique: number }[])
+      .find((r) => r.name === "idx_assistant_models_provider_priority");
+    expect(priorityIdx?.unique).toBe(1);
+    expect(() =>
+      after.prepare("INSERT INTO assistant_models (id, provider_id, model_id, kind, priority) VALUES ('m-dup', 'prov1', 'dup', 'openai_compatible', 0)").run()
+    ).toThrow(/UNIQUE constraint failed/i);
+
     // The widened CHECK now accepts workers_ai on both tables…
     after.prepare(
       "INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m2', 'prov1', '@cf/meta/llama-3.2-1b-instruct', 'workers_ai', 1, 1)"

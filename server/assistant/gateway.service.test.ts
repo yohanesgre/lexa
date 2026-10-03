@@ -350,4 +350,30 @@ describe("AssistantGateway provider secret resolution", () => {
       left: expect.objectContaining({ _tag: "ProviderAuthFailed", message: PROVIDER_KEY_UNDECRYPTABLE }),
     });
   });
+
+  it("resolves a real workers_ai model row and preserves its kind (keyless binding)", async () => {
+    const env = {} as RuntimeEnv;
+    setup();
+    // A manually registered Cloudflare Workers AI model: no secret, empty base
+    // URL — the gateway must surface kind `workers_ai` through normalization.
+    db.exec(`
+      INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr-cf', 'CF', '', '');
+      INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES
+        ('m-cf', 'pr-cf', '@cf/meta/llama-3.2-1b-instruct', 'workers_ai', 0, 1);
+    `);
+
+    const configs = await run(
+      Effect.gen(function* () {
+        const gw = yield* AssistantGateway;
+        return yield* gw.resolveFallback("p1");
+      }),
+      env
+    );
+    expect(configs.find((c) => c.providerId === "pr-cf")).toMatchObject({
+      kind: "workers_ai",
+      baseUrl: "",
+      apiKey: "",
+      model: "@cf/meta/llama-3.2-1b-instruct",
+    });
+  });
 });

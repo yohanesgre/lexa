@@ -355,6 +355,7 @@ describe("root AI binding (H9)", () => {
     expect(() => resolveAiBinding({ ai: [] } as unknown as RootWorkerConfig)).toThrow(/ai/);
     expect(() => resolveAiBinding({ ai: {} } as unknown as RootWorkerConfig)).toThrow(/binding/);
     expect(() => resolveAiBinding({ ai: { binding: "" } } as unknown as RootWorkerConfig)).toThrow(/binding/);
+    expect(() => resolveAiBinding({ ai: { binding: "MY_AI" } } as unknown as RootWorkerConfig)).toThrow(/env\.AI/);
   });
 });
 

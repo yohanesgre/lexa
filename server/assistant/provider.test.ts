@@ -20,6 +20,7 @@ import {
   type FetchLike,
   type ProviderConfig,
 } from "./provider";
+import { AssistantGenerationFailed } from "../api/errors";
 
 const openaiConfig = (baseUrl = "https://api.example.com"): ProviderConfig => ({
   kind: "openai_compatible",
@@ -211,6 +212,12 @@ describe("buildAdapter", () => {
   it("returns adapter for openai_compatible and anthropic_compatible", () => {
     expect(buildAdapter(openaiConfig())).toBeDefined();
     expect(buildAdapter(anthropicConfig())).toBeDefined();
+  });
+
+  it("throws AssistantGenerationFailed for workers_ai (Workers-only, built via the DO factory)", () => {
+    expect(() =>
+      buildAdapter({ kind: "workers_ai", baseUrl: "", apiKey: "", model: "@cf/meta/llama-3.2-1b-instruct" })
+    ).toThrow(AssistantGenerationFailed);
   });
 
   it("attaches x-opencode-session defaultHeaders on every adapter", () => {
