@@ -465,8 +465,8 @@ The default dir is the CWD; `--dir <path>` overrides it. If several
 `deploy-*` dirs exist, pass `--worker <name>` (matches the deploy flavor or the
 worker name); with exactly one deploy it is selected, otherwise a saved login
 host matching `vars.LXK_PUBLIC_URL` breaks the tie, and anything else is
-refused as ambiguous. The deploy's logged-in host is cross-checked against
-`LXK_PUBLIC_URL` before anything runs.
+refused as ambiguous. When a saved login exists, the deploy's host is
+cross-checked against `LXK_PUBLIC_URL` before anything runs.
 
 | Flag | Behavior |
 |---|---|
@@ -492,7 +492,8 @@ First match wins; the token is never printed:
 4. `<dir>/.cf-token`
 5. `<deployDir>/.cf-token`
 
-No credentials → the update fails with guidance. `LXK_UPGRADE_OFFLINE=1` (or
+A non-dry-run update with no credentials fails with guidance; `--dry-run`
+returns before the token check, so it needs none. `LXK_UPGRADE_OFFLINE=1` (or
 `true`) forces the release/migration seams to fail fast for an offline dry run.
 
 ### Version compare
