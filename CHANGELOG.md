@@ -15,7 +15,7 @@ All notable changes to Lexa are documented here. Format based on
   auto-refreshes stored OAuth and works with `--use-keyring` (which leaves no
   plaintext token in the TOML); a failed lookup still falls back to the raw
   file. Explicit `--cf-token` / `CF_API_TOKEN` / `.cf-token` values are
-  unchanged. (#2f9e3346)
+  unchanged. (#269)
 
 ## [2026.7.0] - 2026-10-03
 

@@ -2,7 +2,7 @@
 // refusal, backup/rollback, migration pre-flight, and custody/binding
 // preservation. Seams (fetch, wrangler, CF API, tar) are injected so these
 // tests never touch the network or Cloudflare.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import { sha256Hex, type ReleaseFetcher } from "./release";
 import {
   backupPathFor,
   discoverWorkerDeploys,
+  parseWranglerTokenOutput,
   readDeployConfigFile,
   resolveCfCredentials,
   runUpgrade,
@@ -347,6 +348,44 @@ describe("resolveCfCredentials precedence", () => {
       source: "wrangler-login",
     });
     expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "", source: "none" });
+  });
+});
+
+describe("wrangler token parse + probe seam", () => {
+  const envKeys = ["CF_API_TOKEN", "CLOUDFLARE_API_TOKEN"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of envKeys) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of envKeys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key]!;
+    }
+  });
+
+  it("takes the last non-empty stdout line when a cold `bun x` prepends progress", () => {
+    expect(parseWranglerTokenOutput("Resolving dependencies\ndownloaded wrangler@4\nwrangler-tok\n")).toBe("wrangler-tok");
+    expect(parseWranglerTokenOutput("wrangler-tok\n")).toBe("wrangler-tok");
+    expect(parseWranglerTokenOutput(" \n\n")).toBeUndefined();
+  });
+
+  it("consults the injected reader only when no earlier source wins", () => {
+    const root = makeRoot();
+    const deployDir = join(root, "deploy-lexa");
+    mkdirSync(deployDir, { recursive: true });
+    const reader = vi.fn(() => "wrangler-tok");
+
+    const creds = resolveCfCredentials(undefined, root, deployDir, reader);
+
+    expect(creds).toEqual({ token: "wrangler-tok", source: "wrangler-login" });
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(reader).toHaveBeenCalledWith(deployDir);
   });
 });
 

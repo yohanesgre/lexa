@@ -2,8 +2,8 @@
 // subprocess tests exercise the REAL entry point (mirrors index.entry.test.ts);
 // the pure tests cover config discovery/selection directly.
 import { afterAll, describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupIsolationDirs, freshLexaDir, runCli, type RunResult } from "./test-utils";
@@ -14,13 +14,16 @@ const tmpRoots: string[] = [];
 // `runCli` spawns the real `bun`, and the resolved deploy dir makes the creds
 // chain invoke `bun x wrangler auth token`. A delegating shim intercepts that
 // exact argv (returning "not logged in") and execs the real bun for everything
-// else — so no test ever runs a real `wrangler auth token`.
+// else — so no test ever runs a real `wrangler auth token`. When
+// LXK_SHIM_MARKER is set the shim records the probe, letting a test prove the
+// offline path never reaches it.
 const shimDir = mkdtempSync(join(tmpdir(), "lexa-worker-shim-"));
 const realBun = execFileSync("bash", ["-c", "command -v bun"], { encoding: "utf-8" }).trim();
 writeFileSync(
   join(shimDir, "bun"),
   `#!/usr/bin/env bash
 if [ "$1" = "x" ] && [ "$2" = "wrangler" ] && [ "$3" = "auth" ] && [ "$4" = "token" ]; then
+  if [ -n "$LXK_SHIM_MARKER" ]; then echo "probe" >> "$LXK_SHIM_MARKER"; fi
   exit 1
 fi
 exec "${realBun}" "$@"
@@ -178,6 +181,34 @@ describe("worker upgrade target resolution", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("you are logged in to");
     expect(r.stderr).toContain("other.example.com");
+  });
+});
+
+describe("wrangler-login probe gating", () => {
+  it("the auth-token shim records a probe marker when invoked", () => {
+    const marker = join(makeRoot(), "probe.log");
+    const shim = spawnSync(join(shimDir, "bun"), ["x", "wrangler", "auth", "token"], {
+      env: { ...process.env, LXK_SHIM_MARKER: marker },
+    });
+    expect(shim.status).toBe(1);
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("offline never probes a stored wrangler login", async () => {
+    const root = makeRoot();
+    writeDeploy(root, "lexa", { name: "lexa" });
+    const marker = join(makeRoot(), "probe.log");
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--dry-run"], {
+      LEXA_URL: "",
+      LEXA_API_KEY: "",
+      LXK_UPGRADE_OFFLINE: "1",
+      LXK_SHIM_MARKER: marker,
+      CF_API_TOKEN: "",
+      CLOUDFLARE_API_TOKEN: "",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("CF token:    none");
+    expect(existsSync(marker)).toBe(false);
   });
 });
 

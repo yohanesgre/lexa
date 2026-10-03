@@ -20,7 +20,7 @@ release the app image. The version lives in `cli/package.json` —
   `--use-keyring`, where the plaintext `default.toml` is absent). Explicit
   `--cf-token` / `CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN` / `.cf-token` values
   still win; a failed or empty lookup falls through to the existing error. The
-  token value is never printed. (#2f9e3346)
+  token value is never printed. (#269)
 
 ## [2026.6.0] - 2026-10-03
 
