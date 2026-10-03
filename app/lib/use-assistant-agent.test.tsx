@@ -31,7 +31,10 @@ vi.mock("@cloudflare/ai-chat/react", () => ({
 
 import { useAssistantAgent } from "./use-assistant-agent";
 
-type UseAgentArgs = { basePath?: string; query?: { projectId?: string } | undefined };
+type UseAgentArgs = {
+  basePath?: string;
+  query?: { projectId?: string } | undefined;
+};
 
 function lastArgs(): UseAgentArgs {
   return h.useAgent.mock.calls[h.useAgent.mock.calls.length - 1]![0] as UseAgentArgs;
@@ -46,8 +49,13 @@ describe("useAssistantAgent query wiring", () => {
   it("passes projectId through to useAgent's query for a chat thread", () => {
     renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
     expect(h.useAgent).toHaveBeenCalledTimes(1);
-    expect(lastArgs().basePath).toBe("/api/assistant/agent/chat:c1");
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:c1");
     expect(lastArgs().query).toEqual({ projectId: "p1" });
+  });
+
+  it("uses the idle basePath when there is no thread key", () => {
+    renderHook(() => useAssistantAgent(null));
+    expect(lastArgs().basePath).toBe("api/assistant/agent/__idle__");
   });
 
   it("omits the query when projectId is undefined (task/wiki/panel)", () => {
