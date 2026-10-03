@@ -86,7 +86,7 @@ describe("worker upgrade target resolution", () => {
   it("resolves a single deploy and prints the plan (dry run)", async () => {
     const root = makeRoot();
     writeDeploy(root, "lexa", { name: "lexa", accountId: "acct_single", publicUrl: "https://lexa.example.com", version: "2026.6.2" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Worker:      lexa");
     expect(r.stdout).toContain("Account:     acct_single");
@@ -95,20 +95,20 @@ describe("worker upgrade target resolution", () => {
     expect(r.stdout).toContain("Dry run — no changes made.");
   });
 
-  it("prints the plan then stops at the not-yet-implemented stub", async () => {
+  it("fails offline without credentials instead of stubbing the update", async () => {
     const root = makeRoot();
     writeDeploy(root, "lexa", { name: "lexa" });
-    const r = await runCli(["worker", "upgrade", "--dir", root], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runCli(["worker", "upgrade", "--dir", root], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain("Worker:      lexa");
-    expect(r.stderr).toContain("not yet implemented in this build");
+    expect(r.stderr).toContain("could not resolve the release");
   });
 
   it("refuses several deploys without --worker and lists them", async () => {
     const root = makeRoot();
     writeDeploy(root, "alpha", { name: "alpha" });
     writeDeploy(root, "beta", { name: "beta" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Multiple deploys");
     expect(r.stderr).toContain("alpha");
@@ -120,7 +120,7 @@ describe("worker upgrade target resolution", () => {
     const root = makeRoot();
     writeDeploy(root, "alpha", { name: "alpha-worker" });
     writeDeploy(root, "beta", { name: "beta-worker" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--worker", "beta", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runCli(["worker", "upgrade", "--dir", root, "--worker", "beta", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Worker:      beta-worker");
   });
@@ -129,7 +129,7 @@ describe("worker upgrade target resolution", () => {
     const root = makeRoot();
     writeDeploy(root, "alpha", { name: "alpha" });
     writeDeploy(root, "beta", { name: "beta" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--worker", "nope", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runCli(["worker", "upgrade", "--dir", root, "--worker", "nope", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("No deploy matches --worker 'nope'");
     expect(r.stderr).toContain("alpha, beta");
@@ -141,7 +141,7 @@ describe("worker upgrade target resolution", () => {
     writeDeploy(root, "beta", { name: "beta-worker", publicUrl: "https://lexa.example.com" });
     const lexaDir = freshLexaDir();
     writeLogin(lexaDir, "https://lexa.example.com");
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir, LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Worker:      beta-worker");
   });
@@ -151,7 +151,7 @@ describe("worker upgrade target resolution", () => {
     writeDeploy(root, "lexa", { name: "lexa", publicUrl: "https://lexa.example.com" });
     const lexaDir = freshLexaDir();
     writeLogin(lexaDir, "https://other.example.com");
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir, LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("you are logged in to");
     expect(r.stderr).toContain("other.example.com");
@@ -174,6 +174,39 @@ describe("worker config parsing + selection (pure)", () => {
     const configs = discoverWorkerDeploys(root);
     expect(configs.map((c) => c.flavor)).toEqual(["alpha", "beta"]);
     expect(configs[0]!.workerName).toBe("alpha");
+  });
+
+  it("never discovers a deploy-<flavor>.bak backup as a deploy (second-run simulation)", () => {
+    const root = makeRoot();
+    writeDeploy(root, "lexa", { name: "lexa", accountId: "acct_live", version: "2.0.0" });
+    // The backup sits beside the live dir with the same config name.
+    const bak = join(root, "deploy-lexa.bak");
+    mkdirSync(bak, { recursive: true });
+    writeFileSync(
+      join(bak, "wrangler.lexa.json"),
+      JSON.stringify({ name: "lexa", account_id: "acct_stale", vars: { LXK_VERSION: "1.0.0" } }, null, 2) + "\n",
+    );
+
+    const configs = discoverWorkerDeploys(root);
+    expect(configs.map((c) => c.flavor)).toEqual(["lexa"]);
+    expect(configs[0]!.accountId).toBe("acct_live");
+
+    // A second run (backup present) must target the live deploy, never the .bak.
+    const picked = selectWorkerDeploy(configs, { worker: "lexa" });
+    expect(picked.kind).toBe("resolved");
+    if (picked.kind === "resolved") {
+      expect(picked.config.flavor).toBe("lexa");
+      expect(picked.config.accountId).toBe("acct_live");
+    }
+  });
+
+  it("selectWorkerDeploy defensively drops .bak entries", () => {
+    const live = { flavor: "lexa", dir: "", configPath: "", workerName: "lexa", accountId: "acct_live", publicUrl: "", version: "" };
+    const stale = { flavor: "lexa.bak", dir: "", configPath: "", workerName: "lexa", accountId: "acct_stale", publicUrl: "", version: "" };
+    expect(selectWorkerDeploy([stale], {})).toEqual({ kind: "none" });
+    const picked = selectWorkerDeploy([live, stale], {});
+    expect(picked.kind).toBe("resolved");
+    if (picked.kind === "resolved") expect(picked.config.accountId).toBe("acct_live");
   });
 
   it("selectWorkerDeploy: worker-not-found, single, and login-host tie-break", () => {
