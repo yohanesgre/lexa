@@ -756,19 +756,52 @@ assert_grep "T-workers-account usage documents the flag" \
   'account <id>' "$(lib_call usage)"
 
 echo "== T-oauth-fallback: wrangler login token chain =="
+
+# `bun` shims: the success shim answers `wrangler auth token` with a synthetic
+# token; the fail shim reports not-logged-in. No real wrangler call, ever.
+oauth_shim="$(mktemp -d)"
+mkdir -p "${oauth_shim}/bin"
+cat > "${oauth_shim}/bin/bun" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"wrangler auth token"*) printf '%s\n' "oauth_FROMWRANGLER"; exit 0 ;;
+esac
+exit 0
+SHIM
+chmod +x "${oauth_shim}/bin/bun"
+
+oauth_fail_shim="$(mktemp -d)"
+mkdir -p "${oauth_fail_shim}/bin"
+cat > "${oauth_fail_shim}/bin/bun" <<'SHIM'
+#!/usr/bin/env bash
+case "$*" in
+  *"wrangler auth token"*) exit 1 ;;
+esac
+exit 0
+SHIM
+chmod +x "${oauth_fail_shim}/bin/bun"
+
 oauth_home="$(mktemp -d)"
 mkdir -p "${oauth_home}/.config/.wrangler/config"
 printf 'oauth_token = "oauth_SYNTHETICTOKEN"\n' > "${oauth_home}/.config/.wrangler/config/default.toml"
-got="$(HOME="${oauth_home}" lib_call _cf_token_from_wrangler)"
-assert_eq "T-oauth-fallback reads the stored wrangler token" "oauth_SYNTHETICTOKEN" "$got"
+
+# `wrangler auth token` wins first (refreshes stored OAuth; keyring layouts
+# have no plaintext default.toml).
+got="$(PATH="${oauth_shim}/bin:${PATH}" HOME="${oauth_home}" lib_call _cf_token_from_wrangler)"
+assert_eq "T-oauth-fallback uses wrangler auth token first" "oauth_FROMWRANGLER" "$got"
+
+# Not logged in (auth token fails) → fall back to the stored default.toml.
+got="$(PATH="${oauth_fail_shim}/bin:${PATH}" HOME="${oauth_home}" lib_call _cf_token_from_wrangler)"
+assert_eq "T-oauth-fallback falls back to the stored wrangler token" "oauth_SYNTHETICTOKEN" "$got"
+
 oauth_absent_home="$(mktemp -d)"
 oauth_rc=0
-HOME="${oauth_absent_home}" lib_call _cf_token_from_wrangler >/dev/null 2>&1 || oauth_rc=$?
+( PATH="${oauth_fail_shim}/bin:${PATH}" HOME="${oauth_absent_home}" lib_call _cf_token_from_wrangler ) >/dev/null 2>&1 || oauth_rc=$?
 assert_rc "T-oauth-fallback absent login returns non-zero" 1 "$oauth_rc"
 
 if [ "$have_bun_path" -eq 1 ]; then
   oauth_cwd="$(mktemp -d)"
-  oauth_out="$(cd "${oauth_cwd}" && HOME="${oauth_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || true
+  oauth_out="$(cd "${oauth_cwd}" && HOME="${oauth_home}" PATH="${oauth_shim}/bin:${PATH}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || true
   assert_grep "T-oauth-fallback install uses the login silently" 'using your wrangler login — no token needed' "$oauth_out"
   assert_grep "T-oauth-fallback banner reports the deploy" 'Lexa is deployed to Cloudflare' "$oauth_out"
   assert_grep "T-oauth-fallback banner points at the dashboard" 'Find its address in the Cloudflare dashboard' "$oauth_out"
@@ -783,7 +816,7 @@ fi
 oauth_none_cwd="$(mktemp -d)"
 oauth_none_home="$(mktemp -d)"
 oauth_none_rc=0
-oauth_none_out="$(cd "${oauth_none_cwd}" && HOME="${oauth_none_home}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || oauth_none_rc=$?
+oauth_none_out="$(cd "${oauth_none_cwd}" && HOME="${oauth_none_home}" PATH="${oauth_fail_shim}/bin:${PATH}" INSTALL_DRY_RUN=1 bash "$INSTALL" workers 2>&1)" || oauth_none_rc=$?
 # The rc is 1 either way (preflight without bun); the message needs the runtime.
 assert_rc "T-oauth-fallback no-credentials exits non-zero" 1 "$oauth_none_rc"
 if [ "$have_bun_path" -eq 1 ]; then

@@ -2,16 +2,42 @@
 // subprocess tests exercise the REAL entry point (mirrors index.entry.test.ts);
 // the pure tests cover config discovery/selection directly.
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupIsolationDirs, freshLexaDir, runCli } from "./test-utils";
+import { cleanupIsolationDirs, freshLexaDir, runCli, type RunResult } from "./test-utils";
 import { discoverWorkerDeploys, parseWorkerConfigText, selectWorkerDeploy } from "./worker";
 
 const tmpRoots: string[] = [];
 
+// `runCli` spawns the real `bun`, and the resolved deploy dir makes the creds
+// chain invoke `bun x wrangler auth token`. A delegating shim intercepts that
+// exact argv (returning "not logged in") and execs the real bun for everything
+// else — so no test ever runs a real `wrangler auth token`. When
+// LXK_SHIM_MARKER is set the shim records the probe, letting a test prove the
+// offline path never reaches it.
+const shimDir = mkdtempSync(join(tmpdir(), "lexa-worker-shim-"));
+const realBun = execFileSync("bash", ["-c", "command -v bun"], { encoding: "utf-8" }).trim();
+writeFileSync(
+  join(shimDir, "bun"),
+  `#!/usr/bin/env bash
+if [ "$1" = "x" ] && [ "$2" = "wrangler" ] && [ "$3" = "auth" ] && [ "$4" = "token" ]; then
+  if [ -n "$LXK_SHIM_MARKER" ]; then echo "probe" >> "$LXK_SHIM_MARKER"; fi
+  exit 1
+fi
+exec "${realBun}" "$@"
+`,
+  { mode: 0o755 },
+);
+
+function runWorkerCli(args: string[], env: Record<string, string> = {}): Promise<RunResult> {
+  return runCli(args, { PATH: `${shimDir}:${process.env.PATH ?? ""}`, ...env });
+}
+
 afterAll(() => {
   cleanupIsolationDirs();
+  rmSync(shimDir, { recursive: true, force: true });
   for (const d of tmpRoots) rmSync(d, { recursive: true, force: true });
   tmpRoots.length = 0;
 });
@@ -49,34 +75,34 @@ function writeLogin(lexaDir: string, url: string): void {
 
 describe("worker dispatch + help", () => {
   it("routes to worker group help with no subcommand and exits 0", async () => {
-    const r = await runCli(["worker"]);
+    const r = await runWorkerCli(["worker"]);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("worker upgrade");
   });
 
   it("rejects an unknown worker subcommand with usage + exit 1", async () => {
-    const r = await runCli(["worker", "bogus"]);
+    const r = await runWorkerCli(["worker", "bogus"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Unknown: worker bogus");
     expect(r.stdout).toContain("worker upgrade");
   });
 
   it("lists worker upgrade in the top-level help", async () => {
-    const r = await runCli([]);
+    const r = await runWorkerCli([]);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("worker upgrade");
   });
 
   it("refuses outside a cf-workers custody dir with the cd guidance", async () => {
     const root = makeRoot();
-    const r = await runCli(["worker", "upgrade", "--dir", root], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("No Cloudflare Workers deploy found");
     expect(r.stderr).toContain("cf-workers/");
   });
 
   it("rejects a bare --dir flag with usage", async () => {
-    const r = await runCli(["worker", "upgrade", "--dir"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Usage: lx worker upgrade");
   });
@@ -86,7 +112,7 @@ describe("worker upgrade target resolution", () => {
   it("resolves a single deploy and prints the plan (dry run)", async () => {
     const root = makeRoot();
     writeDeploy(root, "lexa", { name: "lexa", accountId: "acct_single", publicUrl: "https://lexa.example.com", version: "2026.6.2" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Worker:      lexa");
     expect(r.stdout).toContain("Account:     acct_single");
@@ -98,7 +124,7 @@ describe("worker upgrade target resolution", () => {
   it("fails offline without credentials instead of stubbing the update", async () => {
     const root = makeRoot();
     writeDeploy(root, "lexa", { name: "lexa" });
-    const r = await runCli(["worker", "upgrade", "--dir", root], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stdout).toContain("Worker:      lexa");
     expect(r.stderr).toContain("could not resolve the release");
@@ -108,7 +134,7 @@ describe("worker upgrade target resolution", () => {
     const root = makeRoot();
     writeDeploy(root, "alpha", { name: "alpha" });
     writeDeploy(root, "beta", { name: "beta" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Multiple deploys");
     expect(r.stderr).toContain("alpha");
@@ -120,7 +146,7 @@ describe("worker upgrade target resolution", () => {
     const root = makeRoot();
     writeDeploy(root, "alpha", { name: "alpha-worker" });
     writeDeploy(root, "beta", { name: "beta-worker" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--worker", "beta", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--worker", "beta", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Worker:      beta-worker");
   });
@@ -129,7 +155,7 @@ describe("worker upgrade target resolution", () => {
     const root = makeRoot();
     writeDeploy(root, "alpha", { name: "alpha" });
     writeDeploy(root, "beta", { name: "beta" });
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--worker", "nope", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--worker", "nope", "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("No deploy matches --worker 'nope'");
     expect(r.stderr).toContain("alpha, beta");
@@ -141,7 +167,7 @@ describe("worker upgrade target resolution", () => {
     writeDeploy(root, "beta", { name: "beta-worker", publicUrl: "https://lexa.example.com" });
     const lexaDir = freshLexaDir();
     writeLogin(lexaDir, "https://lexa.example.com");
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir, LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir, LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Worker:      beta-worker");
   });
@@ -151,10 +177,38 @@ describe("worker upgrade target resolution", () => {
     writeDeploy(root, "lexa", { name: "lexa", publicUrl: "https://lexa.example.com" });
     const lexaDir = freshLexaDir();
     writeLogin(lexaDir, "https://other.example.com");
-    const r = await runCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir, LXK_UPGRADE_OFFLINE: "1" });
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--dry-run"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir, LXK_UPGRADE_OFFLINE: "1" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("you are logged in to");
     expect(r.stderr).toContain("other.example.com");
+  });
+});
+
+describe("wrangler-login probe gating", () => {
+  it("the auth-token shim records a probe marker when invoked", () => {
+    const marker = join(makeRoot(), "probe.log");
+    const shim = spawnSync(join(shimDir, "bun"), ["x", "wrangler", "auth", "token"], {
+      env: { ...process.env, LXK_SHIM_MARKER: marker },
+    });
+    expect(shim.status).toBe(1);
+    expect(existsSync(marker)).toBe(true);
+  });
+
+  it("offline never probes a stored wrangler login", async () => {
+    const root = makeRoot();
+    writeDeploy(root, "lexa", { name: "lexa" });
+    const marker = join(makeRoot(), "probe.log");
+    const r = await runWorkerCli(["worker", "upgrade", "--dir", root, "--dry-run"], {
+      LEXA_URL: "",
+      LEXA_API_KEY: "",
+      LXK_UPGRADE_OFFLINE: "1",
+      LXK_SHIM_MARKER: marker,
+      CF_API_TOKEN: "",
+      CLOUDFLARE_API_TOKEN: "",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("CF token:    none");
+    expect(existsSync(marker)).toBe(false);
   });
 });
 

@@ -791,12 +791,25 @@ tty_read_secret() {
 # Cloudflare credentials + secrets
 # ---------------------------------------------------------------------------
 
-# _cf_token_from_wrangler — read the OAuth token wrangler login stored, so a
-# logged-in operator needs no CF token. Silent; prints nothing on absence.
+# _cf_token_from_wrangler [workdir] — read the OAuth token wrangler login
+# stored, so a logged-in operator needs no CF token. `wrangler auth token` is
+# tried first: it auto-refreshes stored OAuth and works with `--use-keyring`,
+# where default.toml holds no plaintext. Falls back to grepping the raw
+# default.toml (older wrangler layouts), then silent absence; prints nothing on
+# absence and never echoes the token.
 _cf_token_from_wrangler() {
+  local workdir="${1:-$PWD}"
+  local tok=""
+  if ! tok="$(cd "$workdir" 2>/dev/null && bun x wrangler auth token 2>/dev/null)"; then
+    tok=""
+  fi
+  tok="$(printf '%s' "$tok" | tr -d '[:space:]')"
+  if [ -n "$tok" ]; then
+    printf '%s\n' "$tok"
+    return 0
+  fi
   local cfg="${HOME}/.config/.wrangler/config/default.toml"
   [ -f "$cfg" ] || return 1
-  local tok
   tok="$(grep -E '^[[:space:]]*oauth_token[[:space:]]*=' "$cfg" | head -1 | sed -E 's/^[^=]*=[[:space:]]*"//; s/"[[:space:]]*$//')"
   [ -n "$tok" ] || return 1
   printf '%s\n' "$tok"

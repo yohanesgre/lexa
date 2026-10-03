@@ -7,6 +7,16 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Installer credential source** — `scripts/install.sh workers` now resolves a
+  stored `wrangler login` via `wrangler auth token` before falling back to
+  grepping `~/.config/.wrangler/config/default.toml`. The new lookup
+  auto-refreshes stored OAuth and works with `--use-keyring` (which leaves no
+  plaintext token in the TOML); a failed lookup still falls back to the raw
+  file. Explicit `--cf-token` / `CF_API_TOKEN` / `.cf-token` values are
+  unchanged. (#269)
+
 ## [2026.7.0] - 2026-10-03
 
 ### Migration notes — BREAKING

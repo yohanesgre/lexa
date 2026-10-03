@@ -2,7 +2,7 @@
 // refusal, backup/rollback, migration pre-flight, and custody/binding
 // preservation. Seams (fetch, wrangler, CF API, tar) are injected so these
 // tests never touch the network or Cloudflare.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ import { sha256Hex, type ReleaseFetcher } from "./release";
 import {
   backupPathFor,
   discoverWorkerDeploys,
+  parseWranglerTokenOutput,
   readDeployConfigFile,
   resolveCfCredentials,
   runUpgrade,
@@ -17,6 +18,7 @@ import {
   type UpgradeDeps,
   type UpgradeOptions,
   type WranglerRunner,
+  type WranglerTokenReader,
   type WorkerConfigJson,
   type WorkerDeployConfig,
 } from "./worker";
@@ -295,6 +297,8 @@ describe("worker upgrade post-upgrade discovery", () => {
 describe("resolveCfCredentials precedence", () => {
   const envKeys = ["CF_API_TOKEN", "CLOUDFLARE_API_TOKEN"] as const;
   const saved: Record<string, string | undefined> = {};
+  // Never shell out to a real wrangler in unit tests.
+  const noWrangler: WranglerTokenReader = () => undefined;
 
   beforeEach(() => {
     for (const key of envKeys) {
@@ -317,27 +321,71 @@ describe("resolveCfCredentials precedence", () => {
     writeFileSync(join(root, ".cf-token"), "dir-tok\n");
     writeFileSync(join(deployDir, ".cf-token"), "deploy-tok\n");
 
-    expect(resolveCfCredentials("flag-tok", root, deployDir)).toEqual({ token: "flag-tok", source: "--cf-token" });
+    expect(resolveCfCredentials("flag-tok", root, deployDir, noWrangler)).toEqual({ token: "flag-tok", source: "--cf-token" });
     process.env.CF_API_TOKEN = "cf-env";
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "cf-env", source: "environment" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "cf-env", source: "environment" });
     delete process.env.CF_API_TOKEN;
     process.env.CLOUDFLARE_API_TOKEN = "cf-global";
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "cf-global", source: "environment" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "cf-global", source: "environment" });
   });
 
-  it("falls back to the dir .cf-token, then the deployDir one, then none", () => {
+  it("falls back to the dir .cf-token, then the deployDir one, then wrangler login, then none", () => {
     const root = makeRoot();
     const deployDir = join(root, "deploy-lexa");
     mkdirSync(deployDir, { recursive: true });
     writeFileSync(join(deployDir, ".cf-token"), "deploy-tok\n");
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "deploy-tok", source: ".cf-token" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "deploy-tok", source: ".cf-token" });
 
     writeFileSync(join(root, ".cf-token"), "dir-tok\n");
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "dir-tok", source: ".cf-token" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "dir-tok", source: ".cf-token" });
 
     rmSync(join(root, ".cf-token"));
     rmSync(join(deployDir, ".cf-token"));
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "", source: "none" });
+    // A stored wrangler login is the last resort before the error. The reader
+    // stands in for `bun x wrangler auth token` so no real token is fetched.
+    expect(resolveCfCredentials(undefined, root, deployDir, () => "wrangler-tok")).toEqual({
+      token: "wrangler-tok",
+      source: "wrangler-login",
+    });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "", source: "none" });
+  });
+});
+
+describe("wrangler token parse + probe seam", () => {
+  const envKeys = ["CF_API_TOKEN", "CLOUDFLARE_API_TOKEN"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of envKeys) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of envKeys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key]!;
+    }
+  });
+
+  it("takes the last non-empty stdout line when a cold `bun x` prepends progress", () => {
+    expect(parseWranglerTokenOutput("Resolving dependencies\ndownloaded wrangler@4\nwrangler-tok\n")).toBe("wrangler-tok");
+    expect(parseWranglerTokenOutput("wrangler-tok\n")).toBe("wrangler-tok");
+    expect(parseWranglerTokenOutput(" \n\n")).toBeUndefined();
+  });
+
+  it("consults the injected reader only when no earlier source wins", () => {
+    const root = makeRoot();
+    const deployDir = join(root, "deploy-lexa");
+    mkdirSync(deployDir, { recursive: true });
+    const reader = vi.fn(() => "wrangler-tok");
+
+    const creds = resolveCfCredentials(undefined, root, deployDir, reader);
+
+    expect(creds).toEqual({ token: "wrangler-tok", source: "wrangler-login" });
+    expect(reader).toHaveBeenCalledTimes(1);
+    expect(reader).toHaveBeenCalledWith(deployDir);
   });
 });
 

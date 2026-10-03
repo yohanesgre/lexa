@@ -259,16 +259,43 @@ function resolveLoginHost(): Effect.Effect<{ host: string; url: string } | null,
 // ── credentials + custody (LX-37) ──
 
 // The creds chain: --cf-token > CF_API_TOKEN/CLOUDFLARE_API_TOKEN > the custody
-// `.cf-token`. Never prints the token itself.
+// `.cf-token` > a stored `wrangler login`. Never prints the token itself.
 export interface CfCredentials {
   token: string;
-  source: "--cf-token" | "environment" | ".cf-token" | "none";
+  source: "--cf-token" | "environment" | ".cf-token" | "wrangler-login" | "none";
+}
+
+// Reads the OAuth token `wrangler login` stored, or undefined when not logged
+// in. Injectable so tests never shell out to a real wrangler (which would print
+// the operator's token).
+export type WranglerTokenReader = (cwd: string) => string | undefined;
+
+// The token is the LAST non-empty stdout line: a cold `bun x` may print install
+// progress before it, so trimming the whole stream would yield "progress\ntok".
+export function parseWranglerTokenOutput(stdout: string): string | undefined {
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 ? lines[lines.length - 1] : undefined;
+}
+
+function defaultWranglerTokenReader(cwd: string): string | undefined {
+  // `bun x wrangler`, not `bunx` — same runtime the deploy core uses. A cold
+  // `bun x` may install wrangler, hence the generous timeout. Non-zero exit
+  // (not logged in) or empty stdout falls through.
+  const res = spawnSync("bun", ["x", "wrangler", "auth", "token"], {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+    timeout: 30_000,
+  });
+  if (res.status !== 0) return undefined;
+  return parseWranglerTokenOutput(typeof res.stdout === "string" ? res.stdout : "");
 }
 
 export function resolveCfCredentials(
   flagValue: string | boolean | undefined,
   dir: string,
   deployDir: string,
+  readWranglerToken: WranglerTokenReader = defaultWranglerTokenReader,
 ): CfCredentials {
   if (typeof flagValue === "string" && flagValue) return { token: flagValue, source: "--cf-token" };
   const env = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
@@ -282,6 +309,8 @@ export function resolveCfCredentials(
       /* unreadable custody token — fall through */
     }
   }
+  const wranglerToken = readWranglerToken(deployDir);
+  if (wranglerToken) return { token: wranglerToken, source: "wrangler-login" };
   return { token: "", source: "none" };
 }
 
@@ -721,7 +750,7 @@ export async function runUpgrade(opts: UpgradeOptions, deps: UpgradeDeps): Promi
 
   if (!opts.token) {
     cleanup();
-    return { status: "failed", reason: "no Cloudflare credentials — pass --cf-token, set CF_API_TOKEN/CLOUDFLARE_API_TOKEN, or save .cf-token", rolledBack: false };
+    return { status: "failed", reason: "no Cloudflare credentials — pass --cf-token, set CF_API_TOKEN/CLOUDFLARE_API_TOKEN, save .cf-token, or run `wrangler login`", rolledBack: false };
   }
   if (!opts.yes) {
     const proceed = await deps.prompt(`  Update ${current ?? "unknown"} → ${latest}?`);
@@ -912,7 +941,16 @@ export function cmdWorkerUpgrade(flags: Record<string, string | boolean>): Effec
       }
     }
 
-    const creds = resolveCfCredentials(cfTokenFlag, dir, config.dir);
+    // Offline mode is resolved before credentials: a stored `wrangler login`
+    // probe shells out to `bun x wrangler auth token`, which on a cold cache
+    // can install and block for the timeout. Offline must never spawn it.
+    const offline = process.env.LXK_UPGRADE_OFFLINE === "1" || process.env.LXK_UPGRADE_OFFLINE === "true";
+    const creds = resolveCfCredentials(
+      cfTokenFlag,
+      dir,
+      config.dir,
+      offline ? () => undefined : defaultWranglerTokenReader,
+    );
     const custody = readCustody(dir);
     const prior = readDeployConfigFile(config.configPath) ?? {
       name: config.workerName,
@@ -934,7 +972,6 @@ export function cmdWorkerUpgrade(flags: Record<string, string | boolean>): Effec
     console.log(`  CF token:    ${creds.source}`);
 
     if (creds.token) setCfToken(creds.token);
-    const offline = process.env.LXK_UPGRADE_OFFLINE === "1" || process.env.LXK_UPGRADE_OFFLINE === "true";
     const deps = defaultUpgradeDeps(creds.token, offline);
     const outcome = yield* Effect.promise(() =>
       runUpgrade(
