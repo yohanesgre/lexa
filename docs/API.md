@@ -2097,6 +2097,49 @@ GET    /api/admin/assistant/runs?status=&kind=&projectId=&limit=&cursor=   (supe
   always all five keys, zero-filled. It is a status tab total, not a total for
   the current filter or page.
 
+### Assistant schedules
+
+Per-project cron/interval schedules that fire a `kind='schedule'` assistant run
+on the 15-minute Worker tick. Reads are member-gated (`requireProjectReadById`);
+writes are project-admin-gated (`requireProjectAdminById`). A schedule needs a
+valid five-field UTC cron expression OR a positive `intervalSeconds`; neither
+present (or both cleared by a PATCH) → 422 INVALID_ARGS, and a malformed cron
+that yields no occurrence is refused up front rather than stored. `createdBy`
+is the session/API-key user; `nextRunAt` is recomputed on create and whenever
+timing changes or the schedule is re-enabled. `ASSISTANT_SCHEDULE_NOT_FOUND`
+and a cross-project id both surface as 404 (no existence oracle).
+
+```
+AssistantSchedule = { id, projectId, threadKey: string|null, createdBy: string|null,
+                      title, prompt, cron: string|null, intervalSeconds: number|null,
+                      enabled: boolean, nextRunAt, lastRunAt: string|null,
+                      lastRunId: string|null, createdAt, updatedAt }
+
+GET    /api/assistant/schedules/:projectId   (project member)
+→ 200 { data: AssistantSchedule[] }   // created_at DESC
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+
+GET    /api/assistant/schedules/:projectId/:id   (project member)
+→ 200 AssistantSchedule
+  | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND / ASSISTANT_SCHEDULE_NOT_FOUND
+
+POST   /api/assistant/schedules/:projectId   (project admin)
+body { title*, prompt*, cron?: string|null, intervalSeconds?: number|null,
+       threadKey?: string|null, enabled? }
+  `title` ≤300 chars, `prompt` ≤4000 (sliced); `enabled` defaults true.
+→ 201 AssistantSchedule | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND | 422 INVALID_ARGS
+
+PATCH  /api/assistant/schedules/:projectId/:id   (project admin)
+body { title?, prompt?, cron?: string|null, intervalSeconds?: number|null,
+       threadKey?: string|null, enabled? }
+  Merged timing is re-validated: clearing both timing fields → 422 INVALID_ARGS.
+→ 200 AssistantSchedule | 403 FORBIDDEN
+  | 404 PROJECT_NOT_FOUND / ASSISTANT_SCHEDULE_NOT_FOUND | 422 INVALID_ARGS
+
+DELETE /api/assistant/schedules/:projectId/:id   (project admin)
+→ 204 | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND / ASSISTANT_SCHEDULE_NOT_FOUND
+```
+
 GET    /api/admin/assistant/bindings   (superadmin)
 → 200 { data: [{ projectId, projectName, projectSlug,
                 providerId: string|null, providerLabel: string|null,

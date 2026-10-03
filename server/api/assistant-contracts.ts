@@ -456,6 +456,59 @@ const assistantJevGroup = HttpApiGroup.make("assistantJev")
   .add(HttpApiEndpoint.get("getProjectJev", "/projects/:id/assistant/jev").setPath(AssistantJevProjectIdPath).addSuccess(AssistantJevProjectSchema))
   .add(HttpApiEndpoint.put("putProjectJev", "/projects/:id/assistant/jev").setPath(AssistantJevProjectIdPath).setPayload(AssistantJevProjectPutPayload).addSuccess(AssistantJevProjectSchema));
 
+// ── Scheduled assistant runs (ADR-0004 §4; H7) ──────────────────────────
+// Per-project cron/interval schedules fired by the 15-minute Worker tick. Reads
+// are member-gated, writes admin-gated; a schedule needs a cron OR a positive
+// intervalSeconds (see `hasUsableScheduleTiming`).
+const AssistantScheduleSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  threadKey: Schema.NullOr(Schema.String),
+  createdBy: Schema.NullOr(Schema.String),
+  title: Schema.String,
+  prompt: Schema.String,
+  cron: Schema.NullOr(Schema.String),
+  intervalSeconds: Schema.NullOr(Schema.Number),
+  enabled: Schema.Boolean,
+  nextRunAt: Schema.String,
+  lastRunAt: Schema.NullOr(Schema.String),
+  lastRunId: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+const AssistantScheduleListResponse = Schema.Struct({ data: Schema.Array(AssistantScheduleSchema) });
+const AssistantScheduleProjectPath = Schema.Struct({ projectId: Schema.String });
+const AssistantScheduleIdPath = Schema.Struct({ projectId: Schema.String, id: Schema.String });
+const AssistantScheduleInputPayload = Schema.Struct({
+  title: Schema.String,
+  prompt: Schema.String,
+  cron: Schema.optional(Schema.NullOr(Schema.String)),
+  intervalSeconds: Schema.optional(Schema.NullOr(Schema.Number)),
+  threadKey: Schema.optional(Schema.NullOr(Schema.String)),
+  enabled: Schema.optional(Schema.Boolean),
+});
+const AssistantSchedulePatchPayload = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  prompt: Schema.optional(Schema.String),
+  cron: Schema.optional(Schema.NullOr(Schema.String)),
+  intervalSeconds: Schema.optional(Schema.NullOr(Schema.Number)),
+  threadKey: Schema.optional(Schema.NullOr(Schema.String)),
+  enabled: Schema.optional(Schema.Boolean),
+});
+
+const assistantSchedulesGroup = HttpApiGroup.make("assistantSchedules")
+  .add(HttpApiEndpoint.get("listAssistantSchedules", "/assistant/schedules/:projectId")
+    .setPath(AssistantScheduleProjectPath).addSuccess(AssistantScheduleListResponse))
+  .add(HttpApiEndpoint.get("getAssistantSchedule", "/assistant/schedules/:projectId/:id")
+    .setPath(AssistantScheduleIdPath).addSuccess(AssistantScheduleSchema))
+  .add(HttpApiEndpoint.post("createAssistantSchedule", "/assistant/schedules/:projectId")
+    .setPath(AssistantScheduleProjectPath).setPayload(AssistantScheduleInputPayload)
+    .addSuccess(AssistantScheduleSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateAssistantSchedule", "/assistant/schedules/:projectId/:id")
+    .setPath(AssistantScheduleIdPath).setPayload(AssistantSchedulePatchPayload).addSuccess(AssistantScheduleSchema))
+  .add(HttpApiEndpoint.del("deleteAssistantSchedule", "/assistant/schedules/:projectId/:id")
+    .setPath(AssistantScheduleIdPath).addSuccess(Schema.Void, { status: 204 }));
+
 const adminAssistantGroup = HttpApiGroup.make("adminAssistant")
   .add(HttpApiEndpoint.get("adminAssistantUsage", "/admin/assistant/usage").addSuccess(AssistantUsageResponseSchema))
   .add(HttpApiEndpoint.get("adminAssistantUsageCsv", "/admin/assistant/usage.csv").addSuccess(Schema.Void, { status: 200 }))
@@ -499,4 +552,5 @@ export {
   projectAssistantUsageGroup,
   assistantMcpGroup,
   assistantJevGroup,
+  assistantSchedulesGroup,
 };

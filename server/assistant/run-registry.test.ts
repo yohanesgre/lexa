@@ -7,6 +7,7 @@ import {
   createAssistantRun,
   getAssistantRun,
   isRunTransitionable,
+  reconcileStaleRuns,
   transitionAssistantRunRegistry,
 } from "./run-registry";
 import type { AssistantRunStatus } from "../../shared/assistant";
@@ -153,5 +154,52 @@ describe("assistant run registry", () => {
       ["cancelled", "completed", false],
     ];
     for (const [from, to, expected] of cases) expect(isRunTransitionable(from, to)).toBe(expected);
+  });
+});
+
+describe("reconcileStaleRuns", () => {
+  let ctx: ReturnType<typeof fresh>;
+  beforeEach(() => {
+    ctx = fresh();
+  });
+
+  function insertRow(id: string, status: "queued" | "running", budgetMs: number | null, createdAt: string, startedAt: string | null) {
+    ctx.db.prepare(
+      "INSERT INTO assistant_runs (id, project_id, thread_key, kind, status, goal, budget_ms, created_at, started_at) VALUES (?, 'p1', 'chat:c1', 'chat_run', ?, 'g', ?, ?, ?)"
+    ).run(id, status, budgetMs, createdAt, startedAt);
+  }
+
+  it("fails stale queued/running rows, uses the default budget for NULL budget_ms, and leaves fresh runs", async () => {
+    const now = new Date("2026-01-01T12:00:00Z");
+    // Stale queued: never started, 1h old, 60s budget → expires 6m after create.
+    insertRow("stale-queued", "queued", 60_000, "2026-01-01 11:00:00", null);
+    // Stale running: started 40m ago, 10m budget → expires 15m after start.
+    insertRow("stale-running", "running", 600_000, "2026-01-01 11:00:00", "2026-01-01 11:20:00");
+    // NULL budget_ms, 20m old → default 10m + grace 5m → stale.
+    insertRow("null-budget", "queued", null, "2026-01-01 11:40:00", null);
+    // NULL budget_ms but only 2m old → inside the default window → untouched.
+    insertRow("fresh", "queued", null, "2026-01-01 11:58:00", null);
+
+    const result = await Effect.runPromise(reconcileStaleRuns(ctx.driver, { now }));
+    expect(result.failed).toBe(3);
+
+    const failed = ctx.db.prepare("SELECT id, status, error, finished_at FROM assistant_runs WHERE status = 'failed' ORDER BY id").all() as Array<{
+      id: string;
+      status: string;
+      error: string;
+      finished_at: string | null;
+    }>;
+    expect(failed.map((r) => r.id)).toEqual(["null-budget", "stale-queued", "stale-running"]);
+    for (const r of failed) {
+      expect(r.error).toBe("run exceeded its wall-clock budget");
+      expect(r.finished_at).not.toBeNull();
+    }
+    expect(ctx.db.prepare("SELECT status FROM assistant_runs WHERE id = 'fresh'").get()).toMatchObject({ status: "queued" });
+  });
+
+  it("surfaces a DbError instead of throwing (fail-open at the caller)", async () => {
+    ctx.db.exec("DROP TABLE assistant_runs");
+    const outcome = await runEither(reconcileStaleRuns(ctx.driver, { now: new Date("2026-01-01T12:00:00Z") }));
+    expect(outcome._tag).toBe("Left");
   });
 });

@@ -134,6 +134,24 @@ export async function spawnDelegatedRun(deps: DelegationDeps, input: SpawnRunInp
   return { ok: true, runId };
 }
 
+/**
+ * Dispatch a run whose registry row already exists (schedule runs, recovery).
+ * No insert and no cap check — the caller owns creation; this only drives the
+ * facet and lands the running/failed transition.
+ */
+export async function dispatchRegisteredRun(
+  deps: DelegationDeps,
+  input: DelegatedRunDispatchInput
+): Promise<SpawnRunResult> {
+  const dispatched = await deps.dispatcher.dispatch(input);
+  if (dispatched.status === "error") {
+    await deps.updateRun({ runId: input.runId, status: "failed", error: dispatched.error ?? "dispatch failed" });
+    return { ok: false, code: "ASSISTANT_UNAVAILABLE", error: dispatched.error ?? "dispatch failed" };
+  }
+  await deps.updateRun({ runId: input.runId, status: "running" });
+  return { ok: true, runId: input.runId };
+}
+
 /** Abort one delegated run: cancel the facet first, then land the terminal row. */
 export async function abortDelegatedRun(deps: DelegationDeps, runId: string): Promise<{ ok: true } | { ok: false; code: string; error: string }> {
   const row = await deps.getRun(runId);

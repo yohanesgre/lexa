@@ -7,7 +7,7 @@
 // matches if EITHER matches (Vixie-cron semantics).
 //
 // `nextCronRun` walks minute by minute from the first minute strictly after
-// `from`, capped at one year; a schedule that never fires inside the window
+// `from`, capped at five years; a schedule that never fires inside the window
 // returns `null` (fail-open: the dispatcher leaves it for a later tick).
 
 export interface CronFields {
@@ -21,7 +21,7 @@ export interface CronFields {
 }
 
 const MINUTE_MS = 60_000;
-const SEARCH_WINDOW_MS = 366 * 24 * 60 * MINUTE_MS;
+const SEARCH_WINDOW_MS = 5 * 366 * 24 * 60 * MINUTE_MS;
 
 interface FieldSpec {
   min: number;
@@ -98,7 +98,7 @@ function matches(fields: CronFields, date: Date): boolean {
   return true;
 }
 
-/** First matching UTC minute strictly after `from`, or `null` within a year. */
+/** First matching UTC minute strictly after `from`, or `null` within five years. */
 export function nextCronRun(expression: string, from: Date): Date | null {
   const fields = parseCron(expression);
   if (!fields) return null;

@@ -51,6 +51,12 @@ describe("nextCronRun", () => {
     expect(nextCronRun("0 0 1 * 1", from)?.toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
 
+  it("resolves a leap-day schedule within the widened window", () => {
+    // 2028 is the next leap year after 2025-03-01.
+    const from = new Date("2025-03-01T00:00:00.000Z");
+    expect(nextCronRun("0 0 29 2 *", from)?.toISOString()).toBe("2028-02-29T00:00:00.000Z");
+  });
+
   it("returns null for a malformed expression", () => {
     expect(nextCronRun("nope", new Date())).toBeNull();
   });

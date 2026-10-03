@@ -10,7 +10,8 @@
 
 import { Effect } from "effect";
 import { batch, queryAll, queryFirst, run, type ConstraintViolation, type DbError, type DbDriver, type RowNotFound, type SqlParam } from "../db/db";
-import { nextRunAt } from "./cron";
+import { InvalidArgs } from "../api/errors";
+import { nextRunAt, type ScheduleTiming } from "./cron";
 import type {
   AssistantRunRow,
   AssistantScheduleInput,
@@ -66,6 +67,18 @@ function toSqlDate(date: Date): string {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
+const INVALID_TIMING_REASON = "a schedule needs a valid cron expression or a positive intervalSeconds";
+
+/**
+ * Does this timing produce at least one occurrence? Mirrors the 0021 CHECK
+ * (`cron` non-empty OR `interval_seconds > 0`) and additionally rejects a
+ * malformed cron, so a payload that would otherwise surface as a raw CHECK
+ * violation is refused up front as `InvalidArgs` (422).
+ */
+export function hasUsableScheduleTiming(timing: ScheduleTiming): boolean {
+  return nextRunAt(timing, new Date(0)) !== null;
+}
+
 export function listSchedules(driver: DbDriver, projectId: string): Effect.Effect<AssistantScheduleRow[], DbError> {
   return queryAll<ScheduleRowRaw>(driver, `${SCHEDULE_SELECT} WHERE project_id = ? ORDER BY created_at DESC`, projectId).pipe(
     Effect.map((rows) => rows.map(mapSchedule))
@@ -88,12 +101,15 @@ export function createSchedule(
   input: AssistantScheduleInput,
   createdBy: string | null,
   now: Date = new Date()
-): Effect.Effect<AssistantScheduleRow, RowNotFound | ConstraintViolation | DbError> {
+): Effect.Effect<AssistantScheduleRow, InvalidArgs | RowNotFound | ConstraintViolation | DbError> {
   const id = crypto.randomUUID();
   const cron = input.cron ?? null;
   const intervalSeconds = input.intervalSeconds ?? null;
-  const next = nextRunAt({ cron, intervalSeconds }, now) ?? new Date(now.getTime() + 15 * 60_000);
   return Effect.gen(function* () {
+    if (!hasUsableScheduleTiming({ cron, intervalSeconds })) {
+      return yield* new InvalidArgs({ reason: INVALID_TIMING_REASON });
+    }
+    const next = nextRunAt({ cron, intervalSeconds }, now) ?? new Date(now.getTime() + 15 * 60_000);
     yield* run(
       driver,
       `INSERT INTO assistant_schedules (id, project_id, thread_key, created_by, title, prompt, cron, interval_seconds, enabled, next_run_at)
@@ -120,11 +136,14 @@ export function updateSchedule(
   projectId: string,
   patch: AssistantSchedulePatch,
   now: Date = new Date()
-): Effect.Effect<AssistantScheduleRow, RowNotFound | ConstraintViolation | DbError> {
+): Effect.Effect<AssistantScheduleRow, InvalidArgs | RowNotFound | ConstraintViolation | DbError> {
   return Effect.gen(function* () {
     const current = yield* queryFirst<ScheduleRowRaw>(driver, `${SCHEDULE_SELECT} WHERE id = ? AND project_id = ?`, id, projectId);
     const cron = patch.cron !== undefined ? patch.cron : current.cron;
     const intervalSeconds = patch.intervalSeconds !== undefined ? patch.intervalSeconds : current.interval_seconds;
+    if ((patch.cron !== undefined || patch.intervalSeconds !== undefined) && !hasUsableScheduleTiming({ cron, intervalSeconds })) {
+      return yield* new InvalidArgs({ reason: INVALID_TIMING_REASON });
+    }
     const enabled = patch.enabled !== undefined ? patch.enabled : current.enabled === 1;
     const sets: string[] = [];
     const params: SqlParam[] = [];

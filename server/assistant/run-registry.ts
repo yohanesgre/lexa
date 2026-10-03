@@ -164,6 +164,50 @@ export function transitionAssistantRunRegistry(
   });
 }
 
+/** Grace beyond a run's budget before reconciliation declares it stale. */
+export const STALE_RUN_GRACE_MS = 5 * 60_000;
+/** Budget assumed for a row whose `budget_ms` was never recorded. */
+export const STALE_RUN_DEFAULT_BUDGET_MS = 10 * 60_000;
+
+export interface ReconcileStaleRunsOptions {
+  now?: Date | undefined;
+  graceMs?: number | undefined;
+  defaultBudgetMs?: number | undefined;
+}
+
+function toSqlDate(date: Date): string {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * Fail the runs that outlived their own wall-clock budget. Per-row expiry is
+ * computed in SQL from `COALESCE(started_at, created_at)` plus
+ * `(budget_ms + grace)/1000` seconds, so a queued row that never started still
+ * expires from its creation time. Fail-open at the caller: this surfaces a
+ * `DbError` and the scheduled tick swallows it. Returns how many rows failed.
+ */
+export function reconcileStaleRuns(
+  driver: DbDriver,
+  options: ReconcileStaleRunsOptions = {}
+): Effect.Effect<{ failed: number }, ConstraintViolation | DbError> {
+  const now = options.now ?? new Date();
+  const graceMs = options.graceMs ?? STALE_RUN_GRACE_MS;
+  const defaultBudgetMs = options.defaultBudgetMs ?? STALE_RUN_DEFAULT_BUDGET_MS;
+  return run(
+    driver,
+    `UPDATE assistant_runs
+        SET status = 'failed',
+            error = COALESCE(error, 'run exceeded its wall-clock budget'),
+            finished_at = datetime('now')
+      WHERE status IN ('queued', 'running')
+        AND datetime(COALESCE(started_at, created_at),
+                     '+' || ((COALESCE(budget_ms, ?) + ?) / 1000) || ' seconds') <= ?`,
+    defaultBudgetMs,
+    graceMs,
+    toSqlDate(now)
+  ).pipe(Effect.map((changes) => ({ failed: changes })));
+}
+
 export interface ActiveRunCounts {
   thread: number;
   project: number;

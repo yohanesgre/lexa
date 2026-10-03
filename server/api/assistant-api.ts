@@ -16,6 +16,7 @@ import { Db, queryAll, batch, RowNotFound, DbError, type BatchStmt, type DbDrive
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import {
   AssistantGenerationFailed,
+  AssistantScheduleNotFound,
   AssistantTaskActive,
   AssistantThreadNotFound,
   HasChildren,
@@ -53,6 +54,7 @@ import { AssistantJevRepo } from "../repos/assistant-jev.repo";
 import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
+import { createSchedule, deleteSchedule, getSchedule, listSchedules, updateSchedule } from "../scheduled/schedules";
 import { AssistantThreadRpc, assistantThreadRpcNoop, type AssistantThreadRpcShape } from "../assistant/thread-rpc";
 import { convertStoredMessages, type LegacyStoredMessage } from "../assistant/legacy-convert";
 import { AuthorizationService } from "../services/authorization.service";
@@ -226,6 +228,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
         const service = yield* AssistantService;
+        const identity = yield* AuthIdentity;
         const task = yield* service.enqueue({
           projectId: project.id,
           documentType: req.payload.documentType,
@@ -237,7 +240,11 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           ...(req.payload.attachments !== undefined ? { attachments: [...req.payload.attachments] } : {}),
         });
         const enqueue = yield* threadRpcControl((rpc) =>
-          rpc.enqueueRun(`${req.payload.documentType}:${req.payload.documentId}`, project.id, task.id)
+          rpc.enqueueRun(`${req.payload.documentType}:${req.payload.documentId}`, {
+            projectId: project.id,
+            runId: task.id,
+            actorUserId: identity.userId ?? "",
+          })
         );
         // ADR-0003 §B.4: `enqueueRun` RPC failure → task marked `failed` + 502
         // ASSISTANT_UNAVAILABLE. TODO(P3): the DO `enqueueRun` is still a P2
@@ -1128,6 +1135,57 @@ const assistantJevLive = HttpApiBuilder.group(LexaApi, "assistantJev", (handlers
 );
 
 
+// Scheduled assistant runs (ADR-0004 §4; H7): CRUD over the per-project
+// `assistant_schedules` rows. Reads are member-gated; writes admin-gated and
+// attributed to the caller. Timing validity is enforced by the service
+// (`InvalidArgs` → 422); an unknown/other-project row maps to 404.
+const assistantSchedulesLive = HttpApiBuilder.group(LexaApi, "assistantSchedules", (handlers) =>
+  handlers
+    .handle("listAssistantSchedules", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.projectId);
+        const db = yield* Db;
+        return { data: yield* listSchedules(db, req.path.projectId) };
+      }))
+    )
+    .handle("getAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.projectId);
+        const db = yield* Db;
+        return yield* getSchedule(db, req.path.id, req.path.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantScheduleNotFound({ id: req.path.id }))
+        );
+      }))
+    )
+    .handle("createAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.projectId);
+        const identity = yield* AuthIdentity;
+        const db = yield* Db;
+        return yield* createSchedule(db, req.path.projectId, { ...req.payload }, identity.userId);
+      }))
+    )
+    .handle("updateAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.projectId);
+        const db = yield* Db;
+        return yield* updateSchedule(db, req.path.id, req.path.projectId, { ...req.payload }).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantScheduleNotFound({ id: req.path.id }))
+        );
+      }))
+    )
+    .handle("deleteAssistantSchedule", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectAdminById(req.path.projectId);
+        const db = yield* Db;
+        yield* deleteSchedule(db, req.path.id, req.path.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantScheduleNotFound({ id: req.path.id }))
+        );
+        return undefined;
+      }))
+    )
+);
+
 // ── Assistant service layer (Workers-only) ──────────────────────────────
 // Engine, gateway, MCP bridge, and the assistant-only repos/services. Kept
 // out of `http.ts`'s base layer so the Bun bundle never imports
@@ -1169,7 +1227,7 @@ const apiLayer = HttpApiBuilder.api(LexaApi);
 function fullRouteGroups() {
   return Layer.mergeAll(
     baseRouteGroups(),
-    assistantLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, assistantJevLive
+    assistantLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, assistantJevLive, assistantSchedulesLive
   );
 }
 

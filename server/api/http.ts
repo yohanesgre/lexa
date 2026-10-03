@@ -81,6 +81,7 @@ import {
   projectAssistantUsageGroup,
   assistantMcpGroup,
   assistantJevGroup,
+  assistantSchedulesGroup,
 } from "./assistant-contracts";
 import { SourceService } from "../services/source.service";
 import { SourceRepo } from "../repos/source.repo";
@@ -1311,6 +1312,7 @@ export const LexaApi = lexaBase
   .add(projectAssistantUsageGroup)
   .add(assistantMcpGroup)
   .add(assistantJevGroup)
+  .add(assistantSchedulesGroup)
   .prefix("/api");
 
 const baseApiLayer = HttpApiBuilder.api(LexaBaseApi);

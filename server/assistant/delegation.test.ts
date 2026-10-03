@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   abortDelegatedRun,
+  dispatchRegisteredRun,
   runStatusForTerminal,
   spawnDelegatedRun,
   DEFAULT_RUN_BUDGET_MS,
@@ -108,6 +109,33 @@ describe("spawnDelegatedRun", () => {
     const result = await spawnDelegatedRun(d, INPUT);
     expect(result).toMatchObject({ ok: false, code: "ASSISTANT_UNAVAILABLE" });
     expect(d.dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("dispatchRegisteredRun", () => {
+  const dispatchInput = { runId: "r1", goal: "g", projectId: "p1", threadKey: "chat:c1", mode: "ask", budgetMs: 5000 };
+
+  it("dispatches an existing run and marks it running without inserting", async () => {
+    const d = deps();
+    const result = await dispatchRegisteredRun(d, dispatchInput);
+    expect(result).toEqual({ ok: true, runId: "r1" });
+    expect(d.dispatcher.dispatch).toHaveBeenCalledWith(dispatchInput);
+    expect(d.updateRun).toHaveBeenCalledWith({ runId: "r1", status: "running" });
+    expect(d.createRun).not.toHaveBeenCalled();
+    expect(d.counts).not.toHaveBeenCalled();
+  });
+
+  it("marks a rejected dispatch failed", async () => {
+    const d = deps({
+      dispatcher: {
+        dispatch: vi.fn(async () => ({ status: "error" as const, error: "boom" })),
+        cancel: vi.fn(async () => {}),
+      },
+    });
+    const result = await dispatchRegisteredRun(d, dispatchInput);
+    expect(result).toEqual({ ok: false, code: "ASSISTANT_UNAVAILABLE", error: "boom" });
+    expect(d.updateRun).toHaveBeenCalledWith({ runId: "r1", status: "failed", error: "boom" });
+    expect(d.createRun).not.toHaveBeenCalled();
   });
 });
 

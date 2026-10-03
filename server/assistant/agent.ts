@@ -33,7 +33,7 @@ import { withApprovalCarriers } from "./approval-carrier";
 import { summaryWindow, summarizeTranscript } from "./summarize";
 import { assistantTraceParams, tracedAI } from "./tracing";
 import { LexaAssistantRunner } from "./runner";
-import { abortDelegatedRun, spawnDelegatedRun, type DelegationDeps, type RunDispatcher } from "./delegation";
+import { abortDelegatedRun, dispatchRegisteredRun, spawnDelegatedRun, DEFAULT_RUN_BUDGET_MS, type DelegationDeps, type RunDispatcher } from "./delegation";
 import type { AssistantCallLogInput } from "../../shared/assistant";
 import { attachWorkersAiBinding } from "./model-factory";
 
@@ -56,6 +56,10 @@ const CORE_READ_TOOLS: ReadonlySet<string> = new Set<string>([
 
 export interface LexaAssistantEnv {
   LXK_SECRETS_MASTER_KEY?: string | undefined;
+  // Public worker origin. Used to reach the Worker internal routes for a run
+  // dispatched without a connect (cron schedule ticks); the connect path
+  // persists its own origin, which wins when present.
+  LXK_PUBLIC_URL?: string | undefined;
   // Optional self service binding back to the Worker that hosts the internal
   // assistant routes (ADR-0003 §B.2/R7). When absent the DO falls back to a
   // global fetch against the public origin (the ADR alternative).
@@ -116,6 +120,32 @@ function assistantErrorResponse(status: number, code: string, message: string): 
     status,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
+}
+
+/**
+ * Build the signed internal deps for one DO operation. `storedOrigin` (persisted
+ * at connect) wins; a cron-dispatched `enqueueRun` never connected, so it falls
+ * back to `env.LXK_PUBLIC_URL`. Reuses the same HMAC identity/origin derivation
+ * the connect path persists — no `onConnect` requirement.
+ */
+export function buildInternalDepsForRun(
+  env: LexaAssistantEnv,
+  identity: InternalAuthIdentity | null,
+  storedOrigin?: string
+): AssistantInternalDeps | null {
+  const masterKey = env.LXK_SECRETS_MASTER_KEY;
+  if (!masterKey || !identity) return null;
+  const origin = storedOrigin ?? env.LXK_PUBLIC_URL;
+  if (!origin) return null;
+  const service = env.ASSISTANT_SERVICE;
+  return {
+    origin,
+    identity,
+    masterKey,
+    ...(service
+      ? { fetchImpl: (input: string, init?: RequestInit) => service.fetch(input, init as never) as unknown as Promise<Response> }
+      : {}),
+  };
 }
 
 export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
@@ -214,20 +244,9 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // wake. Origin + identity are persisted at connect, so a mirror triggered by
   // a later persist still authenticates.
   private async loadInternalDeps(): Promise<AssistantInternalDeps | null> {
-    const masterKey = this.env.LXK_SECRETS_MASTER_KEY;
-    if (!masterKey) return null;
     const origin = await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY);
     const identity = await this.ctx.storage.get<InternalAuthIdentity>(INTERNAL_IDENTITY_KEY);
-    if (!origin || !identity) return null;
-    const service = this.env.ASSISTANT_SERVICE;
-    return {
-      origin,
-      identity,
-      masterKey,
-      ...(service
-        ? { fetchImpl: (input: string, init?: RequestInit) => service.fetch(input, init as never) as unknown as Promise<Response> }
-        : {}),
-    };
+    return buildInternalDepsForRun(this.env, identity ?? null, origin ?? undefined);
   }
 
   // Migrate-on-read (ADR-0003 §B.3): the first activation of a thread whose DO
@@ -734,23 +753,38 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     return { ok: true };
   }
 
-  async enqueueRun(_projectId: string, taskId: string): Promise<{ ok: true }> {
-    // Record the document run in the registry (kind `document`) and pin the run
-    // id cursor the engine's terminal transition uses. `projectId` scopes the
-    // row; the identity header supplies the project for the Worker route.
-    const deps = await this.loadInternalDeps();
+  async enqueueRun(input: { projectId: string; runId: string; actorUserId: string }): Promise<{ ok: true }> {
+    // Identity-object entry point (ADR-0004 §4): a cron tick hands over the
+    // run coordinates; the DO derives its own thread key from the instance name.
+    const threadKey = this.ctx.id.name ?? "";
+    const storedOrigin = await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY);
+    const deps = buildInternalDepsForRun(
+      this.env,
+      { actorUserId: input.actorUserId, projectId: input.projectId, threadKey },
+      storedOrigin ?? undefined
+    );
     if (deps) {
-      await createRunRemote(deps, {
-        id: taskId,
-        kind: "document",
-        goal: `Document run ${taskId}`,
-        threadKey: this.ctx.id.name ?? "",
-        budgetMs: null,
-        createdBy: null,
-      }).catch(() => null);
+      const run = await getRunRemote(deps, input.runId);
+      if (run?.kind === "schedule") {
+        // The registry row already exists (created by the schedule tick): drive
+        // the detached facet and land the running/failed transition. No insert,
+        // no cap check. Detached runs have no interactive approver → `auto`.
+        await dispatchRegisteredRun(this.delegationDeps(deps), {
+          runId: run.id,
+          goal: run.goal,
+          projectId: run.projectId,
+          threadKey: run.threadKey,
+          mode: "auto",
+          budgetMs: run.budgetMs ?? DEFAULT_RUN_BUDGET_MS,
+        });
+        return { ok: true };
+      }
     }
+    // Document run (or an unreachable Worker): pin the run-id cursor the
+    // engine's terminal transition uses. `assistant_tasks` remains the document
+    // source of truth — the DO creates no registry row for a document run.
     try {
-      await this.ctx.storage.put(RUN_ID_KEY, taskId);
+      await this.ctx.storage.put(RUN_ID_KEY, input.runId);
     } catch (e) {
       console.warn("[Assistant] failed to persist run id:", e instanceof Error ? e.message : String(e));
     }

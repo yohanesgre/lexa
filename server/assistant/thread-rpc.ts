@@ -40,8 +40,15 @@ export interface AssistantThreadRpcShape {
   destroyThread(threadKey: string): Promise<{ ok: true } | null>;
   /** Clear the DO transcript but keep the thread (document reset). */
   resetThread(threadKey: string): Promise<{ ok: true } | null>;
-  /** Start a background document run. */
-  enqueueRun(threadKey: string, projectId: string, taskId: string): Promise<{ ok: true } | null>;
+  /**
+   * Enqueue per-thread work: a schedule tick hands over `{projectId, runId,
+   * actorUserId}` so the DO can dispatch the detached facet for the registry
+   * row; a document run (no registry row) pins the run-id cursor.
+   */
+  enqueueRun(
+    threadKey: string,
+    input: { projectId: string; runId: string; actorUserId: string }
+  ): Promise<{ ok: true } | null>;
   /** Abort an in-flight document run. */
   abortRun(threadKey: string, taskId: string): Promise<{ ok: true } | null>;
 }
