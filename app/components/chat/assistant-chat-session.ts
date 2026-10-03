@@ -270,11 +270,15 @@ export function useSettledTurns(args: {
   // approval batch) would leak into the new one.
   const syncKey = `chat:${chatId}:${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:rev${transcriptUpdatedAt ?? 0}:${stream.status}:${stream.hasIngress}:${streaming}:${sendAccepted}`;
   if (syncedKey !== syncKey) {
-    const chatChanged = chatRef.current !== chatId;
-    // An accepted send keeps the optimistic turn even across the chatId change:
-    // the id is minted in the same batch as the send, so the "previous chat"
-    // null-out would otherwise discard it.
-    const keepAcrossChange = sendAccepted;
+    const prevChatId = chatRef.current;
+    const chatChanged = prevChatId !== chatId;
+    // An accepted send keeps the optimistic turn across the MINT transition
+    // only: the id is minted from the empty landing in the same batch as the
+    // send, so the "previous chat" null-out would otherwise discard it. Once a
+    // real thread id has been applied the exception is spent — re-selecting the
+    // accepted chat must NOT carry the intervening thread's turns (nor its live
+    // approval chips) into it.
+    const keepAcrossChange = sendAccepted && chatChanged && prevChatId === "";
     chatRef.current = chatId;
     setSyncedKey(syncKey);
     setTurns((prev) => {
@@ -314,7 +318,7 @@ export function useTerminalRefetch(args: {
   // exists, so the transcript must be refetched once. If it keeps 404ing, the
   // guard stops an invalidate/error/invalidate loop. Keyed by chat id.
   const refetchedRef = useRef("");
-  // Terminal work fires at most once per chat/terminal status: the stream status
+  // Terminal work fires at most once per chat/terminal frame: the stream status
   // can oscillate (a transient recovering tick rewrites `done` → `connecting`)
   // and the status churn must not re-issue the transcript + list invalidations.
   // The guard is per (chat, status) and survives the transient non-terminal
@@ -323,6 +327,15 @@ export function useTerminalRefetch(args: {
   const terminalHandledRef = useRef<{ chatId: string; status: string } | null>(null);
   useEffect(() => {
     if (!chatId) {
+      terminalHandledRef.current = null;
+      return;
+    }
+    // A genuine turn always passes through "streaming"; the recovering
+    // oscillation (done → connecting → done) never does. Re-arm the guard on
+    // that edge so a SECOND turn (or a second suspension/abort) in the same
+    // chat is handled — keying the guard on (chat, status) alone would suppress
+    // it and the settled reply would never reach the transcript.
+    if (stream.status === "streaming") {
       terminalHandledRef.current = null;
       return;
     }
@@ -439,9 +452,10 @@ export function useChatThreadActions(args: {
   streaming: boolean;
   abort: () => void;
   clearThreadParam: () => void;
+  stripThreadParam: () => void;
   openThreadParam: (threadId: string) => void;
 }) {
-  const { projectId, chatId, applyChatId, setChatId, streaming, abort, clearThreadParam, openThreadParam } = args;
+  const { projectId, chatId, applyChatId, setChatId, streaming, abort, clearThreadParam, stripThreadParam, openThreadParam } = args;
   const renameChat = useRenameAssistantChat(projectId);
   const deleteChat = useDeleteAssistantChat(projectId);
   const metaChat = useUpdateAssistantChatMeta(projectId);
@@ -475,15 +489,16 @@ export function useChatThreadActions(args: {
   const startNewChat = useCallback(() => {
     if (streaming) abort();
     // "New chat" clears to the fresh landing purely client-side: the next send
-    // mints the uuid (useChatStartStream). Navigating here re-runs the ssr:false
-    // route loader and flashes the shell, so the URL param is left untouched —
-    // the page's per-param resolution guard keeps it from re-opening the thread
-    // that was active.
+    // mints the uuid (useChatStartStream). The ?thread= param is stripped with
+    // replaceState (no router navigation → no ssr:false route-loader flash) so a
+    // remount/reload cannot re-open the thread the user left; navigating here
+    // would re-run the loader and flash the shell.
     try {
       window.localStorage.removeItem(`lexa-chat-last:${projectId}`);
     } catch {}
+    stripThreadParam();
     setChatId("");
-  }, [streaming, abort, projectId, setChatId]);
+  }, [streaming, abort, projectId, setChatId, stripThreadParam]);
   return { handlePinToggle, handleRename, handleDelete, selectThread, startNewChat };
 }
 

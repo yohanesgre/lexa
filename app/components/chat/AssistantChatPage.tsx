@@ -35,6 +35,7 @@ import {
   noWriteToolsAllowed,
   staleThreadNeedsRecovery,
   isThreadNotFound,
+  threadFromSearch,
 } from "./assistant-chat-logic";
 import {
   useApprovalDecisions,
@@ -147,16 +148,38 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const resolvedProjectRef = useRef<string | undefined>(undefined);
   // The ?thread= param is authoritative only when it CHANGES (a real deep link
-  // or sidebar selection). "New chat" clears the active thread purely client-
-  // side without navigating, so the stale URL param must not re-open the
-  // previous thread — a navigation there is exactly the route-loader flash.
+  // or sidebar selection) AND the address bar still names it. "New chat" clears
+  // the active thread purely client-side (replaceState strips ?thread= — no
+  // router navigation, so no route-loader flash), so a stale prop must not
+  // re-open the previous thread on this mount or a later remount/reload.
   const appliedParamRef = useRef<string | undefined>(undefined);
+
+  // Drop ?thread= from the address bar without a router navigation. navigate()
+  // re-runs the ssr:false route loader and flashes the shell; replaceState keeps
+  // the URL honest so a remount/reload cannot re-open the thread the user left.
+  const stripThreadParam = useCallback(() => {
+    appliedParamRef.current = undefined;
+    if (typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("thread");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
   useEffect(() => {
     if (!projectId) return;
     const projectChanged = resolvedProjectRef.current !== projectId;
     resolvedProjectRef.current = projectId;
     const paramChanged = appliedParamRef.current !== thread;
     appliedParamRef.current = thread;
+    // The prop is a deep link only while the URL names the same thread. After
+    // "New chat" the router's search state can lag the stripped address bar, so
+    // a prop the URL no longer carries is treated as absent.
+    const urlThread = typeof window === "undefined" ? undefined : threadFromSearch(window.location.search);
+    const effectiveThread = thread !== undefined && urlThread !== thread ? undefined : thread;
     let lastVisited: string | null = null;
     try {
       lastVisited = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
@@ -165,7 +188,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     }
     const next = resolveChatId({
       projectId,
-      thread: paramChanged ? thread : undefined,
+      thread: paramChanged ? effectiveThread : undefined,
       currentChatId: projectChanged ? "" : chatId,
       lastVisited,
     });
@@ -499,6 +522,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     streaming,
     abort: handleAbort,
     clearThreadParam,
+    stripThreadParam,
     openThreadParam,
   });
 

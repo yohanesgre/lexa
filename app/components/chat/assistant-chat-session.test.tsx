@@ -250,6 +250,31 @@ describe("useSettledTurns — accepted send survives the chatId mint", () => {
   });
 });
 
+describe("useSettledTurns — accepted send is scoped to the mint transition", () => {
+  it("does not leak the intervening thread's turns when the accepted chat is re-selected", () => {
+    const stream = makeStream();
+    const X_MSG = [{ role: "assistant", content: "x reply" }];
+    const { result, rerender } = renderHook(
+      ({ chatId, messages, sendAccepted }: { chatId: string; messages: unknown[]; sendAccepted: boolean }) =>
+        useSettledTurns({ chatId, transcriptData: { messages }, transcriptError: undefined, streaming: false, stream, sendAccepted }),
+      { initialProps: { chatId: "X", messages: X_MSG as unknown[], sendAccepted: true } }
+    );
+    expect(result.current.turns?.map((t) => t.text)).toEqual(["x reply"]);
+
+    // Switch to Y (the accepted send belongs to X, so sendAccepted is false);
+    // Y is suspended on an approval batch.
+    rerender({ chatId: "Y", messages: [BATCH_MSG], sendAccepted: false });
+    expect(result.current.turns?.[0]?.batch?.batchId).toBe("b1");
+
+    // Re-select X: acceptedChatId is still X (sticky), so sendAccepted is true
+    // again — but this is NOT the mint transition (prev chat was Y, not ""), so
+    // Y's turns and its pending approval chips must not leak into X.
+    rerender({ chatId: "X", messages: X_MSG, sendAccepted: true });
+    expect(result.current.turns?.some((t) => !!t.batch)).toBe(false);
+    expect(result.current.turns?.map((t) => t.text)).toEqual(["x reply"]);
+  });
+});
+
 describe("useTerminalRefetch — once per terminal status (A2)", () => {
   function renderTerminalSpy() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -274,7 +299,7 @@ describe("useTerminalRefetch — once per terminal status (A2)", () => {
     return { qc, invalidate, remove, rerender, listCalls, transcriptCalls };
   }
 
-  it("invalidates transcript + list once across a terminal oscillation", async () => {
+  it("invalidates transcript + list once across a terminal oscillation (no streaming edge)", async () => {
     const { invalidate, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
 
     rerender(makeStream({ status: "done", hasIngress: true }));
@@ -282,11 +307,55 @@ describe("useTerminalRefetch — once per terminal status (A2)", () => {
     expect(listCalls()).toBe(1);
     expect(transcriptCalls()).toBe(1);
 
-    // isRecovering oscillation: done → connecting → done must not re-fire.
+    // isRecovering oscillation: done → connecting → done never passes through
+    // "streaming", so it is the SAME terminal frame and must not re-fire.
     rerender(makeStream({ status: "connecting" }));
     rerender(makeStream({ status: "done", hasIngress: true }));
     expect(listCalls()).toBe(1);
     expect(transcriptCalls()).toBe(1);
+  });
+
+  it("re-arms across the streaming edge so a second turn's done fires again", async () => {
+    const { invalidate, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
+
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    expect(listCalls()).toBe(1);
+    expect(transcriptCalls()).toBe(1);
+
+    // Turn 2 on the same chat passes through connecting then streaming, then
+    // ends done: a genuine turn, not the recovering oscillation, so the settled
+    // reply must be refetched.
+    rerender(makeStream({ status: "connecting" }));
+    rerender(makeStream({ status: "streaming", hasIngress: true }));
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    expect(listCalls()).toBe(2);
+    expect(transcriptCalls()).toBe(2);
+  });
+
+  it("fires again for a second suspended frame (two approval batches)", async () => {
+    const { rerender, listCalls, transcriptCalls } = renderTerminalSpy();
+
+    rerender(makeStream({ status: "suspended", hasIngress: true, suspendedBatchId: "b1" }));
+    await waitFor(() => expect(listCalls()).toBe(1));
+    expect(transcriptCalls()).toBe(1);
+
+    // The resumed turn streams, then suspends on a SECOND batch.
+    rerender(makeStream({ status: "streaming", hasIngress: true }));
+    rerender(makeStream({ status: "suspended", hasIngress: true, suspendedBatchId: "b2" }));
+    expect(listCalls()).toBe(2);
+    expect(transcriptCalls()).toBe(2);
+  });
+
+  it("fires again for a second aborted turn", async () => {
+    const { rerender, listCalls } = renderTerminalSpy();
+
+    rerender(makeStream({ status: "aborted", hasIngress: true }));
+    await waitFor(() => expect(listCalls()).toBe(1));
+
+    rerender(makeStream({ status: "streaming", hasIngress: true }));
+    rerender(makeStream({ status: "aborted", hasIngress: true }));
+    expect(listCalls()).toBe(2);
   });
 
   it("fires once per distinct terminal status", async () => {

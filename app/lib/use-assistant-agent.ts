@@ -3,6 +3,7 @@ import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import type { AssistantRunAgent } from "./use-assistant-runs";
 import type { AssistantStream, AssistantStreamSnapshot } from "./use-assistant-stream";
+import { isTerminalStreamStatus } from "../components/chat/assistant-chat-logic";
 import {
   agentSendMetadata,
   agentSendParts,
@@ -43,12 +44,6 @@ export function threadKeyOf(key: string | null): string | null {
   if (surface) return `${surface}:${id}`;
   if (prefix === "chat" || prefix === "task" || prefix === "wiki") return key;
   return null;
-}
-
-// Terminal stream statuses: a recovering tick must never rewrite one of these
-// back to "connecting" (that oscillation drives the terminal-refetch churn).
-function isTerminalSnapshotStatus(status: string): boolean {
-  return status === "done" || status === "error" || status === "aborted" || status === "suspended";
 }
 
 // Cross-render bridge for a just-minted thread: `useChatStartStream` mints the
@@ -148,7 +143,7 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
     // recovering tick paper over it with a "connecting" status. `done` in
     // particular would otherwise oscillate done→connecting→done and re-fire
     // the terminal-refetch effects on every tick.
-    if (chat.isRecovering && !isTerminalSnapshotStatus(next.status)) next.status = "connecting";
+    if (chat.isRecovering && !isTerminalStreamStatus(next.status)) next.status = "connecting";
     return next;
   }, [segment, lastAssistant, chat.status, chat.error, chat.connectionError, chat.isStreaming, chat.isRecovering]);
 

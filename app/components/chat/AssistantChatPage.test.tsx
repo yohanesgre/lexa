@@ -239,14 +239,22 @@ function batchChips(turns: unknown): ApprovalChip[] {
   return arr.flatMap((t) => t.batch?.chips ?? []);
 }
 
+function syncUrl(thread?: string) {
+  if (typeof window === "undefined") return;
+  window.history.replaceState(null, "", thread ? `/?thread=${encodeURIComponent(thread)}` : "/");
+}
+
 function renderPage(
   initial: { slug?: string; thread?: string } = {},
   queryClient: QueryClient = createTestQueryClient()
 ) {
   const wrapper = createQueryWrapper(queryClient);
+  syncUrl(initial.thread);
   const utils = render(<AssistantChatPage slug={initial.slug ?? "nimbus"} thread={initial.thread} />, { wrapper });
-  const rerenderPage = (next: { slug?: string; thread?: string }) =>
+  const rerenderPage = (next: { slug?: string; thread?: string }) => {
+    syncUrl(next.thread);
     utils.rerender(<AssistantChatPage slug={next.slug ?? initial.slug ?? "nimbus"} thread={next.thread} />);
+  };
   return { ...utils, rerenderPage, queryClient };
 }
 
@@ -651,6 +659,32 @@ describe("AssistantChatPage — New chat stays client-side (A3)", () => {
 
     expect(navigateMock).toHaveBeenCalledWith({ search: { thread: "B" }, replace: true });
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("B"));
+  });
+
+  it("strips ?thread= on New chat and lands fresh when remounted with the same stale prop", async () => {
+    const qc = createTestQueryClient();
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    const first = renderPage({ thread: "A" }, qc);
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(first.container.querySelector(".chat-landing")).toBeNull());
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "A"])?.fetchStatus).toBe("idle"));
+
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(first.container.querySelector(".chat-landing")).toBeTruthy());
+
+    // Cleared without a router navigation, and the address bar no longer names
+    // the thread — so a reload / remount cannot re-open it.
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(new URLSearchParams(window.location.search).get("thread")).toBeNull();
+    first.unmount();
+
+    // Remount with the SAME (stale) thread prop the router still holds, while
+    // the URL has been stripped: the page must land fresh, not re-open "A".
+    getAssistantChatMock.mockClear();
+    const second = render(<AssistantChatPage slug="nimbus" thread="A" />, { wrapper: createQueryWrapper(qc) });
+    await waitFor(() => expect(second.container.querySelector(".chat-landing")).toBeTruthy());
+    expect(second.container.querySelector(".thread-row.active")).toBeNull();
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
   });
 });
 
