@@ -552,8 +552,10 @@ deploy_worker_name() {
       return 0
     fi
   fi
-  # Deprecated flavor aliases: flavors are gone (parse_flags rejects
-  # --staging/--prod/--flavor) and no production path passes them, so this map
+  # Deprecated flavor aliases. Flavors are gone (parse_flags rejects
+  # --staging/--prod/--flavor) and the normal install path never passes these
+  # keys, but an explicit `--name prod` still reaches this map — it resolves to
+  # worker `lexa`, a pre-existing collision with the default name. Otherwise it
   # only serves scripts/test-install.sh, which pins the fallbacks. Delete with
   # those tests.
   case "$flavor" in

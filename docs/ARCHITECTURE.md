@@ -640,7 +640,7 @@ operational surface (machine/deployment ops, an HTTP daemon protocol, sandbox
 provisioning, engine switching) that had to be maintained, secured, and
 documented, for a product whose job is the board and the wiki.
 
-**Consequences:** assistant features ship with the web app (deploy = image +
+**Consequences:** assistant features ship with the web app (deploy = bundle +
 one settings row); token streaming, tools, memory, multimodal become direct API
 surface; provider/vendor swap is a settings edit; Worker-portable by
 construction (no child processes anywhere in the AI path); feature velocity —
