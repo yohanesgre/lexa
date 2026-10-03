@@ -118,6 +118,11 @@ no release tarball, no `install.sh`. Use it to rehearse migrations and let a
 branch soak before production; every resource is named after the deploy name,
 so nothing touches the prod worker, database, or bucket.
 
+Shortcut: `bun run deploy:staging` runs the keep-data flow (build, migrate,
+deploy, push the key) and `bun run deploy:staging:reset` wipes the worker +
+D1/KV/R2, recreates them, updates the config ids, and redeploys — both wrap
+`scripts/deploy-staging.sh`. The manual steps below remain the reference.
+
 ```bash
 git clone https://github.com/yohanesgre/lexa && cd lexa
 bun install
@@ -160,6 +165,11 @@ Rules:
   that method, and vice versa — mixing the two double-applies migrations.
 - The filled `wrangler.staging.local.jsonc` carries account and resource ids —
   gitignored, never committed.
+- `wrangler … create` auto-appends the new resource to the wrangler config in
+  the current directory; if that is the root `wrangler.jsonc`, remove the
+  appended blocks before building (a duplicate binding name fails the build).
+  `deploy-staging.sh --reset` snapshots and restores the config around its
+  creates.
 
 `install.sh workers --name lexa-staging` remains the tarball-based route to the
 same isolation (`--name` keys the resource names).

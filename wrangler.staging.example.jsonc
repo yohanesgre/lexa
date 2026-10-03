@@ -14,9 +14,16 @@
 //   bun x wrangler deploy --config wrangler.staging.local.jsonc
 //   bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local.jsonc
 //
+// Shortcut: `bun run deploy:staging` (keep data) and
+// `bun run deploy:staging:reset` (wipe + recreate + update the ids below) wrap
+// these steps — scripts/deploy-staging.sh.
+//
 // Rules:
 // - Never commit the filled copy; never deploy with the root wrangler.jsonc
 //   (it targets the prod worker and prod resources).
+// - `wrangler … create` auto-appends the resource to the wrangler config in the
+//   current directory; if that is the root wrangler.jsonc, remove the appended
+//   blocks before building (a duplicate binding name fails the build).
 // - This path uses wrangler's `_cf` migration journal. Do not point it at a
 //   database that scripts/workers-install.ts migrated (`_migrations` journal).
 // - `bun run db:migrations:apply` / `bun run deploy:workers` ignore this file
