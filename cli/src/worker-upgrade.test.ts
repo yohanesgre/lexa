@@ -17,6 +17,7 @@ import {
   type UpgradeDeps,
   type UpgradeOptions,
   type WranglerRunner,
+  type WranglerTokenReader,
   type WorkerConfigJson,
   type WorkerDeployConfig,
 } from "./worker";
@@ -295,6 +296,8 @@ describe("worker upgrade post-upgrade discovery", () => {
 describe("resolveCfCredentials precedence", () => {
   const envKeys = ["CF_API_TOKEN", "CLOUDFLARE_API_TOKEN"] as const;
   const saved: Record<string, string | undefined> = {};
+  // Never shell out to a real wrangler in unit tests.
+  const noWrangler: WranglerTokenReader = () => undefined;
 
   beforeEach(() => {
     for (const key of envKeys) {
@@ -317,27 +320,33 @@ describe("resolveCfCredentials precedence", () => {
     writeFileSync(join(root, ".cf-token"), "dir-tok\n");
     writeFileSync(join(deployDir, ".cf-token"), "deploy-tok\n");
 
-    expect(resolveCfCredentials("flag-tok", root, deployDir)).toEqual({ token: "flag-tok", source: "--cf-token" });
+    expect(resolveCfCredentials("flag-tok", root, deployDir, noWrangler)).toEqual({ token: "flag-tok", source: "--cf-token" });
     process.env.CF_API_TOKEN = "cf-env";
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "cf-env", source: "environment" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "cf-env", source: "environment" });
     delete process.env.CF_API_TOKEN;
     process.env.CLOUDFLARE_API_TOKEN = "cf-global";
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "cf-global", source: "environment" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "cf-global", source: "environment" });
   });
 
-  it("falls back to the dir .cf-token, then the deployDir one, then none", () => {
+  it("falls back to the dir .cf-token, then the deployDir one, then wrangler login, then none", () => {
     const root = makeRoot();
     const deployDir = join(root, "deploy-lexa");
     mkdirSync(deployDir, { recursive: true });
     writeFileSync(join(deployDir, ".cf-token"), "deploy-tok\n");
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "deploy-tok", source: ".cf-token" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "deploy-tok", source: ".cf-token" });
 
     writeFileSync(join(root, ".cf-token"), "dir-tok\n");
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "dir-tok", source: ".cf-token" });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "dir-tok", source: ".cf-token" });
 
     rmSync(join(root, ".cf-token"));
     rmSync(join(deployDir, ".cf-token"));
-    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "", source: "none" });
+    // A stored wrangler login is the last resort before the error. The reader
+    // stands in for `bun x wrangler auth token` so no real token is fetched.
+    expect(resolveCfCredentials(undefined, root, deployDir, () => "wrangler-tok")).toEqual({
+      token: "wrangler-tok",
+      source: "wrangler-login",
+    });
+    expect(resolveCfCredentials(undefined, root, deployDir, noWrangler)).toEqual({ token: "", source: "none" });
   });
 });
 

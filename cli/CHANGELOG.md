@@ -12,6 +12,16 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+### Added
+
+- **`lx worker upgrade` wrangler-login fallback** — the credentials chain now
+  ends with a stored `wrangler login`, read via `wrangler auth token` (a
+  non-interactive, auto-refreshing lookup that also works with
+  `--use-keyring`, where the plaintext `default.toml` is absent). Explicit
+  `--cf-token` / `CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN` / `.cf-token` values
+  still win; a failed or empty lookup falls through to the existing error. The
+  token value is never printed. (#2f9e3346)
+
 ## [2026.6.0] - 2026-10-03
 
 ### Migration notes

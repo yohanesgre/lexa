@@ -496,6 +496,9 @@ First match wins; the token is never printed:
 3. `CLOUDFLARE_API_TOKEN`
 4. `<dir>/.cf-token`
 5. `<deployDir>/.cf-token`
+6. a stored `wrangler login` — read via `wrangler auth token` (auto-refreshes
+   stored OAuth and works with `--use-keyring`); a failed or empty lookup falls
+   through to the error
 
 A non-dry-run update with no credentials fails with guidance; `--dry-run`
 returns before the token check, so it needs none. `LXK_UPGRADE_OFFLINE=1` (or

@@ -259,16 +259,37 @@ function resolveLoginHost(): Effect.Effect<{ host: string; url: string } | null,
 // ── credentials + custody (LX-37) ──
 
 // The creds chain: --cf-token > CF_API_TOKEN/CLOUDFLARE_API_TOKEN > the custody
-// `.cf-token`. Never prints the token itself.
+// `.cf-token` > a stored `wrangler login`. Never prints the token itself.
 export interface CfCredentials {
   token: string;
-  source: "--cf-token" | "environment" | ".cf-token" | "none";
+  source: "--cf-token" | "environment" | ".cf-token" | "wrangler-login" | "none";
+}
+
+// Reads the OAuth token `wrangler login` stored, or undefined when not logged
+// in. Injectable so tests never shell out to a real wrangler (which would print
+// the operator's token).
+export type WranglerTokenReader = (cwd: string) => string | undefined;
+
+function defaultWranglerTokenReader(cwd: string): string | undefined {
+  // `bun x wrangler`, not `bunx` — same runtime the deploy core uses. A cold
+  // `bun x` may install wrangler, hence the generous timeout. Non-zero exit
+  // (not logged in) or empty stdout falls through.
+  const res = spawnSync("bun", ["x", "wrangler", "auth", "token"], {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf-8",
+    timeout: 30_000,
+  });
+  if (res.status !== 0) return undefined;
+  const token = (typeof res.stdout === "string" ? res.stdout : "").trim();
+  return token || undefined;
 }
 
 export function resolveCfCredentials(
   flagValue: string | boolean | undefined,
   dir: string,
   deployDir: string,
+  readWranglerToken: WranglerTokenReader = defaultWranglerTokenReader,
 ): CfCredentials {
   if (typeof flagValue === "string" && flagValue) return { token: flagValue, source: "--cf-token" };
   const env = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
@@ -282,6 +303,8 @@ export function resolveCfCredentials(
       /* unreadable custody token — fall through */
     }
   }
+  const wranglerToken = readWranglerToken(deployDir);
+  if (wranglerToken) return { token: wranglerToken, source: "wrangler-login" };
   return { token: "", source: "none" };
 }
 
