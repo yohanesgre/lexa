@@ -885,7 +885,13 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           const inferred = inferModelKind(m.id);
           const found = existingById.get(m.id);
           if (found) {
-            if (normalizeProviderKind(found.kind) !== inferred) {
+            const current = normalizeProviderKind(found.kind);
+            // `inferModelKind` can never return `workers_ai` (a Workers-only
+            // kind with no wire signature), so auto-correcting a manually
+            // registered Workers AI row would silently flip it to
+            // `openai_compatible`. Only the three catalog-inferable kinds are
+            // corrected.
+            if (current !== "workers_ai" && current !== inferred) {
               const stmt = mRepo.updateStmt(found.id, { kind: inferred });
               if (stmt) stmts.push(stmt);
               assistantLog("WARN", "assistant model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });

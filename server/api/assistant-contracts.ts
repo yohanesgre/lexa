@@ -38,7 +38,7 @@ const AssistantTaskSchema = Schema.Struct({
 const AssistantTaskPath = Schema.Struct({ id: Schema.String });
 
 // ── Assistant assistant tier (S3/S5/S9/S15) ──
-const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible", "openai_responses");
+const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible", "openai_responses", "workers_ai");
 
 const AssistantReasoningEffortSchema = Schema.Literal("minimal", "low", "medium", "high");
 

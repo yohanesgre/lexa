@@ -200,6 +200,24 @@ describe("provider model sync", () => {
       db.exec("DROP TRIGGER fail_model");
     }
   });
+  it("preserves a manually registered workers_ai row through a catalog sync", async () => {
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
+    const { id } = await createProvider(PLAINTEXT_KEY);
+    // inferModelKind("gpt-4o") is openai_responses — the pre-fix sync would
+    // flip this workers_ai row. The catalog carries the same id.
+    db.prepare(
+      "INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('wm1', ?, 'gpt-4o', 'workers_ai', 0, 1)"
+    ).run(id);
+    vi.stubGlobal("fetch", catalog(["gpt-4o"]));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/models`));
+      expect(res.status).toBe(200);
+      const rows = db.prepare("SELECT model_id, kind FROM assistant_models WHERE provider_id = ?").all(id) as Array<{ model_id: string; kind: string }>;
+      expect(rows).toEqual([{ model_id: "gpt-4o", kind: "workers_ai" }]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 const jsonBody = (status: number, body: unknown) =>

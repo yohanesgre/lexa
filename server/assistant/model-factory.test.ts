@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { Ai } from "@cloudflare/workers-types";
 import {
   CF_AIG_COLLECT_LOG_PAYLOAD_HEADER,
   OPENCODE_SESSION_HEADER,
+  attachWorkersAiBinding,
   baseUrlForProvider,
   buildLanguageModel,
   buildModelChain,
@@ -60,6 +62,7 @@ describe("normalizeProviderKind", () => {
     expect(normalizeProviderKind("responses")).toBe("openai_responses");
     expect(normalizeProviderKind("openai-chat")).toBe("openai_compatible");
     expect(normalizeProviderKind("anthropic")).toBe("anthropic_compatible");
+    expect(normalizeProviderKind("workers_ai")).toBe("workers_ai");
     expect(normalizeProviderKind(undefined)).toBe("openai_compatible");
   });
 });
@@ -116,6 +119,17 @@ describe("buildLanguageModel", () => {
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-chat-123");
   });
 
+  it("maps workers_ai through the injected AI binding (H9)", () => {
+    const binding = { run: async () => ({ response: "ok" }) } as unknown as Ai;
+    const model = buildLanguageModel({ ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama-3.2-1b-instruct", workersAiBinding: binding });
+    expect(providerOf(model)).toContain("workersai");
+    expect(modelIdOf(model)).toBe("@cf/meta/llama-3.2-1b-instruct");
+  });
+
+  it("rejects a workers_ai model with no AI binding", () => {
+    expect(() => buildLanguageModel({ ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama-3.2-1b-instruct" })).toThrow(/AI binding/);
+  });
+
   it("falls back to providerId for the session header when the conversation id is absent", () => {
     const model = buildLanguageModel({ ...baseConfig, sessionId: undefined });
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-prov-1");
@@ -135,6 +149,29 @@ describe("buildModelChain", () => {
   it("caps the chain at three configs", () => {
     const configs: RegistryModelConfig[] = [0, 1, 2, 3, 4].map((i) => ({ ...baseConfig, model: `m-${i}` }));
     expect(buildModelChain(configs)).toHaveLength(3);
+  });
+});
+
+describe("attachWorkersAiBinding", () => {
+  const binding = { run: async () => ({}) } as unknown as Ai;
+
+  it("attaches the binding only to workers_ai configs and passes others through", () => {
+    const configs: RegistryModelConfig[] = [
+      { ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama" },
+      { ...baseConfig, kind: "openai_compatible" },
+    ];
+    const out = attachWorkersAiBinding(configs, binding)!;
+    expect(out[0]!.workersAiBinding).toBe(binding);
+    expect(out[1]!.workersAiBinding).toBeUndefined();
+  });
+
+  it("leaves a workers_ai config untouched when no binding is present", () => {
+    const out = attachWorkersAiBinding([{ ...baseConfig, kind: "workers_ai" }], undefined)!;
+    expect(out[0]!.workersAiBinding).toBeUndefined();
+  });
+
+  it("passes a null chain through", () => {
+    expect(attachWorkersAiBinding(null, binding)).toBeNull();
   });
 });
 

@@ -125,6 +125,7 @@ const CALL_LOG_KINDS: ReadonlySet<string> = new Set<ProviderKind>([
   "openai_compatible",
   "anthropic_compatible",
   "openai_responses",
+  "workers_ai",
 ]);
 const CALL_LOG_STATUSES: ReadonlySet<string> = new Set<AssistantCallLogStatus>([
   "done",

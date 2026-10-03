@@ -14,9 +14,11 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createWorkersAI } from "workers-ai-provider";
+import type { Ai } from "@cloudflare/workers-types";
 import type { LanguageModel } from "ai";
 
-export type ModelFactoryKind = "openai_compatible" | "anthropic_compatible" | "openai_responses";
+export type ModelFactoryKind = "openai_compatible" | "anthropic_compatible" | "openai_responses" | "workers_ai";
 
 /** Fetch signature shared with the AI SDK provider settings (matches `FetchFunction`). */
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -38,6 +40,12 @@ export interface RegistryModelConfig {
   collectLogPayload?: boolean | undefined;
   /** Test seam: routes provider HTTP through an injected fetch (never set in production). */
   fetchImpl?: FetchLike | undefined;
+  /**
+   * H9: the Cloudflare `Ai` binding for a `workers_ai` model. The factory stays
+   * pure of DO imports — the DO attaches `this.env.AI` to the resolved configs
+   * (never persisted; the Worker never sees it).
+   */
+  workersAiBinding?: Ai | undefined;
 }
 
 export const OPENCODE_SESSION_HEADER = "x-opencode-session" as const;
@@ -60,7 +68,7 @@ export function baseUrlForProvider(raw: string, kind: ModelFactoryKind | string)
 }
 
 export function normalizeProviderKind(raw: unknown): ModelFactoryKind {
-  if (raw === "openai_compatible" || raw === "anthropic_compatible" || raw === "openai_responses") return raw;
+  if (raw === "openai_compatible" || raw === "anthropic_compatible" || raw === "openai_responses" || raw === "workers_ai") return raw;
   if (raw === "responses" || raw === "responses_compatible" || raw === "openai_compatible_responses" || raw === "openai-responses") return "openai_responses";
   if (raw === "openai-chat" || raw === "openai") return "openai_compatible";
   if (raw === "anthropic" || raw === "anthropic-chat" || raw === "anthropic_compatible") return "anthropic_compatible";
@@ -105,6 +113,15 @@ function fetchSetting(config: RegistryModelConfig): { fetch?: typeof fetch } {
 /** Build the AI SDK language model for one registry binding. */
 export function buildLanguageModel(config: RegistryModelConfig): LanguageModel {
   const kind = normalizeProviderKind(config.kind);
+  // H9: `workers_ai` runs keyless through the Cloudflare AI binding — no base
+  // URL, no headers, no gateway. The binding is attached by the DO, never
+  // persisted or sent to the Worker.
+  if (kind === "workers_ai") {
+    if (!config.workersAiBinding) {
+      throw new Error("workers_ai model requires the AI binding (env.AI)");
+    }
+    return createWorkersAI({ binding: config.workersAiBinding }).chat(config.model);
+  }
   const baseURL = baseUrlForProvider(config.baseUrl, kind);
   const headers = sessionHeaders(config);
   const fetch = fetchSetting(config);
@@ -120,6 +137,24 @@ export function buildLanguageModel(config: RegistryModelConfig): LanguageModel {
 /** Primary first, then ≤2 fallbacks — the AI SDK side of `fallback_model_ids`. */
 export function buildModelChain(configs: readonly RegistryModelConfig[]): LanguageModel[] {
   return configs.slice(0, 3).map((config) => buildLanguageModel(config));
+}
+
+/**
+ * H9: attach the Cloudflare `Ai` binding to every `workers_ai` config in a
+ * resolved chain. The DO calls this with `this.env.AI`; other kinds pass
+ * through untouched, and a missing binding is left for `buildLanguageModel` to
+ * reject with a clear error.
+ */
+export function attachWorkersAiBinding(
+  configs: RegistryModelConfig[] | null,
+  binding: Ai | undefined
+): RegistryModelConfig[] | null {
+  if (configs === null) return null;
+  return configs.map((config) =>
+    normalizeProviderKind(config.kind) === "workers_ai" && binding !== undefined
+      ? { ...config, workersAiBinding: binding }
+      : config
+  );
 }
 
 // ── Error classification for the fallback walk (ADR-0003 §B.6/§C) ──────────
