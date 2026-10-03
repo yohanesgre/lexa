@@ -26,6 +26,7 @@ import { LexaClient, ApiError, type ColumnInfo, type SwimlaneInfo } from "./api"
 import { CliConfigService, groupDir, normalizeHost, resolveServerUrl, migrateFlavorRootsSync, type CliConfig } from "./config";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck, envFlagsRemoved } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
+import { cmdWorkerUpgrade } from "./worker";
 import { CLI_VERSION } from "./version";
 import { hostname as osHostname } from "node:os";
 import { readFile } from "node:fs/promises";
@@ -1392,6 +1393,13 @@ GitHub sync (optional integration):
                                        unlink a GitHub issue from the task
                                        (needs login)
 
+Workers (self-hosted):
+  worker upgrade [--dir <cf-workers>] [--worker <name>] [--cf-token <tok>]
+                 [--dry-run] [--yes] [--version <v>]
+                                           resolve a Cloudflare Workers deploy
+                                           and print the update plan (run from
+                                           your cf-workers/ custody dir)
+
 Upgrade:
   upgrade                                self-update the CLI binary (GitHub release)
 
@@ -1474,6 +1482,12 @@ const GROUP_HELP: Record<string, string> = {
                                        unlink a GitHub issue from the task
                                        (needs login)`,
 
+  worker: `Workers (self-hosted):
+  worker upgrade [--dir <cf-workers>] [--worker <name>] [--cf-token <tok>]
+                 [--dry-run] [--yes] [--version <v>]
+                                           resolve a Cloudflare Workers deploy
+                                           and print the update plan (run from
+                                           your cf-workers/ custody dir)`,
   upgrade: `Upgrade:
   upgrade                                        self-update the CLI binary (GitHub release)`,
 };
@@ -1623,6 +1637,13 @@ async function main(): Promise<void> {
         case "update": program = cmdWikiUpdate(flags, rest); break;
         case "delete": program = cmdWikiDelete(flags, rest); break;
         default: usage("wiki", sub);
+      }
+      break;
+
+    case "worker":
+      switch (sub) {
+        case "upgrade": program = cmdWorkerUpgrade(flags); break;
+        default: usage("worker", sub);
       }
       break;
 
