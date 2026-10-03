@@ -69,6 +69,51 @@ function isLoopback(host: string): boolean {
   return host === "localhost" || host === "::1" || host.startsWith("127.");
 }
 
+// Resolve a user-supplied server address to a full base URL. An explicit
+// http(s) scheme is preserved; a scheme-less host defaults to https, except
+// loopback hosts (localhost, 127.0.0.0/8, ::1 — bracketed or bare) which get
+// http to match the local dev server. Whitespace is trimmed, a trailing slash
+// is stripped, and invalid input throws an Error the caller prints + exits 1.
+export function resolveServerUrl(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed === "") throw new Error("Server URL is required");
+  if (/:\/\//.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    throw new Error(`Invalid server URL: ${trimmed} — expected an http(s):// address`);
+  }
+  const hasScheme = /^https?:\/\//i.test(trimmed);
+  // Loopback classification and IPv6 bracketing read the HOST SEGMENT only —
+  // a path/query suffix (`localhost:3000/`) or userinfo (`user:pass@host`)
+  // must never leak into either. The full trimmed string still seeds the
+  // candidate URL so suffixes are preserved.
+  const hostSegment = hasScheme ? trimmed : trimmed.split(/[/?#]/)[0]!;
+  const suffix = hasScheme ? "" : trimmed.slice(hostSegment.length);
+  const candidate = hasScheme
+    ? trimmed
+    : `${/^localhost(:\d+)?$/.test(normalizeHost(hostSegment)) ? "http" : "https"}://${bracketBareIpv6(hostSegment)}${suffix}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`Invalid server URL: ${trimmed}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Invalid server URL: ${trimmed}`);
+  }
+  return candidate.replace(/\/+$/, "");
+}
+
+// A scheme-less multi-colon host is a bare IPv6 literal and needs URL brackets.
+// Only the host segment is inspected (the caller strips path/query first), and
+// userinfo before `@` is ignored so `user:pass@localhost:3000` is not mistaken
+// for a literal. A path suffix such as `::1/` must not trigger bracketing.
+function bracketBareIpv6(host: string): string {
+  if (host.startsWith("[")) return host;
+  const bare = host.includes("@") ? host.slice(host.lastIndexOf("@") + 1) : host;
+  if ((bare.match(/:/g)?.length ?? 0) < 2) return host;
+  if (!/^[0-9a-fA-F:.]+$/.test(bare)) return host;
+  return `${host.slice(0, host.length - bare.length)}[${bare}]`;
+}
+
 // Group dir for a host (full URL or bare host) under the state root.
 export function groupDir(host: string): string {
   return join(LEXA_DIR, normalizeHost(host));

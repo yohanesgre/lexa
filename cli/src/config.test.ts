@@ -92,6 +92,55 @@ describe("normalizeHost", () => {
   });
 });
 
+describe("resolveServerUrl", () => {
+  it("preserves an explicit http(s) scheme and strips the trailing slash", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("http://lexa.example.com")).toBe("http://lexa.example.com");
+    expect(resolveServerUrl("https://lexa.example.com/")).toBe("https://lexa.example.com");
+    expect(resolveServerUrl("HTTPS://Lexa.Example.Com/")).toBe("HTTPS://Lexa.Example.Com");
+  });
+
+  it("defaults a scheme-less host to https and trims whitespace", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("lexa.example.com")).toBe("https://lexa.example.com");
+    expect(resolveServerUrl("  lexa.example.com:8443  ")).toBe("https://lexa.example.com:8443");
+  });
+
+  it("uses http for loopback hosts (bare, ported, and IPv6)", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("localhost:3000")).toBe("http://localhost:3000");
+    expect(resolveServerUrl("127.0.0.1:8794")).toBe("http://127.0.0.1:8794");
+    expect(resolveServerUrl("127.0.0.5")).toBe("http://127.0.0.5");
+    expect(resolveServerUrl("[::1]:3000")).toBe("http://[::1]:3000");
+    expect(resolveServerUrl("::1")).toBe("http://[::1]");
+  });
+
+  it("classifies loopback from the host segment (path/query suffix ignored)", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("localhost:3000/")).toBe("http://localhost:3000");
+    expect(resolveServerUrl("[::1]:3000/")).toBe("http://[::1]:3000");
+    expect(resolveServerUrl("localhost/")).toBe("http://localhost");
+    expect(resolveServerUrl("localhost:3000/path")).toBe("http://localhost:3000/path");
+    expect(resolveServerUrl("127.0.0.1:3000/")).toBe("http://127.0.0.1:3000");
+  });
+
+  it("brackets a bare IPv6 host without mistaking userinfo or a path for one", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("::1/")).toBe("http://[::1]");
+    expect(resolveServerUrl("2001:db8::1/path")).toBe("https://[2001:db8::1]/path");
+    expect(() => resolveServerUrl("user:pass@localhost:3000")).not.toThrow();
+    expect(() => resolveServerUrl("user:pass@localhost:3000/")).not.toThrow();
+  });
+
+  it("throws a clear error on empty or invalid input", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(() => resolveServerUrl("")).toThrow(/Server URL is required/);
+    expect(() => resolveServerUrl("   ")).toThrow(/Server URL is required/);
+    expect(() => resolveServerUrl("http://")).toThrow(/Invalid server URL/);
+    expect(() => resolveServerUrl("ftp://lexa.example.com")).toThrow(/Invalid server URL/);
+  });
+});
+
 describe("groupDir + flavorFor", () => {
   it("groupDir nests the normalized host under the state root", async () => {
     const { groupDir } = await import("./config");
