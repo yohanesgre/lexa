@@ -15,10 +15,13 @@ import {
   accountAmbiguousMessage,
   accountStaleMessage,
   d1AmbiguousMessage,
+  readDeployVersion,
+  readPackageVersion,
   readPriorAccount,
   readRootWranglerConfig,
   resolveAccountOrDie,
   resolveAiBinding,
+  resolveDeployVars,
   resolveDurableObjects,
   resolveNames,
   resolveObservability,
@@ -359,6 +362,72 @@ describe("root AI binding (H9)", () => {
     expect(() => resolveAiBinding({ ai: {} } as unknown as RootWorkerConfig)).toThrow(/binding/);
     expect(() => resolveAiBinding({ ai: { binding: "" } } as unknown as RootWorkerConfig)).toThrow(/binding/);
     expect(() => resolveAiBinding({ ai: { binding: "MY_AI" } } as unknown as RootWorkerConfig)).toThrow(/env\.AI/);
+  });
+});
+
+describe("per-deploy version marker + public URL (LX-36)", () => {
+  const ROOT = fileURLToPath(new URL("..", import.meta.url));
+  const ROOT_VERSION = (
+    JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")) as {
+      version: string;
+    }
+  ).version;
+
+  test("readDeployVersion reads the repo package.json", () => {
+    expect(readDeployVersion(ROOT)).toBe(ROOT_VERSION);
+  });
+
+  test("readDeployVersion falls back to the module's repo when the dir has none", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wi-ver-"));
+    expect(readDeployVersion(dir)).toBe(ROOT_VERSION);
+  });
+
+  test("readPackageVersion returns null when no candidate carries a version", () => {
+    expect(readPackageVersion([])).toBeNull();
+    const dir = mkdtempSync(join(tmpdir(), "wi-ver-"));
+    const missing = join(dir, "package.json");
+    expect(readPackageVersion([missing])).toBeNull();
+    writeFileSync(missing, '{ "name": "no-version" }');
+    expect(readPackageVersion([missing])).toBeNull();
+    writeFileSync(missing, "{ not json");
+    expect(readPackageVersion([missing])).toBeNull();
+  });
+
+  test("resolveDeployVars stamps LXK_ENV, LXK_PUBLIC_URL, and LXK_VERSION", () => {
+    expect(
+      resolveDeployVars({
+        version: "2026.6.2",
+        publicUrl: "https://lexa.example.com",
+      }),
+    ).toEqual({
+      LXK_ENV: "production",
+      LXK_PUBLIC_URL: "https://lexa.example.com",
+      LXK_VERSION: "2026.6.2",
+    });
+  });
+
+  test("resolveDeployVars stamps the workers.dev public URL too", () => {
+    expect(
+      resolveDeployVars({ version: "2026.6.2", publicUrl: "https://lexa.acct.workers.dev" }),
+    ).toEqual({
+      LXK_ENV: "production",
+      LXK_PUBLIC_URL: "https://lexa.acct.workers.dev",
+      LXK_VERSION: "2026.6.2",
+    });
+  });
+
+  test("resolveDeployVars omits a key only when genuinely unknown", () => {
+    expect(resolveDeployVars({ version: null, publicUrl: "" })).toEqual({
+      LXK_ENV: "production",
+    });
+  });
+
+  test("main emits vars via resolveDeployVars + readDeployVersion(DIR)", () => {
+    const src = readFileSync(
+      new URL("./lib/cf-deploy.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain("vars: resolveDeployVars({ version: readDeployVersion(DIR), publicUrl })");
   });
 });
 

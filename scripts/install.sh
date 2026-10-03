@@ -172,6 +172,13 @@ deploy_workers() {
         https://*) _prev_domain="${_prev_url#https://}" ;;
         http://*) _prev_domain="${_prev_url#http://}" ;;
       esac
+      # A workers.dev host is not a custom domain — treat it as none so the
+      # re-run prompt never offers it (the zone lookup would die on workers.dev).
+      # Normalize (drop any path/query suffix, lowercase) so variants like
+      # `Lexa.Acct.Workers.Dev/anything` are still recognized.
+      case "$(printf '%s' "${_prev_domain}" | tr '[:upper:]' '[:lower:]' | sed 's#[/?#].*$##')" in
+        *.workers.dev) _prev_domain="" ;;
+      esac
     fi
     if [ -n "${_prev_domain}" ]; then
       answer=$(tty_read_soft "Custom domain [${_prev_domain}]: Enter keeps it, type a new one, or '-' for workers.dev" "${_prev_domain}")

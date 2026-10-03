@@ -45,6 +45,9 @@ jobs:
           sed '/"database_id": "00000000-0000-0000-0000-000000000000"/d' \
             wrangler.jsonc > workers-stage/wrangler.jsonc
           cp -r dist migrations workers-stage/
+          # package.json rides along so the deploy can stamp LXK_VERSION from
+          # the repo version (readDeployVersion reads it from the deploy dir).
+          cp package.json workers-stage/
           # The workers installer helper (bun workers-install.ts) rides in the
           # tarball — install.sh unpacks and runs it with bun.
           cp scripts/workers-install.ts workers-stage/scripts/
@@ -53,7 +56,7 @@ jobs:
           cp -r scripts/lib workers-stage/scripts/
           tar czf "lexa-workers-${{ github.ref_name }}.tar.gz" \
             --exclude='*/.dev.vars' \
-            -C workers-stage dist wrangler.jsonc migrations scripts
+            -C workers-stage dist wrangler.jsonc migrations scripts package.json
 
       - name: Checksums
         run: |
