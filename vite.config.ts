@@ -53,9 +53,17 @@ export default defineConfig(async ({ command }) => {
     },
     server: {
       host: "0.0.0.0",
-      proxy: {
-        "/api": "http://localhost:3000",
-      },
+      // Bun flavor: API and frontend are separate processes, so vite proxies
+      // /api to the Bun entry on :3000. Workers flavor: one workerd instance
+      // co-hosts the handler and the API — proxying would send /api to the
+      // (absent) Bun host and 502, so the worker must handle it directly.
+      ...(isWorkersBuild
+        ? {}
+        : {
+            proxy: {
+              "/api": "http://localhost:3000",
+            },
+          }),
     },
     optimizeDeps: {
       exclude: ["@tanstack/react-start-server", "@tanstack/start-server-core"],
