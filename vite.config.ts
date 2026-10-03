@@ -53,6 +53,23 @@ export default defineConfig(async ({ command, isPreview }) => {
     plugins.unshift(Inspect({ build: false }));
   }
 
+  // Dev API proxy target. Defaults to the local Bun entry; `LEXA_DEV_API_TARGET`
+  // points it at a remote server (e.g. staging) so localhost serves that
+  // server's contents. A remote target needs the outgoing Origin rewritten to
+  // the target origin, otherwise Better Auth rejects cookie-bearing POSTs with
+  // INVALID_ORIGIN (staging trusts only its own publicUrl).
+  const apiTarget = process.env.LEXA_DEV_API_TARGET || "http://localhost:3000";
+  const apiTargetOrigin = new URL(apiTarget).origin;
+  const apiTargetHostname = new URL(apiTarget).hostname;
+  const isLoopbackTarget =
+    apiTargetHostname === "localhost" ||
+    apiTargetHostname === "127.0.0.1" ||
+    apiTargetHostname === "0.0.0.0" ||
+    apiTargetHostname === "[::1]" ||
+    apiTargetHostname === "::1" ||
+    apiTargetHostname === "[::]" ||
+    apiTargetHostname === "::";
+
   return {
     plugins,
     resolve: {
@@ -81,7 +98,25 @@ export default defineConfig(async ({ command, isPreview }) => {
         ? {}
         : {
             proxy: {
-              "/api": "http://localhost:3000",
+              "/api": {
+                target: apiTarget,
+                changeOrigin: true,
+                secure: true,
+                ws: true,
+                // Remote target: rewrite the forwarded Origin to the target's
+                // origin so Better Auth's trustedOrigins check passes. Loopback
+                // targets keep the incoming Origin (local dev trusts :5173).
+                ...(isLoopbackTarget
+                  ? {}
+                  : {
+                      rewriteWsOrigin: true,
+                      configure: (proxy) => {
+                        proxy.on("proxyReq", (proxyReq) => {
+                          proxyReq.setHeader("Origin", apiTargetOrigin);
+                        });
+                      },
+                    }),
+              },
             },
           }),
     },
