@@ -88,14 +88,24 @@ export class AmbiguousHost extends Data.TaggedError("AmbiguousHost")<{ hosts: st
 function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<CliConfig | null, AmbiguousHost, CliConfigService> {
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
-    const urlFlag = ((typeof flags.url === "string" && flags.url) || "").replace(/\/+$/, "");
-    const envUrl = ENV_URL.replace(/\/+$/, "");
+    const urlFlag = typeof flags.url === "string" && flags.url ? flags.url : "";
+    const envUrl = ENV_URL;
     const hint = urlFlag || envUrl;
     const logins = yield* svc.listSavedLogins();
 
+    let resolvedHint = "";
     let host = "";
     if (hint) {
-      host = normalizeHost(hint);
+      // --url/LEXA_URL may be a bare host (`lexa.example.com`); resolve it to
+      // a full base URL with the same resolver `lx login` uses before it ever
+      // reaches the client. Invalid input exits 1 with the resolver's message.
+      try {
+        resolvedHint = resolveServerUrl(hint);
+      } catch (e) {
+        console.error(`  ${(e as Error).message}`);
+        process.exit(1);
+      }
+      host = normalizeHost(resolvedHint);
     } else {
       const active = yield* svc.activeHost();
       if (active && logins.some((l) => l.host === active)) {
@@ -108,13 +118,22 @@ function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<C
     }
 
     const saved = host ? (logins.find((l) => l.host === host) ?? null) : null;
-    const url = hint || saved?.url || "";
+    const url = resolvedHint || saved?.url || "";
     const keyFlag = (typeof flags.key === "string" && flags.key) || "";
     // LEXA_API_KEY is ambient: trusted only when LEXA_URL names the resolved
     // host, or when no LEXA_URL hint exists and there is no saved login at
     // all. --url X must never ship another host's ambient key to X. Env beats
     // a saved login when allowed (a matching LEXA_URL is an explicit ask).
-    const envKeyAllowed = envUrl !== "" ? normalizeHost(envUrl) === host : logins.length === 0;
+    let envKeyAllowed: boolean;
+    if (envUrl === "") {
+      envKeyAllowed = logins.length === 0;
+    } else {
+      try {
+        envKeyAllowed = normalizeHost(resolveServerUrl(envUrl)) === host;
+      } catch {
+        envKeyAllowed = false;
+      }
+    }
     const apiKey = keyFlag || (envKeyAllowed ? ENV_KEY : "") || saved?.apiKey || "";
     if (!url || !apiKey) return null;
     return { url, apiKey };
@@ -418,9 +437,19 @@ function cmdLogout(flags: Record<string, string | boolean>): Effect.Effect<void,
       yield* svc.clearActiveHost();
       return;
     }
-    const urlFlag = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
+    const rawUrl = (typeof flags.url === "string" && flags.url) || ENV_URL || "";
     const active = yield* svc.activeHost();
-    let host = urlFlag ? normalizeHost(urlFlag) : "";
+    let host = "";
+    if (rawUrl) {
+      // Same resolver as login: a bare `--url lexa.example.com` must map to
+      // the same normalized host its saved login was stored under.
+      try {
+        host = normalizeHost(resolveServerUrl(rawUrl));
+      } catch (e) {
+        console.error(`  ${(e as Error).message}`);
+        process.exit(1);
+      }
+    }
     if (!host && active && logins.some((l) => l.host === active)) host = active;
     if (!host && logins.length === 1) host = logins[0]!.host;
     if (!host && logins.length > 1) return yield* new AmbiguousHost({ hosts: logins.map((l) => l.host) });

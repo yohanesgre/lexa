@@ -123,6 +123,27 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     expect(seenUrls).toContain("/api/projects");
   });
 
+  it("bare-host LEXA_URL (no scheme) is resolved to a full base URL", async () => {
+    const bare = `127.0.0.1:${new URL(base).port}`;
+    const r = await runCli(["status"], { LEXA_URL: bare, LEXA_API_KEY: "lxk_env_key_1234567890123456789012345678901234567890", LEXA_DIR: freshLexaDir() });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Server:   reachable (health ok)");
+  });
+
+  it("LEXA_URL with a trailing slash trusts the ambient key against the resolved host", async () => {
+    const trailing = `127.0.0.1:${new URL(base).port}/`;
+    const r = await runCli(["status"], { LEXA_URL: trailing, LEXA_API_KEY: "lxk_env_key_1234567890123456789012345678901234567890", LEXA_DIR: freshLexaDir() });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Server:   reachable (health ok)");
+  });
+
+  it("bare-host --url (no scheme) is resolved for non-login commands too", async () => {
+    const bare = `127.0.0.1:${new URL(base).port}`;
+    const r = await runCli(["status", "--url", bare], { LEXA_URL: "", LEXA_API_KEY: "lxk_flag_key_1234567890123456789012345678901234567890", LEXA_DIR: freshLexaDir() });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Server:   reachable (health ok)");
+  });
+
   it("saved login (group config.json) is used when env vars are absent", async () => {
     const lexaDir = freshLexaDir();
     // Saved logins live in the group of their server URL: 127.0.0.1:<port> →
@@ -325,6 +346,18 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     expect(r.stdout).toContain(target);
     expect(existsSync(join(lexaDir, target, "config.json"))).toBe(false);
     expect(existsSync(join(lexaDir, "other.example.com", "config.json"))).toBe(true);
+  });
+
+  it("logout --url with userinfo resolves to the loopback group", async () => {
+    const lexaDir = freshLexaDir();
+    const p = new URL(base).port;
+    const target = `localhost:${p}`;
+    mkdirSync(join(lexaDir, target), { recursive: true });
+    writeFileSync(join(lexaDir, target, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_a" }));
+    const r = await runCli(["logout", "--url", `user:pass@127.0.0.1:${p}`], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`Logged out ${target}`);
+    expect(existsSync(join(lexaDir, target, "config.json"))).toBe(false);
   });
 
   it("logout without --url but with LEXA_URL targets that host among several logins", async () => {
