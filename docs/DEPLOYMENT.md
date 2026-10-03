@@ -228,6 +228,11 @@ after TTY entry, `chmod 600`, never written from env/flag values), and
 is never rotated. Starting in a directory with no previous deploy asks for
 confirmation first. On a shared machine, decline the token-save offer.
 
+For an in-place update of an existing custody dir from the headless CLI
+(`lx worker upgrade`), see
+[`docs/CLOUDFLARE_WORKERS.md`](CLOUDFLARE_WORKERS.md#upgrading-a-workers-deployment-lx-worker-upgrade)
+§Upgrading a Workers deployment.
+
 ## Sample data
 
 Sample data is offered in every environment: the web wizard shows the
