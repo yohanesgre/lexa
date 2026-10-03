@@ -645,8 +645,12 @@ fetch_release() {
   fi
   if curl -fsSL "https://github.com/${LEXA_REPO}/releases/download/${tag}/checksums.txt" -o "${dest}/checksums.txt" 2>/dev/null; then
     local want_sha=""
-    want_sha=$(grep "${tarball}" "${dest}/checksums.txt" | awk '{print $1}')
-    [ -n "$want_sha" ] && step "verify checksum" verify_checksum "${dest}/${tarball}" "${want_sha}"
+    want_sha=$(grep "${tarball}" "${dest}/checksums.txt" | awk '{print $1}' || true)
+    if [ -n "$want_sha" ]; then
+      step "verify checksum" verify_checksum "${dest}/${tarball}" "${want_sha}"
+    else
+      echo "  (checksums.txt for ${tag} does not list ${tarball} — download NOT verified)"
+    fi
   else
     echo "  (no checksums.txt for ${tag} — download NOT verified; prefer a release tag)"
   fi

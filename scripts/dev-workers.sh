@@ -4,8 +4,8 @@
 #
 # - Ensures `.dev.vars` exists: the Workers runtime reads `.dev.vars`, not
 #   `.env.toml`. Derived from the env file through the loader's emit path
-#   (`bun server/env-file.ts --path <file> --emit-dotenv`), filtered to the
-#   runtime key set (`LXK_*`, `LOG_LEVEL`, `TANSTACK_AI_*`, `CRON_SECRET`),
+#   (`bun server/env-file.ts --path <file> --emit-dotenv`), keeping only the
+#   runtime-relevant prefixes (`LXK_`, `LOG_LEVEL`, `TANSTACK_AI_`, `CRON_SECRET`),
 #   created 0600 from birth (umask) with a chmod backstop.
 # - Idempotent — an existing `.dev.vars` is NEVER overwritten.
 # - Applies local D1 migrations, then execs `vite dev` with LEXA_FLAVOR=workers.
@@ -38,6 +38,8 @@ if [ ! -f .dev.vars ]; then
   (umask 077; printf '%s\n' "$derived" > .dev.vars)
   chmod 600 .dev.vars
   echo "Wrote .dev.vars from $env_file (0600)."
+else
+  chmod 600 .dev.vars 2>/dev/null || true
 fi
 
 bun x wrangler d1 migrations apply DB --local
