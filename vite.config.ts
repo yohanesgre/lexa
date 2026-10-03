@@ -7,12 +7,7 @@ import react from "@vitejs/plugin-react";
 const isWorkersBuild =
   process.env.LEXA_FLAVOR === "workers" || process.env.CF_WORKERS === "1";
 
-export default defineConfig(async ({ command, isPreview }) => {
-  // TanStack Start's prerender step runs `vite.preview` in-process, which
-  // re-evaluates this config with command "serve" + isPreview true. The
-  // Workers build must also disable remote bindings on that preview pass —
-  // `command === "build"` alone never reaches it.
-  const isWorkersBuildOrPreview = isWorkersBuild && (command === "build" || isPreview);
+export default defineConfig(async ({ command }) => {
   const plugins: import("vite").PluginOption[] = [
     tanstackStart({
       srcDirectory: "app",
@@ -35,15 +30,17 @@ export default defineConfig(async ({ command, isPreview }) => {
         viteEnvironment: { name: "ssr" },
         // `ai` is a permanent-remote binding (workers-sdk marks it
         // DO-NOT-USE-this-resource-will-never-have-a-local-simulator; miniflare
-        // has no local simulator). With remote bindings enabled the plugin
-        // starts its remote-bindings proxy during the build's prerender preview
-        // pass, which needs Cloudflare credentials in non-interactive CI and
-        // keeps the process alive after the build. The production deploy config
-        // still carries `ai` (root wrangler.jsonc, transcribed by
+        // has no local simulator). Remote bindings would make the plugin open
+        // its remote-bindings proxy at serve time and during the build's
+        // prerender preview pass — the serve proxy stalls boot at
+        // "Establishing remote connection..." (needs Cloudflare credentials),
+        // and the preview pass keeps the build process alive in CI. Disabling
+        // them keeps local dev token-free. Consequence: `workers_ai` assistant
+        // models do not work locally; external providers do. The production
+        // deploy config still carries `ai` (root wrangler.jsonc, transcribed by
         // scripts/workers-install.ts) — this only affects the local config the
-        // build runs against. `dev:workers` (serve) keeps the real binding and
-        // its remote-proxy + token behavior.
-        ...(isWorkersBuildOrPreview ? { remoteBindings: false } : {}),
+        // plugin runs against.
+        remoteBindings: false,
       }),
     );
   }

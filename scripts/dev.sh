@@ -50,7 +50,9 @@ bun run server/entry.ts &
 SERVER_PID=$!
 
 # Pin the vite port so the banner stays true; fail loudly if it's taken.
-bun run dev --port 5173 --strictPort &
+# Invoke vite directly (not `bun run dev`, which is the Workers flavor) so this
+# stays Bun flavor and keeps the /api → :3000 proxy.
+bun x vite dev --port 5173 --strictPort &
 VITE_PID=$!
 
 wait -n "$SERVER_PID" "$VITE_PID"

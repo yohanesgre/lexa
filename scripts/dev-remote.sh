@@ -19,4 +19,4 @@ echo "── Lexa remote dev ──"
 echo "  Frontend: http://localhost:5173  (vite, proxies /api → $TARGET)"
 echo ""
 
-exec bun run dev --port 5173 --strictPort
+exec bun x vite dev --port 5173 --strictPort
