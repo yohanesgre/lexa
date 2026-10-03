@@ -378,6 +378,51 @@ POST /api/assistant/tasks → queue → server-side chat():
 - Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/Assistant`
   service boundary so SDK swaps stay contained.
 
+## Assistant harness on Workers (ADR-0004)
+
+The assistant is a Workers-only Durable Object runtime (`LexaAssistantAgent`,
+ADR-0003). The harness layer on top (ADR-0004) keeps secrets Worker-side and
+gives the DO a per-turn context bundle:
+
+- **Turn context.** Each turn makes one internal `POST
+  /api/internal/assistant/turn-context` (signed `X-Lexa-Internal` identity;
+  body `{ threadKey, runId?, userText, mode }`) and receives agent
+  instructions, ≤3 `$skill` markdowns + catalog, the memory block, doc/mention/
+  repo context, the Jev advisory, the thread summary, tool descriptors, and
+  boolean flags. No key or allowlist value crosses to the DO; provider config
+  stays a separate `GET provider-config` read.
+- **Runs + schedules.** Delegated runs are facet children of the thread DO; D1
+  `assistant_runs` is the durable registry and `assistant_schedules` is drained
+  by the existing `*/15` `scheduled` handler (migrations `0020`/`0021`). The
+  registry surfaces through `GET /api/admin/assistant/runs`; schedules have
+  per-project CRUD routes.
+- **`workers_ai` models (H9).** A model row with kind `workers_ai` builds
+  `createWorkersAI({ binding: env.AI })` for keyless Workers AI inference
+  instead of a REST provider; ids are entered manually because the binding has
+  no listing route. `wrangler.jsonc` declares `"ai": { "binding": "AI" }` and
+  `scripts/workers-install.ts` (`resolveAiBinding`, wired into the generated
+  per-deploy config) transcribes it — an absent block is omitted, a malformed
+  one or a non-`AI` binding name is refused loudly. The staging example carries
+  the same block.
+- **Call-log attribution.** `assistant_call_logs` gains `thread_key`, `run_id`,
+  and `purpose` (`turn|runner|preflight|summary`, default `turn`); cost is
+  computed from the imported CF per-token prices when the caller sends none.
+
+**Tracing (sampling/cost).** `server/assistant/tracing.ts` wraps the `ai`
+namespace with `wrapAISDK()` (`agents/observability/ai`) and passes
+`functionId: lexa-assistant` plus `agentId`/`conversationId`/`runId`/`purpose`
+as runtime context, so a turn emits `invoke_agent → chat → execute_tool →
+tool_approval` spans to the CF Agents dashboard. Payload storage is OFF
+(`storeMessages`/`storeTools` default false) — traces are metadata-only.
+`wrangler.jsonc` enables observability with `head_sampling_rate: 1` (traces and
+logs persist, 7-day retention) and the installer transcribes that block.
+Workers Observability is billed from 2026-12-01, so the trace surface is
+deliberately the 7-day debug view, not the product metric: token/cost
+accounting remains Lexa's own (`assistant_model_prices` →
+`assistant_call_logs.cost_cents`, `GET /api/projects/:slug/assistant/usage`).
+Per-turn cost is recorded independently of tracing, so lowering
+`head_sampling_rate` to cut the trace bill never blanks the cost view.
+
 ## Top risks
 
 1. **Sync→async DB rewrite + transaction semantics (L).** Every repo/service

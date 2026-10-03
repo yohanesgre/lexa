@@ -25,7 +25,13 @@ import {
 } from "../db/db";
 import { parseThreadKey } from "./agent-gate";
 import type { RegistryModelConfig } from "./model-factory";
-import type { AssistantCallLogInput, AssistantCallLogStatus, ProviderKind } from "../../shared/assistant";
+import type { AssistantCallLogInput, AssistantCallLogPurpose, AssistantCallLogStatus, ProviderKind } from "../../shared/assistant";
+import {
+  EMPTY_HEALTH_ROW,
+  nextHealthOnFailure,
+  nextHealthOnSuccess,
+  type HealthTransitionRow,
+} from "../repos/assistant-health.repo";
 import { assistantCancelled, assistantCompleted, assistantFailed } from "../activity-messages";
 import { APPROVAL_TTL_HOURS, MAX_WRITES_PER_TURN } from "./write-tool-names";
 import {
@@ -140,29 +146,113 @@ const CALL_LOG_STATUSES: ReadonlySet<string> = new Set<AssistantCallLogStatus>([
   "suspended",
   "aborted",
 ]);
+const CALL_LOG_PURPOSES: ReadonlySet<string> = new Set<AssistantCallLogPurpose>([
+  "turn",
+  "runner",
+  "preflight",
+  "summary",
+]);
+
+interface AssistantPriceRow {
+  prompt_price: number;
+  completion_price: number;
+  cached_read_price: number;
+  cached_write_price: number;
+}
+
+// Cost for one call log: an explicit caller value wins (the Bun gateway path
+// computes and sends it); otherwise derive it from `assistant_model_prices`.
+// Mirrors `gateway.service.ts` — fresh input after cache reads, /1e6 per-M
+// tokens → cents. A missing price (or a call with no usage) records 0 and warns
+// only when a call actually spent tokens.
+function resolveCostCents(
+  driver: DbDriver,
+  input: AssistantCallLogInput
+): Effect.Effect<number, DbError> {
+  if (typeof input.costCents === "number") return Effect.succeed(input.costCents);
+  const usageIn = input.usageIn ?? 0;
+  const usageOut = input.usageOut ?? 0;
+  const cachedIn = input.cachedIn ?? 0;
+  return queryFirst<AssistantPriceRow>(
+    driver,
+    `SELECT prompt_price, completion_price, cached_read_price, cached_write_price FROM assistant_model_prices WHERE model = ?`,
+    input.model
+  ).pipe(
+    Effect.map((p) => {
+      const freshIn = Math.max(0, usageIn - cachedIn);
+      return Math.round((freshIn * p.prompt_price + cachedIn * p.cached_read_price + usageOut * p.completion_price) / 1e6 * 100);
+    }),
+    Effect.catchTag("RowNotFound", () =>
+      Effect.sync(() => {
+        if (usageIn !== 0 || usageOut !== 0) {
+          console.warn(`[Assistant] call-log: no price for model ${input.model}; recording cost 0`);
+        }
+        return 0;
+      })
+    )
+  );
+}
 
 export function insertCallLog(
   driver: DbDriver,
   input: AssistantCallLogInput
 ): Effect.Effect<{ ok: true }, ConstraintViolation | DbError> {
-  return run(
-    driver,
-    `INSERT INTO assistant_call_logs (id, project_id, provider_id, model, kind, status, error_code, usage_in, usage_out, cached_in, latency_ms, cost_cents, estimated)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    crypto.randomUUID(),
-    input.projectId ?? null,
-    input.providerId ?? null,
-    input.model,
-    input.kind,
-    input.status,
-    input.errorCode ?? null,
-    input.usageIn ?? 0,
-    input.usageOut ?? 0,
-    input.cachedIn ?? 0,
-    input.latencyMs ?? null,
-    input.costCents ?? 0,
-    input.estimated ? 1 : 0
-  ).pipe(Effect.as({ ok: true as const }));
+  return Effect.gen(function* () {
+    const costCents = yield* resolveCostCents(driver, input);
+    yield* run(
+      driver,
+      `INSERT INTO assistant_call_logs (id, project_id, provider_id, thread_key, run_id, model, kind, status, purpose, error_code, usage_in, usage_out, cached_in, latency_ms, cost_cents, estimated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      crypto.randomUUID(),
+      input.projectId ?? null,
+      input.providerId ?? null,
+      input.threadKey ?? null,
+      input.runId ?? null,
+      input.model,
+      input.kind,
+      input.status,
+      input.purpose ?? "turn",
+      input.errorCode ?? null,
+      input.usageIn ?? 0,
+      input.usageOut ?? 0,
+      input.cachedIn ?? 0,
+      input.latencyMs ?? null,
+      costCents,
+      input.estimated ? 1 : 0
+    );
+    return { ok: true as const };
+  });
+}
+
+// ── Per-turn provider health (H8) ──────────────────────────────────────────
+// The DO reports one outcome per provider attempt so `assistant_provider_health`
+// stays live between manual Test probes. Shares the exact breaker transitions
+// with the admin service (`nextHealthOnFailure`/`nextHealthOnSuccess`) so the
+// DO-written state and the service cannot drift.
+
+export function recordProviderHealth(
+  driver: DbDriver,
+  input: { providerId: string; ok: boolean; nowMs?: number | undefined; nowIso?: string | undefined }
+): Effect.Effect<{ ok: true; circuitState: "open" | "closed" | "half-open" }, ConstraintViolation | DbError> {
+  return Effect.gen(function* () {
+    const row = yield* queryFirst<HealthTransitionRow>(
+      driver,
+      `SELECT failure_count, circuit_state, opened_at, last_probe_at, consecutive_failures FROM assistant_provider_health WHERE provider_id = ?`,
+      input.providerId
+    ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(EMPTY_HEALTH_ROW)));
+    const nowIso = input.nowIso ?? new Date().toISOString();
+    const t = input.ok
+      ? nextHealthOnSuccess(nowIso)
+      : nextHealthOnFailure(row, input.nowMs ?? Date.now(), nowIso);
+    yield* run(
+      driver,
+      `INSERT INTO assistant_provider_health (provider_id, failure_count, circuit_state, opened_at, last_probe_at, consecutive_failures)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(provider_id) DO UPDATE SET failure_count = excluded.failure_count, circuit_state = excluded.circuit_state, opened_at = excluded.opened_at, last_probe_at = excluded.last_probe_at, consecutive_failures = excluded.consecutive_failures`,
+      input.providerId, t.failureCount, t.circuitState, t.openedAt, t.lastProbeAt, t.consecutiveFailures
+    );
+    return { ok: true as const, circuitState: t.circuitState };
+  });
 }
 
 // ── Terminal run-status transitions (ADR-0003 §B.5/§D; invariant #12) ──────
@@ -749,21 +839,28 @@ export async function handleInternalAssistantRequest(input: {
     const model = typeof payload.model === "string" ? payload.model : "";
     const kind = typeof payload.kind === "string" ? payload.kind : "";
     const status = typeof payload.status === "string" ? payload.status : "";
-    if (model.length === 0 || !CALL_LOG_KINDS.has(kind) || !CALL_LOG_STATUSES.has(status)) {
+    const purpose = typeof payload.purpose === "string" ? payload.purpose : "turn";
+    if (model.length === 0 || !CALL_LOG_KINDS.has(kind) || !CALL_LOG_STATUSES.has(status) || !CALL_LOG_PURPOSES.has(purpose)) {
       return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid call-log payload" } } };
     }
     const parsed: AssistantCallLogInput = {
       projectId: typeof payload.projectId === "string" ? payload.projectId : null,
       providerId: typeof payload.providerId === "string" ? payload.providerId : null,
+      threadKey:
+        typeof payload.threadKey === "string" && payload.threadKey.length > 0
+          ? payload.threadKey
+          : (input.identity?.threadKey ?? null),
+      runId: typeof payload.runId === "string" && payload.runId.length > 0 ? payload.runId : null,
       model,
       kind: kind as ProviderKind,
       status: status as AssistantCallLogStatus,
+      purpose: purpose as AssistantCallLogPurpose,
       errorCode: typeof payload.errorCode === "string" ? payload.errorCode : null,
       usageIn: typeof payload.usageIn === "number" ? payload.usageIn : 0,
       usageOut: typeof payload.usageOut === "number" ? payload.usageOut : 0,
       cachedIn: typeof payload.cachedIn === "number" ? payload.cachedIn : 0,
       latencyMs: typeof payload.latencyMs === "number" ? payload.latencyMs : null,
-      costCents: typeof payload.costCents === "number" ? payload.costCents : 0,
+      costCents: typeof payload.costCents === "number" ? payload.costCents : undefined,
       estimated: payload.estimated === true,
     };
     try {
@@ -774,6 +871,23 @@ export async function handleInternalAssistantRequest(input: {
         body: { error: { code: "ASSISTANT_UNAVAILABLE", message: e instanceof Error ? e.message : "call-log write failed" } },
       };
     }
+  }
+
+  // Per-turn provider health (H8): the DO reports one outcome per provider
+  // attempt so the breaker / Overview health stays live between manual probes.
+  // Identity is not required — the report carries only the provider id.
+  if (method === "POST" && path === "/api/internal/assistant/provider-health") {
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const providerId = typeof payload.providerId === "string" ? payload.providerId : "";
+    const ok = payload.ok;
+    if (providerId.length === 0 || typeof ok !== "boolean") {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid provider-health payload" } } };
+    }
+    const outcome = await Effect.runPromise(Effect.either(recordProviderHealth(driver, { providerId, ok })));
+    if (outcome._tag === "Left") {
+      return { status: 500, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "provider-health write failed" } } };
+    }
+    return { status: 200, body: outcome.right };
   }
 
   // Terminal run status + (task runs) activity emission, same transaction.

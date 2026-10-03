@@ -14,12 +14,14 @@
  * path; the lazy check is the intended simplification.
  */
 import { Effect } from "effect";
-import { Db, DbError, RowNotFound } from "../db/db";
-import { AssistantHealthRepo, type AssistantHealthRow } from "../repos/assistant-health.repo";
-
-const THRESHOLD = 3;
-const OPEN_MS = 5 * 60 * 1000;
-const WINDOW_MS = 5 * 60 * 1000;
+import { DbError } from "../db/db";
+import {
+  AssistantHealthRepo,
+  HEALTH_OPEN_MS,
+  nextHealthOnFailure,
+  nextHealthOnSuccess,
+  type AssistantHealthRow,
+} from "../repos/assistant-health.repo";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -54,14 +56,13 @@ function retryAfterSeconds(state: "open" | "closed" | "half-open", openedAt: str
   if (state !== "open") return null;
   const opened = parseTimestamp(openedAt);
   if (opened === null) return null;
-  return Math.max(0, Math.ceil((OPEN_MS - (Date.now() - opened)) / 1000));
+  return Math.max(0, Math.ceil((HEALTH_OPEN_MS - (Date.now() - opened)) / 1000));
 }
 
 export class AssistantHealthService extends Effect.Service<AssistantHealthService>()("Lexa/AssistantHealth", {
   dependencies: [AssistantHealthRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* AssistantHealthRepo;
-    const db = yield* Db;
 
     const getOrDefault = (providerId: string): Effect.Effect<AssistantHealthRow, DbError> =>
       repo.get(providerId).pipe(
@@ -82,7 +83,7 @@ export class AssistantHealthService extends Effect.Service<AssistantHealthServic
         const row = yield* getOrDefault(providerId);
         if (row.circuit_state === "closed") return true;
         if (row.circuit_state === "open") {
-          if (isExpired(row.opened_at, OPEN_MS)) {
+          if (isExpired(row.opened_at, HEALTH_OPEN_MS)) {
             const iso = nowIso();
             yield* repo.upsert({ providerId, circuitState: "half-open", lastProbeAt: iso }).pipe(Effect.catchAll(() => Effect.succeed(row)));
             return true;
@@ -98,62 +99,28 @@ export class AssistantHealthService extends Effect.Service<AssistantHealthServic
     const recordFailure = (providerId: string): Effect.Effect<void, DbError> =>
       Effect.gen(function* () {
         const row = yield* getOrDefault(providerId);
-        const iso = nowIso();
-        const sinceLast = row.last_probe_at ? Date.now() - Date.parse(row.last_probe_at) : Infinity;
-        let consecutive = row.consecutive_failures;
-        if (sinceLast > WINDOW_MS) consecutive = 0;
-        consecutive += 1;
-        const failureCount = row.failure_count + 1;
-
-        if (row.circuit_state === "half-open") {
-          yield* repo.upsert({
-            providerId,
-            failureCount,
-            circuitState: "open",
-            openedAt: iso,
-            lastProbeAt: iso,
-            consecutiveFailures: consecutive,
-          }).pipe(Effect.catchAll(() => Effect.void));
-          return;
-        }
-
-        if (consecutive >= THRESHOLD) {
-          yield* repo.upsert({
-            providerId,
-            failureCount,
-            circuitState: "open",
-            openedAt: iso,
-            lastProbeAt: iso,
-            consecutiveFailures: consecutive,
-          }).pipe(Effect.catchAll(() => Effect.void));
-          return;
-        }
-
+        const t = nextHealthOnFailure(row, Date.now(), nowIso());
         yield* repo.upsert({
           providerId,
-          failureCount,
-          circuitState: row.circuit_state,
-          lastProbeAt: iso,
-          consecutiveFailures: consecutive,
-          ...(row.circuit_state === "open" ? { openedAt: row.opened_at } : {}),
+          failureCount: t.failureCount,
+          circuitState: t.circuitState,
+          openedAt: t.openedAt,
+          lastProbeAt: t.lastProbeAt,
+          consecutiveFailures: t.consecutiveFailures,
         }).pipe(Effect.catchAll(() => Effect.void));
       });
 
     const recordSuccess = (providerId: string): Effect.Effect<void, DbError> =>
       Effect.gen(function* () {
-        const row = yield* getOrDefault(providerId);
-        const iso = nowIso();
+        const t = nextHealthOnSuccess(nowIso());
         yield* repo.upsert({
           providerId,
-          failureCount: 0,
-          circuitState: "closed",
-          openedAt: null,
-          lastProbeAt: iso,
-          consecutiveFailures: 0,
+          failureCount: t.failureCount,
+          circuitState: t.circuitState,
+          openedAt: t.openedAt,
+          lastProbeAt: t.lastProbeAt,
+          consecutiveFailures: t.consecutiveFailures,
         }).pipe(Effect.catchAll(() => Effect.void));
-        if (row.circuit_state === "open" || row.circuit_state === "half-open") {
-          void db;
-        }
       });
 
     const getHealth = (providerId: string): Effect.Effect<{
@@ -180,7 +147,7 @@ export class AssistantHealthService extends Effect.Service<AssistantHealthServic
           lastFailureAt: signals.lastFailureAt,
           lastCheckedAt: latestIso(base.lastProbeAt, signals.lastCallAt),
         });
-        if (row.circuit_state === "open" && isExpired(row.opened_at, OPEN_MS)) {
+        if (row.circuit_state === "open" && isExpired(row.opened_at, HEALTH_OPEN_MS)) {
           const iso = nowIso();
           yield* repo.upsert({ providerId, circuitState: "half-open", lastProbeAt: iso }).pipe(Effect.catchAll(() => Effect.void));
           return enrich({ providerId, circuitState: "half-open" as const, failureCount: row.failure_count, openedAt: row.opened_at, lastProbeAt: iso, consecutiveFailures: row.consecutive_failures });

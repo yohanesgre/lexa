@@ -6,9 +6,12 @@ export interface AssistantCallLogDbRow {
   id: string;
   project_id: string | null;
   provider_id: string | null;
+  thread_key: string | null;
+  run_id: string | null;
   model: string;
   kind: string;
   status: string;
+  purpose: string;
   error_code: string | null;
   usage_in: number;
   usage_out: number;
@@ -24,9 +27,12 @@ function toDomain(row: AssistantCallLogDbRow): AssistantCallLogRow {
     id: row.id,
     projectId: row.project_id,
     providerId: row.provider_id,
+    threadKey: row.thread_key,
+    runId: row.run_id,
     model: row.model,
     kind: row.kind as AssistantCallLogRow["kind"],
     status: row.status as AssistantCallLogRow["status"],
+    purpose: row.purpose as AssistantCallLogRow["purpose"],
     errorCode: row.error_code,
     usageIn: row.usage_in,
     usageOut: row.usage_out,
@@ -46,14 +52,17 @@ export class AssistantCallLogsRepo extends Effect.Service<AssistantCallLogsRepo>
       insert: (input: { id: string } & AssistantCallLogInput): Effect.Effect<AssistantCallLogRow, ConstraintViolation | DbError | RowNotFound> =>
         run(
           db,
-          `INSERT INTO assistant_call_logs (id, project_id, provider_id, model, kind, status, error_code, usage_in, usage_out, cached_in, latency_ms, cost_cents, estimated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO assistant_call_logs (id, project_id, provider_id, thread_key, run_id, model, kind, status, purpose, error_code, usage_in, usage_out, cached_in, latency_ms, cost_cents, estimated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           input.id,
           input.projectId ?? null,
           input.providerId ?? null,
+          input.threadKey ?? null,
+          input.runId ?? null,
           input.model,
           input.kind,
           input.status,
+          input.purpose ?? "turn",
           input.errorCode ?? null,
           input.usageIn ?? 0,
           input.usageOut ?? 0,

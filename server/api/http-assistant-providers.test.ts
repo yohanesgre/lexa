@@ -59,6 +59,7 @@ afterEach(() => {
   delete process.env.LXK_SECRETS_MASTER_KEY_PREV;
   db.exec("DELETE FROM assistant_provider_secrets");
   db.exec("DELETE FROM assistant_models");
+  db.exec("DELETE FROM assistant_model_prices");
   db.exec("DELETE FROM assistant_providers");
 });
 
@@ -200,6 +201,53 @@ describe("provider model sync", () => {
       db.exec("DROP TRIGGER fail_model");
     }
   });
+  it("persists CF per-M prices from properties[price] into assistant_model_prices", async () => {
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
+    const create = await handler(authed("POST", "/api/admin/assistant/providers", {
+      label: "CF",
+      baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1",
+      apiKey: PLAINTEXT_KEY,
+    }));
+    expect(create.status).toBe(200);
+    const { id } = (await create.json()) as { id: string };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            result: [
+              {
+                name: "@cf/meta/llama-3.2-1b-instruct",
+                properties: [
+                  {
+                    property_id: "price",
+                    value: [
+                      { unit: "per M input tokens", price: 0.027, currency: "USD" },
+                      { unit: "per M output tokens", price: 0.201, currency: "USD" },
+                    ],
+                  },
+                ],
+              },
+            ],
+            result_info: { per_page: 50, total_count: 1 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      )
+    );
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/models`));
+      expect(res.status).toBe(200);
+      expect(
+        db
+          .prepare("SELECT prompt_price, completion_price, cached_read_price, cached_write_price FROM assistant_model_prices WHERE model = ?")
+          .get("@cf/meta/llama-3.2-1b-instruct")
+      ).toEqual({ prompt_price: 0.027, completion_price: 0.201, cached_read_price: 0, cached_write_price: 0 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("preserves a manually registered workers_ai row through a catalog sync", async () => {
     process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
     const { id } = await createProvider(PLAINTEXT_KEY);

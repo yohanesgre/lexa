@@ -786,9 +786,12 @@ CREATE TABLE assistant_call_logs (
   id TEXT PRIMARY KEY,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   provider_id TEXT REFERENCES assistant_providers(id) ON DELETE SET NULL,
+  thread_key TEXT,                            -- <documentType>:<documentId> thread
+  run_id TEXT,                                -- delegated run id (runner turns)
   model TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses','workers_ai')),
   status TEXT NOT NULL CHECK (status IN ('done','error','suspended','aborted')),
+  purpose TEXT NOT NULL DEFAULT 'turn' CHECK (purpose IN ('turn','runner','preflight','summary')),
   error_code TEXT,
   usage_in INTEGER NOT NULL DEFAULT 0,
   usage_out INTEGER NOT NULL DEFAULT 0,
@@ -1182,6 +1185,10 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- CHECK, so both tables are rebuilt create/copy/drop/rename with every row
 -- copied verbatim; neither table has an inbound FK, so the rebuild is FK-safe
 -- under D1's enforced foreign keys.
+-- 0023_assistant_call_log_rebuild.sql rebuilds `assistant_call_logs` once more
+-- to add `thread_key`, `run_id`, and a `purpose` column CHECK-pinned to
+-- ('turn','runner','preflight','summary') with DEFAULT 'turn'. Rows and the
+-- three call-log indexes are preserved verbatim.
 ```
 
 ## Design Notes

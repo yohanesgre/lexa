@@ -21,7 +21,7 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, recordProviderHealthRemote, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, type AssistantInternalDeps } from "./agent-runtime";
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
 import { buildMcpToolSet, buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
 import { MAX_WRITES_PER_TURN } from "./write-tool-names";
@@ -438,6 +438,9 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       recordCallLog: async (input) => {
         await recordCallLog(deps, input);
       },
+      recordProviderHealth: async ({ providerId, ok }) => {
+        await recordProviderHealthRemote(deps, { providerId, ok });
+      },
       transitionRun: async (input) => {
         const ok = await transitionRun(deps, input);
         // Terminal transition landed: clear the run cursor so later turns on
@@ -566,6 +569,7 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         system,
         stopWhen,
         runId,
+        callLogPurpose: "turn",
         streamTextImpl: tracedAI.streamText,
         trace: assistantTraceParams({
           agentId: this.ctx.id.toString(),

@@ -19,6 +19,59 @@ export interface AssistantHealthDomain {
   consecutiveFailures: number;
 }
 
+/** Circuit-breaker tuning, shared by the service and the internal health route. */
+export const HEALTH_FAILURE_THRESHOLD = 3;
+export const HEALTH_OPEN_MS = 5 * 60 * 1000;
+export const HEALTH_WINDOW_MS = 5 * 60 * 1000;
+
+export interface HealthTransition {
+  failureCount: number;
+  circuitState: "open" | "closed" | "half-open";
+  openedAt: string | null;
+  lastProbeAt: string;
+  consecutiveFailures: number;
+}
+
+export type HealthTransitionRow = Pick<
+  AssistantHealthRow,
+  "failure_count" | "circuit_state" | "opened_at" | "last_probe_at" | "consecutive_failures"
+>;
+
+export const EMPTY_HEALTH_ROW: HealthTransitionRow = {
+  failure_count: 0,
+  circuit_state: "closed",
+  opened_at: null,
+  last_probe_at: null,
+  consecutive_failures: 0,
+};
+
+/**
+ * Pure breaker transition for one failure: a failure in a `half-open` state
+ * re-opens immediately; otherwise three consecutive failures inside the window
+ * open the circuit. Shared so the DO's per-turn health route and the admin
+ * service cannot drift.
+ */
+export function nextHealthOnFailure(row: HealthTransitionRow, nowMs: number, nowIso: string): HealthTransition {
+  const sinceLast = row.last_probe_at ? nowMs - Date.parse(row.last_probe_at) : Infinity;
+  let consecutive = row.consecutive_failures;
+  if (sinceLast > HEALTH_WINDOW_MS) consecutive = 0;
+  consecutive += 1;
+  const failureCount = row.failure_count + 1;
+  const open = row.circuit_state === "half-open" || consecutive >= HEALTH_FAILURE_THRESHOLD;
+  return {
+    failureCount,
+    circuitState: open ? "open" : row.circuit_state,
+    openedAt: open ? nowIso : row.opened_at,
+    lastProbeAt: nowIso,
+    consecutiveFailures: consecutive,
+  };
+}
+
+/** Pure breaker transition for one success: reset to `closed`. */
+export function nextHealthOnSuccess(nowIso: string): HealthTransition {
+  return { failureCount: 0, circuitState: "closed", openedAt: null, lastProbeAt: nowIso, consecutiveFailures: 0 };
+}
+
 function toDomain(row: AssistantHealthRow): AssistantHealthDomain {
   return {
     providerId: row.provider_id,

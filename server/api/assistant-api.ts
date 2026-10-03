@@ -898,6 +898,39 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           stmts.push(mRepo.createStmt({ id: crypto.randomUUID(), providerId: req.path.id, modelId: m.id, kind: inferred, priority: nextPriority++, enabled: false }));
         }
         if (stmts.length > 0) yield* batch(db, stmts);
+        // CF `ai/models/search` reports per-M token prices inline; persist them
+        // so the call-log write can cost a turn. Best-effort: a price failure
+        // must not fail the model import.
+        const priceRepo = yield* AssistantModelPricesRepo;
+        for (const m of catalog.models) {
+          if (
+            m.promptPrice === undefined &&
+            m.completionPrice === undefined &&
+            m.cachedReadPrice === undefined &&
+            m.cachedWritePrice === undefined
+          ) {
+            continue;
+          }
+          yield* priceRepo
+            .upsert({
+              model: m.id,
+              promptPrice: m.promptPrice ?? 0,
+              completionPrice: m.completionPrice ?? 0,
+              cachedReadPrice: m.cachedReadPrice ?? 0,
+              cachedWritePrice: m.cachedWritePrice ?? 0,
+            })
+            .pipe(
+              Effect.catchAll((e) =>
+                Effect.sync(() =>
+                  assistantLog("WARN", "assistant model price persist failed", {
+                    providerId: req.path.id,
+                    modelId: m.id,
+                    error: e instanceof Error ? e.message : String(e),
+                  })
+                )
+              )
+            );
+        }
         const fresh = yield* mRepo.listByProvider(req.path.id);
         return { data: fresh };
       }))

@@ -142,9 +142,12 @@ export interface AssistantCallLogRow {
   id: ID;
   projectId: ID | null;
   providerId: ID | null;
+  threadKey: string | null;
+  runId: string | null;
   model: string;
   kind: ProviderKind;
   status: AssistantCallLogStatus;
+  purpose: AssistantCallLogPurpose;
   errorCode: string | null;
   usageIn: number;
   usageOut: number;
@@ -155,12 +158,18 @@ export interface AssistantCallLogRow {
   createdAt: ISODate;
 }
 
+/** Which assistant flow issued the provider call. */
+export type AssistantCallLogPurpose = "turn" | "runner" | "preflight" | "summary";
+
 export interface AssistantCallLogInput {
   projectId?: ID | null | undefined;
   providerId?: ID | null | undefined;
+  threadKey?: string | null | undefined;
+  runId?: string | null | undefined;
   model: string;
   kind: ProviderKind;
   status: AssistantCallLogStatus;
+  purpose?: AssistantCallLogPurpose | undefined;
   errorCode?: string | null | undefined;
   usageIn?: number | undefined;
   usageOut?: number | undefined;

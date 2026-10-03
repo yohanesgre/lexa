@@ -254,8 +254,9 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 > (one DO per conversation thread, WebSocket transport). The Bun flavor
 > ships without the assistant — routes absent, capability flag false, UI hidden.
 > This section still describes the pre-ADR in-process tier; the DO-based design
-> lives in `status/assistant-workers/adr-0003.md` and is transcribed here in a
-> later phase.
+> lives in `status/assistant-workers/adr-0003.md` and the harness built on it is
+> summarized in §Harness runtime below (ADR-0004,
+> `status/assistant-harness/adr-0004.md`).
 
 Lexa has exactly **one** AI execution tier: the **Assistant**. In the tier
 described below it runs in the server process — server-side TanStack AI `chat()`
@@ -272,6 +273,54 @@ stream handler — there is no external worker, no claim loop, and no heartbeat.
 
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.
+
+### Harness runtime — turn context, runs, schedules (ADR-0004)
+
+The DO turn is assembled from a harness context bundle, not identity alone.
+Every turn issues **one** `POST /api/internal/assistant/turn-context` (Workers
+only, `X-Lexa-Internal` HMAC) whose project/actor/thread identity comes from the
+signed headers — the body (`{ threadKey, runId?, userText, mode }`) never
+overrides it. The response (`HarnessTurnContext`) carries the resolved agent
+instructions (fallback builtin `assistant`), ≤3 `$skill` markdowns plus a ≤20
+catalog, the `project_memory` FTS block (K=5, 2000-char cap), doc/mention/repo
+context, the Jev advisory, the thread summary, tool descriptors, and boolean
+capability flags. **No key material or allowlist value crosses to the DO** —
+provider config stays a separate `GET provider-config` read, and the capability
+flags are booleans (ADR-0004 §1). Compaction lives on the DO
+(`thread_meta.summary`/`summarized_count`, mirrored to D1 with real values):
+past 40 messages or 64 KiB, everything outside the last-8-message window is
+condensed with one cheap `generateText`; a failure skips the event and the next
+persist retries.
+
+Delegation is a **facet child** of the thread DO — `LexaAssistantRunner extends
+AIChatAgent`, dispatched through `agents/agent-tools` foreground (`agentTool`)
+or detached (`runAgentTool` with an `onFinish` handler). D1 `assistant_runs`
+(kind `chat_run|document|schedule`, status
+`queued|running|completed|failed|cancelled`) is the durable registry; the parent
+DO owns transitions through the atomic conditional-UPDATE pattern, and
+`chat_run`/`schedule` rows emit no `task_activity` (invariant #12 untouched).
+Runs inherit the dispatching turn's write mode and are budget-capped. D1
+`assistant_schedules` (cron or `interval_seconds`, `next_run_at`) is drained by
+the existing 15-minute Worker `runScheduled` cron, which creates the
+`kind='schedule'` row and advances `next_run_at` in the same UPDATE per due row,
+capped per tick; per-project scheduler DOs are deferred.
+
+**`workers_ai` (H9).** A model row with kind `workers_ai` builds
+`createWorkersAI({ binding: env.AI })` — zero-key Workers AI inference — instead
+of a REST provider; model ids are manual (the binding has no catalog listing)
+while REST rows remain for catalog listing. `wrangler.jsonc` declares
+`"ai": { "binding": "AI" }` and `scripts/workers-install.ts` transcribes it into
+the per-deploy config.
+
+Call logs gain `thread_key`, `run_id`, and `purpose`
+(`turn|runner|preflight|summary`), and `cost_cents` is computed from the CF
+`ai/models/search` prices stored in `assistant_model_prices` when the caller
+sends no explicit value. Every DO turn also reports provider success/failure
+through an internal route so `assistant_provider_health` stays live between
+manual Test probes. Tracing is metadata-only (`wrapAISDK` from
+`agents/observability/ai`, `functionId: lexa-assistant`,
+`agentId`/`conversationId`/`runId`/`purpose`, payload storage OFF); CF traces
+are the 7-day debug surface, the Lexa dashboard remains the product surface.
 
 ### MCP tool bridge (`server/assistant/mcp.ts`)
 
