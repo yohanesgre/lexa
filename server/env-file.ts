@@ -50,8 +50,7 @@ export const DEAD_KEYS: readonly string[] = [
 ];
 
 // Presentation-only section order + key membership. Every RuntimeEnv key has a
-// home (asserted below); non-runtime tooling keys map to `core`, unknown keys
-// to `other`.
+// home (asserted below); unknown keys render under `other`.
 export const ENV_SECTION_ORDER = [
   "core",
   "auth",
