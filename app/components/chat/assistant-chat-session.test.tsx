@@ -214,6 +214,94 @@ describe("fresh thread — first send stays visible end to end", () => {
   });
 });
 
+describe("useSettledTurns — accepted send survives the chatId mint", () => {
+  const optimistic = [{ role: "user", text: "hello", imageCount: 0, rawIndex: -1 }];
+
+  it("keeps the optimistic turn when the fresh chat's id arrives with the send", () => {
+    const stream = makeStream();
+    const { result, rerender } = renderHook(
+      ({ chatId, sendAccepted }: { chatId: string; sendAccepted: boolean }) =>
+        useSettledTurns({ chatId, transcriptData: undefined, transcriptError: NOT_FOUND, streaming: false, stream, sendAccepted }),
+      { initialProps: { chatId: "", sendAccepted: false } }
+    );
+    expect(result.current.turns).toEqual([]);
+
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", [])));
+    expect(result.current.turns).toEqual(optimistic);
+
+    // The mint lands in the same batch as the send: chatId changes, but the
+    // accepted-send signal keeps the turn instead of nulling the new chat.
+    rerender({ chatId: "N", sendAccepted: true });
+    expect(result.current.turns).toEqual(optimistic);
+  });
+
+  it("still clears a genuinely dead thread when no send is accepted", () => {
+    const stream = makeStream();
+    const { result, rerender } = renderHook(
+      ({ chatId }: { chatId: string }) =>
+        useSettledTurns({ chatId, transcriptData: undefined, transcriptError: NOT_FOUND, streaming: false, stream }),
+      { initialProps: { chatId: "" } }
+    );
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", [])));
+    expect(result.current.turns).toEqual(optimistic);
+
+    rerender({ chatId: "N" });
+    expect(result.current.turns).toEqual([]);
+  });
+});
+
+describe("useTerminalRefetch — once per terminal status (A2)", () => {
+  function renderTerminalSpy() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const remove = vi.spyOn(qc, "removeQueries");
+    const queryFn = vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "hi" }] });
+    const utils = render(
+      <QueryClientProvider client={qc}>
+        <TerminalHarness stream={makeStream()} queryFn={queryFn} />
+      </QueryClientProvider>
+    );
+    const rerender = (stream: Stream) =>
+      utils.rerender(
+        <QueryClientProvider client={qc}>
+          <TerminalHarness stream={stream} queryFn={queryFn} />
+        </QueryClientProvider>
+      );
+    const listCalls = () =>
+      invalidate.mock.calls.filter(([f]) => Array.isArray(f?.queryKey) && f.queryKey[0] === "assistant-chats").length;
+    const transcriptCalls = () =>
+      invalidate.mock.calls.filter(([f]) => Array.isArray(f?.queryKey) && f.queryKey[0] === "assistant-chat").length;
+    return { qc, invalidate, remove, rerender, listCalls, transcriptCalls };
+  }
+
+  it("invalidates transcript + list once across a terminal oscillation", async () => {
+    const { invalidate, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
+
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    expect(listCalls()).toBe(1);
+    expect(transcriptCalls()).toBe(1);
+
+    // isRecovering oscillation: done → connecting → done must not re-fire.
+    rerender(makeStream({ status: "connecting" }));
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    expect(listCalls()).toBe(1);
+    expect(transcriptCalls()).toBe(1);
+  });
+
+  it("fires once per distinct terminal status", async () => {
+    const { invalidate, rerender, listCalls } = renderTerminalSpy();
+
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    expect(listCalls()).toBe(1);
+
+    // A different terminal status is a new terminal frame: it fires again.
+    rerender(makeStream({ status: "error", hasIngress: true, error: { code: "ASSISTANT_GENERATION_FAILED", message: "x" } }));
+    expect(listCalls()).toBe(2);
+  });
+});
+
 describe("terminalTranscriptAction — not-found vs ingress", () => {
   it("drops a not-found that predates any ingress", () => {
     expect(terminalTranscriptAction("ASSISTANT_THREAD_NOT_FOUND", false)).toBe("drop");

@@ -146,10 +146,17 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const [resolutionProject, setResolutionProject] = useState<string | undefined>(undefined);
 
   const resolvedProjectRef = useRef<string | undefined>(undefined);
+  // The ?thread= param is authoritative only when it CHANGES (a real deep link
+  // or sidebar selection). "New chat" clears the active thread purely client-
+  // side without navigating, so the stale URL param must not re-open the
+  // previous thread — a navigation there is exactly the route-loader flash.
+  const appliedParamRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!projectId) return;
     const projectChanged = resolvedProjectRef.current !== projectId;
     resolvedProjectRef.current = projectId;
+    const paramChanged = appliedParamRef.current !== thread;
+    appliedParamRef.current = thread;
     let lastVisited: string | null = null;
     try {
       lastVisited = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
@@ -158,7 +165,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     }
     const next = resolveChatId({
       projectId,
-      thread,
+      thread: paramChanged ? thread : undefined,
       currentChatId: projectChanged ? "" : chatId,
       lastVisited,
     });
@@ -202,6 +209,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
   const stream = useAssistantAgent(streamKey, { projectId });
   const streaming = stream.status === "connecting" || stream.status === "streaming";
+  // Sticky "a send was accepted for this chat" signal. A fresh-thread send is
+  // deferred until the socket identifies (assistantSendForKey), so `streaming`
+  // cannot flip yet; without this the landing repaints over the in-flight run
+  // while the optimistic turn is dropped by the chat-change derivation. Sticky
+  // per chat: it is true only for the chat the send was accepted on.
+  const [acceptedChatId, setAcceptedChatId] = useState("");
+  const sendAccepted = !!chatId && acceptedChatId === chatId;
 
   const { turns, setTurns } = useSettledTurns({
     chatId,
@@ -209,6 +223,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     transcriptError: transcript.error,
     streaming,
     stream,
+    sendAccepted,
     transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
 
@@ -372,6 +387,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       if (!message || streaming || suspendedLock) return false;
       setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
       const threadId = startStream(message, attachments);
+      // The send is accepted: the landing must dock for THIS chat even before
+      // the stream status flips (the fresh-thread write is deferred).
+      setAcceptedChatId(threadId);
       // Carry an AUTHORITATIVE mode onto the (possibly just-minted) thread so
       // the picker stays in sync before its transcript is read back. A display
       // fallback must NOT be stored — it would later override transcript
@@ -450,6 +468,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     !transcript.isLoading &&
     (!transcript.error || isThreadNotFound(transcript.error)) &&
     (turns?.length ?? 0) === 0 &&
+    !sendAccepted &&
     !streaming;
   const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
 

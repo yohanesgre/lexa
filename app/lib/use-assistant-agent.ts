@@ -45,6 +45,12 @@ export function threadKeyOf(key: string | null): string | null {
   return null;
 }
 
+// Terminal stream statuses: a recovering tick must never rewrite one of these
+// back to "connecting" (that oscillation drives the terminal-refetch churn).
+function isTerminalSnapshotStatus(status: string): boolean {
+  return status === "done" || status === "error" || status === "aborted" || status === "suspended";
+}
+
 // Cross-render bridge for a just-minted thread: `useChatStartStream` mints the
 // id in the same tick and cannot send through the hook bound to the previous
 // (empty) key. The pending body is flushed once the new thread's socket is
@@ -139,8 +145,10 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
       next.reasoningActive = true;
     }
     // A terminal socket close is authoritative: do not let a transient
-    // recovering tick paper over it with a "connecting" status.
-    if (chat.isRecovering && next.status !== "error") next.status = "connecting";
+    // recovering tick paper over it with a "connecting" status. `done` in
+    // particular would otherwise oscillate done→connecting→done and re-fire
+    // the terminal-refetch effects on every tick.
+    if (chat.isRecovering && !isTerminalSnapshotStatus(next.status)) next.status = "connecting";
     return next;
   }, [segment, lastAssistant, chat.status, chat.error, chat.connectionError, chat.isStreaming, chat.isRecovering]);
 
