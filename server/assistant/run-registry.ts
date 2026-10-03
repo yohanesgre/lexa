@@ -162,6 +162,18 @@ export function getAssistantRun(
 }
 
 /**
+ * Project-agnostic read for the shared REST path: the caller loads the row
+ * first, then gates on `row.projectId`, so an unknown id and a foreign project
+ * never leak existence across projects (404 vs 403).
+ */
+export function getAssistantRunById(
+  driver: DbDriver,
+  runId: string
+): Effect.Effect<AssistantRunRow, RowNotFound | DbError> {
+  return queryFirst<AssistantRunRowRaw>(driver, `${RUN_SELECT} WHERE id = ?`, runId).pipe(Effect.map(mapRunRow));
+}
+
+/**
  * The statuses a run may transition FROM for a given target. `running` starts
  * a queued run; a terminal target closes a queued or running one. Any other
  * source is a no-op (idempotent repeat or an illegal regression). `queued` is

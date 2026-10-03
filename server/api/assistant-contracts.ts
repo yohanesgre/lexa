@@ -166,6 +166,28 @@ const ChatMetaPayload = Schema.Struct({
 });
 const ChatMetaResponse = Schema.Struct({ chatId: Schema.String, title: Schema.NullOr(Schema.String), pinned: Schema.Boolean });
 
+// Delegated run row (ADR-0004 §3) — the durable `assistant_runs` registry row
+// behind one run card. `chat_run`/`schedule` runs have no document fields; the
+// admin runs view unions them separately.
+const AssistantDelegatedRunSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  threadKey: Schema.String,
+  parentRunId: Schema.NullOr(Schema.String),
+  kind: Schema.Literal("chat_run", "document", "schedule"),
+  status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
+  goal: Schema.String,
+  result: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+  budgetMs: Schema.NullOr(Schema.Number),
+  stepsUsed: Schema.Number,
+  createdBy: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  startedAt: Schema.NullOr(Schema.String),
+  finishedAt: Schema.NullOr(Schema.String),
+});
+const AssistantRunPath = Schema.Struct({ runId: Schema.String });
+
 const assistantGroup = HttpApiGroup.make("assistant")
   .add(HttpApiEndpoint.get("getAssistantSettings", "/assistant/settings/:projectId")
     .setPath(AssistantSettingsPath).addSuccess(AssistantSettingsMaskedSchema))
@@ -211,7 +233,11 @@ const assistantGroup = HttpApiGroup.make("assistant")
   .add(HttpApiEndpoint.post("resumeAssistantChat", "/assistant/chat/:chatId/resume")
     .setPath(AssistantChatPath).addSuccess(Schema.Void))
   .add(HttpApiEndpoint.post("resumeAssistantThread", "/assistant/threads/:documentType/:documentId/resume")
-    .setPath(AssistantThreadPath).addSuccess(Schema.Void));
+    .setPath(AssistantThreadPath).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.get("getAssistantRun", "/assistant/runs/:runId")
+    .setPath(AssistantRunPath).addSuccess(AssistantDelegatedRunSchema))
+  .add(HttpApiEndpoint.post("abortAssistantRun", "/assistant/runs/:runId/abort")
+    .setPath(AssistantRunPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })));
 
 const AssistantUsageSummarySchema = Schema.Struct({
   totalTokens: Schema.Number,

@@ -991,6 +991,34 @@ export function listAssistantRuns(params?: {
   return request(`${BASE}/admin/assistant/runs${q ? `?${q}` : ""}`);
 }
 
+// Delegated run row (ADR-0004 §3) — the durable `assistant_runs` row behind one
+// run card. Distinct from the admin `AssistantRunRow` union (document fields).
+export interface AssistantDelegatedRun {
+  id: string;
+  projectId: string;
+  threadKey: string;
+  parentRunId: string | null;
+  kind: "chat_run" | "document" | "schedule";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  goal: string;
+  result: string | null;
+  error: string | null;
+  budgetMs: number | null;
+  stepsUsed: number;
+  createdBy: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export function getAssistantRun(runId: string): Promise<AssistantDelegatedRun> {
+  return request(`${BASE}/assistant/runs/${encodeURIComponent(runId)}`);
+}
+
+export function abortAssistantRun(runId: string): Promise<{ ok: boolean }> {
+  return request(`${BASE}/assistant/runs/${encodeURIComponent(runId)}/abort`, { method: "POST" });
+}
+
 export function listAssistantBindings(): Promise<{ data: AssistantBindingRow[] }> {
   return request(`${BASE}/admin/assistant/bindings`);
 }
