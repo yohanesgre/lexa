@@ -103,8 +103,8 @@ export const loginLimiter = {
 export type ReadBodyResult = { ok: true; bytes: ArrayBuffer } | { ok: false };
 
 // Streams the request body up to maxBytes; ok:false → caller replies 413.
-// Shared by the Bun host (server/entry.ts) and the Workers entry so the
-// /api/auth/* body cap is identical on both.
+// Shared by every entry point so the /api/auth/* body cap is identical
+// everywhere.
 export async function readBodyWithLimit(req: Request, maxBytes: number): Promise<ReadBodyResult> {
   const reader = req.body?.getReader();
   if (!reader) return { ok: true, bytes: new ArrayBuffer(0) };

@@ -22,8 +22,8 @@ declare module "bun:sqlite" {
     run(sql: string, ...params: SqlParam[]): RunResult;
     run(sql: string, ...params: unknown[]): RunResult;
     exec(sql: string): void;
-    transaction(fn: (...args: SqlParam[]) => void): (...args: SqlParam[]) => void;
-    transaction(fn: (...args: unknown[]) => void): (...args: unknown[]) => void;
+    transaction<T>(fn: (...args: SqlParam[]) => T): (...args: SqlParam[]) => T;
+    transaction<T>(fn: (...args: unknown[]) => T): (...args: unknown[]) => T;
     close(): void;
   }
 }

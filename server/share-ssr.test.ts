@@ -14,9 +14,8 @@ import { injectEntryScript } from "./workers-entry";
 // (#tanstack-router-entry etc.) that only exist inside the vite build — see
 // server/workers-shims/start-server.ts. This file is the layered equivalent:
 // the D1/SQLite share lookup, the server-rendered head meta, and the Workers
-// per-response HTML patch. The Bun serving gate (non-share → shell, /share/*
-// → SSR) is covered by the W3 smoke against a built server, since
-// server/entry.ts boots a Bun.serve at import time and is not importable here.
+// per-response HTML patch. The full serving gate (non-share → shell, /share/*
+// → SSR) is covered by the Workers smoke against a built server.
 
 const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
 

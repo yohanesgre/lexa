@@ -1,15 +1,15 @@
 # Lexa — Architecture
 
-A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, and GitHub issue sync — running on Cloudflare Workers or a Bun standalone server with SQLite.
+A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, and GitHub issue sync — running on Cloudflare Workers with D1 + R2.
 
 ## Tech Stack
 
 | Layer        | Choice                        | Rationale |
 | ------------ | ----------------------------- | --------- |
-| Frontend     | React + Vite + TanStack Start | Root route `ssr: true`; every authed/app route declares `ssr: false` and stays client-only (build-time root shell served for them). Public `/share/$token` has no `ssr: false`, so its loader + `head` server-render on both flavors (real title/OG for link unfurlers, rendered content for no-JS). TanStack Router + Query, file-based routing; `server/entry.ts` serves the shell + SPA fallback and routes only `/share/*` through the Start SSR handler; Workers: same model |
+| Frontend     | React + Vite + TanStack Start | Root route `ssr: true`; every authed/app route declares `ssr: false` and stays client-only (build-time root shell served for them). Public `/share/$token` has no `ssr: false`, so its loader + `head` server-render on both flavors (real title/OG for link unfurlers, rendered content for no-JS). TanStack Router + Query, file-based routing; the Workers entry serves the shell + SPA fallback and routes only `/share/*` through the Start SSR handler |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
-| Runtime      | Cloudflare Workers + D1 + R2 — the only actively developed deploy target (Workers Paid, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`); Bun standalone HTTP server kept as a frozen flavor | Edge isolates host SSR + REST + webhooks and are the only target receiving new features. The Bun flavor keeps running at current features — existing installs keep working, no new work lands there (see ADR-0003) |
+| Runtime      | Cloudflare Workers + D1 + R2 — the only deploy target (Workers Paid, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | Edge isolates host SSR + REST + webhooks, the assistant's Durable Objects, and the scheduled prune; the former Bun standalone server was retired (LX-28) |
 | Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
 | Machine auth | API keys (`lxk_` + base62(43B)) | CLI/webhooks/scripts: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
@@ -181,12 +181,11 @@ Device login      POST                /api/device-login/requests       (key-exem
 
 ### Request pipeline
 
-`server/entry.ts` is the Bun.serve edge: boot/migrations, the webhook branch
-(HMAC before parse), static/SSR,
+`server/workers-entry.ts` is the workerd edge: per-isolate boot, the webhook
+branch (HMAC before parse), static/SSR,
 and the `/api` **stream cap** (`readBodyWithLimit` — chunked bodies cannot
-bypass `LXK_MAX_BODY_MB`; the request is reconstructed and the resolved
-socket IP is stamped as `x-lexa-remote-ip`, inbound header deleted first to
-prevent spoofing — socket IP is only visible at this layer).
+bypass `LXK_MAX_BODY_MB`). There is no socket peer on Workers; the limiter
+resolves the client from `cf-connecting-ip` (see `docs/LAYERS.md`).
 
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
@@ -645,9 +644,9 @@ one settings row); token streaming, tools, memory, multimodal become direct API
 surface; provider/vendor swap is a settings edit; Worker-portable by
 construction (no child processes anywhere in the AI path); feature velocity —
 most changes touch prompt/tool rows, not plumbing. A crash mid-stream can
-leave an `assistant_tasks` row `running`; a boot-time sweep in
-`server/entry.ts` marks rows older than 30 minutes `failed` ("server
-restarted") so reset/resume never stays blocked.
+leave an `assistant_tasks` row `running`; a boot-time sweep marks rows older
+than 30 minutes `failed` ("server restarted") so reset/resume never stays
+blocked.
 
 **Accepted risks:** TanStack AI is 0.x — pinned exact versions, `chat()`
 imported in exactly one service (`server/assistant/provider.ts`); upgrades are
@@ -781,20 +780,15 @@ replaying on D1:
   Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays;
   read-dependent sites fold the read into the batch SQL or carry an explicit
   read-compute-retry window.
-- **Bun standalone (frozen at current features):** `Bun.serve` + `bun:sqlite` (WAL)
-  + cloudflared tunnel. `server/entry.ts` serves the prerendered SPA shell
-  (`_shell.html`) directly for every route except `/api/*`, `/health`, `/assets/*`
-  and `/favicon*` (all handled earlier) and `/share/*`, which runs the Start SSR
-  handler (loader + `head` server-rendered → title/OG/description). A missing
-  `_shell.html` falls through to the legacy `/` landing page /
-  `dist/client/index.html`. Root is `ssr: true`; the authed/app routes declare
-  `ssr: false` and stay client-only. Frozen at current features (ADR-0003):
-  existing installs keep running, no new work lands there, and the assistant is
-  not part of this flavor. Development runs from a clone
-  (`bun install && bun run setup && bun run dev:full`); the release installer
-  (`scripts/install.sh workers`) targets Workers only — see docs/DEPLOYMENT.md.
+- **Bun standalone (retired):** the `Bun.serve` + `bun:sqlite` flavor was
+  removed when the Workers entry became the only dev/deploy target (LX-28);
+  existing installs were frozen at the prior release, and the assistant was
+  never part of that flavor. Development runs from a clone
+  (`bun install && bun run setup && bun run dev`, Workers flavor); the release
+  installer (`scripts/install.sh workers`) targets Workers only — see
+  docs/DEPLOYMENT.md.
 
-Vite plugin chain emits two server bundles (Bun entry + Workers entry).
+Vite plugin chain emits the Workers server bundle.
 Dispatch point: `curl -fsSL …/scripts/install.sh | bash -s -- workers` (the installer's only target).
 Compliance gate: `scripts/check-invariants.ts` scans for the 14 invariants.
 Full Workers HOW: `docs/CLOUDFLARE_WORKERS.md` (decision formerly ADR-0002,
@@ -809,7 +803,7 @@ lexa/
 │   ├── components/           # activity/, assistant/, auth/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
-│   ├── entry.ts              # Bun.serve — boot, webhook, static/SPA fallback, /api stream cap + IP stamp
+│   ├── workers-entry.ts      # workerd entry — boot, webhook, static/SSR, /api stream cap
 │   ├── auth.ts               # Better Auth instance (credentials + organization + tanstackStartCookies)
 │   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
 │   ├── services/             # task, project, wiki, column, swimlane, session, authorization, workspace-invites, password-links, ...
@@ -819,7 +813,7 @@ lexa/
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
 ├── cli/                      # lx (operator CLI; task/wiki/project/github/keys — no deploy, no daemon)
-├── scripts/                  # compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
+├── scripts/                  # compile-cli.ts, dev-workers.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes
 └── package.json
 ```

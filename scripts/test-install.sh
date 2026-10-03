@@ -394,7 +394,7 @@ dev_out="$(cd "${devdir}" && bash "$INSTALL" dev 2>&1)" || dev_rc=$?
 assert_rc "T-dev-removed dev target exits non-zero" 1 "$dev_rc"
 assert_grep "T-dev-removed names the removed target" "The 'dev' target was removed" "$dev_out"
 assert_grep "T-dev-removed gives the clone command" 'git clone https://github.com/yohanesgre/lexa && cd lexa' "$dev_out"
-assert_grep "T-dev-removed gives the dev:full command" 'bun install && bun run setup && bun run dev:full' "$dev_out"
+assert_grep "T-dev-removed gives the dev command" 'bun install && bun run setup && bun run dev' "$dev_out"
 assert_eq "T-dev-removed creates no clone dir" "absent" "$([ -e "${devdir}/lexa" ] && echo present || echo absent)"
 
 echo "== T-preflight-missing: aggregate prereq list (restricted PATH) =="

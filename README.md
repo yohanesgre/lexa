@@ -21,17 +21,18 @@ provisions D1 + R2 + KV and deploys the prebuilt Worker
 
 ## Quickstart (local dev)
 
-Requires [Bun](https://bun.sh).
+Requires [Bun](https://bun.sh) — dev runs the Cloudflare Workers flavor locally
+(workerd via the Cloudflare Vite plugin, local D1/R2/KV bindings).
 
 ```bash
 bun install
-bun run setup          # first-time: admin email, API key, migrations, sample data
-bun run dev:full       # API (:3000) + vite frontend (:5173)
+bun run setup          # first-time: admin email, migrations, sample data
+bun run dev            # derive .dev.vars + apply local D1 migrations + vite dev
 # open http://localhost:5173
 ```
 
-- DB lives at `data/lexa.db` (SQLite WAL) — delete it to start fresh.
-- Health check: `curl http://localhost:3000/api/health`
+- Local D1/R2/KV state lives under `.wrangler/state/` — delete it to start fresh.
+- Health check: `curl http://localhost:5173/api/health`
 - First-run web wizard at `/setup` (fresh installs only).
 
 ### Verification

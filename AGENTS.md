@@ -155,7 +155,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 
 ```bash
 tsc --noEmit                    # must pass at every phase gate
-bun run dev                     # local smoke testing (vite + server)
+bun run dev                     # local smoke testing (Workers flavor)
 ```
 
 Lane-scoped tests for iteration (pick your lane — `test`/`test:full` stay for pre-merge):
@@ -187,38 +187,41 @@ with `--print-plan`.
 
 Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them and paste the output.
 
-### Running the dev stack (Bun standalone, no Cloudflare)
+### Running the dev stack (Cloudflare Workers flavor)
 
-The `.env.toml` file is **required** — `bun run setup` writes it (dev-only;
-self-hosters use the install script + `/setup` wizard). `server/entry.ts`
-applies it at boot; a legacy flat `.env` is read as a one-release fallback.
+Dev runs the Workers flavor locally: workerd via the Cloudflare Vite plugin,
+with local D1/R2/KV bindings. The `.env.toml` file is **required** — `bun run
+setup` writes it (dev-only; self-hosters use the install script + `/setup`
+wizard). A legacy flat `.env` is read as a one-release fallback.
 
 ```bash
-bun run setup          # first-time: admin email, API key, migrations, sample data
-bun run dev:full       # API (:3000) + vite frontend (:5173) together, Ctrl-C stops both
+bun run setup          # first-time: admin email, migrations, sample data
+bun run dev            # derive .dev.vars, apply local D1 migrations, vite dev
 # open http://localhost:5173
 ```
 
-`scripts/dev.sh` (what `dev:full` runs) loads `.env.toml` (or a legacy `.env`)
-into the shell via the loader's exports, boots
-`server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` → :3000),
-and sets `LXK_SEED_DEV=1` for sample data on every boot. Delete `data/lexa.db*`
-to start fresh. DB lives at `data/lexa.db` (SQLite WAL). Health check:
-`curl http://localhost:3000/api/health` → `{"ok":true}`.
+`scripts/dev-workers.sh` (what `dev`/`dev:workers` run):
+
+1. Derives `.dev.vars` from the env file on first run (the Workers runtime reads
+   `.dev.vars`, not `.env.toml`) through the loader's `--emit-dotenv` path,
+   filtered to `LXK_*` keys, written 0600 — an existing `.dev.vars` is never
+   overwritten.
+2. Applies local D1 migrations (`bun x wrangler d1 migrations apply DB --local`).
+3. Execs `vite dev` with `LEXA_FLAVOR=workers` — one workerd instance co-hosts
+   the handler and `/api` (no proxy, no separate API server).
+
+Local D1/R2/KV state lives under `.wrangler/state/` — delete it to start fresh.
+Health check: `curl http://localhost:5173/api/health` → `{"ok":true}`.
 
 Key facts:
 
-- **dev.sh exports the resolved env file into the shell** — the API server and
-  vite both inherit `.env.toml` values from the process environment, since
-  vite is not TOML-aware (it still auto-loads a legacy flat `.env` if one
-  exists). Browsers authenticate via the session cookie — no key in the bundle.
+- **`.dev.vars` is generated, never committed** (gitignored). Re-derive it by
+  deleting the file and re-running `bun run dev`. Browsers authenticate via the
+  session cookie — no key in the bundle.
 - **Re-running `bun run setup` is safe:** browsers authenticate via the session
   cookie, and setup mints `LXK_SECRETS_MASTER_KEY` only when the env file lacks
   one (never rotated on re-run), so a re-run never breaks the browser — no
   rebuild required.
-- **`bun run dev:server` alone** serves the **built** app from `dist/` on :3000
-  (frontend changes require `bun run build` first). Use it only for API work
-  or to preview the production build; use `dev:full` for day-to-day development.
 - **Setup wizard** (`scripts/setup-cli.ts` / web wizard `/setup`): prompts for
   admin email (`LXK_ADMIN_EMAILS`), mints `LXK_SECRETS_MASTER_KEY` once when the
   env file lacks one (kept verbatim on re-run), runs

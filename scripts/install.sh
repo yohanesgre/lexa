@@ -55,7 +55,7 @@ fi
 die_dev_removed() {
   printf '%s\n' "The 'dev' target was removed — development starts from a clone:
   git clone https://github.com/yohanesgre/lexa && cd lexa
-  bun install && bun run setup && bun run dev:full" >&2
+  bun install && bun run setup && bun run dev" >&2
   exit 1
 }
 

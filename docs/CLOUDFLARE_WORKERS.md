@@ -143,8 +143,9 @@ directly. Serving flow for non-API routes:
   invoking the worker — `/favicon.svg` (declared in the root document head) and
   `/_shell.html` both ride this path.
 
-The current split dev setup (`vite proxy /api → :3000` + `bun server/entry.ts`)
-disappears — single `vite dev`, API routes co-hosted with the handler.
+Local dev is a single `vite dev` with `LEXA_FLAVOR=workers` (via
+`scripts/dev-workers.sh`) — API routes are co-hosted with the handler; no
+separate API server, no `/api` proxy.
 
 Env is **per-request**: module-scope `process.env.X` is `undefined` on Workers.
 Canonical access is `import { env } from "cloudflare:workers"` or the handler arg.
@@ -279,7 +280,8 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
     **slot** (`active`/`prev`) — never a fingerprint — so rotation reads through
     `LXK_SECRETS_MASTER_KEY_PREV` with no rewrap.
 - Migrations: `wrangler d1 migrations create/apply`; seed via
-  `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
+  `wrangler d1 execute --file`. `scripts/dev-workers.sh` applies `--local`
+  migrations before booting dev.
   Migration `0012_remove_mcp_secret_refs.sql` (a single `UPDATE` clearing the
   legacy `secret_ref` column) must be applied **with or before** the build that
   removes reference mode: reference resolution is gone in code, so an

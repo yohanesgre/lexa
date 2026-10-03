@@ -56,7 +56,7 @@ All non-2xx responses share one shape:
 | 409 | `AGENT_ENTITY_IN_USE` | Delete agent/skill still used by assistant tasks (details: `{ kind, name, count }`) |
 | 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
-| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
+| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap at the edge (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
 | 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`). Chat attachment uploads use their own per-file cap of 5 MB (`CHAT_ATTACHMENT_MAX_UPLOAD_BYTES`) independent of `LXK_MAX_UPLOAD_MB` (details: `{ size, maxBytes, filename }`) |
 | 403 | `ATTACHMENT_DELETE_FORBIDDEN` | Attachment delete without uploader/admin authority |
 | 403 | `CHAT_ATTACHMENTS_DISABLED` | Chat attachment upload or a chat send carrying attachments while `LXK_DISABLE_CHAT_ATTACHMENTS=1` |

@@ -11,8 +11,8 @@ Requirements: [Bun](https://bun.sh) ≥ 1.x.
 git clone https://github.com/yohanesgre/lexa.git
 cd lexa
 bun install
-bun run setup          # first-time: admin email, API key, migrations, sample data
-bun run dev:full       # API (:3000) + vite frontend (:5173)
+bun run setup          # first-time: admin email, migrations, sample data
+bun run dev            # Workers flavor: local D1 migrations + vite dev (:5173)
 # open http://localhost:5173
 ```
 

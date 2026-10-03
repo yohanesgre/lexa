@@ -151,7 +151,7 @@ const WEBHOOK_BODY_CAP = 10_000_000;
 
 // ─── Per-isolate boot ────────────────────────────────────────────────────
 // No boot phase exists on Workers: the first request (or tick) runs the
-// same first-boot sequence the Bun host runs in server/entry.ts — env
+// same first-boot sequence the former Bun host ran — env
 // mirror (idempotent: absent keys only), rate-limit sync, GitHub holder
 // sync. Concurrent cold-start requests share one boot promise.
 let bootPromise: Promise<void> | null = null;
@@ -567,7 +567,7 @@ function fallbackPage(): Response {
 }
 
 // ─── Scheduled (cron */15 * * * *): prune + backup retention ─────────────
-// Same SQL as the Bun host's setInterval prune (server/entry.ts):
+// Same SQL as the former Bun host's setInterval prune:
 // webhook_events older than 7 days + device_login_requests past expires_at.
 // R2 retention uses the same stamp scheme as server/storage/backup.ts
 // (backups/lexa-<stamp>.db.gz + -blobs/ companions, lexical ==

@@ -54,7 +54,7 @@ Set in `.env.toml` (or a legacy flat `.env` for one release):
 LXK_BACKUP_ENABLED=1
 ```
 
-Behavior when enabled (`server/entry.ts`):
+Behavior when enabled (former Bun flavor):
 
 - Runs **once at boot**, then every **24h**.
 - After each run, retention keeps the newest `N` snapshots and deletes the

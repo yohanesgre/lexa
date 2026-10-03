@@ -66,9 +66,9 @@ export function resolveStorageConfig(
     return { driver, fsRoot: env.LXK_STORAGE_FS_ROOT || joinPath(dbDir, "blobs"), s3: null, r2: null, maxUploadBytes };
   }
   if (driver === "r2") {
-    // The native R2 binding is only available on Cloudflare Workers. The Bun
-    // host that drives `bun run dev:full` / `lx deploy bun` must use
-    // the S3 driver with `LXK_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com`
+    // The native R2 binding is only available on Cloudflare Workers. A
+    // non-Workers host must use the S3 driver with
+    // `LXK_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com`
     // to talk to R2. Reject r2 here with a clear error so misconfiguration
     // is loud, not silent.
     throw new Error(

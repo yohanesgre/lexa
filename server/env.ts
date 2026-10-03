@@ -100,10 +100,9 @@ export function legacyGithubEnvVars(source: Record<string, string | undefined>):
 }
 
 /**
- * Build a RuntimeEnv from a plain process-env-shaped object. Used by the Bun
- * host's `server/entry.ts` at boot — the snapshot is captured once and
- * threaded through the request pipeline (auth, storage, http) so the rest
- * of the code never touches `process.env` directly.
+ * Build a RuntimeEnv from a plain process-env-shaped object. The snapshot is
+ * captured once and threaded through the request pipeline (auth, storage,
+ * http) so the rest of the code never touches `process.env` directly.
  */
 export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv {
   return {

@@ -271,7 +271,7 @@ async function main() {
   }
 
   // 6. Seed sample data — offered in every environment. The choice is
-  //    persisted as LXK_SEED_DEV so `dev:full` boot-seeding respects an
+  //    persisted as LXK_SEED_DEV so Workers boot-seeding respects an
   //    explicit N (otherwise the boot seed would resurrect sample data
   //    right after setup).
   console.log("\n── Sample data ──");
@@ -304,7 +304,7 @@ async function main() {
     seedChoice = "yes";
   } else if (hasFlag("--no-seed")) {
     console.log("  Skipping sample data (--no-seed).");
-    console.log("  Boot seeding disabled (LXK_SEED_DEV=0) — dev:full will stay empty.");
+    console.log("  Boot seeding disabled (LXK_SEED_DEV=0) — the dev flow will stay empty.");
     seedChoice = "no";
   } else if (NON_INTERACTIVE) {
     console.log("  Non-interactive — skipping sample data (run interactively to seed).");
@@ -312,7 +312,7 @@ async function main() {
     const seed = ask("Include sample data (dev projects + wiki)?", "y");
     if (seed.trim().toLowerCase().startsWith("n")) {
       console.log("  Skipping sample data.");
-      console.log("  Boot seeding disabled (LXK_SEED_DEV=0) — dev:full will stay empty.");
+      console.log("  Boot seeding disabled (LXK_SEED_DEV=0) — the dev flow will stay empty.");
       seedChoice = "no";
     } else {
       seededNow = runSeedFile();
@@ -342,15 +342,14 @@ async function main() {
   console.log(`  Database:       ${DB_PATH}`);
   console.log("");
   if (flavor === "dev") {
-  console.log("  Run the dev stack:  bun run dev:full");
-  console.log("  Frontend:           http://localhost:5173  (vite, live reload)");
-  console.log("  API (optional):     http://localhost:3000  (serves the built app)");
+  console.log("  Run the dev stack:  bun run dev");
+  console.log("  App:                http://localhost:5173  (Workers flavor, live reload)");
   if (seededNow) {
   console.log("  NOTE: seeded member users have no password — log in as the");
   console.log("        superadmin and issue set-password links from the Members UI.");
   } else if (seedChoice === "no") {
   console.log("  Workspace is empty — create your first project from the UI.");
-  console.log("  To seed later: LXK_SEED_DEV=1 bun run dev:full (empty DB only).");
+  console.log("  To seed later: LXK_SEED_DEV=1 bun run dev (empty DB only).");
   }
   } else {
     console.log("  Deploy via scripts/install.sh (see docs/DEPLOYMENT.md).");

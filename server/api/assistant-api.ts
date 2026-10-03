@@ -2,7 +2,7 @@
 // MCP registry, Jev registry) — ADR-0003 §F.
 //
 // Workers-only module: it imports the assistant engine / gateway / MCP bridge,
-// so the Bun entry (`server/entry.ts` → `http.ts`) never imports it. The Bun
+// so the Bun-only base handler (`http.ts`) never imports it. The Bun
 // handler composes only the base groups, so `/api/assistant/*` and
 // `/api/admin/assistant/*` 404 there; `createWorkersApiHandler` below mounts
 // base + assistant.

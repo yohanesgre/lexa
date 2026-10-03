@@ -7,7 +7,7 @@ import { loginLimiter, authIpLimiter } from "../auth";
 
 // R17: 5 failed login attempts per email per 60s, then a 15-minute lockout.
 // Memory storage (single process) — the better-auth rateLimit plugin does not
-// exist in 1.6.27 (declared deviation; wired in server/entry.ts around
+// exist in 1.6.27 (declared deviation; wired around
 // POST /api/auth/sign-in/email).
 describe("loginLimiter", () => {
   it("allows attempts under the budget and locks after 5 failures", () => {

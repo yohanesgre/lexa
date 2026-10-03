@@ -28,9 +28,9 @@ on the machine by the install script or the setup wizard, and all working
 `.env*` files are gitignored. The tracked `.env.toml.example` (repo root) is the
 dev + reference template; `.env.toml` itself is written by `bun run setup` (0600).
 
-The loader is `server/env-file.ts` — a plain module with a CLI. `server/entry.ts`
-calls `applyEnvFile()` at boot, `scripts/dev.sh` evals
-`bun server/env-file.ts --export-shell`, and `bun run setup` writes the file.
+The loader is `server/env-file.ts` — a plain module with a CLI. `bun run setup`
+writes the file, and the Workers dev flow (`scripts/dev-workers.sh`) derives
+`.dev.vars` from it via `bun server/env-file.ts --emit-dotenv`.
 **Real environment variables always win** over file values; the loader never
 overwrites an already-set variable.
 
@@ -68,7 +68,7 @@ clone.)
 
 **Development** starts from a clone — `git clone
 https://github.com/yohanesgre/lexa && cd lexa`, then `bun install && bun run
-setup && bun run dev:full`.
+setup && bun run dev`.
 
 Flags: `--ref <tag>` (artifact source: a release tag), `--name <name>` (workers
 deploy name, default `lexa`), `--account <id>` (Cloudflare account id; skips the
@@ -269,7 +269,7 @@ boot and never overwrites a variable already set in the real environment.
 | `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key — and, **on Workers**, the assistant's internal `X-Lexa-Internal` HMAC key derives from it. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
-| `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
+| `LXK_SEED_DEV` | dev-only seed flag written by `bun run setup` (Y → 1, N → 0) |
 | `LXK_TRUSTED_PROXY_CIDRS` | **Bun/dev-only — inert on Workers**, which has no socket peer and trusts the edge's `cf-connecting-ip` as-is. Comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when a reverse proxy connects from this host. Set it when the proxy is a separate host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
 | `PORT` | server port (default 3000) |
 
@@ -287,10 +287,10 @@ email/password (Better Auth).
 
 **Local dev:** `bun run setup` (dev-only CLI wizard: admin email, API key,
 migrations, optional sample data — self-hosters use the install script +
-`/setup` wizard instead) then `bun run dev:full` (API :3000 + vite :5173,
-vite proxies `/api`). `dev:full` sets `LXK_SEED_DEV=1` for boot-time sample
-data. Dev also sets `LXK_PUBLIC_URL=http://localhost:5173` (the Better Auth
-base URL + cookie domain for the local flow). See the repository README.
+`/setup` wizard instead) then `bun run dev` (Workers flavor: local D1
+migrations + `vite dev` on :5173; the worker co-hosts `/api` and SSR). Dev also
+sets `LXK_PUBLIC_URL=http://localhost:5173` (the Better Auth base URL + cookie
+domain for the local flow). See the repository README.
 
 **Superadmin account:** after install, open `<url>/setup` once — the wizard
 creates the first superadmin (free-choice email + password; the password is

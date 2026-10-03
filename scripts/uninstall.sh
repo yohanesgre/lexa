@@ -62,7 +62,6 @@ case "${TARGET}" in
   dev)
     REPO_DIR="${REPO_DIR:-lexa}"
     [ -d "${REPO_DIR}" ] || die "repo dir '${REPO_DIR}' not found"
-    pkill -f "server/entry.ts" 2>/dev/null || true
     pkill -f "vite dev" 2>/dev/null || true
     echo "  ✓ dev processes stopped"
     if [ "${PURGE}" = "1" ]; then

@@ -25,7 +25,6 @@ import { RUNTIME_ENV_STRING_KEYS } from "./env";
 
 const ENV_FILE_CLI = fileURLToPath(new URL("./env-file.ts", import.meta.url));
 const ENV_BOOT = fileURLToPath(new URL("./env-boot.ts", import.meta.url));
-const ENTRY = fileURLToPath(new URL("./entry.ts", import.meta.url));
 const AUTH_MODULE = fileURLToPath(new URL("./auth.ts", import.meta.url));
 const EXAMPLE = fileURLToPath(new URL("../.env.toml.example", import.meta.url));
 
@@ -363,12 +362,6 @@ describe("resolveEnvTarget", () => {
 });
 
 describe("env-file boot order (SEV regression)", () => {
-  it("keeps ./env-boot as the FIRST import in entry.ts", () => {
-    const source = readFileSync(ENTRY, "utf8");
-    const firstImport = /^\s*import\s+(?:[^'"]*?\bfrom\s+)?["']([^"']+)["']/m.exec(source);
-    expect(firstImport?.[1]).toBe("./env-boot");
-  });
-
   it("populates the auth module constant from a file-only value", () => {
     const dir = tmpDir();
     writeEnvFile(join(dir, ".env.toml"), { LXK_PUBLIC_URL: "http://file-only.example.test" });

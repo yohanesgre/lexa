@@ -1321,7 +1321,7 @@ export const searchParams = (req: unknown): URLSearchParams => {
 };
 
 
-// Bun-only Database loading. Reached synchronously from entry.ts but the
+// Bun-only Database loading. Reached synchronously from createApiHandler but the
 // constructor must not be a static value import (that would pin bun:sqlite
 // into the workerd module graph). Resolve it with a dynamic import —
 // invisible to the static graph, served by the host runtime on Bun and by
@@ -1363,7 +1363,7 @@ async function buildBunApp(dbPath: string, env?: RuntimeEnv) {
   return { handler, driver };
 }
 
-// Eager boot with crash-on-failure: entry.ts calls the factories
+// Eager boot with crash-on-failure: createApiHandler calls the factories
 // synchronously and a bad DATABASE_PATH must still take the process down
 // at boot (as the previous synchronous construction did) instead of
 // surfacing as per-request 500s.

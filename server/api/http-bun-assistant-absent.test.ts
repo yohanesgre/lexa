@@ -11,8 +11,8 @@ import { capabilities } from "../capabilities";
 // ADR-0003 §F: the Bun flavor drops the assistant end-to-end. The assistant
 // groups are not mounted, so `/api/assistant/*` and `/api/admin/assistant/*`
 // return the framework's 404 (not 401/501), while base routes and health keep
-// working. `/api/capabilities` is served by entry.ts before the HttpApi app;
-// its contract is asserted at the `capabilities()` seam.
+// working. `/api/capabilities` is a separate boot contract served outside the
+// HttpApi app; its contract is asserted at the `capabilities()` seam.
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "z".repeat(43);

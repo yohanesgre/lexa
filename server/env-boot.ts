@@ -1,9 +1,9 @@
-// Boot-time env-file side effect. `server/entry.ts` imports this FIRST so the
-// file's values land in `process.env` before any module that snapshots env at
-// import scope evaluates its constants (server/auth.ts,
-// server/api/limits.ts, server/logging/logger.ts). ES module bodies evaluate in
-// import order, so a plain `applyEnvFile()` inside entry.ts's body runs too
-// late — after every static import has already captured the process env.
+// Boot-time env-file side effect: import this FIRST so the file's values land
+// in `process.env` before any module that snapshots env at import scope
+// evaluates its constants (server/auth.ts, server/api/limits.ts,
+// server/logging/logger.ts). ES module bodies evaluate in import order, so a
+// plain `applyEnvFile()` called after the imports runs too late — after every
+// static import has already captured the process env.
 //
 // A present .env.toml that cannot be read or parsed is a hard boot failure —
 // exiting non-zero with a path-naming message — never a silent fall back to

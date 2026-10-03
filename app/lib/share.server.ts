@@ -11,8 +11,7 @@ import type { SharedTree } from "./share";
 // request URL to derive an origin) and is wasteful on Bun.
 //
 // Flavor-selected live layer (same shape as the API entry points):
-//   Bun     → bun:sqlite at DATABASE_PATH (WAL, second connection to the same
-//             file is safe alongside server/entry.ts)
+//   Bun     → bun:sqlite at DATABASE_PATH (WAL)
 //   Workers → the D1 binding, read from the workerd `cloudflare:workers`
 //             module (canonical per docs/CLOUDFLARE_WORKERS.md §TanStack Start)
 // The runtime is built once per isolate/process and reused.
