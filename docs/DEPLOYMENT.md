@@ -51,9 +51,9 @@ converts it to `.env.toml` and renames the original to `.env.legacy` (0600).
 curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- workers [flags]
 ```
 
-`workers` is the default. The installer hub serves the newest release with
-`BASE_URL` pinned to its tag (see `~/projects/lexa-installer`). Pin explicitly
-with `?ref=vYYYY.MINOR.MICRO`, or bypass the hub with the raw
+`workers` is the default. The installer hub serves the newest release with its
+`BASE_URL` pinned to that release's tag. Pin explicitly with
+`?ref=vYYYY.MINOR.MICRO`, or bypass the hub with the raw
 `https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh`
 URL for a tag.
 
@@ -250,7 +250,7 @@ boot and never overwrites a variable already set in the real environment.
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |
-| `LXK_TRUSTED_PROXY_CIDRS` | hand-set (only when a non-loopback proxy fronts the API) | no |
+| `LXK_TRUSTED_PROXY_CIDRS` | hand-set (Bun/dev only — inert on Workers, which trusts the edge's `cf-connecting-ip`; set only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
 | `LXK_SECRETS_MASTER_KEY` | minted by the installer and pushed/custodied in `cf-workers/.env.toml`; preserved across install-script re-runs | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and the assistant's internal HMAC derivation |
 
@@ -270,7 +270,7 @@ boot and never overwrites a variable already set in the real environment.
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
-| `LXK_TRUSTED_PROXY_CIDRS` | comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when a reverse proxy connects from this host. Set it when the proxy is a separate host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
+| `LXK_TRUSTED_PROXY_CIDRS` | **Bun/dev-only — inert on Workers**, which has no socket peer and trusts the edge's `cf-connecting-ip` as-is. Comma-separated IPv4/IPv6 CIDRs or bare IPs of reverse proxies allowed to contribute a trusted `cf-connecting-ip` header to rate limiting. **Unset/empty → loopback only** (`127.0.0.0/8`, `::1`, and the v4-mapped form) — correct when a reverse proxy connects from this host. Set it when the proxy is a separate host reachable over a private network (e.g. `172.16.0.0/12`, `10.0.0.0/8`). A peer that is neither loopback nor listed here has its forwarding header **ignored** (the socket/stamped IP is used), so a direct client cannot spoof its way into a fresh bucket. Malformed entries are ignored; the key is never a boot failure. |
 | `PORT` | server port (default 3000) |
 
 **Jev is configured in the webapp** (Admin → Assistant → Providers & Models),
@@ -504,9 +504,11 @@ The coding-agent ("agent-runtime") tier was deleted end to end — migration
 tier is the Workers-only Assistant (ADR-0003); the Bun flavor serves none. See
 `docs/ARCHITECTURE.md` §Assistant → removal record.
 
-1. **Upgrade the server.** `install.sh` from the new release tag applies `0008`
-   (or run `wrangler d1 migrations apply`). **Back up first**
-   (`docs/BACKUPS.md`) — this is a hard drop of operational state.
+1. **Upgrade the server.** `install.sh` from the new release tag applies `0008`.
+   **Back up first** (`docs/BACKUPS.md`) — this is a hard drop of operational
+   state. (`wrangler d1 migrations apply` is the fallback only for a
+   wrangler-journal database; on an `install.sh`-managed one it writes a second
+   `d1_migrations` journal and double-applies — see the one-method rule.)
 2. **Stop and remove the machine listener on every host.** It has no server
    endpoint any more and will only log errors:
    ```bash
@@ -554,7 +556,9 @@ JSON fields. Data is migrated, never dropped. No env keys or CLI changes;
 this rename is server-side only.
 
 1. **Upgrade the server.** `install.sh` from the new release tag applies
-   `0006_assistant_rename.sql` (or run `wrangler d1 migrations apply`).
+   `0006_assistant_rename.sql`. (`wrangler d1 migrations apply` is only for a
+   wrangler-journal database; on an `install.sh`-managed one it mixes journals —
+   see the one-method rule.)
 2. **Old API clients get 404** on `/api/herald/*` and `/api/admin/herald/*`. Error
    codes are now `ASSISTANT_*`; activity/comment JSON field `viaHerald` is now
    `viaAssistant`.

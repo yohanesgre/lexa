@@ -28,7 +28,6 @@ const ENV_BOOT = fileURLToPath(new URL("./env-boot.ts", import.meta.url));
 const ENTRY = fileURLToPath(new URL("./entry.ts", import.meta.url));
 const AUTH_MODULE = fileURLToPath(new URL("./auth.ts", import.meta.url));
 const EXAMPLE = fileURLToPath(new URL("../.env.toml.example", import.meta.url));
-const EXAMPLE_ALLOWLIST = ["COMPOSE_PROJECT_NAME", "LXK_IMAGE_TAG", "CF_TUNNEL_TOKEN"];
 
 function tmpDir(): string {
   return mkdtempSync(join(tmpdir(), "lexa-env-file-"));
@@ -437,8 +436,8 @@ describe(".env.toml.example drift guard", () => {
     expect(missing).toEqual([]);
   });
 
-  it("contains no keys outside RuntimeEnv + the tooling allowlist", () => {
-    const allowed = new Set<string>([...RUNTIME_ENV_STRING_KEYS, ...EXAMPLE_ALLOWLIST]);
+  it("contains no keys outside RuntimeEnv string keys", () => {
+    const allowed = new Set<string>(RUNTIME_ENV_STRING_KEYS);
     const extra = [...present].filter((k) => !allowed.has(k));
     expect(extra).toEqual([]);
   });
