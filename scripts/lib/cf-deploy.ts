@@ -47,6 +47,7 @@ import {
 import { join, dirname, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 function die(msg: string): never {
   console.error(`  ✗ ${msg}`);
@@ -504,6 +505,51 @@ export function resolveAiBinding(root: RootWorkerConfig): Record<string, unknown
   return { ai };
 }
 
+// First readable `version` across the given package.json paths, or null.
+export function readPackageVersion(paths: string[]): string | null {
+  for (const path of paths) {
+    try {
+      const pkg = JSON.parse(readFileSync(path, "utf-8")) as {
+        version?: unknown;
+      };
+      if (typeof pkg.version === "string" && pkg.version.length > 0) {
+        return pkg.version;
+      }
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null;
+}
+
+// The web-app version stamped into the per-deploy config so `lx worker
+// upgrade` can compare the deployed app against the latest release. Read from
+// the deploy dir `package.json` first (from-repo runs), else the module's own
+// repo root. A release tarball carries no package.json, so an absence returns
+// null and the marker is simply omitted (the CLI warns).
+export function readDeployVersion(dir: string): string | null {
+  return readPackageVersion([
+    join(dir, "package.json"),
+    fileURLToPath(new URL("../../package.json", import.meta.url)),
+  ]);
+}
+
+// Per-deploy `vars`. `LXK_PUBLIC_URL` is stamped on every deploy (custom
+// domain, else the resolved workers.dev host) so `lx worker upgrade` can match
+// the deployment to the logged-in server; `LXK_VERSION` carries the web-app
+// version. Each key is omitted only when genuinely unknown — an empty
+// LXK_PUBLIC_URL would shadow the app's localhost fallback.
+export function resolveDeployVars(input: {
+  version: string | null;
+  publicUrl: string;
+}): Record<string, string> {
+  return {
+    LXK_ENV: "production",
+    ...(input.publicUrl ? { LXK_PUBLIC_URL: input.publicUrl } : {}),
+    ...(input.version ? { LXK_VERSION: input.version } : {}),
+  };
+}
+
 const API = "https://api.cloudflare.com/client/v4";
 
 let CF_TOKEN = "";
@@ -784,7 +830,18 @@ export async function main(): Promise<void> {
       `  (deploy name '${NAME}' is a deprecated flavor alias — prefer an explicit --name)`,
     );
   }
-  const CUSTOM_DOMAIN = flag("domain"); // absent → workers.dev
+  // A workers.dev host (or empty) is not a custom domain: honoring one would
+  // point the zone lookup at workers.dev and die. Treat it as absent.
+  const requestedDomain = flag("domain");
+  const CUSTOM_DOMAIN =
+    requestedDomain && !requestedDomain.endsWith(".workers.dev")
+      ? requestedDomain
+      : "";
+  if (requestedDomain && !CUSTOM_DOMAIN) {
+    console.log(
+      `  (ignoring --domain '${requestedDomain}' — a workers.dev host is not a custom domain)`,
+    );
+  }
   const DIR = flag("dir") || process.cwd();
 
   const accounts = await listAccounts();
@@ -816,6 +873,24 @@ export async function main(): Promise<void> {
       die(
         `no Cloudflare zone for '${zoneHost}' — add the site to this CF account first`,
       );
+  }
+
+  // Public URL stamped into the generated config: the custom domain when set,
+  // else the account's workers.dev host (best-effort). Resolved before the
+  // config is written so every deploy records it; the same value feeds the
+  // .deployed-url write below.
+  let publicUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
+  if (!publicUrl) {
+    try {
+      const sub = await cfFetch(`/accounts/${account}/workers/subdomain`);
+      const result = sub.json?.result as { subdomain?: string } | null;
+      const subdomain = result?.subdomain ?? "";
+      if (sub.ok && subdomain) {
+        publicUrl = `https://${FLAVOR.workerName}.${subdomain}.workers.dev`;
+      }
+    } catch {
+      /* best-effort */
+    }
   }
 
   const d1Id = await ensureD1(FLAVOR, RESET_DB);
@@ -867,7 +942,6 @@ export async function main(): Promise<void> {
   copyContents(dirname(mainAbs), deployDir);
   copyContents(assetsAbs, join(deployDir, "assets"));
 
-  const publicUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
   // The root config read/parse and the observability shape check both refuse
   // through die: a bad wrangler.jsonc must read as an installer refusal, not a
   // crash. `observability` carries root's block verbatim into the per-deploy
@@ -886,10 +960,7 @@ export async function main(): Promise<void> {
       ...(manifest.no_bundle ? { no_bundle: true } : {}),
       ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
       assets: { directory: "./assets", binding: "ASSETS" },
-      vars: {
-        LXK_ENV: "production",
-        ...(publicUrl ? { LXK_PUBLIC_URL: publicUrl } : {}),
-      },
+      vars: resolveDeployVars({ version: readDeployVersion(DIR), publicUrl }),
       d1_databases: [
         { binding: "DB", database_name: FLAVOR.d1Name, database_id: d1Id },
       ],
@@ -987,21 +1058,8 @@ export async function main(): Promise<void> {
   }
 
   // ── Done: API keys are minted post-setup (login → Settings → API Keys) ──
-  // The installer banner needs a URL. A custom domain is known; otherwise ask
-  // the account for its workers.dev subdomain (best-effort — no failure if the
-  // endpoint is unavailable).
-  let deployedUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
-  if (!deployedUrl) {
-    try {
-      const sub = await cfFetch(`/accounts/${account}/workers/subdomain`);
-      const result = sub.json?.result as { subdomain?: string } | null;
-      const subdomain = result?.subdomain ?? "";
-      if (sub.ok && subdomain)
-        deployedUrl = `https://${FLAVOR.workerName}.${subdomain}.workers.dev`;
-    } catch {
-      /* best-effort */
-    }
-  }
+  // The installer banner needs a URL — resolved up front (LXK_PUBLIC_URL).
+  const deployedUrl = publicUrl;
   if (deployedUrl) {
     writeFileSync(join(DIR, ".deployed-url"), `${deployedUrl}\n`, {
       mode: 0o600,
