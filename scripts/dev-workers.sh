@@ -5,7 +5,8 @@
 # - Ensures `.dev.vars` exists: the Workers runtime reads `.dev.vars`, not
 #   `.env.toml`. Derived from the env file through the loader's emit path
 #   (`bun server/env-file.ts --path <file> --emit-dotenv`), filtered to the
-#   `LXK_*` keys the runtime consumes, written 0600.
+#   runtime key set (`LXK_*`, `LOG_LEVEL`, `TANSTACK_AI_*`, `CRON_SECRET`),
+#   created 0600 from birth (umask) with a chmod backstop.
 # - Idempotent — an existing `.dev.vars` is NEVER overwritten.
 # - Applies local D1 migrations, then execs `vite dev` with LEXA_FLAVOR=workers.
 # - vite is resolved from node_modules/.bin via `bun x` (bare `vite` is not on
@@ -25,12 +26,16 @@ if [ ! -f .dev.vars ]; then
     echo "No .env.toml found — run \`bun run setup\` first." >&2
     exit 1
   fi
-  derived="$(bun server/env-file.ts --path "$env_file" --emit-dotenv | grep -E '^LXK_[A-Z0-9_]*=' || true)"
-  if [ -z "$derived" ]; then
-    echo "No LXK_* keys found in $env_file — run \`bun run setup\` first." >&2
+  if ! raw="$(bun server/env-file.ts --path "$env_file" --emit-dotenv)"; then
+    echo "env-file: failed to read $env_file" >&2
     exit 1
   fi
-  printf '%s\n' "$derived" > .dev.vars
+  derived="$(printf '%s\n' "$raw" | grep -E '^(LXK_|LOG_LEVEL|TANSTACK_AI_|CRON_SECRET)' || true)"
+  if [ -z "$derived" ]; then
+    echo "No runtime keys found in $env_file — run \`bun run setup\` first." >&2
+    exit 1
+  fi
+  (umask 077; printf '%s\n' "$derived" > .dev.vars)
   chmod 600 .dev.vars
   echo "Wrote .dev.vars from $env_file (0600)."
 fi
