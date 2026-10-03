@@ -2,14 +2,16 @@
 // refusal, backup/rollback, migration pre-flight, and custody/binding
 // preservation. Seams (fetch, wrangler, CF API, tar) are injected so these
 // tests never touch the network or Cloudflare.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256Hex, type ReleaseFetcher } from "./release";
 import {
   backupPathFor,
+  discoverWorkerDeploys,
   readDeployConfigFile,
+  resolveCfCredentials,
   runUpgrade,
   type CfJson,
   type UpgradeDeps,
@@ -225,7 +227,7 @@ describe("worker upgrade backup/rollback", () => {
     writeFileSync(marker, "prior bundle\n");
     const before = readFileSync(config.configPath, "utf-8");
     const failing: WranglerRunner = () => ({ status: 1, stdout: "", stderr: "boom: deploy rejected" });
-    const { deps, errors } = buildDeps({ applied: [MCP_SECRET_REFS_MIGRATION, "0013_jev_registry.sql"], wrangler: failing });
+    const { deps, errors } = buildDeps({ applied: [MCP_SECRET_REFS_MIGRATION], wrangler: failing });
 
     const outcome = await runUpgrade(options(config, prior), deps);
 
@@ -237,6 +239,105 @@ describe("worker upgrade backup/rollback", () => {
     expect(existsSync(marker)).toBe(true);
     expect(existsSync(backupPathFor(config.dir))).toBe(true);
     expect(errors.join("\n")).toContain("Rolled back");
+    // Dir-only rollback: applied migrations are reported, never reverted.
+    expect(errors.join("\n")).toContain("migrations applied: 1 — not reverted");
+  });
+});
+
+describe("worker upgrade var preservation", () => {
+  it("keeps prior vars beyond the resolved LXK_* keys", async () => {
+    const root = makeRoot();
+    const prior = priorConfig({
+      vars: {
+        LXK_ENV: "production",
+        LXK_PUBLIC_URL: "https://lexa.example.workers.dev",
+        LXK_VERSION: "1.0.0",
+        CUSTOM_FLAG: "keep-me",
+      },
+    });
+    const { config } = makeDeploy(root, prior);
+    const { deps } = buildDeps({ applied: [MCP_SECRET_REFS_MIGRATION, "0013_jev_registry.sql"] });
+
+    const outcome = await runUpgrade(options(config, prior), deps);
+
+    expect(outcome.status).toBe("ok");
+    const rebuilt = readDeployConfigFile(config.configPath)!;
+    expect(rebuilt.vars?.CUSTOM_FLAG).toBe("keep-me");
+    expect(rebuilt.vars?.LXK_VERSION).toBe("2.0.0");
+  });
+});
+
+describe("worker upgrade post-upgrade discovery", () => {
+  it("reads the real config, not the staged bundle manifest, on a subsequent run", async () => {
+    const root = makeRoot();
+    const prior = priorConfig();
+    const { config } = makeDeploy(root, prior);
+    const { deps } = buildDeps({ applied: [MCP_SECRET_REFS_MIGRATION, "0013_jev_registry.sql"] });
+
+    const outcome = await runUpgrade(options(config, prior), deps);
+    expect(outcome.status).toBe("ok");
+    // The server manifest never lands as the bare `wrangler.json`.
+    expect(existsSync(join(config.dir, "wrangler.json"))).toBe(false);
+
+    // The backup is present; discovery still resolves exactly one real deploy.
+    expect(existsSync(backupPathFor(config.dir))).toBe(true);
+    const configs = discoverWorkerDeploys(root);
+    expect(configs.map((c) => c.flavor)).toEqual(["lexa"]);
+    const found = configs[0]!;
+    expect(found.accountId).toBe("acct_123");
+    const real = readDeployConfigFile(found.configPath)!;
+    expect(real.account_id).toBe("acct_123");
+    expect(real.d1_databases).toEqual(prior.d1_databases);
+    expect(real.kv_namespaces).toEqual(prior.kv_namespaces);
+  });
+});
+
+describe("resolveCfCredentials precedence", () => {
+  const envKeys = ["CF_API_TOKEN", "CLOUDFLARE_API_TOKEN"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of envKeys) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of envKeys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key]!;
+    }
+  });
+
+  it("prefers --cf-token, then CF_API_TOKEN, then CLOUDFLARE_API_TOKEN", () => {
+    const root = makeRoot();
+    const deployDir = join(root, "deploy-lexa");
+    mkdirSync(deployDir, { recursive: true });
+    writeFileSync(join(root, ".cf-token"), "dir-tok\n");
+    writeFileSync(join(deployDir, ".cf-token"), "deploy-tok\n");
+
+    expect(resolveCfCredentials("flag-tok", root, deployDir)).toEqual({ token: "flag-tok", source: "--cf-token" });
+    process.env.CF_API_TOKEN = "cf-env";
+    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "cf-env", source: "environment" });
+    delete process.env.CF_API_TOKEN;
+    process.env.CLOUDFLARE_API_TOKEN = "cf-global";
+    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "cf-global", source: "environment" });
+  });
+
+  it("falls back to the dir .cf-token, then the deployDir one, then none", () => {
+    const root = makeRoot();
+    const deployDir = join(root, "deploy-lexa");
+    mkdirSync(deployDir, { recursive: true });
+    writeFileSync(join(deployDir, ".cf-token"), "deploy-tok\n");
+    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "deploy-tok", source: ".cf-token" });
+
+    writeFileSync(join(root, ".cf-token"), "dir-tok\n");
+    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "dir-tok", source: ".cf-token" });
+
+    rmSync(join(root, ".cf-token"));
+    rmSync(join(deployDir, ".cf-token"));
+    expect(resolveCfCredentials(undefined, root, deployDir)).toEqual({ token: "", source: "none" });
   });
 });
 

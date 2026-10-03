@@ -560,7 +560,8 @@ export function resolveDeployVars(input: {
 export const MCP_SECRET_REFS_MIGRATION = "0012_remove_mcp_secret_refs.sql";
 
 // Migration files not yet recorded in the journal, sorted for deterministic
-// apply order. Shared by the installer's apply loop and `lx worker upgrade`.
+// apply order. Used by `lx worker upgrade`; the installer applies migrations
+// with its own inline loop (same journal + ordering semantics).
 export function pendingMigrations(
   files: readonly string[],
   applied: ReadonlySet<string>,

@@ -21,12 +21,13 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { CliConfigService, normalizeHost } from "./config";
 import {
@@ -151,7 +152,9 @@ export function readDeployConfigFile(configPath: string): WorkerConfigJson | nul
 }
 
 // `deploy-<flavor>/wrangler.<flavor>.json`, but tolerate a bare
-// `wrangler.json`. Sorted for deterministic output when both exist.
+// `wrangler.json`. A flavor-specific config wins over the bare name — a staged
+// bundle manifest is also called `wrangler.json`, so preferring the deploy
+// config keeps discovery reading the real one. Sorted for deterministic output.
 function findWranglerConfig(deployDir: string): string | null {
   let entries: string[];
   try {
@@ -159,12 +162,19 @@ function findWranglerConfig(deployDir: string): string | null {
   } catch {
     return null;
   }
-  const matches = entries.filter((f) => /^wrangler(\..+)?\.json$/.test(f)).sort();
+  const matches = entries.filter((f) => /^wrangler(\..+)?\.json$/.test(f)).sort((a, b) => {
+    const aBare = a === "wrangler.json";
+    const bBare = b === "wrangler.json";
+    if (aBare !== bBare) return aBare ? 1 : -1;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
   return matches.length > 0 ? join(deployDir, matches[0]!) : null;
 }
 
 // Every deploy config under the custody dir, sorted by flavor for stable
-// output. A dir without a readable config is skipped (not a deploy).
+// output. A dir without a readable config is skipped (not a deploy). The
+// `deploy-<flavor>.bak` backup sits beside the live dir and must never be
+// discovered as a deploy.
 export function discoverWorkerDeploys(dir: string): WorkerDeployConfig[] {
   let entries: import("node:fs").Dirent[];
   try {
@@ -174,7 +184,7 @@ export function discoverWorkerDeploys(dir: string): WorkerDeployConfig[] {
   }
   const out: WorkerDeployConfig[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith("deploy-")) continue;
+    if (!entry.isDirectory() || !entry.name.startsWith("deploy-") || entry.name.endsWith(".bak")) continue;
     const deployDir = join(dir, entry.name);
     const configPath = findWranglerConfig(deployDir);
     if (!configPath) continue;
@@ -209,17 +219,20 @@ export function selectWorkerDeploy(
   configs: WorkerDeployConfig[],
   opts: { worker?: string | undefined; loginHost?: string | undefined },
 ): WorkerSelection {
-  const available = configs.map((c) => c.flavor);
-  if (configs.length === 0) return { kind: "none" };
+  // Defensive: a `deploy-<flavor>.bak` backup must never be selected even if a
+  // caller bypasses discovery's own filter.
+  const deploys = configs.filter((c) => !c.flavor.endsWith(".bak"));
+  const available = deploys.map((c) => c.flavor);
+  if (deploys.length === 0) return { kind: "none" };
   if (opts.worker) {
-    const matches = configs.filter((c) => c.flavor === opts.worker || c.workerName === opts.worker);
+    const matches = deploys.filter((c) => c.flavor === opts.worker || c.workerName === opts.worker);
     if (matches.length === 0) return { kind: "worker-not-found", worker: opts.worker, available };
     if (matches.length > 1) return { kind: "ambiguous", available };
     return { kind: "resolved", config: matches[0]! };
   }
-  if (configs.length === 1) return { kind: "resolved", config: configs[0]! };
+  if (deploys.length === 1) return { kind: "resolved", config: deploys[0]! };
   if (opts.loginHost) {
-    const matches = configs.filter((c) => c.publicUrl !== "" && normalizeHost(c.publicUrl) === opts.loginHost);
+    const matches = deploys.filter((c) => c.publicUrl !== "" && normalizeHost(c.publicUrl) === opts.loginHost);
     if (matches.length === 1) return { kind: "resolved", config: matches[0]! };
   }
   return { kind: "ambiguous", available };
@@ -276,7 +289,6 @@ export interface CustodyState {
   cfTokenPath: string | null;
   envFilePath: string | null;
   hasMasterKey: boolean;
-  hasMasterKeyPrev: boolean;
 }
 
 function hasEnvKey(text: string, key: string): boolean {
@@ -303,7 +315,6 @@ export function readCustody(dir: string): CustodyState {
     cfTokenPath: existsSync(cfTokenPath) ? cfTokenPath : null,
     envFilePath: envPath,
     hasMasterKey: hasEnvKey(text, "LXK_SECRETS_MASTER_KEY"),
-    hasMasterKeyPrev: hasEnvKey(text, "LXK_SECRETS_MASTER_KEY_PREV"),
   };
 }
 
@@ -323,23 +334,28 @@ export function backupDeployDir(deployDir: string): string {
 }
 
 // Restore the deploy dir from the backup. Returns false when no backup exists
-// (nothing to roll back to).
+// (nothing to roll back to). Restores via a temp sibling + rename so a crash
+// mid-copy never leaves the deploy dir missing. The `.bak` is retained.
 export function restoreDeployDir(deployDir: string): boolean {
   const bak = backupPathFor(deployDir);
   if (!existsSync(bak)) return false;
+  const tmp = join(dirname(deployDir), `.${basename(deployDir)}.restore-tmp`);
+  rmSync(tmp, { recursive: true, force: true });
+  cpSync(bak, tmp, { recursive: true });
   rmSync(deployDir, { recursive: true, force: true });
-  cpSync(bak, deployDir, { recursive: true });
+  renameSync(tmp, deployDir);
   return true;
 }
 
 // ── deploy-config rebuild (LX-37) ──
 
-function copyDirContents(from: string, to: string): void {
+function copyDirContents(from: string, to: string, exclude?: (name: string) => boolean): void {
   mkdirSync(to, { recursive: true });
   for (const entry of readdirSync(from)) {
+    if (exclude?.(entry)) continue;
     const src = join(from, entry);
     const dst = join(to, entry);
-    if (statSync(src).isDirectory()) copyDirContents(src, dst);
+    if (statSync(src).isDirectory()) copyDirContents(src, dst, exclude);
     else writeFileSync(dst, readFileSync(src));
   }
 }
@@ -354,12 +370,14 @@ export function readBundleManifest(stageDir: string): BundleManifest {
 }
 
 // Stage the new bundle into the existing deploy dir (flat layout: server
-// chunk contents at the deploy root, browser assets at ./assets).
+// chunk contents at the deploy root, browser assets at ./assets). The server
+// manifest `wrangler.json` is excluded — copied into the deploy dir it would
+// masquerade as (and shadow) the per-deploy `wrangler.<flavor>.json`.
 export function stageBundle(stageDir: string, deployDir: string, manifest: BundleManifest): void {
   const serverDir = join(stageDir, "dist", "server");
   const assetsDir = join(stageDir, "dist", "server", manifest.assets?.directory ?? "../client");
   if (!existsSync(serverDir)) throw new Error(`workers bundle entry missing: ${serverDir}`);
-  copyDirContents(serverDir, deployDir);
+  copyDirContents(serverDir, deployDir, (name) => name === "wrangler.json");
   if (existsSync(assetsDir)) copyDirContents(assetsDir, join(deployDir, "assets"));
 }
 
@@ -405,7 +423,7 @@ export function buildUpgradeConfig(
     compatibility_date: root?.compatibility_date ?? prior.compatibility_date ?? "2026-08-01",
     compatibility_flags: prior.compatibility_flags ?? ["nodejs_compat"],
     assets: prior.assets ?? { directory: "./assets", binding: "ASSETS" },
-    vars: resolveDeployVars({ version: opts.version, publicUrl: opts.publicUrl }),
+    vars: { ...(prior.vars ?? {}), ...resolveDeployVars({ version: opts.version, publicUrl: opts.publicUrl }) },
     observability: observability ?? { enabled: true },
   };
   const noBundle = opts.bundle.no_bundle ?? prior.no_bundle;
@@ -648,7 +666,8 @@ export async function runUpgrade(opts: UpgradeOptions, deps: UpgradeDeps): Promi
     verifyTarballChecksum(bytes, checksumsText, `lexa-workers-${release.tag}.tar.gz`);
     checksum = "verified";
     tmpRoot = mkdtempSync(join(tmpdir(), "lx-upgrade-"));
-    const tarballPath = join(tmpRoot, `lexa-workers-${release.tag}.tar.gz`);
+    const safeTag = release.tag.replace(/[^A-Za-z0-9._-]/g, "_");
+    const tarballPath = join(tmpRoot, `lexa-workers-${safeTag}.tar.gz`);
     writeFileSync(tarballPath, bytes);
     stageDir = join(tmpRoot, "stage");
     mkdirSync(stageDir, { recursive: true });
@@ -715,6 +734,7 @@ export async function runUpgrade(opts: UpgradeOptions, deps: UpgradeDeps): Promi
   const publicUrl = priorPublicUrl(prior, config);
   let backupPath = "";
   let mutated = false;
+  let appliedMigrations = 0;
   try {
     const bundle = readBundleManifest(stageDir);
     let root: RootWorkerConfig | undefined;
@@ -737,6 +757,7 @@ export async function runUpgrade(opts: UpgradeOptions, deps: UpgradeDeps): Promi
 
     if (pending.length > 0) {
       await applyMigrations(deps.cfJson, account, d1Id, stageDir, pending);
+      appliedMigrations = pending.length;
       deps.log(`  ✓ applied migrations: ${pending.join(", ")}`);
     }
 
@@ -759,10 +780,14 @@ export async function runUpgrade(opts: UpgradeOptions, deps: UpgradeDeps): Promi
     cleanup();
     return { status: "ok", tag: release.tag, currentVersion: current, latestVersion: latest, backupPath, pending };
   } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e);
+    const baseReason = e instanceof Error ? e.message : String(e);
+    // Rollback restores files only; applied D1 migrations are never reverted.
+    const migrationNote = appliedMigrations > 0 ? ` (migrations applied: ${appliedMigrations} — not reverted)` : "";
+    const reason = `${baseReason}${migrationNote}`;
     const rolledBack = mutated ? restoreDeployDir(config.dir) : false;
     if (rolledBack) deps.error(`  Rolled back to ${backupPath}`);
-    deps.error(`  Update failed: ${reason}`);
+    if (appliedMigrations > 0) deps.error(`  migrations applied: ${appliedMigrations} — not reverted (dir-only rollback)`);
+    deps.error(`  Update failed: ${baseReason}`);
     cleanup();
     return { status: "failed", reason, rolledBack };
   }

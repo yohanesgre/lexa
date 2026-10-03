@@ -176,6 +176,39 @@ describe("worker config parsing + selection (pure)", () => {
     expect(configs[0]!.workerName).toBe("alpha");
   });
 
+  it("never discovers a deploy-<flavor>.bak backup as a deploy (second-run simulation)", () => {
+    const root = makeRoot();
+    writeDeploy(root, "lexa", { name: "lexa", accountId: "acct_live", version: "2.0.0" });
+    // The backup sits beside the live dir with the same config name.
+    const bak = join(root, "deploy-lexa.bak");
+    mkdirSync(bak, { recursive: true });
+    writeFileSync(
+      join(bak, "wrangler.lexa.json"),
+      JSON.stringify({ name: "lexa", account_id: "acct_stale", vars: { LXK_VERSION: "1.0.0" } }, null, 2) + "\n",
+    );
+
+    const configs = discoverWorkerDeploys(root);
+    expect(configs.map((c) => c.flavor)).toEqual(["lexa"]);
+    expect(configs[0]!.accountId).toBe("acct_live");
+
+    // A second run (backup present) must target the live deploy, never the .bak.
+    const picked = selectWorkerDeploy(configs, { worker: "lexa" });
+    expect(picked.kind).toBe("resolved");
+    if (picked.kind === "resolved") {
+      expect(picked.config.flavor).toBe("lexa");
+      expect(picked.config.accountId).toBe("acct_live");
+    }
+  });
+
+  it("selectWorkerDeploy defensively drops .bak entries", () => {
+    const live = { flavor: "lexa", dir: "", configPath: "", workerName: "lexa", accountId: "acct_live", publicUrl: "", version: "" };
+    const stale = { flavor: "lexa.bak", dir: "", configPath: "", workerName: "lexa", accountId: "acct_stale", publicUrl: "", version: "" };
+    expect(selectWorkerDeploy([stale], {})).toEqual({ kind: "none" });
+    const picked = selectWorkerDeploy([live, stale], {});
+    expect(picked.kind).toBe("resolved");
+    if (picked.kind === "resolved") expect(picked.config.accountId).toBe("acct_live");
+  });
+
   it("selectWorkerDeploy: worker-not-found, single, and login-host tie-break", () => {
     const single = [{ flavor: "lexa", dir: "", configPath: "", workerName: "lexa", accountId: "", publicUrl: "", version: "" }];
     expect(selectWorkerDeploy(single, {}).kind).toBe("resolved");
