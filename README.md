@@ -80,7 +80,7 @@ curl -fsSL https://install.yohanesgre.com/lexa/install-cli.sh | bash
 curl -fsSL https://install.yohanesgre.com/lexa/uninstall.sh | bash -s -- workers
 ```
 
-- **Upgrade = re-run `install.sh`** from the new tag (idempotent; data survives)
+- **Upgrade = re-run `install.sh`** from the new tag (idempotent; data survives), or update the existing `cf-workers/` in place with `lx worker upgrade` ([runbook](docs/CLOUDFLARE_WORKERS.md#upgrading-a-workers-deployment-lx-worker-upgrade))
 - Full contract (target details, env reference, security notes):
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
 - GitHub App setup: [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)

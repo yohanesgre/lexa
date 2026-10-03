@@ -423,6 +423,112 @@ accounting remains Lexa's own (`assistant_model_prices` →
 Per-turn cost is recorded independently of tracing, so lowering
 `head_sampling_rate` to cut the trace bill never blanks the cost view.
 
+## Upgrading a Workers deployment (`lx worker upgrade`)
+
+`lx worker upgrade` updates a self-hosted Workers deployment in place: it
+fetches and sha256-verifies the release bundle, preserves the prior deploy's
+bindings and custody, applies pending D1 migrations, redeploys, and rolls the
+deploy dir back on failure. It is the CLI counterpart to re-running
+`install.sh`; both are supported. `install.sh` stays the whole upgrade for a
+fresh-machine re-run (see `docs/DEPLOYMENT.md` §Upgrade), while
+`lx worker upgrade` updates an existing custody dir from the headless CLI.
+
+**Two different updates.** `lx upgrade` is **CLI self-update** — it replaces the
+`lx` binary from the newest `cli-v*` release asset. `lx worker upgrade` is the
+**web app** on Cloudflare Workers. CLI releases (`cli-vX.Y.Z`) and web-app
+releases (`vX.Y.Z`) are independent tags.
+
+### Keep the custody dir
+
+Run the update from the custody dir (`cf-workers/` by default) — **do not
+delete it**; a re-run then has no prior bindings to preserve and no saved
+credentials. It holds:
+
+- `cf-workers/deploy-<flavor>/wrangler.<flavor>.json` — the per-deploy config
+  (account, D1/R2/KV ids, vars, Durable Objects). The rebuild preserves these
+  bindings verbatim — the ids identify **live** resources and are never
+  recreated.
+- `cf-workers/deploy-<flavor>.bak` — the prior bundle backup (the rollback source).
+- `cf-workers/.cf-token` — the saved Cloudflare API token (0600).
+- `cf-workers/.env.toml` — `LXK_SECRETS_MASTER_KEY` custody (0600); a missing
+  key is a warning, not a refusal.
+
+### Run it
+
+```bash
+cd cf-workers && lx worker upgrade
+# or point at the dir from anywhere:
+lx worker upgrade --dir /path/to/cf-workers
+```
+
+The default dir is the CWD; `--dir <path>` overrides it. If several
+`deploy-*` dirs exist, pass `--worker <name>` (matches the deploy flavor or the
+worker name); with exactly one deploy it is selected, otherwise a saved login
+host matching `vars.LXK_PUBLIC_URL` breaks the tie, and anything else is
+refused as ambiguous. The deploy's logged-in host is cross-checked against
+`LXK_PUBLIC_URL` before anything runs.
+
+| Flag | Behavior |
+|---|---|
+| `--dir <cf-workers>` | custody dir (default: CWD) |
+| `--worker <name>` | pick a deploy when several exist (flavor or worker name) |
+| `--cf-token <tok>` | Cloudflare API token, highest-priority credential |
+| `--version <tag>` | pin the release tag (`v2026.6.2` or `2026.6.2`) instead of the newest |
+| `--dry-run` | resolve + verify + print the plan, make no changes |
+| `--yes` | skip the confirmation prompt |
+| `--force` | reinstall even when already at the latest version |
+
+`--dry-run`/`--yes`/`--force` are presence checks — `--dry-run extra` still
+counts as a dry run. A bare value flag (`--dir` with no value, or `--dir=`) is
+a usage error. Without `--yes` the run prompts; a non-TTY run aborts.
+
+### Credentials chain
+
+First match wins; the token is never printed:
+
+1. `--cf-token <tok>`
+2. `CF_API_TOKEN`
+3. `CLOUDFLARE_API_TOKEN`
+4. `<dir>/.cf-token`
+5. `<deployDir>/.cf-token`
+
+No credentials → the update fails with guidance. `LXK_UPGRADE_OFFLINE=1` (or
+`true`) forces the release/migration seams to fail fast for an offline dry run.
+
+### Version compare
+
+- **Current** is `vars.LXK_VERSION` from the deploy config; a config predating
+  the marker reads as `unknown` (a warning, not a failure).
+- **Latest** comes from the release resolver: it lists releases and anchors on
+  the newest `v[0-9]` tag, so `cli-v*` tags never match and GitHub's
+  `releases/latest` is never used. The tarball is sha256-verified against
+  `checksums.txt`.
+- If current equals latest the command refuses; `--force` reinstalls the same
+  version.
+
+### Safety: backup, rollback, migrations
+
+- Before any mutation the deploy dir is copied to `deploy-<flavor>.bak`
+  (replacing an older backup). On a failed deploy the dir is restored from it
+  via a temp sibling + rename, so a crash mid-copy never leaves the deploy dir
+  missing. The `.bak` is retained.
+- **Rollback restores the deploy dir only — applied D1 migrations are NOT
+  reverted.** A failed deploy after migrations applied leaves the schema
+  forward; the report says so explicitly.
+- Migrations run as a pre-flight: the pending set is the `.sql` files not in the
+  live D1 `_migrations` journal, sorted for deterministic order. A journal gap
+  (a pending file sorting before an already-applied one) is refused — applying
+  a lagging file later would run its statements after later DDL.
+  `0012_remove_mcp_secret_refs.sql` (`MCP_SECRET_REFS_MIGRATION`) is
+  load-bearing: it must be applied with or before the managed-only build, so
+  the refusal names that rule. Pending migrations are applied **before**
+  deploy.
+- A non-dry-run pre-flight that cannot read the journal fails the update; a dry
+  run logs `Migrations: unavailable` and continues.
+
+A dry run prints `Release`, `Latest` (with current), `Checksum`, and
+`Migrations` lines and exits 0.
+
 ## Top risks
 
 1. **Sync→async DB rewrite + transaction semantics (L).** Every repo/service
