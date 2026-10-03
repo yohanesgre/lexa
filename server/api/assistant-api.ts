@@ -38,7 +38,7 @@ import { AssistantTaskRepo, type AdminAssistantRunKind } from "../repos/assistan
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { listModels, normalizeProviderKind, inferModelKind, assistantLog, type ProviderConfig } from "../assistant/provider";
+import { listModels, pingChatCompletion, isCloudflareAiBaseUrl, normalizeBaseUrl, CLOUDFLARE_DEFAULT_MODEL, normalizeProviderKind, inferModelKind, assistantLog, type ProviderConfig } from "../assistant/provider";
 import { AssistantProvidersRepo } from "../repos/assistant-providers.repo";
 import { AssistantModelsRepo } from "../repos/assistant-models.repo";
 import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
@@ -208,7 +208,16 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         yield* requireAdmin;
         const config = yield* resolveProviderConfig(req.path.projectId, req.payload);
         return yield* Effect.tryPromise({
-          try: () => listModels(config, fetch, { sessionId: `models-${req.path.projectId}` }),
+          try: async () => {
+            try {
+              return await listModels(config, fetch, { sessionId: `models-${req.path.projectId}` });
+            } catch (e) {
+              if (!isListingRouteAbsent(e)) throw e;
+              if (normalizeProviderKind(config.kind) !== "openai_compatible") throw e;
+              await pingChatCompletion({ ...config, model: listingFallbackModel(config) }, fetch, { sessionId: `models-${req.path.projectId}` });
+              return { models: [] as Array<{ id: string }> };
+            }
+          },
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
         });
       }))
@@ -587,6 +596,24 @@ const resolveProviderConfig = (
     return configs[0]!;
   });
 
+// A listing route can be absent on OpenAI-compatible endpoints (Cloudflare's
+// /ai/v1 answers 405 for GET /models; the catalog lives at /ai/models/search).
+// The probe then falls back to a minimal chat completion so a provider that
+// can chat is not reported unreachable. The row/imported model is preferred;
+// the CF default covers a base URL with no models imported yet.
+function listingFallbackModel(cfg: ProviderConfig): string {
+  if (cfg.model && cfg.model !== "test") return cfg.model;
+  try {
+    return isCloudflareAiBaseUrl(normalizeBaseUrl(cfg.baseUrl, cfg.kind)) ? CLOUDFLARE_DEFAULT_MODEL : cfg.model;
+  } catch {
+    return cfg.model;
+  }
+}
+
+function isListingRouteAbsent(e: unknown): boolean {
+  return e instanceof ProviderUnreachable && (e.status === 404 || e.status === 405);
+}
+
 const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (handlers) =>
   handlers
     .handle("adminAssistantUsage", (req) =>
@@ -798,7 +825,19 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
         const model = firstEnabled?.modelId ?? (models[0] as { modelId?: string } | undefined)?.modelId ?? "test";
         const cfg: ProviderConfig = { kind, baseUrl: prov.baseUrl, apiKey: yield* service.resolveApiKey(req.path.id), model, sessionId: `provider-test-${req.path.id}` };
         const start = Date.now();
-        yield* Effect.tryPromise({ try: () => listModels(cfg), catch: (e) => e as ProviderAuthFailed | ProviderUnreachable });
+        yield* Effect.tryPromise({
+          try: async () => {
+            try {
+              await listModels(cfg);
+              return;
+            } catch (e) {
+              if (!isListingRouteAbsent(e)) throw e;
+              if (normalizeProviderKind(cfg.kind) !== "openai_compatible") throw e;
+              await pingChatCompletion({ ...cfg, model: listingFallbackModel(cfg) });
+            }
+          },
+          catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
+        });
         return { ok: true, latencyMs: Date.now() - start };
       }))
     )
@@ -836,7 +875,13 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           const inferred = inferModelKind(m.id);
           const found = existingById.get(m.id);
           if (found) {
-            if (normalizeProviderKind(found.kind) !== inferred) {
+            const current = normalizeProviderKind(found.kind);
+            // `inferModelKind` can never return `workers_ai` (a Workers-only
+            // kind with no wire signature), so auto-correcting a manually
+            // registered Workers AI row would silently flip it to
+            // `openai_compatible`. Only the three catalog-inferable kinds are
+            // corrected.
+            if (current !== "workers_ai" && current !== inferred) {
               const stmt = mRepo.updateStmt(found.id, { kind: inferred });
               if (stmt) stmts.push(stmt);
               assistantLog("WARN", "assistant model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 // Capability-disabled notice (ADR-0003 §F.3). Transcribed verbatim from the
 // wireframes: herald-chat.html "Assistant unavailable on this deployment" (the
 // chat route + admin panels) and settings-project-herald.html "Capability-false
-// variant (Docker)" (the project settings page). No provider controls render on
+// variant" (the project settings page). No provider controls render on
 // either; the notice replaces the whole surface.
 
 const SPARKLE_PATH =

@@ -31,7 +31,7 @@ import { DeleteSwimlaneDialog } from "./DeleteSwimlaneDialog";
 const useBoardMock = vi.mocked(useBoard);
 const useSessionMock = vi.mocked(useSession);
 
-const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Sprint 5 — Audio pass", description: "", position: 0, dueAt: null, startAt: null, archivedAt: "2026-07-22", kind: "sprint", milestoneId: null };
+const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Sprint 5 — Audio pass", description: "", position: 0, dueAt: null, startAt: null, archivedAt: "2026-07-22", kind: "sprint", milestoneId: null, tasksDone: 9, tasksTotal: 9 };
 
 function archivedTasks(laneId: string, count: number): Task[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -58,7 +58,7 @@ function makeBoard(): Board {
   return makeBoardFixture({
     swimlanes: [
       LANE,
-      { id: "s2", projectId: "p1", name: "Sprint 4 — Save system", description: "", position: 1, dueAt: null, startAt: null, archivedAt: "2026-07-22", kind: "sprint", milestoneId: null },
+      { id: "s2", projectId: "p1", name: "Sprint 4 — Save system", description: "", position: 1, dueAt: null, startAt: null, archivedAt: "2026-07-22", kind: "sprint", milestoneId: null, tasksDone: 0, tasksTotal: 0 },
     ],
     tasks: archivedTasks(LANE.id, 9),
   });

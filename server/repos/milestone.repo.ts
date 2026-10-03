@@ -2,13 +2,21 @@ import { Effect } from "effect";
 import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { MilestoneRow, SwimlaneRow, rowToMilestone, rowToSwimlane } from "../../shared/db";
 import type { Milestone, Swimlane } from "../../shared/types";
+import { SWIMLANE_SELECT_WITH_COUNTS } from "./swimlane.repo";
 
 // Every milestone read (list AND mutation readbacks) carries the sprint
 // counts so mutation responses never clobber list-derived FE cache state.
+// Task counts are computed server-side: total includes archived tasks, done
+// counts archived tasks and tasks in done columns (invariant 14).
 const MILESTONE_SELECT_WITH_COUNTS = `
   SELECT m.*,
     (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id) AS sprint_count,
-    (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id AND s.archived_at IS NOT NULL) AS archived_sprint_count
+    (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id AND s.archived_at IS NOT NULL) AS archived_sprint_count,
+    (SELECT COUNT(*) FROM tasks t JOIN swimlanes s ON t.swimlane_id = s.id
+       WHERE s.milestone_id = m.id AND t.project_id = m.project_id) AS tasks_total,
+    (SELECT COUNT(*) FROM tasks t JOIN swimlanes s ON t.swimlane_id = s.id JOIN columns c ON c.id = t.column_id
+       WHERE s.milestone_id = m.id AND t.project_id = m.project_id
+         AND (t.archived_at IS NOT NULL OR c.is_done = 1)) AS tasks_done
   FROM milestones m`;
 
 export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/MilestoneRepo", {
@@ -68,7 +76,7 @@ export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/Milesto
           .pipe(Effect.map((rows) => rows[0]!?.c ?? 0)),
 
       findByMilestone: (milestoneId: string): Effect.Effect<Swimlane[], DbError> =>
-        queryAll<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE milestone_id = ? ORDER BY position`, milestoneId)
+        queryAll<SwimlaneRow>(db, `${SWIMLANE_SELECT_WITH_COUNTS} WHERE s.milestone_id = ? ORDER BY s.position`, milestoneId)
           .pipe(Effect.map((rows) => rows.map(rowToSwimlane))),
     };
   }),

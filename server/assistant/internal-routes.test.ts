@@ -508,6 +508,22 @@ describe("provider config (GET /api/internal/assistant/provider-config)", () => 
     expect(seen).toEqual(["p1"]);
   });
 
+  it("forwards a workers_ai config (keyless binding is resolved DO-side)", async () => {
+    const workersAiConfigs: RegistryModelConfig[] = [
+      { kind: "workers_ai", baseUrl: "", apiKey: "", model: "@cf/meta/llama-3.2-1b-instruct", providerId: "prov-cf" },
+    ];
+    const result = await handleInternalAssistantRequest({
+      method: "GET",
+      path: "/api/internal/assistant/provider-config",
+      query: { projectId: "p1" },
+      body: null,
+      driver: driverOf(),
+      identity: IDENTITY,
+      deps: { resolveProviderConfigs: async () => workersAiConfigs },
+    });
+    expect(result).toEqual({ status: 200, body: { configs: workersAiConfigs } });
+  });
+
   it("403s a query project that does not match the signed identity, 400s a missing identity", async () => {
     const mismatch = await handleInternalAssistantRequest({
       method: "GET",
@@ -805,6 +821,28 @@ describe("call-log writes (POST /api/internal/assistant/call-log)", () => {
       driver: driverOf(),
     });
     expect(bad.status).toBe(400);
+  });
+
+  it("accepts the workers_ai kind (H9)", async () => {
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: {
+        projectId: "p1",
+        providerId: null,
+        model: "@cf/meta/llama-3.2-1b-instruct",
+        kind: "workers_ai",
+        status: "done",
+        usageIn: 1,
+        usageOut: 1,
+      },
+      driver: driverOf(),
+    });
+    expect(res.status).toBe(200);
+    const row = db
+      .prepare("SELECT kind FROM assistant_call_logs WHERE model = '@cf/meta/llama-3.2-1b-instruct'")
+      .get() as { kind: string };
+    expect(row.kind).toBe("workers_ai");
   });
 });
 

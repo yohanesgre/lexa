@@ -66,6 +66,7 @@
   "services": [
     { "binding": "ASSISTANT_SERVICE", "service": "lexa-staging" }
   ],
+  "ai": { "binding": "AI" },
   "durable_objects": {
     "bindings": [{ "name": "ASSISTANT_AGENT", "class_name": "LexaAssistantAgent" }]
   },

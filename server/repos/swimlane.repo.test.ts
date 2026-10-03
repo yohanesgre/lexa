@@ -104,6 +104,40 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
+  it("every read carries tasksTotal/tasksDone — archived tasks count done", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const lanes = yield* repo.findByProject("p1");
+        const m1 = lanes.find((l) => l.id === "m1")!;
+        // t1, t2, t3 (archived), t4 → total 4; only t3 is done (column c1 is not a done column).
+        expect(m1.tasksTotal).toBe(4);
+        expect(m1.tasksDone).toBe(1);
+        const backlog = lanes.find((l) => l.id === "s-backlog")!;
+        expect(backlog.tasksTotal).toBe(0);
+        expect(backlog.tasksDone).toBe(0);
+        const byId = yield* repo.findById("m1");
+        expect(byId.tasksTotal).toBe(4);
+        expect(byId.tasksDone).toBe(1);
+      })
+    );
+  });
+
+  it("a task in a done column counts done without being archived", async () => {
+    seed(db);
+    db.prepare("UPDATE columns SET is_done = 1 WHERE id = 'c1'").run();
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const m1 = yield* repo.findById("m1");
+        // t1, t2, t4 in the done column + t3 archived → all four done.
+        expect(m1.tasksTotal).toBe(4);
+        expect(m1.tasksDone).toBe(4);
+      })
+    );
+  });
+
   it("findBacklog returns the backlog lane; missing → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -191,6 +225,30 @@ describe("SwimlaneRepo due-date queries", () => {
     );
   });
 
+});
+
+describe("SwimlaneRepo task counts", () => {
+  it("reads carry tasksTotal (archived included) and tasksDone (archived OR done column)", async () => {
+    seed(db);
+    // c1 is not done; move t4 to a done column so done = archived t3 + t4.
+    db.prepare("INSERT INTO columns (id, project_id, name, position, is_done) VALUES ('c2','p1','Done',1,1)").run();
+    db.prepare("UPDATE tasks SET column_id = 'c2' WHERE id = 't4'").run();
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const lane = yield* repo.findById("m1");
+        expect(lane.tasksTotal).toBe(4);
+        expect(lane.tasksDone).toBe(2);
+        const all = yield* repo.findByProject("p1");
+        expect(all.find((l) => l.id === "m1")).toMatchObject({ tasksDone: 2, tasksTotal: 4 });
+        expect(all.find((l) => l.id === "m2")).toMatchObject({ tasksDone: 0, tasksTotal: 0 });
+        const updated = yield* repo.update("m1", { name: "M1 renamed" });
+        expect(updated).toMatchObject({ tasksDone: 2, tasksTotal: 4 });
+        const archived = yield* repo.setArchived("m1", "2026-09-01 00:00:00");
+        expect(archived).toMatchObject({ tasksDone: 2, tasksTotal: 4 });
+      })
+    );
+  });
 });
 
 describe("SwimlaneRepo constraints", () => {

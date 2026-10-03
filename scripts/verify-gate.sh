@@ -16,6 +16,8 @@
 #   cli mixed with app/be, tooling, unknown -> full (bun run test)
 #   no changes                 -> full
 #   status/** (repo-root only) or *.md only -> skip tests (typecheck still runs)
+#   scripts/install* uninstall* test-install* workers-install* | wrangler.jsonc
+#     -> also run bash scripts/test-install.sh (installer surface)
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -57,6 +59,7 @@ has_unknown=0
 any=0
 touched_invariants=0
 touched_wireframes=0
+touched_installer=0
 for p in "${CHANGED[@]-}"; do
   [ -z "$p" ] && continue
   any=1
@@ -72,6 +75,9 @@ for p in "${CHANGED[@]-}"; do
   esac
   case "$p" in
     wireframes/src/*) touched_wireframes=1 ;;
+  esac
+  case "$p" in
+    scripts/install*|scripts/uninstall*|scripts/test-install*|scripts/workers-install*|wrangler.jsonc) touched_installer=1 ;;
   esac
 done
 
@@ -117,6 +123,9 @@ if [ "$PLAN_LABEL" = "skip" ]; then
 else
   printf "  command: %s\n" "${PLAN_CMDS[*]}"
 fi
+if [ "$touched_installer" -eq 1 ]; then
+  printf "  install-script: bash scripts/test-install.sh\n"
+fi
 
 if [ "$PRINT_PLAN" -eq 1 ]; then
   exit 0
@@ -143,6 +152,11 @@ if [ "$PLAN_LABEL" = "skip" ]; then
 else
   say "Gate: vitest run ($PLAN_LABEL)"
   if "${PLAN_CMDS[@]}" 2>&1 | tee -a "$LOG" | tail -n 30; then ok "tests passed ($PLAN_LABEL)"; else bad "tests failed ($PLAN_LABEL)"; fi
+fi
+
+if [ "$touched_installer" -eq 1 ]; then
+  say "Gate: install-script suite (scripts/test-install.sh)"
+  if bash scripts/test-install.sh 2>&1 | tee -a "$LOG" | tail -n 20; then ok "install-script suite passed"; else bad "install-script suite failed"; fi
 fi
 
 if [ "$touched_invariants" -eq 1 ]; then

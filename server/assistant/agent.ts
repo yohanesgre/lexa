@@ -12,7 +12,7 @@ import { AIChatAgent } from "@cloudflare/ai-chat";
 import { stepCountIs, tool, type StopCondition, type ToolSet, type UIMessage } from "ai";
 import { z } from "zod";
 import type { Connection, ConnectionContext } from "agents";
-import type { DurableObjectState, Fetcher } from "@cloudflare/workers-types";
+import type { Ai, DurableObjectState, Fetcher } from "@cloudflare/workers-types";
 import {
   INTERNAL_AUTH_ACTOR_HEADER,
   INTERNAL_AUTH_PROJECT_HEADER,
@@ -35,6 +35,7 @@ import { assistantTraceParams, tracedAI } from "./tracing";
 import { LexaAssistantRunner } from "./runner";
 import { abortDelegatedRun, spawnDelegatedRun, type DelegationDeps, type RunDispatcher } from "./delegation";
 import type { AssistantCallLogInput } from "../../shared/assistant";
+import { attachWorkersAiBinding } from "./model-factory";
 
 // Read tools available without per-project settings resolution (project data +
 // attachments). The optional tools (web_search / get_skill / analyze_image /
@@ -59,6 +60,10 @@ export interface LexaAssistantEnv {
   // assistant routes (ADR-0003 §B.2/R7). When absent the DO falls back to a
   // global fetch against the public origin (the ADR alternative).
   ASSISTANT_SERVICE?: Fetcher | undefined;
+  // H9: the Cloudflare AI binding, declared in wrangler.jsonc. A `workers_ai`
+  // model in the resolved chain is built keyless through this binding; absent
+  // (Docker/Bun flavor) the config resolution leaves such models unbuildable.
+  AI?: Ai | undefined;
 }
 
 type ThreadMetaRow = {
@@ -386,7 +391,8 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     }
     const runId = await this.loadRunId();
     const turnDeps: AssistantTurnDeps = {
-      resolveProviderConfigs: (projectId) => resolveProviderConfigs(deps, projectId),
+      resolveProviderConfigs: async (projectId) =>
+        attachWorkersAiBinding(await resolveProviderConfigs(deps, projectId), this.env.AI),
       recordCallLog: async (input) => {
         await recordCallLog(deps, input);
       },

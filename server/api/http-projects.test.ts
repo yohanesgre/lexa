@@ -21,11 +21,12 @@ async function sha256(text: string): Promise<string> {
 }
 
 let dir: string;
+let dbPath: string;
 let handler: (req: Request) => Promise<Response>;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-projects-api-"));
-  const dbPath = join(dir, "test.db");
+  dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   const adminHash = await sha256(ADMIN_KEY);
   const memberHash = await sha256(MEMBER_KEY);
@@ -206,5 +207,35 @@ describe("swimlane routes", () => {
     const missing = await handler(json("POST", "/api/projects/p1/swimlanes/nope/archive"));
     expect(missing.status).toBe(404);
     expect((await missing.json()).error.code).toBe("SWIMLANE_NOT_FOUND");
+  });
+});
+
+describe("board lane counts vs includeArchived", () => {
+  it("an archived lane is absent from board(false) but still aggregates into its milestone; board(true) lane is fully done", async () => {
+    const seed = new Database(dbPath);
+    seed.exec(`
+      INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p-arch', 'Arch', 'p-arch', 'AR', 1);
+      INSERT INTO columns (id, project_id, name, position, is_done) VALUES ('ca1', 'p-arch', 'Todo', 0, 0), ('ca2', 'p-arch', 'Done', 1, 1);
+      INSERT INTO milestones (id, project_id, name, position) VALUES ('ma1', 'p-arch', 'M1', 0);
+      INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id, archived_at)
+        VALUES ('sa1', 'p-arch', 'Sprint A', 0, 'sprint', 'ma1', '2026-03-01T00:00:00.000Z');
+      INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at, created_at, key, number) VALUES
+        ('ta1', 'p-arch', 'ca1', 'sa1', 'A', 'a0', '2026-03-01T00:00:00.000Z', '2026-01-01 10:00:00', 'AR-1', 1),
+        ('ta2', 'p-arch', 'ca2', 'sa1', 'B', 'a1', NULL, '2026-01-01 10:00:00', 'AR-2', 2);
+    `);
+    seed.close();
+
+    const live = await handler(json("GET", "/api/projects/p-arch/board"));
+    expect(live.status).toBe(200);
+    const liveBody = await live.json();
+    expect(liveBody.swimlanes.map((l: { id: string }) => l.id)).not.toContain("sa1");
+    expect(liveBody.milestones[0]).toMatchObject({ id: "ma1", tasksTotal: 2, tasksDone: 2 });
+
+    const full = await handler(json("GET", "/api/projects/p-arch/board?includeArchived=true"));
+    expect(full.status).toBe(200);
+    const fullBody = await full.json();
+    const lane = fullBody.swimlanes.find((l: { id: string }) => l.id === "sa1");
+    expect(lane).toMatchObject({ tasksTotal: 2, tasksDone: 2 });
+    expect(lane.tasksDone).toBe(lane.tasksTotal);
   });
 });

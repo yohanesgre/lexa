@@ -295,6 +295,86 @@ export function useUpdateFieldConfig(slug: string) {
   });
 }
 
+// ── Progress-count cache maintenance ──
+// Lane counts (tasksDone/tasksTotal) are server-authoritative on every
+// mutation response; mutations that only move task rows between cached states
+// keep them fresh via lane deltas, then re-derive milestone aggregates from
+// the lane list (the same fan-in the sprint counts use).
+interface ProgressDelta {
+  swimlaneId: string;
+  doneDelta: number;
+  totalDelta: number;
+}
+
+function cachedBoard(qc: QueryClient, slug: string): Board | undefined {
+  return qc.getQueryData<Board>(["board", slug, true]) ?? qc.getQueryData<Board>(["board", slug, false]);
+}
+
+function findCachedTask(qc: QueryClient, slug: string, taskId: string): Task | undefined {
+  const live = qc.getQueryData<Board>(["board", slug, false])?.tasks;
+  const all = qc.getQueryData<Board>(["board", slug, true])?.tasks;
+  return all?.find((t) => t.id === taskId) ?? live?.find((t) => t.id === taskId) ?? qc.getQueryData<Task>(["tasks", slug, taskId]);
+}
+
+function columnIsDone(qc: QueryClient, slug: string, columnId: string): boolean {
+  return cachedBoard(qc, slug)?.columns.find((c) => c.id === columnId)?.isDone ?? false;
+}
+
+function isTaskDone(qc: QueryClient, slug: string, task: Task): boolean {
+  return task.archivedAt !== null || columnIsDone(qc, slug, task.columnId);
+}
+
+// Deltas for one task transitioning between cache states: create (old
+// undefined), delete (new undefined), move/archive/restore (both).
+function taskTransitionDeltas(qc: QueryClient, slug: string, oldTask: Task | undefined, newTask: Task | undefined): ProgressDelta[] {
+  const oldLane = oldTask?.swimlaneId;
+  const newLane = newTask?.swimlaneId;
+  const oldDone = oldTask ? isTaskDone(qc, slug, oldTask) : false;
+  const newDone = newTask ? isTaskDone(qc, slug, newTask) : false;
+  if (oldLane === newLane) {
+    const doneDelta = (newDone ? 1 : 0) - (oldDone ? 1 : 0);
+    const totalDelta = (newTask ? 1 : 0) - (oldTask ? 1 : 0);
+    return oldLane && (doneDelta !== 0 || totalDelta !== 0) ? [{ swimlaneId: oldLane, doneDelta, totalDelta }] : [];
+  }
+  const deltas: ProgressDelta[] = [];
+  if (oldLane) deltas.push({ swimlaneId: oldLane, doneDelta: oldDone ? -1 : 0, totalDelta: -1 });
+  if (newLane) deltas.push({ swimlaneId: newLane, doneDelta: newDone ? 1 : 0, totalDelta: 1 });
+  return deltas;
+}
+
+// Column isDone flip: only live tasks in that column change done status
+// (archived tasks are already done). Recompute the per-lane delta from cache.
+function columnFlipDeltas(qc: QueryClient, slug: string, columnId: string, isDone: boolean): ProgressDelta[] {
+  const tasks = cachedBoard(qc, slug)?.tasks.filter((t) => t.columnId === columnId && t.archivedAt === null) ?? [];
+  const byLane = new Map<string, number>();
+  for (const t of tasks) byLane.set(t.swimlaneId, (byLane.get(t.swimlaneId) ?? 0) + 1);
+  const sign = isDone ? 1 : -1;
+  return [...byLane].map(([swimlaneId, n]) => ({ swimlaneId, doneDelta: sign * n, totalDelta: 0 }));
+}
+
+function applyProgressDeltas(qc: QueryClient, slug: string, deltas: ProgressDelta[], syncMilestones = true): void {
+  const byLane = new Map<string, ProgressDelta>();
+  for (const d of deltas) {
+    if (!d.swimlaneId) continue;
+    const acc = byLane.get(d.swimlaneId) ?? { swimlaneId: d.swimlaneId, doneDelta: 0, totalDelta: 0 };
+    acc.doneDelta += d.doneDelta;
+    acc.totalDelta += d.totalDelta;
+    byLane.set(d.swimlaneId, acc);
+  }
+  if (byLane.size === 0) return;
+  const patch = (lanes: Swimlane[]): Swimlane[] =>
+    lanes.map((l) => {
+      const d = byLane.get(l.id);
+      if (!d) return l;
+      return { ...l, tasksDone: Math.max(0, l.tasksDone + d.doneDelta), tasksTotal: Math.max(0, l.tasksTotal + d.totalDelta) };
+    });
+  qc.setQueryData<Swimlane[]>(["projects", slug, "swimlanes"], (old) => (old ? patch(old) : old));
+  for (const archived of [false, true]) {
+    qc.setQueryData<Board>(["board", slug, archived], (old) => (old ? { ...old, swimlanes: patch(old.swimlanes) } : old));
+  }
+  if (syncMilestones) syncMilestoneSprintCounts(qc, slug);
+}
+
 export function useUpdateTask(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -333,6 +413,7 @@ export function useCreateTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: [...old.tasks, task] };
       });
+      applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, undefined, task));
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task created");
     },
@@ -349,6 +430,7 @@ export function useMoveTask(slug: string) {
     mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined; clearDueAt?: boolean }) =>
       api.moveTask(slug, id, target),
     onSuccess: ({ data: task, activity }) => {
+      const prev = findCachedTask(qc, slug, task.id);
       // Keep both board caches in sync with the authoritative move response.
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
@@ -357,6 +439,7 @@ export function useMoveTask(slug: string) {
         });
       }
       qc.setQueryData(["tasks", slug, task.id], task);
+      applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, task));
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task moved");
     },
@@ -373,6 +456,7 @@ export function useDeleteTask(slug: string) {
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.deleteTask(slug, id),
     onSuccess: (_, { id }) => {
+      const prev = findCachedTask(qc, slug, id);
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
         return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
@@ -381,6 +465,10 @@ export function useDeleteTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
       });
+      // Unknown row (never cached): the server drops total and done, but the
+      // lane is unidentifiable — leave counts stale rather than synthesize an
+      // inflated delta.
+      if (prev) applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, undefined));
       qc.removeQueries({ queryKey: ["tasks", slug, id] });
       qc.removeQueries({ queryKey: ["task-activity", slug, id] });
       toast.push("success", "Task deleted");
@@ -399,6 +487,7 @@ export function useArchiveTask(slug: string) {
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.archiveTask(slug, id),
     onSuccess: ({ data: task, activity }) => {
+      const prev = findCachedTask(qc, slug, task.id);
       // Live board: remove the card. Archived board: update in place.
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
@@ -409,6 +498,7 @@ export function useArchiveTask(slug: string) {
         return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
       });
       qc.setQueryData(["tasks", slug, task.id], task);
+      applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, task));
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task archived");
     },
@@ -424,6 +514,7 @@ export function useRestoreTask(slug: string) {
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.restoreTask(slug, id),
     onSuccess: ({ data: task, activity }) => {
+      const prev = findCachedTask(qc, slug, task.id);
       // Archived board: update in place. Live board: re-insert at its column/position.
       qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
         if (!old) return old;
@@ -437,6 +528,13 @@ export function useRestoreTask(slug: string) {
         return { ...old, tasks: [...old.tasks, task].sort(byPosition) };
       });
       qc.setQueryData(["tasks", slug, task.id], task);
+      // No cached source row: the restored task was counted done while archived
+      // but stayed in the same lane — total is unchanged and done drops by one.
+      // Deriving the lane from the response avoids a create-shaped +1 total.
+      const deltas = prev
+        ? taskTransitionDeltas(qc, slug, prev, task)
+        : [{ swimlaneId: task.swimlaneId, doneDelta: (isTaskDone(qc, slug, task) ? 1 : 0) - 1, totalDelta: 0 }];
+      applyProgressDeltas(qc, slug, deltas);
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task restored");
     },
@@ -507,7 +605,14 @@ export function useBulkTaskAction(slug: string) {
   return useMutation({
     mutationFn: (input: BulkTaskActionInput) => api.bulkTaskAction(slug, input),
     onSuccess: (res: BulkTaskActionResponse, input) => {
+      const deltas: ProgressDelta[] = [];
+      for (const id of res.applied) {
+        const prev = findCachedTask(qc, slug, id);
+        if (!prev) continue;
+        deltas.push(...taskTransitionDeltas(qc, slug, prev, patchBulkFields(prev, input)));
+      }
       applyBulkResult(qc, slug, input, res.applied);
+      applyProgressDeltas(qc, slug, deltas);
       if (res.applied.length > 0 && res.failed.length === 0) {
         toast.push("success", res.applied.length === 1 ? "Task updated" : `${res.applied.length} tasks updated`);
       }
@@ -746,6 +851,7 @@ export function useUpdateColumn(slug: string) {
     mutationFn: ({ id, ...input }: { id: string } & Parameters<typeof api.updateColumn>[2]) =>
       api.updateColumn(slug, id, input),
     onSuccess: (column) => {
+      const prevColumn = cachedBoard(qc, slug)?.columns.find((c) => c.id === column.id);
       qc.setQueryData(["projects", slug, "columns"], (old: Column[] | undefined) => {
         if (!old) return old;
         return old.map((c) => (c.id === column.id ? column : c));
@@ -757,6 +863,10 @@ export function useUpdateColumn(slug: string) {
           if (!old) return old;
           return { ...old, columns: old.columns.map((c: Column) => (c.id === column.id ? column : c)) };
         });
+      }
+      // A done-flag flip changes the done count of every live task in the column.
+      if (prevColumn && prevColumn.isDone !== column.isDone) {
+        applyProgressDeltas(qc, slug, columnFlipDeltas(qc, slug, column.id, column.isDone));
       }
       toast.push("success", "Column updated");
     },
@@ -776,6 +886,13 @@ export function useDeleteColumn(slug: string) {
         if (!old) return old;
         return old.filter((c) => c.id !== id);
       });
+      // The deleted column's header must leave the board too.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, columns: old.columns.filter((c: Column) => c.id !== id) };
+        });
+      }
       toast.push("success", "Column deleted");
     },
     onError: (err) => {
@@ -801,6 +918,8 @@ function syncMilestoneSprintCounts(qc: QueryClient, slug: string): void {
         ...m,
         sprintCount: owned.length,
         archivedSprintCount: owned.filter((l) => l.archivedAt !== null).length,
+        tasksDone: owned.reduce((n, l) => n + l.tasksDone, 0),
+        tasksTotal: owned.reduce((n, l) => n + l.tasksTotal, 0),
       };
     });
 
@@ -1034,6 +1153,16 @@ export function useArchiveMilestone(slug: string) {
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.archiveMilestone(slug, id),
     onSuccess: ({ data: milestone, activity }) => {
+      // The cascade archives live tasks in the milestone's lanes — those become
+      // done. Collect lane deltas before mutating the caches; the milestone's
+      // own counts come straight from the authoritative response.
+      const laneDeltas: ProgressDelta[] = [];
+      for (const a of activity) {
+        if (a.type !== "archived") continue;
+        const t = findCachedTask(qc, slug, a.taskId);
+        if (!t || t.archivedAt !== null || columnIsDone(qc, slug, t.columnId)) continue;
+        laneDeltas.push({ swimlaneId: t.swimlaneId, doneDelta: 1, totalDelta: 0 });
+      }
       // Cascade archive touches lanes + tasks — the board cache carries all
       // of them, so mirror the mutation response there too.
       qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
@@ -1062,6 +1191,7 @@ export function useArchiveMilestone(slug: string) {
       qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) =>
         old?.map((l) => (l.milestoneId === milestone.id ? { ...l, archivedAt: milestone.archivedAt } : l))
       );
+      applyProgressDeltas(qc, slug, laneDeltas, false);
       toast.push("success", "Milestone completed");
     },
     onError: (err) => {

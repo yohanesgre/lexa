@@ -21,7 +21,7 @@ export const Route = createFileRoute("/$slug/chat")({
 function ChatRoute() {
   const { slug } = Route.useParams();
   const { thread } = Route.useSearch();
-  // Capability gate (ADR-0003 §F.3): the chat route is absent on the Docker/Bun
+  // Capability gate (ADR-0003 §F.3): the chat route is absent on the Bun
   // flavor — a direct URL renders the capability-disabled notice instead of the
   // surface. Gate while the capabilities read is unresolved so dead controls
   // never flash.

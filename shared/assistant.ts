@@ -1,6 +1,6 @@
 import type { ID, ISODate } from "./types";
 
-export type ProviderKind = "openai_compatible" | "anthropic_compatible" | "openai_responses";
+export type ProviderKind = "openai_compatible" | "anthropic_compatible" | "openai_responses" | "workers_ai";
 
 export type AssistantReasoningEffort = "minimal" | "low" | "medium" | "high";
 

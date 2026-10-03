@@ -264,6 +264,8 @@ interface Swimlane {
   startAt: string | null;     // YYYY-MM-DD — sprint start (date-only); null = unset
   kind: "backlog" | "sprint"; // Backlog = system lane (permanent, no deadline); sprint = time-boxed lane
   milestoneId: string | null; // owning milestone id; null = loose sprint (not in any milestone)
+  tasksDone: number;          // done = archived task OR task in a done column (invariant 14)
+  tasksTotal: number;         // every task in the lane, archived included
 }
 
 // Goal wrapper above sprints (e.g. "v1.0 launch"). A milestone holds one or
@@ -279,6 +281,8 @@ interface Milestone {
   archivedAt: string | null;      // null = live; set = archived (cascades to its sprints)
   sprintCount: number;            // total sprints (incl. archived) in this milestone
   archivedSprintCount: number;    // archived sprints
+  tasksDone: number;              // done tasks across the milestone's sprints
+  tasksTotal: number;             // all tasks across the milestone's sprints
 }
 
 // Per-project customizable task fields. tasks.priority / tasks.type hold
@@ -624,6 +628,11 @@ start/end dates (`startAt`, `dueAt`). The Backlog lane (kind `backlog`) is the
 permanent system lane — one per project, never in a milestone, and it rejects
 `dueAt`/`startAt`/`milestoneId`.
 
+Every Swimlane carries `tasksDone`/`tasksTotal`, computed server-side and
+independent of the `includeArchived` toggle: `tasksTotal` counts every task in
+the lane (archived included); `tasksDone` counts archived tasks plus tasks in a
+done column. `includeArchived` controls payload membership only, never counts.
+
 ```
 GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }   (includes archived lanes)
 POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position?, dueAt?, startAt?, milestoneId? } → 201 Swimlane | 403 FORBIDDEN
@@ -655,9 +664,13 @@ A milestone is a goal wrapper holding one or more sprints (via
 (`milestoneId` → null); they surface as loose sprints. Archived milestones keep
 their sprints (see archive cascade below).
 
+Every Milestone carries `tasksDone`/`tasksTotal` aggregating all tasks across
+its sprints (archived sprints and tasks included), with the same done rule as
+Swimlane: archived task OR task in a done column.
+
 ```
 GET    /api/projects/:slug/milestones → 200 { data: Milestone[] }
-       (includes archived milestones; each carries sprintCount + archivedSprintCount)
+       (includes archived milestones; each carries sprintCount + archivedSprintCount + tasksDone/tasksTotal)
 POST   /api/projects/:slug/milestones   (admin)  body { name*, description?, position?, dueAt? } → 201 Milestone | 403 FORBIDDEN
 PATCH  /api/projects/:slug/milestones/:id  (admin) body { name?, description?, position?, dueAt? } → 200 Milestone | 403 FORBIDDEN | 404
   dueAt = "YYYY-MM-DD" (target date); null clears.
@@ -792,8 +805,11 @@ GET    /api/projects/:slug/board?includeArchived=true
   links included — subtask grouping + blocked dots render without extra fetches
   swimlanes carry dueAt/startAt/archivedAt/kind/milestoneId — the Backlog lane
   (kind=backlog) is the permanent system lane; every project has exactly one
+  swimlanes also carry tasksDone/tasksTotal — server-computed, identical for
+  includeArchived=false and true (counts never depend on payload membership)
   milestones: Milestone[] included (archived milestones included when
-  includeArchived=true; sprintCount/archivedSprintCount always present)
+  includeArchived=true; sprintCount/archivedSprintCount + tasksDone/tasksTotal
+  always present)
 ```
 
 ### Attachments
@@ -1690,8 +1706,14 @@ POST   /api/assistant/settings/:projectId/models   (admin — requireAdmin)
 body same as test
 → 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
   Lists models from the provider using submitted unsaved values (per-kind wire
-  format, base URL normalized per kind). Some compat endpoints lack the route
-  — manual model entry is always available as fallback.
+  format, base URL normalized per kind). Some compat endpoints lack the listing
+  route (404/405): the route then pings `POST {base}/chat/completions`
+  (`max_tokens: 1`, `stream: false`); a successful ping returns `{ models: [] }`
+  and manual model entry is always available as fallback.
+  Cloudflare AI (`api.cloudflare.com/client/v4/accounts/<id>/ai/v1`) has no
+  GET /models (405); its catalog is read from
+  `GET .../ai/models/search` (`task=Text Generation` when accepted, full
+  catalog otherwise), mapping `result[].name` → model ids.
 
 ### Assistant Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
 
@@ -1747,7 +1769,18 @@ DELETE /api/admin/assistant/providers/:id   (superadmin)
 POST   /api/admin/assistant/providers/:id/test   (superadmin)
 → 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404
   | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
-  Live probe: listModels against the stored provider row (kind openai_compatible, model "test").
+  Live probe: listModels against the stored provider row (model from the
+  enabled row, else "test"). When the listing route is absent (404/405) and the
+  row's kind normalizes to `openai_compatible`, the probe falls back to a
+  minimal chat completion (`POST {base}/chat/completions`, `max_tokens: 1`,
+  `stream: false`; model from the row, else `@cf/meta/llama-3.2-1b-instruct`
+  when the base normalizes to a Cloudflare AI base — including the bare
+  `.../accounts/<id>/ai` form, normalized to `.../ai/v1`). Anthropic-wire and
+  openai-responses rows never fall back; their 404/405 surfaces as
+  PROVIDER_UNREACHABLE. A successful ping → `{ ok: true, latencyMs }`, 401/403
+  → PROVIDER_AUTH_FAILED; any other non-OK ping response (and network/5xx) →
+  PROVIDER_UNREACHABLE. Cloudflare AI bases list via
+  `GET .../ai/models/search` (their OpenAI-wire GET /models answers 405).
   A stored key that cannot be opened with the configured master key is a hard
   502 PROVIDER_AUTH_FAILED with the fixed message
   `stored provider key could not be decrypted with the configured master key — re-enter the key`

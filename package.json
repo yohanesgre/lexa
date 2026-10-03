@@ -15,6 +15,7 @@
     "dev": "vite dev",
     "dev:server": "bun run server/entry.ts",
     "dev:full": "bash scripts/dev.sh",
+    "dev:workers": "bun x wrangler d1 migrations apply DB --local && LEXA_FLAVOR=workers vite dev",
     "lx-dev": "bun run cli/src/index.ts",
     "compile:cli": "bun run scripts/compile-cli.ts",
     "install:cli-dev": "bash scripts/install-cli-dev.sh",
@@ -97,6 +98,7 @@
     "react-dom": "^19.2.8",
     "tailwind-merge": "^3.6.0",
     "unpdf": "1.8.1",
+    "workers-ai-provider": "4.0.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {

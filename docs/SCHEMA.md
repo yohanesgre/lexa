@@ -774,7 +774,7 @@ CREATE TABLE assistant_models (
   id TEXT PRIMARY KEY,
   provider_id TEXT NOT NULL REFERENCES assistant_providers(id) ON DELETE CASCADE,
   model_id TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses')),
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses','workers_ai')),
   priority INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -787,7 +787,7 @@ CREATE TABLE assistant_call_logs (
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   provider_id TEXT REFERENCES assistant_providers(id) ON DELETE SET NULL,
   model TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses')),
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses','workers_ai')),
   status TEXT NOT NULL CHECK (status IN ('done','error','suspended','aborted')),
   error_code TEXT,
   usage_in INTEGER NOT NULL DEFAULT 0,
@@ -1176,6 +1176,12 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- admin row when both exist) and adds `ux_user_project_roles_user_project`
 -- (user_id, project_id) so the one-role-per-(user, project) invariant is
 -- enforceable without a PK rebuild (D1 has no ALTER).
+-- 0019_workers_ai_provider_kind.sql widens the `kind` CHECK on both
+-- `assistant_models` and `assistant_call_logs` to include `workers_ai` (keyless
+-- Workers AI inference through the `env.AI` binding). SQLite cannot ALTER a
+-- CHECK, so both tables are rebuilt create/copy/drop/rename with every row
+-- copied verbatim; neither table has an inbound FK, so the rebuild is FK-safe
+-- under D1's enforced foreign keys.
 ```
 
 ## Design Notes

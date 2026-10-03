@@ -1,9 +1,8 @@
-// Cloudflare Workers flavor configuration — parallel to the Bun+Docker
-// flavor (see docs/DEPLOYMENT.md). The `main` field points at the Workers
-// entry the Vite build emits; bindings (D1, R2, KV) are declared here and
-// the install-script provisioner binds real ids into a per-deploy config.
-// See ADR-0002 and docs/CLOUDFLARE_WORKERS.md (now design authority for
-// the Workers flavor).
+// Cloudflare Workers configuration (see docs/DEPLOYMENT.md). The `main` field
+// points at the Workers entry the Vite build emits; bindings (D1, R2, KV) are
+// declared here and the install-script provisioner binds real ids into a
+// per-deploy config. See ADR-0002 and docs/CLOUDFLARE_WORKERS.md (design
+// authority for the Workers deploy target).
 {
   "name": "lexa",
   "main": "server/workers-entry.ts",
@@ -55,6 +54,10 @@
       "id": "00000000000000000000000000000000"
     }
   ],
+  // H9: keyless Workers AI inference for `workers_ai` assistant models. The
+  // assistant DO builds `createWorkersAI({ binding: env.AI })`; installed
+  // deployments get this block transcribed by scripts/workers-install.ts.
+  "ai": { "binding": "AI" },
   // DO → Worker transport (ADR-0003 §B.2/R7): the assistant Durable Object
   // reaches its internal routes through this self service binding. `service`
   // names the worker itself — `scripts/workers-install.ts` rewrites it to the

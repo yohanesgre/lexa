@@ -174,7 +174,7 @@ export function AppShell() {
   // would 401 and retry-spam the console. Skip the fetch there.
   const isBare = isBarePath(pathname);
   const { data: projects = [] } = useProjects({ enabled: !isBare });
-  // Capability gate: hide the Chat nav entry on the Docker/Bun flavor where the
+  // Capability gate: hide the Chat nav entry on the Bun flavor where the
   // assistant surface is absent. Suppressed on bare pages (no session).
   const { enabled: assistantEnabled } = useAssistantEnabled({ enabled: !isBare });
   const selectedProjectId = projects.find((p) => p.slug === selectedSlug)?.id;

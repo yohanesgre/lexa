@@ -127,6 +127,8 @@ export interface Swimlane {
   startAt: string | null;     // YYYY-MM-DD sprint start
   kind: "backlog" | "sprint"; // Backlog = system lane (permanent); sprint = time-boxed lane
   milestoneId: string | null; // owning milestone; null = loose sprint
+  tasksDone: number;          // done = archived task OR task in a done column (invariant 14)
+  tasksTotal: number;         // every task in the lane, archived included
 }
 
 // Goal wrapper above sprints (e.g. "v1.0 launch"). A milestone holds one or
@@ -141,6 +143,8 @@ export interface Milestone {
   archivedAt: string | null;     // null = live; set = archived (cascades to its sprints)
   sprintCount: number;           // total sprints (incl. archived) in this milestone
   archivedSprintCount: number;   // archived sprints
+  tasksDone: number;             // done tasks across the milestone's sprints
+  tasksTotal: number;            // all tasks across the milestone's sprints
 }
 
 export interface Board {

@@ -71,7 +71,7 @@ const SECTION_BY_KEY = new Map<string, string>();
 function section(keys: readonly string[], name: string): void {
   for (const k of keys) SECTION_BY_KEY.set(k, name);
 }
-section(["COMPOSE_PROJECT_NAME", "LXK_IMAGE_TAG", "CF_TUNNEL_TOKEN", "DATABASE_PATH", "PORT"], "core");
+section(["DATABASE_PATH", "PORT"], "core");
 section(["LXK_ADMIN_EMAILS"], "auth");
 section(["LXK_ENV", "LXK_PUBLIC_URL", "LXK_TRUSTED_ORIGINS", "LXK_TRUSTED_PROXY_CIDRS"], "urls");
 section(

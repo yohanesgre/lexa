@@ -121,7 +121,7 @@ function debugOption(): DebugOption | undefined {
 }
 
 export function normalizeProviderKind(raw: unknown): ProviderKind {
-  if (raw === "openai_compatible" || raw === "anthropic_compatible" || raw === "openai_responses") return raw;
+  if (raw === "openai_compatible" || raw === "anthropic_compatible" || raw === "openai_responses" || raw === "workers_ai") return raw;
   if (raw === "responses" || raw === "responses_compatible" || raw === "openai_compatible_responses" || raw === "openai-responses") return "openai_responses";
   if (raw === "openai-chat" || raw === "openai") return "openai_compatible";
   if (raw === "anthropic" || raw === "anthropic-chat" || raw === "anthropic_compatible") return "anthropic_compatible";
@@ -221,6 +221,14 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind | string): stri
 // ASSISTANT_GENERATION_FAILED via translateRunError.
 export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   const kind = normalizeProviderKind(config.kind);
+  // H9: `workers_ai` is Workers-only — it builds through the DO model factory
+  // (`createWorkersAI` with the AI binding), never the Bun/TanStack adapter.
+  // Guard loudly rather than silently falling through to the Anthropic wire.
+  if (kind === "workers_ai") {
+    throw new AssistantGenerationFailed({
+      message: "workers_ai models run only on the Workers runtime via the AI binding",
+    } as never);
+  }
   assistantLog("DEBUG", "assistant-provider buildAdapter", {
     kind,
     model: config.model,
@@ -323,11 +331,136 @@ export interface FetchLike {
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
+const CF_AI_PATH_RE = /^\/client\/v4\/accounts\/([^/]+)\/ai\/v1$/;
+const CF_MODELS_PER_PAGE = 50;
+const CF_MAX_PAGES = 10;
+const CF_SEARCH_TIMEOUT_MS = 15_000;
+const CF_TEXT_GENERATION_TASK = "Text Generation";
+
+export const CLOUDFLARE_DEFAULT_MODEL = "@cf/meta/llama-3.2-1b-instruct";
+
+// Cloudflare's OpenAI-wire base (api.cloudflare.com/client/v4/accounts/<id>/ai/v1)
+// has no GET /models — it answers 405; the catalog lives at /ai/models/search.
+// Detected on the NORMALIZED base so a bare ".../ai" input still matches
+// (normalizeBaseUrl appends /v1).
+export function cloudflareAiAccountId(baseUrl: string): string | null {
+  try {
+    const trimmed = baseUrl.trim();
+    const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    if (url.hostname !== "api.cloudflare.com") return null;
+    const match = url.pathname.replace(/\/+$/, "").match(CF_AI_PATH_RE);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isCloudflareAiBaseUrl(baseUrl: string): boolean {
+  return cloudflareAiAccountId(baseUrl) !== null;
+}
+
+interface CfSearchResponse {
+  result?: Array<{ name?: unknown; id?: unknown }>;
+  result_info?: { per_page?: unknown; total_count?: unknown };
+}
+
+interface CfSearchResult {
+  ids: string[];
+  firstCount: number;
+  firstStatus?: number;
+}
+
+async function cfSearchPages(
+  searchUrl: string,
+  apiKey: string,
+  sessionHeaders: Record<string, string>,
+  fetchImpl: FetchLike,
+  task: string | undefined,
+): Promise<CfSearchResult> {
+  const headers = { authorization: `Bearer ${apiKey}`, ...sessionHeaders };
+  const ids: string[] = [];
+  let firstCount = 0;
+  let totalCount: number | undefined;
+  let totalPages = CF_MAX_PAGES;
+  for (let page = 1; page <= Math.min(totalPages, CF_MAX_PAGES); page++) {
+    const qs = new URLSearchParams({ per_page: String(CF_MODELS_PER_PAGE), page: String(page) });
+    if (task) qs.set("task", task);
+    let res: Response;
+    try {
+      res = await fetchImpl(`${searchUrl}?${qs.toString()}`, { headers, signal: AbortSignal.timeout(CF_SEARCH_TIMEOUT_MS) });
+    } catch (e) {
+      assistantLog("WARN", "assistant-provider cloudflare models search failed", { searchUrl, page, error: String(e).slice(0, 500) });
+      throw new ProviderUnreachable({});
+    }
+    if (res.status === 401 || res.status === 403) throw new ProviderAuthFailed({});
+    if (!res.ok) {
+      if (page === 1) return { ids, firstCount, firstStatus: res.status };
+      throw new ProviderUnreachable({ message: `cloudflare models search returned ${res.status}`, status: res.status });
+    }
+    let parsed: unknown;
+    try {
+      parsed = await res.json();
+    } catch {
+      throw new ProviderUnreachable({ message: "cloudflare models search returned invalid JSON" });
+    }
+    const body: CfSearchResponse = parsed !== null && typeof parsed === "object" ? (parsed as CfSearchResponse) : {};
+    const items = Array.isArray(body.result) ? body.result : [];
+    if (page === 1) firstCount = items.length;
+    for (const item of items) {
+      if (typeof item.name === "string" && item.name) ids.push(item.name);
+      else if (typeof item.id === "string" && item.id) ids.push(item.id);
+    }
+    const info = body.result_info;
+    if (page === 1 && typeof info?.total_count === "number" && info.total_count >= 0) {
+      totalCount = info.total_count;
+      if (typeof info.per_page === "number" && info.per_page > 0) totalPages = Math.ceil(info.total_count / info.per_page);
+    }
+    if (items.length === 0) break;
+    if (totalCount !== undefined ? ids.length >= totalCount : items.length < CF_MODELS_PER_PAGE) break;
+  }
+  return { ids, firstCount };
+}
+
+async function listCloudflareModels(
+  base: string,
+  config: ProviderConfig,
+  sessionHeaders: Record<string, string>,
+  fetchImpl: FetchLike,
+): Promise<{ models: Array<{ id: string }> }> {
+  const searchUrl = (() => {
+    const url = new URL(base);
+    url.search = "";
+    url.hash = "";
+    url.pathname = `${url.pathname.replace(/\/ai\/v1$/, "")}/ai/models/search`;
+    return url.toString();
+  })();
+  let result = await cfSearchPages(searchUrl, config.apiKey, sessionHeaders, fetchImpl, CF_TEXT_GENERATION_TASK);
+  const firstStatus = result.firstStatus;
+  const filterRejected = firstStatus === 400 || firstStatus === 404 || firstStatus === 405;
+  const filterEmpty = firstStatus === undefined && result.firstCount === 0;
+  if (filterRejected || filterEmpty) {
+    assistantLog("DEBUG", "assistant-provider cloudflare task filter fallback to full catalog", { firstStatus: firstStatus ?? null, firstCount: result.firstCount });
+    result = await cfSearchPages(searchUrl, config.apiKey, sessionHeaders, fetchImpl, undefined);
+  }
+  if (result.firstStatus !== undefined) {
+    throw new ProviderUnreachable({ message: `cloudflare models search returned ${result.firstStatus}`, status: result.firstStatus });
+  }
+  const seen = new Set<string>();
+  const models: Array<{ id: string }> = [];
+  for (const id of result.ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id });
+  }
+  return { models };
+}
+
 // OpenAI wire (openai_compatible + openai_responses): GET {base}/models with
 // Bearer where base already includes /v1. Anthropic wire: GET {base}/v1/models
 // with x-api-key + anthropic-version where base has /v1 stripped (SDK appends
 // /v1/messages, so listModels must re-add /v1). normalizeBaseUrl already
-// normalized per kind.
+// normalized per kind. Cloudflare's OpenAI-wire base has no /models route and
+// is served from the models-search catalog instead.
 export async function listModels(
   config: ProviderConfig,
   fetchImpl: FetchLike = fetch,
@@ -338,6 +471,13 @@ export async function listModels(
   const isOpenAiWire = kind === "openai_compatible" || kind === "openai_responses";
   const path = isOpenAiWire ? "/models" : "/v1/models";
   const sessionHeaders = opencodeSessionHeaders(opts?.sessionId ?? config.sessionId, config);
+  if (isOpenAiWire) {
+    const accountId = cloudflareAiAccountId(base);
+    if (accountId) {
+      assistantLog("DEBUG", "assistant-provider listModels cloudflare search", { base, accountId, model: config.model, providerId: config.providerId ?? null });
+      return listCloudflareModels(base, config, sessionHeaders, fetchImpl);
+    }
+  }
   const headers: Record<string, string> = isOpenAiWire
     ? { authorization: `Bearer ${config.apiKey}`, ...sessionHeaders }
     : { "x-api-key": config.apiKey, "anthropic-version": ANTHROPIC_VERSION, ...sessionHeaders };
@@ -351,7 +491,7 @@ export async function listModels(
   }
   assistantLog("DEBUG", "assistant-provider listModels response", { kind, base, path, status: res.status });
   if (res.status === 401 || res.status === 403) throw new ProviderAuthFailed({});
-  if (!res.ok) throw new ProviderUnreachable({ message: `models endpoint returned ${res.status}` });
+  if (!res.ok) throw new ProviderUnreachable({ message: `models endpoint returned ${res.status}`, status: res.status });
   const body = (await res.json()) as { data?: Array<{ id?: string }>; models?: Array<{ id?: string }> };
   const items = body.data ?? body.models ?? [];
   const models: Array<{ id: string }> = [];
@@ -360,6 +500,42 @@ export async function listModels(
   }
   assistantLog("DEBUG", "assistant-provider listModels parsed", { kind, count: models.length });
   return { models };
+}
+
+// Minimal chat-completion ping for providers whose OpenAI-wire base serves
+// chat but has no listing route (Cloudflare /ai/v1 → 405 on GET /models).
+export async function pingChatCompletion(
+  config: ProviderConfig,
+  fetchImpl: FetchLike = fetch,
+  opts?: { signal?: AbortSignal; sessionId?: string },
+): Promise<void> {
+  const kind = normalizeProviderKind(config.kind);
+  const base = normalizeBaseUrl(config.baseUrl, kind).replace(/\/+$/, "");
+  const model = config.model;
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    authorization: `Bearer ${config.apiKey}`,
+    ...opencodeSessionHeaders(opts?.sessionId ?? config.sessionId, config),
+  };
+  assistantLog("DEBUG", "assistant-provider pingChatCompletion request", { kind, base, model, providerId: config.providerId ?? null, apiKeyMask: maskApiKey(config.apiKey) });
+  let res: Response;
+  try {
+    res = await fetchImpl(`${base}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false }),
+      signal: opts?.signal ?? AbortSignal.timeout(15_000),
+    });
+  } catch (e) {
+    assistantLog("WARN", "assistant-provider pingChatCompletion fetch failed", { kind, base, model, error: String(e).slice(0, 500) });
+    throw new ProviderUnreachable({});
+  }
+  assistantLog("DEBUG", "assistant-provider pingChatCompletion response", { kind, base, model, status: res.status });
+  if (res.status === 401 || res.status === 403) throw new ProviderAuthFailed({});
+  if (!res.ok) throw new ProviderUnreachable({ message: `chat completion returned ${res.status}`, status: res.status });
+  try {
+    await res.body?.cancel();
+  } catch {}
 }
 
 function maskApiKey(key: string): string {
