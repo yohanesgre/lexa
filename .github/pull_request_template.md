@@ -20,7 +20,7 @@ fixes #
 
 ## How to test
 
-<!-- Steps on `bun run dev:full` (API on :3000, UI on :5173): what to do, what to expect.
+<!-- Steps on `bun run dev` (API on :3000, UI on :5173): what to do, what to expect.
      Include curl/health-check for API-only changes. -->
 
 ## Checklist

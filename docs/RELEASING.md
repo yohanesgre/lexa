@@ -135,7 +135,7 @@ CLI asset.
   `bun build --compile --minify cli/src/index.ts` → `bin/lx`. No daemon embed
   (the agent-runtime tier was removed 2026-09-26), and the CLI installs no
   listener unit.
-- `dev` = `bun run lx-dev` or `bun run install:cli-dev` →
+- `dev` = `bun run lx` or `bun run install:cli-dev` →
   `~/.local/bin/lx-dev` (a pure "run repo source via bun" wrapper —
   no `LEXA_DIR` export or flavor logic, identical behavior and state paths
   to the compiled binary; never overwrites the prod name).

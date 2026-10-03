@@ -12,7 +12,7 @@ git clone https://github.com/yohanesgre/lexa.git
 cd lexa
 bun install
 bun run setup          # first-time: admin email, API key, migrations, sample data
-bun run dev:full       # API (:3000) + vite frontend (:5173)
+bun run dev            # API (:3000) + vite frontend (:5173)
 # open http://localhost:5173
 ```
 

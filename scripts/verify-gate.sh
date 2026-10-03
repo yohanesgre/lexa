@@ -172,7 +172,7 @@ fi
 
 say "Gate: secrets / staged check"
 STAGED="$(git diff --cached --name-only || true)"
-# `(^|/)\.env` covers .env, .env.toml, .env.legacy, .env.staging/.prod; the
+# `(^|/)\.env` covers .env, .env.toml, .env.legacy, .env.staging.toml/.prod; the
 # tracked .env.toml.example template is explicitly exempt.
 if echo "$STAGED" | grep -vE '\.env\.toml\.example$' | grep -qE '((^|/)\.env|private-key\.pem|\.private-key\.pem|config\.json)'; then
   bad "secrets staged: $STAGED"

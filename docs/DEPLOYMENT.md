@@ -68,7 +68,7 @@ clone.)
 
 **Development** starts from a clone — `git clone
 https://github.com/yohanesgre/lexa && cd lexa`, then `bun install && bun run
-setup && bun run dev:full`.
+setup && bun run dev`.
 
 Flags: `--ref <tag>` (artifact source: a release tag), `--name <name>` (workers
 deploy name, default `lexa`), `--account <id>` (Cloudflare account id; skips the
@@ -306,9 +306,10 @@ email/password (Better Auth).
 
 **Local dev:** `bun run setup` (dev-only CLI wizard: admin email, API key,
 migrations, optional sample data — self-hosters use the install script +
-`/setup` wizard instead) then `bun run dev:full` (API :3000 + vite :5173,
-vite proxies `/api`). `dev:full` sets `LXK_SEED_DEV=1` for boot-time sample
-data. Dev also sets `LXK_PUBLIC_URL=http://localhost:5173` (the Better Auth
+`/setup` wizard instead) then `bun run dev` (Bun: API :3000 + vite :5173,
+vite proxies `/api`). `dev` sets `LXK_SEED_DEV=1` for boot-time sample data.
+`bun run dev:workers` is the local Worker flavor (vite + workerd :5173).
+Dev also sets `LXK_PUBLIC_URL=http://localhost:5173` (the Better Auth
 base URL + cookie domain for the local flow). See the repository README.
 
 **Superadmin account:** after install, open `<url>/setup` once — the wizard

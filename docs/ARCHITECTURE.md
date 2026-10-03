@@ -840,7 +840,7 @@ replaying on D1:
   `ssr: false` and stay client-only. Frozen at current features (ADR-0003):
   existing installs keep running, no new work lands there, and the assistant is
   not part of this flavor. Development runs from a clone
-  (`bun install && bun run setup && bun run dev:full`); the release installer
+  (`bun install && bun run setup && bun run dev`); the release installer
   (`scripts/install.sh workers`) targets Workers only — see docs/DEPLOYMENT.md.
 
 Vite plugin chain emits two server bundles (Bun entry + Workers entry).

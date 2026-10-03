@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Lexa local dev — one command: API server (:3000) + vite frontend (:5173).
-#   bun run dev:full
+#   bun run dev
 #
 # - Loads .env.toml (or legacy .env) into the shell so both processes see it.
 # - Vite inherits those exported values from the process environment; it is not
@@ -50,7 +50,7 @@ bun run server/entry.ts &
 SERVER_PID=$!
 
 # Pin the vite port so the banner stays true; fail loudly if it's taken.
-# Invoke vite directly (not `bun run dev`, which is the Workers flavor) so this
+# Invoke vite directly (not `bun run dev:workers`, which is the Workers flavor) so this
 # stays Bun flavor and keeps the /api → :3000 proxy.
 bun x vite dev --port 5173 --strictPort &
 VITE_PID=$!

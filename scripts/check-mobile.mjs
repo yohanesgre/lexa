@@ -5,7 +5,7 @@
 // on any horizontal overflow at any route.
 //
 // Usage:
-//   bun run dev:full           # in one terminal
+//   bun run dev                # in one terminal
 //   bunx playwright install chromium   # one-time
 //   bun run check:mobile       # in another terminal
 //

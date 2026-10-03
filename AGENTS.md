@@ -155,7 +155,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 
 ```bash
 tsc --noEmit                    # must pass at every phase gate
-bun run dev                     # local smoke testing (one workerd instance)
+bun run dev:workers             # local smoke testing (one workerd instance)
 ```
 
 Lane-scoped tests for iteration (pick your lane — `test`/`test:full` stay for pre-merge):
@@ -187,45 +187,46 @@ with `--print-plan`.
 
 Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them and paste the output.
 
-### Running the dev stack (local Worker by default)
+### Running the dev stack (Bun by default)
 
 The `.env.toml` file is **required** — `bun run setup` writes it (dev-only;
-self-hosters use the install script + `/setup` wizard). The local Worker reads
-it through the generated `.dev.vars`; `dev:full` applies it via
-`server/entry.ts` at boot. A legacy flat `.env` is read as a one-release
-fallback.
+self-hosters use the install script + `/setup` wizard). `dev` reads it via
+`server/entry.ts` at boot; the local Worker reads it through the generated
+`.dev.vars`. A legacy flat `.env` is read as a one-release fallback.
 
 ```bash
 bun run setup          # first-time: admin email, API key, migrations, sample data
-bun run dev            # default: local Worker (vite + workerd) on :5173, Ctrl-C stops it
+bun run dev            # default: Bun stack — API :3000 + vite :5173, Ctrl-C stops both
 # open http://localhost:5173
 ```
 
-`bun run dev` is the day-to-day loop: one workerd instance (via
-`@cloudflare/vite-plugin`) co-hosts the SSR handler and the API on :5173, so
-`/api/*` is served directly (no proxy, no separate Bun process). `dev:full` is
-the self-host (Bun) flavor — it boots `server/entry.ts` on :3000 and vite on
-:5173 with vite proxying `/api` → :3000. `bun run dev:bun` aliases it. The
-local Worker's D1 (`.wrangler/state/v3/d1`) is separate from `bun run setup`'s
-Bun SQLite (`data/lexa.db`); a fresh Worker DB lands on `/setup` (web wizard),
-or seed it with `bun x wrangler d1 execute DB --local --file scripts/seed-dev.sql`.
+`bun run dev` is the day-to-day loop: it boots `server/entry.ts` on :3000 and
+vite on :5173 (vite proxies `/api` → :3000) and sets `LXK_SEED_DEV=1` for
+sample data. `bun run dev:workers` is the local Worker flavor: one workerd
+instance (via `@cloudflare/vite-plugin`) co-hosts the SSR handler and the API
+on :5173, so `/api/*` is served directly (no proxy, no separate Bun process).
+`bun run dev:remote` runs vite only, proxying `/api` to a remote server
+(default staging). The local Worker's D1 (`.wrangler/state/v3/d1`) is separate
+from `bun run setup`'s Bun SQLite (`data/lexa.db`); a fresh Worker DB lands on
+`/setup` (web wizard), or seed it with `bun x wrangler d1 execute DB --local
+--file scripts/seed-dev.sql`.
 
 **Env files — which one is for what:**
 
 | File | Role | Read by |
 |---|---|---|
-| `.env.toml` | canonical local dev env (gitignored) | `dev` via `scripts/dev-workers.sh` (source for `.dev.vars`), `dev:full` via `scripts/dev.sh`, `bun run setup` |
-| `.dev.vars` | generated from `.env.toml`; regenerated when `.env.toml` is newer, else reused | `dev` / `dev:workers` (wrangler) |
-| `.env.staging` | staging deploy key custody — one line, `LXK_SECRETS_MASTER_KEY` (gitignored, 0600) | `scripts/deploy-staging.sh` |
+| `.env.toml` | canonical local dev env (gitignored) | `dev` via `scripts/dev.sh`, `dev:workers` via `scripts/dev-workers.sh` (source for `.dev.vars`), `bun run setup` |
+| `.dev.vars` | generated from `.env.toml`; regenerated when `.env.toml` is newer, else reused | `dev:workers` (wrangler) |
+| `.env.staging.toml` | staging deploy key custody — TOML, one key `LXK_SECRETS_MASTER_KEY` (gitignored, 0600) | `scripts/deploy-staging.sh` |
 | `.env.toml.example` | template for `.env.toml` | — |
-| `wrangler.jsonc` | prod Workers config (placeholder ids) | wrangler, `dev` / `dev:workers` |
+| `wrangler.jsonc` | prod Workers config (placeholder ids) | wrangler, `dev:workers` |
 | `wrangler.staging.local.jsonc` | staging custody config (gitignored) | `scripts/deploy-staging.sh`, `bun run staging:pull` |
 | `wrangler.staging.example.jsonc` | staging config template | — |
 | `~/apps/lexa/cf-workers/.env.toml` | prod deploy custody (`LXK_SECRETS_MASTER_KEY`) | prod install/deploy |
 
 A one-time converted flat `.env` may sit next to these as `.env.legacy` — nothing reads it.
 
-`scripts/dev.sh` (what `dev:full` / `dev:bun` runs) loads `.env.toml` (or a
+`scripts/dev.sh` (what `bun run dev` runs) loads `.env.toml` (or a
 legacy `.env`) into the shell via the loader's exports, boots
 `server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` → :3000),
 and sets `LXK_SEED_DEV=1` for sample data on every boot. Delete `data/lexa.db*`
@@ -247,7 +248,7 @@ Key facts:
   (frontend changes require `bun run build` first). Use it only for API work
   or to preview the production build; use `bun run dev` for day-to-day
   development.
-- **Local Worker flavor:** `bun run dev` runs `@cloudflare/vite-plugin` with
+- **Local Worker flavor:** `bun run dev:workers` runs `@cloudflare/vite-plugin` with
   `remoteBindings: false` (the `ai` binding is permanent-remote and would stall
   boot on "Establishing remote connection..."). `workers_ai` assistant models
   therefore do not work locally — configure an external provider instead. The

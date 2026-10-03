@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Lexa local Worker dev (vite + workerd via the Cloudflare Vite plugin).
-#   bun run dev            # the default local loop
-#   bun run dev:workers    # same script, explicit alias
+#   bun run dev:workers
 #
 # - Ensures `.dev.vars` is current: the Workers runtime reads `.dev.vars`, not
 #   `.env.toml`. Derived from the env file through the loader's emit path

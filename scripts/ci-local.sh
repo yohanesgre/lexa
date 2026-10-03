@@ -258,7 +258,7 @@ else
     # check:mobile needs a running dev server + playwright chromium
     # If neither localhost:5173 nor :3000 responds, skip with warn rather than hard-fail.
     if ! curl -sf http://localhost:5173/ >/dev/null 2>&1 && ! curl -sf http://localhost:3000/api/health >/dev/null 2>&1; then
-      warn "no dev server at :5173 or :3000 - skipping check:mobile (run bun run dev:full in another terminal, then re-run; or CI_LOCAL_SKIP_MOBILE=1 to silence)"
+      warn "no dev server at :5173 or :3000 - skipping check:mobile (run bun run dev in another terminal, then re-run; or CI_LOCAL_SKIP_MOBILE=1 to silence)"
     else
       set +e
       bun run check:mobile 2>&1 | tee /tmp/check-mobile.log
