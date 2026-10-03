@@ -42,12 +42,14 @@ export interface AssistantThreadRpcShape {
   resetThread(threadKey: string): Promise<{ ok: true } | null>;
   /**
    * Enqueue per-thread work: a schedule tick hands over `{projectId, runId,
-   * actorUserId}` so the DO can dispatch the detached facet for the registry
-   * row; a document run (no registry row) pins the run-id cursor.
+   * actorUserId, kind: "schedule"}` so the DO can dispatch the detached facet
+   * for the registry row; a document run (no registry row) omits `kind` and
+   * pins the run-id cursor. The explicit kind keeps a schedule run out of the
+   * document fallback when the registry row cannot be read.
    */
   enqueueRun(
     threadKey: string,
-    input: { projectId: string; runId: string; actorUserId: string }
+    input: { projectId: string; runId: string; actorUserId: string; kind?: "document" | "schedule" }
   ): Promise<{ ok: true } | null>;
   /** Abort an in-flight document run. */
   abortRun(threadKey: string, taskId: string): Promise<{ ok: true } | null>;

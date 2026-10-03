@@ -135,9 +135,14 @@ export function buildInternalDepsForRun(
 ): AssistantInternalDeps | null {
   const masterKey = env.LXK_SECRETS_MASTER_KEY;
   if (!masterKey || !identity) return null;
-  const origin = storedOrigin ?? env.LXK_PUBLIC_URL;
-  if (!origin) return null;
+  // A reachable origin: the connect-persisted one wins; a cron-dispatched
+  // `enqueueRun` never connected and a default workers.dev install has no
+  // `LXK_PUBLIC_URL`, so fall back to the fixed origin the service binding
+  // proves (the runner uses the same constant — `runner.ts`). Without the
+  // binding there is no origin and the caller degrades (logged, not silent).
   const service = env.ASSISTANT_SERVICE;
+  const origin = storedOrigin ?? env.LXK_PUBLIC_URL ?? (service ? "https://assistant.internal" : undefined);
+  if (!origin) return null;
   return {
     origin,
     identity,
@@ -247,6 +252,24 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     const origin = await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY);
     const identity = await this.ctx.storage.get<InternalAuthIdentity>(INTERNAL_IDENTITY_KEY);
     return buildInternalDepsForRun(this.env, identity ?? null, origin ?? undefined);
+  }
+
+  // Persist the reachable origin + signed identity when absent. `onConnect`
+  // writes them for an interactive thread; a cron-dispatched schedule run never
+  // connects, so `enqueueRun` writes the same keys before dispatching so the
+  // detached completion hook (`onRunFinished`) can rebuild deps after a cold
+  // wake. An existing connect value wins — never overwrite it.
+  private async persistInternalContext(origin: string, identity: InternalAuthIdentity): Promise<void> {
+    try {
+      if ((await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY)) == null) {
+        await this.ctx.storage.put(INTERNAL_ORIGIN_KEY, origin);
+      }
+      if ((await this.ctx.storage.get<InternalAuthIdentity>(INTERNAL_IDENTITY_KEY)) == null) {
+        await this.ctx.storage.put(INTERNAL_IDENTITY_KEY, identity);
+      }
+    } catch (e) {
+      console.warn("[Assistant] failed to persist internal context:", e instanceof Error ? e.message : String(e));
+    }
   }
 
   // Migrate-on-read (ADR-0003 §B.3): the first activation of a thread whose DO
@@ -663,21 +686,36 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     run: { runId: string },
     result: { status: AgentToolTerminalStatus; summary?: string; error?: string; reason?: string; childStillRunning?: boolean }
   ): Promise<void> {
-    // `interrupted` is a SOFT seal (agents SDK): the parent stopped waiting but
-    // the child may still reach a real terminal and fire this hook again with
-    // `completed`. Leave the registry row `running` and emit no terminal card so
-    // the late real result supersedes; the stale-run reconciliation tick fails a
-    // row whose child never returns.
-    if (!isTerminalAgentToolStatus(result.status)) return;
+    // `interrupted` is a SOFT seal (agents SDK) only while the child may still
+    // run: the parent stopped waiting but the child may reach a real terminal
+    // and fire this hook again with `completed`. Leave the registry row
+    // `running` and emit no terminal card so the late real result supersedes;
+    // the stale-run reconciliation tick fails a row whose child never returns.
+    // `interrupted` with `childStillRunning === false` is HARD: the child is
+    // gone, so land the `failed` transition immediately and emit no card.
+    const hardInterrupt = result.status === "interrupted" && result.childStillRunning === false;
+    if (result.status === "interrupted" && !hardInterrupt) return;
     const deps = await this.loadInternalDeps();
     if (!deps) return;
-    const status = runStatusForTerminal(result.status);
+    let status: "completed" | "failed" | "cancelled";
+    let error: string | null;
+    if (hardInterrupt) {
+      status = "failed";
+      error = result.reason ?? result.error ?? "interrupted";
+    } else {
+      if (!isTerminalAgentToolStatus(result.status)) return;
+      status = runStatusForTerminal(result.status);
+      error = result.error ?? null;
+    }
     await updateRunRemote(deps, {
       runId: run.runId,
       status,
       result: result.summary ?? null,
-      error: result.error ?? null,
+      error,
     });
+    // A hard interrupt is reported through the registry only (no card), so it
+    // never races a later real terminal's card.
+    if (hardInterrupt) return;
     // Server-driven result card (ADR-0004 §3): append the completion to the
     // parent transcript WITHOUT triggering a model turn. Dedupe is per terminal
     // kind, so an earlier non-terminal/interrupted delivery can never block a
@@ -765,36 +803,62 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     return { ok: true };
   }
 
-  async enqueueRun(input: { projectId: string; runId: string; actorUserId: string }): Promise<{ ok: true }> {
+  async enqueueRun(input: {
+    projectId: string;
+    runId: string;
+    actorUserId: string;
+    /**
+     * Explicit routing hint. `"schedule"` (set by the cron tick, which owns the
+     * registry row's kind) never takes the document fallback below; omitted or
+     * `"document"` is the legacy document-run path. The kind is passed rather
+     * than inferred so a null `getRunRemote` (not-found vs unreachable) cannot
+     * misroute a schedule run into a document run.
+     */
+    kind?: "document" | "schedule";
+  }): Promise<{ ok: true }> {
     // Identity-object entry point (ADR-0004 §4): a cron tick hands over the
     // run coordinates; the DO derives its own thread key from the instance name.
     const threadKey = this.ctx.id.name ?? "";
+    const identity: InternalAuthIdentity = { actorUserId: input.actorUserId, projectId: input.projectId, threadKey };
     const storedOrigin = await this.ctx.storage.get<string>(INTERNAL_ORIGIN_KEY);
-    const deps = buildInternalDepsForRun(
-      this.env,
-      { actorUserId: input.actorUserId, projectId: input.projectId, threadKey },
-      storedOrigin ?? undefined
-    );
-    if (deps) {
-      const run = await getRunRemote(deps, input.runId);
-      if (run?.kind === "schedule") {
-        // The registry row already exists (created by the schedule tick): drive
-        // the detached facet and land the running/failed transition. No insert,
-        // no cap check. Detached runs have no interactive approver → `auto`.
-        await dispatchRegisteredRun(this.delegationDeps(deps), {
-          runId: run.id,
-          goal: run.goal,
-          projectId: run.projectId,
-          threadKey: run.threadKey,
-          mode: "auto",
-          budgetMs: run.budgetMs ?? DEFAULT_RUN_BUDGET_MS,
-        });
+    const deps = buildInternalDepsForRun(this.env, identity, storedOrigin ?? undefined);
+    if (input.kind === "schedule") {
+      // Schedule dispatch has its own branch: a missing/unreachable registry
+      // row must never pin a run-id cursor on a schedule thread (that cursor
+      // belongs to document runs). Log rather than silently degrade.
+      if (!deps) {
+        console.warn(
+          `[Assistant] schedule run ${input.runId} could not dispatch: internal deps unavailable (missing master key or origin)`
+        );
         return { ok: true };
       }
+      const run = await getRunRemote(deps, input.runId);
+      if (!run || run.kind !== "schedule") {
+        console.warn(
+          `[Assistant] schedule run ${input.runId} not found in the registry; left queued for reconciliation`
+        );
+        return { ok: true };
+      }
+      // The registry row already exists (created by the schedule tick): drive
+      // the detached facet and land the running/failed transition. No insert,
+      // no cap check. Detached runs have no interactive approver → `auto`.
+      // Persist origin/identity first so the detached completion hook can
+      // rebuild deps without an interactive connect (fix 2).
+      await this.persistInternalContext(deps.origin, identity);
+      await dispatchRegisteredRun(this.delegationDeps(deps), {
+        runId: run.id,
+        goal: run.goal,
+        projectId: run.projectId,
+        threadKey: run.threadKey,
+        mode: "auto",
+        budgetMs: run.budgetMs ?? DEFAULT_RUN_BUDGET_MS,
+      });
+      return { ok: true };
     }
-    // Document run (or an unreachable Worker): pin the run-id cursor the
-    // engine's terminal transition uses. `assistant_tasks` remains the document
-    // source of truth — the DO creates no registry row for a document run.
+    // Document run: pin the run-id cursor the engine's terminal transition
+    // uses. `assistant_tasks` remains the document source of truth — the DO
+    // creates no registry row for a document run. Only document runs reach
+    // here; a schedule run never writes this key.
     try {
       await this.ctx.storage.put(RUN_ID_KEY, input.runId);
     } catch (e) {

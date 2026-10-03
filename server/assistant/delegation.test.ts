@@ -199,10 +199,15 @@ describe("runStatusForTerminal", () => {
     expect(runStatusForTerminal("error")).toBe("failed");
   });
 
-  it("treats interrupted as non-terminal (soft seal)", () => {
+  it("treats interrupted as non-terminal (soft seal) while the child may run", () => {
     expect(isTerminalAgentToolStatus("interrupted")).toBe(false);
+    expect(isTerminalAgentToolStatus("interrupted", true)).toBe(false);
     expect(isTerminalAgentToolStatus("completed")).toBe(true);
     expect(isTerminalAgentToolStatus("error")).toBe(true);
     expect(isTerminalAgentToolStatus("aborted")).toBe(true);
+  });
+
+  it("treats interrupted with childStillRunning === false as a hard terminal", () => {
+    expect(isTerminalAgentToolStatus("interrupted", false)).toBe(true);
   });
 });

@@ -194,13 +194,20 @@ export type AgentToolTerminalStatus = "completed" | "error" | "aborted" | "inter
 export type AgentToolTerminalOnly = Exclude<AgentToolTerminalStatus, "interrupted">;
 
 /**
- * `interrupted` is not terminal: the parent stopped waiting but the child may
- * still reach a real terminal and fire the completion hook again. Treating it
- * as terminal would poison the run row (a late `completed` could never
- * supersede) and the result card.
+ * `interrupted` is not terminal while the child may still run: the parent
+ * stopped waiting but the child may still reach a real terminal and fire the
+ * completion hook again. Treating it as terminal would poison the run row (a
+ * late `completed` could never supersede) and the result card.
+ *
+ * `childStillRunning === false` is the hard case: the SDK reports the child is
+ * gone, so the run can never complete and the caller must land `failed`.
  */
-export function isTerminalAgentToolStatus(status: AgentToolTerminalStatus): status is AgentToolTerminalOnly {
-  return status !== "interrupted";
+export function isTerminalAgentToolStatus(
+  status: AgentToolTerminalStatus,
+  childStillRunning?: boolean
+): status is AgentToolTerminalOnly {
+  if (status !== "interrupted") return true;
+  return childStillRunning === false;
 }
 
 /**

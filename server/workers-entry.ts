@@ -113,7 +113,12 @@ function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadR
     resumeBatch(batchId: string | null): Promise<{ ok: true }>;
     destroyThread(): Promise<{ ok: true }>;
     resetThread(): Promise<{ ok: true }>;
-    enqueueRun(input: { projectId: string; runId: string; actorUserId: string }): Promise<{ ok: true }>;
+    enqueueRun(input: {
+      projectId: string;
+      runId: string;
+      actorUserId: string;
+      kind?: "document" | "schedule";
+    }): Promise<{ ok: true }>;
     abortRun(taskId: string): Promise<{ ok: true }>;
   }
   const stubFor = async (threadKey: string): Promise<Stub> =>
@@ -621,9 +626,19 @@ async function runScheduled(env: WorkersEnv): Promise<void> {
   const enqueue: ScheduleEnqueue | undefined = env.ASSISTANT_AGENT
     ? async (run) => {
         const agent = (await getAgentByName(env.ASSISTANT_AGENT!, run.threadKey)) as unknown as {
-          enqueueRun(input: { projectId: string; runId: string; actorUserId: string }): Promise<{ ok: true }>;
+          enqueueRun(input: {
+            projectId: string;
+            runId: string;
+            actorUserId: string;
+            kind?: "document" | "schedule";
+          }): Promise<{ ok: true }>;
         };
-        await agent.enqueueRun({ projectId: run.projectId, runId: run.id, actorUserId: run.createdBy ?? "" });
+        await agent.enqueueRun({
+          projectId: run.projectId,
+          runId: run.id,
+          actorUserId: run.createdBy ?? "",
+          kind: "schedule",
+        });
       }
     : undefined;
   await runScheduledCore(driver, runtimeEnv, env.BLOB, enqueue);
