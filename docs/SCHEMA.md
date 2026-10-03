@@ -796,6 +796,7 @@ CREATE TABLE assistant_call_logs (
   usage_in INTEGER NOT NULL DEFAULT 0,
   usage_out INTEGER NOT NULL DEFAULT 0,
   cached_in INTEGER NOT NULL DEFAULT 0,
+  cached_write_in INTEGER NOT NULL DEFAULT 0,
   latency_ms INTEGER,
   cost_cents INTEGER NOT NULL DEFAULT 0,
   estimated INTEGER NOT NULL DEFAULT 0,
@@ -1189,6 +1190,9 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- to add `thread_key`, `run_id`, and a `purpose` column CHECK-pinned to
 -- ('turn','runner','preflight','summary') with DEFAULT 'turn'. Rows and the
 -- three call-log indexes are preserved verbatim.
+-- 0024_assistant_call_log_cached_write_in.sql adds `cached_write_in` (cache-write
+-- tokens) so a DO-computed cost can be reproduced from the row; additive
+-- ALTER (no CHECK change, so no rebuild).
 ```
 
 ## Design Notes

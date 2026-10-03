@@ -312,8 +312,9 @@ async function startStream(
         usageIn: event.usage.inputTokens ?? 0,
         usageOut: event.usage.outputTokens ?? 0,
         cachedIn: event.usage.inputTokenDetails?.cacheReadTokens ?? 0,
+        cachedWriteIn: event.usage.inputTokenDetails?.cacheWriteTokens ?? 0,
         latencyMs: (input.nowMs?.() ?? Date.now()) - startedAtMs,
-        estimated: false,
+        estimated: event.usage.inputTokens === undefined && event.usage.outputTokens === undefined,
       });
       await reportProviderHealthQuietly(guardedDeps, config.providerId, true);
       await transitionRunQuietly(guardedDeps, input.runId, {

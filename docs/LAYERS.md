@@ -954,7 +954,7 @@ export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("
   // thin: create/getById/listByProvider/listAll/update/delete
 }) {}
 export class AssistantCallLogsRepo extends Effect.Service<AssistantCallLogsRepo>()("Lexa/AssistantCallLogsRepo", {
-  // assistant_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→assistant_providers ON DELETE SET NULL,thread_key,run_id,model,kind,status CHECK done|error|suspended|aborted,purpose CHECK turn|runner|preflight|summary DEFAULT turn,error_code,usage_in/out,cached_in,latency_ms,cost_cents,estimated,created_at)
+  // assistant_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→assistant_providers ON DELETE SET NULL,thread_key,run_id,model,kind,status CHECK done|error|suspended|aborted,purpose CHECK turn|runner|preflight|summary DEFAULT turn,error_code,usage_in/out,cached_in,cached_write_in,latency_ms,cost_cents,estimated,created_at)
   // thin: insert/getById/listByProject/listByProvider/listByModel/listRecent
 }) {}
 export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPricesRepo>()("Lexa/AssistantModelPricesRepo", {

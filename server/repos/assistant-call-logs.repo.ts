@@ -16,6 +16,7 @@ export interface AssistantCallLogDbRow {
   usage_in: number;
   usage_out: number;
   cached_in: number;
+  cached_write_in: number;
   latency_ms: number | null;
   cost_cents: number;
   estimated: number;
@@ -37,6 +38,7 @@ function toDomain(row: AssistantCallLogDbRow): AssistantCallLogRow {
     usageIn: row.usage_in,
     usageOut: row.usage_out,
     cachedIn: row.cached_in,
+    cachedWriteIn: row.cached_write_in,
     latencyMs: row.latency_ms,
     costCents: row.cost_cents,
     estimated: row.estimated === 1,
@@ -52,8 +54,8 @@ export class AssistantCallLogsRepo extends Effect.Service<AssistantCallLogsRepo>
       insert: (input: { id: string } & AssistantCallLogInput): Effect.Effect<AssistantCallLogRow, ConstraintViolation | DbError | RowNotFound> =>
         run(
           db,
-          `INSERT INTO assistant_call_logs (id, project_id, provider_id, thread_key, run_id, model, kind, status, purpose, error_code, usage_in, usage_out, cached_in, latency_ms, cost_cents, estimated)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO assistant_call_logs (id, project_id, provider_id, thread_key, run_id, model, kind, status, purpose, error_code, usage_in, usage_out, cached_in, cached_write_in, latency_ms, cost_cents, estimated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           input.id,
           input.projectId ?? null,
           input.providerId ?? null,
@@ -67,6 +69,7 @@ export class AssistantCallLogsRepo extends Effect.Service<AssistantCallLogsRepo>
           input.usageIn ?? 0,
           input.usageOut ?? 0,
           input.cachedIn ?? 0,
+          input.cachedWriteIn ?? 0,
           input.latencyMs ?? null,
           input.costCents ?? 0,
           input.estimated ? 1 : 0

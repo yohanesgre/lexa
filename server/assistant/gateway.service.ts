@@ -545,7 +545,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                   costCents = 0;
                   estimated = true;
                 }
-                try { const l2 = (callLogRepo as never as Record<string, unknown>); const fn2 = (l2.log ?? l2.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn2) await Effect.runPromise(fn2.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "done", latencyMs: Date.now() - start, usageIn, usageOut, cachedIn, costCents, estimated } as never).pipe(Effect.catchAll(() => Effect.void)));
+                try { const l2 = (callLogRepo as never as Record<string, unknown>); const fn2 = (l2.log ?? l2.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn2) await Effect.runPromise(fn2.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "done", latencyMs: Date.now() - start, usageIn, usageOut, cachedIn, cachedWriteIn: cacheWriteIn, costCents, estimated } as never).pipe(Effect.catchAll(() => Effect.void)));
                 } catch {}
               }
               if (cfg.providerId) {

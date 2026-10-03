@@ -152,6 +152,7 @@ export interface AssistantCallLogRow {
   usageIn: number;
   usageOut: number;
   cachedIn: number;
+  cachedWriteIn: number;
   latencyMs: number | null;
   costCents: number;
   estimated: boolean;
@@ -174,6 +175,7 @@ export interface AssistantCallLogInput {
   usageIn?: number | undefined;
   usageOut?: number | undefined;
   cachedIn?: number | undefined;
+  cachedWriteIn?: number | undefined;
   latencyMs?: number | null | undefined;
   costCents?: number | undefined;
   estimated?: boolean | undefined;

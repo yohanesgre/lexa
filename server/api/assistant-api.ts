@@ -952,12 +952,10 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
         // must not fail the model import.
         const priceRepo = yield* AssistantModelPricesRepo;
         for (const m of catalog.models) {
-          if (
-            m.promptPrice === undefined &&
-            m.completionPrice === undefined &&
-            m.cachedReadPrice === undefined &&
-            m.cachedWritePrice === undefined
-          ) {
+          // Both prompt and completion prices are required before a row is
+          // persisted: an input-only (or output-only) entry would upsert the
+          // missing side as 0 and clobber a previously good price row.
+          if (m.promptPrice === undefined || m.completionPrice === undefined) {
             continue;
           }
           yield* priceRepo
