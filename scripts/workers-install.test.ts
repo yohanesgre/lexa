@@ -1,12 +1,15 @@
-// Unit tests for the pure D1 selector in scripts/workers-install.ts.
+// Unit tests for the pure selectors in scripts/lib/cf-deploy.ts (the workers
+// provisioning core) and for the thin entry wrapper scripts/workers-install.ts.
 //
-// workers-install.ts guards its runtime side effects behind `import.meta.main`,
-// so importing it here is inert. Run with `bun test scripts/workers-install.test.ts`
-// (invoked from scripts/test-install.sh, the CI `install-script` job).
+// cf-deploy.ts has no top-level runtime side effects, so importing it here is
+// inert (and the dedicated test below pins that against the entry script). Run
+// with `bun test scripts/workers-install.test.ts` (invoked from
+// scripts/test-install.sh, the CI `install-script` job).
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   accountAmbiguousMessage,
@@ -24,7 +27,7 @@ import {
   type AccountRow,
   type D1Row,
   type RootWorkerConfig,
-} from "./workers-install";
+} from "./lib/cf-deploy";
 
 function row(name: string): D1Row {
   return { uuid: `uuid-${name}`, name };
@@ -362,7 +365,7 @@ describe("root AI binding (H9)", () => {
 describe("source order — account resolves before any resource is created", () => {
   test("the resolveAccountOrDie call precedes the ensureD1 call in main", () => {
     const src = readFileSync(
-      new URL("./workers-install.ts", import.meta.url),
+      new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
     const resolveIdx = src.indexOf("account = resolveAccountOrDie(");
@@ -374,7 +377,7 @@ describe("source order — account resolves before any resource is created", () 
 
   test("main emits the DO blocks: resolveDurableObjects(rootConfig) spread into the config", () => {
     const src = readFileSync(
-      new URL("./workers-install.ts", import.meta.url),
+      new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
     expect(src).toContain("resolveDurableObjects(rootConfig)");
@@ -384,7 +387,7 @@ describe("source order — account resolves before any resource is created", () 
 
   test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {
     const src = readFileSync(
-      new URL("./workers-install.ts", import.meta.url),
+      new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
     expect(src).toContain("observability: resolveObservability(rootConfig)");
@@ -392,7 +395,7 @@ describe("source order — account resolves before any resource is created", () 
 
   test("main emits the AI binding: resolveAiBinding(rootConfig) spread into the config", () => {
     const src = readFileSync(
-      new URL("./workers-install.ts", import.meta.url),
+      new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
     expect(src).toContain("...resolveAiBinding(rootConfig),");
@@ -400,9 +403,48 @@ describe("source order — account resolves before any resource is created", () 
 
   test("main emits the ASSETS binding on the static-assets directory", () => {
     const src = readFileSync(
-      new URL("./workers-install.ts", import.meta.url),
+      new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
     expect(src).toContain('assets: { directory: "./assets", binding: "ASSETS" }');
+  });
+});
+
+describe("importable core", () => {
+  test("importing cf-deploy does not execute main (no deploy side effects)", () => {
+    const core = fileURLToPath(new URL("./lib/cf-deploy.ts", import.meta.url));
+    const res = spawnSync(
+      "bun",
+      [
+        "-e",
+        `await import(${JSON.stringify(core)}); console.log("CORE_IMPORT_OK");`,
+      ],
+      {
+        encoding: "utf-8",
+        // No credentials: if main ran it would die on the missing token and
+        // exit 1 before printing the marker.
+        env: {
+          ...process.env,
+          CF_API_TOKEN: "",
+          CLOUDFLARE_API_TOKEN: "",
+          CLOUDFLARE_ACCOUNT_ID: "",
+        },
+      },
+    );
+    expect(res.stderr).not.toContain("no Cloudflare credentials");
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("CORE_IMPORT_OK");
+  });
+
+  test("workers-install.ts is a thin wrapper that runs main only as the entry script", () => {
+    const src = readFileSync(
+      new URL("./workers-install.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain('import { main } from "./lib/cf-deploy";');
+    expect(src).toContain("if (import.meta.main) {");
+    expect(src).toContain("await main();");
+    // The wrapper must not re-declare provisioning logic.
+    expect(src).not.toContain("ensureD1");
   });
 });

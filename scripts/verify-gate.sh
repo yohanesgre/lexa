@@ -77,7 +77,7 @@ for p in "${CHANGED[@]-}"; do
     wireframes/src/*) touched_wireframes=1 ;;
   esac
   case "$p" in
-    scripts/install*|scripts/uninstall*|scripts/test-install*|scripts/workers-install*|wrangler.jsonc) touched_installer=1 ;;
+    scripts/install*|scripts/uninstall*|scripts/test-install*|scripts/workers-install*|scripts/lib/*|wrangler.jsonc) touched_installer=1 ;;
   esac
 done
 
