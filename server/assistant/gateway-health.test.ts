@@ -19,7 +19,7 @@ function memDb() {
   db.exec("CREATE TABLE assistant_providers (id TEXT PRIMARY KEY, label TEXT, base_url TEXT, api_key TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))");
   db.exec("CREATE TABLE assistant_models (id TEXT PRIMARY KEY, provider_id TEXT, model_id TEXT, kind TEXT, priority INTEGER DEFAULT 0, enabled INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')))");
   db.exec("CREATE TABLE assistant_provider_health (provider_id TEXT PRIMARY KEY, failure_count INTEGER NOT NULL DEFAULT 0, circuit_state TEXT NOT NULL CHECK (circuit_state IN ('open','closed','half-open')) DEFAULT 'closed', opened_at TEXT, last_probe_at TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0)");
-  db.exec("CREATE TABLE assistant_call_logs (id TEXT PRIMARY KEY, project_id TEXT, provider_id TEXT, thread_key TEXT, run_id TEXT, model TEXT, kind TEXT, status TEXT, purpose TEXT NOT NULL DEFAULT 'turn', error_code TEXT, usage_in INTEGER DEFAULT 0, usage_out INTEGER DEFAULT 0, cached_in INTEGER DEFAULT 0, latency_ms INTEGER, cost_cents INTEGER DEFAULT 0, estimated INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))");
+  db.exec("CREATE TABLE assistant_call_logs (id TEXT PRIMARY KEY, project_id TEXT, provider_id TEXT, thread_key TEXT, run_id TEXT, model TEXT, kind TEXT, status TEXT, purpose TEXT NOT NULL DEFAULT 'turn', error_code TEXT, usage_in INTEGER DEFAULT 0, usage_out INTEGER DEFAULT 0, cached_in INTEGER DEFAULT 0, cached_write_in INTEGER DEFAULT 0, latency_ms INTEGER, cost_cents INTEGER DEFAULT 0, estimated INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))");
   db.exec("CREATE TABLE assistant_model_prices (model TEXT PRIMARY KEY, prompt_price REAL DEFAULT 0, completion_price REAL DEFAULT 0, cached_read_price REAL DEFAULT 0, cached_write_price REAL DEFAULT 0, updated_at TEXT DEFAULT (datetime('now')))");
   db.exec("CREATE TABLE assistant_settings (project_id TEXT PRIMARY KEY, search_provider TEXT, search_api_key TEXT, url_allowlist TEXT, primary_supports_images INTEGER DEFAULT 0, reasoning_effort TEXT, write_tools TEXT DEFAULT '', fallback_model_ids TEXT DEFAULT '[]', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))");
   return db;
@@ -204,5 +204,38 @@ describe("gateway health wiring", () => {
     expect(row.estimated).toBe(1);
     expect(row.usage_in > 0).toBe(true);
     expect(row.cost_cents > 0).toBe(true);
+  });
+
+  it("prices cache-write tokens at cached_write_price in the gateway cost path", async () => {
+    const db = memDb();
+    db.prepare("INSERT INTO assistant_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES ('m-cw', 3000, 6000, 300, 1500)").run();
+    const spy = vi.spyOn(provider, "streamChat");
+    spy.mockImplementation((() => (async function* () { yield { type: "TEXT_MESSAGE_CONTENT", delta: "hello" } as unknown as never; yield { type: "RUN_FINISHED", usage: { input: 1000, output: 500, cachedTokens: 200, cacheWriteTokens: 100 } } as unknown as never; })()) as never);
+
+    const combined = Layer.mergeAll(
+      Layer.succeed(AssistantProvidersRepo, { list: () => Effect.succeed([]) } as unknown as never),
+      Layer.succeed(AssistantModelsRepo, { listAll: () => Effect.succeed([]) } as unknown as never),
+      AssistantCallLogsRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any)))),
+      Layer.succeed(AssistantSettingsRepo, { getByProject: () => Effect.fail(new (class E { _tag = "RowNotFound" as const; table = "assistant_settings" })()) } as unknown as never),
+      Layer.succeed(AssistantHealthService, mockHealth(db) as unknown as never),
+      AssistantModelPricesRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any)))),
+      Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any))
+    );
+    const gatewayLayer = Layer.provide(AssistantGateway.Default, combined);
+
+    const prog = Effect.gen(function* () {
+      const gw = yield* AssistantGateway;
+      const stream = gw.streamChat({
+        projectId: "p1",
+        systemPrompts: [],
+        messages: [{ role: "user", content: "hi" } as never],
+        fallbackConfigs: [{ kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m-cw", providerId: "prov-cw" }],
+      });
+      yield* Effect.promise(() => collect(stream));
+    });
+    await Effect.runPromise(prog.pipe(Effect.provide(gatewayLayer)) as any);
+    const row = db.prepare("SELECT usage_in, usage_out, cached_in, cached_write_in, cost_cents, estimated FROM assistant_call_logs WHERE model='m-cw'").get() as any;
+    // freshIn = 1000-200-100 = 700: (700*3000 + 200*300 + 100*1500 + 500*6000)/1e6*100 = 531 cents.
+    expect(row).toMatchObject({ usage_in: 1000, usage_out: 500, cached_in: 200, cached_write_in: 100, cost_cents: 531, estimated: 0 });
   });
 });

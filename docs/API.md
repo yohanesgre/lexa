@@ -1659,12 +1659,12 @@ GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers
                                                               runId?, model, kind, status,
                                                               purpose: "turn"|"runner"|"preflight"|"summary",
                                                               errorCode?, usageIn?, usageOut?,
-                                                              cachedIn?, latencyMs?, costCents?,
-                                                              estimated? }
+                                                              cachedIn?, cachedWriteIn?, latencyMs?,
+                                                              costCents?, estimated? }
                                                        (purpose defaults to "turn"; threadKey falls
                                                         back to the signed identity thread)
     POST /api/internal/assistant/run-status         → { ok: true }        (terminal task transitions)
-    POST /api/internal/assistant/provider-health    → assistant health row (per-turn breaker outcome)
+    POST /api/internal/assistant/provider-health    → { ok: true, circuitState } (per-turn breaker outcome)
                                                        body { providerId, ok }
     POST /api/internal/assistant/run-create         → { run }             (delegation registry)
     POST /api/internal/assistant/run-update         → assistant run row   (atomic transition)
@@ -1842,8 +1842,8 @@ GET    /api/admin/assistant/calls   (superadmin)
   | 403 FORBIDDEN
   AssistantCallLogRow = { id, projectId, providerId, threadKey, runId, model,
                           kind, status, purpose: "turn"|"runner"|"preflight"|"summary",
-                          errorCode, usageIn, usageOut, cachedIn, latencyMs,
-                          costCents, estimated, createdAt }
+                          errorCode, usageIn, usageOut, cachedIn, cachedWriteIn,
+                          latencyMs, costCents, estimated, createdAt }
   `threadKey`/`runId` are nullable (older rows and non-threaded calls); `purpose`
   defaults to `turn`.
 

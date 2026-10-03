@@ -162,9 +162,9 @@ interface AssistantPriceRow {
 
 // Cost for one call log: an explicit caller value wins (the Bun gateway path
 // computes and sends it); otherwise derive it from `assistant_model_prices`.
-// Mirrors `gateway.service.ts` — fresh input after cache reads, /1e6 per-M
-// tokens → cents. A missing price (or a call with no usage) records 0 and warns
-// only when a call actually spent tokens.
+// Mirrors `gateway.service.ts` — freshest input after cache reads and cache
+// writes, /1e6 per-M tokens → cents. A missing price (or a call with no usage)
+// records 0 and warns only when a call actually spent tokens.
 function resolveCostCents(
   driver: DbDriver,
   input: AssistantCallLogInput
@@ -173,18 +173,19 @@ function resolveCostCents(
   const usageIn = input.usageIn ?? 0;
   const usageOut = input.usageOut ?? 0;
   const cachedIn = input.cachedIn ?? 0;
+  const cachedWriteIn = input.cachedWriteIn ?? 0;
   return queryFirst<AssistantPriceRow>(
     driver,
     `SELECT prompt_price, completion_price, cached_read_price, cached_write_price FROM assistant_model_prices WHERE model = ?`,
     input.model
   ).pipe(
     Effect.map((p) => {
-      const freshIn = Math.max(0, usageIn - cachedIn);
-      return Math.round((freshIn * p.prompt_price + cachedIn * p.cached_read_price + usageOut * p.completion_price) / 1e6 * 100);
+      const freshIn = Math.max(0, usageIn - cachedIn - cachedWriteIn);
+      return Math.round((freshIn * p.prompt_price + cachedIn * p.cached_read_price + cachedWriteIn * p.cached_write_price + usageOut * p.completion_price) / 1e6 * 100);
     }),
     Effect.catchTag("RowNotFound", () =>
       Effect.sync(() => {
-        if (usageIn !== 0 || usageOut !== 0) {
+        if (usageIn !== 0 || usageOut !== 0 || cachedIn !== 0 || cachedWriteIn !== 0) {
           console.warn(`[Assistant] call-log: no price for model ${input.model}; recording cost 0`);
         }
         return 0;
@@ -201,8 +202,8 @@ export function insertCallLog(
     const costCents = yield* resolveCostCents(driver, input);
     yield* run(
       driver,
-      `INSERT INTO assistant_call_logs (id, project_id, provider_id, thread_key, run_id, model, kind, status, purpose, error_code, usage_in, usage_out, cached_in, latency_ms, cost_cents, estimated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO assistant_call_logs (id, project_id, provider_id, thread_key, run_id, model, kind, status, purpose, error_code, usage_in, usage_out, cached_in, cached_write_in, latency_ms, cost_cents, estimated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       crypto.randomUUID(),
       input.projectId ?? null,
       input.providerId ?? null,
@@ -216,6 +217,7 @@ export function insertCallLog(
       input.usageIn ?? 0,
       input.usageOut ?? 0,
       input.cachedIn ?? 0,
+      input.cachedWriteIn ?? 0,
       input.latencyMs ?? null,
       costCents,
       input.estimated ? 1 : 0
@@ -859,6 +861,7 @@ export async function handleInternalAssistantRequest(input: {
       usageIn: typeof payload.usageIn === "number" ? payload.usageIn : 0,
       usageOut: typeof payload.usageOut === "number" ? payload.usageOut : 0,
       cachedIn: typeof payload.cachedIn === "number" ? payload.cachedIn : 0,
+      cachedWriteIn: typeof payload.cachedWriteIn === "number" ? payload.cachedWriteIn : 0,
       latencyMs: typeof payload.latencyMs === "number" ? payload.latencyMs : null,
       costCents: typeof payload.costCents === "number" ? payload.costCents : undefined,
       estimated: payload.estimated === true,

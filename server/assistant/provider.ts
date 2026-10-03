@@ -379,8 +379,8 @@ interface CfSearchResult {
   firstStatus?: number;
 }
 
-const CF_PRICE_INPUT_UNIT = "per m input tokens";
-const CF_PRICE_OUTPUT_UNIT = "per m output tokens";
+const CF_PRICE_INPUT_RE = /^per\s*1?\s*m(?:illion)?\s+input\s+tokens?$/;
+const CF_PRICE_OUTPUT_RE = /^per\s*1?\s*m(?:illion)?\s+output\s+tokens?$/;
 
 function cfPriceNumber(value: unknown): number | null {
   const n = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
@@ -389,8 +389,12 @@ function cfPriceNumber(value: unknown): number | null {
 
 // CF `ai/models/search` items carry `properties: [{ property_id, value }]`; the
 // `price` property's value is `[{ unit, price, currency }]` with units
-// "per M input tokens" / "per M output tokens" (verified live). Cache units are
-// matched tolerantly; anything unmatched leaves the cached columns at 0.
+// "per M input tokens" / "per M output tokens" (verified live; digit/spelling
+// variants like "per 1M" / "per million" are matched tolerantly). BOTH the
+// prompt and the completion unit must be present — an input-only (or
+// output-only) property would otherwise persist the missing side as 0 and
+// clobber a previously good price row. Cache units are matched tolerantly and
+// stay optional; anything unmatched leaves the cached columns at 0.
 export function parseCfModelPrice(properties: unknown): ModelPriceInfo | null {
   if (!Array.isArray(properties)) return null;
   for (const prop of properties) {
@@ -401,28 +405,27 @@ export function parseCfModelPrice(properties: unknown): ModelPriceInfo | null {
     let completionPrice = 0;
     let cachedReadPrice = 0;
     let cachedWritePrice = 0;
-    let found = false;
+    let hasInput = false;
+    let hasOutput = false;
     for (const entry of p.value) {
       if (entry === null || typeof entry !== "object") continue;
       const e = entry as { unit?: unknown; price?: unknown };
       const unit = typeof e.unit === "string" ? e.unit.trim().toLowerCase() : "";
       const price = cfPriceNumber(e.price);
       if (price === null) continue;
-      if (unit === CF_PRICE_INPUT_UNIT) {
+      if (CF_PRICE_INPUT_RE.test(unit)) {
         promptPrice = price;
-        found = true;
-      } else if (unit === CF_PRICE_OUTPUT_UNIT) {
+        hasInput = true;
+      } else if (CF_PRICE_OUTPUT_RE.test(unit)) {
         completionPrice = price;
-        found = true;
+        hasOutput = true;
       } else if (unit.includes("cach") && unit.includes("input") && (unit.includes("read") || unit.includes("hit"))) {
         cachedReadPrice = price;
-        found = true;
       } else if (unit.includes("cach") && (unit.includes("write") || unit.includes("creation"))) {
         cachedWritePrice = price;
-        found = true;
       }
     }
-    if (found) return { promptPrice, completionPrice, cachedReadPrice, cachedWritePrice };
+    if (hasInput && hasOutput) return { promptPrice, completionPrice, cachedReadPrice, cachedWritePrice };
   }
   return null;
 }

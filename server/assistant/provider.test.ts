@@ -536,12 +536,12 @@ describe("parseCfModelPrice", () => {
     ).toEqual({ promptPrice: 12.5, completionPrice: 75, cachedReadPrice: 0, cachedWritePrice: 0 });
   });
 
-  it("accepts numeric strings and tolerant cache units", () => {
+  it("accepts numeric strings, tolerant cache units, and digit/spelling unit variants", () => {
     expect(
       parseCfModelPrice(
         props([
-          { unit: "per M input tokens", price: "1.5" },
-          { unit: "per M output tokens", price: "3" },
+          { unit: "per 1M input tokens", price: "1.5" },
+          { unit: "per million output tokens", price: "3" },
           { unit: "per M cached input tokens read", price: "0.15" },
           { unit: "per M cached input tokens write", price: "1.5" },
         ])
@@ -549,13 +549,10 @@ describe("parseCfModelPrice", () => {
     ).toEqual({ promptPrice: 1.5, completionPrice: 3, cachedReadPrice: 0.15, cachedWritePrice: 1.5 });
   });
 
-  it("defaults units that were not reported to 0", () => {
-    expect(parseCfModelPrice(props([{ unit: "per M input tokens", price: 2 }]))).toEqual({
-      promptPrice: 2,
-      completionPrice: 0,
-      cachedReadPrice: 0,
-      cachedWritePrice: 0,
-    });
+  it("requires BOTH prompt and completion units before returning a price", () => {
+    expect(parseCfModelPrice(props([{ unit: "per M input tokens", price: 2 }]))).toBeNull();
+    expect(parseCfModelPrice(props([{ unit: "per M output tokens", price: 2 }]))).toBeNull();
+    expect(parseCfModelPrice(props([{ unit: "per M cached input tokens read", price: 0.15 }]))).toBeNull();
   });
 
   it("returns null when absent or malformed", () => {
@@ -567,7 +564,7 @@ describe("parseCfModelPrice", () => {
     expect(parseCfModelPrice(props([{ unit: "per M input tokens", price: "abc" }, null, 7]))).toBeNull();
   });
 
-  it("ignores negative and non-finite prices", () => {
+  it("returns null when a required unit price is negative or non-finite", () => {
     expect(
       parseCfModelPrice(
         props([
@@ -575,7 +572,15 @@ describe("parseCfModelPrice", () => {
           { unit: "per M output tokens", price: 4 },
         ])
       )
-    ).toEqual({ promptPrice: 0, completionPrice: 4, cachedReadPrice: 0, cachedWritePrice: 0 });
+    ).toBeNull();
+    expect(
+      parseCfModelPrice(
+        props([
+          { unit: "per M input tokens", price: 2 },
+          { unit: "per M output tokens", price: "abc" },
+        ])
+      )
+    ).toBeNull();
   });
 });
 

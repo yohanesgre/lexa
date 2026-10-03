@@ -889,9 +889,9 @@ describe("call-log writes (POST /api/internal/assistant/call-log)", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("computes cost_cents from assistant_model_prices when the caller omits it", async () => {
+  it("computes cost_cents from assistant_model_prices across fresh, cache-read, and cache-write tokens", async () => {
     db.prepare(
-      "INSERT INTO assistant_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES ('priced', 3000, 6000, 300, 0)"
+      "INSERT INTO assistant_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES ('priced', 3000, 6000, 300, 1500)"
     ).run();
     const res = await handleInternalAssistantRequest({
       method: "POST",
@@ -903,17 +903,40 @@ describe("call-log writes (POST /api/internal/assistant/call-log)", () => {
         usageIn: 1000,
         usageOut: 500,
         cachedIn: 200,
+        cachedWriteIn: 100,
       },
       driver: driverOf(),
     });
     expect(res.status).toBe(200);
-    // freshIn=800: (800*3000 + 200*300 + 500*6000)/1e6*100 = 546 cents.
-    expect(db.prepare("SELECT usage_in, usage_out, cached_in, cost_cents FROM assistant_call_logs WHERE model = 'priced'").get()).toEqual({
+    // freshIn = 1000-200-100 = 700: (700*3000 + 200*300 + 100*1500 + 500*6000)/1e6*100 = 531 cents.
+    expect(db.prepare("SELECT usage_in, usage_out, cached_in, cached_write_in, cost_cents FROM assistant_call_logs WHERE model = 'priced'").get()).toEqual({
       usage_in: 1000,
       usage_out: 500,
       cached_in: 200,
-      cost_cents: 546,
+      cached_write_in: 100,
+      cost_cents: 531,
     });
+  });
+
+  it("lets an explicit costCents win over the derived price", async () => {
+    db.prepare(
+      "INSERT INTO assistant_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES ('priced-explicit', 3000, 6000, 300, 1500)"
+    ).run();
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: {
+        model: "priced-explicit",
+        kind: "openai_compatible",
+        status: "done",
+        usageIn: 1000,
+        usageOut: 500,
+        costCents: 42,
+      },
+      driver: driverOf(),
+    });
+    expect(res.status).toBe(200);
+    expect(db.prepare("SELECT cost_cents FROM assistant_call_logs WHERE model = 'priced-explicit'").get()).toEqual({ cost_cents: 42 });
   });
 
   it("records cost 0 when the model has no price row", async () => {

@@ -41,6 +41,10 @@ export const INTERNAL_TOOL_PATH = "/api/internal/assistant/tool";
 export const INTERNAL_WRITE_TOOL_PATH = "/api/internal/assistant/write-tool";
 export const INTERNAL_WRITE_EXECUTE_PATH = "/api/internal/assistant/write-execute";
 
+// Bound every DO → Worker internal call: a hung fetch must not stall the
+// turn's `onEnd`/`failAttempt` terminal writes (the retry re-arms the signal).
+const INTERNAL_CALL_TIMEOUT_MS = 15_000;
+
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface AssistantInternalDeps {
@@ -321,7 +325,7 @@ async function postInternal(
   const url = `${originOf(deps)}${path}`;
   try {
     return await withRetryOnce(async () => {
-      const res = await fetchImpl(url, { method: "POST", headers: await signedHeaders(deps), body: JSON.stringify(body) });
+      const res = await fetchImpl(url, { method: "POST", headers: await signedHeaders(deps), body: JSON.stringify(body), signal: AbortSignal.timeout(INTERNAL_CALL_TIMEOUT_MS) });
       if (!res.ok) throw new AssistantInternalUnavailable(`${label} failed (${res.status})`);
       return true;
     });
