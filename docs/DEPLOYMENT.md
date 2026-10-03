@@ -118,13 +118,18 @@ no release tarball, no `install.sh`. Use it to rehearse migrations and let a
 branch soak before production; every resource is named after the deploy name,
 so nothing touches the prod worker, database, or bucket.
 
+Shortcut: `bun run deploy:staging` runs the keep-data flow (build, migrate,
+deploy, push the key) and `bun run deploy:staging:reset` wipes the worker +
+D1/KV/R2, recreates them, updates the config ids, and redeploys — both wrap
+`scripts/deploy-staging.sh`. The manual steps below remain the reference.
+
 ```bash
 git clone https://github.com/yohanesgre/lexa && cd lexa
 bun install
 bun x wrangler d1 create lexa-staging
 bun x wrangler r2 bucket create lexa-staging-blobs
 bun x wrangler kv namespace create lexa-staging
-cp wrangler.staging.example.jsonc wrangler.staging.local.jsonc  # fill the 3 ids
+cp wrangler.staging.example.jsonc wrangler.staging.local.jsonc  # fill in the ids + the public URL
 bun run build:workers
 bun x wrangler d1 migrations apply DB --remote --config wrangler.staging.local.jsonc
 bun x wrangler deploy --config wrangler.staging.local.jsonc
@@ -137,14 +142,18 @@ bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local
   binding, `main`/`assets` from the built `dist/`, `no_bundle`
   plus the ESModule rule, and the crons + observability from the root
   `wrangler.jsonc`. Fill `<ACCOUNT_ID>` (multi-account tokens only),
-  `<D1_DATABASE_ID>`, and `<KV_NAMESPACE_ID>` in the copied file.
+  `<D1_DATABASE_ID>`, `<KV_NAMESPACE_ID>`, and `<PUBLIC_URL>` in the copied
+  file.
 - `LXK_SECRETS_MASTER_KEY` is **required** — Better Auth's session-signing
   secret derives from it (see the variable table) — mint it as base64 of exactly
   32 bytes (`openssl rand -base64 32`). Configure GitHub sync in the web app
   after first deploy — point staging at its own GitHub App (one webhook URL
   belongs to one App).
-- `LXK_PUBLIC_URL` is optional (workers.dev URL or custom domain); a custom
-  domain needs a zone in the same Cloudflare account.
+- `LXK_PUBLIC_URL` is **required** for browser sign-in — set it to the deployed
+  URL (workers.dev or custom domain). Unset, it falls back to
+  `http://localhost:5173` for the Better Auth baseURL + trustedOrigins and
+  Better Auth rejects the real origin with `Invalid origin`. A custom domain
+  needs a zone in the same Cloudflare account.
 - First superadmin: open `<url>/setup`.
 - Updating staging: check out the branch or commit, `bun run build:workers`,
   and re-run the migrate + deploy commands with the same config. Resources,
@@ -160,6 +169,11 @@ Rules:
   that method, and vice versa — mixing the two double-applies migrations.
 - The filled `wrangler.staging.local.jsonc` carries account and resource ids —
   gitignored, never committed.
+- `wrangler … create` auto-appends the new resource to the wrangler config in
+  the current directory; if that is the root `wrangler.jsonc`, remove the
+  appended blocks before building (a duplicate binding name fails the build).
+  `deploy-staging.sh --reset` snapshots and restores the config around its
+  creates.
 
 `install.sh workers --name lexa-staging` remains the tarball-based route to the
 same isolation (`--name` keys the resource names).
@@ -251,7 +265,7 @@ boot and never overwrites a variable already set in the real environment.
 |---|---|---|
 | `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lx login` device flow) | only for non-browser clients (CLI/scripts) |
 | `LXK_ENV` | install script / setup wizard | yes (`production` on deployed targets) |
-| `LXK_PUBLIC_URL` | install script (from `--domain`; only set for a custom domain) | deployed targets (Better Auth baseURL) |
+| `LXK_PUBLIC_URL` | install script (stamped on every deploy — custom domain, else the resolved workers.dev host) | deployed targets (Better Auth baseURL + trustedOrigins) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |

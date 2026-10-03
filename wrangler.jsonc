@@ -4,99 +4,120 @@
 // per-deploy config. See ADR-0002 and docs/CLOUDFLARE_WORKERS.md (design
 // authority for the Workers deploy target).
 {
-  "name": "lexa",
-  "main": "server/workers-entry.ts",
-  "compatibility_date": "2026-08-01",
-  "compatibility_flags": ["nodejs_compat"],
-  // `bun:sqlite` is a Bun builtin no other runtime can resolve (vitest maps
-  // it to a node:sqlite shim the same way). The worker never constructs it —
-  // see server/workers-shims/bun-sqlite.ts. `lexa-cli deploy --runtime
-  // workers` copies this alias into the generated per-flavor config.
-  // `@tanstack/react-start/server` pulls Vite-virtual modules unresolvable
-  // outside the vite build (see server/workers-shims/start-server.ts): the
-  // vite workers build ignores this alias and links the real Start SSR
-  // handler, while source `wrangler dev` gets stubs and falls back to the
-  // no-SSR page for non-API routes. `node:fs` has no filesystem on Workers
-  // (see server/workers-shims/node-fs.ts) — the R2/D1 drivers serve those
-  // roles, so the stubs never execute on this flavor.
-  "alias": {
-    "bun:sqlite": "./server/workers-shims/bun-sqlite.ts",
-    "better-auth/tanstack-start": "./server/workers-shims/better-auth-tanstack-start.ts",
-    "@tanstack/react-start/server": "./server/workers-shims/start-server.ts",
-    "node:fs": "./server/workers-shims/node-fs.ts"
-  },
-  "vars": {
-    "LXK_ENV": "production"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "lexa",
-      // Placeholder id — Deploy Button / Builds provision the real database
-      // and overwrite this. The install-script provisioner binds the real id
-      // into a per-deploy wrangler config (see install.sh / docs/
-      // CLOUDFLARE_WORKERS.md). Binding name DB is frozen (deploy scripts
-      // must reference the binding, never the database name).
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "BLOB",
-      "bucket_name": "lexa-blobs"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "KV",
-      // Placeholder; `lexa-cli deploy workers` overwrites with the real id.
-      "id": "00000000000000000000000000000000"
-    }
-  ],
-  // H9: keyless Workers AI inference for `workers_ai` assistant models. The
-  // assistant DO builds `createWorkersAI({ binding: env.AI })`; installed
-  // deployments get this block transcribed by scripts/workers-install.ts.
-  "ai": { "binding": "AI" },
-  // DO → Worker transport (ADR-0003 §B.2/R7): the assistant Durable Object
-  // reaches its internal routes through this self service binding. `service`
-  // names the worker itself — `scripts/workers-install.ts` rewrites it to the
-  // per-flavor worker name at deploy time. When the binding is absent the DO
-  // falls back to a global fetch against the public origin (agent.ts).
-  "services": [
-    { "binding": "ASSISTANT_SERVICE", "service": "lexa" }
-  ],
-  // Assistant Durable Object (ADR-0003 §B.1): one instance per conversation
-  // thread (`chat:<id>` | `task:<id>` | `wiki:<id>`), class exported from
-  // server/workers-entry.ts. `new_sqlite_classes` is the v1 migration that
-  // creates SQLite-backed storage for the class — installed deployments get
-  // these blocks transcribed by scripts/workers-install.ts, so never remove
-  // them from this root config.
-  "durable_objects": {
-    "bindings": [{ "name": "ASSISTANT_AGENT", "class_name": "LexaAssistantAgent" }]
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] }],
-  "triggers": {
-    "crons": ["*/15 * * * *"]
-  },
-  // Cloudflare observability defaults, spelled out explicitly.
-  "observability": {
-    "enabled": true,
-    "head_sampling_rate": 1,
-    "redact_query_string": true,
-    "logs": {
-      "enabled": true,
-      "head_sampling_rate": 1,
-      "invocation_logs": true,
-      "persist": true
-    },
-    "traces": {
-      "enabled": true,
-      "head_sampling_rate": 1,
-      "persist": true
-    },
-    "issues": {
-      "enabled": true
-    }
-  }
+	"name": "lexa",
+	"main": "server/workers-entry.ts",
+	"compatibility_date": "2026-08-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// `bun:sqlite` is a Bun builtin no other runtime can resolve (vitest maps
+	// it to a node:sqlite shim the same way). The worker never constructs it —
+	// see server/workers-shims/bun-sqlite.ts. `lexa-cli deploy --runtime
+	// workers` copies this alias into the generated per-flavor config.
+	// `@tanstack/react-start/server` pulls Vite-virtual modules unresolvable
+	// outside the vite build (see server/workers-shims/start-server.ts): the
+	// vite workers build ignores this alias and links the real Start SSR
+	// handler, while source `wrangler dev` gets stubs and falls back to the
+	// no-SSR page for non-API routes. `node:fs` has no filesystem on Workers
+	// (see server/workers-shims/node-fs.ts) — the R2/D1 drivers serve those
+	// roles, so the stubs never execute on this flavor.
+	"alias": {
+		"bun:sqlite": "./server/workers-shims/bun-sqlite.ts",
+		"better-auth/tanstack-start": "./server/workers-shims/better-auth-tanstack-start.ts",
+		"@tanstack/react-start/server": "./server/workers-shims/start-server.ts",
+		"node:fs": "./server/workers-shims/node-fs.ts"
+	},
+	"vars": {
+		"LXK_ENV": "production"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "lexa",
+			// Placeholder id — Deploy Button / Builds provision the real database
+			// and overwrite this. The install-script provisioner binds the real id
+			// into a per-deploy wrangler config (see install.sh / docs/
+			// CLOUDFLARE_WORKERS.md). Binding name DB is frozen (deploy scripts
+			// must reference the binding, never the database name).
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BLOB",
+			"bucket_name": "lexa-blobs"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			// Placeholder; `lexa-cli deploy workers` overwrites with the real id.
+			"id": "00000000000000000000000000000000"
+		}
+	],
+	// H9: keyless Workers AI inference for `workers_ai` assistant models. The
+	// assistant DO builds `createWorkersAI({ binding: env.AI })`; installed
+	// deployments get this block transcribed by scripts/workers-install.ts.
+	"ai": {
+		"binding": "AI"
+	},
+	// DO → Worker transport (ADR-0003 §B.2/R7): the assistant Durable Object
+	// reaches its internal routes through this self service binding. `service`
+	// names the worker itself — `scripts/workers-install.ts` rewrites it to the
+	// per-flavor worker name at deploy time. When the binding is absent the DO
+	// falls back to a global fetch against the public origin (agent.ts).
+	"services": [
+		{
+			"binding": "ASSISTANT_SERVICE",
+			"service": "lexa"
+		}
+	],
+	// Assistant Durable Object (ADR-0003 §B.1): one instance per conversation
+	// thread (`chat:<id>` | `task:<id>` | `wiki:<id>`), class exported from
+	// server/workers-entry.ts. `new_sqlite_classes` is the v1 migration that
+	// creates SQLite-backed storage for the class — installed deployments get
+	// these blocks transcribed by scripts/workers-install.ts, so never remove
+	// them from this root config.
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "ASSISTANT_AGENT",
+				"class_name": "LexaAssistantAgent"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"LexaAssistantAgent"
+			]
+		}
+	],
+	"triggers": {
+		"crons": [
+			"*/15 * * * *"
+		]
+	},
+	// Cloudflare observability defaults, spelled out explicitly.
+	"observability": {
+		"enabled": true,
+		"head_sampling_rate": 1,
+		"redact_query_string": true,
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"invocation_logs": true,
+			"persist": true
+		},
+		"traces": {
+			"enabled": true,
+			"head_sampling_rate": 1,
+			"persist": true
+		},
+		"issues": {
+			"enabled": true
+		}
+	}
 }
