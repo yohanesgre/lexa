@@ -7,7 +7,7 @@
 //
 // Deploy:
 //   cp wrangler.staging.example.jsonc wrangler.staging.local.jsonc
-//   # fill in <ACCOUNT_ID>, <D1_DATABASE_ID>, <KV_NAMESPACE_ID>
+//   # fill in <ACCOUNT_ID>, <D1_DATABASE_ID>, <KV_NAMESPACE_ID>, <PUBLIC_URL>
 //   bun install
 //   bun run build:workers
 //   bun x wrangler d1 migrations apply DB --remote --config wrangler.staging.local.jsonc
@@ -29,6 +29,10 @@
 // - `bun run db:migrations:apply` / `bun run deploy:workers` ignore this file
 //   and hit the root config — don't use them for staging.
 // - Superadmin is created by the web /setup wizard after first deploy.
+// - `LXK_PUBLIC_URL` is required for browser sign-in. Set it to the deployed
+//   URL (workers.dev or a custom domain). Unset, it falls back to
+//   `http://localhost:5173` for the Better Auth baseURL + trustedOrigins, and
+//   Better Auth rejects the real origin with `Invalid origin`.
 {
   "name": "lexa-staging",
   "account_id": "<ACCOUNT_ID>",
@@ -47,8 +51,8 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "LXK_ENV": "production"
-    // "LXK_PUBLIC_URL": "https://lexa-staging.<your-subdomain>.workers.dev"
+    "LXK_ENV": "production",
+    "LXK_PUBLIC_URL": "<PUBLIC_URL>"
   },
   "d1_databases": [
     {
