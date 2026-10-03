@@ -441,6 +441,32 @@ describe("login (legacy key + device flow)", () => {
     expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
   });
 
+  it("bare-host --url (no scheme) resolves to http for loopback and logs in", async () => {
+    const lexaDir = freshLexaDir();
+    const bare = `127.0.0.1:${new URL(base).port}`;
+    const r = await runCli(["login", "--url", bare, "--key", legacyKey], { LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`Logged in to ${base}`);
+    expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
+  });
+
+  it("bare positional host (no scheme) drives the device flow", async () => {
+    const lexaDir = freshLexaDir();
+    pollQueue = [{ status: 200, body: { status: "approved", rawKey: approvedKey, keyName: "cli-testhost", approverName: "Maria" } }];
+    const bare = `127.0.0.1:${new URL(base).port}`;
+    const r = await runCli(["login", bare], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`${base}/device-login?token=${DEVICE_TOKEN}`);
+    expect(r.stdout).toContain(`Logged in to ${base}`);
+    expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: approvedKey });
+  });
+
+  it("invalid --url exits 1 with a clear message", async () => {
+    const r = await runCli(["login", "--url", "http://", "--key", legacyKey], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Invalid server URL");
+  });
+
   it("device flow happy path: verify URL printed, pending → approved, config saved", async () => {
     const lexaDir = freshLexaDir();
     pollQueue = [{ status: 200, body: pendingBody }, { status: 200, body: { status: "approved", rawKey: approvedKey, keyName: "cli-testhost", approverName: "Maria" } }];

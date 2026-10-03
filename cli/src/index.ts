@@ -23,7 +23,7 @@
  */
 import { Effect, Data } from "effect";
 import { LexaClient, ApiError, type ColumnInfo, type SwimlaneInfo } from "./api";
-import { CliConfigService, groupDir, normalizeHost, migrateFlavorRootsSync, type CliConfig } from "./config";
+import { CliConfigService, groupDir, normalizeHost, resolveServerUrl, migrateFlavorRootsSync, type CliConfig } from "./config";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck, envFlagsRemoved } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
@@ -358,8 +358,9 @@ function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
     // --url flag beats a positional URL (`login <url>`); env stays last.
-    let url = ((typeof flags.url === "string" && flags.url) || positionals[1] || ENV_URL || "").replace(/\/+$/, "");
+    const rawUrl = (typeof flags.url === "string" && flags.url) || positionals[1] || ENV_URL || "";
     const key = (typeof flags.key === "string" && flags.key) || ENV_KEY || "";
+    let url = rawUrl;
     if (!url) {
       if (!process.stdin.isTTY) {
         // Cannot prompt without stdin — message + usage, exit 1. (The device
@@ -369,6 +370,14 @@ function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]
         process.exit(1);
       }
       url = yield* promptRequired("  Server URL: ", "  Server URL is required — please fill it");
+    }
+    // A bare host (`lexa.example.com`) has no scheme — resolve to a full base
+    // URL before any `new URL()` sees it. Loopback defaults to http.
+    try {
+      url = resolveServerUrl(url);
+    } catch (e) {
+      console.error(`  ${(e as Error).message}`);
+      process.exit(1);
     }
     if (key) {
       // Legacy key login — validate the lxk_ shape, confirm server + key, save.

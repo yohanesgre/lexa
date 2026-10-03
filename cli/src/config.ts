@@ -69,6 +69,38 @@ function isLoopback(host: string): boolean {
   return host === "localhost" || host === "::1" || host.startsWith("127.");
 }
 
+// Resolve a user-supplied server address to a full base URL. An explicit
+// http(s) scheme is preserved; a scheme-less host defaults to https, except
+// loopback hosts (localhost, 127.0.0.0/8, ::1 — bracketed or bare) which get
+// http to match the local dev server. Whitespace is trimmed, a trailing slash
+// is stripped, and invalid input throws an Error the caller prints + exits 1.
+export function resolveServerUrl(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed === "") throw new Error("Server URL is required");
+  if (/:\/\//.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    throw new Error(`Invalid server URL: ${trimmed} — expected an http(s):// address`);
+  }
+  const hasScheme = /^https?:\/\//i.test(trimmed);
+  const candidate = hasScheme
+    ? trimmed
+    : `${/^localhost(:\d+)?$/.test(normalizeHost(trimmed)) ? "http" : "https"}://${bracketBareIpv6(trimmed)}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`Invalid server URL: ${trimmed}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Invalid server URL: ${trimmed}`);
+  }
+  return candidate.replace(/\/+$/, "");
+}
+
+// A scheme-less multi-colon host is a bare IPv6 literal and needs URL brackets.
+function bracketBareIpv6(host: string): string {
+  return !host.startsWith("[") && (host.match(/:/g)?.length ?? 0) > 1 ? `[${host}]` : host;
+}
+
 // Group dir for a host (full URL or bare host) under the state root.
 export function groupDir(host: string): string {
   return join(LEXA_DIR, normalizeHost(host));
