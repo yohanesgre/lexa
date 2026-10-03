@@ -115,6 +115,23 @@ describe("resolveServerUrl", () => {
     expect(resolveServerUrl("::1")).toBe("http://[::1]");
   });
 
+  it("classifies loopback from the host segment (path/query suffix ignored)", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("localhost:3000/")).toBe("http://localhost:3000");
+    expect(resolveServerUrl("[::1]:3000/")).toBe("http://[::1]:3000");
+    expect(resolveServerUrl("localhost/")).toBe("http://localhost");
+    expect(resolveServerUrl("localhost:3000/path")).toBe("http://localhost:3000/path");
+    expect(resolveServerUrl("127.0.0.1:3000/")).toBe("http://127.0.0.1:3000");
+  });
+
+  it("brackets a bare IPv6 host without mistaking userinfo or a path for one", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("::1/")).toBe("http://[::1]");
+    expect(resolveServerUrl("2001:db8::1/path")).toBe("https://[2001:db8::1]/path");
+    expect(() => resolveServerUrl("user:pass@localhost:3000")).not.toThrow();
+    expect(() => resolveServerUrl("user:pass@localhost:3000/")).not.toThrow();
+  });
+
   it("throws a clear error on empty or invalid input", async () => {
     const { resolveServerUrl } = await import("./config");
     expect(() => resolveServerUrl("")).toThrow(/Server URL is required/);
