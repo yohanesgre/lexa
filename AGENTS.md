@@ -240,10 +240,12 @@ Key facts:
 ## Reference (read the linked doc/skill, don't inline it here)
 
 - **Releasing:** `docs/RELEASING.md` — version policy, pre-tag checklist, image flow, CLI build flow, deploy state.
-- **lexa-cli operator tool:** the `lexa-cli` skill (auto-discovered; the
-  project ships one at `~/.agents/skills/lexa-cli/SKILL.md`). Load it before
-  any CLI work. lexa-cli is operate-only — no deploy commands (removed in
-  cli-v2026.2.0; self-hosting goes through `scripts/install.sh`).
+- **lexa-cli operator tool:** the `lexa-cli` skill. Install it into a harness
+  skill dir with `lx skill install --global` (→
+  `~/.agents/skills/lexa-cli/SKILL.md`) or `lx skill install --local` (→
+  `./.agents/skills/lexa-cli/SKILL.md`). Load it before any CLI work.
+  lexa-cli is operate-only — no deploy commands (removed in cli-v2026.2.0;
+  self-hosting goes through `scripts/install.sh`).
 - **Browser automation:** the `agent-browser` skill (auto-discovered; at
   `~/.agents/skills/agent-browser/SKILL.md`). Load it before any browser
   work. If the active model lacks vision, the skill defaults to snapshot-
