@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createAssistantApiHandler } from "./assistant-api";
+import { CLOUDFLARE_DEFAULT_MODEL } from "../assistant/provider";
 import { PROVIDER_CLEAR_KEY_CONFLICT_REJECTED, PROVIDER_KEY_UNDECRYPTABLE, PROVIDER_SECRET_REQUIRES_MASTER_KEY } from "../services/assistant-providers.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -277,6 +278,88 @@ describe("provider test fallback when the listing route is absent", () => {
       expect(res.status).toBe(502);
       const body = await res.json() as { error: { code: string } };
       expect(body.error.code).toBe("PROVIDER_AUTH_FAILED");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("bare .../ai base, CF search 405, no models → ping uses the CF default model", async () => {
+    const created = await handler(authed("POST", "/api/admin/assistant/providers", { label: "CF", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai", apiKey: "" }));
+    expect(created.status).toBe(200);
+    const { id } = await created.json() as { id: string };
+    const pingBodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      if (init?.method === "POST" && url.endsWith("/chat/completions")) {
+        pingBodies.push(String(init.body));
+        return jsonBody(200, { choices: [] });
+      }
+      return jsonBody(405, { code: 7001, message: "GET not supported for requested URI." });
+    }));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/test`));
+      expect(res.status).toBe(200);
+      expect(pingBodies).toHaveLength(1);
+      const body = JSON.parse(pingBodies[0]!) as Record<string, unknown>;
+      expect(body.model).toBe(CLOUDFLARE_DEFAULT_MODEL);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("GET /models 500 → 502 PROVIDER_UNREACHABLE and no chat ping", async () => {
+    const { id } = await createProvider();
+    const calls: Array<{ url: string; method?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      calls.push({ url, ...(init?.method !== undefined ? { method: init.method } : {}) });
+      return jsonBody(500, {});
+    }));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/test`));
+      expect(res.status).toBe(502);
+      const body = await res.json() as { error: { code: string } };
+      expect(body.error.code).toBe("PROVIDER_UNREACHABLE");
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("GET /models network failure → 502 PROVIDER_UNREACHABLE and no chat ping", async () => {
+    const { id } = await createProvider();
+    const calls: Array<{ url: string; method?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: urlOf(input), ...(init?.method !== undefined ? { method: init.method } : {}) });
+      throw new Error("fetch failed");
+    }));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/test`));
+      expect(res.status).toBe(502);
+      const body = await res.json() as { error: { code: string } };
+      expect(body.error.code).toBe("PROVIDER_UNREACHABLE");
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("anthropic-wire provider: GET /models 404 does NOT chat-ping → 502 PROVIDER_UNREACHABLE", async () => {
+    const { id } = await createProvider();
+    db.prepare("INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES (?,?,?,?,?,?)").run("am-anthropic", id, "claude-x", "anthropic_compatible", 0, 1);
+    const calls: Array<{ url: string; method?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = urlOf(input);
+      calls.push({ url, ...(init?.method !== undefined ? { method: init.method } : {}) });
+      return jsonBody(404, {});
+    }));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/test`));
+      expect(res.status).toBe(502);
+      const body = await res.json() as { error: { code: string } };
+      expect(body.error.code).toBe("PROVIDER_UNREACHABLE");
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+      expect(calls[0]?.url).toBe("https://api.test/v1/models");
     } finally {
       vi.unstubAllGlobals();
     }

@@ -389,12 +389,13 @@ async function cfSearchPages(
       if (page === 1) return { ids, firstCount, firstStatus: res.status };
       throw new ProviderUnreachable({ message: `cloudflare models search returned ${res.status}`, status: res.status });
     }
-    let body: CfSearchResponse;
+    let parsed: unknown;
     try {
-      body = (await res.json()) as CfSearchResponse;
+      parsed = await res.json();
     } catch {
       throw new ProviderUnreachable({ message: "cloudflare models search returned invalid JSON" });
     }
+    const body: CfSearchResponse = parsed !== null && typeof parsed === "object" ? (parsed as CfSearchResponse) : {};
     const items = Array.isArray(body.result) ? body.result : [];
     if (page === 1) firstCount = items.length;
     for (const item of items) {
@@ -418,7 +419,13 @@ async function listCloudflareModels(
   sessionHeaders: Record<string, string>,
   fetchImpl: FetchLike,
 ): Promise<{ models: Array<{ id: string }> }> {
-  const searchUrl = `${base.replace(/\/ai\/v1$/, "")}/ai/models/search`;
+  const searchUrl = (() => {
+    const url = new URL(base);
+    url.search = "";
+    url.hash = "";
+    url.pathname = `${url.pathname.replace(/\/ai\/v1$/, "")}/ai/models/search`;
+    return url.toString();
+  })();
   let result = await cfSearchPages(searchUrl, config.apiKey, sessionHeaders, fetchImpl, CF_TEXT_GENERATION_TASK);
   const firstStatus = result.firstStatus;
   const filterRejected = firstStatus === 400 || firstStatus === 404 || firstStatus === 405;
@@ -492,11 +499,11 @@ export async function listModels(
 export async function pingChatCompletion(
   config: ProviderConfig,
   fetchImpl: FetchLike = fetch,
-  opts?: { signal?: AbortSignal; sessionId?: string; model?: string },
+  opts?: { signal?: AbortSignal; sessionId?: string },
 ): Promise<void> {
   const kind = normalizeProviderKind(config.kind);
   const base = normalizeBaseUrl(config.baseUrl, kind).replace(/\/+$/, "");
-  const model = opts?.model ?? config.model ?? CLOUDFLARE_DEFAULT_MODEL;
+  const model = config.model;
   const headers: Record<string, string> = {
     "content-type": "application/json",
     authorization: `Bearer ${config.apiKey}`,

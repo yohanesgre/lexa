@@ -38,7 +38,7 @@ import { AssistantTaskRepo } from "../repos/assistant-task.repo";
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { listModels, pingChatCompletion, isCloudflareAiBaseUrl, CLOUDFLARE_DEFAULT_MODEL, normalizeProviderKind, inferModelKind, assistantLog, type ProviderConfig } from "../assistant/provider";
+import { listModels, pingChatCompletion, isCloudflareAiBaseUrl, normalizeBaseUrl, CLOUDFLARE_DEFAULT_MODEL, normalizeProviderKind, inferModelKind, assistantLog, type ProviderConfig } from "../assistant/provider";
 import { AssistantProvidersRepo } from "../repos/assistant-providers.repo";
 import { AssistantModelsRepo } from "../repos/assistant-models.repo";
 import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
@@ -212,6 +212,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
               return await listModels(config, fetch, { sessionId: `models-${req.path.projectId}` });
             } catch (e) {
               if (!isListingRouteAbsent(e)) throw e;
+              if (normalizeProviderKind(config.kind) !== "openai_compatible") throw e;
               await pingChatCompletion({ ...config, model: listingFallbackModel(config) }, fetch, { sessionId: `models-${req.path.projectId}` });
               return { models: [] as Array<{ id: string }> };
             }
@@ -601,7 +602,11 @@ const resolveProviderConfig = (
 // the CF default covers a base URL with no models imported yet.
 function listingFallbackModel(cfg: ProviderConfig): string {
   if (cfg.model && cfg.model !== "test") return cfg.model;
-  return isCloudflareAiBaseUrl(cfg.baseUrl) ? CLOUDFLARE_DEFAULT_MODEL : cfg.model;
+  try {
+    return isCloudflareAiBaseUrl(normalizeBaseUrl(cfg.baseUrl, cfg.kind)) ? CLOUDFLARE_DEFAULT_MODEL : cfg.model;
+  } catch {
+    return cfg.model;
+  }
 }
 
 function isListingRouteAbsent(e: unknown): boolean {
@@ -837,6 +842,7 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
               return;
             } catch (e) {
               if (!isListingRouteAbsent(e)) throw e;
+              if (normalizeProviderKind(cfg.kind) !== "openai_compatible") throw e;
               await pingChatCompletion({ ...cfg, model: listingFallbackModel(cfg) });
             }
           },
