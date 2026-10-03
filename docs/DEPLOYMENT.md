@@ -480,7 +480,9 @@ legal). See `docs/ARCHITECTURE.md` §Managed-only MCP client secrets.
    `0012_remove_mcp_secret_refs.sql`, which clears every stored `secret_ref`
    with a single value `UPDATE` (no DDL, no FK interaction; idempotent).
    Upgrade the build and run migrations together, or run
-   `wrangler d1 migrations apply` before the new Worker starts. An **old build
+   `wrangler d1 migrations apply` before the new Worker starts (only for a
+   wrangler-journal database; on an `install.sh`-managed one it mixes journals
+   — see the one-method rule). An **old build
    on an un-migrated database** can still resolve a stored ref; the **new build
    refuses a stored ref** at connect (`MCP_CONNECT_FAILED`) until a write
    clears it — never an anonymous connect.

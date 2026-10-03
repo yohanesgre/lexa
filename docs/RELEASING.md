@@ -112,7 +112,9 @@ CLI asset.
   by scanning the release list for the newest `v*` web-app tag (the `v[0-9]`
   anchor excludes `cli-v*`, and it never uses `releases/latest`, which a newer
   CLI release could win), verifies the tarball against `checksums.txt` when the
-  release carries one (otherwise it unpacks unverified, with a warning), then runs
+  release carries one that lists it (a release without `checksums.txt` unpacks
+  unverified, with a warning; one whose `checksums.txt` omits the tarball aborts
+  the install), then runs
   `scripts/workers-install.ts` — provisioning D1+R2+KV via the Cloudflare API,
   applying D1 migrations, and deploying the prebuilt bundle. Upgrade = re-run
   from a newer tag; the D1/R2/KV resources survive (keyed by `--name`).
