@@ -1028,6 +1028,45 @@ describe("delegation run registry routes (H3)", () => {
     expect((missing.body as { error: { code: string } }).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
   });
 
+  it("400s a run-update to queued (never a valid target)", async () => {
+    await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "run-q" },
+      driver: driverOf(),
+      identity,
+    });
+    const result = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-update",
+      body: { runId: "run-q", status: "queued" },
+      driver: driverOf(),
+      identity,
+    });
+    expect(result.status).toBe(400);
+    expect((result.body as { error: { code: string } }).error.code).toBe("INVALID_PAYLOAD");
+  });
+
+  it("409s a run-create refused by the atomic cap", async () => {
+    const first = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "cap-1", maxActiveThread: 1 },
+      driver: driverOf(),
+      identity,
+    });
+    expect(first.status).toBe(200);
+    const second = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-create",
+      body: { kind: "chat_run", goal: "x", id: "cap-2", maxActiveThread: 1 },
+      driver: driverOf(),
+      identity,
+    });
+    expect(second.status).toBe(409);
+    expect((second.body as { error: { code: string } }).error.code).toBe("ASSISTANT_RUN_CAP_EXCEEDED");
+  });
+
   it("POST run-counts and GET run are project/thread scoped", async () => {
     for (const id of ["run-a", "run-b"]) {
       await handleInternalAssistantRequest({

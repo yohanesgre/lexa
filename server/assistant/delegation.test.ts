@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   abortDelegatedRun,
   dispatchRegisteredRun,
+  isTerminalAgentToolStatus,
   runStatusForTerminal,
   spawnDelegatedRun,
   DEFAULT_RUN_BUDGET_MS,
@@ -110,6 +111,38 @@ describe("spawnDelegatedRun", () => {
     expect(result).toMatchObject({ ok: false, code: "ASSISTANT_UNAVAILABLE" });
     expect(d.dispatcher.dispatch).not.toHaveBeenCalled();
   });
+
+  it("reports a cap refusal when a parallel spawn wins the last slot (atomic create)", async () => {
+    // The atomic create is authoritative: both spawns pass the pre-read, the
+    // first insert wins, the second is refused by the guarded INSERT and the
+    // re-read yields the cap-specific refusal.
+    let active = 0;
+    const createRun = vi.fn(async (input) => {
+      if (active >= THREAD_RUN_LIMIT) return null;
+      active += 1;
+      return row({ id: input.id });
+    });
+    const d = deps({
+      createRun,
+      counts: vi.fn(async () => ({ thread: active, project: active })),
+    });
+    const [a, b] = await Promise.all([
+      spawnDelegatedRun(d, { ...INPUT, runId: "run-a" }),
+      spawnDelegatedRun(d, { ...INPUT, runId: "run-b" }),
+    ]);
+    expect([a, b].filter((r) => r.ok)).toHaveLength(1);
+    const refused = a.ok ? b : a;
+    expect(refused).toMatchObject({ ok: false, code: "ASSISTANT_RUN_CAP_EXCEEDED" });
+    expect(active).toBe(1);
+  });
+
+  it("passes the atomic caps into createRun", async () => {
+    const d = deps();
+    await spawnDelegatedRun(d, { ...INPUT, runId: "run-caps" });
+    expect(d.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({ maxThreadRuns: THREAD_RUN_LIMIT, maxProjectRuns: PROJECT_RUN_LIMIT })
+    );
+  });
 });
 
 describe("dispatchRegisteredRun", () => {
@@ -164,6 +197,12 @@ describe("runStatusForTerminal", () => {
     expect(runStatusForTerminal("completed")).toBe("completed");
     expect(runStatusForTerminal("aborted")).toBe("cancelled");
     expect(runStatusForTerminal("error")).toBe("failed");
-    expect(runStatusForTerminal("interrupted")).toBe("failed");
+  });
+
+  it("treats interrupted as non-terminal (soft seal)", () => {
+    expect(isTerminalAgentToolStatus("interrupted")).toBe(false);
+    expect(isTerminalAgentToolStatus("completed")).toBe(true);
+    expect(isTerminalAgentToolStatus("error")).toBe(true);
+    expect(isTerminalAgentToolStatus("aborted")).toBe(true);
   });
 });

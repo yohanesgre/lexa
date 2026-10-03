@@ -152,8 +152,60 @@ describe("assistant run registry", () => {
       ["queued", "completed", true],
       ["running", "failed", true],
       ["cancelled", "completed", false],
+      // `queued` is never a valid target (a run is only born queued).
+      ["running", "queued", false],
+      ["queued", "queued", false],
     ];
     for (const [from, to, expected] of cases) expect(isRunTransitionable(from, to)).toBe(expected);
+  });
+
+  it("refuses a running→queued registry update", async () => {
+    await runEither(createAssistantRun(ctx.driver, { ...BASE, id: "r1" }));
+    await runEither(transitionAssistantRunRegistry(ctx.driver, { runId: "r1", projectId: "p1", status: "running" }));
+    const regress = await runEither(
+      transitionAssistantRunRegistry(ctx.driver, { runId: "r1", projectId: "p1", status: "queued" })
+    );
+    if (regress._tag === "Left") throw new Error("unexpected failure");
+    expect(regress.right.changed).toBe(false);
+    expect(regress.right.run.status).toBe("running");
+  });
+});
+
+describe("createAssistantRun atomic caps", () => {
+  let ctx: ReturnType<typeof fresh>;
+  beforeEach(() => {
+    ctx = fresh();
+  });
+
+  it("enforces the thread cap inside the INSERT", async () => {
+    const first = await runEither(
+      createAssistantRun(ctx.driver, { ...BASE, id: "r1", maxActiveThread: 1, maxActiveProject: 3 })
+    );
+    expect(first._tag).toBe("Right");
+    const second = await runEither(
+      createAssistantRun(ctx.driver, { ...BASE, id: "r2", maxActiveThread: 1, maxActiveProject: 3 })
+    );
+    expect(second._tag).toBe("Left");
+    if (second._tag === "Left") expect(second.left._tag).toBe("RunCapExceeded");
+    const count = ctx.db.prepare("SELECT COUNT(*) AS n FROM assistant_runs").get() as { n: number };
+    expect(count.n).toBe(1);
+  });
+
+  it("enforces the project cap across threads inside the INSERT", async () => {
+    await runEither(createAssistantRun(ctx.driver, { ...BASE, id: "r1", maxActiveProject: 1 }));
+    const other = await runEither(
+      createAssistantRun(ctx.driver, { ...BASE, id: "r2", threadKey: "chat:c2", maxActiveProject: 1 })
+    );
+    expect(other._tag).toBe("Left");
+    if (other._tag === "Left") expect(other.left._tag).toBe("RunCapExceeded");
+  });
+
+  it("does not count terminal runs toward the cap", async () => {
+    await runEither(createAssistantRun(ctx.driver, { ...BASE, id: "r1", maxActiveThread: 1 }));
+    await runEither(transitionAssistantRunRegistry(ctx.driver, { runId: "r1", projectId: "p1", status: "running" }));
+    await runEither(transitionAssistantRunRegistry(ctx.driver, { runId: "r1", projectId: "p1", status: "completed" }));
+    const next = await runEither(createAssistantRun(ctx.driver, { ...BASE, id: "r2", maxActiveThread: 1 }));
+    expect(next._tag).toBe("Right");
   });
 });
 

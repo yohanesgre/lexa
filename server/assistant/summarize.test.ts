@@ -49,6 +49,15 @@ describe("needsSummary", () => {
     const big = [{ id: "m", role: "user", parts: [{ type: "text", text: "x".repeat(SUMMARY_THRESHOLD_BYTES + 1) }] }];
     expect(needsSummary(big)).toBe(true);
   });
+
+  it("measures UTF-8 bytes, not UTF-16 code units, for the byte threshold", () => {
+    // 16_384 four-byte emoji = 65_536 UTF-8 bytes but only 32_768 code units,
+    // so the old `JSON.stringify(...).length` check would miss it.
+    const text = "😀".repeat(16_384);
+    const msg = [{ id: "m", role: "user", parts: [{ type: "text", text }] }];
+    expect(JSON.stringify(msg).length).toBeLessThanOrEqual(SUMMARY_THRESHOLD_BYTES);
+    expect(needsSummary(msg)).toBe(true);
+  });
 });
 
 describe("summaryWindow", () => {

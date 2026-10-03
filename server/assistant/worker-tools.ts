@@ -122,6 +122,24 @@ export async function resolveWorkerBoundSkills(driver: DbDriver, agentId: string
   }
 }
 
+/**
+ * Dark-launch gate for delegation (ADR-0004 §3; H3). Reads the GLOBAL
+ * `assistant_delegation_enabled` setting and defaults OFF: any missing row,
+ * unreadable DB or unrecognized value keeps `spawn_run`/`check_run` off every
+ * chat surface. H5 flips it on.
+ */
+export async function resolveWorkerDelegationEnabled(driver: DbDriver): Promise<boolean> {
+  try {
+    const row = await Effect.runPromise(
+      queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = 'assistant_delegation_enabled'")
+    );
+    const value = (row?.value ?? "").trim().toLowerCase();
+    return value === "1" || value === "true";
+  } catch {
+    return false;
+  }
+}
+
 // Jev config resolution is delegated to the existing service (global enable +
 // per-project opt-in + a decryptable stored key). Totally fail-open: any error
 // is "no Jev" rather than a broken turn (ADR-0003 §D).
@@ -449,6 +467,7 @@ export async function resolveWorkerHarnessContext(
       : await runWorkerPreflight(deps, input, documentType, threadRow?.title ?? null, docContext, memoryHits);
 
   const summary = threadRow?.summary && threadRow.summary.trim() !== "" ? threadRow.summary : null;
+  const delegationEnabled = await resolveWorkerDelegationEnabled(deps.driver);
   return {
     projectId: input.projectId,
     threadKey: input.threadKey,
@@ -468,7 +487,7 @@ export async function resolveWorkerHarnessContext(
     primarySupportsImages: gating.primarySupportsImages,
     hasSearchKey: gating.hasSearchKey,
     jevConfigured: gating.jevConfigured,
-    delegation: { enabled: true, maxConcurrentRuns: PROJECT_RUN_LIMIT },
+    delegation: { enabled: delegationEnabled, maxConcurrentRuns: PROJECT_RUN_LIMIT },
   };
 }
 

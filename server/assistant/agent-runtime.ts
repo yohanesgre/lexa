@@ -225,6 +225,9 @@ export interface RunCreateRemoteInput {
   budgetMs?: number | null | undefined;
   parentRunId?: string | null | undefined;
   createdBy?: string | null | undefined;
+  /** Atomic caps enforced inside the registry INSERT (see run-registry). */
+  maxActiveThread?: number | undefined;
+  maxActiveProject?: number | undefined;
 }
 
 /**

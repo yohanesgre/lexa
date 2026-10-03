@@ -842,10 +842,23 @@ export async function handleInternalAssistantRequest(input: {
               : identity.actorUserId.length > 0
                 ? identity.actorUserId
                 : null,
+          ...(typeof payload.maxActiveThread === "number" && Number.isFinite(payload.maxActiveThread)
+            ? { maxActiveThread: Math.floor(payload.maxActiveThread) }
+            : {}),
+          ...(typeof payload.maxActiveProject === "number" && Number.isFinite(payload.maxActiveProject)
+            ? { maxActiveProject: Math.floor(payload.maxActiveProject) }
+            : {}),
         })
       )
     );
     if (outcome._tag === "Left") {
+      if (outcome.left._tag === "RunCapExceeded") {
+        const message =
+          outcome.left.reason === "thread"
+            ? "this thread already has an active run"
+            : "this project already has the maximum active runs";
+        return { status: 409, body: { error: { code: "ASSISTANT_RUN_CAP_EXCEEDED", message } } };
+      }
       return { status: 500, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "run-create failed" } } };
     }
     return { status: 200, body: { run: outcome.right } };
@@ -859,8 +872,9 @@ export async function handleInternalAssistantRequest(input: {
     const payload = (input.body ?? {}) as Record<string, unknown>;
     const runId = typeof payload.runId === "string" ? payload.runId : "";
     const status = payload.status;
-    const validStatus =
-      status === "queued" || status === "running" || status === "completed" || status === "failed" || status === "cancelled";
+    // `queued` is not a valid target: a run is only born queued. Accepting it
+    // here would allow `running → queued` (the registry now also refuses it).
+    const validStatus = status === "running" || status === "completed" || status === "failed" || status === "cancelled";
     if (runId.length === 0 || !validStatus) {
       return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid run-update payload" } } };
     }

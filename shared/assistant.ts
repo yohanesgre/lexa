@@ -210,6 +210,13 @@ export interface AssistantRunCreateInput {
   parentRunId?: string | null | undefined;
   budgetMs?: number | null | undefined;
   createdBy?: ID | null | undefined;
+  /**
+   * Optional concurrency caps enforced inside the registry INSERT (`WHERE
+   * (SELECT COUNT(*) …) < cap`), so the check and the write are one atomic
+   * statement and parallel spawns cannot both win the last slot.
+   */
+  maxActiveThread?: number | undefined;
+  maxActiveProject?: number | undefined;
 }
 
 export interface AssistantRunTransitionInput {

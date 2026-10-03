@@ -33,7 +33,7 @@ import { withApprovalCarriers } from "./approval-carrier";
 import { summaryWindow, summarizeTranscript } from "./summarize";
 import { assistantTraceParams, tracedAI } from "./tracing";
 import { LexaAssistantRunner } from "./runner";
-import { abortDelegatedRun, dispatchRegisteredRun, spawnDelegatedRun, DEFAULT_RUN_BUDGET_MS, type DelegationDeps, type RunDispatcher } from "./delegation";
+import { abortDelegatedRun, dispatchRegisteredRun, isTerminalAgentToolStatus, runStatusForTerminal, spawnDelegatedRun, DEFAULT_RUN_BUDGET_MS, PROJECT_RUN_LIMIT, THREAD_RUN_LIMIT, type AgentToolTerminalStatus, type DelegationDeps, type RunDispatcher } from "./delegation";
 import type { AssistantCallLogInput } from "../../shared/assistant";
 import { attachWorkersAiBinding } from "./model-factory";
 
@@ -491,8 +491,9 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       ...buildWriteTools({ transport, enabled: enabledWrite, mode: permissionMode }),
     };
     // Delegation tools (ADR-0004 §3; H3): offered only when the Worker reports
-    // delegation enabled for this turn. Dark launch: the Worker flag defaults
-    // off, so no chat surface sees them yet.
+    // delegation enabled for this turn. The Worker reads the global
+    // `assistant_delegation_enabled` setting, which defaults off (dark launch;
+    // H5 flips it on).
     if (harness?.delegation.enabled && harness.delegation.maxConcurrentRuns > 0) {
       Object.assign(tools, this.buildDelegationTools(deps, meta.project_id, threadKey, permissionMode));
     }
@@ -602,6 +603,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
           threadKey: input.threadKey,
           budgetMs: input.budgetMs,
           createdBy: input.createdBy,
+          // Caps ride the create so the registry INSERT is the atomic authority
+          // (the DO's pre-read is only a fast path).
+          maxActiveThread: THREAD_RUN_LIMIT,
+          maxActiveProject: PROJECT_RUN_LIMIT,
         }),
       updateRun: async (input) =>
         updateRunRemote(deps, {
@@ -656,11 +661,17 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // registry's conditional UPDATE.
   async onRunFinished(
     run: { runId: string },
-    result: { status: string; summary?: string; error?: string }
+    result: { status: AgentToolTerminalStatus; summary?: string; error?: string; reason?: string; childStillRunning?: boolean }
   ): Promise<void> {
+    // `interrupted` is a SOFT seal (agents SDK): the parent stopped waiting but
+    // the child may still reach a real terminal and fire this hook again with
+    // `completed`. Leave the registry row `running` and emit no terminal card so
+    // the late real result supersedes; the stale-run reconciliation tick fails a
+    // row whose child never returns.
+    if (!isTerminalAgentToolStatus(result.status)) return;
     const deps = await this.loadInternalDeps();
     if (!deps) return;
-    const status = result.status === "completed" ? "completed" : result.status === "aborted" ? "cancelled" : "failed";
+    const status = runStatusForTerminal(result.status);
     await updateRunRemote(deps, {
       runId: run.runId,
       status,
@@ -668,9 +679,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       error: result.error ?? null,
     });
     // Server-driven result card (ADR-0004 §3): append the completion to the
-    // parent transcript WITHOUT triggering a model turn. Idempotent on the
-    // message id so an interrupted-then-completed delivery cannot double-append.
-    const messageId = `run-${run.runId}`;
+    // parent transcript WITHOUT triggering a model turn. Dedupe is per terminal
+    // kind, so an earlier non-terminal/interrupted delivery can never block a
+    // later real terminal's card.
+    const messageId = `run-${run.runId}-${status}`;
     if (this.messages.some((m) => m.id === messageId)) return;
     const label =
       status === "completed"

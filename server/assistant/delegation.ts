@@ -41,6 +41,9 @@ export interface DelegationDeps {
     projectId: string;
     budgetMs: number;
     createdBy: string | null;
+    /** Atomic caps enforced inside the registry INSERT (TOCTOU-safe). */
+    maxThreadRuns: number;
+    maxProjectRuns: number;
   }) => Promise<AssistantRunRow | null>;
   updateRun: (input: {
     runId: string;
@@ -105,6 +108,9 @@ export async function spawnDelegatedRun(deps: DelegationDeps, input: SpawnRunInp
   }
 
   const runId = input.runId ?? crypto.randomUUID();
+  // The insert carries the caps so the check and the write are one atomic
+  // statement: the pre-read above is only a fast path, the guarded INSERT is
+  // authoritative and two parallel spawns cannot both win the last slot.
   const row = await deps.createRun({
     id: runId,
     kind: "chat_run",
@@ -113,8 +119,22 @@ export async function spawnDelegatedRun(deps: DelegationDeps, input: SpawnRunInp
     projectId: input.projectId,
     budgetMs: budget.budgetMs,
     createdBy: input.createdBy,
+    maxThreadRuns: THREAD_RUN_LIMIT,
+    maxProjectRuns: PROJECT_RUN_LIMIT,
   });
   if (row === null) {
+    // The guarded insert refused (a parallel spawn took the slot) or the Worker
+    // was unreachable. Re-read the counts to give the accurate cap copy when the
+    // refusal was a cap; otherwise it is an availability failure.
+    let after: { thread: number; project: number } | null = null;
+    try {
+      after = await deps.counts();
+    } catch {
+      after = null;
+    }
+    if (after !== null && (after.thread >= THREAD_RUN_LIMIT || after.project >= PROJECT_RUN_LIMIT)) {
+      return { ok: false, code: "ASSISTANT_RUN_CAP_EXCEEDED", error: "run cap reached" };
+    }
     return { ok: false, code: "ASSISTANT_UNAVAILABLE", error: "could not record the run" };
   }
 
@@ -170,12 +190,26 @@ export async function abortDelegatedRun(deps: DelegationDeps, runId: string): Pr
 
 export type AgentToolTerminalStatus = "completed" | "error" | "aborted" | "interrupted";
 
+/** Terminal statuses the registry may land. `interrupted` is a SOFT seal. */
+export type AgentToolTerminalOnly = Exclude<AgentToolTerminalStatus, "interrupted">;
+
+/**
+ * `interrupted` is not terminal: the parent stopped waiting but the child may
+ * still reach a real terminal and fire the completion hook again. Treating it
+ * as terminal would poison the run row (a late `completed` could never
+ * supersede) and the result card.
+ */
+export function isTerminalAgentToolStatus(status: AgentToolTerminalStatus): status is AgentToolTerminalOnly {
+  return status !== "interrupted";
+}
+
 /**
  * Map an SDK agent-tool terminal onto the run registry's status domain. A
- * `budget-exceeded`/`no-progress` interrupt is a failed run; an explicit abort
- * is cancelled. Pure so the parent's `onRunFinished` is unit-testable.
+ * `budget-exceeded`/`no-progress` interrupt is handled before this (non-terminal);
+ * an explicit abort is cancelled. Pure so the parent's `onRunFinished` is
+ * unit-testable.
  */
-export function runStatusForTerminal(status: AgentToolTerminalStatus): "completed" | "failed" | "cancelled" {
+export function runStatusForTerminal(status: AgentToolTerminalOnly): "completed" | "failed" | "cancelled" {
   if (status === "completed") return "completed";
   if (status === "aborted") return "cancelled";
   return "failed";

@@ -75,6 +75,7 @@ beforeEach(() => {
   db.exec("DELETE FROM assistant_jev_secrets");
   db.exec("DELETE FROM assistant_jev_projects");
   db.exec("DELETE FROM assistant_settings");
+  db.exec("DELETE FROM settings WHERE key = 'assistant_delegation_enabled'");
   db.exec("DELETE FROM lexa_agent_skills");
   db.exec("DELETE FROM lexa_skills");
   db.exec("DELETE FROM lexa_agents");
@@ -177,11 +178,28 @@ describe("resolveWorkerHarnessContext", () => {
     expect(context.repoContent).toEqual([]);
     expect(context.mentionContext).toBeNull();
     expect(context.mcpTools).toEqual([]);
-    expect(context.delegation).toEqual({ enabled: true, maxConcurrentRuns: 3 });
+    // Dark launch: the global flag is absent, so delegation defaults off.
+    expect(context.delegation).toEqual({ enabled: false, maxConcurrentRuns: 3 });
     const raw = JSON.stringify(context);
     expect(raw).not.toContain("exa-secret");
     expect(raw).not.toContain("searchApiKey");
     expect(raw).not.toContain("urlAllowlist");
+  });
+
+  it("enables delegation only when the global assistant_delegation_enabled setting is on", async () => {
+    seedSettings();
+    const off = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "turn" }
+    );
+    expect(off.delegation.enabled).toBe(false);
+
+    db.prepare("INSERT INTO settings (key, value) VALUES ('assistant_delegation_enabled', '1')").run();
+    const on = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "chat:c1", userText: "hi", mode: "turn" }
+    );
+    expect(on.delegation).toEqual({ enabled: true, maxConcurrentRuns: 3 });
   });
 
   it("assembles a task bundle: doc context + bound-skill markdown", async () => {

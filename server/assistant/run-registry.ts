@@ -9,7 +9,7 @@
 //
 // Worker-side (D1) module; unit-tested with a bun-sqlite driver.
 
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 import {
   queryFirst,
   run,
@@ -26,6 +26,9 @@ import type {
   AssistantRunStatus,
   AssistantRunTransitionInput,
 } from "../../shared/assistant";
+
+/** Raised when the atomic guarded INSERT refuses a run at the thread/project cap. */
+export class RunCapExceeded extends Data.TaggedError("RunCapExceeded")<{ reason: "thread" | "project" }> {}
 
 export interface AssistantRunRowRaw {
   id: string;
@@ -72,22 +75,77 @@ const RUN_SELECT = `SELECT id, project_id, thread_key, parent_run_id, kind, stat
 export function createAssistantRun(
   driver: DbDriver,
   input: AssistantRunCreateInput
-): Effect.Effect<AssistantRunRow, RowNotFound | ConstraintViolation | DbError> {
+): Effect.Effect<AssistantRunRow, RowNotFound | ConstraintViolation | DbError | RunCapExceeded> {
   const id = input.id && input.id.length > 0 ? input.id : crypto.randomUUID();
+  const guarded = input.maxActiveThread !== undefined || input.maxActiveProject !== undefined;
   return Effect.gen(function* () {
-    yield* run(
-      driver,
-      `INSERT INTO assistant_runs (id, project_id, thread_key, parent_run_id, kind, status, goal, budget_ms, created_by)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
-      id,
-      input.projectId,
-      input.threadKey,
-      input.parentRunId ?? null,
-      input.kind,
-      input.goal.slice(0, 4000),
-      input.budgetMs ?? null,
-      input.createdBy ?? null
-    );
+    if (guarded) {
+      // Atomic cap enforcement: the counts and the insert are one statement, so
+      // two parallel spawns cannot both pass the pre-read and exceed the cap.
+      // A NULL cap disables that side via `? IS NULL`.
+      const changes = yield* run(
+        driver,
+        `INSERT INTO assistant_runs (id, project_id, thread_key, parent_run_id, kind, status, goal, budget_ms, created_by)
+         SELECT ?, ?, ?, ?, ?, 'queued', ?, ?, ?
+         WHERE (? IS NULL OR (SELECT COUNT(*) FROM assistant_runs
+                WHERE project_id = ? AND thread_key = ? AND status IN ('queued', 'running')) < ?)
+           AND (? IS NULL OR (SELECT COUNT(*) FROM assistant_runs
+                WHERE project_id = ? AND status IN ('queued', 'running')) < ?)`,
+        id,
+        input.projectId,
+        input.threadKey,
+        input.parentRunId ?? null,
+        input.kind,
+        input.goal.slice(0, 4000),
+        input.budgetMs ?? null,
+        input.createdBy ?? null,
+        input.maxActiveThread ?? null,
+        input.projectId,
+        input.threadKey,
+        input.maxActiveThread ?? null,
+        input.maxActiveProject ?? null,
+        input.projectId,
+        input.maxActiveProject ?? null
+      );
+      if (changes === 0) {
+        const counts = yield* Effect.all({
+          thread: queryFirst<{ n: number }>(
+            driver,
+            `SELECT COUNT(*) AS n FROM assistant_runs WHERE project_id = ? AND thread_key = ? AND status IN ('queued', 'running')`,
+            input.projectId,
+            input.threadKey
+          ).pipe(
+            Effect.map((r) => Number(r.n ?? 0)),
+            Effect.catchTag("RowNotFound", () => Effect.succeed(0))
+          ),
+          project: queryFirst<{ n: number }>(
+            driver,
+            `SELECT COUNT(*) AS n FROM assistant_runs WHERE project_id = ? AND status IN ('queued', 'running')`,
+            input.projectId
+          ).pipe(
+            Effect.map((r) => Number(r.n ?? 0)),
+            Effect.catchTag("RowNotFound", () => Effect.succeed(0))
+          ),
+        });
+        const reason =
+          counts.thread >= (input.maxActiveThread ?? Number.POSITIVE_INFINITY) ? "thread" : "project";
+        return yield* new RunCapExceeded({ reason });
+      }
+    } else {
+      yield* run(
+        driver,
+        `INSERT INTO assistant_runs (id, project_id, thread_key, parent_run_id, kind, status, goal, budget_ms, created_by)
+         VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
+        id,
+        input.projectId,
+        input.threadKey,
+        input.parentRunId ?? null,
+        input.kind,
+        input.goal.slice(0, 4000),
+        input.budgetMs ?? null,
+        input.createdBy ?? null
+      );
+    }
     const row = yield* queryFirst<AssistantRunRowRaw>(driver, `${RUN_SELECT} WHERE id = ?`, id);
     return mapRunRow(row);
   });
@@ -106,10 +164,13 @@ export function getAssistantRun(
 /**
  * The statuses a run may transition FROM for a given target. `running` starts
  * a queued run; a terminal target closes a queued or running one. Any other
- * source is a no-op (idempotent repeat or an illegal regression).
+ * source is a no-op (idempotent repeat or an illegal regression). `queued` is
+ * never a target: a run is only born queued, so `→ queued` (including
+ * `running → queued`) is rejected.
  */
 export function isRunTransitionable(from: AssistantRunStatus, to: AssistantRunStatus): boolean {
   if (to === "running") return from === "queued";
+  if (to === "queued") return false;
   return from === "queued" || from === "running";
 }
 

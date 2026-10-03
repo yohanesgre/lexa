@@ -26,11 +26,18 @@ export const SUMMARY_SYSTEM_PROMPT =
 
 export type GenerateTextImpl = typeof generateText;
 
+const textEncoder = new TextEncoder();
+
+/** UTF-8 byte length — `String.length` undercounts multibyte characters. */
+function utf8ByteLength(value: string): number {
+  return textEncoder.encode(value).length;
+}
+
 /** True when the transcript crossed the message or byte threshold. */
 export function needsSummary(messages: readonly unknown[]): boolean {
   if (messages.length > SUMMARY_THRESHOLD_MESSAGES) return true;
   try {
-    return JSON.stringify(messages).length > SUMMARY_THRESHOLD_BYTES;
+    return utf8ByteLength(JSON.stringify(messages)) > SUMMARY_THRESHOLD_BYTES;
   } catch {
     return false;
   }
