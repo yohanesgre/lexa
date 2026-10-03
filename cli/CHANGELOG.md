@@ -12,6 +12,13 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+### Added
+
+- **`lx skill install`** — installs the embedded `lexa-cli` agent skill into
+  `~/.agents/skills/lexa-cli/SKILL.md` (`--global`) or
+  `./.agents/skills/lexa-cli/SKILL.md` (`--local`); prompts in a TTY when no
+  target is given, and refuses an existing file unless `--force` is passed.
+
 ## [2026.5.2] - 2026-10-03
 
 ### Changed

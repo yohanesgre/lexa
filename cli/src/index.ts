@@ -234,7 +234,7 @@ function readJsonFileSafe(pathOrDash: string): Promise<{ ok: true; text: string 
 // queries, and nothing that can hang on a real terminal.
 // Resolves null on EOF (Ctrl-D) so callers can distinguish a cancel from an
 // empty line (an empty answer must re-prompt, not default).
-function promptLogin(question: string): Promise<string | null> {
+export function promptLogin(question: string): Promise<string | null> {
   return new Promise((resolve) => {
     const done = (line: string | null) => {
       // Remove all stdin listeners — bun keeps a read interest on a TTY
@@ -1435,6 +1435,14 @@ Workers (self-hosted):
 Upgrade:
   upgrade                                self-update the CLI binary (GitHub release)
 
+Skill:
+  skill install [--global | --local] [--force]
+                                           install the lexa-cli agent skill into
+                                           ~/.agents/skills (--global) or
+                                           ./.agents/skills (--local); prompts
+                                           when neither is given; --force
+                                           overwrites an existing file
+
 Env fallbacks: LEXA_URL, LEXA_API_KEY. Flags override saved login.
 `;
 
@@ -1525,6 +1533,13 @@ const GROUP_HELP: Record<string, string> = {
                                            from your cf-workers/ custody dir)`,
   upgrade: `Upgrade:
   upgrade                                        self-update the CLI binary (GitHub release)`,
+  skill: `Skill:
+  skill install [--global | --local] [--force]
+                                           install the lexa-cli agent skill into
+                                           ~/.agents/skills (--global) or
+                                           ./.agents/skills (--local); prompts
+                                           when neither is given; --force
+                                           overwrites an existing file`,
 };
 
 function usage(cmd: string, sub: string): never {
@@ -1679,6 +1694,20 @@ async function main(): Promise<void> {
       switch (sub) {
         case "upgrade": program = cmdWorkerUpgrade(flags); break;
         default: usage("worker", sub);
+      }
+      break;
+
+    case "skill":
+      switch (sub) {
+        case "install":
+          // Lazy so the embedded SKILL.md text import stays out of the module
+          // graph that imports index.ts without running the CLI.
+          program = Effect.gen(function* () {
+            const { cmdSkillInstall } = yield* Effect.promise(() => import("./skill"));
+            yield* cmdSkillInstall(flags);
+          });
+          break;
+        default: usage("skill", sub);
       }
       break;
 

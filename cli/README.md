@@ -133,4 +133,6 @@ bun run uninstall:cli-dev  # removes the dev shim
 - `--version` prints the embedded version; releases also write
   `cli/CHANGELOG.md`.
 
-Agent skill: `~/.agents/skills/lexa-cli/SKILL.md`.
+Agent skill: install it with `lx skill install --global` (→
+`~/.agents/skills/lexa-cli/SKILL.md`) or `lx skill install --local` (→
+`./.agents/skills/lexa-cli/SKILL.md`); `--force` overwrites an existing file.
