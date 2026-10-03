@@ -132,6 +132,15 @@ describe("resolveServerUrl", () => {
     expect(() => resolveServerUrl("user:pass@localhost:3000/")).not.toThrow();
   });
 
+  it("classifies loopback from the host with userinfo stripped (user:pass@host)", async () => {
+    const { resolveServerUrl } = await import("./config");
+    expect(resolveServerUrl("user:pass@localhost:3000")).toBe("http://user:pass@localhost:3000");
+    expect(resolveServerUrl("user:pass@localhost:3000/")).toBe("http://user:pass@localhost:3000");
+    expect(resolveServerUrl("user:pass@127.0.0.1:3000")).toBe("http://user:pass@127.0.0.1:3000");
+    // Userinfo alone never makes a remote host loopback.
+    expect(resolveServerUrl("user:pass@example.com")).toBe("https://user:pass@example.com");
+  });
+
   it("throws a clear error on empty or invalid input", async () => {
     const { resolveServerUrl } = await import("./config");
     expect(() => resolveServerUrl("")).toThrow(/Server URL is required/);

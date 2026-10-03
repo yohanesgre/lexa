@@ -87,9 +87,16 @@ export function resolveServerUrl(input: string): string {
   // candidate URL so suffixes are preserved.
   const hostSegment = hasScheme ? trimmed : trimmed.split(/[/?#]/)[0]!;
   const suffix = hasScheme ? "" : trimmed.slice(hostSegment.length);
+  // Classification reads the host proper — strip any userinfo (`user:pass@`)
+  // first so `user:pass@localhost:3000` still lands on http. The full segment
+  // (userinfo included) still seeds the candidate URL, and bracketBareIpv6
+  // ignores userinfo on its own.
+  const hostForClassify = hostSegment.includes("@")
+    ? hostSegment.slice(hostSegment.lastIndexOf("@") + 1)
+    : hostSegment;
   const candidate = hasScheme
     ? trimmed
-    : `${/^localhost(:\d+)?$/.test(normalizeHost(hostSegment)) ? "http" : "https"}://${bracketBareIpv6(hostSegment)}${suffix}`;
+    : `${/^localhost(:\d+)?$/.test(normalizeHost(hostForClassify)) ? "http" : "https"}://${bracketBareIpv6(hostSegment)}${suffix}`;
   let parsed: URL;
   try {
     parsed = new URL(candidate);
