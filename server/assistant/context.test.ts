@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSkillPromptParts, lastUserText, resolveMentionContext, type MentionResolverDeps } from "./context";
+import { buildSkillPromptParts, firstUserText, lastUserText, resolveMentionContext, type MentionResolverDeps } from "./context";
 import { mentionSlug } from "../../shared/mention-entities";
 import type { TipTapDoc } from "../../shared/types";
 import type { BoundSkill } from "./tools";
@@ -60,6 +60,38 @@ describe("lastUserText", () => {
   it("returns empty when there is no user message", () => {
     expect(lastUserText([{ role: "assistant", content: "x" }])).toBe("");
     expect(lastUserText([])).toBe("");
+  });
+});
+
+describe("firstUserText", () => {
+  it("returns the first user string content, not the last", () => {
+    const messages = [
+      { role: "user", content: "first" },
+      { role: "assistant", content: "reply" },
+      { role: "user", content: "second" },
+    ];
+    expect(firstUserText(messages)).toBe("first");
+  });
+
+  it("joins text parts of a UIMessage-shaped transcript", () => {
+    const messages = [
+      { role: "user", parts: [{ type: "text", text: "hello " }, { type: "text", text: "world" }] },
+    ];
+    expect(firstUserText(messages)).toBe("hello world");
+  });
+
+  it("skips a leading textless user message so a later text turn seeds the title", () => {
+    const messages = [
+      { role: "user", parts: [{ type: "image-ref", storageKey: "k" }] },
+      { role: "assistant", parts: [{ type: "text", text: "ack" }] },
+      { role: "user", parts: [{ type: "text", text: "real question" }] },
+    ];
+    expect(firstUserText(messages)).toBe("real question");
+  });
+
+  it("returns empty when there is no user message", () => {
+    expect(firstUserText([{ role: "assistant", content: "x" }])).toBe("");
+    expect(firstUserText([])).toBe("");
   });
 });
 

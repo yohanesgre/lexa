@@ -48,20 +48,39 @@ export function buildSkillPromptParts(
   return { skillMarkdowns, skillCatalog };
 }
 
+/** User-role text of one message, or `null` when it is not a user message. */
+function userMessageText(message: unknown): string | null {
+  const m = message as { role?: unknown; content?: unknown; parts?: unknown } | null;
+  if (!m || m.role !== "user") return null;
+  if (typeof m.content === "string") return m.content;
+  if (Array.isArray(m.parts)) {
+    return m.parts
+      .filter((p): p is { type?: unknown; text?: unknown } => typeof p === "object" && p !== null)
+      .filter((p) => (p.type === "text" || p.type === undefined) && typeof p.text === "string")
+      .map((p) => p.text as string)
+      .join("");
+  }
+  return "";
+}
+
 /** Last user-role text in a transcript (legacy `content` string or UIMessage parts). */
 export function lastUserText(messages: readonly unknown[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i] as { role?: unknown; content?: unknown; parts?: unknown } | null;
-    if (!m || m.role !== "user") continue;
-    if (typeof m.content === "string") return m.content;
-    if (Array.isArray(m.parts)) {
-      return m.parts
-        .filter((p): p is { type?: unknown; text?: unknown } => typeof p === "object" && p !== null)
-        .filter((p) => (p.type === "text" || p.type === undefined) && typeof p.text === "string")
-        .map((p) => p.text as string)
-        .join("");
-    }
-    return "";
+    const text = userMessageText(messages[i]);
+    if (text !== null) return text;
+  }
+  return "";
+}
+
+/**
+ * First user-role text with non-empty content in a transcript. Used to derive
+ * a thread title from the opening turn (a leading attachment-only message with
+ * no text is skipped so a later text turn can still seed the title).
+ */
+export function firstUserText(messages: readonly unknown[]): string {
+  for (const message of messages) {
+    const text = userMessageText(message);
+    if (text !== null && text !== "") return text;
   }
   return "";
 }
