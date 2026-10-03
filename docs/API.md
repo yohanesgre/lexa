@@ -1764,13 +1764,17 @@ DELETE /api/admin/assistant/providers/:id   (superadmin)
 POST   /api/admin/assistant/providers/:id/test   (superadmin)
 → 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404
   | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
-  Live probe: listModels against the stored provider row (kind openai_compatible,
-  model from the enabled row, else "test"). When the listing route is absent
-  (404/405) the probe falls back to a minimal chat completion
-  (`POST {base}/chat/completions`, `max_tokens: 1`, `stream: false`; model from
-  the row, else `@cf/meta/llama-3.2-1b-instruct` for a Cloudflare base); a
-  successful ping → `{ ok: true, latencyMs }`, 401/403 → PROVIDER_AUTH_FAILED,
-  network/5xx → PROVIDER_UNREACHABLE. Cloudflare AI bases list via
+  Live probe: listModels against the stored provider row (model from the
+  enabled row, else "test"). When the listing route is absent (404/405) and the
+  row's kind normalizes to `openai_compatible`, the probe falls back to a
+  minimal chat completion (`POST {base}/chat/completions`, `max_tokens: 1`,
+  `stream: false`; model from the row, else `@cf/meta/llama-3.2-1b-instruct`
+  when the base normalizes to a Cloudflare AI base — including the bare
+  `.../accounts/<id>/ai` form, normalized to `.../ai/v1`). Anthropic-wire and
+  openai-responses rows never fall back; their 404/405 surfaces as
+  PROVIDER_UNREACHABLE. A successful ping → `{ ok: true, latencyMs }`, 401/403
+  → PROVIDER_AUTH_FAILED; any other non-OK ping response (and network/5xx) →
+  PROVIDER_UNREACHABLE. Cloudflare AI bases list via
   `GET .../ai/models/search` (their OpenAI-wire GET /models answers 405).
   A stored key that cannot be opened with the configured master key is a hard
   502 PROVIDER_AUTH_FAILED with the fixed message

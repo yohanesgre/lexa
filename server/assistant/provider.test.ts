@@ -354,6 +354,16 @@ describe("cloudflare models", () => {
     expect(res.models).toEqual([{ id: "@cf/meta/llama-3.2-1b-instruct" }]);
   });
 
+  it("drops a query string on the base before building the search URL", async () => {
+    const calls: Array<{ url: string }> = [];
+    const res = await listModels(cfConfig("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1?foo=bar&baz=1"), async (input) => {
+      calls.push({ url: input });
+      return jsonResponse(200, { result: [{ name: "@cf/meta/llama-3.2-1b-instruct" }], result_info: { per_page: 50, total_count: 1 } });
+    });
+    expect(calls[0]?.url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/ai/models/search?per_page=50&page=1&task=Text+Generation");
+    expect(res.models).toEqual([{ id: "@cf/meta/llama-3.2-1b-instruct" }]);
+  });
+
   it("maps result[].name into data[].id and sends Bearer auth", async () => {
     const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
     const res = await listModels(cfConfig(), async (input, init) => {
@@ -382,6 +392,17 @@ describe("cloudflare models", () => {
     expect(e500._tag).toBe("ProviderUnreachable");
     const enet = await listModels(cfConfig(), async () => { throw new Error("fetch failed"); }).catch((e) => e);
     expect(enet._tag).toBe("ProviderUnreachable");
+  });
+
+  it("invalid JSON body → PROVIDER_UNREACHABLE", async () => {
+    const err = await listModels(cfConfig(), async () => new Response("not-json", { status: 200, headers: { "content-type": "application/json" } })).catch((e) => e);
+    expect(err._tag).toBe("ProviderUnreachable");
+    expect(err.message).toContain("invalid JSON");
+  });
+
+  it("literal null JSON body is coerced to an empty object (no TypeError)", async () => {
+    const res = await listModels(cfConfig(), async () => jsonResponse(200, null));
+    expect(res.models).toEqual([]);
   });
 
   it("falls back to the full catalog when the task filter is rejected with 400", async () => {
@@ -417,6 +438,23 @@ describe("cloudflare models", () => {
     });
     expect(urls).toHaveLength(10);
     expect(res.models).toHaveLength(500);
+  });
+
+  it("multi-page concatenation increments page and keeps per_page=50", async () => {
+    const urls: string[] = [];
+    const res = await listModels(cfConfig(), async (input) => {
+      urls.push(input);
+      const names = urls.length === 1
+        ? Array.from({ length: 50 }, (_, i) => ({ name: `@cf/p1-${i}` }))
+        : [{ name: "@cf/p2-0" }];
+      return jsonResponse(200, { result: names, result_info: { per_page: 50, total_count: 51 } });
+    });
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain("page=1");
+    expect(urls[1]).toContain("page=2");
+    expect(urls[0]).toContain("per_page=50");
+    expect(urls[1]).toContain("per_page=50");
+    expect(res.models).toHaveLength(51);
   });
 
   it("ping posts to /chat/completions with max_tokens 1 and stream false", async () => {
