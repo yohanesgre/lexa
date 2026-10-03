@@ -17,6 +17,8 @@ export function SetupStepEmail({
   onDone: () => void;
 }) {
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,7 +40,13 @@ export function SetupStepEmail({
       setError("Password must be at least 8 characters.");
       return;
     }
+    if (password !== confirm) {
+      setError("");
+      setConfirmError("Passwords do not match");
+      return;
+    }
     setError("");
+    setConfirmError(null);
     setBusy(true);
     try {
       await setSetupAdmin(trimmed, password);
@@ -83,7 +91,7 @@ export function SetupStepEmail({
           className="prop-input w-full"
           type={showPassword ? "text" : "password"}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => { setPassword(e.target.value); setConfirmError(null); }}
           onKeyDown={(e) => e.key === "Enter" && !busy && submit()}
           placeholder="Minimum 8 characters"
           autoComplete="new-password"
@@ -112,6 +120,19 @@ export function SetupStepEmail({
           </svg>
         </button>
       </div>
+      <label className="prop-label block mb-1.5 mt-3" htmlFor="setup-confirm">Confirm password</label>
+      <input
+        id="setup-confirm"
+        className="prop-input w-full"
+        type="password"
+        value={confirm}
+        onChange={(e) => { setConfirm(e.target.value); setConfirmError(null); }}
+        onKeyDown={(e) => e.key === "Enter" && !busy && submit()}
+        placeholder="••••••••••••"
+        autoComplete="new-password"
+        style={confirmError ? { borderColor: "var(--lx-text-danger)" } : undefined}
+      />
+      {confirmError && <div className="field-hint-danger">{confirmError}</div>}
       {error && <p className="text-xs text-lx-text-danger mt-2">{error}</p>}
       {isRemote && (
         <p className="text-xs text-lx-text-warning mt-3 leading-4">
@@ -119,7 +140,7 @@ export function SetupStepEmail({
         </p>
       )}
       <div className="flex justify-end mt-5">
-        <button type="button" className="btn btn-primary" onClick={submit} disabled={busy || !email.trim() || password.length < 8}>
+        <button type="button" className="btn btn-primary" onClick={submit} disabled={busy || !email.trim() || password.length < 8 || password !== confirm}>
           Continue <ArrowRight size={14} strokeWidth={2} />
         </button>
       </div>
