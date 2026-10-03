@@ -16,7 +16,8 @@
 #   cli mixed with app/be, tooling, unknown -> full (bun run test)
 #   no changes                 -> full
 #   status/** (repo-root only) or *.md only -> skip tests (typecheck still runs)
-#   scripts/install* uninstall* test-install* workers-install* | wrangler.jsonc
+#   scripts/install* uninstall* test-install* workers-install* | scripts/lib/*
+#     | wrangler.jsonc
 #     -> also run bash scripts/test-install.sh (installer surface)
 set -euo pipefail
 
