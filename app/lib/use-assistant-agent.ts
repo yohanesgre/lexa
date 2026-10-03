@@ -85,7 +85,10 @@ export interface AssistantAgentStream extends AssistantStream {
 
 export function useAssistantAgent(key: string | null, options?: AssistantAgentOptions): AssistantAgentStream {
   const threadKey = threadKeyOf(key);
-  const basePath = threadKey ? `/api/assistant/agent/${threadKey}` : `/api/assistant/agent/__idle__`;
+  // No leading slash: PartySocket builds `${protocol}://${host}/${basePath}...`,
+  // so a leading slash yields a double-slash path that workers.dev does not
+  // normalize (the SPA fallback swallows the upgrade). Keep it slash-free.
+  const basePath = threadKey ? `api/assistant/agent/${threadKey}` : `api/assistant/agent/__idle__`;
 
   // `?projectId=` rides the WS handshake for a fresh chat thread. Keep the
   // object referentially stable across renders: PartySocket memoizes its socket
