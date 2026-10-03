@@ -106,7 +106,7 @@ CLI asset.
   `lexa-workers-<tag>.tar.gz` + `checksums.txt`.
 - The tarball is the whole deploy artifact: `dist/` (the prebuilt worker
   bundle), `wrangler.jsonc` (placeholder `database_id` stripped), `migrations/`,
-  and `scripts/workers-install.ts`. No image is built or published.
+  and `scripts/workers-install.ts`, and `scripts/lib/cf-deploy.ts`. No image is built or published.
 - Remote deploy uses `scripts/install.sh workers` (`curl -fsSL
   …/scripts/install.sh | bash -s -- workers [flags]`). It fetches the tarball
   by scanning the release list for the newest `v*` web-app tag (the `v[0-9]`

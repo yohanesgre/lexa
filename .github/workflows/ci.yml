@@ -290,7 +290,7 @@ jobs:
           fi
           CHANGED="$(cat /tmp/changed.txt)"
           echo "$CHANGED"
-          if echo "$CHANGED" | grep -qE '^(scripts/(install|uninstall|test-install|workers-install)|wrangler\.jsonc)'; then
+          if echo "$CHANGED" | grep -qE '^(scripts/(install|uninstall|test-install|workers-install)|scripts/lib/|wrangler\.jsonc)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

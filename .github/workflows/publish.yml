@@ -48,6 +48,9 @@ jobs:
           # The workers installer helper (bun workers-install.ts) rides in the
           # tarball — install.sh unpacks and runs it with bun.
           cp scripts/workers-install.ts workers-stage/scripts/
+          # The installer imports ./lib/cf-deploy; stage the shared helper dir
+          # next to it so the bundled script resolves in the unpacked tarball.
+          cp -r scripts/lib workers-stage/scripts/
           tar czf "lexa-workers-${{ github.ref_name }}.tar.gz" \
             --exclude='*/.dev.vars' \
             -C workers-stage dist wrangler.jsonc migrations scripts

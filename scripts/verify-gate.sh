@@ -16,7 +16,8 @@
 #   cli mixed with app/be, tooling, unknown -> full (bun run test)
 #   no changes                 -> full
 #   status/** (repo-root only) or *.md only -> skip tests (typecheck still runs)
-#   scripts/install* uninstall* test-install* workers-install* | wrangler.jsonc
+#   scripts/install* uninstall* test-install* workers-install* | scripts/lib/*
+#     | wrangler.jsonc
 #     -> also run bash scripts/test-install.sh (installer surface)
 set -euo pipefail
 
@@ -77,7 +78,7 @@ for p in "${CHANGED[@]-}"; do
     wireframes/src/*) touched_wireframes=1 ;;
   esac
   case "$p" in
-    scripts/install*|scripts/uninstall*|scripts/test-install*|scripts/workers-install*|wrangler.jsonc) touched_installer=1 ;;
+    scripts/install*|scripts/uninstall*|scripts/test-install*|scripts/workers-install*|scripts/lib/*|wrangler.jsonc) touched_installer=1 ;;
   esac
 done
 

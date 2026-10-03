@@ -69,7 +69,7 @@ ci-local also has `shared` and rejects `full`), `--print-plan` (print the
 chosen lane + command(s), run nothing, exit 0).
 
 When installer paths change (`scripts/install*`, `scripts/uninstall*`,
-`scripts/test-install*`, `scripts/workers-install*`, `wrangler.jsonc`), the
+`scripts/test-install*`, `scripts/workers-install*`, `scripts/lib/*`, `wrangler.jsonc`), the
 gate also runs `bash scripts/test-install.sh` alongside the scoped vitest lane.
 
 Iteration contract: touched test file(s) during iteration
