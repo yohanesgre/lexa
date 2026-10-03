@@ -238,7 +238,7 @@ jobs:
           # The check drives a real browser against the dev stack (:3000 API +
           # :5173 vite) — boot it first, then wait for both surfaces.
           bun run setup --yes --admin-email admin@lexa.local
-          bun run dev:full > /tmp/dev-full.log 2>&1 &
+          bun run dev > /tmp/dev.log 2>&1 &
           up=0
           for _ in $(seq 1 60); do
             if curl -sf http://localhost:3000/api/health >/dev/null && curl -sf -o /dev/null http://localhost:5173/login; then
@@ -248,8 +248,8 @@ jobs:
             sleep 1
           done
           if [ "$up" != "1" ]; then
-            echo "::warning::dev stack did not come up - skipping check:mobile (see /tmp/dev-full.log)"
-            tail -20 /tmp/dev-full.log || true
+            echo "::warning::dev stack did not come up - skipping check:mobile (see /tmp/dev.log)"
+            tail -20 /tmp/dev.log || true
             exit 0
           fi
           echo "running bun run check:mobile"

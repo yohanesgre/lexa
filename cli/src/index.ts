@@ -3,7 +3,7 @@
  * lx — Lexa operator CLI.
  *
  *   lx <command> [options]        (prod: compiled binary)
- *   lx-dev <command> [options]    (dev: bun run cli/index.ts)
+ *   lx-dev <command> [options]    (dev: bun run lx)
  *
  * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app, and
  * gives humans/scripts (external agent harnesses included) a non-browser way

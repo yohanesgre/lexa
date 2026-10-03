@@ -5,7 +5,7 @@
 #
 # Fixed paths (repo root):
 #   config       wrangler.staging.local.jsonc   (gitignored; carries account + resource ids)
-#   key custody  .env.staging                   (0600; one line: LXK_SECRETS_MASTER_KEY=<base64>)
+#   key custody  .env.staging.toml              (0600; TOML: LXK_SECRETS_MASTER_KEY = "<base64>")
 #
 # Every wrangler call passes --config. The root wrangler.jsonc (prod) is never
 # read or written; the filled config's "name" MUST be lexa-staging or we abort.
@@ -21,7 +21,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CFG="wrangler.staging.local.jsonc"
-ENV_FILE=".env.staging"
+ENV_FILE=".env.staging.toml"
+LEGACY_ENV_FILE=".env.staging"
 WORKER="lexa-staging"
 D1_NAME="lexa-staging"
 KV_NAME="lexa-staging"
@@ -38,7 +39,7 @@ Lexa staging deploy — clone-path Workers environment (docs/DEPLOYMENT.md §Sta
 Usage: bash scripts/deploy-staging.sh [--reset] [--yes] [--help]
 
   (no flags)  build:workers, apply remote D1 migrations, deploy, push
-              LXK_SECRETS_MASTER_KEY from .env.staging
+              LXK_SECRETS_MASTER_KEY from .env.staging.toml
   --reset     wipe all staging resources (R2, then worker + Durable Object
               storage, D1, KV), recreate them, then run the deploy steps;
               already-absent resources are skipped
@@ -47,7 +48,7 @@ Usage: bash scripts/deploy-staging.sh [--reset] [--yes] [--help]
 
 Fixed paths (repo root):
   config       wrangler.staging.local.jsonc   (gitignored)
-  key custody  .env.staging                   (0600; LXK_SECRETS_MASTER_KEY=<base64>)
+  key custody  .env.staging.toml              (0600; TOML: LXK_SECRETS_MASTER_KEY = "<base64>")
 EOF
 }
 
@@ -77,7 +78,27 @@ cfg_bucket="$(grep -m1 -E '^[[:space:]]*"bucket_name"[[:space:]]*:' "$CFG" | sed
 [ -n "$cfg_bucket" ] || cfg_bucket="$BUCKET_FALLBACK"
 
 if [ ! -f "$ENV_FILE" ]; then
-  echo "deploy-staging: $ENV_FILE missing — mint it with: printf 'LXK_SECRETS_MASTER_KEY=%s\\n' \"\$(openssl rand -base64 32)\" > $ENV_FILE && chmod 600 $ENV_FILE" >&2
+  if [ -f "$LEGACY_ENV_FILE" ]; then
+    cat >&2 <<'EOF'
+deploy-staging: .env.staging.toml missing, but legacy .env.staging exists — convert it with:
+  v="$(cut -d= -f2- .env.staging)"; printf 'LXK_SECRETS_MASTER_KEY = "%s"\n' "$v" > .env.staging.toml && chmod 600 .env.staging.toml && rm .env.staging
+EOF
+    exit 1
+  fi
+  echo "deploy-staging: $ENV_FILE missing — mint it with: printf 'LXK_SECRETS_MASTER_KEY = \"%s\"\\n' \"\$(openssl rand -base64 32)\" > $ENV_FILE && chmod 600 $ENV_FILE" >&2
+  exit 1
+fi
+
+if [ -f "$LEGACY_ENV_FILE" ]; then
+  echo "deploy-staging: legacy $LEGACY_ENV_FILE present — ignored; using $ENV_FILE." >&2
+fi
+
+# Extract the key through the repo loader (TOML-aware). The loader's dotenv
+# emit quotes values containing characters outside its bare charset (base64
+# `=`/`+`/`/`), so strip one layer of surrounding double quotes.
+key="$(bun server/env-file.ts --path "$ENV_FILE" --emit-dotenv | sed -n 's/^LXK_SECRETS_MASTER_KEY=//p' | sed -e 's/^"//' -e 's/"$//' || true)"
+if [ -z "$key" ]; then
+  echo "deploy-staging: no LXK_SECRETS_MASTER_KEY in $ENV_FILE — add LXK_SECRETS_MASTER_KEY = \"<base64>\" (see docs/DEPLOYMENT.md §Staging from a clone)." >&2
   exit 1
 fi
 
@@ -92,7 +113,7 @@ deploy_steps() {
   bun x wrangler deploy --config "$CFG"
 
   echo "▶ push LXK_SECRETS_MASTER_KEY"
-  cut -d= -f2- "$ENV_FILE" | bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config "$CFG"
+  printf '%s' "$key" | bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config "$CFG"
 
   echo
   echo "Deployed: $URL"

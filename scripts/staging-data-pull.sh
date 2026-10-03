@@ -205,5 +205,5 @@ Notes:
     only decrypt if .env.toml's LXK_SECRETS_MASTER_KEY matches staging's;
     otherwise re-enter the provider key locally.
   • Log in locally with the staging email/password.
-  • `dev:full` (Bun) cannot show the assistant by design.
+  • `dev` (Bun) cannot show the assistant by design.
 EOF
