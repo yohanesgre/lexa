@@ -10,18 +10,28 @@ const h = vi.hoisted(() => ({
   useAgent: vi.fn(),
 }));
 
+// Mutable chat state for the `useAgentChat` mock, so tests can drive the
+// recovering / terminal status projection.
+const chatFx = vi.hoisted(() => {
+  const idle = () => ({
+    messages: [] as unknown[],
+    status: "ready",
+    error: null as Error | null,
+    connectionError: null as Error | null,
+    isStreaming: false,
+    isRecovering: false,
+  });
+  const state = { current: idle() };
+  return { idle, state };
+});
+
 vi.mock("agents/react", () => ({
   useAgent: h.useAgent,
 }));
 
 vi.mock("@cloudflare/ai-chat/react", () => ({
   useAgentChat: () => ({
-    messages: [],
-    status: "idle",
-    error: null,
-    connectionError: null,
-    isStreaming: false,
-    isRecovering: false,
+    ...chatFx.state.current,
     sendMessage: vi.fn(),
     stop: vi.fn(),
     setMessages: vi.fn(),
@@ -43,6 +53,7 @@ function lastArgs(): UseAgentArgs {
 beforeEach(() => {
   h.useAgent.mockReset();
   h.useAgent.mockReturnValue({ identified: false, connectionError: null });
+  chatFx.state.current = chatFx.idle();
 });
 
 describe("useAssistantAgent query wiring", () => {
@@ -71,5 +82,23 @@ describe("useAssistantAgent query wiring", () => {
     const first = lastArgs().query;
     rerender({ projectId: "p1" });
     expect(lastArgs().query).toBe(first);
+  });
+});
+
+describe("useAssistantAgent — recovering status projection", () => {
+  it("does not rewrite a terminal done status back to connecting while recovering", () => {
+    chatFx.state.current = {
+      ...chatFx.idle(),
+      messages: [{ id: "m1", role: "assistant", parts: [{ type: "text", text: "hello" }] }],
+      isRecovering: true,
+    };
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(result.current.status).toBe("done");
+  });
+
+  it("still surfaces connecting during recovery before any ingress", () => {
+    chatFx.state.current = { ...chatFx.idle(), isRecovering: true };
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(result.current.status).toBe("connecting");
   });
 });

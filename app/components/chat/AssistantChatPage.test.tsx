@@ -239,14 +239,22 @@ function batchChips(turns: unknown): ApprovalChip[] {
   return arr.flatMap((t) => t.batch?.chips ?? []);
 }
 
+function syncUrl(thread?: string) {
+  if (typeof window === "undefined") return;
+  window.history.replaceState(null, "", thread ? `/?thread=${encodeURIComponent(thread)}` : "/");
+}
+
 function renderPage(
   initial: { slug?: string; thread?: string } = {},
   queryClient: QueryClient = createTestQueryClient()
 ) {
   const wrapper = createQueryWrapper(queryClient);
+  syncUrl(initial.thread);
   const utils = render(<AssistantChatPage slug={initial.slug ?? "nimbus"} thread={initial.thread} />, { wrapper });
-  const rerenderPage = (next: { slug?: string; thread?: string }) =>
+  const rerenderPage = (next: { slug?: string; thread?: string }) => {
+    syncUrl(next.thread);
     utils.rerender(<AssistantChatPage slug={next.slug ?? initial.slug ?? "nimbus"} thread={next.thread} />);
+  };
   return { ...utils, rerenderPage, queryClient };
 }
 
@@ -572,29 +580,6 @@ describe("AssistantChatPage — zero-turn landing", () => {
     await waitFor(() => expect(composerCapture.seed).toBeNull());
   });
 
-  it("keeps the landing after New chat mints a fresh ?thread= uuid that 404s", async () => {
-    fx.lists.p1 = [];
-    getAssistantChatMock.mockRejectedValue(
-      Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" })
-    );
-    const { container, rerenderPage } = renderPage();
-    expect(container.querySelector(".chat-landing")).toBeTruthy();
-
-    // New chat mints a fresh uuid and deep-links it as ?thread=<uuid>.
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    const freshId = navigateMock.mock.calls.at(-1)?.[0]?.search?.thread as string;
-    expect(freshId).toBeTruthy();
-
-    // The route applies the uuid as the ?thread= param.
-    rerenderPage({ thread: freshId });
-    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(freshId));
-
-    // A settled zero-turn uuid IS the new-chat landing — not an empty docked
-    // transcript — so the hero and its starter chips come back.
-    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
-    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(3);
-  });
-
   it("shows the landing for a settled existing thread that has zero turns", async () => {
     getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [] });
     const { container } = renderPage({ thread: "A" });
@@ -641,6 +626,120 @@ describe("AssistantChatPage — zero-turn landing", () => {
 
     resolveTranscript({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
     await waitFor(() => expect(shellCapture.turns ?? []).toHaveLength(1));
+    expect(container.querySelector(".chat-landing")).toBeNull();
+  });
+});
+
+describe("AssistantChatPage — New chat stays client-side (A3)", () => {
+  it("clears to the fresh landing from an active thread without any route navigation", async () => {
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    const { container } = renderPage({ thread: "A" });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeNull());
+    navigateMock.mockClear();
+
+    // New chat clears to the fresh empty state immediately — a client-side
+    // state swap, NOT a ?thread=<uuid> navigate (which re-runs the ssr:false
+    // route loader and flashes the shell).
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(3);
+    expect(container.querySelector(".thread-row.active")).toBeNull();
+  });
+
+  it("still navigates when selecting an existing persisted thread", async () => {
+    getAssistantChatMock.mockResolvedValue(TRANSCRIPT);
+    renderPage({ thread: "A" });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    navigateMock.mockClear();
+
+    fireEvent.click(screen.getByText("Thread B"));
+
+    expect(navigateMock).toHaveBeenCalledWith({ search: { thread: "B" }, replace: true });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("B"));
+  });
+
+  it("strips ?thread= on New chat and lands fresh when remounted with the same stale prop", async () => {
+    const qc = createTestQueryClient();
+    getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
+    const first = renderPage({ thread: "A" }, qc);
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith("A"));
+    await waitFor(() => expect(first.container.querySelector(".chat-landing")).toBeNull());
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "A"])?.fetchStatus).toBe("idle"));
+
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(first.container.querySelector(".chat-landing")).toBeTruthy());
+
+    // Cleared without a router navigation, and the address bar no longer names
+    // the thread — so a reload / remount cannot re-open it.
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(new URLSearchParams(window.location.search).get("thread")).toBeNull();
+    first.unmount();
+
+    // Remount with the SAME (stale) thread prop the router still holds, while
+    // the URL has been stripped: the page must land fresh, not re-open "A".
+    getAssistantChatMock.mockClear();
+    const second = render(<AssistantChatPage slug="nimbus" thread="A" />, { wrapper: createQueryWrapper(qc) });
+    await waitFor(() => expect(second.container.querySelector(".chat-landing")).toBeTruthy());
+    expect(second.container.querySelector(".thread-row.active")).toBeNull();
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
+  // The real app navigates the just-minted uuid into ?thread= in the same tick
+  // as the send (useChatStartStream → openThreadParam), so the fresh-thread 404
+  // reads as an untracked deep link. Mirror that here: navigateMock is inert, so
+  // the page's `thread` prop must be applied alongside the send or the
+  // stale-thread recovery would evict the minted chat.
+  function sendFirst(rerenderPage: (next: { thread?: string }) => void) {
+    act(() => {
+      expect(composerCapture.onSend!("hello", [])).toBe(true);
+      const key = transportCapture.sendForKey.mock.calls[0]?.[0] as string;
+      rerenderPage({ thread: key.replace("assistant-chat:", "") });
+    });
+  }
+
+  it("hides the landing + chips from the accepted send before the stream flips", async () => {
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container, rerenderPage } = renderPage();
+    expect(container.querySelector(".chat-landing")).toBeTruthy();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+
+    // The send is deferred (assistantSendForKey) so the stream is still idle —
+    // the landing must dock anyway, and the optimistic user turn must survive
+    // the chatId mint.
+    expect(streamFx.state.current.status).toBe("idle");
+    expect(container.querySelector(".chat-landing")).toBeNull();
+    expect(container.querySelectorAll(".chat-landing-chip")).toHaveLength(0);
+    await waitFor(() => expect(shellCapture.turns ?? []).toHaveLength(1));
+    expect((shellCapture.turns as Array<{ role: string; text: string }>)[0]).toMatchObject({ role: "user", text: "hello" });
+  });
+
+  it("never repaints the hero while the run is active", async () => {
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container, rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+    sendFirst(rerenderPage);
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // Socket identifies → connecting → streaming → done: the hero never returns.
+    streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
+    rerenderPage({});
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+    rerenderPage({});
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    streamFx.state.current = { ...streamFx.idle(), status: "done", hasIngress: true };
+    rerenderPage({});
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
 });

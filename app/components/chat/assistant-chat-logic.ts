@@ -320,6 +320,20 @@ export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>)
 
 // ── Thread resolution ( ?thread= deep link | in-session selection ) ──
 
+// The ?thread= value currently in the address bar (empty → undefined). "New
+// chat" strips the param with a plain window.history.replaceState (no router
+// navigation, so the ssr:false route loader never re-runs); the router's own
+// search state can lag that strip, so the resolution effect compares the
+// `thread` prop against the address bar to tell a real deep link from a stale
+// prop.
+export function threadFromSearch(search: string): string | undefined {
+  try {
+    return new URLSearchParams(search).get("thread") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Returns the chat id to apply, or null when the current selection stands. An
 // explicit ?thread= deep link always wins. With no deep link, the last active
 // thread (`lexa-chat-last:<projectId>`) is restored so a run that survived a

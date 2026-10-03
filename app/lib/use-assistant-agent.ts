@@ -3,6 +3,7 @@ import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import type { AssistantRunAgent } from "./use-assistant-runs";
 import type { AssistantStream, AssistantStreamSnapshot } from "./use-assistant-stream";
+import { isTerminalStreamStatus } from "../components/chat/assistant-chat-logic";
 import {
   agentSendMetadata,
   agentSendParts,
@@ -139,8 +140,10 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
       next.reasoningActive = true;
     }
     // A terminal socket close is authoritative: do not let a transient
-    // recovering tick paper over it with a "connecting" status.
-    if (chat.isRecovering && next.status !== "error") next.status = "connecting";
+    // recovering tick paper over it with a "connecting" status. `done` in
+    // particular would otherwise oscillate done→connecting→done and re-fire
+    // the terminal-refetch effects on every tick.
+    if (chat.isRecovering && !isTerminalStreamStatus(next.status)) next.status = "connecting";
     return next;
   }, [segment, lastAssistant, chat.status, chat.error, chat.connectionError, chat.isStreaming, chat.isRecovering]);
 

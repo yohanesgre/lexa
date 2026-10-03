@@ -249,6 +249,11 @@ export function useSettledTurns(args: {
   transcriptError: unknown;
   streaming: boolean;
   stream: Stream;
+  // True while the active chat holds an accepted send whose stream has not yet
+  // flipped to connecting/streaming (the fresh-thread write is deferred until
+  // the socket identifies). The optimistic user turn must survive the
+  // chatId-change derivation; without this the landing repaints.
+  sendAccepted?: boolean | undefined;
   // Timestamp of the last successful transcript read (React Query
   // dataUpdatedAt). Reconciliation backfills decision statuses without changing
   // the message count, so the sync key below must also react to a new read —
@@ -256,30 +261,39 @@ export function useSettledTurns(args: {
   // pending. Omitted by callers that don't care about status-only refetches.
   transcriptUpdatedAt?: number | undefined;
 }) {
-  const { chatId, transcriptData, transcriptError, streaming, stream, transcriptUpdatedAt } = args;
+  const { chatId, transcriptData, transcriptError, streaming, stream, sendAccepted = false, transcriptUpdatedAt } = args;
   const [turns, setTurns] = useState<ChatTurn[] | null>(null);
   const [syncedKey, setSyncedKey] = useState("");
   const chatRef = useRef("");
   // chatId is part of the key: two threads can share a message count and stream
   // status, and without it the previous thread's turns (including a frozen
   // approval batch) would leak into the new one.
-  const syncKey = `chat:${chatId}:${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:rev${transcriptUpdatedAt ?? 0}:${stream.status}:${stream.hasIngress}:${streaming}`;
+  const syncKey = `chat:${chatId}:${transcriptError ? "err" : "ok"}:${transcriptData ? transcriptData.messages.length : "-"}:rev${transcriptUpdatedAt ?? 0}:${stream.status}:${stream.hasIngress}:${streaming}:${sendAccepted}`;
   if (syncedKey !== syncKey) {
-    const chatChanged = chatRef.current !== chatId;
+    const prevChatId = chatRef.current;
+    const chatChanged = prevChatId !== chatId;
+    // An accepted send keeps the optimistic turn across the MINT transition
+    // only: the id is minted from the empty landing in the same batch as the
+    // send, so the "previous chat" null-out would otherwise discard it. Once a
+    // real thread id has been applied the exception is spent — re-selecting the
+    // accepted chat must NOT carry the intervening thread's turns (nor its live
+    // approval chips) into it.
+    const keepAcrossChange = sendAccepted && chatChanged && prevChatId === "";
     chatRef.current = chatId;
     setSyncedKey(syncKey);
     setTurns((prev) => {
       if (transcriptError) {
-        // A live turn (connecting/streaming, or any ingress) means the fresh
-        // thread's write is in flight or landed — the 404 is stale, so the
-        // optimistic turns (the send's ephemeral user turn) must survive. Only
-        // a genuinely dead thread (no stream activity, no ingress) clears.
-        if (stream.hasIngress || streaming) return chatChanged ? null : prev;
+        // A live turn (connecting/streaming, any ingress, or an accepted send
+        // whose flush is still pending) means the fresh thread's write is in
+        // flight or landed — the 404 is stale, so the optimistic turns (the
+        // send's ephemeral user turn) must survive. Only a genuinely dead
+        // thread (no stream activity, no ingress) clears.
+        if (stream.hasIngress || streaming || keepAcrossChange) return chatChanged && !keepAcrossChange ? null : prev;
         return [];
       }
-      if (!transcriptData) return chatChanged ? null : prev;
+      if (!transcriptData) return chatChanged && !keepAcrossChange ? null : prev;
       return settleTurns({
-        prev: chatChanged ? null : prev,
+        prev: chatChanged && !keepAcrossChange ? null : prev,
         messages: transcriptData.messages,
         streaming,
         streamStatus: stream.status,
@@ -304,9 +318,31 @@ export function useTerminalRefetch(args: {
   // exists, so the transcript must be refetched once. If it keeps 404ing, the
   // guard stops an invalidate/error/invalidate loop. Keyed by chat id.
   const refetchedRef = useRef("");
+  // Terminal work fires at most once per chat/terminal frame: the stream status
+  // can oscillate (a transient recovering tick rewrites `done` → `connecting`)
+  // and the status churn must not re-issue the transcript + list invalidations.
+  // The guard is per (chat, status) and survives the transient non-terminal
+  // flip, so a done→connecting→done oscillation refetches once; a different
+  // chat re-arms it.
+  const terminalHandledRef = useRef<{ chatId: string; status: string } | null>(null);
   useEffect(() => {
-    if (!chatId) return;
+    if (!chatId) {
+      terminalHandledRef.current = null;
+      return;
+    }
+    // A genuine turn always passes through "streaming"; the recovering
+    // oscillation (done → connecting → done) never does. Re-arm the guard on
+    // that edge so a SECOND turn (or a second suspension/abort) in the same
+    // chat is handled — keying the guard on (chat, status) alone would suppress
+    // it and the settled reply would never reach the transcript.
+    if (stream.status === "streaming") {
+      terminalHandledRef.current = null;
+      return;
+    }
     if (!isTerminalStreamStatus(stream.status)) return;
+    const handled = terminalHandledRef.current;
+    if (handled && handled.chatId === chatId && handled.status === stream.status) return;
+    terminalHandledRef.current = { chatId, status: stream.status };
     const code = (transcriptError as { code?: string } | null)?.code;
     if (terminalTranscriptAction(code, stream.hasIngress) === "drop") {
       qc.cancelQueries({ queryKey: ["assistant-chat", chatId] });
@@ -416,9 +452,10 @@ export function useChatThreadActions(args: {
   streaming: boolean;
   abort: () => void;
   clearThreadParam: () => void;
+  stripThreadParam: () => void;
   openThreadParam: (threadId: string) => void;
 }) {
-  const { projectId, chatId, applyChatId, setChatId, streaming, abort, clearThreadParam, openThreadParam } = args;
+  const { projectId, chatId, applyChatId, setChatId, streaming, abort, clearThreadParam, stripThreadParam, openThreadParam } = args;
   const renameChat = useRenameAssistantChat(projectId);
   const deleteChat = useDeleteAssistantChat(projectId);
   const metaChat = useUpdateAssistantChatMeta(projectId);
@@ -450,8 +487,18 @@ export function useChatThreadActions(args: {
     [streaming, abort, applyChatId, openThreadParam]
   );
   const startNewChat = useCallback(() => {
-    selectThread(crypto.randomUUID());
-  }, [selectThread]);
+    if (streaming) abort();
+    // "New chat" clears to the fresh landing purely client-side: the next send
+    // mints the uuid (useChatStartStream). The ?thread= param is stripped with
+    // replaceState (no router navigation → no ssr:false route-loader flash) so a
+    // remount/reload cannot re-open the thread the user left; navigating here
+    // would re-run the loader and flash the shell.
+    try {
+      window.localStorage.removeItem(`lexa-chat-last:${projectId}`);
+    } catch {}
+    stripThreadParam();
+    setChatId("");
+  }, [streaming, abort, projectId, setChatId, stripThreadParam]);
   return { handlePinToggle, handleRename, handleDelete, selectThread, startNewChat };
 }
 
