@@ -403,7 +403,12 @@ gives the DO a per-turn context bundle:
   `scripts/workers-install.ts` (`resolveAiBinding`, wired into the generated
   per-deploy config) transcribes it — an absent block is omitted, a malformed
   one or a non-`AI` binding name is refused loudly. The staging example carries
-  the same block.
+  the same block. `ai` is remote-only by design (no local simulator), so local
+  `dev:workers` needs a Cloudflare credential (`CLOUDFLARE_API_TOKEN`, or an
+  interactive `wrangler login`) for the plugin's remote-bindings proxy; the
+  release build disables remote bindings (`vite.config.ts` gates
+  `remoteBindings: false` to the build/preview pass), so it needs no token and
+  still ships the `ai` binding from the root config.
 - **Call-log attribution.** `assistant_call_logs` gains `thread_key`, `run_id`,
   and `purpose` (`turn|runner|preflight|summary`, default `turn`); cost is
   computed from the imported CF per-token prices when the caller sends none.

@@ -7,7 +7,12 @@ import react from "@vitejs/plugin-react";
 const isWorkersBuild =
   process.env.LEXA_FLAVOR === "workers" || process.env.CF_WORKERS === "1";
 
-export default defineConfig(async ({ command }) => {
+export default defineConfig(async ({ command, isPreview }) => {
+  // TanStack Start's prerender step runs `vite.preview` in-process, which
+  // re-evaluates this config with command "serve" + isPreview true. The
+  // Workers build must also disable remote bindings on that preview pass —
+  // `command === "build"` alone never reaches it.
+  const isWorkersBuildOrPreview = isWorkersBuild && (command === "build" || isPreview);
   const plugins: import("vite").PluginOption[] = [
     tanstackStart({
       srcDirectory: "app",
@@ -25,7 +30,22 @@ export default defineConfig(async ({ command }) => {
 
   if (isWorkersBuild) {
     const { cloudflare } = await import("@cloudflare/vite-plugin");
-    plugins.unshift(cloudflare({ viteEnvironment: { name: "ssr" } }));
+    plugins.unshift(
+      cloudflare({
+        viteEnvironment: { name: "ssr" },
+        // `ai` is a permanent-remote binding (workers-sdk marks it
+        // DO-NOT-USE-this-resource-will-never-have-a-local-simulator; miniflare
+        // has no local simulator). With remote bindings enabled the plugin
+        // starts its remote-bindings proxy during the build's prerender preview
+        // pass, which needs Cloudflare credentials in non-interactive CI and
+        // keeps the process alive after the build. The production deploy config
+        // still carries `ai` (root wrangler.jsonc, transcribed by
+        // scripts/workers-install.ts) — this only affects the local config the
+        // build runs against. `dev:workers` (serve) keeps the real binding and
+        // its remote-proxy + token behavior.
+        ...(isWorkersBuildOrPreview ? { remoteBindings: false } : {}),
+      }),
+    );
   }
 
   if (command === "serve") {
