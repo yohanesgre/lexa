@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { formatRelative } from "../../lib/relative-time";
+import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
@@ -270,6 +271,7 @@ export function ChatTranscriptArea({
   atBottom,
   onJump,
   attachmentIndex,
+  renderRunCard,
 }: {
   turns: ChatTurn[];
   slug: string;
@@ -296,6 +298,7 @@ export function ChatTranscriptArea({
   atBottom: boolean;
   onJump: () => void;
   attachmentIndex?: Map<string, ChatAttachment> | undefined;
+  renderRunCard?: ((ref: SpawnedRunRef) => ReactNode) | undefined;
 }) {
   const lastAssistantPos = turns.findLastIndex((turn) => turn.role === "assistant");
   return (
@@ -322,20 +325,24 @@ export function ChatTranscriptArea({
                 attachmentIndex={attachmentIndex}
               />
             ) : (
-              <AssistantBubble
-                key={pos}
-                turn={turn}
-                projectId={projectId}
-                streaming={streaming}
-                renderText={renderText}
-                activity={turn.activity ?? (streamActivity && pos === turns.length - 1 ? streamActivity : undefined)}
-                usage={stream.status === "done" && pos === lastAssistantPos ? stream.usage : undefined}
-                batchBusy={batchBusy}
-                onDecide={onDecide}
-                onApproveAll={onApproveAll}
-                onRejectAll={onRejectAll}
-                onRetry={() => onRetryTurn(turn)}
-              />
+              <Fragment key={pos}>
+                <AssistantBubble
+                  turn={turn}
+                  projectId={projectId}
+                  streaming={streaming}
+                  renderText={renderText}
+                  activity={turn.activity ?? (streamActivity && pos === turns.length - 1 ? streamActivity : undefined)}
+                  usage={stream.status === "done" && pos === lastAssistantPos ? stream.usage : undefined}
+                  batchBusy={batchBusy}
+                  onDecide={onDecide}
+                  onApproveAll={onApproveAll}
+                  onRejectAll={onRejectAll}
+                  onRetry={() => onRetryTurn(turn)}
+                />
+                {turn.spawnedRuns?.map((ref) => (
+                  <Fragment key={ref.toolCallId}>{renderRunCard?.(ref)}</Fragment>
+                ))}
+              </Fragment>
             )
           )}
 

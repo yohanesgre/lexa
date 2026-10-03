@@ -3,6 +3,7 @@ import { ASSISTANT_APPROVAL_DATA_PART, type AssistantWriteDiff } from "../../../
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
 import { segmentFromAssistantMessage } from "../../lib/assistant-agent-adapter";
+import { extractSpawnedRuns, type SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import type { ChatAttachmentKind, ChatAttachmentRef } from "../../lib/assistant-image";
 
 // Pure helpers + wire-shape types for Assistant chat (assistant-chat.html +
@@ -41,6 +42,10 @@ export interface ChatTurn {
   // existed) carry no reconstructable chips — render the waiting indicator
   // only. New suspensions carry the full approvals payload and render chips.
   suspendedBatchId?: string | undefined;
+  // Delegated runs this assistant turn spawned (ADR-0004) — each renders a run
+  // card as a sibling AFTER the bubble, keyed by `toolCallId`. Durable: rebuilt
+  // from the persisted `spawn_run` tool parts on every transcript read.
+  spawnedRuns?: SpawnedRunRef[] | undefined;
 }
 
 // A persisted pendingBatch approval rebuilds into a decidable chip only when it
@@ -224,7 +229,10 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       }
       const metadata = ((msg.metadata ?? {}) as { ts?: unknown; citations?: unknown; error?: unknown; stopped?: unknown });
       const carrier = carrierBatchOf(parts);
-      if (!text && !imageCount && !metadata.error && metadata.stopped !== true && !carrier) continue;
+      // A run can be spawned with no assistant text of its own — the card must
+      // still render, so a spawn ref keeps an otherwise-empty turn alive.
+      const spawnedRuns = msg.role === "assistant" ? extractSpawnedRuns([msg]) : [];
+      if (!text && !imageCount && !metadata.error && metadata.stopped !== true && !carrier && spawnedRuns.length === 0) continue;
       const citations =
         msg.role === "assistant"
           ? safeCitations([
@@ -243,6 +251,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
         ...(citations.length > 0 ? { citations } : {}),
         ...(err ? { error: err } : {}),
         ...(metadata.stopped === true ? { stopped: true } : {}),
+        ...(spawnedRuns.length > 0 ? { spawnedRuns } : {}),
         ...(carrier
           ? carrier.chips.length > 0
             ? { batch: carrier }

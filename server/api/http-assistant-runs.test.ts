@@ -23,6 +23,9 @@ let db: Database;
 const authed = (path: string, key = ADMIN_KEY) =>
   new Request(`http://lexa.test${path}`, { headers: { authorization: `Bearer ${key}` } });
 
+const post = (path: string, key = ADMIN_KEY) =>
+  new Request(`http://lexa.test${path}`, { method: "POST", headers: { authorization: `Bearer ${key}` } });
+
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-assistant-runs-http-"));
   const dbPath = join(dir, "test.db");
@@ -34,6 +37,7 @@ beforeAll(async () => {
     INSERT INTO users (id, email, name, role) VALUES ('u1','a@lexa.test','A','superadmin'), ('u2','m@lexa.test','M','member');
     INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1','test','${adminHash}','u1'), ('k2','mem','${memberHash}','u2');
     INSERT INTO projects (id, name, slug) VALUES ('p1','Alpha','alpha'), ('p2','Beta','beta');
+    INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u2','member','p1');
     INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1','A','','',0);
     INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1','S','','',0);
   `);
@@ -154,5 +158,86 @@ describe("GET /api/admin/assistant/runs", () => {
     const secondBody = await second.json() as { data: Array<{ id: string }>; nextCursor: string | null };
     expect(secondBody.data.map((r) => r.id)).toEqual(["r1"]);
     expect(secondBody.nextCursor).toBeNull();
+  });
+});
+
+// `createAssistantApiHandler` injects `assistantThreadRpcNoop`, so these suites
+// also pin the Bun / no-DO ack path.
+describe("GET /api/assistant/runs/:runId", () => {
+  it("serves a superadmin the persisted run columns only", async () => {
+    insertRun("r1", "chat_run", "running", "p1", "2026-01-02 10:00:00", "chat:c9");
+    const res = await handler(authed("/api/assistant/runs/r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body).toMatchObject({
+      id: "r1",
+      projectId: "p1",
+      threadKey: "chat:c9",
+      parentRunId: null,
+      kind: "chat_run",
+      status: "running",
+      goal: "g",
+      stepsUsed: 0,
+      startedAt: null,
+      finishedAt: null,
+    });
+    // The live event log is session-memory only — never part of the REST row.
+    expect("events" in body).toBe(false);
+  });
+
+  it("serves a member their own project's run", async () => {
+    insertRun("r1", "chat_run", "running", "p1", "2026-01-02 10:00:00");
+    const res = await handler(authed("/api/assistant/runs/r1", MEMBER_KEY));
+    expect(res.status).toBe(200);
+    expect((await res.json() as { id: string }).id).toBe("r1");
+  });
+
+  it("404s a member on a foreign project's run (no existence oracle)", async () => {
+    insertRun("r2", "chat_run", "running", "p2", "2026-01-02 10:00:00");
+    const res = await handler(authed("/api/assistant/runs/r2", MEMBER_KEY));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
+  });
+
+  it("404s an unknown run id", async () => {
+    const res = await handler(authed("/api/assistant/runs/nope"));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
+  });
+});
+
+describe("POST /api/assistant/runs/:runId/abort", () => {
+  it("acks on the no-DO flavor and leaves the running row untouched", async () => {
+    insertRun("r1", "chat_run", "running", "p1", "2026-01-02 10:00:00");
+    const res = await handler(post("/api/assistant/runs/r1/abort"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    // No DO answered: the handler still acks; no D1 transition is attempted.
+    expect(db.prepare("SELECT status FROM assistant_runs WHERE id = 'r1'").get()).toMatchObject({ status: "running" });
+  });
+
+  it("is a no-op ack on a terminal run", async () => {
+    insertRun("r1", "chat_run", "completed", "p1", "2026-01-02 10:00:00");
+    const res = await handler(post("/api/assistant/runs/r1/abort"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(db.prepare("SELECT status FROM assistant_runs WHERE id = 'r1'").get()).toMatchObject({ status: "completed" });
+  });
+
+  it("lets a member abort their own project's run", async () => {
+    insertRun("r1", "chat_run", "running", "p1", "2026-01-02 10:00:00");
+    const res = await handler(post("/api/assistant/runs/r1/abort", MEMBER_KEY));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("404s a member on a foreign run and an unknown id (no existence oracle)", async () => {
+    insertRun("r2", "chat_run", "running", "p2", "2026-01-02 10:00:00");
+    const foreign = await handler(post("/api/assistant/runs/r2/abort", MEMBER_KEY));
+    expect(foreign.status).toBe(404);
+    expect((await foreign.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
+    const missing = await handler(post("/api/assistant/runs/nope/abort"));
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
   });
 });

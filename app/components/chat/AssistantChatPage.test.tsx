@@ -116,6 +116,8 @@ vi.mock("../../lib/api", () => ({
   getAssistantChat: getAssistantChatMock,
   getProject: vi.fn(),
   decideAssistantApproval: vi.fn(),
+  getAssistantRun: vi.fn(),
+  abortAssistantRun: vi.fn(async () => ({ ok: true })),
 }));
 
 vi.mock("../../lib/use-assistant-agent", () => ({
@@ -136,6 +138,15 @@ vi.mock("../../lib/use-assistant-agent", () => ({
 }));
 
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ push: vi.fn() }) }));
+
+vi.mock("../../lib/use-assistant-runs", () => ({
+  useAssistantRunEvents: () => ({
+    runsById: {},
+    liveRunIds: new Set<string>(),
+    liveFromByRunId: {},
+    resetLocalState: vi.fn(),
+  }),
+}));
 
 vi.mock("./AssistantChatShell", () => ({
   ChatHeader: (props: { landing: boolean; onDelete: () => void }) =>

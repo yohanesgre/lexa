@@ -16,6 +16,7 @@ import { Db, queryAll, batch, RowNotFound, DbError, type BatchStmt, type DbDrive
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import {
   AssistantGenerationFailed,
+  AssistantRunNotFound,
   AssistantScheduleNotFound,
   AssistantTaskActive,
   AssistantThreadNotFound,
@@ -56,6 +57,7 @@ import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
 import { createSchedule, deleteSchedule, getSchedule, listSchedules, updateSchedule } from "../scheduled/schedules";
 import { AssistantThreadRpc, assistantThreadRpcNoop, type AssistantThreadRpcShape } from "../assistant/thread-rpc";
+import { getAssistantRunById } from "../assistant/run-registry";
 import { convertStoredMessages, type LegacyStoredMessage } from "../assistant/legacy-convert";
 import { AuthorizationService } from "../services/authorization.service";
 import { AttachmentService } from "../services/attachment.service";
@@ -121,6 +123,21 @@ const threadRpcControl = (
       )
     );
   });
+
+// Run read/abort gate: a run in a project the caller cannot read is not
+// disclosed — it answers the same 404 as an unknown run id (no existence
+// oracle), so a foreign project's run is indistinguishable from a missing one.
+const requireRunProjectRead = (
+  projectId: string,
+  runId: string
+): Effect.Effect<void, AssistantRunNotFound | DbError, AuthIdentity | ProjectService | AuthorizationService> =>
+  requireProjectReadById(projectId).pipe(
+    Effect.asVoid,
+    Effect.catchTags({
+      ProjectAccessDenied: () => new AssistantRunNotFound({ id: runId }),
+      ProjectNotFound: () => new AssistantRunNotFound({ id: runId }),
+    })
+  );
 
 const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
   handlers
@@ -494,6 +511,38 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         }
         yield* repo.remove(req.path.memoryId);
         return undefined;
+      }))
+    )
+    // Delegated run card access (ADR-0004 §3). The run is meaningful only
+    // through its thread, but the card reads it directly: load the durable row,
+    // gate on its project, then serve the persisted columns. The live event log
+    // is never served here — it is session-memory only.
+    .handle("getAssistantRun", (req) =>
+      respond(Effect.gen(function* () {
+        const db = yield* Db;
+        const run = yield* getAssistantRunById(db, req.path.runId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantRunNotFound({ id: req.path.runId }))
+        );
+        yield* requireRunProjectRead(run.projectId, run.id);
+        return run;
+      }))
+    )
+    .handle("abortAssistantRun", (req) =>
+      respond(Effect.gen(function* () {
+        const db = yield* Db;
+        const run = yield* getAssistantRunById(db, req.path.runId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantRunNotFound({ id: req.path.runId }))
+        );
+        yield* requireRunProjectRead(run.projectId, run.id);
+        // Supervised abort: forward to the run's thread DO, which cancels the
+        // facet and lands the `cancelled` registry row. On the Bun/no-DO flavor
+        // the RPC is a no-op and the handler still acks (same degradation as
+        // cancelAssistantTask).
+        const abort = yield* threadRpcControl((rpc) => rpc.abortRun(run.threadKey, run.id));
+        if (abort.available && !abort.ok) {
+          yield* Effect.logWarning(`[assistant] abortRun RPC not acked for run ${run.id}`);
+        }
+        return { ok: true as const };
       }))
     )
 );
