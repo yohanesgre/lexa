@@ -367,14 +367,19 @@ describe("root AI binding (H9)", () => {
 
 describe("per-deploy version marker + public URL (LX-36)", () => {
   const ROOT = fileURLToPath(new URL("..", import.meta.url));
+  const ROOT_VERSION = (
+    JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")) as {
+      version: string;
+    }
+  ).version;
 
   test("readDeployVersion reads the repo package.json", () => {
-    expect(readDeployVersion(ROOT)).toBe("2026.6.2");
+    expect(readDeployVersion(ROOT)).toBe(ROOT_VERSION);
   });
 
   test("readDeployVersion falls back to the module's repo when the dir has none", () => {
     const dir = mkdtempSync(join(tmpdir(), "wi-ver-"));
-    expect(readDeployVersion(dir)).toBe("2026.6.2");
+    expect(readDeployVersion(dir)).toBe(ROOT_VERSION);
   });
 
   test("readPackageVersion returns null when no candidate carries a version", () => {

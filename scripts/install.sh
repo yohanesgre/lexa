@@ -174,7 +174,9 @@ deploy_workers() {
       esac
       # A workers.dev host is not a custom domain — treat it as none so the
       # re-run prompt never offers it (the zone lookup would die on workers.dev).
-      case "${_prev_domain}" in
+      # Normalize (drop any path/query suffix, lowercase) so variants like
+      # `Lexa.Acct.Workers.Dev/anything` are still recognized.
+      case "$(printf '%s' "${_prev_domain}" | tr '[:upper:]' '[:lower:]' | sed 's#[/?#].*$##')" in
         *.workers.dev) _prev_domain="" ;;
       esac
     fi

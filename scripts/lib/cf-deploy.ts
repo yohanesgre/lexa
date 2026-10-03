@@ -523,10 +523,12 @@ export function readPackageVersion(paths: string[]): string | null {
 }
 
 // The web-app version stamped into the per-deploy config so `lx worker
-// upgrade` can compare the deployed app against the latest release. Read from
-// the deploy dir `package.json` first (from-repo runs), else the module's own
-// repo root. A release tarball carries no package.json, so an absence returns
-// null and the marker is simply omitted (the CLI warns).
+// upgrade` can compare the deployed app against the latest release. Candidates
+// in order: the deploy dir `package.json` (from-repo runs and release tarballs,
+// which ship one), then the CLI module's own repo root `package.json` as a
+// fallback. The fallback reflects the CLI's package, not necessarily the
+// deployed app, so it is a best-effort only; when no candidate yields a version
+// the marker is omitted (the CLI warns).
 export function readDeployVersion(dir: string): string | null {
   return readPackageVersion([
     join(dir, "package.json"),
@@ -831,10 +833,18 @@ export async function main(): Promise<void> {
     );
   }
   // A workers.dev host (or empty) is not a custom domain: honoring one would
-  // point the zone lookup at workers.dev and die. Treat it as absent.
+  // point the zone lookup at workers.dev and die. Treat it as absent. Normalize
+  // the guard input (drop any scheme, path, or query suffix, then lowercase) so
+  // variants like `https://Lexa.Acct.Workers.Dev/` are still recognized.
   const requestedDomain = flag("domain");
+  const requestedHost = requestedDomain
+    ? requestedDomain
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+        .split(/[/?#]/)[0]!
+        .toLowerCase()
+    : "";
   const CUSTOM_DOMAIN =
-    requestedDomain && !requestedDomain.endsWith(".workers.dev")
+    requestedDomain && !requestedHost.endsWith(".workers.dev")
       ? requestedDomain
       : "";
   if (requestedDomain && !CUSTOM_DOMAIN) {
