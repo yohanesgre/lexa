@@ -124,6 +124,21 @@ const threadRpcControl = (
     );
   });
 
+// Run read/abort gate: a run in a project the caller cannot read is not
+// disclosed — it answers the same 404 as an unknown run id (no existence
+// oracle), so a foreign project's run is indistinguishable from a missing one.
+const requireRunProjectRead = (
+  projectId: string,
+  runId: string
+): Effect.Effect<void, AssistantRunNotFound | DbError, AuthIdentity | ProjectService | AuthorizationService> =>
+  requireProjectReadById(projectId).pipe(
+    Effect.asVoid,
+    Effect.catchTags({
+      ProjectAccessDenied: () => new AssistantRunNotFound({ id: runId }),
+      ProjectNotFound: () => new AssistantRunNotFound({ id: runId }),
+    })
+  );
+
 const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
   handlers
     .handle("getAssistantSettings", (req) =>
@@ -508,7 +523,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         const run = yield* getAssistantRunById(db, req.path.runId).pipe(
           Effect.catchTag("RowNotFound", () => new AssistantRunNotFound({ id: req.path.runId }))
         );
-        yield* requireProjectReadById(run.projectId);
+        yield* requireRunProjectRead(run.projectId, run.id);
         return run;
       }))
     )
@@ -518,7 +533,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         const run = yield* getAssistantRunById(db, req.path.runId).pipe(
           Effect.catchTag("RowNotFound", () => new AssistantRunNotFound({ id: req.path.runId }))
         );
-        yield* requireProjectReadById(run.projectId);
+        yield* requireRunProjectRead(run.projectId, run.id);
         // Supervised abort: forward to the run's thread DO, which cancels the
         // facet and lands the `cancelled` registry row. On the Bun/no-DO flavor
         // the RPC is a no-op and the handler still acks (same degradation as

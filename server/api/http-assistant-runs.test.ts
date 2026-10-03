@@ -192,11 +192,11 @@ describe("GET /api/assistant/runs/:runId", () => {
     expect((await res.json() as { id: string }).id).toBe("r1");
   });
 
-  it("403s a member on a foreign project's run", async () => {
+  it("404s a member on a foreign project's run (no existence oracle)", async () => {
     insertRun("r2", "chat_run", "running", "p2", "2026-01-02 10:00:00");
     const res = await handler(authed("/api/assistant/runs/r2", MEMBER_KEY));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
   });
 
   it("404s an unknown run id", async () => {
@@ -231,11 +231,12 @@ describe("POST /api/assistant/runs/:runId/abort", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it("403s a member on a foreign run and 404s an unknown id", async () => {
+  it("404s a member on a foreign run and an unknown id (no existence oracle)", async () => {
     insertRun("r2", "chat_run", "running", "p2", "2026-01-02 10:00:00");
-    const foreign = await handler(post("/api/assistant/runs/r2", MEMBER_KEY));
-    expect(foreign.status).toBe(403);
-    const missing = await handler(post("/api/assistant/runs/nope"));
+    const foreign = await handler(post("/api/assistant/runs/r2/abort", MEMBER_KEY));
+    expect(foreign.status).toBe(404);
+    expect((await foreign.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
+    const missing = await handler(post("/api/assistant/runs/nope/abort"));
     expect(missing.status).toBe(404);
     expect((await missing.json()).error.code).toBe("ASSISTANT_RUN_NOT_FOUND");
   });

@@ -2416,20 +2416,21 @@ GET    /api/assistant/chat/:chatId/export
 GET    /api/assistant/runs/:runId
 → 200 { id, projectId, threadKey, parentRunId, kind, status, goal, result,
         error, budgetMs, stepsUsed, createdBy, createdAt, startedAt, finishedAt }
-  | 404 ASSISTANT_RUN_NOT_FOUND | 404 PROJECT_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
+  | 404 ASSISTANT_RUN_NOT_FOUND
   The durable `assistant_runs` registry row behind one delegated run card
-  (ADR-0004 §3). Reads are project-member-gated from `row.projectId`; the row is
-  loaded by id first, then gated, so a foreign project's run answers 403 and its
-  contents are never disclosed. Only persisted columns are returned — the live
+  (ADR-0004 §3). Runs in projects you cannot access are not disclosed (404,
+  same as unknown ids); contents are member-only. The row is loaded by id first,
+  then gated on `row.projectId`. Only persisted columns are returned — the live
   step/event log is session-memory-only and is never reconstructed from the
   transcript.
 
 POST   /api/assistant/runs/:runId/abort
 → 200 { ok: true }
-  | 404 ASSISTANT_RUN_NOT_FOUND | 404 PROJECT_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
+  | 404 ASSISTANT_RUN_NOT_FOUND
   Supervised abort: forwards `abortRun` to the run's thread Durable Object,
   which cancels the facet and lands the `cancelled` registry row. Idempotent
-  (a terminal run aborts to a no-op). On the Bun/no-DO flavor the RPC is a
+  (a terminal run aborts to a no-op). Runs in projects you cannot access are not
+  disclosed (404, same as unknown ids). On the Bun/no-DO flavor the RPC is a
   no-op and the handler still acks.
 
 GET    /api/assistant/memory/:projectId

@@ -162,10 +162,9 @@ export function getAssistantRun(
 }
 
 /**
- * Project-agnostic read for the shared REST path: the caller loads the row
- * first, then gates on `row.projectId`. An unknown id is 404; a foreign
- * project's run answers 403 (existence is not hidden), but the row's contents
- * are only served to project members.
+ * Project-agnostic read for the shared REST path: the caller loads the row,
+ * then gates on `row.projectId`. Runs in projects you cannot access are not
+ * disclosed (404, same as unknown ids); contents are member-only.
  */
 export function getAssistantRunById(
   driver: DbDriver,
