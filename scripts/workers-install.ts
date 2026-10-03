@@ -262,6 +262,7 @@ export interface RootWorkerConfig {
   durable_objects?: Record<string, unknown>;
   migrations?: Array<Record<string, unknown>>;
   services?: Array<Record<string, unknown>>;
+  ai?: unknown;
 }
 
 // Remove // line comments and /* */ block comments while respecting string
@@ -474,6 +475,28 @@ export function resolveServiceBindings(
     out.push({ binding, service: workerName });
   }
   return out;
+}
+
+// H9: Workers AI binding written into the per-deploy config. Root declares
+// `"ai": { "binding": "AI" }`; installed deployments must transcribe it so a
+// `workers_ai` assistant model can build `createWorkersAI({ binding: env.AI })`.
+// An absent block is omitted (older clones keep deploying without Workers AI);
+// a present but malformed block is refused loudly rather than silently dropped.
+export function resolveAiBinding(root: RootWorkerConfig): Record<string, unknown> {
+  const ai = root.ai;
+  if (ai === undefined) return {};
+  if (typeof ai !== "object" || ai === null || Array.isArray(ai)) {
+    throw new Error(
+      "root wrangler.jsonc 'ai' must be a JSON object declaring { binding: \"AI\" }",
+    );
+  }
+  const binding = (ai as { binding?: unknown }).binding;
+  if (typeof binding !== "string" || binding.length === 0) {
+    throw new Error(
+      "root wrangler.jsonc 'ai' must carry a non-empty string 'binding' (e.g. { binding: \"AI\" })",
+    );
+  }
+  return { ai };
 }
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -870,6 +893,7 @@ async function main(): Promise<void> {
       durable_objects,
       migrations,
       ...(services.length > 0 ? { services } : {}),
+      ...resolveAiBinding(rootConfig),
       observability: resolveObservability(rootConfig),
     };
   } catch (err) {

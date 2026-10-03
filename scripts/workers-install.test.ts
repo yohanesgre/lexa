@@ -15,6 +15,7 @@ import {
   readPriorAccount,
   readRootWranglerConfig,
   resolveAccountOrDie,
+  resolveAiBinding,
   resolveDurableObjects,
   resolveNames,
   resolveObservability,
@@ -339,6 +340,24 @@ describe("root durable objects / migrations", () => {
   });
 });
 
+describe("root AI binding (H9)", () => {
+  const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+  test("the generated per-deploy config carries root's ai binding", () => {
+    expect(resolveAiBinding(readRootWranglerConfig(ROOT))).toEqual({ ai: { binding: "AI" } });
+  });
+
+  test("an absent ai block is omitted (older clones still deploy)", () => {
+    expect(resolveAiBinding({} as RootWorkerConfig)).toEqual({});
+  });
+
+  test("a malformed ai block fails loud", () => {
+    expect(() => resolveAiBinding({ ai: [] } as unknown as RootWorkerConfig)).toThrow(/ai/);
+    expect(() => resolveAiBinding({ ai: {} } as unknown as RootWorkerConfig)).toThrow(/binding/);
+    expect(() => resolveAiBinding({ ai: { binding: "" } } as unknown as RootWorkerConfig)).toThrow(/binding/);
+  });
+});
+
 describe("source order — account resolves before any resource is created", () => {
   test("the resolveAccountOrDie call precedes the ensureD1 call in main", () => {
     const src = readFileSync(
@@ -368,6 +387,14 @@ describe("source order — account resolves before any resource is created", () 
       "utf-8",
     );
     expect(src).toContain("observability: resolveObservability(rootConfig)");
+  });
+
+  test("main emits the AI binding: resolveAiBinding(rootConfig) spread into the config", () => {
+    const src = readFileSync(
+      new URL("./workers-install.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain("...resolveAiBinding(rootConfig),");
   });
 
   test("main emits the ASSETS binding on the static-assets directory", () => {

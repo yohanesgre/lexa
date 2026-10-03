@@ -121,7 +121,7 @@ function debugOption(): DebugOption | undefined {
 }
 
 export function normalizeProviderKind(raw: unknown): ProviderKind {
-  if (raw === "openai_compatible" || raw === "anthropic_compatible" || raw === "openai_responses") return raw;
+  if (raw === "openai_compatible" || raw === "anthropic_compatible" || raw === "openai_responses" || raw === "workers_ai") return raw;
   if (raw === "responses" || raw === "responses_compatible" || raw === "openai_compatible_responses" || raw === "openai-responses") return "openai_responses";
   if (raw === "openai-chat" || raw === "openai") return "openai_compatible";
   if (raw === "anthropic" || raw === "anthropic-chat" || raw === "anthropic_compatible") return "anthropic_compatible";
@@ -221,6 +221,14 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind | string): stri
 // ASSISTANT_GENERATION_FAILED via translateRunError.
 export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   const kind = normalizeProviderKind(config.kind);
+  // H9: `workers_ai` is Workers-only — it builds through the DO model factory
+  // (`createWorkersAI` with the AI binding), never the Bun/TanStack adapter.
+  // Guard loudly rather than silently falling through to the Anthropic wire.
+  if (kind === "workers_ai") {
+    throw new AssistantGenerationFailed({
+      message: "workers_ai models run only on the Workers runtime via the AI binding",
+    } as never);
+  }
   assistantLog("DEBUG", "assistant-provider buildAdapter", {
     kind,
     model: config.model,

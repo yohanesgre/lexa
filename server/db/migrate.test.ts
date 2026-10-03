@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1372,6 +1372,74 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     expect(() =>
       after.prepare("INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u1', 'member', 'p1')").run()
     ).toThrow(/UNIQUE constraint failed/i);
+    expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
+
+  // ── 0019 workers_ai provider kind ────────────────────────────────────────
+  it("0019 rebuilds both kind CHECKs, preserves rows, and accepts workers_ai", () => {
+    const dir = stageThrough("0018");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0019_workers_ai_provider_kind.sql");
+
+    const seed = new Database(dbPath);
+    seed.exec("PRAGMA foreign_keys = ON");
+    seed.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+      INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('prov1', 'CF', '', '');
+      INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled)
+        VALUES ('m1', 'prov1', 'gpt-4o-mini', 'openai_compatible', 0, 1);
+      INSERT INTO assistant_call_logs (id, project_id, provider_id, model, kind, status)
+        VALUES ('cl1', 'p1', 'prov1', 'gpt-4o-mini', 'openai_compatible', 'done');
+    `);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    after.exec("PRAGMA foreign_keys = ON");
+    expect(appliedMigrations(dbPath)).toContain("0019_workers_ai_provider_kind.sql");
+
+    // Existing rows survived the create/copy/drop/rename rebuild verbatim.
+    expect(after.prepare("SELECT id, kind FROM assistant_models").all()).toEqual([{ id: "m1", kind: "openai_compatible" }]);
+    expect(after.prepare("SELECT id, kind FROM assistant_call_logs").all()).toEqual([{ id: "cl1", kind: "openai_compatible" }]);
+
+    // The rebuild recreated every index.
+    const idx = (after.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toEqual(
+      expect.arrayContaining([
+        "idx_assistant_models_provider",
+        "idx_assistant_models_provider_priority",
+        "idx_call_logs_project_time",
+        "idx_call_logs_provider",
+        "idx_call_logs_model",
+      ])
+    );
+
+    // The widened CHECK now accepts workers_ai on both tables…
+    after.prepare(
+      "INSERT INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m2', 'prov1', '@cf/meta/llama-3.2-1b-instruct', 'workers_ai', 1, 1)"
+    ).run();
+    after.prepare(
+      "INSERT INTO assistant_call_logs (id, project_id, provider_id, model, kind, status) VALUES ('cl2', 'p1', 'prov1', '@cf/meta/llama-3.2-1b-instruct', 'workers_ai', 'done')"
+    ).run();
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_models WHERE kind = 'workers_ai'").get()).toEqual({ n: 1 });
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_call_logs WHERE kind = 'workers_ai'").get()).toEqual({ n: 1 });
+
+    // …and still rejects an unknown kind.
+    expect(() =>
+      after.prepare("INSERT INTO assistant_models (id, provider_id, model_id, kind) VALUES ('m3', 'prov1', 'x', 'bogus')").run()
+    ).toThrow(/CHECK constraint failed/i);
+    expect(() =>
+      after.prepare("INSERT INTO assistant_call_logs (id, model, kind, status) VALUES ('cl3', 'x', 'bogus', 'done')").run()
+    ).toThrow(/CHECK constraint failed/i);
+
+    // FKs survived the rebuild: a deleted provider cascades its models and
+    // nulls the call-log's provider_id.
+    after.prepare("DELETE FROM assistant_providers WHERE id = 'prov1'").run();
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_models").get()).toEqual({ n: 0 });
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_call_logs WHERE provider_id IS NULL").get()).toEqual({ n: 2 });
     expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     after.close();
   });

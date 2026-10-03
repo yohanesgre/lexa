@@ -100,6 +100,10 @@ describe("normalizeProviderKind", () => {
     expect(normalizeProviderKind("anthropic_compatible")).toBe("anthropic_compatible");
   });
 
+  it("keeps workers_ai verbatim (H9 — keyless Workers AI)", () => {
+    expect(normalizeProviderKind("workers_ai")).toBe("workers_ai");
+  });
+
   it("defaults unknown to openai_compatible", () => {
     expect(normalizeProviderKind("unknown_kind")).toBe("openai_compatible");
   });
