@@ -12,6 +12,7 @@
 import {
   convertToModelMessages,
   createUIMessageStreamResponse,
+  pruneMessages,
   stepCountIs,
   streamText,
   toUIMessageStream,
@@ -36,6 +37,12 @@ export interface RunStatusTransition {
   status: "completed" | "failed" | "cancelled";
   result?: string | null;
   error?: string | null;
+  /**
+   * Steps the turn actually took (AI SDK `steps.length`). Only registry-backed
+   * runs persist it (`assistant_runs.steps_used`); the document-run route
+   * ignores it. Omitted when unknown.
+   */
+  stepsUsed?: number | undefined;
 }
 
 /** Worker capabilities one turn needs, injected from `agent.ts`. */
@@ -44,6 +51,19 @@ export interface AssistantTurnDeps {
   resolveProviderConfigs: (projectId: string) => Promise<RegistryModelConfig[] | null>;
   recordCallLog: (input: AssistantCallLogInput) => Promise<void>;
   transitionRun: (input: RunStatusTransition) => Promise<void>;
+}
+
+/**
+ * Per-call tracing metadata (ADR-0004 addendum; H2). Structural twin of
+ * `tracing.ts`'s params so the engine never imports `agents/observability/ai`
+ * (which pulls `cloudflare:workers`) into its node-run unit tests.
+ */
+export interface AssistantTraceParams {
+  runtimeContext: Record<string, unknown>;
+  experimental_telemetry: {
+    functionId: string;
+    includeRuntimeContext: Record<string, boolean>;
+  };
 }
 
 export interface AssistantTurnInput {
@@ -68,6 +88,10 @@ export interface AssistantTurnInput {
   abortSignal?: AbortSignal | undefined;
   /** Clock seam for latency in tests. */
   nowMs?: (() => number) | undefined;
+  /** Traced `streamText` (the DO passes `tracedAI.streamText`); defaults to `ai`'s. */
+  streamTextImpl?: typeof streamText | undefined;
+  /** Per-call trace identity; absent = untraced (unit tests). */
+  trace?: AssistantTraceParams | undefined;
 }
 
 export type AssistantTurnErrorCode =
@@ -205,7 +229,11 @@ async function startStream(
   guardedDeps: AssistantTurnDeps,
   startedAtMs: number
 ): Promise<StartedTurn> {
-  const messages = await convertToModelMessages(input.messages);
+  const modelMessages = await convertToModelMessages(input.messages);
+  // H2 addendum: prune tool call/result content before the last 2 messages so a
+  // long tool loop cannot balloon the request; the persisted thread summary
+  // covers what falls out of the window. Cheap and bounded.
+  const messages = pruneMessages({ messages: modelMessages, toolCalls: "before-last-2-messages" });
   // One terminal outcome per provider attempt: `onEnd` (success), `onError` (an
   // error part the SDK surfaces) and the transport catch below can race for the
   // same attempt, and exactly one call log must describe it.
@@ -236,7 +264,7 @@ async function startStream(
       await transitionRunQuietly(guardedDeps, input.runId, { status: "failed", result: null, error: turnError.message });
     }
   };
-  const result = streamText({
+  const result = (input.streamTextImpl ?? streamText)({
     model,
     messages,
     // Tool loop: one step per assistant turn; the caller raises the cap with
@@ -248,6 +276,12 @@ async function startStream(
     // (that would multiply the rate-limit hit and defeat the walk).
     maxRetries: 0,
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    ...(input.trace
+      ? {
+          runtimeContext: input.trace.runtimeContext,
+          experimental_telemetry: input.trace.experimental_telemetry,
+        }
+      : {}),
     onEnd: async (event) => {
       if (settled) return;
       settled = true;
@@ -264,7 +298,12 @@ async function startStream(
         costCents: 0,
         estimated: true,
       });
-      await transitionRunQuietly(guardedDeps, input.runId, { status: "completed", result: event.text, error: null });
+      await transitionRunQuietly(guardedDeps, input.runId, {
+        status: "completed",
+        result: event.text,
+        error: null,
+        stepsUsed: event.steps.length,
+      });
     },
     onError: async (event) => {
       await failAttempt(event.error);

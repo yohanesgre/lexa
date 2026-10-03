@@ -22,6 +22,7 @@ import {
 } from "./legacy-convert";
 import type { RegistryModelConfig } from "./model-factory";
 import type { AssistantCallLogInput } from "../../shared/assistant";
+import type { AssistantRunKind, AssistantRunRow, AssistantRunStatus } from "../../shared/assistant";
 import type { AssistantRunStatusInput, HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
 import type { ReadToolResponse, WriteExecuteResponse, WriteToolResponse } from "./tools-ai";
 
@@ -31,6 +32,10 @@ export const INTERNAL_PROVIDER_CONFIG_PATH = "/api/internal/assistant/provider-c
 export const INTERNAL_TURN_CONTEXT_PATH = "/api/internal/assistant/turn-context";
 export const INTERNAL_CALL_LOG_PATH = "/api/internal/assistant/call-log";
 export const INTERNAL_RUN_STATUS_PATH = "/api/internal/assistant/run-status";
+export const INTERNAL_RUN_CREATE_PATH = "/api/internal/assistant/run-create";
+export const INTERNAL_RUN_UPDATE_PATH = "/api/internal/assistant/run-update";
+export const INTERNAL_RUN_GET_PATH = "/api/internal/assistant/run";
+export const INTERNAL_RUN_COUNTS_PATH = "/api/internal/assistant/run-counts";
 export const INTERNAL_TOOL_PATH = "/api/internal/assistant/tool";
 export const INTERNAL_WRITE_TOOL_PATH = "/api/internal/assistant/write-tool";
 export const INTERNAL_WRITE_EXECUTE_PATH = "/api/internal/assistant/write-execute";
@@ -210,6 +215,85 @@ export async function transitionRun(deps: AssistantInternalDeps, input: Assistan
   return postInternal(deps, INTERNAL_RUN_STATUS_PATH, input, "run-status");
 }
 
+// ── Delegation run registry transports (ADR-0004 §3; H3) ───────────────────
+
+export interface RunCreateRemoteInput {
+  kind: AssistantRunKind;
+  goal: string;
+  id?: string | undefined;
+  threadKey?: string | undefined;
+  budgetMs?: number | null | undefined;
+  parentRunId?: string | null | undefined;
+  createdBy?: string | null | undefined;
+}
+
+/**
+ * Create a run registry row in the Worker. Best-effort retry-once; returns the
+ * created row, or `null` when the Worker is unreachable (the caller refuses to
+ * dispatch a run it cannot record).
+ */
+export async function createRunRemote(
+  deps: AssistantInternalDeps,
+  input: RunCreateRemoteInput
+): Promise<AssistantRunRow | null> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input_, init) => fetch(input_, init));
+  const url = `${originOf(deps)}${INTERNAL_RUN_CREATE_PATH}`;
+  try {
+    return await withRetryOnce(async () => {
+      const res = await fetchImpl(url, { method: "POST", headers: await signedHeaders(deps), body: JSON.stringify(input) });
+      if (!res.ok) throw new AssistantInternalUnavailable(`run-create failed (${res.status})`);
+      const body = (await res.json()) as { run?: unknown };
+      return body.run ? (body.run as AssistantRunRow) : null;
+    });
+  } catch (e) {
+    console.warn("[Assistant] run-create failed after retry:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+export interface RunUpdateRemoteInput {
+  runId: string;
+  status: AssistantRunStatus;
+  result?: string | null | undefined;
+  error?: string | null | undefined;
+  stepsUsed?: number | undefined;
+}
+
+/** Report a run registry transition. Best-effort retry-once; `false` = not landed. */
+export async function updateRunRemote(deps: AssistantInternalDeps, input: RunUpdateRemoteInput): Promise<boolean> {
+  return postInternal(deps, INTERNAL_RUN_UPDATE_PATH, input, "run-update");
+}
+
+/** Read a run registry row. `null` when unknown/unreachable. */
+export async function getRunRemote(deps: AssistantInternalDeps, runId: string): Promise<AssistantRunRow | null> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input_, init) => fetch(input_, init));
+  const url = `${originOf(deps)}${INTERNAL_RUN_GET_PATH}?id=${encodeURIComponent(runId)}`;
+  try {
+    const res = await fetchImpl(url, { method: "GET", headers: await signedHeaders(deps) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { run?: unknown };
+    return body.run ? (body.run as AssistantRunRow) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Active run counts for the concurrency caps (1/thread, 3/project). */
+export async function countRunsRemote(
+  deps: AssistantInternalDeps
+): Promise<{ thread: number; project: number } | null> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input_, init) => fetch(input_, init));
+  const url = `${originOf(deps)}${INTERNAL_RUN_COUNTS_PATH}`;
+  try {
+    const res = await fetchImpl(url, { method: "POST", headers: await signedHeaders(deps), body: "{}" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { thread?: unknown; project?: unknown };
+    return { thread: Number(body.thread ?? 0), project: Number(body.project ?? 0) };
+  } catch {
+    return null;
+  }
+}
+
 async function postInternal(
   deps: AssistantInternalDeps,
   path: string,
@@ -240,6 +324,10 @@ export interface AssistantWriteToolCallInput {
   documentType: "task" | "wiki" | "chat";
   documentId: string;
   ownerUserId: string;
+  // Run attribution (ADR-0004 §3; plan line 140): present when a delegated run
+  // proposes the write; the Worker persists it on the pending row and echoes it
+  // back so the client can attribute the chip.
+  runId?: string | undefined;
 }
 
 /**
@@ -250,7 +338,8 @@ export interface AssistantWriteToolCallInput {
 export async function callReadTool(
   deps: AssistantInternalDeps,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  agentId?: string | undefined
 ): Promise<ReadToolResponse> {
   const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
   const url = `${originOf(deps)}${INTERNAL_TOOL_PATH}`;
@@ -259,7 +348,7 @@ export async function callReadTool(
       const res = await fetchImpl(url, {
         method: "POST",
         headers: await signedHeaders(deps),
-        body: JSON.stringify({ name, args }),
+        body: JSON.stringify({ name, args, ...(agentId ? { agentId } : {}) }),
       });
       if (!res.ok) throw new AssistantInternalUnavailable(`tool ${name} failed (${res.status})`);
       const body = (await res.json()) as { ok?: unknown; result?: unknown; error?: unknown };
@@ -300,6 +389,7 @@ export async function proposeWrite(
         name?: unknown;
         detail?: unknown;
         diff?: unknown;
+        proposedByRunId?: unknown;
         error?: unknown;
       };
       if (body.proposed === true && typeof body.approvalId === "string") {
@@ -312,6 +402,9 @@ export async function proposeWrite(
           name: typeof body.name === "string" ? body.name : input.name,
           ...(typeof body.detail === "string" ? { detail: body.detail } : {}),
           ...(body.diff !== undefined ? { diff: body.diff } : {}),
+          ...(typeof body.proposedByRunId === "string" && body.proposedByRunId.length > 0
+            ? { proposedByRunId: body.proposedByRunId }
+            : {}),
         } satisfies WriteToolResponse;
       }
       return {

@@ -34,7 +34,7 @@ import { ProjectService } from "../services/project.service";
 import { AssistantService, buildChatExport } from "../services/assistant.service";
 import { AssistantChatService } from "../services/assistant-chat.service";
 import { AssistantTaskService } from "../services/assistant-task.service";
-import { AssistantTaskRepo } from "../repos/assistant-task.repo";
+import { AssistantTaskRepo, type AdminAssistantRunKind } from "../repos/assistant-task.repo";
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
@@ -46,6 +46,7 @@ import { AssistantModelPricesRepo } from "../repos/assistant-model-prices.repo";
 import { AssistantHealthRepo } from "../repos/assistant-health.repo";
 import { AssistantHealthService } from "../services/assistant-health.service";
 import { AssistantMcpService, McpConnector, type McpUpdateInput } from "../services/assistant-mcp.service";
+import { invalidateMcpDescriptorCache } from "../assistant/mcp-descriptors";
 import { AssistantProvidersService, type ProviderUpdateInput } from "../services/assistant-providers.service";
 import { AssistantJevService, type JevConfigInput } from "../services/assistant-jev.service";
 import { AssistantJevRepo } from "../repos/assistant-jev.repo";
@@ -691,6 +692,15 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           }
           status = statusRaw as AssistantTaskStatus;
         }
+        const kindRaw = sp.get("kind");
+        const kinds: ReadonlyArray<AdminAssistantRunKind> = ["chat_run", "document", "schedule"];
+        let kind: AdminAssistantRunKind | null = null;
+        if (kindRaw) {
+          if (!kinds.includes(kindRaw as AdminAssistantRunKind)) {
+            return yield* new InvalidArgs({ reason: "kind must be one of chat_run, document, schedule" });
+          }
+          kind = kindRaw as AdminAssistantRunKind;
+        }
         let limit = 50;
         const limitRaw = sp.get("limit");
         if (limitRaw !== null) {
@@ -710,29 +720,9 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           cursor = { createdAt: cursorRaw.slice(0, sep), id: cursorRaw.slice(sep + 1) };
         }
         const projectId = sp.get("projectId");
-        const { tasks, nextCursor } = yield* repo.listRecent({ status, projectId: projectId || null, limit, cursor });
-        const counts = yield* repo.countByStatus();
-        return {
-          data: tasks.map((t) => ({
-            id: t.id,
-            key: t.key,
-            projectId: t.projectId,
-            documentType: t.documentType,
-            documentId: t.documentId,
-            documentTitle: t.documentTitle,
-            agentId: t.agentId,
-            skillId: t.skillId,
-            agentName: t.agentName,
-            skillName: t.skillName,
-            status: t.status,
-            error: t.error,
-            createdAt: t.createdAt,
-            startedAt: t.startedAt,
-            finishedAt: t.finishedAt,
-          })),
-          nextCursor: nextCursor ? `${nextCursor.createdAt}|${nextCursor.id}` : null,
-          counts,
-        };
+        const { runs, nextCursor } = yield* repo.listRecentRuns({ status, projectId: projectId || null, kind, limit, cursor });
+        const counts = yield* repo.countRunsByStatus();
+        return { data: runs, nextCursor: nextCursor ? `${nextCursor.createdAt}|${nextCursor.id}` : null, counts };
       }))
     )
     .handle("adminAssistantBindings", () =>
@@ -968,7 +958,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         yield* requireSuperadmin;
         warnIgnoredMcpSecretRef("create", req.payload.secretRef);
         const service = yield* AssistantMcpService;
-        return yield* service.create({
+        const created = yield* service.create({
           label: req.payload.label,
           transportType: req.payload.transportType,
           url: req.payload.url ?? null,
@@ -979,6 +969,9 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
           ...(req.payload.secret !== undefined && req.payload.secret !== null ? { secret: req.payload.secret } : {}),
           ...(req.payload.enabled !== undefined ? { enabled: req.payload.enabled } : {}),
         });
+        // Registry write → the DO descriptor cache is stale (H6).
+        invalidateMcpDescriptorCache();
+        return created;
       }))
     )
     .handle("updateMcpServer", (req) =>
@@ -995,7 +988,9 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         if (req.payload.secret !== undefined && req.payload.secret !== null) patch.secret = req.payload.secret;
         if (req.payload.clearSecret !== undefined) patch.clearSecret = req.payload.clearSecret;
         if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;
-        return yield* service.update(req.path.id, patch);
+        const updated = yield* service.update(req.path.id, patch);
+        invalidateMcpDescriptorCache();
+        return updated;
       }))
     )
     .handle("deleteMcpServer", (req) =>
@@ -1003,6 +998,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
         yield* requireSuperadmin;
         const service = yield* AssistantMcpService;
         yield* service.remove(req.path.id);
+        invalidateMcpDescriptorCache();
         return undefined;
       }))
     )
@@ -1028,6 +1024,7 @@ const assistantMcpLive = HttpApiBuilder.group(LexaApi, "assistantMcp", (handlers
           req.path.id,
           req.payload.entries.map((e) => ({ serverId: e.serverId, enabled: e.enabled }))
         );
+        invalidateMcpDescriptorCache(req.path.id);
         return { data: yield* service.listForProject(req.path.id) };
       }))
     )

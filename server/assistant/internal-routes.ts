@@ -38,6 +38,13 @@ import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
 import type { RepoContentEntry } from "../services/assistant-repo-content";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
+import type { AssistantRunKind, AssistantRunStatus } from "../../shared/assistant";
+import {
+  countActiveRuns,
+  createAssistantRun,
+  getAssistantRun,
+  transitionAssistantRunRegistry,
+} from "./run-registry";
 
 export interface MirrorThreadInput {
   threadKey: string;
@@ -271,6 +278,9 @@ export interface AssistantWriteToolRequest {
   documentType: "task" | "wiki" | "chat";
   documentId: string;
   ownerUserId: string;
+  // Run attribution (ADR-0004 §3; plan line 140): the run that proposed this
+  // write, when the caller is a delegated runner.
+  runId?: string | undefined;
 }
 
 function sqlTimestampPlusHours(hours: number): string {
@@ -399,8 +409,8 @@ function writeToolDeps(
             driver,
             `INSERT INTO assistant_pending_writes
                (id, project_id, document_type, document_id, owner_user_id, batch_id, seq,
-                tool_name, args, diff, status, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                tool_name, args, diff, status, expires_at, proposed_by_run_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
             approvalId,
             input.projectId,
             input.documentType,
@@ -411,7 +421,8 @@ function writeToolDeps(
             proposal.name,
             JSON.stringify(proposal.args),
             JSON.stringify(proposal.diff),
-            sqlTimestampPlusHours(APPROVAL_TTL_HOURS)
+            sqlTimestampPlusHours(APPROVAL_TTL_HOURS),
+            input.runId ?? null
           )
         );
       } catch (e) {
@@ -454,6 +465,7 @@ export async function executeAssistantWriteTool(
             name: capture.name ?? input.name,
             ...(capture.detail !== undefined ? { detail: capture.detail } : {}),
             ...(capture.diff !== undefined ? { diff: capture.diff } : {}),
+            ...(input.runId !== undefined ? { proposedByRunId: input.runId } : {}),
           }
         : result;
     return { status: 200, body };
@@ -532,7 +544,7 @@ export interface InternalAssistantDeps {
    * Unwired → 502 so the DO reports ASSISTANT_UNAVAILABLE rather than hanging.
    */
   executeReadTool?:
-    | ((input: { name: string; args: Record<string, unknown>; projectId: string; actorUserId: string }) => Promise<ReadToolResponse>)
+    | ((input: { name: string; args: Record<string, unknown>; projectId: string; actorUserId: string; agentId?: string }) => Promise<ReadToolResponse>)
     | undefined;
   /**
    * Apply one write immediately in the Worker (auto mode, D4). Owns the
@@ -640,7 +652,14 @@ export async function handleInternalAssistantRequest(input: {
       return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Read-tool execution not wired" } } };
     }
     const args = (typeof payload.args === "object" && payload.args !== null ? payload.args : {}) as Record<string, unknown>;
-    const result = await input.deps.executeReadTool({ name, args, projectId, actorUserId: input.identity?.actorUserId ?? "" });
+    const agentId = typeof payload.agentId === "string" && payload.agentId.length > 0 ? payload.agentId : undefined;
+    const result = await input.deps.executeReadTool({
+      name,
+      args,
+      projectId,
+      actorUserId: input.identity?.actorUserId ?? "",
+      ...(agentId !== undefined ? { agentId } : {}),
+    });
     return { status: 200, body: result };
   }
 
@@ -674,6 +693,7 @@ export async function handleInternalAssistantRequest(input: {
       return { status: 403, body: { error: { code: "NO_USER_CONTEXT", message: "identity mismatch" } } };
     }
     const args = (typeof payload.args === "object" && payload.args !== null ? payload.args : {}) as Record<string, unknown>;
+    const runId = typeof payload.runId === "string" && payload.runId.length > 0 ? payload.runId : undefined;
     return executeAssistantWriteTool(driver, {
       name,
       args,
@@ -683,6 +703,7 @@ export async function handleInternalAssistantRequest(input: {
       documentType,
       documentId,
       ownerUserId: identity.actorUserId,
+      ...(runId !== undefined ? { runId } : {}),
     });
   }
 
@@ -783,6 +804,113 @@ export async function handleInternalAssistantRequest(input: {
       return { status: 500, body: { error: { code: "ASSISTANT_UNAVAILABLE", message } } };
     }
     return { status: 200, body: outcome.right };
+  }
+
+  // ── Delegation run registry (ADR-0004 §3; H3) ──────────────────────────
+  // The parent DO creates a run row at dispatch and reports transitions. The
+  // signed identity supplies project/thread; the body never overrides it.
+  if (method === "POST" && path === "/api/internal/assistant/run-create") {
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
+    }
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const kind = payload.kind;
+    const goal = typeof payload.goal === "string" ? payload.goal : "";
+    if ((kind !== "chat_run" && kind !== "document" && kind !== "schedule") || goal.trim() === "") {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid run-create payload" } } };
+    }
+    const threadKey =
+      typeof payload.threadKey === "string" && payload.threadKey.length > 0 ? payload.threadKey : identity.threadKey;
+    if (threadKey.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "run thread key is required" } } };
+    }
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        createAssistantRun(driver, {
+          projectId: identity.projectId,
+          threadKey,
+          kind: kind as AssistantRunKind,
+          goal,
+          ...(typeof payload.id === "string" && payload.id.length > 0 ? { id: payload.id } : {}),
+          parentRunId: typeof payload.parentRunId === "string" ? payload.parentRunId : null,
+          budgetMs: typeof payload.budgetMs === "number" && Number.isFinite(payload.budgetMs) ? payload.budgetMs : null,
+          createdBy:
+            typeof payload.createdBy === "string" && payload.createdBy.length > 0
+              ? payload.createdBy
+              : identity.actorUserId.length > 0
+                ? identity.actorUserId
+                : null,
+        })
+      )
+    );
+    if (outcome._tag === "Left") {
+      return { status: 500, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "run-create failed" } } };
+    }
+    return { status: 200, body: { run: outcome.right } };
+  }
+
+  if (method === "POST" && path === "/api/internal/assistant/run-update") {
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
+    }
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const runId = typeof payload.runId === "string" ? payload.runId : "";
+    const status = payload.status;
+    const validStatus =
+      status === "queued" || status === "running" || status === "completed" || status === "failed" || status === "cancelled";
+    if (runId.length === 0 || !validStatus) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid run-update payload" } } };
+    }
+    const outcome = await Effect.runPromise(
+      Effect.either(
+        transitionAssistantRunRegistry(driver, {
+          runId,
+          projectId: identity.projectId,
+          status: status as AssistantRunStatus,
+          result: typeof payload.result === "string" || payload.result === null ? payload.result : undefined,
+          error: typeof payload.error === "string" || payload.error === null ? payload.error : undefined,
+          stepsUsed: typeof payload.stepsUsed === "number" ? payload.stepsUsed : undefined,
+        })
+      )
+    );
+    if (outcome._tag === "Left") {
+      if (outcome.left._tag === "RowNotFound") {
+        return { status: 404, body: { error: { code: "ASSISTANT_RUN_NOT_FOUND", message: "Unknown run" } } };
+      }
+      return { status: 500, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "run-update failed" } } };
+    }
+    return { status: 200, body: outcome.right };
+  }
+
+  if (method === "POST" && path === "/api/internal/assistant/run-counts") {
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
+    }
+    const threadKey = identity.threadKey;
+    const outcome = await Effect.runPromise(Effect.either(countActiveRuns(driver, identity.projectId, threadKey)));
+    if (outcome._tag === "Left") {
+      return { status: 500, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "run-counts failed" } } };
+    }
+    return { status: 200, body: outcome.right };
+  }
+
+  if (method === "GET" && path === "/api/internal/assistant/run") {
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
+    }
+    const runId = input.query?.["id"] ?? "";
+    if (runId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "run id is required" } } };
+    }
+    const outcome = await Effect.runPromise(Effect.either(getAssistantRun(driver, runId, identity.projectId)));
+    if (outcome._tag === "Left") {
+      return { status: 404, body: { error: { code: "ASSISTANT_RUN_NOT_FOUND", message: "Unknown run" } } };
+    }
+    return { status: 200, body: { run: outcome.right } };
   }
 
   if (method === "POST" && path === "/api/internal/assistant/mirror") {

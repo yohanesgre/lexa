@@ -14,6 +14,8 @@ import {
   runScheduledCore,
   type WorkersEnv,
 } from "./workers-entry";
+import { LexaAssistantRunner as RunnerFromModule } from "./assistant/runner";
+import { LexaAssistantRunner as RunnerFromEntry } from "./workers-entry";
 
 function memDriver(): ReturnType<typeof createBunSqliteDriver> {
   const db = new Database(":memory:");
@@ -234,5 +236,14 @@ describe("per-isolate caches", () => {
     const first = getRuntimeAuth(runtimeEnv);
     expect(getRuntimeAuth(runtimeEnv)).toBe(first);
     expect(getRuntimeAuth({ ...runtimeEnv, LXK_ENV: "prod" })).not.toBe(first);
+  });
+});
+
+describe("delegation facet export", () => {
+  it("re-exports the runner class from the worker entry for ctx.exports resolution", () => {
+    expect(RunnerFromEntry).toBe(RunnerFromModule);
+    expect(typeof RunnerFromEntry).toBe("function");
+    const proto = RunnerFromEntry.prototype as unknown as { onChatMessage?: unknown };
+    expect(typeof proto.onChatMessage).toBe("function");
   });
 });

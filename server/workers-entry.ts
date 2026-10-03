@@ -84,10 +84,16 @@ import {
 } from "./assistant/internal-auth";
 import { handleInternalAssistantRequest } from "./assistant/internal-routes";
 import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerHarnessContext } from "./assistant/worker-tools";
+import { dispatchDueSchedules } from "./scheduled/schedules";
 import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
 import type { AssistantThreadType, AssistantToolPermissionMode } from "../shared/assistant";
 
 export { LexaAssistantAgent };
+// Delegation facet child (ADR-0004 §3; H3). Exported from the worker entry so
+// the SDK's dynamic-agents machinery can resolve it via `ctx.exports`; facets
+// need no `new_sqlite_classes` migration entry (they are not top-level DO
+// bindings). The export name must match the class name exactly.
+export { LexaAssistantRunner } from "./assistant/runner";
 
 type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
 
@@ -629,6 +635,15 @@ export async function runScheduledCore(
       console.error("[Workers] backup retention prune failed:", e instanceof Error ? e.message : String(e));
     }
   }
+  // Scheduled assistant runs (ADR-0004 §4; H7): fire due schedules, each of
+  // which creates a `kind='schedule'` run row and advances its next fire in one
+  // atomic batch. Fail-open: a dispatch error must never break the prune tick.
+  try {
+    const result = await dispatchDueSchedules(driver);
+    if (result.dispatched > 0) console.log(`[Workers] assistant schedules dispatched: ${result.dispatched}`);
+  } catch (e) {
+    console.error("[Workers] assistant schedule dispatch failed:", e instanceof Error ? e.message : String(e));
+  }
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────
@@ -766,8 +781,8 @@ const handler: ExportedHandler<WorkersEnv> = {
           identity,
           deps: {
             resolveProviderConfigs: (projectId) => resolveAssistantProviderConfigs(base, projectId),
-            resolveHarnessTurnContext: (input) => resolveWorkerHarnessContext({ driver, base }, input),
-            executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB }),
+            resolveHarnessTurnContext: (input) => resolveWorkerHarnessContext({ driver, base, env: runtimeEnv }, input),
+            executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB, env: runtimeEnv }),
             executeWriteTool: buildWorkerWriteToolExecutor({ base }),
           },
         });

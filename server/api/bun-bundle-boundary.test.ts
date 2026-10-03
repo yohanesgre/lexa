@@ -82,4 +82,9 @@ describe("Bun bundle boundary (ADR-0003 §F)", () => {
     expect([...workers.files].some((f) => f.endsWith("/server/api/assistant-api.ts"))).toBe(true);
     expect([...workers.bare].some((s) => FORBIDDEN.some((re) => re.test(s)))).toBe(true);
   });
+
+  it("Workers entry reaches the delegation runner facet; the Bun entry never does", () => {
+    expect([...workers.files].some((f) => f.endsWith("/server/assistant/runner.ts"))).toBe(true);
+    expect([...bun.files].some((f) => f.endsWith("/server/assistant/runner.ts"))).toBe(false);
+  });
 });

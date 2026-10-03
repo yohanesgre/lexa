@@ -19,6 +19,9 @@ export interface AssistantPendingWriteRow {
   created_at: string;
   expires_at: string;
   decided_at: string | null;
+  // Run attribution (ADR-0004 §3; plan line 140): the run that proposed this
+  // write, or NULL for a regular chat/document proposal.
+  proposed_by_run_id?: string | null;
 }
 
 export class AssistantPendingWritesRepo extends Effect.Service<AssistantPendingWritesRepo>()("Lexa/AssistantPendingWritesRepo", {
@@ -35,10 +38,11 @@ export class AssistantPendingWritesRepo extends Effect.Service<AssistantPendingW
           db,
           `INSERT INTO assistant_pending_writes
              (id, project_id, document_type, document_id, owner_user_id, batch_id, seq,
-              tool_name, args, diff, status, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+              tool_name, args, diff, status, expires_at, proposed_by_run_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
           row.id, row.project_id, row.document_type, row.document_id, row.owner_user_id,
-          row.batch_id, row.seq, row.tool_name, row.args, row.diff, row.expires_at
+          row.batch_id, row.seq, row.tool_name, row.args, row.diff, row.expires_at,
+          row.proposed_by_run_id ?? null
         )
       );
 

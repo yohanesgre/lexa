@@ -37,6 +37,118 @@ const TASK_SELECT = `
   LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
 `;
 
+export type AdminAssistantRunKind = "chat_run" | "document" | "schedule";
+
+export interface AdminAssistantRunRow {
+  id: string;
+  key: string;
+  projectId: string;
+  kind: AdminAssistantRunKind;
+  documentType: "task" | "wiki" | null;
+  documentId: string;
+  documentTitle: string;
+  agentId: string;
+  skillId: string;
+  agentName: string;
+  skillName: string;
+  threadKey: string | null;
+  status: AssistantTaskStatus;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+interface AdminRunRaw {
+  id: string;
+  key: string | null;
+  project_id: string;
+  kind: AdminAssistantRunKind;
+  document_type: "task" | "wiki" | null;
+  document_id: string | null;
+  document_title: string | null;
+  agent_id: string | null;
+  skill_id: string | null;
+  agent_name: string | null;
+  skill_name: string | null;
+  thread_key: string | null;
+  status: AssistantTaskStatus;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+// Union the document-run tier (assistant_tasks) with the delegation/schedule
+// registry (assistant_runs). Document rows present as kind 'document'; registry
+// rows carry their own kind and null document fields. Column order/types are
+// aligned so the caller can filter/sort/page the union as one relation.
+const RUNS_UNION = `
+  SELECT ft.id AS id,
+         CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+              ELSE '' END AS key,
+         ft.project_id AS project_id,
+         'document' AS kind,
+         ft.document_type AS document_type,
+         ft.document_id AS document_id,
+         CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
+              ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+         ft.agent_id AS agent_id,
+         ft.skill_id AS skill_id,
+         fa.name AS agent_name,
+         fs.name AS skill_name,
+         ft.document_type || ':' || ft.document_id AS thread_key,
+         ft.status AS status,
+         ft.error AS error,
+         ft.created_at AS created_at,
+         ft.started_at AS started_at,
+         ft.finished_at AS finished_at
+  FROM assistant_tasks ft
+  LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+  LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
+  UNION ALL
+  SELECT r.id AS id,
+         r.id AS key,
+         r.project_id AS project_id,
+         r.kind AS kind,
+         NULL AS document_type,
+         NULL AS document_id,
+         NULL AS document_title,
+         NULL AS agent_id,
+         NULL AS skill_id,
+         NULL AS agent_name,
+         NULL AS skill_name,
+         r.thread_key AS thread_key,
+         r.status AS status,
+         r.error AS error,
+         r.created_at AS created_at,
+         r.started_at AS started_at,
+         r.finished_at AS finished_at
+  FROM assistant_runs r
+`;
+
+function mapAdminRunRow(row: AdminRunRaw): AdminAssistantRunRow {
+  return {
+    id: row.id,
+    key: row.key ?? row.id,
+    projectId: row.project_id,
+    kind: row.kind,
+    documentType: row.document_type,
+    documentId: row.document_id ?? "",
+    documentTitle: row.document_title ?? "",
+    agentId: row.agent_id ?? "",
+    skillId: row.skill_id ?? "",
+    agentName: row.agent_name ?? "",
+    skillName: row.skill_name ?? "",
+    threadKey: row.thread_key,
+    status: row.status,
+    error: row.error,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
 export class AssistantTaskRepo extends Effect.Service<AssistantTaskRepo>()("Lexa/AssistantTaskRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Db;
@@ -166,6 +278,66 @@ export class AssistantTaskRepo extends Effect.Service<AssistantTaskRepo>()("Lexa
         queryAll<{ status: AssistantTaskStatus; n: number }>(
           db,
           `SELECT status, COUNT(*) AS n FROM assistant_tasks GROUP BY status`
+        ).pipe(
+          Effect.map((rows) => {
+            const counts: Record<AssistantTaskStatus, number> = { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
+            for (const r of rows) counts[r.status] = r.n;
+            return counts;
+          })
+        ),
+
+      // ── Admin runs list: union of document runs (assistant_tasks) and the
+      // delegation/schedule registry (assistant_runs) (ADR-0004 §3; plan H3/H7).
+      // Document rows present as kind 'document'; registry rows carry their own
+      // kind and nullable document fields. Keyset pagination stays on
+      // (created_at DESC, id DESC); the status/project/kind filters apply to the
+      // union, and counts are the unfiltered GROUP BY over both tables.
+      listRecentRuns: (input: {
+        status?: AssistantTaskStatus | null;
+        projectId?: string | null;
+        kind?: AdminAssistantRunKind | null;
+        limit: number;
+        cursor?: { createdAt: string; id: string } | null;
+      }): Effect.Effect<{ runs: AdminAssistantRunRow[]; nextCursor: { createdAt: string; id: string } | null }, DbError> =>
+        Effect.gen(function* () {
+          const conds: string[] = [];
+          const params: unknown[] = [];
+          if (input.status) {
+            conds.push("u.status = ?");
+            params.push(input.status);
+          }
+          if (input.projectId) {
+            conds.push("u.project_id = ?");
+            params.push(input.projectId);
+          }
+          if (input.kind) {
+            conds.push("u.kind = ?");
+            params.push(input.kind);
+          }
+          if (input.cursor) {
+            conds.push("(u.created_at < ? OR (u.created_at = ? AND u.id < ?))");
+            params.push(input.cursor.createdAt, input.cursor.createdAt, input.cursor.id);
+          }
+          const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+          const rows = yield* queryAll<AdminRunRaw>(
+            db,
+            `SELECT u.* FROM (${RUNS_UNION}) u ${where} ORDER BY u.created_at DESC, u.id DESC LIMIT ?`,
+            ...params,
+            input.limit + 1
+          );
+          const hasMore = rows.length > input.limit;
+          const page = hasMore ? rows.slice(0, input.limit) : rows;
+          const last = page[page.length - 1];
+          const nextCursor = hasMore && last ? { createdAt: last.created_at, id: last.id } : null;
+          return { runs: page.map(mapAdminRunRow), nextCursor };
+        }),
+
+      countRunsByStatus: (): Effect.Effect<Record<AssistantTaskStatus, number>, DbError> =>
+        queryAll<{ status: AssistantTaskStatus; n: number }>(
+          db,
+          `SELECT status, COUNT(*) AS n
+           FROM (SELECT status FROM assistant_tasks UNION ALL SELECT status FROM assistant_runs)
+           GROUP BY status`
         ).pipe(
           Effect.map((rows) => {
             const counts: Record<AssistantTaskStatus, number> = { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };

@@ -250,7 +250,15 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         };
         const decisionRows = rows.map((r) => {
           const diff = parseDiff(r.diff);
-          return { id: r.id, batchId: r.batch_id, status: r.status, seq: r.seq, name: r.tool_name, ...(diff !== undefined ? { diff } : {}) };
+          return {
+            id: r.id,
+            batchId: r.batch_id,
+            status: r.status,
+            seq: r.seq,
+            name: r.tool_name,
+            ...(diff !== undefined ? { diff } : {}),
+            ...(r.proposed_by_run_id ? { proposedByRunId: r.proposed_by_run_id } : {}),
+          };
         });
         const legacyReconciled = reconcilePendingBatchStatuses(messages, decisionRows);
         return reconcileApprovalCarriers(legacyReconciled, decisionRows);

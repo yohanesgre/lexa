@@ -34,8 +34,10 @@ import { applyAssistantWrite, type AssistantWriteApplyCtx } from "./write-execut
 import type { AssistantWriteToolName } from "./write-tool-names";
 import { BOUND_SKILLS_SQL, matchBoundSkillByName } from "../services/assistant-helpers";
 import { buildSkillPromptParts, resolveMentionContext, type MentionResolverDeps } from "./context";
+import { discoverMcpDescriptors, executeMcpTool } from "./mcp-descriptors";
 import { docToMarkdown } from "../../shared/markdown";
 import { extractMemoryTerms, memoryBlockFromHits } from "./prompt";
+import { PROJECT_RUN_LIMIT } from "./delegation";
 import { parseThreadKey } from "./agent-gate";
 import { buildPreflightState, runJevPreflight, type JevPreflightResult } from "./jev";
 import { parseWriteTools } from "./write-tools";
@@ -188,6 +190,8 @@ export async function resolveWorkerTurnContext(
 export interface WorkerHarnessContextDeps {
   driver: DbDriver;
   base: BaseLayer;
+  /** Runtime env (Workers bindings) for MCP discovery; absent = MCP disabled. */
+  env?: RuntimeEnv | null | undefined;
 }
 
 const HARNESS_PREFLIGHT_TIMEOUT_MS = 3_000;
@@ -343,7 +347,11 @@ export async function resolveWorkerHarnessContext(
   // builtin `assistant` row and finally a synthetic blank agent.
   let agentId = threadRow?.agent_id ?? null;
   if (input.runId) {
-    const runRow = await dbFirst<{ agent_id: string }>(`SELECT agent_id FROM assistant_tasks WHERE id = ?`, input.runId);
+    const runRow = await dbFirst<{ agent_id: string }>(
+      `SELECT agent_id FROM assistant_tasks WHERE id = ? AND project_id = ?`,
+      input.runId,
+      input.projectId
+    );
     if (runRow?.agent_id) agentId = runRow.agent_id;
   }
   const agentRow = agentId
@@ -405,8 +413,12 @@ export async function resolveWorkerHarnessContext(
   const repoContent =
     documentType === "chat" ? [] : await loadWorkerRepoContent(deps, documentType, documentId, input.projectId);
 
-  // Memory: FTS K=5 / 2000-char cap via the shared repo.
-  const memoryHits = await loadWorkerMemory(deps, input.projectId, extractMemoryTerms(input.userText, ""));
+  // Memory: FTS K=5 / 2000-char cap via the shared repo. Task/wiki terms come
+  // from the document title + assembled context so a doc-body question still
+  // recalls the right facts; chat falls back to the thread title + user text.
+  const memoryTitle = threadRow?.title ?? "";
+  const memoryBody = documentType === "chat" ? input.userText : `${input.userText}\n${docContext ?? ""}`;
+  const memoryHits = await loadWorkerMemory(deps, input.projectId, extractMemoryTerms(memoryTitle, memoryBody));
   const memoryBlock = memoryBlockFromHits(memoryHits);
 
   // Mention context: chat only (task/wiki carry their own doc context).
@@ -416,8 +428,19 @@ export async function resolveWorkerHarnessContext(
     mentionContext = block.trim() !== "" ? block : null;
   }
 
-  // Tool gating: names + booleans only; secrets stay Worker-side.
-  const gating = await resolveWorkerTurnContext({ driver: deps.driver, base: deps.base }, input.projectId);
+  // Tool gating: names + booleans only; secrets stay Worker-side. The resolved
+  // agent id gates bound-skill tools (never the literal "assistant").
+  const gating = await resolveWorkerTurnContext({ driver: deps.driver, base: deps.base, agentId: agent.id }, input.projectId);
+
+  // MCP descriptors (ADR-0004 §5; H6): read-only, default-deny, cached ~60s
+  // Worker-side. Secrets/clients never cross to the DO — descriptors only.
+  const settings = await resolveWorkerSettings(deps.driver, input.projectId);
+  const mcpTools = await discoverMcpDescriptors({
+    driver: deps.driver,
+    env: deps.env ?? null,
+    allowlist: settings.urlAllowlist,
+    projectId: input.projectId,
+  });
 
   // Jev preflight: advisory, fail-open, skipped on resume, 3s cap (R2).
   const advisory =
@@ -440,12 +463,12 @@ export async function resolveWorkerHarnessContext(
     advisory,
     threadSummary: summary !== null ? { summary, summarizedCount: threadRow?.summarized_count ?? 0 } : null,
     readTools: gating.readTools,
-    mcpTools: [],
+    mcpTools,
     writeTools: gating.writeTools,
     primarySupportsImages: gating.primarySupportsImages,
     hasSearchKey: gating.hasSearchKey,
     jevConfigured: gating.jevConfigured,
-    delegation: { enabled: false, maxConcurrentRuns: 0 },
+    delegation: { enabled: true, maxConcurrentRuns: PROJECT_RUN_LIMIT },
   };
 }
 
@@ -473,6 +496,8 @@ export interface WorkerReadToolExecutorInput {
   name: string;
   args: Record<string, unknown>;
   projectId: string;
+  /** Resolved agent id (H1 nit): gates bound-skill tools for the right agent. */
+  agentId?: string | undefined;
 }
 
 interface R2BucketLike {
@@ -483,6 +508,8 @@ export interface WorkerReadToolExecutorDeps {
   driver: DbDriver;
   base: BaseLayer;
   blob?: R2BucketLike | undefined;
+  /** Runtime env for MCP dispatch; absent = MCP unavailable (fail-open). */
+  env?: RuntimeEnv | null | undefined;
 }
 
 function storageConfigFor(blob: R2BucketLike | undefined): StorageConfigShape {
@@ -493,6 +520,110 @@ function storageConfigFor(blob: R2BucketLike | undefined): StorageConfigShape {
     r2: blob ? { binding: blob as unknown as NarrowR2Bucket, bucketName: "lexa-blobs" } : null,
     maxUploadBytes: 0,
   };
+}
+
+// ── Repo read tools (ADR-0004 §5; H6) ──────────────────────────────────────
+// Source-role repos only, capped by the `assistant_repo_cap` setting (same
+// source the prefetch uses). Read-only; every failure is a typed tool error the
+// model can recover from.
+
+const REPO_READ_MAX_FILES = 500;
+const REPO_READ_MAX_BYTES = 120_000;
+const REPO_READ_DEFAULT_CAP = 3;
+
+async function readRepoCap(driver: DbDriver): Promise<number> {
+  const row = await Effect.runPromise(
+    queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = 'assistant_repo_cap'")
+  ).catch(() => null);
+  const parsed = Number(row?.value ?? "");
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), 10) : REPO_READ_DEFAULT_CAP;
+}
+
+function repoReadLayer(base: BaseLayer): Layer.Layer<ProjectReposRepo | GitHubClient> {
+  return Layer.mergeAll(Layer.provide(ProjectReposRepo.Default, base), GitHubClient.Default);
+}
+
+async function sourceRepos(deps: WorkerReadToolExecutorDeps, projectId: string): Promise<string[]> {
+  const rows = await Effect.runPromise(
+    Effect.provide(
+      Effect.flatMap(ProjectReposRepo, (repo) => repo.listByProject(projectId)).pipe(Effect.catchAll(() => Effect.succeed([]))),
+      repoReadLayer(deps.base)
+    )
+  ).catch(() => []);
+  return rows.filter((row) => row.sourceRole).map((row) => row.repo);
+}
+
+async function listWorkerRepoFiles(
+  deps: WorkerReadToolExecutorDeps,
+  projectId: string
+): Promise<ReadToolResponse> {
+  try {
+    const cap = await readRepoCap(deps.driver);
+    const repos = (await sourceRepos(deps, projectId)).slice(0, cap);
+    if (repos.length === 0) return { ok: true, result: { repos: [], files: [], truncated: false } };
+    const files = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const client = yield* GitHubClient;
+          const out: Array<{ repo: string; path: string; size: number | null }> = [];
+          for (const full of repos) {
+            const [owner, name] = full.split("/");
+            if (!owner || !name) continue;
+            const branch = yield* client.getDefaultBranch(owner, name).pipe(Effect.catchAll(() => Effect.succeed("")));
+            if (branch === "") continue;
+            const tree = yield* client
+              .getRepoFileTree(owner, name, branch)
+              .pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ path: string; type: string; size?: number }>)));
+            for (const entry of tree) {
+              if (entry.type !== "blob") continue;
+              if (out.length >= REPO_READ_MAX_FILES) break;
+              out.push({ repo: full, path: entry.path, size: entry.size ?? null });
+            }
+          }
+          return out;
+        }),
+        repoReadLayer(deps.base)
+      )
+    );
+    return { ok: true, result: { repos, files, truncated: files.length >= REPO_READ_MAX_FILES } };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "repo listing failed" };
+  }
+}
+
+async function readWorkerRepoFile(
+  deps: WorkerReadToolExecutorDeps,
+  projectId: string,
+  args: Record<string, unknown>
+): Promise<ReadToolResponse> {
+  const repo = typeof args.repo === "string" ? args.repo : "";
+  const path = typeof args.path === "string" ? args.path : "";
+  if (repo === "" || path === "") return { ok: false, error: "repo and path are required" };
+  try {
+    const cap = await readRepoCap(deps.driver);
+    const repos = (await sourceRepos(deps, projectId)).slice(0, cap);
+    if (!repos.includes(repo)) return { ok: false, error: `repo ${repo} is not a source-role repo for this project` };
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) return { ok: false, error: `invalid repo ${repo}` };
+    const content = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const client = yield* GitHubClient;
+          const branch = yield* client.getDefaultBranch(owner, name).pipe(Effect.catchAll(() => Effect.succeed("")));
+          if (branch === "") return "";
+          return yield* client.getRepoFileContent(owner, name, path).pipe(Effect.catchAll(() => Effect.succeed("")));
+        }),
+        repoReadLayer(deps.base)
+      )
+    );
+    if (content === "") return { ok: false, error: `file ${path} not found in ${repo}` };
+    return {
+      ok: true,
+      result: { repo, path, content: content.slice(0, REPO_READ_MAX_BYTES), truncated: content.length > REPO_READ_MAX_BYTES },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "repo read failed" };
+  }
 }
 
 /**
@@ -522,9 +653,20 @@ export function buildWorkerReadToolExecutor(
     try {
       const [settings, boundSkills, jevConfig] = await Promise.all([
         resolveWorkerSettings(deps.driver, input.projectId),
-        resolveWorkerBoundSkills(deps.driver, "assistant"),
+        resolveWorkerBoundSkills(deps.driver, input.agentId && input.agentId.length > 0 ? input.agentId : "assistant"),
         resolveWorkerJevConfig(deps.base, input.projectId),
       ]);
+      // MCP dispatch (H6): prefixed calls execute through the read-only bridge.
+      if (input.name.startsWith("mcp__")) {
+        return await executeMcpTool(
+          { driver: deps.driver, env: deps.env ?? null, allowlist: settings.urlAllowlist, projectId: input.projectId },
+          input.name,
+          input.args
+        );
+      }
+      // Repo read tools (H6): source-role repos only, capped.
+      if (input.name === "list_repo_files") return await listWorkerRepoFiles(deps, input.projectId);
+      if (input.name === "read_repo_file") return await readWorkerRepoFile(deps, input.projectId, input.args);
       const toolDeps: AssistantToolDeps = {
         projectId: input.projectId,
         allowlist: settings.urlAllowlist,

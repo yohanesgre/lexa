@@ -73,7 +73,8 @@ const useSQLite = sqliteMigration?.new_sqlite_classes?.includes(class_name) ?? f
 // entry pulls the whole app and is exercised by the workers build.
 const ENTRY = `
 import { LexaAssistantAgent } from "./server/assistant/agent";
-export { LexaAssistantAgent };
+import { LexaAssistantRunner } from "./server/assistant/runner";
+export { LexaAssistantAgent, LexaAssistantRunner };
 
 const INTERNAL = "/api/internal/assistant/";
 
@@ -162,6 +163,13 @@ export default {
       const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
       return Response.json(await stub.saveMessages(body.messages));
     }
+    if (url.pathname === "/__test/runner") {
+      return Response.json({
+        kind: typeof LexaAssistantRunner,
+        name: LexaAssistantRunner?.name ?? null,
+        hasOnChatMessage: typeof LexaAssistantRunner?.prototype?.onChatMessage === "function",
+      });
+    }
     const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
     const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
     return stub.fetch(request);
@@ -184,6 +192,24 @@ let d1: D1LikeTest;
 // Captured raw provider request body (the AI SDK sends the system prompt as the
 // first `system` role message). Set by the worker's `outboundService`.
 let capturedProviderRequest: string | null = null;
+// H2 summary accounting: non-stream provider calls are the compaction
+// `generateText`; `summaryShouldFail` makes the next one 500 (skip-on-failure).
+let summaryCalls = 0;
+let summaryShouldFail = false;
+
+function providerJson(text: string): Response {
+  return new Response(
+    JSON.stringify({
+      id: "c1",
+      object: "chat.completion",
+      created: 0,
+      model: "test-model",
+      choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+}
 
 function providerChunk(delta: Record<string, unknown>, finish: string | null, usage?: Record<string, number>): string {
   return JSON.stringify({
@@ -326,8 +352,22 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
             bindings: { LXK_SECRETS_MASTER_KEY: MASTER_KEY },
             // Provider calls go through global fetch; capture the request body
             // and answer with a valid SSE stream so the turn completes offline.
+            // Summary (`generateText`) is a non-stream JSON call: count it and
+            // answer with a compact completion.
             outboundService: async (request: Request) => {
-              capturedProviderRequest = await request.text();
+              const body = await request.text();
+              const isStream = /"stream"\s*:\s*true/.test(body);
+              if (!isStream) {
+                summaryCalls += 1;
+                if (summaryShouldFail) {
+                  return new Response(JSON.stringify({ error: { message: "summary boom" } }), {
+                    status: 500,
+                    headers: { "content-type": "application/json" },
+                  });
+                }
+                return providerJson("CONDENSED-SUMMARY");
+              }
+              capturedProviderRequest = body;
               return providerSse();
             },
           },
@@ -350,6 +390,16 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(binding).toEqual({ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" });
     expect(sqliteMigration).toEqual({ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] });
     expect(useSQLite).toBe(true);
+  });
+
+  it("bundles the delegation runner facet class and keeps it out of new_sqlite_classes", async () => {
+    const res = await mf!.dispatchFetch("http://assistant-smoke/__test/runner");
+    const body = (await res.json()) as { kind: string; name: string; hasOnChatMessage: boolean };
+    expect(body.kind).toBe("function");
+    expect(body.name).toBe("LexaAssistantRunner");
+    expect(body.hasOnChatMessage).toBe(true);
+    // A facet class needs no top-level migration entry (ADR-0004 §3/R5).
+    expect(sqliteMigration?.new_sqlite_classes ?? []).not.toContain("LexaAssistantRunner");
   });
 
   it("rejects an unsigned websocket with 1008", async () => {
@@ -610,6 +660,10 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
 
     const cols = await storage.exec<{ name: string }>("PRAGMA table_info(thread_meta)");
     expect(cols.some((c) => c.name === "permission_mode")).toBe(true);
+    // H2: the same guarded ALTER pass adds the compaction columns to a
+    // pre-existing store.
+    expect(cols.some((c) => c.name === "summary")).toBe(true);
+    expect(cols.some((c) => c.name === "summarized_count")).toBe(true);
     const row = await storage.exec<{ permission_mode: string }>(
       `SELECT permission_mode FROM thread_meta WHERE thread_key = '${threadKey}'`
     );
@@ -675,6 +729,121 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(body).toContain("SUMMARY-BLOCK");
     expect(body).toContain("[Conversation summary — the 3 earlier turns were condensed]");
   }, 60_000);
+
+  it("compacts past the threshold once, persists real summary/count on the DO and D1", async () => {
+    const documentId = "h2-compact";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = Array.from({ length: 41 }, (_, i) => ({
+      id: `h2-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      parts: [{ type: "text", text: `message ${i}` }],
+    }));
+    summaryCalls = 0;
+    expect((await persistStep(threadKey, messages)).status).toBe(200);
+    expect(summaryCalls).toBe(1);
+
+    const transcriptRes = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+    );
+    const transcript = (await transcriptRes.json()) as {
+      messages?: unknown[];
+      summary?: string | null;
+      summarizedCount?: number | null;
+    };
+    expect(transcript.summary).toBe("CONDENSED-SUMMARY");
+    expect(transcript.summarizedCount).toBe(41 - 8);
+    expect(transcript.messages).toHaveLength(41);
+
+    const mirrored = await d1
+      .prepare("SELECT summary, summarized_count FROM assistant_threads WHERE document_id = ?")
+      .bind(documentId)
+      .first<{ summary: string | null; summarized_count: number }>();
+    expect(mirrored?.summary).toBe("CONDENSED-SUMMARY");
+    expect(mirrored?.summarized_count).toBe(41 - 8);
+
+    // Repeat persist of the SAME transcript: the window is already summarized,
+    // so no second provider call ("threshold once").
+    expect((await persistStep(threadKey, messages)).status).toBe(200);
+    expect(summaryCalls).toBe(1);
+  }, 90_000);
+
+  it("compaction survives a wake (summary/count read back from durable thread_meta)", async () => {
+    const documentId = "h2-wake";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, 'proj-1', 'user-1', '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = Array.from({ length: 41 }, (_, i) => ({
+      id: `w-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      parts: [{ type: "text", text: `message ${i}` }],
+    }));
+    expect((await persistStep(threadKey, messages)).status).toBe(200);
+
+    await evictThread(threadKey);
+
+    const res = await mf!.dispatchFetch(
+      `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+    );
+    const body = (await res.json()) as { summary?: string | null; summarizedCount?: number | null };
+    expect(body.summary).toBe("CONDENSED-SUMMARY");
+    expect(body.summarizedCount).toBe(41 - 8);
+  }, 90_000);
+
+  it("skips compaction on a provider failure and leaves the D1 summary untouched", async () => {
+    const documentId = "h2-fail";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    await d1
+      .prepare(
+        "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, summary, summarized_count, messages) VALUES ('chat', ?, 'proj-1', 'user-1', 'PRIOR-SUMMARY', 3, '[]')"
+      )
+      .bind(documentId)
+      .run();
+
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const messages = Array.from({ length: 41 }, (_, i) => ({
+      id: `f-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      parts: [{ type: "text", text: `message ${i}` }],
+    }));
+    summaryCalls = 0;
+    summaryShouldFail = true;
+    try {
+      expect((await persistStep(threadKey, messages)).status).toBe(200);
+    } finally {
+      summaryShouldFail = false;
+    }
+    expect(summaryCalls).toBe(1);
+
+    const mirrored = await d1
+      .prepare("SELECT summary, summarized_count FROM assistant_threads WHERE document_id = ?")
+      .bind(documentId)
+      .first<{ summary: string | null; summarized_count: number }>();
+    expect(mirrored?.summary).toBe("PRIOR-SUMMARY");
+    expect(mirrored?.summarized_count).toBe(3);
+  }, 90_000);
 
   it("load smoke: 10 concurrent threads connect, persist, and read back independently", async () => {
     // WS2 (P6): bounded local load smoke. Ten thread-keyed DO instances are
