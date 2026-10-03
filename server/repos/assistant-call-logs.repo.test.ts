@@ -68,6 +68,20 @@ describe("AssistantCallLogsRepo", () => {
     expect(missing).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
   });
 
+  it("insert round-trips threadKey/runId/purpose; purpose defaults to turn", async () => {
+    setup();
+    const full = await insert("p1", { threadKey: "task:t1", runId: "run-1", purpose: "runner" });
+    expect(full).toMatchObject({ threadKey: "task:t1", runId: "run-1", purpose: "runner" });
+
+    const def = await insert("p2");
+    expect(def).toMatchObject({ threadKey: null, runId: null, purpose: "turn" });
+
+    const byId = await Effect.runPromise(repo.getById("p1"));
+    expect(byId.threadKey).toBe("task:t1");
+    expect(byId.runId).toBe("run-1");
+    expect(byId.purpose).toBe("runner");
+  });
+
   it("lists by project/provider/model/recent: created_at DESC and limit", async () => {
     setup();
     await insert("a", { projectId: "p1", providerId: "prov1", model: "m1" });

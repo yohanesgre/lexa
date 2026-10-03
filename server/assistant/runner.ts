@@ -38,6 +38,7 @@ import {
   callWriteExecute,
   proposeWrite,
   recordCallLog,
+  recordProviderHealthRemote,
   resolveHarnessContext,
   resolveProviderConfigs,
   updateRunRemote,
@@ -106,6 +107,9 @@ export class LexaAssistantRunner extends AIChatAgent<LexaAssistantRunnerEnv> {
       resolveProviderConfigs: (projectId) => resolveProviderConfigs(deps, projectId),
       recordCallLog: async (entry) => {
         await recordCallLog(deps, entry);
+      },
+      recordProviderHealth: async ({ providerId, ok }) => {
+        await recordProviderHealthRemote(deps, { providerId, ok });
       },
       // Runner terminal transitions land in `assistant_runs` (not the legacy
       // `assistant_tasks` run-status route) and carry the engine's step count so
@@ -192,6 +196,7 @@ export class LexaAssistantRunner extends AIChatAgent<LexaAssistantRunnerEnv> {
         system,
         stopWhen,
         runId: input.runId,
+        callLogPurpose: "runner",
         streamTextImpl: tracedAI.streamText,
         trace: assistantTraceParams({
           agentId: this.ctx.id.toString(),

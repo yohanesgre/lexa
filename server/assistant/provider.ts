@@ -360,14 +360,71 @@ export function isCloudflareAiBaseUrl(baseUrl: string): boolean {
 }
 
 interface CfSearchResponse {
-  result?: Array<{ name?: unknown; id?: unknown }>;
+  result?: Array<{ name?: unknown; id?: unknown; properties?: unknown }>;
   result_info?: { per_page?: unknown; total_count?: unknown };
+}
+
+/** Mapped CF price units (USD per M tokens), keyed by the catalog model id. */
+export interface ModelPriceInfo {
+  promptPrice: number;
+  completionPrice: number;
+  cachedReadPrice: number;
+  cachedWritePrice: number;
 }
 
 interface CfSearchResult {
   ids: string[];
+  prices: Map<string, ModelPriceInfo>;
   firstCount: number;
   firstStatus?: number;
+}
+
+const CF_PRICE_INPUT_UNIT = "per m input tokens";
+const CF_PRICE_OUTPUT_UNIT = "per m output tokens";
+
+function cfPriceNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+// CF `ai/models/search` items carry `properties: [{ property_id, value }]`; the
+// `price` property's value is `[{ unit, price, currency }]` with units
+// "per M input tokens" / "per M output tokens" (verified live). Cache units are
+// matched tolerantly; anything unmatched leaves the cached columns at 0.
+export function parseCfModelPrice(properties: unknown): ModelPriceInfo | null {
+  if (!Array.isArray(properties)) return null;
+  for (const prop of properties) {
+    if (prop === null || typeof prop !== "object") continue;
+    const p = prop as { property_id?: unknown; value?: unknown };
+    if (p.property_id !== "price" || !Array.isArray(p.value)) continue;
+    let promptPrice = 0;
+    let completionPrice = 0;
+    let cachedReadPrice = 0;
+    let cachedWritePrice = 0;
+    let found = false;
+    for (const entry of p.value) {
+      if (entry === null || typeof entry !== "object") continue;
+      const e = entry as { unit?: unknown; price?: unknown };
+      const unit = typeof e.unit === "string" ? e.unit.trim().toLowerCase() : "";
+      const price = cfPriceNumber(e.price);
+      if (price === null) continue;
+      if (unit === CF_PRICE_INPUT_UNIT) {
+        promptPrice = price;
+        found = true;
+      } else if (unit === CF_PRICE_OUTPUT_UNIT) {
+        completionPrice = price;
+        found = true;
+      } else if (unit.includes("cach") && unit.includes("input") && (unit.includes("read") || unit.includes("hit"))) {
+        cachedReadPrice = price;
+        found = true;
+      } else if (unit.includes("cach") && (unit.includes("write") || unit.includes("creation"))) {
+        cachedWritePrice = price;
+        found = true;
+      }
+    }
+    if (found) return { promptPrice, completionPrice, cachedReadPrice, cachedWritePrice };
+  }
+  return null;
 }
 
 async function cfSearchPages(
@@ -379,6 +436,7 @@ async function cfSearchPages(
 ): Promise<CfSearchResult> {
   const headers = { authorization: `Bearer ${apiKey}`, ...sessionHeaders };
   const ids: string[] = [];
+  const prices = new Map<string, ModelPriceInfo>();
   let firstCount = 0;
   let totalCount: number | undefined;
   let totalPages = CF_MAX_PAGES;
@@ -394,7 +452,7 @@ async function cfSearchPages(
     }
     if (res.status === 401 || res.status === 403) throw new ProviderAuthFailed({});
     if (!res.ok) {
-      if (page === 1) return { ids, firstCount, firstStatus: res.status };
+      if (page === 1) return { ids, prices, firstCount, firstStatus: res.status };
       throw new ProviderUnreachable({ message: `cloudflare models search returned ${res.status}`, status: res.status });
     }
     let parsed: unknown;
@@ -407,8 +465,16 @@ async function cfSearchPages(
     const items = Array.isArray(body.result) ? body.result : [];
     if (page === 1) firstCount = items.length;
     for (const item of items) {
-      if (typeof item.name === "string" && item.name) ids.push(item.name);
-      else if (typeof item.id === "string" && item.id) ids.push(item.id);
+      const id =
+        typeof item.name === "string" && item.name
+          ? item.name
+          : typeof item.id === "string" && item.id
+            ? item.id
+            : null;
+      if (!id) continue;
+      ids.push(id);
+      const price = parseCfModelPrice(item.properties);
+      if (price) prices.set(id, price);
     }
     const info = body.result_info;
     if (page === 1 && typeof info?.total_count === "number" && info.total_count >= 0) {
@@ -418,7 +484,7 @@ async function cfSearchPages(
     if (items.length === 0) break;
     if (totalCount !== undefined ? ids.length >= totalCount : items.length < CF_MODELS_PER_PAGE) break;
   }
-  return { ids, firstCount };
+  return { ids, prices, firstCount };
 }
 
 async function listCloudflareModels(
@@ -426,7 +492,7 @@ async function listCloudflareModels(
   config: ProviderConfig,
   sessionHeaders: Record<string, string>,
   fetchImpl: FetchLike,
-): Promise<{ models: Array<{ id: string }> }> {
+): Promise<{ models: ListedModel[] }> {
   const searchUrl = (() => {
     const url = new URL(base);
     url.search = "";
@@ -446,13 +512,23 @@ async function listCloudflareModels(
     throw new ProviderUnreachable({ message: `cloudflare models search returned ${result.firstStatus}`, status: result.firstStatus });
   }
   const seen = new Set<string>();
-  const models: Array<{ id: string }> = [];
+  const models: ListedModel[] = [];
   for (const id of result.ids) {
     if (seen.has(id)) continue;
     seen.add(id);
-    models.push({ id });
+    const price = result.prices.get(id);
+    models.push(price ? { id, ...price } : { id });
   }
   return { models };
+}
+
+/** A catalog model; price fields are present only when the provider reported them (CF). */
+export interface ListedModel {
+  id: string;
+  promptPrice?: number;
+  completionPrice?: number;
+  cachedReadPrice?: number;
+  cachedWritePrice?: number;
 }
 
 // OpenAI wire (openai_compatible + openai_responses): GET {base}/models with
@@ -465,7 +541,7 @@ export async function listModels(
   config: ProviderConfig,
   fetchImpl: FetchLike = fetch,
   opts?: { sessionId?: string },
-): Promise<{ models: { id: string }[] }> {
+): Promise<{ models: ListedModel[] }> {
   const kind = normalizeProviderKind(config.kind);
   const base = normalizeBaseUrl(config.baseUrl, kind).replace(/\/+$/, "");
   const isOpenAiWire = kind === "openai_compatible" || kind === "openai_responses";
@@ -482,9 +558,13 @@ export async function listModels(
     ? { authorization: `Bearer ${config.apiKey}`, ...sessionHeaders }
     : { "x-api-key": config.apiKey, "anthropic-version": ANTHROPIC_VERSION, ...sessionHeaders };
   assistantLog("DEBUG", "assistant-provider listModels request", { kind, base, path, model: config.model, providerId: config.providerId ?? null, apiKeyMask: maskApiKey(config.apiKey) });
+  // Build via `new URL` so a base carrying query/fragment keeps them in place
+  // (string concatenation would push the path past them).
+  const listUrl = new URL(base);
+  listUrl.pathname = `${listUrl.pathname.replace(/\/+$/, "")}${path}`;
   let res: Response;
   try {
-    res = await fetchImpl(`${base}${path}`, { headers, signal: AbortSignal.timeout(15_000) });
+    res = await fetchImpl(listUrl.toString(), { headers, signal: AbortSignal.timeout(15_000) });
   } catch (e) {
     assistantLog("WARN", "assistant-provider listModels fetch failed", { kind, base, path, error: String(e).slice(0, 500) });
     throw new ProviderUnreachable({});
@@ -492,9 +572,17 @@ export async function listModels(
   assistantLog("DEBUG", "assistant-provider listModels response", { kind, base, path, status: res.status });
   if (res.status === 401 || res.status === 403) throw new ProviderAuthFailed({});
   if (!res.ok) throw new ProviderUnreachable({ message: `models endpoint returned ${res.status}`, status: res.status });
-  const body = (await res.json()) as { data?: Array<{ id?: string }>; models?: Array<{ id?: string }> };
+  let parsed: unknown;
+  try {
+    parsed = await res.json();
+  } catch {
+    throw new ProviderUnreachable({ message: "models endpoint returned invalid JSON" });
+  }
+  const body = parsed !== null && typeof parsed === "object"
+    ? (parsed as { data?: Array<{ id?: string }>; models?: Array<{ id?: string }> })
+    : {};
   const items = body.data ?? body.models ?? [];
-  const models: Array<{ id: string }> = [];
+  const models: ListedModel[] = [];
   for (const m of items) {
     if (typeof m.id === "string") models.push({ id: m.id });
   }
@@ -518,9 +606,12 @@ export async function pingChatCompletion(
     ...opencodeSessionHeaders(opts?.sessionId ?? config.sessionId, config),
   };
   assistantLog("DEBUG", "assistant-provider pingChatCompletion request", { kind, base, model, providerId: config.providerId ?? null, apiKeyMask: maskApiKey(config.apiKey) });
+  // Same `new URL` path append as listModels: query/fragment survive in place.
+  const pingUrl = new URL(base);
+  pingUrl.pathname = `${pingUrl.pathname.replace(/\/+$/, "")}/chat/completions`;
   let res: Response;
   try {
-    res = await fetchImpl(`${base}/chat/completions`, {
+    res = await fetchImpl(pingUrl.toString(), {
       method: "POST",
       headers,
       body: JSON.stringify({ model, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false }),

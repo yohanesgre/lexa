@@ -206,6 +206,90 @@ describe("runAssistantTurn", () => {
   });
 });
 
+describe("runAssistantTurn provider health (H8)", () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("reports ok=true once for a completed attempt", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    const health: Array<{ providerId: string; ok: boolean }> = [];
+    const response = await runAssistantTurn(
+      {
+        ...deps([config({ fetchImpl: successFetch("ok") })], recorded),
+        recordProviderHealth: async (input) => {
+          health.push(input);
+        },
+      },
+      { projectId: "p1", threadKey: "chat:c1", sessionId: "c1", messages: MESSAGES }
+    );
+    await drain(response);
+    await tick();
+
+    expect(health).toEqual([{ providerId: "prov-1", ok: true }]);
+  });
+
+  it("reports ok=false for an errored attempt", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    const health: Array<{ providerId: string; ok: boolean }> = [];
+    await expect(
+      runAssistantTurn(
+        {
+          ...deps([config({ fetchImpl: failingFetch(401) })], recorded),
+          recordProviderHealth: async (input) => {
+            health.push(input);
+          },
+        },
+        { projectId: "p1", threadKey: "chat:c1", sessionId: "c1", messages: MESSAGES }
+      )
+    ).rejects.toMatchObject({ code: "PROVIDER_AUTH_FAILED" });
+    await tick();
+
+    expect(health).toEqual([{ providerId: "prov-1", ok: false }]);
+  });
+
+  it("walks false (primary) then true (fallback) across a fallback turn", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    const health: Array<{ providerId: string; ok: boolean }> = [];
+    const configs = [
+      config({ model: "primary", providerId: "prov-primary", fetchImpl: failingFetch(429) }),
+      config({ model: "fallback", providerId: "prov-fallback", fetchImpl: successFetch("from fallback") }),
+    ];
+    const response = await runAssistantTurn(
+      {
+        ...deps(configs, recorded),
+        recordProviderHealth: async (input) => {
+          health.push(input);
+        },
+      },
+      { projectId: "p1", threadKey: "chat:c1", sessionId: "c1", messages: MESSAGES }
+    );
+    await drain(response);
+    await tick();
+
+    expect(health).toEqual([
+      { providerId: "prov-primary", ok: false },
+      { providerId: "prov-fallback", ok: true },
+    ]);
+  });
+
+  it("a throwing provider-health report never fails the turn (fail-open)", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    const response = await runAssistantTurn(
+      {
+        ...deps([config({ fetchImpl: successFetch("still fine") })], recorded),
+        recordProviderHealth: async () => {
+          throw new Error("health store down");
+        },
+      },
+      { projectId: "p1", threadKey: "chat:c1", sessionId: "c1", messages: MESSAGES }
+    );
+    const body = await drain(response);
+
+    expect(body).toContain("still fine");
+    expect(recorded.logs).toHaveLength(1);
+    expect(recorded.logs[0]).toMatchObject({ status: "done" });
+  });
+});
+
 describe("turnErrorFor", () => {
   it("maps rate limits, auth, and transient failures to catalog codes", () => {
     expect(turnErrorFor({ status: 429 }).code).toBe("PROVIDER_RATE_LIMITED");

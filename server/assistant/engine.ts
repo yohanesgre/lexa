@@ -22,7 +22,7 @@ import {
   type ToolSet,
   type UIMessage,
 } from "ai";
-import type { AssistantCallLogInput } from "../../shared/assistant";
+import type { AssistantCallLogInput, AssistantCallLogPurpose } from "../../shared/assistant";
 import {
   isRateLimitedError,
   isRetryableModelError,
@@ -51,6 +51,13 @@ export interface AssistantTurnDeps {
   resolveProviderConfigs: (projectId: string) => Promise<RegistryModelConfig[] | null>;
   recordCallLog: (input: AssistantCallLogInput) => Promise<void>;
   transitionRun: (input: RunStatusTransition) => Promise<void>;
+  /**
+   * Best-effort per-attempt provider health report (H8): keeps
+   * `assistant_provider_health` live between manual probes. Absent = no breaker
+   * telemetry; a throw is swallowed by the engine so a health write can never
+   * fail a turn.
+   */
+  recordProviderHealth?: ((input: { providerId: string; ok: boolean }) => Promise<void>) | undefined;
 }
 
 /**
@@ -85,6 +92,11 @@ export interface AssistantTurnInput {
   stopWhen?: StopCondition<ToolSet> | Array<StopCondition<ToolSet>> | undefined;
   /** Present only for document runs; chat turns have no `assistant_tasks` row. */
   runId?: string | null | undefined;
+  /**
+   * Which assistant flow issued this turn; stamped onto every call log as
+   * `purpose`. `"turn"` for interactive turns, `"runner"` for delegated runs.
+   */
+  callLogPurpose?: AssistantCallLogPurpose | undefined;
   abortSignal?: AbortSignal | undefined;
   /** Clock seam for latency in tests. */
   nowMs?: (() => number) | undefined;
@@ -246,14 +258,17 @@ async function startStream(
       await guardedDeps.recordCallLog({
         projectId: input.projectId,
         providerId: config.providerId ?? null,
+        threadKey: input.threadKey,
+        runId: input.runId ?? null,
         model: config.model,
         kind: config.kind,
         status: "error",
+        purpose: input.callLogPurpose ?? "turn",
         errorCode: turnError.code,
         latencyMs: (input.nowMs?.() ?? Date.now()) - startedAtMs,
-        costCents: 0,
         estimated: true,
       });
+      await reportProviderHealthQuietly(guardedDeps, config.providerId, false);
     }
     // A retryable pre-stream failure may still be retried by the fallback walk,
     // so only the attempt the walk committed to may land `failed` (mid-stream
@@ -288,16 +303,19 @@ async function startStream(
       await guardedDeps.recordCallLog({
         projectId: input.projectId,
         providerId: config.providerId ?? null,
+        threadKey: input.threadKey,
+        runId: input.runId ?? null,
         model: config.model,
         kind: config.kind,
         status: "done",
+        purpose: input.callLogPurpose ?? "turn",
         usageIn: event.usage.inputTokens ?? 0,
         usageOut: event.usage.outputTokens ?? 0,
         cachedIn: event.usage.inputTokenDetails?.cacheReadTokens ?? 0,
         latencyMs: (input.nowMs?.() ?? Date.now()) - startedAtMs,
-        costCents: 0,
-        estimated: true,
+        estimated: false,
       });
+      await reportProviderHealthQuietly(guardedDeps, config.providerId, true);
       await transitionRunQuietly(guardedDeps, input.runId, {
         status: "completed",
         result: event.text,
@@ -317,6 +335,22 @@ async function startStream(
   // stream is re-errored for the client.
   const stream = await peekFirstPart(result.fullStream, failAttempt);
   return { stream, config, attemptState };
+}
+
+// Provider-health writes are best-effort from the stream callbacks: a failed
+// report must never break the turn's stream (the breaker self-heals on the next
+// turn). Absent provider id / unwired dep = nothing to report.
+async function reportProviderHealthQuietly(
+  deps: AssistantTurnDeps,
+  providerId: string | null | undefined,
+  ok: boolean
+): Promise<void> {
+  if (!providerId || !deps.recordProviderHealth) return;
+  try {
+    await deps.recordProviderHealth({ providerId, ok });
+  } catch (e) {
+    console.warn("[Assistant] provider-health report failed:", e instanceof Error ? e.message : String(e));
+  }
 }
 
 // Run-status writes are best-effort from the stream callbacks: the turn's

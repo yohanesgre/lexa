@@ -1655,7 +1655,21 @@ GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers
                                                         HMAC headers is authoritative; the body
                                                         never overrides signed identity)
     POST /api/internal/assistant/call-log           → { ok: true }
+                                                       body { projectId?, providerId?, threadKey?,
+                                                              runId?, model, kind, status,
+                                                              purpose: "turn"|"runner"|"preflight"|"summary",
+                                                              errorCode?, usageIn?, usageOut?,
+                                                              cachedIn?, latencyMs?, costCents?,
+                                                              estimated? }
+                                                       (purpose defaults to "turn"; threadKey falls
+                                                        back to the signed identity thread)
     POST /api/internal/assistant/run-status         → { ok: true }        (terminal task transitions)
+    POST /api/internal/assistant/provider-health    → assistant health row (per-turn breaker outcome)
+                                                       body { providerId, ok }
+    POST /api/internal/assistant/run-create         → { run }             (delegation registry)
+    POST /api/internal/assistant/run-update         → assistant run row   (atomic transition)
+    POST /api/internal/assistant/run-counts         → { thread, project } (active-run caps)
+    GET  /api/internal/assistant/run?id=<runId>     → { run }
   A missing/malformed HMAC → 401 NO_USER_CONTEXT; no master key → 502
   ASSISTANT_UNAVAILABLE.
   Like `GET /api/capabilities`, these mounts run before the HttpApi app and
@@ -1706,10 +1720,13 @@ POST   /api/assistant/settings/:projectId/models   (admin — requireAdmin)
 body same as test
 → 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
   Lists models from the provider using submitted unsaved values (per-kind wire
-  format, base URL normalized per kind). Some compat endpoints lack the listing
-  route (404/405): the route then pings `POST {base}/chat/completions`
-  (`max_tokens: 1`, `stream: false`); a successful ping returns `{ models: [] }`
-  and manual model entry is always available as fallback.
+  format, base URL normalized per kind). Some `openai_compatible` endpoints lack
+  the listing route (404/405): for that kind only, the route then pings
+  `POST {base}/chat/completions` (`max_tokens: 1`, `stream: false`); a
+  successful ping returns `{ models: [] }` and manual model entry is always
+  available as fallback. Non-`openai_compatible` kinds (`anthropic_compatible`,
+  `openai_responses`, `workers_ai`) never take the ping fallback — their listing
+  failure propagates unchanged.
   Cloudflare AI (`api.cloudflare.com/client/v4/accounts/<id>/ai/v1`) has no
   GET /models (405); its catalog is read from
   `GET .../ai/models/search` (`task=Text Generation` when accepted, full
@@ -1823,6 +1840,12 @@ GET    /api/projects/:slug/assistant/usage?from=&to=   (superadmin)
 GET    /api/admin/assistant/calls   (superadmin)
 → 200 { data: AssistantCallLogRow[] }   // last 100, created_at DESC
   | 403 FORBIDDEN
+  AssistantCallLogRow = { id, projectId, providerId, threadKey, runId, model,
+                          kind, status, purpose: "turn"|"runner"|"preflight"|"summary",
+                          errorCode, usageIn, usageOut, cachedIn, latencyMs,
+                          costCents, estimated, createdAt }
+  `threadKey`/`runId` are nullable (older rows and non-threaded calls); `purpose`
+  defaults to `turn`.
 
 ### Assistant MCP clients
 

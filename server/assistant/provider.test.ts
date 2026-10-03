@@ -5,6 +5,7 @@ import {
   pingChatCompletion,
   cloudflareAiAccountId,
   isCloudflareAiBaseUrl,
+  parseCfModelPrice,
   CLOUDFLARE_DEFAULT_MODEL,
   normalizeBaseUrl,
   normalizeProviderKind,
@@ -491,6 +492,90 @@ describe("cloudflare models", () => {
 
   it("exposes the CF default model constant", () => {
     expect(CLOUDFLARE_DEFAULT_MODEL).toBe("@cf/meta/llama-3.2-1b-instruct");
+  });
+
+  it("attaches per-M prices parsed from properties[price] to catalog entries", async () => {
+    const res = await listModels(cfConfig(), async () =>
+      jsonResponse(200, {
+        result: [
+          {
+            name: "@cf/meta/llama-3.2-1b-instruct",
+            properties: [
+              {
+                property_id: "price",
+                value: [
+                  { unit: "per M input tokens", price: 0.027, currency: "USD" },
+                  { unit: "per M output tokens", price: 0.201, currency: "USD" },
+                ],
+              },
+            ],
+          },
+          { name: "@cf/baai/bge-base-en" },
+        ],
+        result_info: { per_page: 50, total_count: 2 },
+      })
+    );
+    expect(res.models).toEqual([
+      { id: "@cf/meta/llama-3.2-1b-instruct", promptPrice: 0.027, completionPrice: 0.201, cachedReadPrice: 0, cachedWritePrice: 0 },
+      { id: "@cf/baai/bge-base-en" },
+    ]);
+  });
+});
+
+describe("parseCfModelPrice", () => {
+  const props = (value: unknown) => [{ property_id: "price", value }];
+
+  it("maps the input/output unit entries", () => {
+    expect(
+      parseCfModelPrice(
+        props([
+          { unit: "per M input tokens", price: 12.5, currency: "USD" },
+          { unit: "per M output tokens", price: 75, currency: "USD" },
+        ])
+      )
+    ).toEqual({ promptPrice: 12.5, completionPrice: 75, cachedReadPrice: 0, cachedWritePrice: 0 });
+  });
+
+  it("accepts numeric strings and tolerant cache units", () => {
+    expect(
+      parseCfModelPrice(
+        props([
+          { unit: "per M input tokens", price: "1.5" },
+          { unit: "per M output tokens", price: "3" },
+          { unit: "per M cached input tokens read", price: "0.15" },
+          { unit: "per M cached input tokens write", price: "1.5" },
+        ])
+      )
+    ).toEqual({ promptPrice: 1.5, completionPrice: 3, cachedReadPrice: 0.15, cachedWritePrice: 1.5 });
+  });
+
+  it("defaults units that were not reported to 0", () => {
+    expect(parseCfModelPrice(props([{ unit: "per M input tokens", price: 2 }]))).toEqual({
+      promptPrice: 2,
+      completionPrice: 0,
+      cachedReadPrice: 0,
+      cachedWritePrice: 0,
+    });
+  });
+
+  it("returns null when absent or malformed", () => {
+    expect(parseCfModelPrice(undefined)).toBeNull();
+    expect(parseCfModelPrice("nope")).toBeNull();
+    expect(parseCfModelPrice([])).toBeNull();
+    expect(parseCfModelPrice([{ property_id: "other", value: [{ unit: "per M input tokens", price: 1 }] }])).toBeNull();
+    expect(parseCfModelPrice([{ property_id: "price", value: "not-an-array" }])).toBeNull();
+    expect(parseCfModelPrice(props([{ unit: "per M input tokens", price: "abc" }, null, 7]))).toBeNull();
+  });
+
+  it("ignores negative and non-finite prices", () => {
+    expect(
+      parseCfModelPrice(
+        props([
+          { unit: "per M input tokens", price: -1 },
+          { unit: "per M output tokens", price: 4 },
+        ])
+      )
+    ).toEqual({ promptPrice: 0, completionPrice: 4, cachedReadPrice: 0, cachedWritePrice: 0 });
   });
 });
 

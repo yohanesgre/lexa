@@ -31,6 +31,7 @@ export const INTERNAL_MIRROR_PATH = "/api/internal/assistant/mirror";
 export const INTERNAL_PROVIDER_CONFIG_PATH = "/api/internal/assistant/provider-config";
 export const INTERNAL_TURN_CONTEXT_PATH = "/api/internal/assistant/turn-context";
 export const INTERNAL_CALL_LOG_PATH = "/api/internal/assistant/call-log";
+export const INTERNAL_PROVIDER_HEALTH_PATH = "/api/internal/assistant/provider-health";
 export const INTERNAL_RUN_STATUS_PATH = "/api/internal/assistant/run-status";
 export const INTERNAL_RUN_CREATE_PATH = "/api/internal/assistant/run-create";
 export const INTERNAL_RUN_UPDATE_PATH = "/api/internal/assistant/run-update";
@@ -204,6 +205,19 @@ export async function resolveHarnessContext(
  */
 export async function recordCallLog(deps: AssistantInternalDeps, input: AssistantCallLogInput): Promise<boolean> {
   return postInternal(deps, INTERNAL_CALL_LOG_PATH, input, "call-log");
+}
+
+/**
+ * Report one provider outcome (success/failure) so the breaker /
+ * `assistant_provider_health` stays live between manual probes (H8). Best-effort
+ * with the retry-once policy: a failed health write is warned, never thrown —
+ * the turn must not break on breaker telemetry.
+ */
+export async function recordProviderHealthRemote(
+  deps: AssistantInternalDeps,
+  input: { providerId: string; ok: boolean }
+): Promise<boolean> {
+  return postInternal(deps, INTERNAL_PROVIDER_HEALTH_PATH, input, "provider-health");
 }
 
 /**

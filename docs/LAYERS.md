@@ -954,7 +954,7 @@ export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("
   // thin: create/getById/listByProvider/listAll/update/delete
 }) {}
 export class AssistantCallLogsRepo extends Effect.Service<AssistantCallLogsRepo>()("Lexa/AssistantCallLogsRepo", {
-  // assistant_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→assistant_providers ON DELETE SET NULL,model,kind,status CHECK done|error|suspended|aborted,error_code,usage_in/out,cached_in,latency_ms,cost_cents,estimated,created_at)
+  // assistant_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→assistant_providers ON DELETE SET NULL,thread_key,run_id,model,kind,status CHECK done|error|suspended|aborted,purpose CHECK turn|runner|preflight|summary DEFAULT turn,error_code,usage_in/out,cached_in,latency_ms,cost_cents,estimated,created_at)
   // thin: insert/getById/listByProject/listByProvider/listByModel/listRecent
 }) {}
 export class AssistantModelPricesRepo extends Effect.Service<AssistantModelPricesRepo>()("Lexa/AssistantModelPricesRepo", {
@@ -1360,10 +1360,25 @@ the run intact, and Jev emits no `task_activity` of its own.
   before the public middleware, authenticated only by the `X-Lexa-Internal` HMAC
   (≤120s skew). Surfaces: legacy import read, mirror write, read-tool execution,
   write-tool proposal, write execution (auto mode), provider config, turn
-  context, call-log, run-status.
+  context, call-log, provider-health, run-status, and the run registry
+  (run-create/run-update/run-counts/run).
   Writes that execute approved proposals run through the existing domain
   services (invariant #1 intact); terminal transitions emit activity in the
   same transaction (invariant #12).
+- **Runner + run registries** — `LexaAssistantRunner` (a facet `AIChatAgent`
+  exported from `server/workers-entry.ts`) executes delegated runs the parent DO
+  dispatches via `agents/agent-tools`. The durable registry is D1
+  `assistant_runs` (kind `chat_run|document|schedule`; status
+  `queued|running|completed|failed|cancelled`), transitioned by an atomic
+  conditional UPDATE; `chat_run`/`schedule` rows emit no `task_activity`
+  (invariant #12). `assistant_schedules` is drained by `runScheduled` on the
+  `*/15` cron, which creates the run row and advances `next_run_at` in one
+  UPDATE per due row.
+- **Observability** — call logs carry `thread_key`/`run_id`/`purpose`
+  (`turn|runner|preflight|summary`); `cost_cents` derives from
+  `assistant_model_prices` when the caller sends none; each DO turn reports
+  provider success/failure so `assistant_provider_health` stays live. DO AI
+  calls are traced via `wrapAISDK` (metadata-only; `server/assistant/tracing.ts`).
 - **Inference** — `server/assistant/model-factory.ts` maps a registry row to an
   AI SDK provider, preserves the built-in `x-opencode-session` derivation, walks
   the ≤3 cross-kind fallback, and maps upstream 429 → `PROVIDER_RATE_LIMITED`.

@@ -40,6 +40,8 @@ afterAll(() => {
 
 beforeEach(() => {
   db.exec("DELETE FROM assistant_call_logs");
+  db.exec("DELETE FROM assistant_provider_health");
+  db.exec("DELETE FROM assistant_model_prices");
   db.exec("DELETE FROM assistant_runs");
   db.exec("DELETE FROM task_activity");
   db.exec("DELETE FROM assistant_tasks");
@@ -843,6 +845,146 @@ describe("call-log writes (POST /api/internal/assistant/call-log)", () => {
       .prepare("SELECT kind FROM assistant_call_logs WHERE model = '@cf/meta/llama-3.2-1b-instruct'")
       .get() as { kind: string };
     expect(row.kind).toBe("workers_ai");
+  });
+
+  it("round-trips thread_key/run_id/purpose, defaults purpose, and rejects an unknown purpose", async () => {
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: {
+        projectId: "p1",
+        model: "runner-model",
+        kind: "openai_compatible",
+        status: "done",
+        purpose: "runner",
+        threadKey: "task:t1",
+        runId: "run-1",
+      },
+      driver: driverOf(),
+    });
+    expect(res.status).toBe(200);
+    expect(
+      db.prepare("SELECT thread_key, run_id, purpose FROM assistant_call_logs WHERE model = 'runner-model'").get()
+    ).toEqual({ thread_key: "task:t1", run_id: "run-1", purpose: "runner" });
+
+    // purpose omitted → 'turn'; thread_key falls back to the signed identity.
+    const def = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: { model: "default-model", kind: "openai_compatible", status: "done" },
+      driver: driverOf(),
+      identity: { actorUserId: "u1", projectId: "p1", threadKey: "chat:c1" },
+    });
+    expect(def.status).toBe(200);
+    expect(
+      db.prepare("SELECT thread_key, run_id, purpose FROM assistant_call_logs WHERE model = 'default-model'").get()
+    ).toEqual({ thread_key: "chat:c1", run_id: null, purpose: "turn" });
+
+    const bad = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: { model: "m", kind: "openai_compatible", status: "done", purpose: "bogus" },
+      driver: driverOf(),
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("computes cost_cents from assistant_model_prices when the caller omits it", async () => {
+    db.prepare(
+      "INSERT INTO assistant_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES ('priced', 3000, 6000, 300, 0)"
+    ).run();
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: {
+        model: "priced",
+        kind: "openai_compatible",
+        status: "done",
+        usageIn: 1000,
+        usageOut: 500,
+        cachedIn: 200,
+      },
+      driver: driverOf(),
+    });
+    expect(res.status).toBe(200);
+    // freshIn=800: (800*3000 + 200*300 + 500*6000)/1e6*100 = 546 cents.
+    expect(db.prepare("SELECT usage_in, usage_out, cached_in, cost_cents FROM assistant_call_logs WHERE model = 'priced'").get()).toEqual({
+      usage_in: 1000,
+      usage_out: 500,
+      cached_in: 200,
+      cost_cents: 546,
+    });
+  });
+
+  it("records cost 0 when the model has no price row", async () => {
+    const res = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/call-log",
+      body: { model: "unpriced", kind: "openai_compatible", status: "done", usageIn: 1000, usageOut: 500 },
+      driver: driverOf(),
+    });
+    expect(res.status).toBe(200);
+    expect(db.prepare("SELECT cost_cents FROM assistant_call_logs WHERE model = 'unpriced'").get()).toEqual({ cost_cents: 0 });
+  });
+});
+
+describe("provider health (POST /api/internal/assistant/provider-health)", () => {
+  const driverOf = () => createBunSqliteDriver(db);
+
+  it("records a success as a closed reset and three failures as an open circuit", async () => {
+    db.exec("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P1','https://x','sk'), ('pr2','P2','https://x','sk')");
+    const okRes = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/provider-health",
+      body: { providerId: "pr1", ok: true },
+      driver: driverOf(),
+    });
+    expect(okRes.status).toBe(200);
+    expect(db.prepare("SELECT circuit_state, failure_count, consecutive_failures FROM assistant_provider_health WHERE provider_id = 'pr1'").get()).toEqual({
+      circuit_state: "closed",
+      failure_count: 0,
+      consecutive_failures: 0,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const res = await handleInternalAssistantRequest({
+        method: "POST",
+        path: "/api/internal/assistant/provider-health",
+        body: { providerId: "pr2", ok: false },
+        driver: driverOf(),
+      });
+      expect(res.status).toBe(200);
+    }
+    const row = db.prepare("SELECT circuit_state, failure_count, consecutive_failures, opened_at FROM assistant_provider_health WHERE provider_id = 'pr2'").get() as {
+      circuit_state: string;
+      failure_count: number;
+      consecutive_failures: number;
+      opened_at: string | null;
+    };
+    expect(row.circuit_state).toBe("open");
+    expect(row.failure_count).toBe(3);
+    expect(row.consecutive_failures).toBe(3);
+    expect(row.opened_at).not.toBeNull();
+
+    // Isolation: pr1's row is untouched by pr2's failures.
+    expect(db.prepare("SELECT circuit_state FROM assistant_provider_health WHERE provider_id = 'pr1'").get()).toEqual({ circuit_state: "closed" });
+  });
+
+  it("rejects a malformed payload with 400", async () => {
+    const missing = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/provider-health",
+      body: { providerId: "", ok: true },
+      driver: driverOf(),
+    });
+    expect(missing.status).toBe(400);
+    const nonBool = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/provider-health",
+      body: { providerId: "pr1", ok: "yes" },
+      driver: driverOf(),
+    });
+    expect(nonBool.status).toBe(400);
   });
 });
 

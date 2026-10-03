@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1448,6 +1448,67 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     after.prepare("DELETE FROM assistant_providers WHERE id = 'prov1'").run();
     expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_models").get()).toEqual({ n: 0 });
     expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_call_logs WHERE provider_id IS NULL").get()).toEqual({ n: 2 });
+    expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
+
+  // ── 0023 assistant_call_logs rebuild (H8) ────────────────────────────────
+  it("0023 rebuilds assistant_call_logs with thread_key/run_id/purpose, preserves rows and indexes", () => {
+    const dir = stageThrough("0022");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0023_assistant_call_log_rebuild.sql");
+
+    const seed = new Database(dbPath);
+    seed.exec("PRAGMA foreign_keys = ON");
+    seed.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+      INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('prov1', 'CF', '', '');
+      INSERT INTO assistant_call_logs (id, project_id, provider_id, model, kind, status, usage_in, usage_out)
+        VALUES ('cl1', 'p1', 'prov1', 'gpt-4o-mini', 'openai_compatible', 'done', 10, 5);
+    `);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    after.exec("PRAGMA foreign_keys = ON");
+    expect(appliedMigrations(dbPath)).toContain("0023_assistant_call_log_rebuild.sql");
+
+    // Rows survived verbatim; new columns default (purpose 'turn', others NULL).
+    expect(
+      after.prepare("SELECT id, model, kind, usage_in, usage_out, purpose, thread_key, run_id FROM assistant_call_logs").all()
+    ).toEqual([
+      { id: "cl1", model: "gpt-4o-mini", kind: "openai_compatible", usage_in: 10, usage_out: 5, purpose: "turn", thread_key: null, run_id: null },
+    ]);
+
+    // The CHECK accepts every purpose…
+    for (const p of ["turn", "runner", "preflight", "summary"]) {
+      after.prepare("INSERT INTO assistant_call_logs (id, model, kind, status, purpose) VALUES (?, 'm', 'openai_compatible', 'done', ?)").run(`cl-${p}`, p);
+    }
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_call_logs").get()).toEqual({ n: 5 });
+    // …and rejects an unknown one.
+    expect(() =>
+      after.prepare("INSERT INTO assistant_call_logs (id, model, kind, status, purpose) VALUES ('cl-bad', 'm', 'openai_compatible', 'done', 'bogus')").run()
+    ).toThrow(/CHECK constraint failed/i);
+
+    // thread_key/run_id round-trip.
+    after
+      .prepare("INSERT INTO assistant_call_logs (id, model, kind, status, purpose, thread_key, run_id) VALUES ('cl-att', 'm', 'openai_compatible', 'done', 'runner', 'task:t1', 'run-1')")
+      .run();
+    expect(after.prepare("SELECT thread_key, run_id, purpose FROM assistant_call_logs WHERE id = 'cl-att'").get()).toEqual({
+      thread_key: "task:t1",
+      run_id: "run-1",
+      purpose: "runner",
+    });
+
+    // The three call-log indexes were recreated.
+    const idx = (after.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toEqual(expect.arrayContaining(["idx_call_logs_project_time", "idx_call_logs_provider", "idx_call_logs_model"]));
+
+    // FK survived the rebuild: provider delete nulls provider_id.
+    after.prepare("DELETE FROM assistant_providers WHERE id = 'prov1'").run();
+    expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_call_logs WHERE provider_id IS NULL").get()).toEqual({ n: 6 });
     expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     after.close();
   });
