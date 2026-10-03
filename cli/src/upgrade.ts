@@ -1,6 +1,7 @@
-// lx upgrade — self-update the CLI binary (GitHub release). Web app
-// upgrades go through the install script (re-run pulls the latest image
-// and recreates the container; the data volume survives).
+// lx upgrade — self-update the CLI binary (GitHub release). Web-app
+// upgrades go through `lx worker upgrade` (Cloudflare Workers) or by
+// re-running the install script (which redeploys the worker; D1/R2/KV
+// state survives).
 //
 // CLI releases are INDEPENDENT of web app releases: cli-vX.Y.Z tags publish
 // the binary as a GitHub release asset; vX.Y.Z tags publish the app image to
