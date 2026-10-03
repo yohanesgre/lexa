@@ -1395,10 +1395,13 @@ GitHub sync (optional integration):
 
 Workers (self-hosted):
   worker upgrade [--dir <cf-workers>] [--worker <name>] [--cf-token <tok>]
-                 [--dry-run] [--yes] [--version <v>]
-                                           resolve a Cloudflare Workers deploy
-                                           and print the update plan (run from
-                                           your cf-workers/ custody dir)
+                 [--version <tag>] [--dry-run] [--yes] [--force]
+                                           update a Cloudflare Workers deploy:
+                                           fetch + verify the release, preserve
+                                           custody/bindings, back up the deploy
+                                           dir, apply pending D1 migrations,
+                                           deploy, roll back on failure (run
+                                           from your cf-workers/ custody dir)
 
 Upgrade:
   upgrade                                self-update the CLI binary (GitHub release)
@@ -1484,10 +1487,13 @@ const GROUP_HELP: Record<string, string> = {
 
   worker: `Workers (self-hosted):
   worker upgrade [--dir <cf-workers>] [--worker <name>] [--cf-token <tok>]
-                 [--dry-run] [--yes] [--version <v>]
-                                           resolve a Cloudflare Workers deploy
-                                           and print the update plan (run from
-                                           your cf-workers/ custody dir)`,
+                 [--version <tag>] [--dry-run] [--yes] [--force]
+                                           update a Cloudflare Workers deploy:
+                                           fetch + verify the release, preserve
+                                           custody/bindings, back up the deploy
+                                           dir, apply pending D1 migrations,
+                                           deploy, roll back on failure (run
+                                           from your cf-workers/ custody dir)`,
   upgrade: `Upgrade:
   upgrade                                        self-update the CLI binary (GitHub release)`,
 };

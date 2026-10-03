@@ -552,10 +552,56 @@ export function resolveDeployVars(input: {
   };
 }
 
+// The install-managed D1 journal lives in `_migrations`. Migration files are
+// applied in lexicographic (numeric-prefix) order. This one is load-bearing:
+// it must be applied with or before the build that removes reference mode
+// (docs/CLOUDFLARE_WORKERS.md) — a new build on an un-migrated DB refuses a
+// stored `secret_ref` at connect rather than falling back to anonymous access.
+export const MCP_SECRET_REFS_MIGRATION = "0012_remove_mcp_secret_refs.sql";
+
+// Migration files not yet recorded in the journal, sorted for deterministic
+// apply order. Shared by the installer's apply loop and `lx worker upgrade`.
+export function pendingMigrations(
+  files: readonly string[],
+  applied: ReadonlySet<string>,
+): string[] {
+  return files
+    .filter((f) => f.endsWith(".sql"))
+    .slice()
+    .sort()
+    .filter((f) => !applied.has(f));
+}
+
+// A journal with a gap (a pending migration sorting before an applied one) is
+// out of order — applying the lagging file now runs its statements after later
+// DDL. Refuse it; the 0012 case names the managed-only deploy rule explicitly.
+export function migrationOrderError(
+  files: readonly string[],
+  applied: ReadonlySet<string>,
+): string | null {
+  const known = new Set(files);
+  const pending = pendingMigrations(files, applied);
+  if (pending.length === 0) return null;
+  const first = pending[0]!;
+  const appliedAfter = [...applied].filter((f) => known.has(f) && f > first).sort();
+  if (appliedAfter.length === 0) return null;
+  const base = `migration journal is out of order: '${first}' is not applied but later migration(s) ${appliedAfter.join(", ")} are`;
+  return first === MCP_SECRET_REFS_MIGRATION
+    ? `${base} — ${MCP_SECRET_REFS_MIGRATION} must be applied with or before the managed-only build (docs/CLOUDFLARE_WORKERS.md)`
+    : base;
+}
+
 const API = "https://api.cloudflare.com/client/v4";
 
 let CF_TOKEN = "";
 let account = "";
+
+// Set the token cfFetch/cfJson present to the Cloudflare API. The installer
+// assigns these in main(); `lx worker upgrade` sets them once from its creds
+// chain (flag > env > .cf-token) before using the helpers.
+export function setCfToken(token: string): void {
+  CF_TOKEN = token;
+}
 
 export async function cfFetch(
   path: string,
