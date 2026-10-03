@@ -66,7 +66,7 @@ export interface LexaAssistantEnv {
   ASSISTANT_SERVICE?: Fetcher | undefined;
   // H9: the Cloudflare AI binding, declared in wrangler.jsonc. A `workers_ai`
   // model in the resolved chain is built keyless through this binding; absent
-  // (Docker/Bun flavor) the config resolution leaves such models unbuildable.
+  // (Bun flavor) the config resolution leaves such models unbuildable.
   AI?: Ai | undefined;
 }
 

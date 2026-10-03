@@ -492,7 +492,7 @@ GET    /api/capabilities
   boot on both flavors, no DB read, no leak. `assistant` is `true` only on the
   Workers flavor **and** when `LXK_SECRETS_MASTER_KEY` is configured (the
   assistant needs it for HMAC derivation + provider-secret decryption), so the
-  Bun/Docker flavor always reports `false`. `chatAttachments` is
+  Bun flavor always reports `false`. `chatAttachments` is
   `assistant && !LXK_DISABLE_CHAT_ATTACHMENTS`; `tasksBulk` is
   `!LXK_DISABLE_TASKS_BULK` (flavor-independent). The frontend gates assistant
   surfaces on these flags; the server refuses regardless.
@@ -1578,7 +1578,7 @@ Notes:
 > **Workers-only.** The assistant runs on `@cloudflare/ai-chat` `AIChatAgent`
 > Durable Objects (one DO per conversation thread), reached over a
 > session-authenticated WebSocket through the Worker gate. It is the only flavor
-> that serves this section: on **Bun/Docker** the assistant HttpApi groups are
+> that serves this section: on the **Bun flavor** the assistant HttpApi groups are
 > not mounted, so `/api/assistant/*` and `/api/admin/assistant/*` return the
 > framework's **404** and `GET /api/capabilities` reports
 > `{ "assistant": false, "flavor": "bun" }` (ADR-0003 §F).
@@ -2253,7 +2253,7 @@ GET    /api/assistant/tasks/:id
 POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
 → 200 text/event-stream
   > **Retained legacy — Workers only.** Still mounted on Workers; the document
-  > panel uses it. **404 on Bun/Docker** (the assistant groups are not mounted).
+  > panel uses it. **404 on the Bun flavor** (the assistant groups are not mounted).
   > Superseded by the `GET /api/assistant/agent/:threadKey` WebSocket for the
   > chat surface; new integrations should prefer the socket. (The ADR's REMOVED
   > applies to the Bun flavor / a later release, not to today's Workers route.)
@@ -2295,7 +2295,7 @@ body { projectId*, chatId*, message*, agentId?,
        fromIndex?: number }
   > **Retained legacy — Workers only.** Still mounted on Workers (the app now
   > sends over the `GET /api/assistant/agent/chat:<chatId>` WebSocket);
-  > **404 on Bun/Docker** (the assistant groups are not mounted). Not removed on
+  > **404 on the Bun flavor** (the assistant groups are not mounted). Not removed on
   > Workers — the ADR's REMOVED applies to the Bun flavor / a later release.
   Freeform chat ALWAYS runs the assistant lane. Multi-thread per user: a chat
   thread is keyed by its own client-generated `chatId` and owned by one user
