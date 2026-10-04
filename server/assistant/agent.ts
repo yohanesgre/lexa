@@ -891,9 +891,14 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       this.releaseResumeBatch(batchId);
       return { ok: true, executed: false, reason: "settled" };
     }
-    // No approved rows: nothing ran, so no continuation. Keep the claim so a
-    // repeated request stays idempotent, and settle the batch.
-    if (outcome.kind === "noop") return { ok: true, executed: false, reason: "settled" };
+    // No approved rows: nothing ran, but a settled note (all rejected/expired)
+    // still warrants a rejection acknowledgment so the user is never left with
+    // silent feedback. Keep the claim so a repeated request stays idempotent,
+    // and settle the batch. A note-less noop (old Worker) stays silent.
+    if (outcome.kind === "noop") {
+      if (outcome.note.trim() !== "") await this.runResumeContinuation(batchId, outcome.note);
+      return { ok: true, executed: false, reason: "settled" };
+    }
     // Non-chat thread (task/wiki): the route applies nothing and the
     // continuation is owned in-process by `resumeThreadStream`, so there is no
     // DO-side work to do. Writes definitely did not apply → release the claim

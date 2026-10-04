@@ -534,7 +534,7 @@ describe("chat resume execution (POST /api/internal/assistant/resume-execute)", 
     expect(result).toEqual({ status: 200, body: { ok: false, reason: "missing" } });
   });
 
-  it("reports an all-rejected batch as noop without executing or noting anything", async () => {
+  it("reports an all-rejected batch as noop with rejection note lines and no executor call", async () => {
     seedTask();
     seedPendingWrite({ id: "w1", batchId: "b-noop", status: "rejected", seq: 0 });
     seedPendingWrite({ id: "w2", batchId: "b-noop", status: "rejected", seq: 1, args: { ref: "P-2" } });
@@ -545,8 +545,50 @@ describe("chat resume execution (POST /api/internal/assistant/resume-execute)", 
         return { ok: true, applied: true, result: {} };
       },
     });
-    expect(result).toEqual({ status: 200, body: { ok: false, reason: "noop" } });
+    expect(result.status).toBe(200);
+    const body = result.body as { ok: boolean; reason: string; note: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("noop");
+    expect(body.note).toContain("[approved write results]");
+    expect(body.note).toContain("None of the proposed writes were executed.");
+    expect(body.note).toContain('- update_task "P-1": rejected (not executed)');
+    expect(body.note).toContain('- update_task "P-2": rejected (not executed)');
     expect(called).toBe(0);
+  });
+
+  it("reports an all-expired batch as noop with an expired note line", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b-expired", status: "expired", seq: 0 });
+    let called = 0;
+    const result = await call({ batchId: "b-expired" }, IDENTITY, {
+      executeWriteTool: async () => {
+        called += 1;
+        return { ok: true, applied: true, result: {} };
+      },
+    });
+    expect(result.status).toBe(200);
+    const body = result.body as { ok: boolean; reason: string; note: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("noop");
+    expect(body.note).toContain("None of the proposed writes were executed.");
+    expect(body.note).toContain('- update_task "P-1": expired (not executed)');
+    expect(called).toBe(0);
+  });
+
+  it("includes rejected and expired rows in the note for a mixed batch", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b-mixed", status: "approved", seq: 0 });
+    seedPendingWrite({ id: "w2", batchId: "b-mixed", status: "rejected", seq: 1, args: { ref: "P-2" } });
+    seedPendingWrite({ id: "w3", batchId: "b-mixed", status: "expired", seq: 2, args: { ref: "P-3" } });
+    const result = await call({ batchId: "b-mixed" }, IDENTITY, {
+      executeWriteTool: async (input) => ({ ok: true, applied: true, result: { id: input.args.ref } }),
+    });
+    expect(result.status).toBe(200);
+    const body = result.body as { ok: boolean; note: string };
+    expect(body.ok).toBe(true);
+    expect(body.note).toContain('update_task "P-1": applied');
+    expect(body.note).toContain('- update_task "P-2": rejected (not executed)');
+    expect(body.note).toContain('- update_task "P-3": expired (not executed)');
   });
 
   it("surfaces an execute failure as a 'failed (not executed)' note line", async () => {

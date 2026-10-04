@@ -102,6 +102,11 @@ async function handleInternal(request, env) {
     if (typeof body.batchId === "string" && body.batchId.startsWith("pending")) {
       return Response.json({ ok: false, reason: "pending", remaining: 1 });
     }
+    // A batch the Worker decided with no approved rows and a settled note: the
+    // DO must run a rejection acknowledgment continuation, then settle.
+    if (typeof body.batchId === "string" && body.batchId.startsWith("noop-note")) {
+      return Response.json({ ok: false, reason: "noop", note: '[approved write results]\\nNone of the proposed writes were executed.\\n- update_task "P-1": rejected (not executed)' });
+    }
     // A batch the Worker decided but with no approved rows: nothing to execute.
     if (typeof body.batchId === "string" && body.batchId.startsWith("noop")) {
       return Response.json({ ok: false, reason: "noop" });
@@ -1408,6 +1413,29 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     // No continuation: nothing was executed, so the transcript must not grow.
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(await transcriptOf(documentId)).toHaveLength(1);
+  }, 60_000);
+
+  it("runs a rejection acknowledgment continuation for a noted noop batch (never silent)", async () => {
+    const documentId = "resume-noop-note";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    await persistStep(threadKey, [carrierMessage("w-noop-note", "noop-note-batch")]);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
+
+    capturedProviderRequest = null;
+    const res = await callResume(threadKey, "noop-note-batch");
+    expect(await res.json()).toEqual({ ok: true, executed: false, reason: "settled" });
+
+    // The note drives a continuation: a provider call runs and the assistant
+    // message grows beyond the carrier's original "proposed" text.
+    await waitFor<string>(() => Promise.resolve(capturedProviderRequest), 20_000);
+    await waitFor<boolean>(
+      () => transcriptOf(documentId).then((m) => (JSON.stringify(m).includes('"ok"') ? true : null)),
+      20_000
+    );
   }, 60_000);
 
   it("releases the claim for a requested batch the Worker reports missing", async () => {

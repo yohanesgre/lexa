@@ -53,7 +53,7 @@ import {
   getAssistantRun,
   transitionAssistantRunRegistry,
 } from "./run-registry";
-import { collectResumeResults } from "./resume-results";
+import { collectResumeResults, settledNoteLines } from "./resume-results";
 import { buildResumeResultsNote, type ResumeResultLine } from "./build-stream";
 
 export interface MirrorThreadInput {
@@ -894,11 +894,11 @@ export async function handleInternalAssistantRequest(input: {
       return { status: 200, body: { ok: false, reason: "pending", remaining: pending } };
     }
     // A fully-decided batch with no approved rows (all rejected/expired) has
-    // nothing to execute. Report `noop` instead of running the executor: the DO
-    // keeps its claim, runs no continuation, and the client settles the batch
-    // (no note, no model turn).
+    // nothing to execute. Report `noop` with the settled note lines instead of
+    // running the executor: the DO keeps its claim, runs a continuation from the
+    // note, and the client settles the batch (never silent).
     if (!rows.some((row) => row.status === "approved")) {
-      return { status: 200, body: { ok: false, reason: "noop" } };
+      return { status: 200, body: { ok: false, reason: "noop", note: buildResumeResultsNote(settledNoteLines(rows)) } };
     }
     if (!input.deps?.executeWriteTool) {
       return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Write execution not wired" } } };
