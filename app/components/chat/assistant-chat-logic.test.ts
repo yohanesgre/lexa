@@ -288,4 +288,24 @@ describe("resumableBatchId — resume guards (LX-81/82/83)", () => {
     expect(resumableBatchId(turns, new Set())).toBe("b2");
     expect(resumableBatchId(turns, new Set(["b2"]))).toBe("b1");
   });
+
+  it("resumes an all-rejected/expired batch decided in this session (acknowledgment)", () => {
+    expect(resumableBatchId([batchTurn("b1", "rejected")], new Set(), new Set(["b1"]))).toBe("b1");
+    expect(resumableBatchId([batchTurn("b1", "expired")], new Set(), new Set(["b1"]))).toBe("b1");
+    expect(resumableBatchId([batchTurn("b1", "expired", "rejected")], new Set(), new Set(["b1"]))).toBe("b1");
+  });
+
+  it("never resumes a transcript-loaded terminal batch never observed pending in-session", () => {
+    expect(resumableBatchId([batchTurn("b1", "rejected")], new Set())).toBeNull();
+    expect(resumableBatchId([batchTurn("b1", "rejected")], new Set(), new Set(["other"]))).toBeNull();
+  });
+
+  it("does not resume an in-session batch that still holds a pending chip", () => {
+    expect(resumableBatchId([batchTurn("b1", "approved", "pending")], new Set(), new Set(["b1"]))).toBeNull();
+  });
+
+  it("requires chips for the in-session path (a marker-only batch never resumes)", () => {
+    const marker: ChatTurn = { role: "assistant", text: "", imageCount: 0, rawIndex: -1, suspendedBatchId: "b1" };
+    expect(resumableBatchId([marker], new Set(), new Set(["b1"]))).toBeNull();
+  });
 });

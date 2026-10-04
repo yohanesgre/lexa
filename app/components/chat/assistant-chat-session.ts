@@ -80,6 +80,10 @@ function settleStreamFrame(args: {
   frozeBatchRef: React.RefObject<string | null>;
   frozeErrorRef: React.RefObject<string | null>;
   resumedBatchesRef: React.RefObject<Set<string>>;
+  // Batch ids observed with a pending chip this session. A later all-terminal
+  // (rejected/expired) outcome still earns the acknowledgment resume, while a
+  // batch that loads terminal from the transcript never does.
+  observedPendingRef: React.RefObject<Set<string>>;
   // In-flight resume POSTs keyed `${chatId}:${batchId}`, component-lifetime
   // (never reset on chat switch). The persisted/in-memory `resumedBatchesRef`
   // is per-chat and is re-seeded on selection, so without this a switch away
@@ -87,7 +91,7 @@ function settleStreamFrame(args: {
   inFlightResumeRef: React.RefObject<Set<string>>;
   ingressInsertedRef: React.RefObject<Set<string>>;
 }): void {
-  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, inFlightResumeRef, ingressInsertedRef } = args;
+  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef } = args;
   if (stream.status === "suspended") {
     const batchId = stream.suspendedBatchId ?? "";
     const chips = batchId ? pendingChipsOf(stream.pending, batchId) : [];
@@ -115,8 +119,15 @@ function settleStreamFrame(args: {
   }
   // When EVERY chip of a frozen batch reaches a terminal state the client
   // re-opens the stream for that batch — Assistant continues with a fresh entry.
+  // Record any batch that was seen pending this session BEFORE the early return
+  // so a later all-terminal outcome (rejected/expired) still earns the
+  // acknowledgment resume; transcript-loaded terminal batches are never recorded.
+  for (const t of turns ?? []) {
+    const b = t.batch;
+    if (b && b.chips.some((c) => c.state === "pending")) observedPendingRef.current?.add(b.batchId);
+  }
   if (!chatId || streaming) return;
-  const batchId = resumableBatchId(turns, resumedBatchesRef.current ?? new Set());
+  const batchId = resumableBatchId(turns, resumedBatchesRef.current ?? new Set(), observedPendingRef.current ?? new Set());
   if (batchId === null) return;
   const flightKey = `${chatId}:${batchId}`;
   if (inFlightResumeRef.current?.has(flightKey)) return;
@@ -212,6 +223,7 @@ export function useStreamFrameFreeze(args: {
   const frozeBatchRef = useRef<string | null>(null);
   const frozeErrorRef = useRef<string | null>(null);
   const resumedBatchesRef = useRef<Set<string>>(new Set());
+  const observedPendingRef = useRef<Set<string>>(new Set());
   // Survives chat switches by design (LX-83): the per-chat resumed set below is
   // re-seeded on selection, but an in-flight resume POST must not be re-issued.
   const inFlightResumeRef = useRef<Set<string>>(new Set());
@@ -241,6 +253,7 @@ export function useStreamFrameFreeze(args: {
       frozeBatchRef,
       frozeErrorRef,
       resumedBatchesRef,
+      observedPendingRef,
       inFlightResumeRef,
       ingressInsertedRef,
     });

@@ -13,6 +13,7 @@ import {
   snapshotFromSegment,
   usageFromMessage,
   type AgentSendBody,
+  type KnownApprovalDecisions,
 } from "./assistant-agent-adapter";
 
 // ADR-0003 P4b (WS1): the assistant chat transport, replacing the SSE session
@@ -66,6 +67,9 @@ export interface AssistantAgentOptions {
   // upgrade 404s and the first send is dropped. Omitted for task/wiki threads
   // and the document panel, which always have a server-created row.
   projectId?: string | undefined;
+  // Client-known approval decisions overlaid onto the raw carrier projection,
+  // so a batch decided in this session settles locally without a reload.
+  decisions?: KnownApprovalDecisions | undefined;
 }
 
 // A no-op `subscribe` surface keeps the hook structurally compatible with the
@@ -167,12 +171,14 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
 
   const messages = chat.messages;
   const lastAssistant = useMemo(() => lastAssistantMessage(messages), [messages]);
+  const decisions = options?.decisions;
   const segment = useMemo(() => {
     if (!threadKey) return emptyAgentSegment();
     // LX-120: suspension rides the merged carrier set across the trailing turn,
-    // not just the last assistant message.
-    return segmentFromMessages(messages);
-  }, [threadKey, messages]);
+    // not just the last assistant message. The known-decisions overlay settles
+    // a batch decided in this session (or already terminal in the view).
+    return segmentFromMessages(messages, decisions);
+  }, [threadKey, messages, decisions]);
 
   const snapshot = useMemo<AssistantStreamSnapshot>(() => {
     const next = snapshotFromSegment(segment, {

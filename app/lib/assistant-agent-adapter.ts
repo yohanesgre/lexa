@@ -358,6 +358,16 @@ export function lastAssistantMessage(messages: readonly UIMessage[]): UIMessage 
   return undefined;
 }
 
+// Client-known approval decisions overlaid onto the raw carrier projection.
+// `byApproval` extends terminal-wins to a decision the client made (a stale
+// pending carrier must never re-arm a decided batch); `settledBatches` marks a
+// batch the client knows is fully decided so a marker-only carrier does not
+// keep the turn suspended.
+export interface KnownApprovalDecisions {
+  byApproval: ReadonlyMap<string, Exclude<AssistantPendingChip["state"], "pending">>;
+  settledBatches: ReadonlySet<string>;
+}
+
 // LX-120: the suspension must be projected from the merged carrier set across
 // the trailing turn, not from the last assistant message alone. The DO attaches
 // the carrier to the message that held the write proposals (withApprovalCarriers),
@@ -367,7 +377,8 @@ export function lastAssistantMessage(messages: readonly UIMessage[]): UIMessage 
 // marker-only; a fully-terminal batch (decided in another tab) never re-arms.
 // Terminal decisions win by approvalId, mirroring `mergeBatchChips`' union.
 export function suspensionFromMessages(
-  messages: readonly UIMessage[]
+  messages: readonly UIMessage[],
+  known?: KnownApprovalDecisions
 ): { pending: AssistantPendingChip[]; suspendedBatchId: string | null } {
   // Trailing region only: assistant messages after the newest user turn. An
   // older turn's marker must not keep the current turn suspended.
@@ -396,9 +407,15 @@ export function suspensionFromMessages(
   const isTerminal = (chip: AssistantPendingChip) => (chip.state ?? "pending") !== "pending";
   const mergeChip = (chip: AssistantPendingChip) => {
     noteBatch(chip.batchId);
+    // Client-known decisions extend terminal-wins: a decided approvalId
+    // overrides a still-pending carrier chip (the DO carrier stays stale by
+    // design), while a terminal carrier (server truth) is left to the normal
+    // later-arrival rule below.
+    const decided = known?.byApproval.get(chip.approvalId);
+    const incoming = decided !== undefined && !isTerminal(chip) ? { ...chip, state: decided } : chip;
     const existing = byApproval.get(chip.approvalId);
-    if (existing && isTerminal(existing) && !isTerminal(chip)) return;
-    byApproval.set(chip.approvalId, chip);
+    if (existing && isTerminal(existing) && !isTerminal(incoming)) return;
+    byApproval.set(chip.approvalId, incoming);
   };
 
   for (let i = start; i < messages.length; i++) {
@@ -432,6 +449,10 @@ export function suspensionFromMessages(
       }
     }
     if (!hasChip || hasPending) {
+      // A batch the client knows is settled (server/client truth shows decided)
+      // must not stay suspended on a marker-only carrier; a marker-only read
+      // with no known decision still suspends below.
+      if (!hasChip && known?.settledBatches.has(batchId)) continue;
       suspendedBatchId = batchId;
       break;
     }
@@ -443,9 +464,9 @@ export function suspensionFromMessages(
 
 // The last-assistant full projection (text/tools/citations/usage) with the
 // suspension overridden by the merged carrier set across the trailing turn.
-export function segmentFromMessages(messages: readonly UIMessage[]): AgentSegment {
+export function segmentFromMessages(messages: readonly UIMessage[], known?: KnownApprovalDecisions): AgentSegment {
   const segment = segmentFromAssistantMessage(lastAssistantMessage(messages));
-  const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+  const { pending, suspendedBatchId } = suspensionFromMessages(messages, known);
   segment.pending = pending;
   segment.suspendedBatchId = suspendedBatchId;
   return segment;
