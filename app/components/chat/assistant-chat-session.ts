@@ -90,8 +90,13 @@ function settleStreamFrame(args: {
   // and back while the POST is still in flight would re-issue it (LX-83).
   inFlightResumeRef: React.RefObject<Set<string>>;
   ingressInsertedRef: React.RefObject<Set<string>>;
+  // Fired when the resume POST settles into a terminal outcome (executed /
+  // settled / indeterminate) — the continuation reply is persisted by then, so
+  // the caller refetches the transcript + thread list. Never fired for
+  // pending/unavailable/failure (no persisted reply yet).
+  onResumeSettled?: (() => void) | undefined;
 }): void {
-  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef } = args;
+  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef, onResumeSettled } = args;
   if (stream.status === "suspended") {
     const batchId = stream.suspendedBatchId ?? "";
     const chips = batchId ? pendingChipsOf(stream.pending, batchId) : [];
@@ -142,8 +147,14 @@ function settleStreamFrame(args: {
   ingressInsertedRef.current?.delete(chatId);
   stream.send(`/api/assistant/chat/${chatId}/resume`, { batchId }, (result) => {
     inFlightResumeRef.current?.delete(flightKey);
-    if (shouldPersistResume(result)) persistResumedBatch(chatId, batchId);
-    else resumedBatchesRef.current?.delete(batchId);
+    if (shouldPersistResume(result)) {
+      persistResumedBatch(chatId, batchId);
+      // The continuation ran and its reply is persisted by the time the result
+      // arrives — refetch so the resumed assistant entry renders live.
+      onResumeSettled?.();
+    } else {
+      resumedBatchesRef.current?.delete(batchId);
+    }
   });
 }
 
@@ -218,8 +229,11 @@ export function useStreamFrameFreeze(args: {
   chatId: string;
   streaming: boolean;
   ingressInsertedRef: React.RefObject<Set<string>>;
+  // The resume POST's terminal outcome — the page refetches the transcript so
+  // the server-persisted continuation reply renders live.
+  onResumeSettled?: (() => void) | undefined;
 }) {
-  const { stream, setTurns, turns, chatId, streaming, ingressInsertedRef } = args;
+  const { stream, setTurns, turns, chatId, streaming, ingressInsertedRef, onResumeSettled } = args;
   const frozeBatchRef = useRef<string | null>(null);
   const frozeErrorRef = useRef<string | null>(null);
   const resumedBatchesRef = useRef<Set<string>>(new Set());
@@ -256,6 +270,7 @@ export function useStreamFrameFreeze(args: {
       observedPendingRef,
       inFlightResumeRef,
       ingressInsertedRef,
+      onResumeSettled,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per terminal frame; snapshot fields are read at flip time
   }, [stream.status, stream.suspendedBatchId, stream.pending, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText, stream.hasIngress, turns, chatId, streaming]);
