@@ -29,15 +29,16 @@ export function AssigneeChips({
   const isExpanded = expanded || localExpanded;
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
 
     function handleMouseDown(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
+      const target = event.target as Node;
+      if (inputRef.current?.contains(target) || listRef.current?.contains(target)) return;
+      setOpen(false);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -117,6 +118,7 @@ export function AssigneeChips({
   return (
     <>
       <input
+        ref={inputRef}
         className={inputClassName}
         style={inputStyle}
         value={draft}
@@ -131,7 +133,7 @@ export function AssigneeChips({
         onKeyDown={handleKeyDown}
         onBlur={(e) => {
           const related = e.relatedTarget as Node | null;
-          if (containerRef.current && related && containerRef.current.contains(related)) {
+          if (related && (inputRef.current?.contains(related) || listRef.current?.contains(related))) {
             return;
           }
           if (draft.trim() && !assignees.includes(draft.trim())) {
@@ -149,7 +151,7 @@ export function AssigneeChips({
         </span>
       ))}
       {open && suggestions.length > 0 && (
-        <div className="dropdown-menu" style={{ position: "absolute", top: "100%", left: 0, zIndex: 60 }}>
+        <div ref={listRef} className="dropdown-menu" style={{ position: "absolute", top: "100%", left: 0, zIndex: 60 }}>
           <div className="dropdown-label">Members</div>
           {suggestions.map((name) => (
             <button

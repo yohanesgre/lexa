@@ -25,11 +25,12 @@
   --lx-border-subtle: #1A1714;
   --lx-border-strong: #4A443D;
   --lx-border-focus: #F0C040;
+  --lx-border-input: #6B6560;
 
   --lx-text-primary: #F5F0EB;
   --lx-text-secondary: #948E88;
-  --lx-text-tertiary: #6B6560;
-  --lx-text-muted: #4A443D;
+  --lx-text-tertiary: #8A837C;
+  --lx-text-muted: #867F78;
   --lx-text-inverse: #12100E;
   --lx-text-link: #F0C040;
   --lx-text-link-hover: #F5D76A;
@@ -92,7 +93,8 @@
   --lx-border-default: #DDD5CC;
   --lx-border-subtle: #EBE5DE;
   --lx-border-strong: #C4BAB0;
-  --lx-border-focus: #D4A017;
+  --lx-border-focus: #A07908;
+  --lx-border-input: #888078;
   --lx-status-danger: #DC2626;
   --lx-status-warning: #D4A017;
   --lx-status-success: #16A34A;
@@ -100,10 +102,10 @@
   --lx-text-primary: #1A1714;
   --lx-text-secondary: #5C554F;
   --lx-text-tertiary: #7A7169;
-  --lx-text-muted: #9C9187;
+  --lx-text-muted: #6A645C;
   --lx-text-inverse: #FFFFFF;
-  --lx-text-link: #B8931A;
-  --lx-text-link-hover: #D4A017;
+  --lx-text-link: #8A6600;
+  --lx-text-link-hover: #7E5C00;
   --lx-text-danger: #991B1B;
   --lx-text-warning: #92400E;
   --lx-text-success: #166534;
@@ -177,6 +179,7 @@
   --color-lx-border-subtle: var(--lx-border-subtle);
   --color-lx-border-strong: var(--lx-border-strong);
   --color-lx-border-focus: var(--lx-border-focus);
+  --color-lx-border-input: var(--lx-border-input);
 
   --color-lx-text-primary: var(--lx-text-primary);
   --color-lx-text-secondary: var(--lx-text-secondary);
@@ -192,16 +195,6 @@
   --color-lx-accent: #F0C040;
   --color-lx-accent-hover: #F5D76A;
   --color-lx-accent-muted: #8A7020;
-
-  --color-lx-priority-urgent: #FF4444;
-  --color-lx-priority-high: #F0C040;
-  --color-lx-priority-medium: #22D3EE;
-  --color-lx-priority-low: #6B6560;
-
-  --color-lx-type-feature: #4ADE80;
-  --color-lx-type-bug: #FF4444;
-  --color-lx-type-task: #22D3EE;
-  --color-lx-type-asset: #F472B6;
 
   --color-lx-status-success: #4ADE80;
   --color-lx-status-warning: #F0C040;
@@ -623,7 +616,6 @@
     border-color: var(--lx-border-default);
     box-shadow: var(--lx-shadow-sm);
   }
-
   /* Subtask child card — indented under parent, slightly dimmed */
   .kanban-card-subtask {
     margin-left: 16px;
@@ -894,19 +886,6 @@
   .column-body.drop-target {
     background: var(--lx-surface-selected);
   }
-  .column-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px 0;
-    font-family: var(--lx-font-micro);
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--lx-text-muted);
-    user-select: none;
-  }
-
   .add-task-btn {
     display: flex;
     align-items: center;
@@ -1073,6 +1052,12 @@
   }
 
   /* Board layout */
+  .board-page {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
   .board-area {
     display: flex;
     flex-direction: column;
@@ -1101,7 +1086,6 @@
     display: flex;
     gap: 12px;
   }
-  .board-loading,
   .board-error {
     display: flex;
     align-items: center;
@@ -1168,10 +1152,23 @@
     line-height: 26px;
     cursor: pointer;
   }
+  .slideover-title-text {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    border: none;
+    background: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
   .slideover-title-input {
     width: 100%;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 6px;
     padding: 12px;
     font-family: var(--lx-font-display);
@@ -1219,7 +1216,7 @@
     height: 32px;
     padding: 0 10px;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 4px;
     color: var(--lx-text-primary);
     font-family: var(--lx-font-body);
@@ -1405,6 +1402,12 @@
   }
 
   /* Task detail rendered prose (TipTap read-mode) */
+  .td-prose {
+    font-size: 15px;
+    line-height: 22px;
+    color: var(--lx-text-secondary);
+    font-family: var(--lx-font-body);
+  }
   .td-p {
     font-size: 15px;
     line-height: 22px;
@@ -2498,6 +2501,20 @@
     flex-shrink: 0;
     margin-top: 3px;
   }
+  .checkbox-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .checkbox-input:focus-visible + .checkbox {
+    box-shadow: var(--lx-focus-ring);
+  }
   .checkbox.checked {
     background: var(--lx-border-focus);
     border-color: var(--lx-border-focus);
@@ -3553,7 +3570,7 @@
   .inline-add-input {
     width: 100%;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 4px;
     color: var(--lx-text-primary);
     font-family: var(--lx-font-body);
@@ -4282,7 +4299,7 @@
     align-items: center;
     gap: 8px;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 6px;
     padding: 10px 12px;
   }
@@ -4843,7 +4860,7 @@
   /* Composer — compact TipTap box pinned at the bottom of the timeline */
   .composer {
     margin-top: 12px;
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 6px;
     background: var(--lx-surface-input);
     transition: border-color 100ms, box-shadow 100ms;
@@ -4933,7 +4950,7 @@
     height: 28px;
     padding: 0 10px;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 4px;
     color: var(--lx-text-primary);
     font-family: var(--lx-font-body);
@@ -4949,7 +4966,7 @@
     max-width: 140px;
     padding: 0 8px;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 4px;
     color: var(--lx-text-secondary);
     font-family: var(--lx-font-body);
@@ -5019,7 +5036,7 @@
     align-items: center;
     justify-content: center;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-strong);
+    border: 1px solid var(--lx-border-input);
     border-radius: 3px;
     color: transparent;
     cursor: pointer;
@@ -5309,7 +5326,7 @@
     min-width: 160px;
     padding: 0 10px;
     background: var(--lx-surface-input);
-    border: 1px solid var(--lx-border-default);
+    border: 1px solid var(--lx-border-input);
     border-radius: 4px;
     color: var(--lx-text-primary);
     font-family: var(--lx-font-body);
@@ -5500,7 +5517,9 @@
   border-radius: 1px;
   background: var(--lx-border-strong);
 }
-.lane-dates-tick {
+.lane-dates-tick,
+.lane-dates-tick-start,
+.lane-dates-tick-end {
   width: 2px;
   height: 5px;
   flex-shrink: 0;
@@ -5562,7 +5581,7 @@
   gap: 8px;
   height: 32px;
   padding: 0 12px;
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
   background: var(--lx-surface-elevated);
   font-family: var(--lx-font-body);
@@ -7026,7 +7045,7 @@
   font-family: var(--lx-font-body);
   color: var(--lx-text-primary);
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
 }
 .threads-search::placeholder {
@@ -7573,7 +7592,7 @@
     height: calc(100vh - 48px);
   }
   .wiki-content {
-    padding: 16px 16px 32px;
+    padding: 20px;
   }
   .wiki-prose {
     max-width: none;
@@ -7581,8 +7600,8 @@
     line-height: 24px;
   }
   .wiki-prose h1 {
-    font-size: 22px;
-    line-height: 28px;
+    font-size: 20px;
+    line-height: 26px;
   }
   .wiki-prose h2 {
     font-size: 17px;

@@ -149,9 +149,15 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     [localTasks]
   );
 
+  const columnCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of localTasks) counts.set(t.columnId, (counts.get(t.columnId) ?? 0) + 1);
+    return counts;
+  }, [localTasks]);
+
   const columnTotalCount = useCallback(
-    (columnId: string) => localTasks.filter((t) => t.columnId === columnId).length,
-    [localTasks]
+    (columnId: string) => columnCounts.get(columnId) ?? 0,
+    [columnCounts]
   );
 
   const columnDimmed = useCallback(
