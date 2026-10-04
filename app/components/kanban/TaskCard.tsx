@@ -3,12 +3,17 @@ import { cn } from "../ui/cn";
 import { formatDueLabel } from "../../lib/dates";
 import type { GithubIssue, FieldOption } from "../../../shared/types";
 
+// Canonical default type labels → documented badge classes. Keyed by label
+// (not color) so recoloring an option in settings doesn't drop the token class.
 const TYPE_BADGE_CLASS: Record<string, string> = {
-  "#4ADE80": "type-feature",
-  "#FF4444": "type-bug",
-  "#22D3EE": "type-task",
-  "#F472B6": "type-asset",
+  feature: "type-feature",
+  bug: "type-bug",
+  task: "type-task",
+  asset: "type-asset",
 };
+
+const withAlpha = (color: string) =>
+  color.startsWith("#") ? `${color}1a` : `color-mix(in srgb, ${color} 10%, transparent)`;
 
 interface TaskCardProps {
   id: string;
@@ -50,6 +55,9 @@ function SubtaskChevron({ collapsed, onToggle }: { collapsed: boolean; onToggle?
         title={collapsed ? "Expand subtasks" : "Collapse subtasks"}
         aria-label={collapsed ? "Expand subtasks" : "Collapse subtasks"}
         onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+        }}
       >
         <svg
           width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -70,12 +78,12 @@ function CardBadgesRow({ typeLabel, typeColor, blockedBy, isLowPriority, prioCol
   prioLabel: string;
   action: React.ReactNode | undefined;
 }) {
-  const badgeClass = TYPE_BADGE_CLASS[typeColor.toUpperCase()];
+  const badgeClass = TYPE_BADGE_CLASS[typeLabel.toLowerCase()];
   return (
     <div className="flex items-center justify-between">
       <span
         className={cn("type-badge", badgeClass)}
-        style={badgeClass ? undefined : { background: `${typeColor}1a`, color: typeColor }}
+        style={badgeClass ? undefined : { background: withAlpha(typeColor), color: typeColor }}
       >
         {typeLabel}
       </span>
@@ -88,8 +96,8 @@ function CardBadgesRow({ typeLabel, typeColor, blockedBy, isLowPriority, prioCol
           />
         )}
         <span
-          className="priority-dot"
-          style={isLowPriority ? { border: "2px solid #6B6560", background: "transparent" } : { background: prioColor }}
+          className={cn("priority-dot", isLowPriority && "priority-low")}
+          style={isLowPriority ? undefined : { background: prioColor }}
           title={`${typeLabel} · ${prioLabel}`}
         />
         {action}
@@ -135,10 +143,11 @@ export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type,
   const typeOpt = types.find((t) => t.id === type);
   const prioOpt = priorities.find((p) => p.id === priority);
   const typeLabel = typeOpt?.label ?? type;
-  const typeColor = typeOpt?.color ?? "#6B6560";
-  const prioColor = prioOpt?.color ?? "#6B6560";
+  const typeColor = typeOpt?.color ?? "var(--lx-text-tertiary)";
+  const prioColor = prioOpt?.color ?? "var(--lx-text-tertiary)";
+  const prioLabel = prioOpt?.label ?? priority;
   // Legacy default Low renders as a hollow ring, never a solid dot (§5.5/§5.9i).
-  const isLowPriority = prioColor.toUpperCase() === "#6B6560";
+  const isLowPriority = prioLabel.toLowerCase() === "low";
   const hasOutOfSync = githubs.some(g => g.outOfSync);
   const due = dueAt ? formatDueLabel(dueAt) : null;
   return (
@@ -150,7 +159,7 @@ export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type,
         blockedBy={blockedBy}
         isLowPriority={isLowPriority}
         prioColor={prioColor}
-        prioLabel={prioOpt?.label ?? priority}
+        prioLabel={prioLabel}
         action={action}
       />
       <div className="card-title mt-2">

@@ -20,7 +20,10 @@ import {
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
   useCreateGithubManifest, useCompleteGithubSetup,
   useCreateMyApiKey, useDeleteMyApiKey, useRestoreWikiRevision, wikiKeys,
+  useSignIn, useSetPassword, useRevokeWorkspaceInvite,
 } from "./queries";
+import type { SessionResponse } from "./auth";
+import type { WorkspaceInvite } from "../../shared/types";
 
 const { fetchMock, routes, mockFetch } = createFetchMock();
 
@@ -175,7 +178,7 @@ describe("project mutations", () => {
     expect(dash.projects.map((h) => h.project.id)).toEqual(["p2", "p1"]);
     expect(dash.stats.activeProjects).toBe(2);
     expect(queryClient.getQueryData<Project[]>(["projects"])!.filter((p) => p.id === "p2")).toHaveLength(1);
-    expect(result.current.error).toBeInstanceOf(Error);
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
     expect((result.current.error as Error).message).toBe("Slug already taken");
   });
 
@@ -851,5 +854,46 @@ describe("progress counts stay fresh after mutations (LX 63450bf5)", () => {
     await act(async () => { await result.current.mutateAsync({ id: "c1" }); });
     expect(queryClient.getQueryData<Board>(["board", "demo", false])!.columns.map((c) => c.id)).toEqual(["c2"]);
     expect(queryClient.getQueryData<Board>(["board", "demo", true])!.columns.map((c) => c.id)).toEqual(["c2"]);
+  });
+});
+
+describe("session + invite mutation paths (LX-100/LX-102/LX-103)", () => {
+  const USER = { id: "u1", email: "y@lexa.test", name: "Y", role: "superadmin" as const, createdAt: "t", lastSeen: null };
+
+  it("useSignIn seeds the get-session shape, then writes the authoritative read back — never invalidate", async () => {
+    const SERVER_SESSION = { session: { id: "s1", userId: "u1", expiresAt: "t", createdAt: "t" }, user: USER };
+    routes.set("POST /api/auth/sign-in/email", { redirect: false, token: "tok", url: "/", user: USER });
+    routes.set("GET /api/auth/get-session", SERVER_SESSION);
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useSignIn(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ email: "y@lexa.test", password: "pw" }); });
+
+    // The sign-in seed is replaced by the authoritative get-session read
+    // written through setQueryData — invariant 6, no invalidateQueries.
+    await waitFor(() => {
+      expect(queryClient.getQueryData<SessionResponse>(["session"])).toEqual(SERVER_SESSION);
+    });
+    expect(queryClient.getQueryData<SessionResponse>(["session"])).not.toHaveProperty("token");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("useSetPassword neither seeds nor invalidates the session cache", async () => {
+    routes.set("POST /api/auth/reset-password", { status: true });
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useSetPassword(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ newPassword: "password1", token: "tok" }); });
+    expect(queryClient.getQueryData(["session"])).toBeUndefined();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("useRevokeWorkspaceInvite drops the row without invalidating", async () => {
+    const invite: WorkspaceInvite = { id: "inv1", email: "a@b.test", tokenHint: "", expiresAt: "t", acceptedAt: null };
+    queryClient.setQueryData<WorkspaceInvite[]>(["workspace-invites"], [invite]);
+    routes.set("DELETE /api/workspace/invites/inv1", 204);
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useRevokeWorkspaceInvite(), { wrapper });
+    await act(async () => { await result.current.mutateAsync("inv1"); });
+    expect(queryClient.getQueryData<WorkspaceInvite[]>(["workspace-invites"])).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
   });
 });

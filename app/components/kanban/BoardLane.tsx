@@ -15,6 +15,7 @@ export interface BoardLaneProps {
   board: any;
   localTasks: Task[];
   childrenByParent: Map<string, string[]>;
+  parentOf: Map<string, string>;
   blockedBy: Map<string, string[]>;
   cardHidden: (t: Task) => boolean;
   cardDimmed: (t: Task) => boolean;
@@ -37,7 +38,7 @@ export interface BoardLaneProps {
 }
 
 export function BoardLane({
-  slug, lane, columns, board, localTasks, childrenByParent, blockedBy,
+  slug, lane, columns, board, localTasks, childrenByParent, parentOf, blockedBy,
   cardHidden, cardDimmed, columnTotalCount, columnDimmed, cellDropId,
   flashColumnId, collapsed, toggleLane, onOpenCreateTask, onSelectTask,
   onDelete, selectedTaskId, newTaskIds, shakeTaskId, archiveTask, restoreTask,
@@ -58,6 +59,37 @@ export function BoardLane({
     return m;
   }, [localTasks]);
   const tasksInCell = (columnId: string, lId: string) => cellMap.get(`${columnId}:${lId}`) ?? [];
+  // Parent ids that actually render as a parent in each cell: same-cell,
+  // visible, top-level (a card that is itself a child renders nested, so its
+  // own children fall back to top-level). A child is nested only when its
+  // canonical parent is in this set — otherwise an archived, filtered, or
+  // off-cell parent would strand the child with no card anywhere.
+  const parentIdsByCell = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const t of localTasks) {
+      if (cardHidden(t) || parentOf.has(t.id)) continue;
+      const key = `${t.columnId}:${t.swimlaneId}`;
+      const s = m.get(key);
+      if (s) s.add(t.id);
+      else m.set(key, new Set([t.id]));
+    }
+    return m;
+  }, [localTasks, parentOf, cardHidden]);
+  const nestedUnder = (task: Task): boolean => {
+    const parentId = parentOf.get(task.id);
+    return !!parentId && parentIdsByCell.get(`${task.columnId}:${task.swimlaneId}`)?.has(parentId) === true;
+  };
+  // Rendered children of a parent card, in position order, hidden/off-cell
+  // ones dropped. Only the canonical parent renders a shared child, so a task
+  // linked to two subtask_of parents renders once.
+  const visibleKidsFor = (task: Task) =>
+    (childrenByParent.get(task.id) ?? [])
+      .map((id) => localTasks.find((t) => t.id === id))
+      .filter((t): t is Task => !!t)
+      .filter((t) => !cardHidden(t))
+      .filter((t) => t.columnId === task.columnId && t.swimlaneId === task.swimlaneId)
+      .filter((t) => parentOf.get(t.id) === task.id)
+      .sort(byPosition);
   return (
     <div key={laneId}>
       <SwimlaneHeader
@@ -95,14 +127,17 @@ export function BoardLane({
                   types={board.fieldConfig?.types ?? []}
                   onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                 >
-                  <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+                  <SortableContext
+                    items={cell.flatMap((t) =>
+                      cardHidden(t) || nestedUnder(t)
+                        ? []
+                        : [t.id, ...(collapsedParents.has(t.id) ? [] : visibleKidsFor(t).map((k) => k.id))]
+                    )}
+                    strategy={verticalListSortingStrategy}
+                  >
                     {cell.flatMap((task) => {
-                      if (cardHidden(task) || childrenByParent.has(task.id)) return []; // parents render at top level
-                      const kids = (childrenByParent.get(task.id) ?? [])
-                        .map((id) => localTasks.find((t) => t.id === id))
-                        .filter((t): t is Task => !!t)
-                        .filter((t) => !cardHidden(t))
-                        .sort(byPosition);
+                      if (cardHidden(task) || nestedUnder(task)) return []; // nested subtasks render under their parent
+                      const kids = visibleKidsFor(task);
                       const isCollapsed = collapsedParents.has(task.id);
                       const card = (
                         <div key={task.id}>

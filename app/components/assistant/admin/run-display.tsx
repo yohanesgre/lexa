@@ -44,3 +44,23 @@ export function RunStatusChip({ status }: { status: AssistantRunStatus }) {
     </span>
   );
 }
+
+// Runs table label: the union row carries both `kind` (chat_run/document/
+// schedule) and `documentType` (task/wiki/null). chat_run/schedule rows have no
+// document, so they must never be labelled "Wiki" nor linked to an empty slug.
+export function runKindLabel(r: { kind?: string | undefined; documentType?: "task" | "wiki" | null | undefined }): string {
+  if (r.kind === "schedule") return "Schedule";
+  if (r.kind === "chat_run") return "Chat";
+  if (r.documentType === "task") return "Task";
+  if (r.documentType === "wiki") return "Wiki";
+  return "Chat";
+}
+
+// Navigable document target, or null for chat/schedule rows (no document) and
+// rows whose document id is missing.
+export function runDocumentTarget(r: { documentType?: "task" | "wiki" | null | undefined; documentId: string; key: string }): { kind: "task" | "wiki"; value: string } | null {
+  if (r.documentType !== "task" && r.documentType !== "wiki") return null;
+  const id = r.documentId.trim();
+  if (!id) return null;
+  return { kind: r.documentType, value: r.documentType === "task" ? r.key || id : id };
+}

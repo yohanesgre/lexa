@@ -11,6 +11,21 @@ interface PriceEdit {
   error?: string | undefined;
 }
 
+const PRICE_ERROR = "Enter a price ≥ 0, no exponent, max 6 decimals";
+
+// The raw string is validated, never Number()'s coercion: blank, exponent
+// notation ("1e3"), negative, non-finite and >6-decimal inputs are rejected
+// before they can reach the PUT.
+function parsePrice(raw: string): number | null {
+  const s = raw.trim();
+  if (!s || /[eE]/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return null;
+  const dot = s.indexOf(".");
+  if (dot !== -1 && s.slice(dot + 1).length > 6) return null;
+  return n;
+}
+
 export function PriceEditor({
   byModel,
   isLoadingUsage,
@@ -33,53 +48,38 @@ export function PriceEditor({
     return Array.from(set).sort();
   })();
 
+  // Missing rows stay blank, never "0": a blank forces the user to enter an
+  // explicit price instead of silently persisting a zero over an unknown model.
   const defaultsFor = (model: string): PriceEdit => {
     const p = priceMap.get(model);
     return {
-      prompt_price: p ? String(p.prompt_price) : "0",
-      completion_price: p ? String(p.completion_price) : "0",
-      cached_read_price: p ? String(p.cached_read_price) : "0",
-      cached_write_price: p ? String(p.cached_write_price) : "0",
+      prompt_price: p ? String(p.prompt_price) : "",
+      completion_price: p ? String(p.completion_price) : "",
+      cached_read_price: p ? String(p.cached_read_price) : "",
+      cached_write_price: p ? String(p.cached_write_price) : "",
     };
   };
 
   const handleSave = (model: string) => {
+    if (isErrorPrices) return;
     const e = edits[model] ?? defaultsFor(model);
-    const pp = Number(e.prompt_price);
-    const cp = Number(e.completion_price);
-    const cr = Number(e.cached_read_price);
-    const cw = Number(e.cached_write_price);
-    const decimalsOk = (n: number) => {
-      const s = String(n);
-      const dot = s.indexOf(".");
-      if (dot === -1) return true;
-      return s.slice(dot + 1).length <= 6;
-    };
-    const valid = (n: number) => Number.isFinite(n) && n >= 0 && decimalsOk(n);
-    if (!valid(pp) || !valid(cp) || !valid(cr) || !valid(cw)) {
-      setEdits((prev) => ({ ...prev, [model]: { ...(prev[model] ?? defaultsFor(model)), error: "Invalid number (≥0, max 6 decimals)" } }));
+    const pp = parsePrice(e.prompt_price);
+    const cp = parsePrice(e.completion_price);
+    const cr = parsePrice(e.cached_read_price);
+    const cw = parsePrice(e.cached_write_price);
+    if (pp === null || cp === null || cr === null || cw === null) {
+      setEdits((prev) => ({ ...prev, [model]: { ...(prev[model] ?? defaultsFor(model)), error: PRICE_ERROR } }));
       return;
     }
     setEdits((prev) => ({ ...prev, [model]: { ...(prev[model] ?? defaultsFor(model)), error: undefined } }));
     putPrice.mutate({ model, prompt_price: pp, completion_price: cp, cached_read_price: cr, cached_write_price: cw });
   };
 
-  const handleReset = (model: string) => {
-    const p = priceMap.get(model);
-    setEdits((prev) => ({
-      ...prev,
-      [model]: {
-        prompt_price: p ? String(p.prompt_price) : "0",
-        completion_price: p ? String(p.completion_price) : "0",
-        cached_read_price: p ? String(p.cached_read_price) : "0",
-        cached_write_price: p ? String(p.cached_write_price) : "0",
-        error: undefined,
-      },
-    }));
-  };
+  const handleReset = (model: string) => setEdits((prev) => ({ ...prev, [model]: defaultsFor(model) }));
 
   const isLoading = isLoadingPrices || !!isLoadingUsage;
   const isError = isErrorPrices || !!isErrorUsage;
+  const pricesErrored = isErrorPrices;
 
   if (isError && prices.length === 0 && models.length === 0) {
     return (
@@ -131,6 +131,8 @@ export function PriceEditor({
               </tr>
             ) : models.map((model) => {
               const e = edits[model] ?? defaultsFor(model);
+              const modelPending = putPrice.isPending && putPrice.variables?.model === model;
+              const serverError = putPrice.isError && putPrice.variables?.model === model ? (putPrice.error as Error).message : null;
               const setField = (field: keyof Omit<PriceEdit, "error">) => (ev: React.ChangeEvent<HTMLInputElement>) => {
                 const value = ev.target.value;
                 setEdits((prev) => ({ ...prev, [model]: { ...(prev[model] ?? defaultsFor(model)), [field]: value } }));
@@ -139,21 +141,22 @@ export function PriceEditor({
                 <tr key={model}>
                   <td className="font-mono text-xs weight-500 color-primary">{model}</td>
                   <td>
-                    <input className="prop-input font-mono" aria-label={`prompt_price for ${model}`} value={e.prompt_price} onChange={setField("prompt_price")} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
+                    <input className="prop-input font-mono" aria-label={`prompt_price for ${model}`} value={e.prompt_price} onChange={setField("prompt_price")} readOnly={pricesErrored} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
                   </td>
                   <td>
-                    <input className="prop-input font-mono" aria-label={`completion_price for ${model}`} value={e.completion_price} onChange={setField("completion_price")} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
+                    <input className="prop-input font-mono" aria-label={`completion_price for ${model}`} value={e.completion_price} onChange={setField("completion_price")} readOnly={pricesErrored} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
                   </td>
                   <td>
-                    <input className="prop-input font-mono" aria-label={`cached_read_price for ${model}`} value={e.cached_read_price} onChange={setField("cached_read_price")} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
+                    <input className="prop-input font-mono" aria-label={`cached_read_price for ${model}`} value={e.cached_read_price} onChange={setField("cached_read_price")} readOnly={pricesErrored} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
                   </td>
                   <td>
-                    <input className="prop-input font-mono" aria-label={`cached_write_price for ${model}`} value={e.cached_write_price} onChange={setField("cached_write_price")} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
+                    <input className="prop-input font-mono" aria-label={`cached_write_price for ${model}`} value={e.cached_write_price} onChange={setField("cached_write_price")} readOnly={pricesErrored} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
                   </td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => handleSave(model)} disabled={putPrice.isPending}>Save</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleReset(model)} style={{ marginLeft: 6 }}>Reset</button>
+                    <button className="btn btn-primary btn-sm" onClick={() => handleSave(model)} disabled={pricesErrored || modelPending}>{modelPending ? "Saving…" : "Save"}</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => handleReset(model)} disabled={pricesErrored} style={{ marginLeft: 6 }}>Reset</button>
                     {e.error ? <div className="font-micro text-2xs" style={{ color: "var(--lx-text-danger)", marginTop: 4 }}>{e.error}</div> : null}
+                    {serverError ? <div className="font-micro text-2xs" style={{ color: "var(--lx-text-danger)", marginTop: 4 }}>{serverError}</div> : null}
                   </td>
                 </tr>
               );
