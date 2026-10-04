@@ -17,6 +17,27 @@ const BLOCK_TYPES = new Set([
   "orderedList",
 ]);
 
+// Single source of emptiness (invariant 10): a doc is empty when it holds no
+// text and no meaningful content nodes (image, horizontalRule, table).
+// Container nodes (paragraph, heading, blockquote, list) always recurse — a
+// paragraph of whitespace is empty. The server imports this same function
+// (`server/services/task.service.ts`) so the client warning and the server gate
+// cannot drift.
+export function isEmptyDoc(doc: TipTapDoc): boolean {
+  if (!doc || typeof doc !== "object") return true;
+  const hasContent = (node: Record<string, unknown>): boolean => {
+    const children = node.content as Record<string, unknown>[] | undefined;
+    if (node.type === "text") {
+      return (typeof node.text === "string" ? node.text : "").trim().length > 0;
+    }
+    if (children && children.length > 0) {
+      return children.some(hasContent);
+    }
+    return node.type !== "paragraph" && node.type !== "doc";
+  };
+  return !hasContent(doc as unknown as Record<string, unknown>);
+}
+
 export function extractText(doc: TipTapDoc): string {
   try {
     if (!doc || !Array.isArray(doc.content)) return "";

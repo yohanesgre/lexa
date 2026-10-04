@@ -8,7 +8,7 @@ import { rowToComment, rowToActivityEvent, type CommentRow, type ActivityRow } f
 import { TipTapDoc, Actor, TaskComment, ActivityEvent } from "../../shared/types";
 import type { AuthIdentityShape } from "../api/auth";
 import { TaskNotFound, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "../api/errors";
-import { isEmptyDoc } from "./task.service";
+import { isEmptyDoc } from "../../shared/tiptap-text";
 import * as msg from "../activity-messages";
 
 const MAX_COMMENT_BYTES = 65536;

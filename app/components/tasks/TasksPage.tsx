@@ -740,6 +740,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
           columns={columns}
           swimlanes={swimlanes}
           milestones={board.milestones}
+          boardTasks={board.tasks}
           columnRequiredFields={columns.map((column) => ({
             columnId: column.id,
             fields: column.requiredFields,

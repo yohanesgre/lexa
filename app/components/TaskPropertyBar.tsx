@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import type { Milestone, Swimlane, Task } from "../../shared/types";
 import { cn } from "./ui/cn";
@@ -20,7 +21,7 @@ interface TaskPropertyBarProps {
   selectedSwimlaneId: string;
   setSelectedSwimlaneId: (v: string) => void;
   onUpdate: (id: string, data: Partial<import("../../shared/types").Task>) => void;
-  onMove: (id: string, data: { columnId: string; swimlaneId: string }) => void;
+  onMove: (id: string, data: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined }) => void | Promise<void>;
   createColumnId: string;
   setCreateColumnId: (v: string) => void;
   createSwimlaneId: string;
@@ -41,6 +42,29 @@ interface TaskPropertyBarProps {
 
 type OptionItem = { id: string; label: string; color: string };
 
+// Known option colors map to the PHOSPHOR token classes (phosphor.css); custom
+// colors fall back to a data-driven inline color.
+const PRIORITY_BADGE_CLASS: Record<string, string> = {
+  "#FF4444": "pb-urgent",
+  "#F0C040": "pb-high",
+  "#22D3EE": "pb-medium",
+  "#6B6560": "pb-low",
+};
+
+const PRIORITY_DOT_CLASS: Record<string, string> = {
+  "#FF4444": "priority-urgent",
+  "#F0C040": "priority-high",
+  "#22D3EE": "priority-medium",
+  "#6B6560": "priority-low",
+};
+
+const TYPE_BADGE_CLASS: Record<string, string> = {
+  "#4ADE80": "type-feature",
+  "#FF4444": "type-bug",
+  "#22D3EE": "type-task",
+  "#F472B6": "type-asset",
+};
+
 function swimlaneLabel(lane: Swimlane, milestones: Milestone[] | undefined): string {
   if (lane.milestoneId == null) return lane.name;
   const milestone = milestones?.find((m) => m.id === lane.milestoneId);
@@ -49,6 +73,9 @@ function swimlaneLabel(lane: Swimlane, milestones: Milestone[] | undefined): str
 }
 
 function ColumnField(props: TaskPropertyBarProps) {
+  const moveSeq = useRef(0);
+  const latestColumnId = useRef(props.task?.columnId);
+  latestColumnId.current = props.task?.columnId;
   return (
     <div className="prop-field">
       <span className="prop-label">Column</span>
@@ -74,8 +101,17 @@ function ColumnField(props: TaskPropertyBarProps) {
             label: col.name,
           }))}
           onChange={(columnId: string) => {
+            const currentColumnId = props.task!.columnId;
+            if (columnId === currentColumnId) return;
+            const seq = ++moveSeq.current;
             props.setSelectedColumnId(columnId);
-            props.onUpdate?.(props.task!.id, { columnId });
+            Promise.resolve(props.onMove?.(props.task!.id, { columnId, swimlaneId: props.task!.swimlaneId }))
+              .catch(() => {
+                // A superseded rejection must not clobber a newer selection;
+                // restore the freshest task value rather than a stale capture.
+                if (moveSeq.current !== seq) return;
+                props.setSelectedColumnId(latestColumnId.current ?? "");
+              });
           }}
           trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
             <button
@@ -116,6 +152,9 @@ function CreateSwimlaneField(props: TaskPropertyBarProps) {
 }
 
 function SwimlaneField(props: TaskPropertyBarProps) {
+  const moveSeq = useRef(0);
+  const latestSwimlaneId = useRef(props.task?.swimlaneId);
+  latestSwimlaneId.current = props.task?.swimlaneId;
   return (
     <div className="prop-field">
       <span className="prop-label">Swimlane</span>
@@ -126,8 +165,17 @@ function SwimlaneField(props: TaskPropertyBarProps) {
           label: swimlaneLabel(lane, props.milestones),
         }))}
         onChange={(swimlaneId: string) => {
+          const currentSwimlaneId = props.task!.swimlaneId;
+          if (swimlaneId === currentSwimlaneId) return;
+          const seq = ++moveSeq.current;
           props.setSelectedSwimlaneId(swimlaneId);
-          props.onMove?.(props.task!.id, { columnId: props.task!.columnId, swimlaneId });
+          Promise.resolve(props.onMove?.(props.task!.id, { columnId: props.task!.columnId, swimlaneId }))
+            .catch(() => {
+              // A superseded rejection must not clobber a newer selection;
+              // restore the freshest task value rather than a stale capture.
+              if (moveSeq.current !== seq) return;
+              props.setSelectedSwimlaneId(latestSwimlaneId.current ?? "");
+            });
         }}
         trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
           <button
@@ -154,21 +202,41 @@ function PrioritySelect({ value, options, onChange, withGlow }: {
   return (
     <SelectDropdown
       value={value}
-      options={options.map((priority) => ({
-        value: priority.id,
-        label: (
-          <>
-            <span className="priority-dot" style={{ background: priority.color }} />
-            {priority.label}
-          </>
-        ),
-      }))}
+      options={options.map((priority) => {
+        const color = priority.color?.toUpperCase();
+        const dotClass = color ? PRIORITY_DOT_CLASS[color] : undefined;
+        return {
+          value: priority.id,
+          label: (
+            <>
+              <span
+                className={cn("priority-dot", dotClass)}
+                style={dotClass || !priority.color ? undefined : { background: priority.color }}
+              />
+              {priority.label}
+            </>
+          ),
+        };
+      })}
       onChange={onChange}
       trigger={({ toggle }) => {
         const opt = options.find((p) => p.id === value);
+        const color = opt?.color?.toUpperCase();
+        const knownBadge = color ? PRIORITY_BADGE_CLASS[color] : undefined;
+        const knownDot = color ? PRIORITY_DOT_CLASS[color] : undefined;
+        const badgeClass = knownBadge ?? (opt?.color ? undefined : "pb-low");
+        const dotClass = knownDot ?? (opt?.color ? undefined : "priority-low");
         return (
-          <button type="button" className="priority-badge" onClick={toggle} style={{ boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined, color: opt?.color, background: `${opt?.color ?? "#6b6560"}1a` }}>
-            <span className="priority-dot" style={{ background: opt?.color ?? "#6b6560" }} />
+          <button
+            type="button"
+            className={cn("priority-badge", badgeClass)}
+            onClick={toggle}
+            style={{
+              boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined,
+              ...(knownBadge ? {} : opt?.color ? { color: opt.color, background: `${opt.color}1a` } : {}),
+            }}
+          >
+            <span className={cn("priority-dot", dotClass)} style={dotClass ? undefined : { background: opt?.color }} />
             {opt?.label ?? "—"}
           </button>
         );
@@ -186,19 +254,38 @@ function TypeSelect({ value, options, onChange, withGlow }: {
   return (
     <SelectDropdown
       value={value}
-      options={options.map((type) => ({
-        value: type.id,
-        label: (
-          <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
-            {type.label}
-          </span>
-        ),
-      }))}
+      options={options.map((type) => {
+        const color = type.color?.toUpperCase();
+        const badgeClass = color ? TYPE_BADGE_CLASS[color] : undefined;
+        return {
+          value: type.id,
+          label: (
+            <span
+              className={cn("type-badge", badgeClass)}
+              style={badgeClass || !type.color ? undefined : { background: `${type.color}1a`, color: type.color }}
+            >
+              {type.label}
+            </span>
+          ),
+        };
+      })}
       onChange={onChange}
       trigger={({ toggle }) => {
         const opt = options.find((t) => t.id === value);
+        const color = opt?.color?.toUpperCase();
+        const knownBadge = color ? TYPE_BADGE_CLASS[color] : undefined;
+        const badgeClass = knownBadge ?? (opt?.color ? undefined : "type-task");
         return (
-          <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6B6560"}1a`, color: opt?.color ?? "#6B6560", boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined, borderRadius: withGlow ? 4 : undefined }}>
+          <button
+            type="button"
+            className={cn("type-badge", badgeClass)}
+            onClick={toggle}
+            style={{
+              boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined,
+              borderRadius: withGlow ? 4 : undefined,
+              ...(knownBadge ? {} : opt?.color ? { background: `${opt.color}1a`, color: opt.color } : {}),
+            }}
+          >
             {opt?.label ?? "—"}
           </button>
         );

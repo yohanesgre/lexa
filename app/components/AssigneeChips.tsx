@@ -159,10 +159,7 @@ export function AssigneeChips({
               onClick={() => handleAdd(name)}
             >
               <span className="avatar">{name.slice(0, 2).toUpperCase()}</span>
-              <div>
-                <div className="text-sm font-medium text-lx-text-primary">{name}</div>
-                <div className="font-mono text-2xs text-lx-text-muted">{name.toLowerCase()}@example.com</div>
-              </div>
+              <div className="text-sm font-medium text-lx-text-primary">{name}</div>
             </button>
           ))}
         </div>
