@@ -96,6 +96,7 @@
   --lx-border-strong: #C4BAB0;
   --lx-border-focus: #A07908;
   --lx-border-input: #888078;
+  /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
   --lx-border-input-hover: #5C554F;
   --lx-status-danger: #DC2626;
   --lx-status-warning: #D4A017;

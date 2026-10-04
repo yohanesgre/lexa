@@ -146,12 +146,17 @@ function chipFromToolOutput(part: ToolUIPart | DynamicToolUIPart, name: string):
   if (!approvalId || !batchId || !isRecord(diff)) return null;
   const seq = typeof output.seq === "number" && Number.isFinite(output.seq) ? output.seq : 0;
   const detail = readString(output, "detail");
+  // A reconciled decision can ride the proposal output itself (the server's
+  // `approvalFromProposal` reads `output.status`); carry it as `state` so a
+  // terminal carrier is never projected as a still-pending chip.
+  const state = pendingState(output);
   return {
     approvalId,
     batchId,
     seq,
     name: readString(output, "name") ?? name,
     ...(detail ? { detail } : {}),
+    ...(state ? { state } : {}),
     diff: diff as unknown as AssistantWriteDiff,
   };
 }
@@ -383,16 +388,16 @@ export function suspensionFromMessages(
       batchOrder.push(batchId);
     }
   };
+  // Terminal-wins across carriers: a pending incoming chip must never replace
+  // an already-terminal chip (a stale proposal carrier must not re-arm a batch
+  // decided elsewhere), while between two terminal chips the later arrival is
+  // the newer decision. Getting this wrong leaves the batch suspended and the
+  // UI POSTs `/resume` for a batch that already executed.
+  const isTerminal = (chip: AssistantPendingChip) => (chip.state ?? "pending") !== "pending";
   const mergeChip = (chip: AssistantPendingChip) => {
     noteBatch(chip.batchId);
     const existing = byApproval.get(chip.approvalId);
-    if (existing) {
-      const existingTerminal = (existing.state ?? "pending") !== "pending";
-      const incomingTerminal = (chip.state ?? "pending") !== "pending";
-      // A decided chip must never be re-armed by a stale pending carrier;
-      // otherwise the later part is the newer server state.
-      if (existingTerminal && !incomingTerminal) return;
-    }
+    if (existing && isTerminal(existing) && !isTerminal(chip)) return;
     byApproval.set(chip.approvalId, chip);
   };
 

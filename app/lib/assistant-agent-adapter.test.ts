@@ -352,6 +352,142 @@ describe("segmentFromMessages — merged suspension projection (LX-120)", () => 
     expect(suspensionFromMessages(messages).suspendedBatchId).toBeNull();
     expect(segmentFromMessages(messages).suspendedBatchId).toBeNull();
   });
+
+  // Two carriers for one approval (the merged shape the DO persists): a pending
+  // carrier must never overwrite an already-terminal chip, in EITHER arrival
+  // order, or the batch re-arms and the UI POSTs `/resume` for an executed batch.
+  it("keeps the terminal chip when a pending carrier arrives after it (terminal→pending)", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
+        }),
+      ]),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
+        }),
+      ]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF },
+    ]);
+  });
+
+  it("adopts the terminal chip when it arrives after a pending carrier (pending→terminal)", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
+        }),
+      ]),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
+        }),
+      ]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF },
+    ]);
+  });
+
+  // The decision can ride the live proposal output itself; the adapter must read
+  // `output.status` (the server's `approvalFromProposal` does) or a terminal
+  // carrier projects as pending and re-arms an executed batch.
+  it("adopts a terminal tool-output carrier arriving after a pending one (pending→terminal)", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        toolResult("create_task", "c1", {}, {
+          approvalId: "a1",
+          batchId: "b1",
+          seq: 0,
+          name: "create_task",
+          detail: "Create task",
+          diff: DIFF,
+        }),
+      ]),
+      assistant([
+        toolResult("create_task", "c2", {}, {
+          approvalId: "a1",
+          batchId: "b1",
+          seq: 0,
+          name: "create_task",
+          detail: "Create task",
+          diff: DIFF,
+          status: "approved",
+        }),
+      ]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", state: "approved", diff: DIFF },
+    ]);
+  });
+
+  it("keeps a terminal tool-output carrier when a pending carrier arrives after it (terminal→pending)", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        toolResult("create_task", "c1", {}, {
+          approvalId: "a1",
+          batchId: "b1",
+          seq: 0,
+          name: "create_task",
+          detail: "Create task",
+          diff: DIFF,
+          status: "approved",
+        }),
+      ]),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
+        }),
+      ]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", state: "approved", diff: DIFF },
+    ]);
+  });
+
+  // Terminal-vs-terminal: the later carrier is the newer decision.
+  it("lets the later terminal carrier win between two terminal carriers", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
+        }),
+      ]),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "rejected" }],
+        }),
+      ]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "rejected", diff: DIFF },
+    ]);
+  });
 });
 
 describe("lastAssistantMessage / hasUserMessage", () => {
