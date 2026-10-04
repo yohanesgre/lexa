@@ -32,11 +32,12 @@
   --lx-border-subtle: #1A1714;
   --lx-border-strong: #4A443D;
   --lx-border-focus: #F0C040;
+  --lx-border-input: #6B6560;
 
   --lx-text-primary: #F5F0EB;
   --lx-text-secondary: #948E88;
-  --lx-text-tertiary: #6B6560;
-  --lx-text-muted: #4A443D;
+  --lx-text-tertiary: #8A837C;
+  --lx-text-muted: #867F78;
   --lx-text-inverse: #12100E;
   --lx-text-link: #F0C040;
   --lx-text-link-hover: #F5D76A;
@@ -917,7 +918,7 @@ a:hover { color: var(--lx-text-link-hover); }
   height: 32px;
   padding: 0 10px;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 4px;
   color: var(--lx-text-primary);
   font-family: var(--lx-font-body);
@@ -1712,7 +1713,7 @@ a:hover { color: var(--lx-text-link-hover); }
 
 .editor-area {
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-top: none;
   border-radius: 0 0 6px 6px;
   padding: 16px 20px;
@@ -2073,15 +2074,16 @@ mark {
   --lx-border-default: #DDD5CC;
   --lx-border-subtle: #EBE5DE;
   --lx-border-strong: #C4BAB0;
-  --lx-border-focus: #D4A017;
+  --lx-border-focus: #A07908;
+  --lx-border-input: #888078;
 
   --lx-text-primary: #1A1714;
   --lx-text-secondary: #5C554F;
   --lx-text-tertiary: #7A7169;
-  --lx-text-muted: #9C9187;
+  --lx-text-muted: #706A62;
   --lx-text-inverse: #FFFFFF;
-  --lx-text-link: #B8931A;
-  --lx-text-link-hover: #D4A017;
+  --lx-text-link: #8A6600;
+  --lx-text-link-hover: #7E5C00;
   --lx-text-danger: #991B1B;
   --lx-text-warning: #92400E;
   --lx-text-success: #166534;
@@ -2816,7 +2818,7 @@ mark {
   min-width: 128px;
   padding: 0 8px;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 4px;
   font-size: 12px;
   font-family: var(--lx-font-body);
@@ -2847,7 +2849,7 @@ mark {
 .inline-add-input {
   width: 100%;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 4px;
   color: var(--lx-text-primary);
   font-family: var(--lx-font-body);
@@ -3028,7 +3030,7 @@ textarea.prop-input {
   align-items: center;
   gap: 8px;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
   padding: 10px 12px;
 }
@@ -3070,7 +3072,7 @@ textarea.prop-input {
   letter-spacing: -0.02em;
   color: var(--lx-text-primary);
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
   padding: 12px;
   outline: none;
@@ -4064,7 +4066,7 @@ button.history-item {
 /* ---- Composer (pinned at the bottom of the timeline) ---- */
 .composer {
   margin-top: 12px;
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
   background: var(--lx-surface-input);
   transition: border-color 100ms, box-shadow 100ms;
@@ -4544,7 +4546,7 @@ button.history-item {
   height: 28px;
   padding: 0 10px;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 4px;
   color: var(--lx-text-primary);
   font-family: var(--lx-font-body);
@@ -4560,7 +4562,7 @@ button.history-item {
   max-width: 140px;
   padding: 0 8px;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 4px;
   color: var(--lx-text-secondary);
   font-family: var(--lx-font-body);
@@ -4792,7 +4794,7 @@ button.history-item {
   align-items: center;
   justify-content: center;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-strong);
+  border: 1px solid var(--lx-border-input);
   border-radius: 3px;
   color: transparent;
   cursor: pointer;
@@ -4919,7 +4921,7 @@ button.history-item {
   min-width: 160px;
   padding: 0 10px;
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 4px;
   color: var(--lx-text-primary);
   font-family: var(--lx-font-body);
@@ -5173,7 +5175,7 @@ button.history-item {
   gap: 8px;
   height: 32px;
   padding: 0 12px;
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
   background: var(--lx-surface-elevated);
   font-family: var(--lx-font-body);
@@ -5965,7 +5967,7 @@ button.history-item {
   font-family: var(--lx-font-body);
   color: var(--lx-text-primary);
   background: var(--lx-surface-input);
-  border: 1px solid var(--lx-border-default);
+  border: 1px solid var(--lx-border-input);
   border-radius: 6px;
 }
 
@@ -6190,7 +6192,12 @@ button.history-item {
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-border-focus);"></div>
           <div class="token-name font-mono text-xs">--lx-border-focus</div>
-          <div class="token-value text-2xs color-muted">#F0C040 / #D4A017</div>
+          <div class="token-value text-2xs color-muted">#F0C040 / #A07908</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-border-input);"></div>
+          <div class="token-name font-mono text-xs">--lx-border-input</div>
+          <div class="token-value text-2xs color-muted">#6B6560 / #888078</div>
         </div>
       </div>
 
@@ -6209,12 +6216,12 @@ button.history-item {
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-text-tertiary);"></div>
           <div class="token-name font-mono text-xs">--lx-text-tertiary</div>
-          <div class="token-value text-2xs color-muted">#6B6560 / #7A7169</div>
+          <div class="token-value text-2xs color-muted">#8A837C / #7A7169</div>
         </div>
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-text-muted);"></div>
           <div class="token-name font-mono text-xs">--lx-text-muted</div>
-          <div class="token-value text-2xs color-muted">#4A443D / #9C9187</div>
+          <div class="token-value text-2xs color-muted">#867F78 / #706A62</div>
         </div>
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-text-inverse);"></div>
@@ -6224,12 +6231,12 @@ button.history-item {
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-text-link);"></div>
           <div class="token-name font-mono text-xs">--lx-text-link</div>
-          <div class="token-value text-2xs color-muted">#F0C040 / #B8931A</div>
+          <div class="token-value text-2xs color-muted">#F0C040 / #8A6600</div>
         </div>
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-text-link-hover);"></div>
           <div class="token-name font-mono text-xs">--lx-text-link-hover</div>
-          <div class="token-value text-2xs color-muted">#F5D76A / #D4A017</div>
+          <div class="token-value text-2xs color-muted">#F5D76A / #7E5C00</div>
         </div>
         <div class="token-cell">
           <div class="swatch" style="background:var(--lx-text-danger);"></div>
