@@ -111,6 +111,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const debouncedSearch = useDebouncedValue(chatSearch, 250);
   const listQuery = useAssistantChatList(projectId, debouncedSearch);
   const threads = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  // The list is server-filtered by `?q=`; retain the last-seen row per thread so
+  // the header keeps the open thread's title/pinned when a search excludes it.
+  const threadRowsRef = useRef<Map<string, api.AssistantChatThreadSummary>>(new Map());
+  useEffect(() => {
+    const next = new Map(threadRowsRef.current);
+    for (const t of threads) next.set(t.chatId, t);
+    threadRowsRef.current = next;
+  }, [threads]);
 
   // chatId resolution: ?thread= deep link wins; otherwise the last active
   // thread (lexa-chat-last:<projectId>) is restored so a run that survived a
@@ -414,7 +422,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // never destroy a held message.
   const send = useCallback(
     (message: string, attachments: ChatAttachmentRef[]): boolean => {
-      if (!message || streaming || suspendedLock) return false;
+      if (!message || streaming || suspendedLock || busy409) return false;
       setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
       const threadId = startStream(message, attachments);
       // The send is accepted: the landing must dock for THIS chat even before
@@ -432,7 +440,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       if (permissionAuthoritative) setPermissionSelection({ chatId: threadId, value: permissionMode });
       return true;
     },
-    [streaming, suspendedLock, startStream, setTurns, permissionMode, permissionAuthoritative]
+    [streaming, suspendedLock, busy409, startStream, setTurns, permissionMode, permissionAuthoritative]
   );
 
   // Run-card actions. Abort stops the supervised child and flips the cached row
@@ -537,7 +545,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     openThreadParam,
   });
 
-  const activeThread = useMemo(() => threads.find((t) => t.chatId === chatId) ?? null, [threads, chatId]);
+  const activeThread = useMemo(
+    () => threads.find((t) => t.chatId === chatId) ?? threadRowsRef.current.get(chatId) ?? null,
+    [threads, chatId]
+  );
 
   // Stable markdown text-leaf hook (mention chips) — identity must hold
   // across stream deltas or the memoized renderer re-lexes every frame.
@@ -560,7 +571,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef });
 
-  const { scrollRef, atBottom, handleTranscriptScroll, scrollToBottom } = useChatAutoScroll({ turns, stream });
+  const { scrollRef, atBottom, handleTranscriptScroll, scrollToBottom } = useChatAutoScroll({ turns, stream, chatId });
 
   const { editingPos, editDraft, setEditDraft, beginEdit, cancelEdit, commitEdit } = useChatEditing({ chatId, turns, onEditSave: handleEditSave });
 
@@ -630,6 +641,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         <>
           <ChatTranscriptArea
             turns={turns ?? []}
+            chatId={chatId}
             slug={slug}
             streaming={streaming}
             renderText={renderText}

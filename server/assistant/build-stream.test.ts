@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
-import { buildStream, buildResumeResultsNote, findNewestPendingBatch, isWriteIntentClaim, normalizeProviderMessages, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
+import { buildStream, buildResumeResultsNote, findNewestPendingBatch, pendingBatchIdsNewestFirst, isWriteIntentClaim, normalizeProviderMessages, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { QueuedProposal } from "./write-tools";
 
@@ -462,6 +462,46 @@ describe("findNewestPendingBatch", () => {
         { role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "", approvals: [] } }] },
       ])
     ).toBeNull();
+  });
+});
+
+describe("pendingBatchIdsNewestFirst", () => {
+  it("lists every legacy marker newest-first", () => {
+    const messages = [
+      { role: "assistant", content: "old", pendingBatch: { batchId: "b1", approvals: [] } },
+      { role: "assistant", content: "new", pendingBatch: "b2" },
+    ];
+    expect(pendingBatchIdsNewestFirst(messages)).toEqual(["b2", "b1"]);
+  });
+
+  it("lists carrier markers newest-first and interleaves both shapes by position", () => {
+    const messages = [
+      { id: "m1", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "c1", approvals: [] } }] },
+      { role: "assistant", content: "legacy", pendingBatch: { batchId: "b2", approvals: [] } },
+      { id: "m3", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "c3", approvals: [] } }] },
+    ];
+    expect(pendingBatchIdsNewestFirst(messages)).toEqual(["c3", "b2", "c1"]);
+  });
+
+  it("carries a newer pending batch before an older decided one (LX-82 walk order)", () => {
+    // The DO tries each in order; the Worker reports the newer one pending and
+    // the older fully-decided one still resumes.
+    const messages = [
+      { id: "m1", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "decided", approvals: [] } }] },
+      { id: "m2", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "pending", approvals: [] } }] },
+    ];
+    expect(pendingBatchIdsNewestFirst(messages)).toEqual(["pending", "decided"]);
+  });
+
+  it("dedupes repeated markers and ignores empty/missing ids", () => {
+    const messages = [
+      { role: "assistant", content: "same", pendingBatch: { batchId: "b1", approvals: [] } },
+      { role: "assistant", content: "same again", pendingBatch: { batchId: "b1", approvals: [] } },
+      { role: "assistant", content: "empty", pendingBatch: { batchId: "", approvals: [] } },
+      { role: "user", content: "no marker" },
+    ];
+    expect(pendingBatchIdsNewestFirst(messages)).toEqual(["b1"]);
+    expect(pendingBatchIdsNewestFirst([])).toEqual([]);
   });
 });
 

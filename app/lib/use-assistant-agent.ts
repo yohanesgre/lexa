@@ -72,14 +72,54 @@ export interface AssistantAgentOptions {
 // SSE `AssistantStream`; the chat page only reads the snapshot fields.
 const noopSubscribe = (): (() => void) => () => {};
 
+// LX-79/LX-84: the resume route answers with a discriminated JSON ack. A JSON
+// `{ok:true}` with no discriminated fields is still success (legacy
+// undiscriminated ack); a non-JSON 2xx is the legacy SSE path (no Durable
+// Object). A malformed JSON body or a JSON body without `ok:true` is a failure.
+export interface ResumeResult {
+  ok: boolean;
+  executed?: boolean | undefined;
+  reason?: string | undefined;
+}
+
+export async function resumeOutcome(response: Response): Promise<ResumeResult> {
+  const contentType = response.headers?.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) return { ok: response.ok };
+  try {
+    const body = (await response.json()) as { ok?: unknown; executed?: unknown; reason?: unknown };
+    if (body.ok !== true) return { ok: false };
+    return {
+      ok: true,
+      ...(typeof body.executed === "boolean" ? { executed: body.executed } : {}),
+      ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// The resume POST is not idempotent from the client's view, but the DO claim is:
+// persist the batch (never replay) only when the writes ran, or the batch is
+// settled/indeterminate. `pending` / `unavailable` and any RPC failure keep the
+// batch eligible for retry. A legacy undiscriminated `{ok:true}` is persisted
+// (the SSE path had no DO claim to rely on).
+export function shouldPersistResume(result: ResumeResult): boolean {
+  if (!result.ok) return false;
+  if (result.executed === true) return true;
+  if (result.reason === "settled" || result.reason === "indeterminate") return true;
+  if (result.reason === "pending" || result.reason === "unavailable") return false;
+  return true;
+}
+
 // The agent-backed stream adds the transport-only reconnect signals the chat
 // surface renders (herald-chat.html "Connection lost → auto-resume").
 export interface AssistantAgentStream extends AssistantStream {
   reconnecting: boolean;
   resumed: boolean;
-  // The resume POST is non-idempotent, so its caller can be told the HTTP
-  // outcome (persist a success, retry a failure). Non-resume sends ignore it.
-  send: (url: string, body: unknown, onResult?: (ok: boolean) => void) => void;
+  // The resume POST is non-idempotent, so its caller can be told the route's
+  // discriminated outcome (persist a success, retry a failure). Non-resume
+  // sends ignore it.
+  send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => void;
   // The thread's single PartySocket. Exposed so the delegated-run hook taps the
   // SAME connection instead of opening a second one. Typed structurally to the
   // `useAgentToolEvents` agent view (`useAgent`'s overloads don't survive
@@ -198,16 +238,18 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   }, [key, agent.identified]);
 
   const send = useCallback(
-    (url: string, body: unknown, onResult?: (ok: boolean) => void) => {
+    (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => {
       const payload = (body ?? {}) as AgentSendBody;
       // Approval resume stays a plain REST POST (docs/API.md B.4 kept path);
-      // the resumed frames then arrive over this socket. The optional outcome
-      // callback lets the caller persist a successful resume (the POST is not
-      // idempotent) while leaving a failed attempt eligible for retry.
+      // the resumed frames then arrive over this socket. The client names the
+      // exact batch it is resuming; the route forwards it to the DO. The
+      // optional outcome callback lets the caller persist a successful resume
+      // while leaving a failed attempt eligible for retry.
       if (/\/resume$/.test(url)) {
-        void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-          .then((r) => onResult?.(r.ok))
-          .catch(() => onResult?.(false));
+        void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+          .then((r) => resumeOutcome(r))
+          .then((result) => onResult?.(result))
+          .catch(() => onResult?.({ ok: false }));
         return;
       }
       bodyRef.current = agentSendMetadata(payload);

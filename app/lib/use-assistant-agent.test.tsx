@@ -111,7 +111,7 @@ describe("useAssistantAgent — resume outcome callback", () => {
     const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
     const onResult = vi.fn();
     act(() => result.current.send("/api/assistant/chat/c1/resume", {}, onResult));
-    await waitFor(() => expect(onResult).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith({ ok: true }));
   });
 
   it("reports ok=false when the resume POST fails", async () => {
@@ -119,7 +119,7 @@ describe("useAssistantAgent — resume outcome callback", () => {
     const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
     const onResult = vi.fn();
     act(() => result.current.send("/api/assistant/chat/c1/resume", {}, onResult));
-    await waitFor(() => expect(onResult).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith({ ok: false }));
   });
 
   it("never invokes the outcome callback for a non-resume send", () => {

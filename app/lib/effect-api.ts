@@ -1,4 +1,4 @@
-import { Data, Effect, Schedule, Duration, Schema, Fiber } from "effect";
+import { Data, Effect, Schedule, Schema, Fiber } from "effect";
 import * as Option from "effect/Option";
 import { TipTapDocSchema } from "../../shared/schema";
 
@@ -41,37 +41,11 @@ export function effectFetch<T>(
   ) as unknown as Effect.Effect<T, ApiError>;
 }
 
-export function withTimeout<A, E, R>(effect: Effect.Effect<A, E, R>, ms: number): Effect.Effect<Option.Option<A>, E, R> {
-  return Effect.timeout(effect, Duration.millis(ms)) as unknown as Effect.Effect<Option.Option<A>, E, R>;
-}
-
 export function withRetry<A, E, R>(
   effect: Effect.Effect<A, E, R>,
   schedule: Schedule.Schedule<unknown, E, R> = Schedule.recurs(1) as unknown as Schedule.Schedule<unknown, E, R>
 ): Effect.Effect<A, E, R> {
   return Effect.retry(effect, schedule as unknown as Schedule.Schedule<never, E>) as unknown as Effect.Effect<A, E, R>;
-}
-
-export const RUNTIME_POLL_BASE_MS = 1500;
-export const RUNTIME_POLL_MAX_MS = 30000;
-
-export function runtimePollingSchedule(baseMs: number = RUNTIME_POLL_BASE_MS): Schedule.Schedule<Duration.Duration, unknown> {
-  return Schedule.exponential(Duration.millis(baseMs)).pipe(
-    Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(12))
-  ) as unknown as Schedule.Schedule<Duration.Duration, unknown>;
-}
-
-export function runtimePollDelayForAttempt(attempt: number, baseMs: number = RUNTIME_POLL_BASE_MS): number {
-  const raw = baseMs * Math.pow(2, attempt);
-  return Math.min(raw, RUNTIME_POLL_MAX_MS);
-}
-
-export function withRuntimePolling<A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  baseMs: number = RUNTIME_POLL_BASE_MS
-): Effect.Effect<A, E, R> {
-  return Effect.repeat(effect, runtimePollingSchedule(baseMs) as unknown as Schedule.Schedule<Duration.Duration, A>) as unknown as Effect.Effect<A, E, R>;
 }
 
 export function decodeTipTapDoc(doc: unknown): Effect.Effect<import("../../shared/types").TipTapDoc, ApiError> {
@@ -86,55 +60,6 @@ export interface DebouncedEffect<A> {
   cancel: () => void;
   destroy: () => void;
   pending: () => boolean;
-}
-
-export function createDebouncedEffect<A, E>(
-  fn: (value: A) => Effect.Effect<void, E>,
-  delayMs: number
-): DebouncedEffect<A> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let fiber: Fiber.Fiber<void, E> | null = null;
-  let pendingValue: A | null = null;
-  let hasPending = false;
-
-  const interruptFiber = () => {
-    if (fiber) {
-      const toInterrupt = fiber;
-      fiber = null;
-      Effect.runFork(Fiber.interrupt(toInterrupt));
-    }
-  };
-
-  const trigger = (value: A): void => {
-    pendingValue = value;
-    hasPending = true;
-    if (timer !== null) clearTimeout(timer);
-    interruptFiber();
-    timer = setTimeout(() => {
-      timer = null;
-      const arg = pendingValue as A;
-      pendingValue = null;
-      hasPending = false;
-      fiber = Effect.runFork(fn(arg));
-    }, delayMs);
-  };
-
-  const cancel = (): void => {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    hasPending = false;
-    pendingValue = null;
-    interruptFiber();
-  };
-
-  return {
-    trigger,
-    cancel,
-    destroy: cancel,
-    pending: () => hasPending || timer !== null,
-  };
 }
 
 export function createWikiAutosaveEffect(

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
 import { Check, X } from "lucide-react";
@@ -79,12 +79,16 @@ export function DescriptionEditor({
   );
   const embedsActive = !!(attachments && attachments.slug && attachments.documentId);
 
+  // Stable extension list — rebuilding it per render made TipTap re-apply
+  // options on every keystroke.
+  const extensions = useMemo(
+    () => extensionsWithMentions(textEditorExtensions, attachments?.slug ?? runtime?.slug),
+    [attachments?.slug, runtime?.slug]
+  );
+
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: extensionsWithMentions(
-      textEditorExtensions,
-      attachments?.slug ?? runtime?.slug
-    ),
+    extensions,
     content: initialContent as unknown as JSONContent,
     editable,
     onUpdate: ({ editor: nextEditor }) => {

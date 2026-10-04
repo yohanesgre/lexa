@@ -48,15 +48,16 @@ interface RenderOptions {
   expanded?: Set<string>;
   onToggleExpand?: (id: string) => void;
   onNavigate?: () => void;
+  onContextMenuKeyboard?: (element: HTMLElement, page: WikiPageMeta) => void;
 }
 
-function renderSidebar(
+function sidebarElement(
   pages: WikiPageMeta[] | undefined,
   error: unknown = null,
   onRetryPages: () => void = vi.fn(),
   options: RenderOptions = {}
 ) {
-  return render(
+  return (
     <WikiPageSidebar
       slug="demo"
       activePageSlug={options.activePageSlug}
@@ -66,6 +67,7 @@ function renderSidebar(
       onRetryPages={onRetryPages}
       contextMenuPageId={null}
       onContextMenu={vi.fn()}
+      onContextMenuKeyboard={options.onContextMenuKeyboard ?? vi.fn()}
       onNewPage={vi.fn()}
       onClose={vi.fn()}
       expanded={options.expanded ?? new Set()}
@@ -77,6 +79,15 @@ function renderSidebar(
       onNavigate={options.onNavigate}
     />
   );
+}
+
+function renderSidebar(
+  pages: WikiPageMeta[] | undefined,
+  error: unknown = null,
+  onRetryPages: () => void = vi.fn(),
+  options: RenderOptions = {}
+) {
+  return render(sidebarElement(pages, error, onRetryPages, options));
 }
 
 describe("WikiPageSidebar empty state", () => {
@@ -178,5 +189,39 @@ describe("WikiPageSidebar tree semantics", () => {
     fireEvent.keyDown(item, { key: "Enter" });
     fireEvent.keyDown(item, { key: " " });
     expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a rendered row tabbable when the focused row is hidden by a collapsed ancestor", () => {
+    const { rerender } = renderSidebar([page, child], null, vi.fn(), { expanded: new Set(["w1"]) });
+
+    let items = screen.getAllByRole("treeitem");
+    act(() => items[1]!.focus());
+    expect(items[1]).toHaveAttribute("tabindex", "0");
+
+    // Collapse the parent: the focused child is no longer rendered, so the
+    // tabbable id must fall back to a rendered row instead of the hidden child.
+    rerender(sidebarElement([page, child], null, vi.fn(), { expanded: new Set() }));
+    items = screen.getAllByRole("treeitem");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveAttribute("tabindex", "0");
+  });
+
+  it("opens the row action menu on the ContextMenu key and Shift+F10", () => {
+    const onContextMenuKeyboard = vi.fn();
+    renderSidebar([page], null, vi.fn(), { onContextMenuKeyboard });
+
+    const item = screen.getByRole("treeitem");
+    act(() => item.focus());
+
+    fireEvent.keyDown(item, { key: "ContextMenu" });
+    expect(onContextMenuKeyboard).toHaveBeenCalledTimes(1);
+    expect(onContextMenuKeyboard).toHaveBeenCalledWith(item, expect.objectContaining({ id: "w1" }));
+
+    fireEvent.keyDown(item, { key: "F10", shiftKey: true });
+    expect(onContextMenuKeyboard).toHaveBeenCalledTimes(2);
+
+    // F10 without Shift is not a context-menu gesture.
+    fireEvent.keyDown(item, { key: "F10" });
+    expect(onContextMenuKeyboard).toHaveBeenCalledTimes(2);
   });
 });

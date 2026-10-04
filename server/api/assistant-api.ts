@@ -102,23 +102,23 @@ const threadRpcCall = <A>(f: (rpc: AssistantThreadRpcShape) => Promise<A>): Effe
     );
   });
 
-// Engine-control forward (enqueue/abort). Reports whether a DO was present and
-// acked, so call sites can honour the ADR §B.4 failure semantics instead of
-// silently degrading. On Bun `available` is false (no DO — the in-process
-// engine owns the task); on Workers a rejected call is `available: true,
-// ok: false`.
-const threadRpcControl = (
-  f: (rpc: AssistantThreadRpcShape) => Promise<{ ok: true } | null>
-): Effect.Effect<{ available: boolean; ok: boolean }, never, AssistantThreadRpc> =>
+// Engine-control forward (enqueue/abort/resume). Reports whether a DO was
+// present and acked, plus the raw ack, so call sites can honour the ADR §B.4
+// failure semantics instead of silently degrading. On Bun `available` is false
+// (no DO — the in-process engine owns the task); on Workers a rejected call is
+// `available: true, ok: false`.
+const threadRpcControl = <A extends { ok: true }>(
+  f: (rpc: AssistantThreadRpcShape) => Promise<A | null>
+): Effect.Effect<{ available: boolean; ok: boolean; ack: A | null }, never, AssistantThreadRpc> =>
   Effect.gen(function* () {
     const rpc = yield* AssistantThreadRpc;
-    if (!rpc.available) return { available: false, ok: false };
+    if (!rpc.available) return { available: false, ok: false, ack: null as A | null };
     return yield* Effect.tryPromise(() => f(rpc)).pipe(
-      Effect.map((result) => ({ available: true, ok: result !== null })),
+      Effect.map((result) => ({ available: true, ok: result !== null, ack: result })),
       Effect.catchAll((e) =>
         Effect.sync(() => {
           console.warn("[assistant] DO thread control RPC failed:", e instanceof Error ? e.message : String(e));
-          return { available: true, ok: false };
+          return { available: true, ok: false, ack: null as A | null };
         })
       )
     );
@@ -371,9 +371,36 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         yield* requireProjectReadById(t.projectId);
+        // LX-79 single-owner resume: with a Durable Object present, the DO owns
+        // the whole resume — it atomically claims the batch, executes the
+        // approved writes once through the Worker, then continues the turn on
+        // its own socket. The route is only the handoff; it must NEVER also
+        // start the in-process stream, or the same batch would be executed
+        // twice. The client names the exact batch (`payload.batchId`); a missing
+        // id keeps the DO's legacy newest-first walk.
+        const rpc = yield* AssistantThreadRpc;
+        if (rpc.available) {
+          const requested = req.payload.batchId ?? null;
+          const resume = yield* threadRpcControl((r) => r.resumeBatch(`chat:${req.path.chatId}`, requested));
+          // ADR-0003 §B.4: a real DO that rejected the call is the assistant
+          // being unavailable. 502 (not a silent 202) so the client keeps the
+          // batch eligible — the DO's claim makes the retry idempotent.
+          if (!resume.ok) {
+            return HttpServerResponse.unsafeJson(
+              { error: { code: "ASSISTANT_UNAVAILABLE", message: "Resume RPC failed" } },
+              { status: 502 }
+            );
+          }
+          // 202 carries the DO's discriminated ack so the client can decide
+          // whether to persist (`executed` / `settled` / `indeterminate`) or
+          // keep the batch eligible (`pending` / `unavailable`).
+          return HttpServerResponse.unsafeJson(resume.ack ?? { ok: true }, { status: 202 });
+        }
+        // No Durable Object (Bun flavor / P5-deprecated server path): nothing
+        // else can own the resume, so the in-process engine runs it and the
+        // frames stream to the client. Kept only for that no-DO surface.
         const service = yield* AssistantService;
         const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
-        yield* threadRpcCall((rpc) => rpc.resumeBatch(`chat:${req.path.chatId}`, null));
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
         return sseHttpResponse(frames);
       }))
@@ -1363,9 +1390,9 @@ export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
 export function createAssistantApiHandler(
   dbPath: string,
   env?: RuntimeEnv,
-  opts?: { mcpConnector?: Layer.Layer<McpConnector> }
+  opts?: { mcpConnector?: Layer.Layer<McpConnector>; threadRpc?: AssistantThreadRpcShape }
 ) {
-  const ready = bootOrCrash(buildBunFullApp(dbPath, env, opts?.mcpConnector));
+  const ready = bootOrCrash(buildBunFullApp(dbPath, env, opts?.mcpConnector, opts?.threadRpc));
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
@@ -1386,7 +1413,8 @@ export function createAssistantApiHandler(
 async function buildBunFullApp(
   dbPath: string,
   env?: RuntimeEnv,
-  mcpConnector?: Layer.Layer<McpConnector>
+  mcpConnector?: Layer.Layer<McpConnector>,
+  threadRpc?: AssistantThreadRpcShape
 ) {
   const { Database } = await import("bun:sqlite");
   const db = new Database(dbPath);
@@ -1406,7 +1434,7 @@ async function buildBunFullApp(
   const storageCfg = resolveStorageConfig(storageEnvFrom(env ?? getEnv()), dirname(dbPath));
   const serviceLayer = Layer.mergeAll(
     buildBaseServiceLayerWithStorage(storageCfg),
-    assistantServiceLayerWithStorage(storageCfg, mcpConnector),
+    assistantServiceLayerWithStorage(storageCfg, mcpConnector, threadRpc),
   );
   const handlerLayer = fullRouteGroups().pipe(
     Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),

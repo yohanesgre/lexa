@@ -2398,16 +2398,32 @@ body { verdict*: "approve" | "reject" }
   executes/refuses without one (`auto`/`deny`).
 
 POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-stream)
+  body { batchId?: string }   (optional — LX-79 single-owner resume)
 POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
   Kept path (ADR-0003 §B.4). On the chat surface the app issues this as a plain
-  REST POST and reads no body; the DO resume RPC runs server-side and the
-  resumed frames arrive on the `chat:<chatId>` WebSocket. The endpoint's own SSE
-  body (same frames as the respective stream endpoints) remains for the document
-  panel. Server-side sequence:
+  REST POST with an optional `{ batchId?: string }` body naming the exact approval
+  batch to execute (omitted → the DO's legacy newest-first walk). With a Durable
+  Object present the endpoint does not stream: the DO claims the batch, runs the
+  resume RPC, and the resumed frames arrive on the `chat:<chatId>` WebSocket. It
+  responds `202` with a discriminated ack the client uses to decide persistence:
+
+    202 { ok: true, executed: true }                    — writes ran; persist.
+    202 { ok: true, executed: false, reason: "settled" }       — nothing to run; persist.
+    202 { ok: true, executed: false, reason: "indeterminate" } — transport failed,
+        writes MAY have applied; persist (never replay).
+    202 { ok: true, executed: false, reason: "pending" }       — batch not fully
+        decided; keep eligible, retry.
+    202 { ok: true, executed: false, reason: "unavailable" }   — no DO→Worker
+        transport; keep eligible (nothing was claimed).
+
+  The endpoint's own SSE body (same frames as the respective stream endpoints)
+  remains for the document panel and the no-DO (Bun) surface. Server-side sequence:
   sweep expired → execute approved rows in seq order (each emitting an
   approval_result frame right after start: applied|failed, error carries
   "CODE: message"; rejected rows emit denied) → continue the provider turn
   with no new user message → done.
+  | 202 ack (DO present) — see reasons above
+  | 502 ASSISTANT_UNAVAILABLE (DO RPC rejected; the claim makes a retry idempotent)
   | 404 ASSISTANT_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume)
   | 409 ASSISTANT_TASK_ACTIVE | 409 APPROVALS_PENDING
 

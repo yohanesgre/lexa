@@ -86,9 +86,7 @@ function useWikiPageContextMenu(
     };
   }, [menu, close]);
 
-  const open = useCallback((event: React.MouseEvent, page: WikiPageMeta) => {
-    event.preventDefault();
-    const row = event.currentTarget as HTMLElement;
+  const openAt = useCallback((row: HTMLElement, page: WikiPageMeta) => {
     const rect = row.getBoundingClientRect();
     rowRef.current = row;
     setMenu({
@@ -98,6 +96,11 @@ function useWikiPageContextMenu(
       anchor: { top: rect.bottom, left: rect.left },
     });
   }, []);
+
+  const open = useCallback((event: React.MouseEvent, page: WikiPageMeta) => {
+    event.preventDefault();
+    openAt(event.currentTarget as HTMLElement, page);
+  }, [openAt]);
 
   const addChild = useCallback(() => {
     if (!menu) return;
@@ -130,7 +133,7 @@ function useWikiPageContextMenu(
     if (page) actions.onDelete(page);
   }, [menu, pages, close, actions]);
 
-  return { menu, open, close, addChild, rename, move, remove };
+  return { menu, open, openAt, close, addChild, rename, move, remove };
 }
 
 function SidebarRail({ onExpand }: { onExpand: () => void }) {
@@ -293,6 +296,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           onRetryPages={refetchPages}
           contextMenuPageId={contextMenu.menu?.pageId ?? null}
           onContextMenu={contextMenu.open}
+          onContextMenuKeyboard={contextMenu.openAt}
           onNewPage={openNewPage}
           onClose={toggle}
           expanded={expanded}
