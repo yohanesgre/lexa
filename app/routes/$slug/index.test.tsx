@@ -78,7 +78,7 @@ describe("project dashboard header", () => {
     expect(screen.getByText("Create Project")).toBeInTheDocument();
   });
 
-  it("a superadmin can submit an unassigned project without picking a team", async () => {
+  it("a superadmin cannot submit while the team placeholder is selected", async () => {
     h.sessionUser = { role: "superadmin" };
     const user = userEvent.setup();
     const Component = (Route as unknown as { component: ComponentType }).component;
@@ -87,10 +87,7 @@ describe("project dashboard header", () => {
     await user.click(screen.getByRole("button", { name: /new project/i }));
     await user.type(screen.getByLabelText("Name"), "Unassigned");
 
-    const submit = screen.getByRole("button", { name: /create project/i });
-    expect(submit).toBeEnabled();
-    await user.click(submit);
-    expect(h.createInput).toEqual({ name: "Unassigned", description: undefined, teamId: null });
+    expect(screen.getByRole("button", { name: /create project/i })).toBeDisabled();
   });
 
   it("a superadmin sees the Global (no team) option and it submits teamId:null", async () => {
@@ -102,7 +99,9 @@ describe("project dashboard header", () => {
     await user.click(screen.getByRole("button", { name: /new project/i }));
     await user.type(screen.getByLabelText("Name"), "Global");
     await user.selectOptions(screen.getByLabelText("Project team"), "global");
-    await user.click(screen.getByRole("button", { name: /create project/i }));
+    const submit = screen.getByRole("button", { name: /create project/i });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
     expect(h.createInput).toEqual({ name: "Global", description: undefined, teamId: null });
   });
 
