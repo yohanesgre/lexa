@@ -6366,6 +6366,12 @@
   flex: 1;
   overflow-y: auto;
   padding: 24px 24px 8px;
+  /* Top clearance contract — the 48px .chat-header-scrim fades ink at the
+     scroller's top edge. scrollIntoView({ block: "start" }) on the newest
+     approval batch (Review ↑ + proposal arrival) lands its header row below
+     the scrim instead of clipping it above the scroller; without this the
+     bulk actions were unclickable at the default scroll position. */
+  scroll-padding-top: 48px;
 }
 /* Clearance contract — transcript scroller only (panels such as
    ChatProviderMissingPanel keep the base rhythm). At rest the last bubble ends

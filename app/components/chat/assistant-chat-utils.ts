@@ -175,6 +175,15 @@ export function hhmm(ts?: string): string | null {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// The suspended batch is the NEWEST turn, so `Review ↑` and proposal-arrival
+// targeting use the LAST `.approval-batch` in the scroll container — not the
+// first one rendered. Lives here (not in the composer) so the auto-scroll hook
+// and the composer share one definition.
+export function lastApprovalBatch(root: ParentNode): Element | null {
+  const batches = root.querySelectorAll(".approval-batch");
+  return batches.length > 0 ? batches[batches.length - 1]! : null;
+}
+
 function isErrorMeta(raw: unknown): { code: string; message: string } | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const e = raw as { code?: unknown; message?: unknown };

@@ -23,6 +23,8 @@ import type { ChatAttachment } from "../../lib/api";
 import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
 import { MENTION_SECTIONS, type MentionItem } from "../../lib/mention-suggestion";
 import { useMentionTokens } from "../../lib/useMentionTokens";
+import { matchMedia } from "../../lib/viewport";
+import { lastApprovalBatch } from "./assistant-chat-utils";
 import type { LexaSkill } from "../../../shared/types";
 
 const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Assistant.";
@@ -47,12 +49,10 @@ export interface ChatUploadRequest {
   onHandle: (handle: { abort: () => void }) => void;
 }
 
-// The suspended batch is the NEWEST turn, so `Review ↑` targets the LAST
-// `.approval-batch` in the scroll container — not the first one rendered.
-export function lastApprovalBatch(root: ParentNode): Element | null {
-  const batches = root.querySelectorAll(".approval-batch");
-  return batches.length > 0 ? batches[batches.length - 1]! : null;
-}
+// Re-exported for existing tests; the definition lives with the auto-scroll
+// hook in assistant-chat-utils so `Review ↑` and proposal arrival share one
+// last-`.approval-batch` target.
+export { lastApprovalBatch };
 
 function mmss(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -710,7 +710,10 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   const reviewApprovals = useCallback(() => {
     const scrollRoot = document.querySelector(".chat-scroll") ?? document;
-    lastApprovalBatch(scrollRoot)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    lastApprovalBatch(scrollRoot)?.scrollIntoView({
+      block: "start",
+      behavior: matchMedia("(prefers-reduced-motion: reduce)") ? "auto" : "smooth",
+    });
   }, []);
 
   // Extraction failure surfaces as a terminal stream error; keep the chips,

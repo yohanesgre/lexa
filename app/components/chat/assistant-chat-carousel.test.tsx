@@ -339,6 +339,21 @@ describe("AssistantApprovalBatch — carousel", () => {
     expect(counter()).toBe("2 / 3");
   });
 
+  it("survives an unrelated parent re-render between the decision and the terminal state", () => {
+    const chips = threeChips();
+    const { counter, rerenderChips } = renderBatch(chips);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+    // A parent re-render with fresh chip identities while the decision is in
+    // flight must not drop the arm.
+    rerenderChips(chips.map((c) => ({ ...c })));
+    expect(counter()).toBe("1 / 3");
+
+    rerenderChips([{ ...chips[0]!, state: "approved" }, chips[1]!, chips[2]!]);
+    expect(counter()).toBe("2 / 3");
+    expect(document.activeElement).toHaveAttribute("aria-label", "Approve move_task new");
+  });
+
   it("stays put when the decision leaves no pending card", () => {
     const chips = [
       chip({ approvalId: "a1", seq: 0, state: "approved" }),
