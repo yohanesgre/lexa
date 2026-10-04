@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
 import { DatePicker } from "../ui/DatePicker";
 import { useCreateWikiShareLink, useRevokeWikiShareLink, useWikiShareLinks } from "../../lib/queries";
 import type { WikiShareLink } from "../../lib/api";
 import { parseApiDate } from "../../lib/date";
+import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 
 interface ShareDialogProps {
   slug: string;
@@ -35,6 +36,22 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
   const [expiry, setExpiry] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  // Focus contract: initial focus inside, Tab trapped while open, focus
+  // returned to the Share trigger on close.
+  useOverlayFocusTrap(isOpen, dialogRef);
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -77,6 +94,7 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
       <button type="button" className="dialog-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
         <dialog
+          ref={dialogRef}
           open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}

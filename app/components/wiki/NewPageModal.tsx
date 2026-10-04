@@ -19,8 +19,16 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
   const isSubmitting = createPage.isPending;
 
   const [title, setTitle] = useState("");
-  const [parentId, setParentId] = useState<string | null>(null);
+  const [parentId, setParentId] = useState<string | null>(defaultParentId ?? null);
   const [error, setError] = useState<string | null>(null);
+
+  // "Add child page" seeds the parent on open; the modal is remounted per open
+  // by WikiLayout, but a reachable isOpen toggle must seed too.
+  useEffect(() => {
+    if (!isOpen) return;
+    setParentId(defaultParentId ?? null);
+    setError(null);
+  }, [isOpen, defaultParentId]);
 
   const pagesById = useMemo(() => new Map(pages.map((p) => [p.id, p])), [pages]);
   const flatPages = useMemo(() => flattenPages(pages), [pages]);

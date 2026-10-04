@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { PanelLeft } from "lucide-react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { useOverlayFocusTrap, useSidebarState } from "../../lib/sidebar-state";
@@ -113,9 +113,11 @@ function useWikiPageContextMenu(
   const remove = useCallback(() => {
     if (!menu || !pages) return;
     const page = pages.find((p) => p.id === menu.pageId);
+    // Restore focus to the originating row before the dialog takes it, so the
+    // dialog's focus trap can hand it back there on close.
+    close();
     if (page) actions.onDelete(page);
-    setMenu(null);
-  }, [menu, pages, actions]);
+  }, [menu, pages, close, actions]);
 
   return { menu, open, close, addChild, rename, move, remove };
 }
@@ -162,14 +164,25 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     []
   );
 
-  const handleDelete = useCallback(() => {
+  const deleteHasChildren = useMemo(
+    () => (deleteConfirm ? (pages ?? []).some((p) => p.parentId === deleteConfirm.id) : false),
+    [deleteConfirm, pages]
+  );
+
+  const handleDelete = useCallback(async () => {
     if (!deleteConfirm) return;
-    deletePage.mutate(deleteConfirm.slug);
+    if (deleteHasChildren) return;
+    try {
+      await deletePage.mutateAsync(deleteConfirm.slug);
+    } catch {
+      // Server rejected (e.g. HAS_CHILDREN) — keep the dialog open, no bounce.
+      return;
+    }
     if (deleteConfirm.slug === activePageSlug) {
       navigate({ to: "/$slug/wiki", params: { slug } });
     }
     setDeleteConfirm(null);
-  }, [deleteConfirm, activePageSlug, slug, deletePage, navigate]);
+  }, [deleteConfirm, deleteHasChildren, activePageSlug, slug, deletePage, navigate]);
 
   const contextMenu = useWikiPageContextMenu(pages, {
     onAddChild: (pageId) => openNewPage(pageId),
@@ -314,6 +327,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
         <WikiDeletePageDialog
           page={deleteConfirm}
           pending={deletePage.isPending}
+          hasChildren={deleteHasChildren}
           onConfirm={handleDelete}
           onCancel={() => setDeleteConfirm(null)}
         />
