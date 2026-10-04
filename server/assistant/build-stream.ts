@@ -1,6 +1,7 @@
 import { translateRunError, clientFacingErrorMessage } from "./provider";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail } from "./tools";
 import { isAssistantWriteTool, type QueuedProposal } from "./write-tools";
+import { approvalCarriersOf } from "./approval-carrier";
 import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/errors";
 import type { AssistantReasoningEffort, StreamFrame, ApprovalPartial } from "../../shared/assistant";
 import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../shared/assistant";
@@ -80,6 +81,25 @@ export function findPendingBatches(messages: unknown[]): string[] {
     if (id !== null && !out.includes(id)) out.push(id);
   }
   return out;
+}
+// Newest pending-batch marker across BOTH persisted shapes: the legacy
+// `pendingBatch` message field and the D3 `data-assistant-approval` carrier
+// part. Scanning message-by-message from the tail makes the newest marker win
+// regardless of which shape carries it (`findPendingBatch` sees only the legacy
+// field, so a parts-shaped transcript resolved to an empty batchId and the
+// resume gate 409'd). An empty/non-string batchId is not a marker.
+export function findNewestPendingBatch(messages: unknown[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    const legacy = m && typeof m === "object" ? pendingBatchIdOf((m as { pendingBatch?: unknown }).pendingBatch) : null;
+    if (legacy !== null) return legacy;
+    const carriers = approvalCarriersOf(m);
+    if (carriers.length > 0) {
+      const newest = carriers[carriers.length - 1]!.batchId;
+      if (newest.length > 0) return newest;
+    }
+  }
+  return null;
 }
 export function applyResumeResults(messages: unknown[], resolvedBatchIds: string[]): unknown[] {
   const done = new Set(resolvedBatchIds);

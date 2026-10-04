@@ -354,6 +354,59 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
   });
 });
 
+describe("chat resume — carrier-shaped transcript (DO path)", () => {
+  const carrierThread = (status: "approved" | "pending") =>
+    `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+       VALUES ('chat', 'c1', 'p1', 'u1', '[{"id":"m1","role":"user","parts":[{"type":"text","text":"go"}]},{"id":"m2","role":"assistant","parts":[{"type":"text","text":"proposed"},{"type":"data-assistant-approval","data":{"batchId":"b1","approvals":[{"approvalId":"ap1","seq":0,"name":"no_such_write_tool"}]}}]}]');
+     INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+       VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'no_such_write_tool', '{}', '{}', '${status}', '2099-01-01 00:00:00');`;
+
+  it("resumes past the gate when every carrier approval is decided", async () => {
+    setup();
+    db.exec(carrierThread("approved"));
+
+    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect(providerMock.calls).toHaveLength(1);
+  });
+
+  it("still 409s while a carrier approval remains pending", async () => {
+    setup();
+    db.exec(carrierThread("pending"));
+
+    const result = await run(Effect.either(service.resumeChatStream("c1", "u1")));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string; batchId: string; remaining: number } }).left).toMatchObject({
+      _tag: "ApprovalsPending",
+      batchId: "b1",
+      remaining: 1,
+    });
+    expect(providerMock.calls).toHaveLength(0);
+  });
+
+  it("targets the newest marker across both shapes", async () => {
+    setup();
+    // Legacy b-old (decided) lives in the earlier message; carrier b-new (still
+    // pending) is newer, so the gate must resolve b-new, not the legacy b-old.
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"assistant","content":"old","pendingBatch":{"batchId":"b-old","approvals":[{"approvalId":"ap-old"}]}},{"id":"m2","role":"assistant","parts":[{"type":"text","text":"new"},{"type":"data-assistant-approval","data":{"batchId":"b-new","approvals":[{"approvalId":"ap-new","seq":0,"name":"no_such_write_tool"}]}}]}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap-old', 'p1', 'chat', 'c1', 'u1', 'b-old', 0, 'no_such_write_tool', '{}', '{}', 'approved', '2099-01-01 00:00:00'),
+         ('ap-new', 'p1', 'chat', 'c1', 'u1', 'b-new', 0, 'no_such_write_tool', '{}', '{}', 'pending', '2099-01-01 00:00:00');
+`);
+
+    const result = await run(Effect.either(service.resumeChatStream("c1", "u1")));
+    expect(result._tag).toBe("Left");
+    expect((result as { left: { _tag: string; batchId: string; remaining: number } }).left).toMatchObject({
+      _tag: "ApprovalsPending",
+      batchId: "b-new",
+      remaining: 1,
+    });
+    expect(providerMock.calls).toHaveLength(0);
+  });
+});
+
 describe("chat preflight — fail-open and disable", () => {
   it("a throwing transport leaves the run intact with no advisory", async () => {
     stubFetch(() => Promise.reject(new Error("socket hang up")));

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
-import { buildStream, buildResumeResultsNote, isWriteIntentClaim, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
+import { buildStream, buildResumeResultsNote, findNewestPendingBatch, isWriteIntentClaim, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { QueuedProposal } from "./write-tools";
 
@@ -313,6 +313,48 @@ describe("buildStream provider-boundary sanitization", () => {
     expect(frames.at(-1)?.type).toBe("done");
     const assistant = seen!.find((m) => m.role === "assistant")!;
     expect(assistant.toolCalls).toBeUndefined();
+  });
+});
+
+describe("findNewestPendingBatch", () => {
+  it("finds the newest legacy marker", () => {
+    const messages = [
+      { role: "assistant", content: "old", pendingBatch: { batchId: "b1", approvals: [] } },
+      { role: "assistant", content: "new", pendingBatch: { batchId: "b2", approvals: [] } },
+    ];
+    expect(findNewestPendingBatch(messages)).toBe("b2");
+  });
+
+  it("finds the newest carrier marker", () => {
+    const messages = [
+      { id: "m1", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "c1", approvals: [] } }] },
+      { id: "m2", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "c2", approvals: [] } }] },
+    ];
+    expect(findNewestPendingBatch(messages)).toBe("c2");
+  });
+
+  it("picks the newest marker across both shapes by message position", () => {
+    const carrierThenLegacy = [
+      { id: "m1", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "c-old", approvals: [] } }] },
+      { role: "assistant", content: "later", pendingBatch: { batchId: "b-new", approvals: [] } },
+    ];
+    expect(findNewestPendingBatch(carrierThenLegacy)).toBe("b-new");
+
+    const legacyThenCarrier = [
+      { role: "assistant", content: "earlier", pendingBatch: { batchId: "b-old", approvals: [] } },
+      { id: "m2", role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "c-new", approvals: [] } }] },
+    ];
+    expect(findNewestPendingBatch(legacyThenCarrier)).toBe("c-new");
+  });
+
+  it("ignores non-markers and returns null when neither shape carries one", () => {
+    expect(
+      findNewestPendingBatch([
+        { role: "user", content: "hi" },
+        { role: "assistant", parts: [{ type: "text", text: "no marker" }] },
+        { role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "", approvals: [] } }] },
+      ])
+    ).toBeNull();
   });
 });
 
