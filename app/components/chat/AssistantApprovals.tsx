@@ -175,6 +175,22 @@ export function AssistantApprovalBatch({
   // Page to a card: clamp at the ends (no wrap), scroll it into view (instant
   // under reduced motion), then land focus on the card's first enabled action
   // button — or the card wrapper when the card is fully decided / disabled.
+  function focusCardAction(index: number) {
+    const slide = slideRefs.current[index];
+    if (!slide) return;
+    // Wireframe (herald-write-approvals.html:238): focus lands on the card's
+    // Approve button, not DOM-first (which would be Reject). preventScroll: the
+    // browser's focus reveal must not scroll the track — under
+    // `scroll-snap-type: x mandatory` that reveal can fall short of the snap
+    // midpoint on a BACKWARD page (the Approve button sits right of centre), so
+    // mandatory snap returns the track to the old card and the page no-ops.
+    const action =
+      slide.querySelector<HTMLButtonElement>('button:not([disabled])[aria-label^="Approve "]') ??
+      slide.querySelector<HTMLButtonElement>("button:not([disabled])");
+    if (action) action.focus({ preventScroll: true });
+    else slide.focus({ preventScroll: true });
+  }
+
   function goTo(index: number, focus: boolean) {
     const next = Math.max(0, Math.min(total - 1, index));
     setActiveIndex(next);
@@ -189,20 +205,7 @@ export function AssistantApprovalBatch({
         // jsdom has no layout/scroll — the counter state is the assertion.
       }
     }
-    if (focus && slide) {
-      // Wireframe (herald-write-approvals.html:238): focus lands on the newly
-      // active card's Approve button, not DOM-first (which would be Reject).
-      // preventScroll: the browser's focus reveal must not scroll the track —
-      // under `scroll-snap-type: x mandatory` that reveal can fall short of the
-      // snap midpoint on a BACKWARD page (the Approve button sits right of
-      // centre), so mandatory snap returns the track to the old card and the
-      // page no-ops. Only the explicit track.scrollTo above may move the track.
-      const action =
-        slide.querySelector<HTMLButtonElement>('button:not([disabled])[aria-label^="Approve "]') ??
-        slide.querySelector<HTMLButtonElement>("button:not([disabled])");
-      if (action) action.focus({ preventScroll: true });
-      else slide.focus({ preventScroll: true });
-    }
+    if (focus && slide) focusCardAction(next);
   }
 
   // Auto-advance settle (herald-write-approvals.html State 3b): once the armed
@@ -244,6 +247,9 @@ export function AssistantApprovalBatch({
   function handleCardDecide(chip: ApprovalChip, verdict: "approve" | "reject") {
     if (ordered[active]?.approvalId !== chip.approvalId) {
       void onDecide(chip, verdict);
+      // The decided non-active card's action can disable and drop focus to
+      // <body>; return it to the still-active card.
+      focusCardAction(active);
       return;
     }
     const marker = { id: chip.approvalId, resolved: false };

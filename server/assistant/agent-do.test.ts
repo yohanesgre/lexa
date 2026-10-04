@@ -1405,6 +1405,30 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(await transcriptOf(documentId)).toHaveLength(1);
   }, 60_000);
 
+  it("releases the claim for a requested batch the Worker reports missing", async () => {
+    const documentId = "resume-missing";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    expect(await (await callResume(threadKey, "missing-1")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+    expect(await (await callResume(threadKey, "missing-1")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+
+    // A kept claim would ack `executed: true` on the retry; the released claim
+    // lets the second request re-reach the Worker and stay symmetric with the walk.
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "missing-1")).toHaveLength(2);
+  }, 60_000);
+
   it("walks older batches when the newest is already claimed (LX-82)", async () => {
     const documentId = "resume-walk";
     const threadKey = `chat:${documentId}`;

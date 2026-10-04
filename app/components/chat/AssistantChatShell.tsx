@@ -247,6 +247,7 @@ export function ChatHeader({
 
 export function ChatTranscriptArea({
   turns,
+  chatId,
   slug,
   streaming,
   renderText,
@@ -274,6 +275,9 @@ export function ChatTranscriptArea({
   renderRunCard,
 }: {
   turns: ChatTurn[];
+  // Thread id: folds into every row key so per-row local state cannot leak
+  // across a thread switch (the transcript component is not remounted).
+  chatId: string;
   slug: string;
   streaming: boolean;
   renderText: (text: string) => ReactNode;
@@ -305,11 +309,11 @@ export function ChatTranscriptArea({
     <div className="chat-transcript">
       <div className="chat-header-scrim" aria-hidden="true" />
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
-        <div className="chat-column" role="log" aria-live="polite">
+        <div className="chat-column" role="log" aria-live={streaming ? "off" : "polite"} aria-busy={streaming}>
           {turns.map((turn, pos) =>
             turn.role === "user" ? (
               <UserTurnBubble
-                key={pos}
+                key={`${chatId}:${pos}`}
                 turn={turn}
                 pos={pos}
                 slug={slug}
@@ -325,7 +329,7 @@ export function ChatTranscriptArea({
                 attachmentIndex={attachmentIndex}
               />
             ) : (
-              <Fragment key={pos}>
+              <Fragment key={`${chatId}:${pos}`}>
                 <AssistantBubble
                   turn={turn}
                   projectId={projectId}

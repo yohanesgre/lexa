@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, FileText, Image as ImageIcon, Paperclip, Send, Square, XCircle } from "lucide-react";
 import {
   CHAT_ATTACHMENT_CAPS,
@@ -83,10 +83,12 @@ function ComposerMentionPopup({
   mention,
   hasBoundSkills,
   composerRef,
+  listboxId,
 }: {
   mention: ReturnType<typeof useMentionTokens>;
   hasBoundSkills: boolean;
   composerRef: React.RefObject<HTMLTextAreaElement | null>;
+  listboxId: string;
 }) {
   const skillMode = mention.sigil === "$";
   const empty = mention.items.length === 0;
@@ -98,6 +100,7 @@ function ComposerMentionPopup({
   const row = (item: MentionItem, index: number) => (
     <div
       key={`${item.refType}-${item.refId}`}
+      id={`${listboxId}-opt-${index}`}
       role="option"
       tabIndex={-1}
       aria-selected={index === mention.focusedIndex}
@@ -124,7 +127,7 @@ function ComposerMentionPopup({
   );
 
   return (
-    <div className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
+    <div id={listboxId} className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
       {skillMode ? (
         <>
           <div className="dropdown-label mention-popup-skill-header">Skills — invoke with $</div>
@@ -136,6 +139,7 @@ function ComposerMentionPopup({
             mention.items.map((it, idx) => (
               <div
                 key={it.refId}
+                id={`${listboxId}-opt-${idx}`}
                 role="option"
                 tabIndex={-1}
                 aria-selected={idx === mention.focusedIndex}
@@ -507,6 +511,11 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const [warning, setWarning] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const mention = useMentionTokens({ slug, value: draft, onChange: setDraft, skills });
+  // Combobox wiring: the textarea owns focus, the popup is its listbox, and the
+  // focused row is named by aria-activedescendant (focusedIndex).
+  const mentionListboxId = useId();
+  const mentionActiveDescendant =
+    mention.open && mention.items.length > 0 ? `${mentionListboxId}-opt-${mention.focusedIndex}` : undefined;
   const queueMode = streaming || suspendedLock;
   const elapsed = useElapsedSeconds(streaming);
   const reconnectSeconds = useElapsedSeconds(reconnecting);
@@ -753,7 +762,14 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   return (
     <div className="chat-deck" style={{ position: "relative" }}>
-      {mention.open && <ComposerMentionPopup mention={mention} hasBoundSkills={(skills?.length ?? 0) > 0} composerRef={composerRef} />}
+      {mention.open && (
+        <ComposerMentionPopup
+          mention={mention}
+          hasBoundSkills={(skills?.length ?? 0) > 0}
+          composerRef={composerRef}
+          listboxId={mentionListboxId}
+        />
+      )}
       {rail && (
         <div className="deck-rail" style={busy409 || queueMode ? { opacity: 0.55 } : undefined}>
           {rail}
@@ -801,6 +817,11 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
           ref={composerRef}
           className="composer-editor w-full"
           aria-label="Message Assistant"
+          role="combobox"
+          aria-expanded={mention.open}
+          aria-controls={mention.open ? mentionListboxId : undefined}
+          aria-activedescendant={mentionActiveDescendant}
+          aria-autocomplete="list"
           rows={busy409 ? 1 : 2}
           placeholder={placeholder}
           value={draft}

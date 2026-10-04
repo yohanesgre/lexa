@@ -66,7 +66,7 @@ describe("useChatAutoScroll — proposal arrival", () => {
     const scroll = mountScroller();
 
     try {
-      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM, chatId: "c1" }), {
         initialProps: { turns: [userTurn()] },
       });
       act(() => {
@@ -92,7 +92,7 @@ describe("useChatAutoScroll — proposal arrival", () => {
     const scroll = mountScroller();
 
     try {
-      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM, chatId: "c1" }), {
         initialProps: { turns: [userTurn()] },
       });
       act(() => {
@@ -115,7 +115,7 @@ describe("useChatAutoScroll — proposal arrival", () => {
     const scroll = mountScroller();
 
     try {
-      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM, chatId: "c1" }), {
         initialProps: { turns: [userTurn()] },
       });
       act(() => {
@@ -142,7 +142,7 @@ describe("useChatAutoScroll — proposal arrival", () => {
     scroll.scrollTop = 0;
 
     try {
-      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM, chatId: "c1" }), {
         initialProps: { turns: [userTurn()] },
       });
       act(() => {
@@ -170,7 +170,7 @@ describe("useChatAutoScroll — proposal arrival", () => {
     const scroll = mountScroller();
 
     try {
-      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM, chatId: "c1" }), {
         initialProps: { turns: [userTurn(), pendingBatchTurn()] },
       });
       act(() => {
@@ -181,6 +181,38 @@ describe("useChatAutoScroll — proposal arrival", () => {
 
       // One motionless jump to the bottom so the resume continuation is followed.
       expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo).toHaveBeenCalledWith({ top: scroll.scrollHeight, behavior: "auto" });
+    } finally {
+      scroll.remove();
+    }
+  });
+
+  it("resets the at-bottom pin when the thread changes", () => {
+    const scrollIntoView = vi.fn();
+    const scrollTo = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true, writable: true });
+    Object.defineProperty(Element.prototype, "scrollTo", { value: scrollTo, configurable: true, writable: true });
+    stubMatchMedia(false);
+    const scroll = mountScroller();
+    Object.defineProperty(scroll, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scroll, "clientHeight", { value: 100, configurable: true });
+    scroll.scrollTop = 0;
+
+    try {
+      const { result, rerender } = renderHook(
+        ({ turns, chatId }: { turns: ChatTurn[]; chatId: string }) => useChatAutoScroll({ turns, stream: STREAM, chatId }),
+        { initialProps: { turns: [userTurn()], chatId: "c1" } }
+      );
+      act(() => {
+        result.current.scrollRef.current = scroll;
+      });
+      // Release the pin on the first thread…
+      act(() => {
+        result.current.handleTranscriptScroll();
+      });
+      scrollTo.mockClear();
+      // …then switch threads: the new thread must start pinned and follow.
+      rerender({ turns: [userTurn()], chatId: "c2" });
       expect(scrollTo).toHaveBeenCalledWith({ top: scroll.scrollHeight, behavior: "auto" });
     } finally {
       scroll.remove();

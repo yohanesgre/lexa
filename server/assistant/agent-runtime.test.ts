@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   INTERNAL_LEGACY_PATH,
   INTERNAL_MIRROR_PATH,
+  INTERNAL_RESUME_EXECUTE_PATH,
   INTERNAL_TURN_CONTEXT_PATH,
   INTERNAL_WRITE_EXECUTE_PATH,
   AssistantInternalUnavailable,
   callWriteExecute,
+  executeResumeBatchRemote,
   fetchLegacyTranscript,
   mirrorTranscript,
   resolveHarnessContext,
@@ -218,6 +220,51 @@ describe("callWriteExecute (auto mode)", () => {
     const out = await callWriteExecute(deps(fetchImpl), INPUT);
     expect(out).toEqual({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" });
     expect((out as { indeterminate?: unknown }).indeterminate).toBeUndefined();
+  });
+});
+
+describe("executeResumeBatchRemote", () => {
+  it("POSTs the batch id to the resume-execute route with a signed identity", async () => {
+    const calls: Array<{ url: string; method?: string | undefined; body: unknown }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      return jsonResponse({ ok: true, note: "done" });
+    };
+    await executeResumeBatchRemote(deps(fetchImpl), "batch-1");
+    expect(calls[0]?.url).toBe(`https://lexa.test${INTERNAL_RESUME_EXECUTE_PATH}`);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.body).toEqual({ batchId: "batch-1" });
+  });
+
+  it("maps an AbortError (timeout) to unavailable so the DO keeps its claim", async () => {
+    // `AbortSignal.timeout` rejects with an AbortError; the mapping must be
+    // `unavailable` (writes MAY have applied → never retry), not a thrown error.
+    const fetchImpl: FetchLike = async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    };
+    await expect(executeResumeBatchRemote(deps(fetchImpl), "batch-1")).resolves.toEqual({ kind: "unavailable" });
+  });
+
+  it("maps a non-ok response to unavailable", async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse({ error: { code: "ASSISTANT_UNAVAILABLE" } }, 502);
+    await expect(executeResumeBatchRemote(deps(fetchImpl), "batch-1")).resolves.toEqual({ kind: "unavailable" });
+  });
+
+  it("maps the discriminated body to executed/pending/noop/missing", async () => {
+    const withBody = (b: unknown): FetchLike => async () => jsonResponse(b);
+    await expect(executeResumeBatchRemote(deps(withBody({ ok: true, note: "n" })), "b1")).resolves.toEqual({
+      kind: "executed",
+      note: "n",
+    });
+    await expect(
+      executeResumeBatchRemote(deps(withBody({ ok: false, reason: "pending", remaining: 2 })), "b1")
+    ).resolves.toEqual({ kind: "pending", remaining: 2 });
+    await expect(executeResumeBatchRemote(deps(withBody({ ok: false, reason: "noop" })), "b1")).resolves.toEqual({
+      kind: "noop",
+    });
+    await expect(executeResumeBatchRemote(deps(withBody({ ok: false, reason: "missing" })), "b1")).resolves.toEqual({
+      kind: "missing",
+    });
   });
 });
 
