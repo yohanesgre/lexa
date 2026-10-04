@@ -103,6 +103,55 @@ describe("useAssistantAgent — recovering status projection", () => {
   });
 });
 
+describe("useAssistantAgent — suspended carrier projection (LX-120)", () => {
+  it("flips to suspended for a carrier on an earlier assistant message than the last", () => {
+    chatFx.state.current = {
+      ...chatFx.idle(),
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] },
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-create_task",
+              toolCallId: "c1",
+              state: "output-available",
+              input: {},
+              output: { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", diff: {} },
+            },
+          ],
+        },
+        { id: "m2", role: "assistant", parts: [{ type: "text", text: "done" }] },
+      ],
+    };
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(result.current.status).toBe("suspended");
+    expect(result.current.suspendedBatchId).toBe("b1");
+    expect(result.current.pending.map((c) => c.approvalId)).toEqual(["a1"]);
+  });
+
+  it("flips to suspended for a marker-only carrier", () => {
+    chatFx.state.current = {
+      ...chatFx.idle(),
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] },
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            { type: "text", text: "proposed" },
+            { type: "data-assistant-approval", data: { batchId: "b9", approvals: [] } },
+          ],
+        },
+      ],
+    };
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(result.current.status).toBe("suspended");
+    expect(result.current.suspendedBatchId).toBe("b9");
+  });
+});
+
 describe("useAssistantAgent — resume outcome callback", () => {
   afterEach(() => vi.unstubAllGlobals());
 

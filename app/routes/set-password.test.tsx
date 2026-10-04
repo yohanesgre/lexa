@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 const h = vi.hoisted(() => ({
   session: { value: null as { user: { id: string } } | null },
   mutate: vi.fn(),
+  navigate: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -14,7 +15,7 @@ vi.mock("@tanstack/react-router", () => ({
     useSearch: () => ({ token: "tok" }),
   }),
   Navigate: ({ to }: { to: string }) => <div data-testid="home-redirect">{to}</div>,
-  useNavigate: () => vi.fn(),
+  useNavigate: () => h.navigate,
 }));
 
 vi.mock("../lib/queries", () => ({
@@ -28,6 +29,7 @@ import { SetPasswordPage } from "./set-password";
 beforeEach(() => {
   h.session.value = null;
   h.mutate.mockReset();
+  h.navigate.mockReset();
 });
 
 async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
@@ -47,7 +49,10 @@ describe("SetPasswordForm", () => {
     render(<SetPasswordForm token="tok" onDone={onDone} />);
     await fillAndSubmit(user);
 
-    expect(await screen.findByText(/you're signed in/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sign in with your new password/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(h.navigate).toHaveBeenCalledWith({ to: "/login" });
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 });
@@ -71,7 +76,8 @@ describe("SetPasswordPage", () => {
 
     await fillAndSubmit(user);
 
-    expect(await screen.findByText(/you're signed in/i)).toBeInTheDocument();
+    expect(await screen.findByText(/sign in with your new password/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.queryByTestId("home-redirect")).toBeNull();
   });
 });

@@ -5,11 +5,12 @@ import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { NoticeDanger } from "../ui/NoticeDanger";
 
-// Shared accept form for both token links: admin-issued set-password links
-// (/set-password?token=…) and workspace invitation links (/invite?token=…).
-// Both carry a Better Auth verification token; the server resolves it to the
-// account (invite accept mints the member account), sets the password and
-// establishes the session cookie. Tokens are single-use with 7d expiry.
+// Admin-issued set-password links only (/set-password?token=…). The link
+// carries a Better Auth verification token; the server resolves it to the
+// existing account and runs better-auth's native reset-password, which sets
+// the password and revokes existing sessions — it establishes NO session
+// cookie. Tokens are single-use with 7d expiry. Workspace invitation links
+// (/invite?token=…) are a different token kind on a separate surface.
 export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () => void }) {
   const navigate = useNavigate();
   const setPassword = useSetPassword();
@@ -44,10 +45,10 @@ export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 9999, background: "var(--lx-bg-success-subtle)", color: "var(--lx-text-success)", margin: "0 auto 12px" }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M20 6L9 17l-5-5" /></svg>
         </div>
-        <div className="text-sm weight-500 mb-1" style={{ fontWeight: 500 }}>Password set — you're signed in</div>
-        <p className="text-xs text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Welcome to Lexa.</p>
-        <button className="btn btn-primary w-full" style={{ height: 36 }} onClick={() => navigate({ to: "/" })}>
-          Continue to Lexa
+        <div className="text-sm weight-500 mb-1" style={{ fontWeight: 500 }}>Password set — sign in with your new password</div>
+        <p className="text-xs text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Your account is ready — no session was started, so sign in to continue.</p>
+        <button className="btn btn-primary w-full" style={{ height: 36 }} onClick={() => navigate({ to: "/login" })}>
+          Sign in
         </button>
       </div>
     );

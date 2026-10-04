@@ -10,8 +10,10 @@ import {
   lastAssistantMessage,
   reasoningMsFromMessage,
   segmentFromAssistantMessage,
+  segmentFromMessages,
   snapshotFromSegment,
   statusFromChat,
+  suspensionFromMessages,
   usageFromMessage,
 } from "./assistant-agent-adapter";
 
@@ -276,6 +278,79 @@ describe("segmentFromAssistantMessage — approval chips", () => {
     const segment = segmentFromAssistantMessage(assistant([dataPart("usage", { tokens: 1 })]));
     expect(segment.pending).toEqual([]);
     expect(segment.suspendedBatchId).toBeNull();
+  });
+});
+
+describe("segmentFromMessages — merged suspension projection (LX-120)", () => {
+  it("projects a carrier landing on an earlier assistant message than the last", () => {
+    const carrier = assistant([
+      toolResult("create_task", "c1", {}, {
+        approvalId: "a1",
+        batchId: "b1",
+        seq: 0,
+        name: "create_task",
+        detail: "Create task",
+        diff: DIFF,
+      }),
+    ]);
+    const messages = [user("go"), carrier, assistant([text("done")])];
+    const segment = segmentFromMessages(messages);
+    expect(segment.suspendedBatchId).toBe("b1");
+    expect(segment.pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", diff: DIFF },
+    ]);
+    // `segmentFromMessages` still projects the last message's own text.
+    expect(segment.text).toBe("done");
+  });
+
+  it("flips suspendedBatchId for a marker-only carrier (no reconstructable chips)", () => {
+    const messages = [
+      user("go"),
+      assistant([text("proposed"), dataPart("assistant-approval", { batchId: "b9", approvals: [] })]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBe("b9");
+    expect(pending).toEqual([]);
+    expect(segmentFromMessages(messages).suspendedBatchId).toBe("b9");
+  });
+
+  it("merges chips for the same batch split across trailing messages", () => {
+    const messages = [
+      user("go"),
+      assistant([dataPart("assistant-approval", { batchId: "b1", approvals: [{ approvalId: "a2", seq: 1, name: "delete_task", diff: DIFF }] })]),
+      assistant([dataPart("assistant-approval", { batchId: "b1", approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }] })]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(pending.map((c) => c.approvalId)).toEqual(["a1", "a2"]);
+    expect(suspendedBatchId).toBe("b1");
+  });
+
+  it("does not re-arm a batch whose chips are all terminal", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
+        }),
+      ]),
+    ];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([
+      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF },
+    ]);
+  });
+
+  it("ignores a suspension from an earlier trailing turn", () => {
+    const messages = [
+      user("first"),
+      assistant([dataPart("assistant-approval", { batchId: "b1", approvals: [] })]),
+      user("second"),
+      assistant([text("ok")]),
+    ];
+    expect(suspensionFromMessages(messages).suspendedBatchId).toBeNull();
+    expect(segmentFromMessages(messages).suspendedBatchId).toBeNull();
   });
 });
 

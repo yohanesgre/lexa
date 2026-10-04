@@ -1511,7 +1511,7 @@ export function useSetPassword() {
       // server/auth.ts:363 revokes existing sessions). The user must sign in
       // afterwards; the mutation path neither seeds nor invalidates the
       // session cache.
-      toast.push("success", "Password set — you're signed in");
+      toast.push("success", "Password set — sign in with your new password");
     },
     onError: (err) => {
       toast.push("error", "Could not set password", toastMessage(err));

@@ -89,13 +89,14 @@ export function signOut(): Promise<void> {
 }
 
 // Verification-token password set for admin-issued set-password links
-// (/set-password?token=) only: the server resolves the token to the
-// existing account and establishes the session cookie. Workspace
-// invitation links (/invite?token=) live in a different table and use
-// acceptInvite below — the two token kinds are not interchangeable.
-// `reset-password:<token>` identifier (server/services/password-links.service.ts),
-// so consumption goes through better-auth's native /reset-password endpoint.
-// `/reset-password` returns `{ status: true }` — it seeds no session body.
+// (/set-password?token=) only: the server resolves the token to the existing
+// account (identifier `reset-password:<token>`,
+// server/services/password-links.service.ts) and runs better-auth's native
+// /reset-password, which sets the password and revokes existing sessions
+// (`revokeSessionsOnPasswordReset`). It returns `{ status: true }` and seeds
+// NO session cookie — the user must sign in afterwards. Workspace invitation
+// links (/invite?token=) live in a different table and use acceptInvite below
+// — the two token kinds are not interchangeable.
 export function setPassword(input: { newPassword: string; token: string }): Promise<{ status: boolean }> {
   return authRequest("/reset-password", input) as Promise<{ status: boolean }>;
 }
