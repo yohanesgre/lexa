@@ -23,6 +23,7 @@ import { AttachmentsPanel } from "./AttachmentsPanel";
 import { TaskFooter } from "./TaskFooter";
 import { Toolbar } from "./TextEditor";
 import { textEditorExtensions } from "../lib/tiptap";
+import { laneNeighbors } from "../lib/lane-neighbors";
 import { SourcesSection } from "./document/SourcesSection";
 import { LinksSection } from "./document/LinksSection";
 import { ActivityTab } from "./activity/ActivityTab";
@@ -42,6 +43,7 @@ interface TaskDetailProps {
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
   swimlanes?: Swimlane[];
   milestones?: Milestone[];
+  boardTasks?: Task[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
   taskTitles?: Map<string, string>;    // taskId → title, for link display
@@ -96,27 +98,6 @@ function missingFieldsFor(isCreate: boolean, createColumnId: string, currentColu
         assignees: task?.assignees ?? [],
         description: task?.description ?? emptyDoc,
       });
-}
-
-// A lane-only move must not reposition the task. The move endpoint computes a
-// new position from the supplied neighbors, so pass the task's current
-// same-column neighbors to keep its relative order (server appends to the end
-// when they are absent).
-function laneNeighbors(tasks: Task[], task: Task): { beforeTaskId?: string; afterTaskId?: string } {
-  let before: Task | undefined;
-  let after: Task | undefined;
-  for (const candidate of tasks) {
-    if (candidate.id === task.id || candidate.columnId !== task.columnId) continue;
-    if (candidate.position < task.position) {
-      if (!before || candidate.position > before.position) before = candidate;
-    } else if (candidate.position > task.position) {
-      if (!after || candidate.position < after.position) after = candidate;
-    }
-  }
-  return {
-    ...(before ? { beforeTaskId: before.id } : {}),
-    ...(after ? { afterTaskId: after.id } : {}),
-  };
 }
 
 interface DetailContext {
@@ -299,7 +280,7 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
   );
 }
 
-export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, boardTasks, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -372,8 +353,9 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
   const handleMove = (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined }) => {
     if (!onMove) return;
     if (task && target.columnId === task.columnId && target.swimlaneId !== task.swimlaneId && !target.beforeTaskId && !target.afterTaskId) {
-      const board = queryClient.getQueryData<Board>(["board", slug, false]) ?? queryClient.getQueryData<Board>(["board", slug, true]);
-      return onMove(id, { ...target, ...laneNeighbors(board?.tasks ?? [], task) });
+      const cached = queryClient.getQueryData<Board>(["board", slug, false]) ?? queryClient.getQueryData<Board>(["board", slug, true]);
+      const tasks = cached?.tasks ?? boardTasks ?? [];
+      return onMove(id, { ...target, ...laneNeighbors(tasks, task) });
     }
     return onMove(id, target);
   };

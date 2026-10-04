@@ -17,10 +17,12 @@ const BLOCK_TYPES = new Set([
   "orderedList",
 ]);
 
-// Mirrors the server's `isEmptyDoc` (server/services/task.service.ts): a doc is
-// empty when it holds no text and no meaningful content nodes (image,
-// horizontalRule, table). Container nodes (paragraph, heading, blockquote,
-// list) always recurse — a paragraph of whitespace is empty.
+// Single source of emptiness (invariant 10): a doc is empty when it holds no
+// text and no meaningful content nodes (image, horizontalRule, table).
+// Container nodes (paragraph, heading, blockquote, list) always recurse — a
+// paragraph of whitespace is empty. The server imports this same function
+// (`server/services/task.service.ts`) so the client warning and the server gate
+// cannot drift.
 export function isEmptyDoc(doc: TipTapDoc): boolean {
   if (!doc || typeof doc !== "object") return true;
   const hasContent = (node: Record<string, unknown>): boolean => {

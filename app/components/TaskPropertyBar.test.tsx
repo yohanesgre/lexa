@@ -124,4 +124,107 @@ describe("TaskPropertyBar column + lane moves", () => {
 
     await waitFor(() => expect(props.setSelectedSwimlaneId).toHaveBeenLastCalledWith("s1"));
   });
+
+  it("ignores a same-value column selection", () => {
+    const { props } = baseProps();
+    const { container } = render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
+    fireEvent.click(container.querySelector(".menu-popover .menu-item.active")!);
+
+    expect(props.onMove).not.toHaveBeenCalled();
+    expect(props.setSelectedColumnId).not.toHaveBeenCalled();
+  });
+
+  it("ignores a same-value lane selection", () => {
+    const { props } = baseProps();
+    const { container } = render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Lane A/ }));
+    fireEvent.click(container.querySelector(".menu-popover .menu-item.active")!);
+
+    expect(props.onMove).not.toHaveBeenCalled();
+    expect(props.setSelectedSwimlaneId).not.toHaveBeenCalled();
+  });
+
+  it("does not restore a stale value when a superseded move rejects", async () => {
+    let rejectFirst: ((reason: unknown) => void) | undefined;
+    const onMove = vi.fn()
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
+      .mockResolvedValueOnce(undefined);
+    const { props } = baseProps({
+      columns: [
+        { id: "c1", name: "Todo" },
+        { id: "c2", name: "Doing" },
+        { id: "c3", name: "Review" },
+      ],
+      onMove,
+    });
+    render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Doing" }));
+    fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+
+    await waitFor(() => expect(props.setSelectedColumnId).toHaveBeenCalledTimes(2));
+    rejectFirst!(new Error("nope"));
+    await waitFor(() => expect(props.setSelectedColumnId).toHaveBeenCalledTimes(2));
+    expect(props.setSelectedColumnId).not.toHaveBeenCalledWith("c1");
+  });
+});
+
+describe("TaskPropertyBar badge tokens", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("maps known option colors to PHOSPHOR token classes", () => {
+    const { props } = baseProps({
+      fieldConfig: {
+        priorities: [{ id: "pr1", label: "Urgent", color: "#FF4444" }],
+        types: [{ id: "tp1", label: "Bug", color: "#FF4444" }],
+      },
+    });
+    const { container } = render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
+
+    const badge = container.querySelector(".priority-badge")!;
+    expect(badge).toHaveClass("pb-urgent");
+    expect(badge.querySelector(".priority-dot")).toHaveClass("priority-urgent");
+    expect(container.querySelector(".type-badge")).toHaveClass("type-bug");
+  });
+
+  it("renders option rows with the same token classes", () => {
+    const { props } = baseProps({
+      fieldConfig: {
+        priorities: [
+          { id: "pr1", label: "Urgent", color: "#FF4444" },
+          { id: "pr2", label: "High", color: "#F0C040" },
+        ],
+        types: [],
+      },
+    });
+    const { container } = render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Urgent" }));
+    const dots = container.querySelectorAll(".menu-popover .priority-dot");
+    expect(dots[0]).toHaveClass("priority-urgent");
+    expect(dots[1]).toHaveClass("priority-high");
+  });
+
+  it("falls back to neutral token classes for colorless options", () => {
+    const { props } = baseProps({
+      fieldConfig: {
+        priorities: [{ id: "pr1", label: "None", color: "" }],
+        types: [{ id: "tp1", label: "Generic", color: "" }],
+      },
+    });
+    const { container } = render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
+
+    const badge = container.querySelector(".priority-badge")!;
+    expect(badge).toHaveClass("pb-low");
+    expect(badge.querySelector(".priority-dot")).toHaveClass("priority-low");
+    expect(container.querySelector(".type-badge")).toHaveClass("type-task");
+  });
 });

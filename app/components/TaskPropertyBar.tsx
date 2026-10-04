@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { ChevronDown } from "lucide-react";
 import type { Milestone, Swimlane, Task } from "../../shared/types";
 import { cn } from "./ui/cn";
@@ -72,6 +73,9 @@ function swimlaneLabel(lane: Swimlane, milestones: Milestone[] | undefined): str
 }
 
 function ColumnField(props: TaskPropertyBarProps) {
+  const moveSeq = useRef(0);
+  const latestColumnId = useRef(props.task?.columnId);
+  latestColumnId.current = props.task?.columnId;
   return (
     <div className="prop-field">
       <span className="prop-label">Column</span>
@@ -99,9 +103,15 @@ function ColumnField(props: TaskPropertyBarProps) {
           onChange={(columnId: string) => {
             const currentColumnId = props.task!.columnId;
             if (columnId === currentColumnId) return;
+            const seq = ++moveSeq.current;
             props.setSelectedColumnId(columnId);
             Promise.resolve(props.onMove?.(props.task!.id, { columnId, swimlaneId: props.task!.swimlaneId }))
-              .catch(() => props.setSelectedColumnId(currentColumnId));
+              .catch(() => {
+                // A superseded rejection must not clobber a newer selection;
+                // restore the freshest task value rather than a stale capture.
+                if (moveSeq.current !== seq) return;
+                props.setSelectedColumnId(latestColumnId.current ?? "");
+              });
           }}
           trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
             <button
@@ -142,6 +152,9 @@ function CreateSwimlaneField(props: TaskPropertyBarProps) {
 }
 
 function SwimlaneField(props: TaskPropertyBarProps) {
+  const moveSeq = useRef(0);
+  const latestSwimlaneId = useRef(props.task?.swimlaneId);
+  latestSwimlaneId.current = props.task?.swimlaneId;
   return (
     <div className="prop-field">
       <span className="prop-label">Swimlane</span>
@@ -154,9 +167,15 @@ function SwimlaneField(props: TaskPropertyBarProps) {
         onChange={(swimlaneId: string) => {
           const currentSwimlaneId = props.task!.swimlaneId;
           if (swimlaneId === currentSwimlaneId) return;
+          const seq = ++moveSeq.current;
           props.setSelectedSwimlaneId(swimlaneId);
           Promise.resolve(props.onMove?.(props.task!.id, { columnId: props.task!.columnId, swimlaneId }))
-            .catch(() => props.setSelectedSwimlaneId(currentSwimlaneId));
+            .catch(() => {
+              // A superseded rejection must not clobber a newer selection;
+              // restore the freshest task value rather than a stale capture.
+              if (moveSeq.current !== seq) return;
+              props.setSelectedSwimlaneId(latestSwimlaneId.current ?? "");
+            });
         }}
         trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
           <button
@@ -183,21 +202,30 @@ function PrioritySelect({ value, options, onChange, withGlow }: {
   return (
     <SelectDropdown
       value={value}
-      options={options.map((priority) => ({
-        value: priority.id,
-        label: (
-          <>
-            <span className="priority-dot" style={{ background: priority.color }} />
-            {priority.label}
-          </>
-        ),
-      }))}
+      options={options.map((priority) => {
+        const color = priority.color?.toUpperCase();
+        const dotClass = color ? PRIORITY_DOT_CLASS[color] : undefined;
+        return {
+          value: priority.id,
+          label: (
+            <>
+              <span
+                className={cn("priority-dot", dotClass)}
+                style={dotClass || !priority.color ? undefined : { background: priority.color }}
+              />
+              {priority.label}
+            </>
+          ),
+        };
+      })}
       onChange={onChange}
       trigger={({ toggle }) => {
         const opt = options.find((p) => p.id === value);
         const color = opt?.color?.toUpperCase();
-        const badgeClass = color ? PRIORITY_BADGE_CLASS[color] : undefined;
-        const dotClass = color ? PRIORITY_DOT_CLASS[color] : undefined;
+        const knownBadge = color ? PRIORITY_BADGE_CLASS[color] : undefined;
+        const knownDot = color ? PRIORITY_DOT_CLASS[color] : undefined;
+        const badgeClass = knownBadge ?? (opt?.color ? undefined : "pb-low");
+        const dotClass = knownDot ?? (opt?.color ? undefined : "priority-low");
         return (
           <button
             type="button"
@@ -205,7 +233,7 @@ function PrioritySelect({ value, options, onChange, withGlow }: {
             onClick={toggle}
             style={{
               boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined,
-              ...(badgeClass ? {} : { color: opt?.color, background: opt?.color ? `${opt.color}1a` : undefined }),
+              ...(knownBadge ? {} : opt?.color ? { color: opt.color, background: `${opt.color}1a` } : {}),
             }}
           >
             <span className={cn("priority-dot", dotClass)} style={dotClass ? undefined : { background: opt?.color }} />
@@ -226,19 +254,27 @@ function TypeSelect({ value, options, onChange, withGlow }: {
   return (
     <SelectDropdown
       value={value}
-      options={options.map((type) => ({
-        value: type.id,
-        label: (
-          <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
-            {type.label}
-          </span>
-        ),
-      }))}
+      options={options.map((type) => {
+        const color = type.color?.toUpperCase();
+        const badgeClass = color ? TYPE_BADGE_CLASS[color] : undefined;
+        return {
+          value: type.id,
+          label: (
+            <span
+              className={cn("type-badge", badgeClass)}
+              style={badgeClass || !type.color ? undefined : { background: `${type.color}1a`, color: type.color }}
+            >
+              {type.label}
+            </span>
+          ),
+        };
+      })}
       onChange={onChange}
       trigger={({ toggle }) => {
         const opt = options.find((t) => t.id === value);
         const color = opt?.color?.toUpperCase();
-        const badgeClass = color ? TYPE_BADGE_CLASS[color] : undefined;
+        const knownBadge = color ? TYPE_BADGE_CLASS[color] : undefined;
+        const badgeClass = knownBadge ?? (opt?.color ? undefined : "type-task");
         return (
           <button
             type="button"
@@ -247,7 +283,7 @@ function TypeSelect({ value, options, onChange, withGlow }: {
             style={{
               boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined,
               borderRadius: withGlow ? 4 : undefined,
-              ...(badgeClass ? {} : { background: opt?.color ? `${opt.color}1a` : undefined, color: opt?.color }),
+              ...(knownBadge ? {} : opt?.color ? { background: `${opt.color}1a`, color: opt.color } : {}),
             }}
           >
             {opt?.label ?? "—"}
