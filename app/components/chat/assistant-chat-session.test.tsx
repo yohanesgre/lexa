@@ -8,7 +8,7 @@ import { useMentionTokens } from "../../lib/useMentionTokens";
 import { AssistantChatComposer } from "./AssistantChatComposer";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ToastProvider } from "../ui/Toast";
-import { appendEphemeralUserTurn, terminalTranscriptAction } from "./assistant-chat-logic";
+import { appendEphemeralUserTurn, resolveResendTarget, terminalTranscriptAction } from "./assistant-chat-logic";
 import { useSettledTurns, useTerminalRefetch, useTurnResend } from "./assistant-chat-session";
 
 type Stream = ReturnType<typeof useAssistantStream>;
@@ -386,6 +386,34 @@ describe("terminalTranscriptAction — not-found vs ingress", () => {
     expect(terminalTranscriptAction("PROVIDER_UNREACHABLE", false)).toBe("refetch");
     expect(terminalTranscriptAction(undefined, false)).toBe("refetch");
     expect(terminalTranscriptAction(undefined, true)).toBe("refetch");
+  });
+});
+
+describe("useSettledTurns — reconciled turns stay resend-resolvable (M1)", () => {
+  it("exposes a merged raw snapshot so an edit on a kept earlier turn resolves", () => {
+    const full = [
+      { role: "user", content: "one" },
+      { role: "assistant", content: "reply one" },
+      { role: "user", content: "two" },
+      { role: "assistant", content: "reply two" },
+    ];
+    const short = [
+      { role: "user", content: "three" },
+      { role: "assistant", content: "reply three" },
+    ];
+    const stream = makeStream();
+    const { result, rerender } = renderHook(
+      ({ messages }: { messages: unknown[] }) =>
+        useSettledTurns({ chatId: "A", transcriptData: { messages }, transcriptError: undefined, streaming: false, stream }),
+      { initialProps: { messages: full as unknown[] } }
+    );
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "three", [])));
+    rerender({ messages: short });
+    const turns = result.current.turns!;
+    expect(turns.map((t) => t.text)).toEqual(["one", "reply one", "two", "reply two", "three", "reply three"]);
+    const raw = (result.current as { raw?: unknown[] }).raw ?? [];
+    const resolved = resolveResendTarget({ turns, target: turns[2]!, rawMessages: raw, mode: "edit" });
+    expect(resolved?.index).toBe(2);
   });
 });
 

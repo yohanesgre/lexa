@@ -257,3 +257,61 @@ describe("settleTurns — terminal shorter transcript reconciliation (A8)", () =
     expect(out?.map((t) => t.text)).toEqual(["live", "two"]);
   });
 });
+
+// PR #280 review — reconcile guard precedence (M2) and duplicate-prompt
+// anchoring (N1). The reconcile branch must not preempt the error/ephemeral
+// preservation branches, and duplicate prompt texts must not resurrect a
+// duplicated prefix.
+describe("settleTurns — reconcile guard precedence + duplicate prompts (M2/N1)", () => {
+  function turn(role: "user" | "assistant", text: string, rawIndex: number): ChatTurn {
+    return { role, text, imageCount: 0, rawIndex };
+  }
+  const errorTurn: ChatTurn = {
+    role: "assistant",
+    text: "failed",
+    imageCount: 0,
+    rawIndex: -1,
+    error: { code: "PROVIDER_UNREACHABLE", message: "x" },
+  };
+
+  it("preserves a frozen error turn a shorter error read lacks (M2)", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1), turn("user", "two", -1), errorTurn];
+    const out = settleTurns({ prev, messages: [{ role: "user", content: "two" }], streaming: false, streamStatus: "error", hasIngress: true });
+    expect(out?.map((t) => t.text)).toEqual(["one", "reply one", "two", "failed"]);
+    expect(out?.some((t) => !!t.error)).toBe(true);
+  });
+
+  it("preserves the just-sent optimistic user turn when the shorter read predates it (M2)", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1), turn("user", "two", -1)];
+    const messages = [
+      { role: "user", content: "one" },
+      { role: "assistant", content: "reply one" },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "done", hasIngress: true });
+    expect(out?.map((t) => t.text)).toEqual(["one", "reply one", "two"]);
+  });
+
+  it("does not resurrect a duplicated prefix when the shorter read already exists (N1)", () => {
+    const prev: ChatTurn[] = [
+      turn("user", "hello", 0),
+      turn("assistant", "hi", 1),
+      turn("user", "again", 2),
+      turn("assistant", "ok", 3),
+      turn("user", "hello", -1),
+    ];
+    const messages = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+      { role: "user", content: "again" },
+      { role: "assistant", content: "ok" },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "done", hasIngress: true });
+    expect(out?.map((t) => `${t.role}:${t.text}`)).toEqual(["user:hello", "assistant:hi", "user:again", "assistant:ok"]);
+  });
+
+  it("does not duplicate an assistant-only tail already present (fallback dedupe)", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1), turn("assistant", "tail", 2)];
+    const out = settleTurns({ prev, messages: [{ role: "assistant", content: "reply one" }], streaming: false, streamStatus: "done", hasIngress: true });
+    expect(out?.map((t) => t.text)).toEqual(["one", "reply one", "tail"]);
+  });
+});
