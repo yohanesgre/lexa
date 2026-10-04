@@ -48,6 +48,7 @@ interface RenderOptions {
   expanded?: Set<string>;
   onToggleExpand?: (id: string) => void;
   onNavigate?: () => void;
+  onContextMenuKeyboard?: (element: HTMLElement, page: WikiPageMeta) => void;
 }
 
 function renderSidebar(
@@ -66,6 +67,7 @@ function renderSidebar(
       onRetryPages={onRetryPages}
       contextMenuPageId={null}
       onContextMenu={vi.fn()}
+      onContextMenuKeyboard={options.onContextMenuKeyboard ?? vi.fn()}
       onNewPage={vi.fn()}
       onClose={vi.fn()}
       expanded={options.expanded ?? new Set()}
@@ -178,5 +180,24 @@ describe("WikiPageSidebar tree semantics", () => {
     fireEvent.keyDown(item, { key: "Enter" });
     fireEvent.keyDown(item, { key: " " });
     expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the row action menu on the ContextMenu key and Shift+F10", () => {
+    const onContextMenuKeyboard = vi.fn();
+    renderSidebar([page], null, vi.fn(), { onContextMenuKeyboard });
+
+    const item = screen.getByRole("treeitem");
+    act(() => item.focus());
+
+    fireEvent.keyDown(item, { key: "ContextMenu" });
+    expect(onContextMenuKeyboard).toHaveBeenCalledTimes(1);
+    expect(onContextMenuKeyboard).toHaveBeenCalledWith(item, expect.objectContaining({ id: "w1" }));
+
+    fireEvent.keyDown(item, { key: "F10", shiftKey: true });
+    expect(onContextMenuKeyboard).toHaveBeenCalledTimes(2);
+
+    // F10 without Shift is not a context-menu gesture.
+    fireEvent.keyDown(item, { key: "F10" });
+    expect(onContextMenuKeyboard).toHaveBeenCalledTimes(2);
   });
 });

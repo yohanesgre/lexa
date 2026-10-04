@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import type { WikiPageMeta } from "../../../shared/types";
-import { buildParentOptions, collectDescendantIds, flattenPages } from "./wiki-tree";
+import { buildParentOptions, buildTree, collectDescendantIds, flattenPages } from "./wiki-tree";
 
 function meta(id: string, title: string, parentId: string | null, position = 0): WikiPageMeta {
   return {
@@ -64,5 +64,13 @@ describe("cycle safety", () => {
     const aDup = meta("a", "A2", "b");
     expect(flattenPages([a, b, aDup]).map((p) => p.id)).toEqual(["a", "b"]);
     expect(buildParentOptions([a, b, aDup], new Set()).map((p) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("buildTree terminates on a reachable duplicate-id cycle", () => {
+    const a = meta("a", "A", null);
+    const b = meta("b", "B", "a");
+    const aDup = meta("a", "A2", "b");
+    const tree = buildTree([a, b, aDup]);
+    expect(tree.map((node) => [node.id, node.children.map((c) => c.id)])).toEqual([["a", ["b"]]]);
   });
 });

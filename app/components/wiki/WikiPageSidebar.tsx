@@ -25,6 +25,16 @@ function findNodeIdBySlug(nodes: WikiNode[], slug?: string): string | null {
   return null;
 }
 
+function findNodeById(nodes: WikiNode[], id: string | null): WikiNode | null {
+  if (!id) return null;
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findNodeById(node.children, id);
+    if (child) return child;
+  }
+  return null;
+}
+
 type ListState = "loading" | "error" | "empty" | "ready";
 
 function SidebarList({
@@ -42,6 +52,7 @@ function SidebarList({
   expanded,
   onToggle,
   onContextMenu,
+  onContextMenuKeyboard,
   contextMenuPageId,
   onNavigate,
   onRetryList,
@@ -60,6 +71,7 @@ function SidebarList({
   expanded: Set<string>;
   onToggle: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
+  onContextMenuKeyboard: (element: HTMLElement, page: WikiPageMeta) => void;
   contextMenuPageId: string | null;
   onNavigate?: (() => void) | undefined;
   onRetryList: () => void;
@@ -67,7 +79,9 @@ function SidebarList({
   const treeRef = useRef<HTMLDivElement | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const activeNodeId = findNodeIdBySlug(tree, activePageSlug);
-  const tabbableId = focusedId ?? activeNodeId ?? tree[0]?.id ?? null;
+  // A focused row can vanish (page deleted) — fall back to the active/first row
+  // so the tree always keeps exactly one tabbable treeitem.
+  const tabbableId = findNodeById(tree, focusedId) ? focusedId : activeNodeId ?? tree[0]?.id ?? null;
 
   const treeItems = () =>
     Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []);
@@ -86,6 +100,13 @@ function SidebarList({
     const index = items.indexOf(target);
     if (index === -1) return;
     const level = Number(target.getAttribute("aria-level") ?? 1);
+    // Windows/Context-Menu key and Shift+F10 open the row's action menu.
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      const page = findNodeById(tree, target.dataset.nodeId ?? null);
+      if (page) onContextMenuKeyboard(target, page);
+      return;
+    }
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -213,6 +234,7 @@ export function WikiPageSidebar({
   error,
   contextMenuPageId,
   onContextMenu,
+  onContextMenuKeyboard,
   onNewPage,
   onClose,
   expanded,
@@ -233,6 +255,7 @@ export function WikiPageSidebar({
   onRetryPages: () => void;
   contextMenuPageId: string | null;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
+  onContextMenuKeyboard: (element: HTMLElement, page: WikiPageMeta) => void;
   onNewPage: (defaultParentId: string | null) => void;
   onClose: () => void;
   expanded: Set<string>;
@@ -313,6 +336,7 @@ export function WikiPageSidebar({
         expanded={expanded}
         onToggle={onToggleExpand}
         onContextMenu={onContextMenu}
+        onContextMenuKeyboard={onContextMenuKeyboard}
         contextMenuPageId={contextMenuPageId}
         onNavigate={onNavigate}
         onRetryList={onRetryPages}

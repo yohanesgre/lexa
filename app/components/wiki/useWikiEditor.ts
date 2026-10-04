@@ -70,9 +70,12 @@ function editReducer(state: EditState, action: EditAction): EditState {
       return { ...state, isSaving: true };
     case "saved":
       // A save that overlapped further edits must not adopt the server title
-      // or clear the dirty flag — those edits would be silently dropped.
+      // or clear the dirty flag — those edits would be silently dropped. It
+      // must also not overwrite lastSavedPage: after a page switch the in-flight
+      // response belongs to the previous page (LX-93), and after a cancel it
+      // carries the discarded edits.
       if (action.stale) {
-        return { ...state, lastSavedPage: action.page, lastSavedAt: action.at };
+        return { ...state, lastSavedAt: action.at };
       }
       return { ...state, title: action.page.title, lastSavedPage: action.page, lastSavedAt: action.at, isDirty: false };
     case "cancel":
@@ -151,7 +154,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     setHistoryPreviewId(null);
     dispatch({ type: "reset", page });
     editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
+    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
     setPreviewContent(page.content ?? emptyDoc);
   }, [page]);
 
@@ -366,7 +369,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
       const restored = await restoreWikiPage.mutateAsync({ pageSlug: page.slug, revisionId });
       dispatch({ type: "title", title: restored.title });
       dispatch({ type: "saved", page: restored, at: new Date() });
-      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent);
+      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
       autosaveHandleRef.current?.cancel();
       previewSnapshotRef.current = null;
       editorRef.current?.setEditable(true);
@@ -397,16 +400,21 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     dispatch({ type: "start", page });
     setPreviewContent(page.content ?? emptyDoc);
     editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
+    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
   };
 
   const handleCancel = () => {
+    // No AbortSignal on the PATCH, so an in-flight autosave cannot be recalled.
+    // Bump the edit counter first: when it resolves it is treated as stale and
+    // cannot adopt the discarded content (LX-93). The content swap below must
+    // not emit an update either, or markDirty re-arms autosave after cancel.
+    editVersionRef.current += 1;
     autosaveHandleRef.current?.cancel();
     previewSnapshotRef.current = null;
     setHistoryPreviewId(null);
     dispatch({ type: "cancel", page: lastSavedPage });
     editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
+    editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent, { emitUpdate: false });
     dispatch({ type: "stopEditing" });
   };
 

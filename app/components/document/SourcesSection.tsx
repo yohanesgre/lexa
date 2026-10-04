@@ -127,10 +127,12 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
   const dropdownOpen = focused && value.trim().length > 0 && (mention || wikiMatches.length > 0);
 
   const selectWiki = (page: WikiPageMeta) => {
+    if (addSource.isPending) return;
     addSource.mutate(
       { kind: "wiki", ref: page.slug },
       {
-        onSettled: () => {
+        // Keep the query on failure so it can be retried, not silently wiped.
+        onSuccess: () => {
           setValue("");
           setHighlight(-1);
         },
@@ -151,10 +153,8 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
     addSource.mutate(
       { kind: looksLikeUrl ? "external" : "wiki", ref: v },
       {
-        onSettled: () => {
-          setAdding(false);
-          setValue("");
-        },
+        onSuccess: () => setValue(""),
+        onSettled: () => setAdding(false),
       }
     );
   };

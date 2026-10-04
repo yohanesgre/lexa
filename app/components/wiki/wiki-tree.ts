@@ -76,8 +76,15 @@ export function buildTree(pages: WikiPageMeta[]): WikiNode[] {
     byParent.set(page.parentId, list);
   }
   const sort = (list: WikiPageMeta[]) => [...list].toSorted((a, b) => a.position - b.position);
+  const visited = new Set<string>();
   const recurse = (parentId: string | null): WikiNode[] => {
-    return sort(byParent.get(parentId) ?? []).map((p) => ({ ...p, children: recurse(p.id) }));
+    const nodes: WikiNode[] = [];
+    for (const p of sort(byParent.get(parentId) ?? [])) {
+      if (visited.has(p.id)) continue;
+      visited.add(p.id);
+      nodes.push({ ...p, children: recurse(p.id) });
+    }
+    return nodes;
   };
   return recurse(null);
 }
