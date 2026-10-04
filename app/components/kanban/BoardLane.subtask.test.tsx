@@ -89,8 +89,8 @@ const BOARD: Board = makeBoard({
   tasks: [PARENT, CHILD],
 });
 
-function renderLane() {
-  const { result } = renderHook(() => useLinkMaps(BOARD));
+function renderLane(boardTask: Board = BOARD, cardHidden: (t: Task) => boolean = () => false) {
+  const { result } = renderHook(() => useLinkMaps(boardTask));
   const { childrenByParent, parentOf, blockedBy } = result.current;
   render(
     <DndContext>
@@ -98,14 +98,14 @@ function renderLane() {
         slug="demo"
         lane={LANE}
         columns={[COLUMN]}
-        board={BOARD}
-        localTasks={BOARD.tasks}
+        board={boardTask}
+        localTasks={boardTask.tasks}
         childrenByParent={childrenByParent}
         parentOf={parentOf}
         blockedBy={blockedBy}
-        cardHidden={() => false}
+        cardHidden={cardHidden}
         cardDimmed={() => false}
-        columnTotalCount={() => BOARD.tasks.length}
+        columnTotalCount={() => boardTask.tasks.length}
         columnDimmed={() => false}
         cellDropId={(columnId, laneId) => `cell:${laneId}:${columnId}`}
         flashColumnId={null}
@@ -147,5 +147,41 @@ describe("BoardLane subtask rendering", () => {
     expect(childCard).toHaveClass("kanban-card-subtask");
     expect(parentCard?.textContent).toContain("01");
     expect(document.querySelectorAll(".kanban-card")).toHaveLength(2);
+  });
+
+  it("renders an orphaned child top-level when its parent is absent (archived)", () => {
+    const orphaned: Board = makeBoard({ columns: [COLUMN], swimlanes: [LANE], links: BOARD.links, tasks: [CHILD] });
+    renderLane(orphaned);
+
+    const childCard = screen.getByRole("button", { name: "Open task Child task" }).querySelector(".kanban-card");
+    expect(childCard).not.toBeNull();
+    expect(childCard).not.toHaveClass("kanban-card-subtask");
+    expect(document.querySelectorAll(".kanban-card")).toHaveLength(1);
+  });
+
+  it("renders an orphaned child top-level when its parent is filtered out", () => {
+    renderLane(BOARD, (t) => t.id === "t1");
+
+    const childCard = screen.getByRole("button", { name: "Open task Child task" }).querySelector(".kanban-card");
+    expect(childCard).not.toBeNull();
+    expect(childCard).not.toHaveClass("kanban-card-subtask");
+    expect(document.querySelectorAll(".kanban-card")).toHaveLength(1);
+  });
+
+  it("renders a child with two parents once, under its canonical parent", () => {
+    const secondParent = makeTask({ id: "t3", key: "DEMO-3", title: "Second parent", position: "a2" });
+    const twoParents: Board = makeBoard({
+      columns: [COLUMN],
+      swimlanes: [LANE],
+      links: [
+        { id: "l1", projectId: "p1", fromTaskId: "t2", toTaskId: "t1", relation: "subtask_of", createdAt: "t" },
+        { id: "l2", projectId: "p1", fromTaskId: "t2", toTaskId: "t3", relation: "subtask_of", createdAt: "t" },
+      ],
+      tasks: [PARENT, secondParent, CHILD],
+    });
+    renderLane(twoParents);
+
+    expect(screen.getAllByRole("button", { name: "Open task Child task" })).toHaveLength(1);
+    expect(document.querySelectorAll(".kanban-card")).toHaveLength(3);
   });
 });
