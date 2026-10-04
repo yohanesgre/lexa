@@ -41,7 +41,7 @@ export function NotSignedInVariant() {
           <label className="field-label" htmlFor="dl-password">Password</label>
           <PasswordField id="dl-password" value={password} onChange={(v) => { setPassword(v); if (error) setError(null); }} />
         </div>
-        {error && <NoticeDanger>Invalid email or password.</NoticeDanger>}
+        {error && <NoticeDanger>{error}</NoticeDanger>}
         <button type="submit" className="btn btn-primary w-full" style={{ height: 36 }} disabled={signIn.isPending}>
           {signIn.isPending ? "Logging in…" : "Log in"}
         </button>

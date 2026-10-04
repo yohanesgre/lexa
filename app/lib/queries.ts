@@ -1747,12 +1747,10 @@ export function useRevokeWorkspaceInvite() {
 }
 
 export function useCreateSetPasswordLink() {
-  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: (userId: string) => api.createSetPasswordLink(userId),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["users"] });
       toast.push("success", "Set-password link created");
     },
     onError: (err) => {
@@ -2415,7 +2413,8 @@ export function useDeleteAssistantChat(projectId: string | undefined) {
   });
 }
 
-export function useAssistantSettings(projectId: string | undefined) {  return useQuery({
+export function useAssistantSettings(projectId: string | undefined) {
+  return useQuery({
     queryKey: ["assistant-settings", projectId],
     queryFn: async () => {
       try {
@@ -2479,12 +2478,8 @@ export function useTestAssistantSettings(projectId: string) {
 }
 
 export function useFetchAssistantModels(projectId: string) {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: AssistantSettingsInput) => api.listAssistantModels(projectId, input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["assistant-providers"] });
-    },
   });
 }
 

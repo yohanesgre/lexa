@@ -22,7 +22,7 @@ interface CommentCardProps {
   members: string[];
   currentUser: CurrentUser;
   onDelete: (commentId: number) => void;
-  onUpdate: (commentId: number, body: TaskComment["body"]) => void;
+  onUpdate: (commentId: number, body: TaskComment["body"]) => void | Promise<void>;
 }
 
 function initials(name: string): string {
@@ -139,10 +139,14 @@ export function CommentCard({ comment, members, currentUser, onDelete, onUpdate 
     },
   });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editor || extractText(editor.getJSON() as TaskComment["body"]).trim() === "") return;
-    onUpdate(comment.id, editor.getJSON() as TaskComment["body"]);
-    setEditing(false);
+    try {
+      await onUpdate(comment.id, editor.getJSON() as TaskComment["body"]);
+      setEditing(false);
+    } catch {
+      // The mutation hook toasts the failure; keep edit mode so the draft survives.
+    }
   };
 
   return (

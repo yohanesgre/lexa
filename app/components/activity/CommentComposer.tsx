@@ -32,7 +32,7 @@ export function CommentComposer({ slug, taskId }: { slug: string; taskId: string
     editorProps: {
       attributes: { class: "composer-editor" },
       handleKeyDown: (_view, event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
           submit();
           return true;

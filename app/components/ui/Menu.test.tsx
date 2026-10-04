@@ -1,0 +1,64 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { Menu } from "./Menu";
+
+function renderMenu() {
+  render(
+    <Menu
+      trigger={({ toggle }) => (
+        <button type="button" onClick={toggle}>Open</button>
+      )}
+    >
+      <button type="button" className="menu-item">One</button>
+      <button type="button" className="menu-item">Two</button>
+    </Menu>
+  );
+}
+
+describe("Menu", () => {
+  it("keeps the menu open until Escape or an item click", () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("moves focus through items with arrow keys", () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const menu = screen.getByRole("menu");
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: "One" })).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: "Two" })).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(screen.getByRole("button", { name: "One" })).toHaveFocus();
+  });
+
+  it("re-anchors the popover on window scroll", () => {
+    renderMenu();
+    const trigger = screen.getByRole("button", { name: "Open" });
+    const anchor = trigger.parentElement!;
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({
+      top: 10, bottom: 40, left: 20, right: 80, width: 60, height: 30,
+      x: 20, y: 10, toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    expect(menu).toHaveStyle({ top: "48px" });
+
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({
+      top: 110, bottom: 140, left: 20, right: 80, width: 60, height: 30,
+      x: 20, y: 110, toJSON: () => ({}),
+    } as DOMRect);
+    fireEvent.scroll(window);
+    expect(menu).toHaveStyle({ top: "148px" });
+  });
+});

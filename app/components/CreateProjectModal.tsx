@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { useSession, useTeams } from "../lib/queries";
 import { Field } from "./ui/Field";
@@ -13,16 +13,61 @@ interface CreateProjectModalProps {
   onSubmit: (input: { name: string; description?: string | undefined; teamId: string | null }) => void;
 }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateProjectModalProps) {
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
   const { data: session } = useSession();
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [teamId, setTeamId] = useState<string>("");
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
 
   // Unassigned (no team) projects are superadmin-only (server enforces
   // teamId:null); members must pick a team.
   const canCreateUnassigned = session?.user?.role === "superadmin";
+
+  // Reset the form only when a fresh dialog opens, so a failed mutation keeps
+  // the user's input instead of clearing it before the request resolves.
+  useEffect(() => {
+    if (!open) return;
+    setName("");
+    setDesc("");
+    setTeamId("");
+  }, [open]);
+
+  // Esc closes; Tab is trapped inside the dialog (initial focus stays on the
+  // name field via autoFocus).
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -32,16 +77,13 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
       description: desc.trim() || undefined,
       teamId: teamId && teamId !== "global" ? teamId : null,
     });
-    setName("");
-    setDesc("");
-    setTeamId("");
   };
 
   return (
     <>
       <button type="button" className="slideover-overlay" aria-label="Close dialog" onClick={onClose} />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open
+        <dialog ref={dialogRef} open
           className="modal dialog-enter pointer-events-auto"
           aria-modal="true"
           aria-labelledby="create-project-title"

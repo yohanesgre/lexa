@@ -86,11 +86,12 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
 
   const firstWeekday = new Date(view.year, view.month, 1).getDay();
   const daysInMonth = new Date(view.year, view.month + 1, 0).getDate();
-  const cells: { day: number; muted: boolean }[] = [];
-  for (let i = 0; i < firstWeekday; i++) cells.push({ day: 0, muted: true });
-  for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, muted: false });
+  const cells: { day: number; muted: boolean; offset: number }[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push({ day: 0, muted: true, offset: 0 });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d, muted: false, offset: 0 });
+  let trailing = 1;
   while (cells.length % 7 !== 0) {
-    cells.push({ day: cells.length - firstWeekday - daysInMonth + 1, muted: true });
+    cells.push({ day: trailing++, muted: true, offset: 1 });
   }
 
   const today = isoToday();
@@ -148,7 +149,8 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
           <div className="datepicker-grid">
             {cells.map((cell, i) => {
               if (cell.day === 0) return <span key={`empty-${i}`} className="datepicker-day empty" />;
-              const iso = toISODate(view.year, view.month, cell.day);
+              const cellDate = new Date(view.year, view.month + cell.offset, cell.day);
+              const iso = toISODate(cellDate.getFullYear(), cellDate.getMonth(), cellDate.getDate());
               const isToday = iso === today;
               const isSelected = iso === value;
               return (

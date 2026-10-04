@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { IconFrame } from "./icon-frame";
+import { ExpiredVariant } from "./expired";
 import { expiresInLabel } from "./expires-label";
 
 export function PendingVariant({ clientName, code, expiresAt, busy, onApprove, onDeny }: {
@@ -15,6 +16,10 @@ export function PendingVariant({ clientName, code, expiresAt, busy, onApprove, o
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // The request is terminal once it expires — flip to the expired variant
+  // instead of leaving Approve/Deny live on a dead request.
+  if (new Date(expiresAt).getTime() <= now) return <ExpiredVariant />;
 
   return (
     <div className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>

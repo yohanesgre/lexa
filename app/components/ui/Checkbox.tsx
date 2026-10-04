@@ -13,6 +13,7 @@ export function Checkbox({ checked, onChange, label, disabled, className }: Chec
       onClick={() => !disabled && onChange(!checked)}
       role="checkbox"
       aria-checked={checked}
+      aria-disabled={disabled || undefined}
       tabIndex={disabled ? -1 : 0}
       onKeyDown={(e) => {
         if (!disabled && (e.key === " " || e.key === "Enter")) {

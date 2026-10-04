@@ -47,6 +47,18 @@ describe("DeviceLoginPage", () => {
     expect(screen.getByText(/Approve this device\?/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
+
+  it("transitions to the expired variant when the deadline has passed", () => {
+    h.session.value = { user: { id: "u1" } };
+    h.request.value = {
+      data: { status: "pending", clientName: "cli-laptop", code: "ABCD", expiresAt: new Date(Date.now() - 60_000).toISOString() },
+      error: null,
+      isLoading: false,
+    };
+    render(<DeviceLoginPage request="req-1" token="tok" />);
+    expect(screen.getByText(/This request has expired/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
 });
 
 describe("root auth guard", () => {

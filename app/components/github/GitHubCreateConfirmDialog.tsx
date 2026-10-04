@@ -1,3 +1,6 @@
+import { useEffect, useRef } from "react";
+import { useOverlayFocusTrap } from "../../lib/sidebar-state";
+
 // Create-issue confirmation. When the task's column maps to "closed", the
 // created issue starts open and shows out of sync until the task moves to
 // the mapped column — hence the extra warning variant.
@@ -14,11 +17,28 @@ export function GitHubCreateConfirmDialog({
   onCreate: () => void;
   onCancel: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  // Initial focus (Cancel), Tab trap, and focus return to the opener.
+  useOverlayFocusTrap(true, dialogRef);
+
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancelRef.current();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <>
       <button type="button" className="dialog-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-        <dialog open className="dialog dialog-enter" aria-modal="true" aria-labelledby="gh-create-title">
+        <dialog ref={dialogRef} open className="dialog dialog-enter" aria-modal="true" aria-labelledby="gh-create-title">
           {columnGithubState === "closed" ? (
             <>
               <h2 id="gh-create-title" className="font-display text-lg font-medium text-lx-text-primary">Create issue in a closed column?</h2>

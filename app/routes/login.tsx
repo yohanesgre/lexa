@@ -92,7 +92,7 @@ function LoginPage() {
 
         <form onSubmit={handleSubmit} className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
           {error && (
-            <NoticeDanger>Invalid email or password.</NoticeDanger>
+            <NoticeDanger>{error}</NoticeDanger>
           )}
 
           <Field label="Email" htmlFor="login-email" className="field mb-3">

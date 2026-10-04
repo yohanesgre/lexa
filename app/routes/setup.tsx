@@ -27,12 +27,19 @@ function setupComplete(status: SetupStatus): boolean {
 function SetupWizard() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [statusError, setStatusError] = useState(false);
+  const [statusNonce, setStatusNonce] = useState(0);
   const [step, setStep] = useState(0);
   const [email, setEmail] = useState("");
 
   useEffect(() => {
-    getSetupStatus().then(setStatus).catch(() => setStatus(null));
-  }, []);
+    let alive = true;
+    setStatusError(false);
+    getSetupStatus()
+      .then((s) => { if (alive) setStatus(s); })
+      .catch(() => { if (alive) setStatusError(true); });
+    return () => { alive = false; };
+  }, [statusNonce]);
 
   // If already configured, bounce to the dashboard.
   useEffect(() => {
@@ -40,6 +47,19 @@ function SetupWizard() {
       navigate({ to: "/" });
     }
   }, [status, navigate]);
+
+  if (statusError && !status) {
+    return (
+      <main className="page-frame flex items-center justify-center" style={{ minHeight: "100vh" }}>
+        <div className="text-center">
+          <p className="text-sm text-lx-text-secondary">Could not load setup status.</p>
+          <button type="button" className="btn btn-primary btn-sm mt-3" onClick={() => setStatusNonce((n) => n + 1)}>
+            Retry
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (!status) {
     return (

@@ -23,7 +23,7 @@ export function PasswordField({ id, value, onChange, autoComplete = "current-pas
       <button
         type="button"
         className="password-toggle"
-        aria-label="Show password"
+        aria-label={show ? "Hide password" : "Show password"}
         aria-pressed={show}
         title={show ? "Hide password" : "Show password"}
         onClick={() => setShow((v) => !v)}

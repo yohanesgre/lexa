@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import type { GithubIssue } from "../../../shared/types";
+import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 
 // Unlink confirmation: removes only the Lexa↔GitHub link; the issue itself
 // stays open on GitHub.
@@ -11,11 +13,28 @@ export function GitHubUnlinkDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  // Initial focus (Cancel), Tab trap, and focus return to the opener.
+  useOverlayFocusTrap(true, dialogRef);
+
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancelRef.current();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
     <>
       <button type="button" className="dialog-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-        <dialog open className="dialog dialog-enter" aria-modal="true" aria-labelledby="gh-unlink-title">
+        <dialog ref={dialogRef} open className="dialog dialog-enter" aria-modal="true" aria-labelledby="gh-unlink-title">
           <h2 id="gh-unlink-title" className="font-display text-lg font-medium text-lx-text-primary">Unlink issue?</h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5" style={{ maxWidth: 360 }}>
             Unlink <span className="font-mono text-xs">{issue.repo} #{issue.issueNumber}</span> from this task? The GitHub issue stays open; only the link is removed.
