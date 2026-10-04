@@ -191,6 +191,69 @@ describe("settleTurns — decided batch survives a transcript rebuild", () => {
     ];
     expect(settleTurns({ prev, messages, streaming: false, streamStatus: "idle", hasIngress: false })).toBe(prev);
   });
+
+  it("unions the server's later same-batch chips into the frozen prefix (chat-live-chips)", () => {
+    // The freeze captured only the first carrier's chip; the settled read holds
+    // the whole batch. Every chip must be live without a reload.
+    const prev: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1" })] },
+      },
+    ];
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: {
+          batchId: "b1",
+          approvals: [
+            { approvalId: "a1", seq: 0, name: "create_task", diff: DIFF },
+            { approvalId: "a2", seq: 1, name: "create_task", diff: DIFF },
+            { approvalId: "a3", seq: 2, name: "create_task", diff: DIFF },
+          ],
+        },
+      },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "idle", hasIngress: false })!;
+    const chips = out.find((t) => t.batch)!.batch!.chips;
+    expect(chips.map((c) => c.approvalId)).toEqual(["a1", "a2", "a3"]);
+    expect(chips.every((c) => c.state === "pending")).toBe(true);
+  });
+
+  it("keeps a session decision while unioning later chips", () => {
+    const prev: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1", state: "approved" })] },
+      },
+    ];
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: {
+          batchId: "b1",
+          approvals: [
+            { approvalId: "a1", seq: 0, name: "create_task", diff: DIFF },
+            { approvalId: "a2", seq: 1, name: "create_task", diff: DIFF },
+          ],
+        },
+      },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "idle", hasIngress: false })!;
+    const chips = out.find((t) => t.batch)!.batch!.chips;
+    expect(chips.find((c) => c.approvalId === "a1")!.state).toBe("approved");
+    expect(chips.find((c) => c.approvalId === "a2")!.state).toBe("pending");
+  });
 });
 
 // A8: at a terminal frame the server transcript read can be transiently
