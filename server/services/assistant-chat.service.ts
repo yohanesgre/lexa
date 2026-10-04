@@ -30,7 +30,7 @@ import { extractText } from "../../shared/tiptap-text";
 import { buildSkillPromptParts, lastUserText, resolveMentionContextEffect, type MentionResolverDeps } from "../assistant/context";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest } from "../../shared/assistant";
-import { buildStream, findPendingBatch, findPendingBatches, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
+import { buildStream, findPendingBatch, findPendingBatches, findNewestPendingBatch, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
 import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
 import { collectResumeResults } from "../assistant/resume-results";
 import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
@@ -393,7 +393,11 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const thread = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId })));
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
-        const batchId = findPendingBatch(thread.messages);
+        // Shape-agnostic: a DO-path transcript carries the D3
+        // `data-assistant-approval` carrier part instead of the legacy
+        // `pendingBatch` field. Target the newest marker across BOTH shapes so a
+        // parts-shaped thread resumes instead of 409ing with an empty batchId.
+        const batchId = findNewestPendingBatch(thread.messages);
         if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
         const rows = yield* pendingWritesRepo.listByBatch(batchId);
         const remaining = rows.filter((r) => r.status === "pending").length;
