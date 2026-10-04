@@ -146,12 +146,17 @@ function chipFromToolOutput(part: ToolUIPart | DynamicToolUIPart, name: string):
   if (!approvalId || !batchId || !isRecord(diff)) return null;
   const seq = typeof output.seq === "number" && Number.isFinite(output.seq) ? output.seq : 0;
   const detail = readString(output, "detail");
+  // A reconciled decision can ride the proposal output itself (the server's
+  // `approvalFromProposal` reads `output.status`); carry it as `state` so a
+  // terminal carrier is never projected as a still-pending chip.
+  const state = pendingState(output);
   return {
     approvalId,
     batchId,
     seq,
     name: readString(output, "name") ?? name,
     ...(detail ? { detail } : {}),
+    ...(state ? { state } : {}),
     diff: diff as unknown as AssistantWriteDiff,
   };
 }
@@ -177,41 +182,57 @@ function pendingState(source: Record<string, unknown>): AssistantPendingChip["st
   return status === "pending" || status === "approved" || status === "rejected" || status === "expired" ? status : undefined;
 }
 
-// One data part → pending chip(s). Supports a single chip payload and the
-// `{ batchId, approvals: [...] }` envelope the persisted marker uses, so the
-// adapter is ready for the D3 live data part without an app change.
-function chipsFromDataPart(type: string, data: unknown): AssistantPendingChip[] {
-  if (type !== ASSISTANT_APPROVAL_DATA_PART) return [];
-  if (!isRecord(data)) return [];
-  const single = (): AssistantPendingChip | null => {
-    const approvalId = readString(data, "approvalId");
-    const batchId = readString(data, "batchId");
-    const name = readString(data, "name");
-    const diff = data.diff;
-    if (!approvalId || !batchId || !name || !isRecord(diff)) return null;
-    const seq = typeof data.seq === "number" && Number.isFinite(data.seq) ? data.seq : 0;
-    const detail = readString(data, "detail");
-    const state = pendingState(data);
-    return { approvalId, batchId, seq, name, ...(detail ? { detail } : {}), ...(state ? { state } : {}), diff: diff as unknown as AssistantWriteDiff };
-  };
-  const one = single();
-  if (one) return [one];
+// The single-chip shape on a data part (approvalId/batchId/name/diff present).
+function singleChipFromData(data: Record<string, unknown>): AssistantPendingChip | null {
+  const approvalId = readString(data, "approvalId");
   const batchId = readString(data, "batchId");
+  const name = readString(data, "name");
+  const diff = data.diff;
+  if (!approvalId || !batchId || !name || !isRecord(diff)) return null;
+  const seq = typeof data.seq === "number" && Number.isFinite(data.seq) ? data.seq : 0;
+  const detail = readString(data, "detail");
+  const state = pendingState(data);
+  return { approvalId, batchId, seq, name, ...(detail ? { detail } : {}), ...(state ? { state } : {}), diff: diff as unknown as AssistantWriteDiff };
+}
+
+// An approval entry inside a `{ batchId, approvals: [...] }` envelope.
+function chipFromApproval(raw: unknown, batchId: string, fallbackSeq: number): AssistantPendingChip | null {
+  if (!isRecord(raw)) return null;
+  const approvalId = readString(raw, "approvalId");
+  const name = readString(raw, "name");
+  const diff = raw.diff;
+  if (!approvalId || !name || !isRecord(diff)) return null;
+  const seq = typeof raw.seq === "number" && Number.isFinite(raw.seq) ? raw.seq : fallbackSeq;
+  const detail = readString(raw, "detail");
+  const state = pendingState(raw);
+  return { approvalId, batchId, seq, name, ...(detail ? { detail } : {}), ...(state ? { state } : {}), diff: diff as unknown as AssistantWriteDiff };
+}
+
+// One carrier data part → the batch it names plus any reconstructable chips.
+// Supports the single-chip payload and the `{ batchId, approvals: [...] }`
+// envelope the persisted marker uses. A marker-only carrier (batchId with no
+// full chip payload) still yields its batchId so the suspension is not lost.
+function carrierFromDataPart(type: string, data: unknown): { batchId: string; chips: AssistantPendingChip[] } | null {
+  if (type !== ASSISTANT_APPROVAL_DATA_PART || !isRecord(data)) return null;
+  const one = singleChipFromData(data);
+  if (one) return { batchId: one.batchId, chips: [one] };
+  const batchId = readString(data, "batchId");
+  if (!batchId) return null;
   const approvals = data.approvals;
-  if (!batchId || !Array.isArray(approvals)) return [];
-  const out: AssistantPendingChip[] = [];
-  for (const raw of approvals) {
-    if (!isRecord(raw)) continue;
-    const approvalId = readString(raw, "approvalId");
-    const name = readString(raw, "name");
-    const diff = raw.diff;
-    if (!approvalId || !name || !isRecord(diff)) continue;
-    const seq = typeof raw.seq === "number" && Number.isFinite(raw.seq) ? raw.seq : out.length;
-    const detail = readString(raw, "detail");
-    const state = pendingState(raw);
-    out.push({ approvalId, batchId, seq, name, ...(detail ? { detail } : {}), ...(state ? { state } : {}), diff: diff as unknown as AssistantWriteDiff });
+  const chips: AssistantPendingChip[] = [];
+  if (Array.isArray(approvals)) {
+    for (const raw of approvals) {
+      const chip = chipFromApproval(raw, batchId, chips.length);
+      if (chip) chips.push(chip);
+    }
   }
-  return out;
+  return { batchId, chips };
+}
+
+// One data part → pending chip(s). The marker-only batchId is dropped here —
+// the suspension projection reads the carrier itself (`suspensionFromMessages`).
+function chipsFromDataPart(type: string, data: unknown): AssistantPendingChip[] {
+  return carrierFromDataPart(type, data)?.chips ?? [];
 }
 
 function isAssistantToolPart(part: UIMessagePart<UIDataTypes, UITools>): part is ToolUIPart | DynamicToolUIPart {
@@ -335,6 +356,99 @@ export function lastAssistantMessage(messages: readonly UIMessage[]): UIMessage 
     if (messages[i]!.role === "assistant") return messages[i]!;
   }
   return undefined;
+}
+
+// LX-120: the suspension must be projected from the merged carrier set across
+// the trailing turn, not from the last assistant message alone. The DO attaches
+// the carrier to the message that held the write proposals (withApprovalCarriers),
+// so a later text-only assistant message in the same turn hides it; and a
+// marker-only carrier (empty approvals) carries no reconstructable chip. A batch
+// is suspended when its merged chips hold a pending one, or its carrier was
+// marker-only; a fully-terminal batch (decided in another tab) never re-arms.
+// Terminal decisions win by approvalId, mirroring `mergeBatchChips`' union.
+export function suspensionFromMessages(
+  messages: readonly UIMessage[]
+): { pending: AssistantPendingChip[]; suspendedBatchId: string | null } {
+  // Trailing region only: assistant messages after the newest user turn. An
+  // older turn's marker must not keep the current turn suspended.
+  let start = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "user") {
+      start = i + 1;
+      break;
+    }
+  }
+
+  const byApproval = new Map<string, AssistantPendingChip>();
+  const batchOrder: string[] = [];
+  const seenBatches = new Set<string>();
+  const noteBatch = (batchId: string) => {
+    if (!seenBatches.has(batchId)) {
+      seenBatches.add(batchId);
+      batchOrder.push(batchId);
+    }
+  };
+  // Terminal-wins across carriers: a pending incoming chip must never replace
+  // an already-terminal chip (a stale proposal carrier must not re-arm a batch
+  // decided elsewhere), while between two terminal chips the later arrival is
+  // the newer decision. Getting this wrong leaves the batch suspended and the
+  // UI POSTs `/resume` for a batch that already executed.
+  const isTerminal = (chip: AssistantPendingChip) => (chip.state ?? "pending") !== "pending";
+  const mergeChip = (chip: AssistantPendingChip) => {
+    noteBatch(chip.batchId);
+    const existing = byApproval.get(chip.approvalId);
+    if (existing && isTerminal(existing) && !isTerminal(chip)) return;
+    byApproval.set(chip.approvalId, chip);
+  };
+
+  for (let i = start; i < messages.length; i++) {
+    const message = messages[i];
+    if (!message || message.role !== "assistant") continue;
+    for (const part of message.parts) {
+      if (part.type.startsWith("data-")) {
+        const carrier = carrierFromDataPart(part.type, (part as { data?: unknown }).data);
+        if (!carrier) continue;
+        noteBatch(carrier.batchId);
+        for (const chip of carrier.chips) mergeChip(chip);
+        continue;
+      }
+      if (!isAssistantToolPart(part)) continue;
+      const chip = chipFromToolOutput(part, getToolName(part));
+      if (chip) mergeChip(chip);
+    }
+  }
+
+  let suspendedBatchId: string | null = null;
+  for (let i = batchOrder.length - 1; i >= 0; i--) {
+    const batchId = batchOrder[i]!;
+    let hasChip = false;
+    let hasPending = false;
+    for (const chip of byApproval.values()) {
+      if (chip.batchId !== batchId) continue;
+      hasChip = true;
+      if ((chip.state ?? "pending") === "pending") {
+        hasPending = true;
+        break;
+      }
+    }
+    if (!hasChip || hasPending) {
+      suspendedBatchId = batchId;
+      break;
+    }
+  }
+
+  const pending = [...byApproval.values()].sort((a, b) => a.seq - b.seq);
+  return { pending, suspendedBatchId };
+}
+
+// The last-assistant full projection (text/tools/citations/usage) with the
+// suspension overridden by the merged carrier set across the trailing turn.
+export function segmentFromMessages(messages: readonly UIMessage[]): AgentSegment {
+  const segment = segmentFromAssistantMessage(lastAssistantMessage(messages));
+  const { pending, suspendedBatchId } = suspensionFromMessages(messages);
+  segment.pending = pending;
+  segment.suspendedBatchId = suspendedBatchId;
+  return segment;
 }
 
 export function hasUserMessage(messages: readonly UIMessage[]): boolean {

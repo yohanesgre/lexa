@@ -9,7 +9,7 @@ import {
   agentSendParts,
   emptyAgentSegment,
   lastAssistantMessage,
-  segmentFromAssistantMessage,
+  segmentFromMessages,
   snapshotFromSegment,
   usageFromMessage,
   type AgentSendBody,
@@ -169,8 +169,10 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   const lastAssistant = useMemo(() => lastAssistantMessage(messages), [messages]);
   const segment = useMemo(() => {
     if (!threadKey) return emptyAgentSegment();
-    return segmentFromAssistantMessage(lastAssistant);
-  }, [threadKey, lastAssistant]);
+    // LX-120: suspension rides the merged carrier set across the trailing turn,
+    // not just the last assistant message.
+    return segmentFromMessages(messages);
+  }, [threadKey, messages]);
 
   const snapshot = useMemo<AssistantStreamSnapshot>(() => {
     const next = snapshotFromSegment(segment, {

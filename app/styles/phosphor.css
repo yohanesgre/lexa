@@ -26,6 +26,7 @@
   --lx-border-strong: #4A443D;
   --lx-border-focus: #F0C040;
   --lx-border-input: #6B6560;
+  --lx-border-input-hover: #8A837C;
 
   --lx-text-primary: #F5F0EB;
   --lx-text-secondary: #948E88;
@@ -95,6 +96,8 @@
   --lx-border-strong: #C4BAB0;
   --lx-border-focus: #A07908;
   --lx-border-input: #888078;
+  /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
+  --lx-border-input-hover: #5C554F;
   --lx-status-danger: #DC2626;
   --lx-status-warning: #D4A017;
   --lx-status-success: #16A34A;
@@ -4974,7 +4977,7 @@
     cursor: pointer;
     transition: border-color 100ms;
   }
-  .tasks-select:hover { border-color: var(--lx-border-strong); }
+  .tasks-select:hover { border-color: var(--lx-border-input-hover); }
 
   .tasks-archive-toggle {
     display: inline-flex;
@@ -5335,7 +5338,7 @@
     transition: border-color 100ms, background 100ms;
   }
   .datepicker-trigger:hover {
-    border-color: var(--lx-border-strong);
+    border-color: var(--lx-border-input-hover);
     background: var(--lx-surface-card-hover);
   }
   .datepicker-trigger svg {
@@ -5589,8 +5592,10 @@
   color: var(--lx-text-primary);
   cursor: pointer;
   white-space: nowrap;
+  transition: border-color 100ms, background 100ms;
 }
 .ms-selector-trigger:hover {
+  border-color: var(--lx-border-input-hover);
   background: var(--lx-surface-card-hover);
 }
 .ms-selector-details > summary {
