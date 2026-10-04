@@ -1,6 +1,7 @@
 import { renderTranscript } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
 import type { ApprovalChip } from "./AssistantApprovals";
+import { mergeBatchChips } from "./assistant-chat-logic";
 
 // Turn-settle policy for the Assistant chat transcript (pure): merge the
 // server transcript with the live optimistic view. Ephemeral user turns
@@ -171,6 +172,26 @@ function reconcileShorterTranscript(
   return { turns: [...merged, ...reattach], raw: [...prevRaw, ...messages] };
 }
 
+// Union the server read's chips for every batch already present in the
+// optimistic view. A batch whose carrier parts straddled several frames/reads
+// leaves the optimistic turn holding only a prefix of its chips; the settled
+// read carries the whole batch. Never touches batches the optimistic view does
+// not hold.
+function mergeServerBatchChips(prev: ChatTurn[], serverTurns: ChatTurn[]): ChatTurn[] {
+  const byBatch = new Map<string, ApprovalChip[]>();
+  for (const t of serverTurns) {
+    const b = t.batch;
+    if (!b) continue;
+    const list = byBatch.get(b.batchId);
+    if (list) list.push(...b.chips);
+    else byBatch.set(b.batchId, [...b.chips]);
+  }
+  if (byBatch.size === 0) return prev;
+  let out = prev;
+  for (const [batchId, chips] of byBatch) out = mergeBatchChips(out, batchId, chips);
+  return out;
+}
+
 export function settleTurnsWithRaw(args: {
   prev: ChatTurn[] | null;
   prevRaw: unknown[];
@@ -190,8 +211,11 @@ export function settleTurnsWithRaw(args: {
     // (another tab / this session before remount) must flip its chips terminal
     // instead of staying pending. Overlay only the server's terminal states
     // over prev — every still-pending chip and the suspension structure stay
-    // optimistic.
-    return { turns: overlayDecisions(prev ?? [], terminalDecisions(serverTurns)), raw: prevRaw };
+    // optimistic. The server read can still carry MORE chips for the same batch
+    // (carrier parts that arrived after the freeze) — union them in so the whole
+    // batch is decidable without a reload.
+    const overlaid = overlayDecisions(prev ?? [], terminalDecisions(serverTurns));
+    return { turns: mergeServerBatchChips(overlaid, serverTurns), raw: prevRaw };
   }
   // A8/M2: at a terminal frame a shorter server read must not erase the settled
   // history. This holds UNCONDITIONALLY — no non-empty shorter read may fall

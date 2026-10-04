@@ -684,6 +684,74 @@ describe("useStreamFrameFreeze — in-flight resume survives a chat switch (LX-8
   });
 });
 
+// A suspension flips on the FIRST carrier part of a batch; the rest of the
+// batch's carriers can arrive in later stream frames. The freeze guard must
+// union them into the frozen turn so every chip is live without a reload
+// (chat-live-chips).
+function pendingChip(approvalId: string, seq: number, state?: "approved" | "rejected" | "expired") {
+  return {
+    approvalId,
+    batchId: "b1",
+    seq,
+    name: "create_task",
+    diff: { type: "task_create" as const, title: "t", fields: {} },
+    ...(state ? { state } : {}),
+  };
+}
+
+function FreezeFramesHarness({ stream, chatId }: { stream: Stream; chatId: string }) {
+  const [turns, setTurns] = useState<ChatTurn[] | null>(null);
+  const ingressInsertedRef = useRef<Set<string>>(new Set());
+  useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming: false, ingressInsertedRef });
+  const chips = (turns ?? []).flatMap((t) => t.batch?.chips ?? []);
+  return <div data-testid="live-chips">{chips.map((c) => `${c.approvalId}:${c.state}`).join(",")}</div>;
+}
+
+describe("useStreamFrameFreeze — later carriers for one batch merge live (chat-live-chips)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("renders every chip across multiple suspended frames without a reload", () => {
+    const { rerender } = render(
+      <FreezeFramesHarness
+        stream={makeStream({ status: "suspended", suspendedBatchId: "b1", pending: [pendingChip("c1", 0)], hasIngress: true, text: "proposed" })}
+        chatId="C1"
+      />
+    );
+    expect(screen.getByTestId("live-chips").textContent).toBe("c1:pending");
+
+    // The client message was reset after the freeze; the remaining carrier
+    // parts of the SAME batch land on a later suspended frame.
+    rerender(<FreezeFramesHarness stream={makeStream()} chatId="C1" />);
+    rerender(
+      <FreezeFramesHarness
+        stream={makeStream({ status: "suspended", suspendedBatchId: "b1", pending: [pendingChip("c2", 1), pendingChip("c3", 2)], hasIngress: true, text: "proposed" })}
+        chatId="C1"
+      />
+    );
+    expect(screen.getByTestId("live-chips").textContent).toBe("c1:pending,c2:pending,c3:pending");
+  });
+
+  it("does not re-arm a chip already decided when later carriers re-list it", () => {
+    const { rerender } = render(
+      <FreezeFramesHarness
+        stream={makeStream({ status: "suspended", suspendedBatchId: "b1", pending: [pendingChip("c1", 0, "approved")], hasIngress: true, text: "proposed" })}
+        chatId="C1"
+      />
+    );
+    expect(screen.getByTestId("live-chips").textContent).toBe("c1:approved");
+
+    // A later carrier re-lists the decided chip (pending) alongside a new one;
+    // the session decision must survive, the new chip appended.
+    rerender(
+      <FreezeFramesHarness
+        stream={makeStream({ status: "suspended", suspendedBatchId: "b1", pending: [pendingChip("c1", 0), pendingChip("c2", 1)], hasIngress: true, text: "proposed" })}
+        chatId="C1"
+      />
+    );
+    expect(screen.getByTestId("live-chips").textContent).toBe("c1:approved,c2:pending");
+  });
+});
+
 function renderComposer(overrides: Partial<Parameters<typeof AssistantChatComposer>[0]> = {}) {
   const onSend = vi.fn(() => true);
   const onQueue = vi.fn();

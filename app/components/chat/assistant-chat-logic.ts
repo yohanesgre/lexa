@@ -288,6 +288,28 @@ export function suspendTurnFrame(args: {
   };
 }
 
+// Later-arriving approval carriers merge into the turn that already holds the
+// batch. A suspension flips as soon as the FIRST carrier part lands; the rest
+// of the batch can arrive in later stream frames (or a transcript read), and
+// the freeze guard would otherwise drop them. Existing chip state wins by
+// approvalId so a decision already made is never re-armed; unknown chips are
+// appended in seq order.
+export function mergeBatchChips(prev: ChatTurn[] | null, batchId: string, incoming: ApprovalChip[]): ChatTurn[] {
+  const arr = prev ?? [];
+  if (incoming.length === 0) return arr;
+  let touched = false;
+  const out = arr.map((t) => {
+    if (t.batch?.batchId !== batchId && t.suspendedBatchId !== batchId) return t;
+    const chips = t.batch?.chips ?? [];
+    const known = new Set(chips.map((c) => c.approvalId));
+    const added = incoming.filter((c) => !known.has(c.approvalId));
+    if (added.length === 0) return t;
+    touched = true;
+    return { ...t, batch: { batchId, chips: [...chips, ...added].sort((a, b) => a.seq - b.seq) }, suspendedBatchId: undefined };
+  });
+  return touched ? out : arr;
+}
+
 // Error frames freeze/merge into the trailing assistant turn: same-code
 // errors are idempotent (no dup), a different error on an errored tail
 // overwrites it, otherwise a fresh failed turn appends.

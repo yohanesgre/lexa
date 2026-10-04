@@ -21,6 +21,7 @@ import {
   insertNewThread,
   isTerminalStreamStatus,
   isThreadNotFoundCode,
+  mergeBatchChips,
   nextTurnsAfterStreamError,
   pendingChipsOf,
   pendingChipTargets,
@@ -89,12 +90,17 @@ function settleStreamFrame(args: {
   const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, inFlightResumeRef, ingressInsertedRef } = args;
   if (stream.status === "suspended") {
     const batchId = stream.suspendedBatchId ?? "";
+    const chips = batchId ? pendingChipsOf(stream.pending, batchId) : [];
     if (batchId && frozeBatchRef.current !== batchId) {
       frozeBatchRef.current = batchId;
-      const chips = pendingChipsOf(stream.pending, batchId);
       const activity = frozenActivity(stream, "suspended");
       setTurns((prev) => [...(prev ?? []), suspendTurnFrame({ batchId, chips, text: stream.text, activity })]);
       stream.reset();
+    } else if (batchId) {
+      // Carriers of the same batch can straddle several stream frames (the
+      // suspension flips on the FIRST chip) — union the rest into the frozen
+      // turn so the whole batch stays decidable without a reload.
+      setTurns((prev) => mergeBatchChips(prev, batchId, chips));
     }
   }
   if (stream.status === "error" && stream.hasIngress) {
