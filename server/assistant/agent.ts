@@ -375,8 +375,16 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // message holding successful write proposals, so the DO canonical store and
     // the D1 mirror both carry the approvals marker (idempotent).
     const withCarriers = withApprovalCarriers(messages);
+    // Do NOT hand-patch `this.messages` from the argument: the SDK persists an
+    // incoming array that can be run-scoped (only the current run's messages,
+    // e.g. the programmatic `saveMessages` write and the client chat-request
+    // body), and the base class mirrors the merged transcript into
+    // `this.messages` from the Sessions change feed before `super` resolves.
+    // Assigning the argument here shrank the DO-canonical read (`getTranscript`)
+    // to the current run and made the terminal REST refetch erase earlier turns
+    // (A9). The change feed is the sole writer of the in-memory cache; the
+    // stored transcript was already correct, so delete/reset stays authoritative.
     await super.persistMessages(withCarriers, excludeBroadcastIds, options);
-    this.messages = withCarriers;
     // Compact first, then mirror the freshened summary/count to D1.
     await this.maybeSummarize();
     await this.mirrorCurrent();

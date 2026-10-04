@@ -1221,4 +1221,47 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     );
     expect(await d1Title(documentId)).toBeNull();
   }, 60_000);
+
+  it("keeps earlier turns in getTranscript when a run-scoped write lands during a run (A9)", async () => {
+    // The SDK persists the incoming run-scoped message list (the client run's
+    // messages, not necessarily the whole transcript) through the overridden
+    // `persistMessages`. The override must not hand-patch `this.messages` down
+    // to that run-scoped array: `getTranscript` is the DO-canonical read the
+    // terminal REST refetch serves, and a transiently shorter read erases
+    // earlier turns on the client. The base class merge (Sessions change feed)
+    // is the only writer of the in-memory cache.
+    const documentId = "transcript-no-shrink";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const runTurn = async (message: Record<string, unknown>): Promise<void> => {
+      const res = await mf!.dispatchFetch(
+        `http://assistant-smoke/__test/turn?threadKey=${encodeURIComponent(threadKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: [message] }),
+        }
+      );
+      expect(res.status).toBe(200);
+    };
+
+    // Turn 1 commits [u1, a1].
+    await runTurn({ id: "s1-u1", role: "user", parts: [{ type: "text", text: "turn one" }] });
+    const turn1 = await waitFor<unknown[]>(
+      () => transcriptOf(documentId).then((m) => (m.length === 2 ? m : null)),
+      20_000
+    );
+    expect(messageIds(turn1)).toEqual(["s1-u1", expect.any(String)]);
+
+    // Turn 2's incoming write carries only the current run's message. Right
+    // after the run the canonical read must hold the prior turn too.
+    await runTurn({ id: "s2-u2", role: "user", parts: [{ type: "text", text: "turn two" }] });
+    const after = await transcriptOf(documentId);
+    expect(after.length).toBe(4);
+    expect(after.slice(0, 2)).toEqual(turn1);
+    expect(messageIds(after)).toContain("s2-u2");
+  }, 90_000);
 });
