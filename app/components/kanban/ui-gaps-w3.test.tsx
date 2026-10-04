@@ -419,6 +419,54 @@ describe("SwimlaneForm delete", () => {
   });
 });
 
+describe("SwimlaneForm payload", () => {
+  it("omits protected date/milestone fields when saving a backlog lane", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SwimlaneForm
+        slug="demo"
+        swimlane={{ ...LANE, name: "Backlog", kind: "backlog" }}
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    const payload = onSubmit.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload).toEqual({ name: "Backlog", description: null });
+    expect(payload).not.toHaveProperty("dueAt");
+    expect(payload).not.toHaveProperty("startAt");
+    expect(payload).not.toHaveProperty("milestoneId");
+  });
+
+  it("sends date/milestone fields when saving a sprint lane", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <SwimlaneForm
+        slug="demo"
+        swimlane={LANE}
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: "Sprint 7",
+      description: null,
+      dueAt: null,
+      startAt: null,
+      milestoneId: null,
+    });
+  });
+});
+
 const SELECTOR_MILESTONES: Milestone[] = [
   { id: "m1", projectId: "p1", name: "v1.0 launch", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 4, archivedSprintCount: 2, tasksDone: 0, tasksTotal: 0 },
   { id: "m2", projectId: "p1", name: "Beta milestone", description: "", position: 1, dueAt: null, archivedAt: null, sprintCount: 3, archivedSprintCount: 1, tasksDone: 0, tasksTotal: 0 },

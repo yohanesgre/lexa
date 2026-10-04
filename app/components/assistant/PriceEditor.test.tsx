@@ -84,6 +84,24 @@ describe("PriceEditor", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("formats an exponent-formatted stored default without exponent and saves it unchanged", async () => {
+    const tinyPrices = { data: [{ model: "m1", prompt_price: 5e-7, completion_price: 0, cached_read_price: 0, cached_write_price: 0, updated_at: "t" }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => tinyPrices })
+      .mockResolvedValueOnce({ ok: true, json: async () => tinyPrices.data[0] });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<PriceEditor byModel={[]} />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("prompt_price for m1") as HTMLInputElement;
+    expect(input.value).toBe("0.0000005");
+    expect(input.value).not.toContain("e");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [, init] = fetchMock.mock.calls[1]!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.prompt_price).toBe(5e-7);
+  });
+
   it("surfaces a server error on the row it failed for", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => prices })

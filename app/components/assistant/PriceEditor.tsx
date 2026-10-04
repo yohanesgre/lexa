@@ -13,6 +13,14 @@ interface PriceEdit {
 
 const PRICE_ERROR = "Enter a price ≥ 0, no exponent, max 6 decimals";
 
+// Number#toString switches to exponent notation below 1e-6 (e.g. 5e-7 → "5e-7"),
+// which parsePrice rejects and an input cannot display. Render the shortest
+// plain-decimal form so an unchanged stored value round-trips exactly.
+function formatPrice(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  return n.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+}
+
 // The raw string is validated, never Number()'s coercion: blank, exponent
 // notation ("1e3"), negative, non-finite and >6-decimal inputs are rejected
 // before they can reach the PUT.
@@ -21,8 +29,12 @@ function parsePrice(raw: string): number | null {
   if (!s || /[eE]/.test(s)) return null;
   const n = Number(s);
   if (!Number.isFinite(n) || n < 0) return null;
-  const dot = s.indexOf(".");
-  if (dot !== -1 && s.slice(dot + 1).length > 6) return null;
+  // Decimals are counted from the number's canonical string, like the server
+  // does — a tiny value's raw expansion ("0.0000005") is fine because its
+  // canonical String() is exponential ("5e-7") and carries no decimal point.
+  const canonical = String(n);
+  const dot = canonical.indexOf(".");
+  if (dot !== -1 && canonical.slice(dot + 1).length > 6) return null;
   return n;
 }
 
@@ -53,10 +65,10 @@ export function PriceEditor({
   const defaultsFor = (model: string): PriceEdit => {
     const p = priceMap.get(model);
     return {
-      prompt_price: p ? String(p.prompt_price) : "",
-      completion_price: p ? String(p.completion_price) : "",
-      cached_read_price: p ? String(p.cached_read_price) : "",
-      cached_write_price: p ? String(p.cached_write_price) : "",
+      prompt_price: p ? formatPrice(p.prompt_price) : "",
+      completion_price: p ? formatPrice(p.completion_price) : "",
+      cached_read_price: p ? formatPrice(p.cached_read_price) : "",
+      cached_write_price: p ? formatPrice(p.cached_write_price) : "",
     };
   };
 

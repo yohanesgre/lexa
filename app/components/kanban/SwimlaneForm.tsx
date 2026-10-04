@@ -31,11 +31,18 @@ function validateSwimlaneForm(state: SwimlaneFormState): string | null {
   return null;
 }
 
-function buildSwimlanePayload(state: SwimlaneFormState) {
+// Backlog lanes are protected server-side: any defined dueAt/startAt/milestoneId
+// triggers BACKLOG_PROTECTED. Omit them entirely so the service's
+// "undefined = no change" contract holds — the backlog payload is name/description.
+function buildSwimlanePayload(state: SwimlaneFormState, isBacklog: boolean) {
   const trimmedDescription = state.description.trim();
-  return {
+  const base = {
     name: state.name.trim(),
     description: trimmedDescription === "" ? null : trimmedDescription,
+  };
+  if (isBacklog) return base;
+  return {
+    ...base,
     dueAt: state.dueAt,
     startAt: state.startAt,
     milestoneId: state.milestoneId,
@@ -205,6 +212,7 @@ function SwimlaneFormFooter({ isEdit, swimlane, onDelete, onClose, submitLabel }
 
 export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onDelete, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
+  const isBacklog = isEdit && swimlane?.kind === "backlog";
   const { data: milestones = [] } = useMilestones(slug);
 
   const [state, setState] = useState<SwimlaneFormState>({
@@ -263,11 +271,9 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onDelete, onSubm
       return;
     }
     setError(null);
-    onSubmit(buildSwimlanePayload(state));
+    onSubmit(buildSwimlanePayload(state, isBacklog));
     onClose();
   };
-
-  const isBacklog = isEdit && swimlane?.kind === "backlog";
 
   return createPortal(
     <>

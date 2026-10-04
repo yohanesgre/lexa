@@ -127,7 +127,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             <button
               type="button"
               className="btn btn-primary"
-              disabled={pending || !name.trim() || (!teamId && !canCreateUnassigned)}
+              disabled={pending || !name.trim() || !teamId}
               onClick={handleCreate}
             >
               <Plus size={14} strokeWidth={1.5} />
