@@ -21,6 +21,7 @@ import { byPosition, cardProps, cellDropId, tasksReducer, useLinkMaps } from "./
 import { emptyFilters, type FilterState } from "../../lib/filters";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
 import { useMoveGuard } from "../../lib/useMoveGuard";
+import { useToast } from "../ui/Toast";
 
 export type { MoveTarget } from "./board-drop";
 
@@ -61,7 +62,8 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   );
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(new Set());
-  const { childrenByParent, blockedBy } = useLinkMaps(board);
+  const { childrenByParent, parentOf, blockedBy } = useLinkMaps(board);
+  const toast = useToast();
   const [filters, setFilters] = useState<FilterState>(() => {
     const f = emptyFilters();
     if (initialSwimlaneId) f.swimlanes.add(initialSwimlaneId);
@@ -79,12 +81,14 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     const prev = prevTaskIds.current;
     const added = new Set<string>();
     for (const id of currentIds) if (!prev.has(id)) added.add(id);
+    // Commit the snapshot before the early return so subsequent moves/updates
+    // (same id set) don't re-mark every card as new and replay card-enter.
+    prevTaskIds.current = currentIds;
     if (added.size > 0) {
       setNewTaskIds(added);
       const t = window.setTimeout(() => setNewTaskIds(new Set()), 200);
       return () => window.clearTimeout(t);
     }
-    prevTaskIds.current = currentIds;
   }, [localTasks]);
 
   useEffect(() => {
@@ -187,7 +191,16 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     const commit = confirmMove(task, target);
     if (!commit) return;
     dispatch({ type: "move", taskId: task.id, columnId: target.columnId, swimlaneId: target.swimlaneId, position });
-    void commit.catch(() => revertMove(task.id));
+    void commit.catch((err) => {
+      revertMove(task.id);
+      if ((err as { code?: string }).code !== "WIP_LIMIT") return;
+      // useMoveTask.onError swallows WIP_LIMIT (no toast) — surface it here
+      // alongside the column flash so the rejection is visible.
+      toast.push("warning", "WIP limit reached", (err as { message?: string }).message ?? "Column is at its WIP limit");
+      setFlashColumnId(target.columnId);
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+      flashTimer.current = window.setTimeout(() => setFlashColumnId(null), 1500);
+    });
   };
 
   return (
@@ -220,6 +233,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           showArchived={!!showArchived}
           localTasks={localTasks}
           childrenByParent={childrenByParent}
+          parentOf={parentOf}
           blockedBy={blockedBy}
           cardHidden={cardHidden}
           cardDimmed={cardDimmed}

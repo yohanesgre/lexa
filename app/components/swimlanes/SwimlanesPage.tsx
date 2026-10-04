@@ -85,7 +85,9 @@ function submitSwimlaneForm<TInput extends { description?: string | null | undef
   update: { mutate: (input: Omit<TInput, "description"> & { id: string; description?: string | undefined }) => void },
   create: { mutate: (input: Omit<TInput, "description"> & { description?: string | undefined }) => void },
 ) {
-  const payload = { ...input, description: input.description ?? undefined } as Omit<TInput, "description"> & { description?: string | undefined };
+  // An omitted description is skipped by the repo update; send "" so clearing
+  // the field persists.
+  const payload = { ...input, description: input.description ?? "" } as Omit<TInput, "description"> & { description?: string | undefined };
   if (editing) {
     update.mutate({ ...payload, id: editing.id });
   } else {
