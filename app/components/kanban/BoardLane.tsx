@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Swimlane, Task } from "../../../shared/types";
+import type { Board, Swimlane, Task } from "../../../shared/types";
 import { Column } from "./Column";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { cn } from "../ui/cn";
@@ -12,7 +12,7 @@ export interface BoardLaneProps {
   slug: string;
   lane: Swimlane;
   columns: Array<import("../../../shared/types").Column>;
-  board: any;
+  board: Board;
   localTasks: Task[];
   childrenByParent: Map<string, string[]>;
   parentOf: Map<string, string>;
@@ -45,7 +45,10 @@ export function BoardLane({
   collapsedParents, setCollapsedParents,
 }: BoardLaneProps) {
   const laneId = lane.id;
-  const laneTaskCount = localTasks.filter((t) => t.swimlaneId === laneId).length;
+  const laneTaskCount = useMemo(
+    () => localTasks.reduce((n, t) => (t.swimlaneId === laneId ? n + 1 : n), 0),
+    [localTasks, laneId]
+  );
   const isCollapsed = collapsed.has(laneId);
   const cellMap = useMemo(() => {
     const m = new Map<string, Task[]>();

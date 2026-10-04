@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { addDays, axisDays, buildRange, clampDate, dayForX, formatDay, parseDay, xForDay, DAY_WIDTH_PX } from "../../lib/gantt";
+import { formatDueChip } from "../../lib/dates";
 import { cn } from "../ui/cn";
 import type { Milestone, Swimlane } from "../../../shared/types";
 
@@ -331,7 +332,6 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
           axisStart={axisStart}
           to={to}
           today={todayDate}
-          sprintPlan={sprintPlan}
           barFor={barFor}
           milestoneDue={milestoneDue}
           milestoneNames={milestoneNameById}
@@ -349,7 +349,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   );
 }
 
-function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes, backlogLanes, collapsedGroups, gridCols, groupProps, axisStart, to, today, sprintPlan, barFor, milestoneDue, milestoneNames, onToggle, onMarkerPointerDown, onMarkerPointerMove, onMarkerPointerUp, onMarkerClick, isJustDragged, onSprintPointerDown, sprintRowProps }: {
+function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes, backlogLanes, collapsedGroups, gridCols, groupProps, axisStart, to, today, barFor, milestoneDue, milestoneNames, onToggle, onMarkerPointerDown, onMarkerPointerMove, onMarkerPointerUp, onMarkerClick, isJustDragged, onSprintPointerDown, sprintRowProps }: {
   canvasRef: React.RefObject<HTMLDivElement | null>;
   guidelineXs: { left: number; bottom: number }[];
   milestones: Milestone[];
@@ -362,7 +362,6 @@ function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes,
   axisStart: Date;
   to: Date;
   today: Date;
-  sprintPlan: TimelineLane[];
   barFor: (laneId: string) => { startAt: string | null; dueAt: string | null };
   milestoneDue: (m: Milestone) => string | null;
   milestoneNames: Map<string, string>;
@@ -380,11 +379,8 @@ function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes,
     onOpenBoard: (laneId: string) => void;
   };
 }) {
-  let planIdx = 0;
   let zebra = 0;
   const sprintRow = (t: TimelineLane) => {
-    const p = sprintPlan[planIdx++]!;
-    void p;
     const bar = barFor(t.lane.id);
     const striped = (zebra++ % 2) === 1;
     return (
@@ -731,14 +727,4 @@ function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gri
 
 function shortDate(iso: string): string {
   return parseDay(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function formatDueChip(dueAt: string): { text: string; overdue: boolean } {
-  const d = parseDay(dueAt);
-  const now = new Date();
-  const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Math.round((d.getTime() - todayUTC) / 86_400_000);
-  if (days < 0) return { text: `Overdue ${-days}d`, overdue: true };
-  if (days === 0) return { text: "Due today", overdue: false };
-  return { text: `Due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`, overdue: false };
 }

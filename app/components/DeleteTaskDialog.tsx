@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { TrashIcon } from "./icons";
 import type { Task } from "../../shared/types";
@@ -10,13 +11,47 @@ interface DeleteTaskDialogProps {
   onDelete: () => void;
 }
 
+const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export function DeleteTaskDialog({ task, open, deleting, onClose, onDelete }: DeleteTaskDialogProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+    focusables()[0]?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const els = focusables();
+      if (els.length === 0) return;
+      const first = els[0]!;
+      const last = els[els.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    dialog.addEventListener("keydown", onKeyDown);
+    return () => {
+      dialog.removeEventListener("keydown", onKeyDown);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [open]);
+
   if (!open) return null;
   return (
 <>
   <button type="button" className="dialog-overlay" onClick={onClose} aria-label="Close" />
   <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
     <dialog open
+      ref={dialogRef}
       className="dialog dialog-enter"
       aria-modal="true"
       aria-labelledby="delete-task-title"

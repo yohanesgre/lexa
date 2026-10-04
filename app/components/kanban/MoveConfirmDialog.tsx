@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { formatDueLabel, parseDateOnly } from "../../lib/dates";
@@ -25,6 +25,9 @@ function overdueDays(dueAt: string): number {
 
 export function MoveConfirmDialog({ board, pending, resolve, cancel }: MoveConfirmDialogProps) {
   const [checked, setChecked] = useState(false);
+  // Reset the clear-deadline opt-in whenever a new move is queued — otherwise a
+  // dialog dismissed after checking would pre-apply it to the next move.
+  useEffect(() => setChecked(false), [pending]);
   if (!pending) return null;
 
   const lane = board.swimlanes.find((l) => l.id === pending.target.swimlaneId);
