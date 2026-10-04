@@ -1391,6 +1391,12 @@ body { name*, slug? }
 → 201 Team | 403 FORBIDDEN | 409 SLUG_TAKEN
   Creator becomes the org owner (member role 'owner').
 
+PATCH  /api/teams/:teamId   (team admin own team / superadmin)
+body { name* }             (trimmed; 1-80 chars)
+→ 200 Team | 403 FORBIDDEN | 404 TEAM_NOT_FOUND
+  | 422 INVALID_NAME   (empty / over 80 chars after trim)
+  Renames the team; the slug is immutable.
+
 DELETE /api/teams/:teamId  (superadmin only)
 → 204 | 403 FORBIDDEN | 404
   | 409 TEAM_HAS_PROJECTS { count }   (blocked while the team owns projects — reassign first)

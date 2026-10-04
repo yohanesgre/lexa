@@ -102,6 +102,16 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
         Effect.map((row) => (row ? toTeam(row) : null))
       );
 
+    const rename = (teamId: string, name: string): Effect.Effect<Team, TeamNotFound | DbError> =>
+      Effect.gen(function* () {
+        const org = yield* findById(teamId);
+        if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
+        yield* run(db, "UPDATE organization SET name = ? WHERE id = ?", name, teamId).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
+        return { ...org, name };
+      });
+
     const remove = (teamId: string): Effect.Effect<void, TeamNotFound | TeamHasProjects | DbError> =>
       Effect.gen(function* () {
         const org = yield* firstOrNull(queryFirst<OrgRow>(db, "SELECT id FROM organization WHERE id = ?", teamId));
@@ -193,6 +203,6 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
         );
       });
 
-    return { create, listAll, listForUser, findById, remove, members, addMember, setMemberRole, removeMember };
+    return { create, listAll, listForUser, findById, rename, remove, members, addMember, setMemberRole, removeMember };
   }),
 }) {}

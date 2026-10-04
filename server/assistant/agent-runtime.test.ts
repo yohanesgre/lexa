@@ -250,7 +250,7 @@ describe("executeResumeBatchRemote", () => {
     await expect(executeResumeBatchRemote(deps(fetchImpl), "batch-1")).resolves.toEqual({ kind: "unavailable" });
   });
 
-  it("maps the discriminated body to executed/pending/noop/missing", async () => {
+  it("maps the discriminated body to executed/pending/noop/missing/unsupported", async () => {
     const withBody = (b: unknown): FetchLike => async () => jsonResponse(b);
     await expect(executeResumeBatchRemote(deps(withBody({ ok: true, note: "n" })), "b1")).resolves.toEqual({
       kind: "executed",
@@ -265,6 +265,11 @@ describe("executeResumeBatchRemote", () => {
     await expect(executeResumeBatchRemote(deps(withBody({ ok: false, reason: "missing" })), "b1")).resolves.toEqual({
       kind: "missing",
     });
+    // LX-116: a non-chat thread is `unsupported` (not `missing`/`unavailable`),
+    // so the DO releases its claim instead of stranding the batch.
+    await expect(
+      executeResumeBatchRemote(deps(withBody({ ok: false, reason: "unsupported" })), "b1")
+    ).resolves.toEqual({ kind: "unsupported" });
   });
 });
 

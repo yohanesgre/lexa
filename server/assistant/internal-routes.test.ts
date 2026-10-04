@@ -569,14 +569,28 @@ describe("chat resume execution (POST /api/internal/assistant/resume-execute)", 
     expect((result.body as { error: { code: string } }).error.code).toBe("ASSISTANT_UNAVAILABLE");
   });
 
-  it("400s a missing batchId, a missing identity, and a non-chat thread key", async () => {
+  it("400s a missing batchId and a missing identity", async () => {
     seedTask();
     const noBatch = await call({});
     expect(noBatch.status).toBe(400);
     const noIdentity = await call({ batchId: "b1" }, null);
     expect(noIdentity.status).toBe(400);
-    const nonChat = await call({ batchId: "b1" }, { actorUserId: "u1", projectId: "p1", threadKey: "task:t1" });
-    expect(nonChat.status).toBe(400);
+  });
+
+  it("reports a non-chat thread key as unsupported without touching writes (LX-116)", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b1", status: "approved", seq: 0 });
+    let called = 0;
+    const nonChat = await call({ batchId: "b1" }, { actorUserId: "u1", projectId: "p1", threadKey: "task:t1" }, {
+      executeWriteTool: async () => {
+        called += 1;
+        return { ok: true, applied: true, result: {} };
+      },
+    });
+    // 200 + `unsupported` (not a 4xx): the DO releases its claim and no-ops;
+    // the chat-only rejection must never read as an indeterminate failure.
+    expect(nonChat).toEqual({ status: 200, body: { ok: false, reason: "unsupported" } });
+    expect(called).toBe(0);
   });
 });
 

@@ -867,7 +867,12 @@ export async function handleInternalAssistantRequest(input: {
     }
     const parsed = parseThreadKey(identity.threadKey);
     if (!parsed || parsed.documentType !== "chat") {
-      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "resume-execute is chat-only" } } };
+      // Non-chat threads never execute here: task/wiki continuation is owned
+      // in-process by `resumeThreadStream`. Report `unsupported` (200, nothing
+      // touched) rather than an error so the DO releases its claim — writes
+      // definitely did not apply, so an indeterminate/keep-claim classification
+      // would strand the batch forever.
+      return { status: 200, body: { ok: false, reason: "unsupported" } };
     }
     const rows = await Effect.runPromise(
       queryAll<ResumeWriteRow>(

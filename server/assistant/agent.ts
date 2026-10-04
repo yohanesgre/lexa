@@ -851,6 +851,12 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     };
   }
 
+  // Chat batches execute here; task/wiki batches are intentionally a no-op on
+  // the DO side. Their continuation is owned in-process by the Worker's
+  // `resumeThreadStream` (the route calls it alongside this RPC), so the
+  // removed pre-PR DO `continueLastTurn` for those threads was deliberate and
+  // must not come back. `resume-execute` reports `unsupported` for them and
+  // this method releases the claim rather than stranding it.
   async resumeBatch(batchId: string | null): Promise<{ ok: true; executed?: boolean; reason?: string }> {
     this.ensureResumeClaimsTable();
     const deps = await this.loadInternalDeps();
@@ -888,6 +894,14 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // No approved rows: nothing ran, so no continuation. Keep the claim so a
     // repeated request stays idempotent, and settle the batch.
     if (outcome.kind === "noop") return { ok: true, executed: false, reason: "settled" };
+    // Non-chat thread (task/wiki): the route applies nothing and the
+    // continuation is owned in-process by `resumeThreadStream`, so there is no
+    // DO-side work to do. Writes definitely did not apply → release the claim
+    // (rather than stranding it as `unavailable` would) and settle.
+    if (outcome.kind === "unsupported") {
+      this.releaseResumeBatch(batchId);
+      return { ok: true, executed: false, reason: "settled" };
+    }
     // Transport/HTTP failure: the writes MAY have applied. Keep the claim and
     // report indeterminate so the client settles instead of replaying.
     if (outcome.kind === "unavailable") return { ok: true, executed: false, reason: "indeterminate" };
@@ -911,6 +925,13 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       }
       // Nothing was executed for this batch; keep the claim and try older ones.
       if (outcome.kind === "noop") continue;
+      // Non-chat thread: nothing to execute DO-side (task/wiki continuation is
+      // in-process via `resumeThreadStream`). Release the claim so a retry
+      // re-reaches the Worker instead of stranding the batch forever.
+      if (outcome.kind === "unsupported") {
+        this.releaseResumeBatch(id);
+        continue;
+      }
       if (outcome.kind === "unavailable") return { ok: true, executed: false, reason: "indeterminate" };
       await this.runResumeContinuation(id, outcome.note);
       return { ok: true, executed: true };

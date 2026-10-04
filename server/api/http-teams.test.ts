@@ -162,6 +162,42 @@ describe("teams + workspace + sessions endpoints", () => {
     expect(((await dup.json()) as { error: { code: string } }).error.code).toBe("SLUG_TAKEN");
   });
 
+  it("rename team via PATCH /api/teams/:teamId: success, 403 non-manager, 404 unknown, 422 invalid name", async () => {
+    const created = await withKey("POST", "/api/teams", { name: "Renamable" });
+    expect(created.status).toBe(201);
+    const team = (await created.json()) as { id: string; name: string; slug: string };
+    // success — superadmin key renames the team, slug stays immutable
+    const renamed = await withKey("PATCH", `/api/teams/${team.id}`, { name: "Renamed Team" });
+    expect(renamed.status).toBe(200);
+    const renamedBody = (await renamed.json()) as { id: string; name: string; slug: string };
+    expect(renamedBody.id).toBe(team.id);
+    expect(renamedBody.name).toBe("Renamed Team");
+    expect(renamedBody.slug).toBe(team.slug);
+    // 403 — plain member session is not a team manager
+    const denied = await withCookie(await signIn("member3@lexa.test"), "PATCH", `/api/teams/${team.id}`, { name: "Hijack" });
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { error: { code: string } }).error.code).toBe("FORBIDDEN");
+    // 404 — unknown team id
+    const missing = await withKey("PATCH", "/api/teams/does-not-exist", { name: "Ghost" });
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as { error: { code: string } }).error.code).toBe("TEAM_NOT_FOUND");
+    // 422 — empty / whitespace-only name
+    const empty = await withKey("PATCH", `/api/teams/${team.id}`, { name: "   " });
+    expect(empty.status).toBe(422);
+    expect(((await empty.json()) as { error: { code: string } }).error.code).toBe("INVALID_NAME");
+    // 422 — name longer than 80 chars
+    const long = await withKey("PATCH", `/api/teams/${team.id}`, { name: "x".repeat(81) });
+    expect(long.status).toBe(422);
+    expect(((await long.json()) as { error: { code: string } }).error.code).toBe("INVALID_NAME");
+    // success — a team-admin *session* (not the superadmin key) may rename:
+    // member2 is promoted to admin on this team, then patches it by cookie.
+    const promote = await withKey("POST", `/api/teams/${team.id}/members`, { email: "member2@lexa.test", role: "admin" });
+    expect(promote.status).toBe(201);
+    const asAdmin = await withCookie(await signIn("member2@lexa.test"), "PATCH", `/api/teams/${team.id}`, { name: "Renamed by Team Admin" });
+    expect(asAdmin.status).toBe(200);
+    expect(((await asAdmin.json()) as { name: string }).name).toBe("Renamed by Team Admin");
+  });
+
   it("team admin adds existing workspace members; unknown email → 422 with details.available", async () => {
     const cookie = await signIn("member2@lexa.test");
     const teams = (await (await withKey("GET", "/api/teams")).json()) as { data: { id: string; name: string }[] };

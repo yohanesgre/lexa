@@ -521,6 +521,9 @@ function isApprovalPartial(value: unknown): value is { applied: number; failed: 
  * releases its claim and may try an older batch); `missing` means the batch has
  * no rows for this thread/owner. `noop` means the batch holds no approved rows
  * (all rejected/expired): nothing is executed and the DO runs no continuation.
+ * `unsupported` means the thread is not chat (task/wiki): the route applies
+ * nothing, so the DO releases its claim and no-ops — task/wiki continuation is
+ * owned in-process by `resumeThreadStream`.
  * `unavailable` is a transport/HTTP failure: the writes MAY have applied, so
  * the caller must keep the claim and must not retry (no
  * `indeterminate`/`applied:false` claim as fact — same rule as
@@ -531,6 +534,7 @@ export type ResumeExecuteOutcome =
   | { kind: "pending"; remaining: number }
   | { kind: "missing" }
   | { kind: "noop" }
+  | { kind: "unsupported" }
   | { kind: "unavailable" };
 
 export async function executeResumeBatchRemote(
@@ -556,6 +560,7 @@ export async function executeResumeBatchRemote(
       return { kind: "pending", remaining: typeof body.remaining === "number" ? body.remaining : 0 };
     }
     if (body.reason === "noop") return { kind: "noop" };
+    if (body.reason === "unsupported") return { kind: "unsupported" };
     return { kind: "missing" };
   } catch {
     return { kind: "unavailable" };

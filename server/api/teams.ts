@@ -2,7 +2,7 @@ import { HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "@effect/platform"
 import { Effect, Schema } from "effect";
 import type { LexaApi } from "./http";
 import { AuthIdentity } from "./auth";
-import { Forbidden } from "./errors";
+import { Forbidden, InvalidName } from "./errors";
 import { respond } from "./http-helpers";
 import { TeamsService } from "../services/teams.service";
 import { AuthorizationService } from "../services/authorization.service";
@@ -29,6 +29,10 @@ const CreateTeamInput = Schema.Struct({
   slug: Schema.optional(Schema.String),
 });
 
+const UpdateTeamInput = Schema.Struct({
+  name: Schema.String,
+});
+
 const AddTeamMemberInput = Schema.Struct({
   email: Schema.String,
   role: TeamMemberRoleSchema,
@@ -44,6 +48,7 @@ const MemberPath = Schema.Struct({ teamId: Schema.String, userId: Schema.String 
 export const teamsGroup = HttpApiGroup.make("teams")
   .add(HttpApiEndpoint.get("listTeams", "/teams").addSuccess(Schema.Struct({ data: Schema.Array(TeamSchema) })))
   .add(HttpApiEndpoint.post("createTeam", "/teams").setPayload(CreateTeamInput).addSuccess(TeamSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateTeam", "/teams/:teamId").setPath(TeamIdPath).setPayload(UpdateTeamInput).addSuccess(TeamSchema))
   .add(HttpApiEndpoint.del("deleteTeam", "/teams/:teamId").setPath(TeamIdPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.get("listTeamMembers", "/teams/:teamId/members").setPath(TeamIdPath).addSuccess(Schema.Struct({ data: Schema.Array(TeamMemberSchema) })))
   .add(HttpApiEndpoint.post("addTeamMember", "/teams/:teamId/members").setPath(TeamIdPath).setPayload(AddTeamMemberInput).addSuccess(TeamMemberSchema, { status: 201 }))
@@ -88,6 +93,19 @@ export const createTeamsLive = (api: typeof LexaApi) =>
           if (!identity.userId) return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
           const teams = yield* TeamsService;
           const team = yield* teams.create(req.payload.name, req.payload.slug, identity.userId);
+          return team;
+        }))
+      )
+      .handle("updateTeam", (req) =>
+        respond(Effect.gen(function* () {
+          const identity = yield* AuthIdentity;
+          yield* requireTeamManager(identity, req.path.teamId);
+          const name = req.payload.name.trim();
+          if (name.length === 0 || name.length > 80) {
+            return yield* Effect.fail(new InvalidName({ reason: "Name must be 1-80 characters" }));
+          }
+          const teams = yield* TeamsService;
+          const team = yield* teams.rename(req.path.teamId, name);
           return team;
         }))
       )
