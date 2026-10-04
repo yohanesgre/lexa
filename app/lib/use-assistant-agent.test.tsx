@@ -3,8 +3,8 @@
 // `?projectId=` on the handshake to upsert it (ADR-0003 §B.2), otherwise the
 // upgrade 404s and the first send is dropped. These tests pin the query wiring
 // at the `useAgent` boundary.
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   useAgent: vi.fn(),
@@ -100,5 +100,35 @@ describe("useAssistantAgent — recovering status projection", () => {
     chatFx.state.current = { ...chatFx.idle(), isRecovering: true };
     const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
     expect(result.current.status).toBe("connecting");
+  });
+});
+
+describe("useAssistantAgent — resume outcome callback", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reports ok=true when the resume POST succeeds", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    const onResult = vi.fn();
+    act(() => result.current.send("/api/assistant/chat/c1/resume", {}, onResult));
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(true));
+  });
+
+  it("reports ok=false when the resume POST fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    const onResult = vi.fn();
+    act(() => result.current.send("/api/assistant/chat/c1/resume", {}, onResult));
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(false));
+  });
+
+  it("never invokes the outcome callback for a non-resume send", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    const onResult = vi.fn();
+    act(() => result.current.send("/api/assistant/chat/stream", { message: "hi" }, onResult));
+    expect(onResult).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

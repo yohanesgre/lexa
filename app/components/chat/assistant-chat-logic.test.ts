@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { renderTranscript } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
-import { chipStateFromError, dropUnknownThread, resolveChatId, resolveResendTarget } from "./assistant-chat-logic";
+import { chipStateFromError, dropUnknownThread, resolveChatId, resolveResendTarget, resumableBatchId } from "./assistant-chat-logic";
 
 const user = (text: string, rawIndex = -1): ChatTurn => ({ role: "user", text, imageCount: 0, rawIndex });
 const assistant = (text: string, rawIndex = -1, error?: { code: string; message: string }): ChatTurn => ({
@@ -236,5 +236,26 @@ describe("chipStateFromError", () => {
       chipStateFromError(Object.assign(new Error("x"), { code: "APPROVAL_ALREADY_DECIDED", details: { status: "approved" } }))
     ).toBe("approved");
     expect(chipStateFromError(Object.assign(new Error("x"), { code: "OTHER" }))).toBeNull();
+  });
+});
+
+describe("resumableBatchId — resumed-set suppression", () => {
+  const batchTurn = (batchId: string, state: "pending" | "approved"): ChatTurn =>
+    ({
+      role: "assistant",
+      text: "",
+      imageCount: 0,
+      rawIndex: -1,
+      batch: { batchId, chips: [{ approvalId: `${batchId}-a`, batchId, seq: 0, name: "t", diff: {}, state }] },
+    }) as ChatTurn;
+
+  it("skips a batch already in the resumed set (persisted across reload)", () => {
+    const turns = [batchTurn("b1", "approved")];
+    expect(resumableBatchId(turns, new Set())).toBe("b1");
+    expect(resumableBatchId(turns, new Set(["b1"]))).toBeNull();
+  });
+
+  it("never resumes a batch that still has a pending chip", () => {
+    expect(resumableBatchId([batchTurn("b1", "pending")], new Set())).toBeNull();
   });
 });
