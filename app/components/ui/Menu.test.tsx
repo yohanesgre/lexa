@@ -30,16 +30,35 @@ describe("Menu", () => {
   it("moves focus through items with arrow keys", () => {
     renderMenu();
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    const menu = screen.getByRole("menu");
 
-    fireEvent.keyDown(menu, { key: "ArrowDown" });
-    expect(screen.getByRole("button", { name: "One" })).toHaveFocus();
+    // Opening moves focus into the popover, so keydowns on an item reach the
+    // menu's key handler the way a real keyboard user's would.
+    const one = screen.getByRole("button", { name: "One" });
+    expect(one).toHaveFocus();
 
-    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    fireEvent.keyDown(one, { key: "ArrowDown" });
     expect(screen.getByRole("button", { name: "Two" })).toHaveFocus();
 
-    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Two" }), { key: "ArrowDown" });
     expect(screen.getByRole("button", { name: "One" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "One" }), { key: "End" });
+    expect(screen.getByRole("button", { name: "Two" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Two" }), { key: "Home" });
+    expect(screen.getByRole("button", { name: "One" })).toHaveFocus();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "One" }), { key: "ArrowUp" });
+    expect(screen.getByRole("button", { name: "Two" })).toHaveFocus();
+  });
+
+  it("closes on Escape from inside the menu", () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "One" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("re-anchors the popover on window scroll", () => {

@@ -13,7 +13,9 @@ export function PendingVariant({ clientName, code, expiresAt, busy, onApprove, o
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
+    // 1s while pending so the flip to expired (and the countdown label) is
+    // never stale by more than a second; Approve/Deny must not stay live.
+    const t = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(t);
   }, []);
 

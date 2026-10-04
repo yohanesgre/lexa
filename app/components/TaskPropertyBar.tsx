@@ -118,6 +118,8 @@ function ColumnField(props: TaskPropertyBarProps) {
               type="button"
               className={cn("prop-input", props.missingFields.length > 0 && "is-focused")}
               style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
+              aria-haspopup="listbox"
+              aria-expanded={open}
               onClick={toggle}
             >
               <span>{props.currentColumnName || "—"}</span>
@@ -182,6 +184,8 @@ function SwimlaneField(props: TaskPropertyBarProps) {
             type="button"
             className="prop-input"
             style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
+            aria-haspopup="listbox"
+            aria-expanded={open}
             onClick={toggle}
           >
             <span>{props.currentSwimlaneName || "—"}</span>
@@ -219,7 +223,7 @@ function PrioritySelect({ value, options, onChange, withGlow }: {
         };
       })}
       onChange={onChange}
-      trigger={({ toggle }) => {
+      trigger={({ open, toggle }) => {
         const opt = options.find((p) => p.id === value);
         const color = opt?.color?.toUpperCase();
         const knownBadge = color ? PRIORITY_BADGE_CLASS[color] : undefined;
@@ -230,6 +234,8 @@ function PrioritySelect({ value, options, onChange, withGlow }: {
           <button
             type="button"
             className={cn("priority-badge", badgeClass)}
+            aria-haspopup="listbox"
+            aria-expanded={open}
             onClick={toggle}
             style={{
               boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined,
@@ -270,7 +276,7 @@ function TypeSelect({ value, options, onChange, withGlow }: {
         };
       })}
       onChange={onChange}
-      trigger={({ toggle }) => {
+      trigger={({ open, toggle }) => {
         const opt = options.find((t) => t.id === value);
         const color = opt?.color?.toUpperCase();
         const knownBadge = color ? TYPE_BADGE_CLASS[color] : undefined;
@@ -279,6 +285,8 @@ function TypeSelect({ value, options, onChange, withGlow }: {
           <button
             type="button"
             className={cn("type-badge", badgeClass)}
+            aria-haspopup="listbox"
+            aria-expanded={open}
             onClick={toggle}
             style={{
               boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined,

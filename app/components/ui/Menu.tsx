@@ -65,7 +65,19 @@ export function Menu({ trigger, children, align = "right", gap = 8 }: MenuProps)
     };
   }, [open, reposition]);
 
-  const toggle = () => setOpen((v) => !v);
+  // Opening must move focus into the popover; otherwise keydowns stay on the
+  // trigger and never reach handlePopoverKeyDown, leaving arrow keys dead.
+  useEffect(() => {
+    if (!open) return;
+    popoverRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
+  }, [open]);
+
+  const toggle = () => {
+    // Reposition before the first open paint so the popover never renders at
+    // the document bottom for a frame waiting on the passive effect.
+    if (!open) reposition();
+    setOpen((v) => !v);
+  };
 
   const handlePopoverKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === "Escape") {
