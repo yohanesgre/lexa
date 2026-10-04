@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
-import { useTeams } from "../lib/queries";
+import { useSession, useTeams } from "../lib/queries";
 import { Field } from "./ui/Field";
 import { TextInput } from "./ui/TextInput";
 import { TextArea } from "./ui/TextArea";
@@ -15,9 +15,14 @@ interface CreateProjectModalProps {
 
 export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateProjectModalProps) {
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
+  const { data: session } = useSession();
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [teamId, setTeamId] = useState<string>("");
+
+  // Unassigned (no team) projects are superadmin-only (server enforces
+  // teamId:null); members must pick a team.
+  const canCreateUnassigned = session?.user?.role === "superadmin";
 
   if (!open) return null;
 
@@ -25,7 +30,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
     onSubmit({
       name: name.trim(),
       description: desc.trim() || undefined,
-      teamId: teamId || null,
+      teamId: teamId && teamId !== "global" ? teamId : null,
     });
     setName("");
     setDesc("");
@@ -62,6 +67,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             <Field label="Team" htmlFor="create-project-team" hint="The owning team scopes who can see and use the project. Unassigned (no team) is superadmin-only." className="field">
               <SelectInput id="create-project-team" value={teamId} onChange={setTeamId} disabled={pending || teamsLoading} aria-label="Project team" className="w-full">
                 <option value="">Select a team…</option>
+                {canCreateUnassigned && <option value="global">Global (no team)</option>}
                 {teams.map((t) => (
                   <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>
                 ))}
@@ -79,7 +85,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             <button
               type="button"
               className="btn btn-primary"
-              disabled={pending || !name.trim() || !teamId}
+              disabled={pending || !name.trim() || (!teamId && !canCreateUnassigned)}
               onClick={handleCreate}
             >
               <Plus size={14} strokeWidth={1.5} />
