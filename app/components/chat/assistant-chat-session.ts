@@ -91,9 +91,13 @@ function settleStreamFrame(args: {
   inFlightResumeRef: React.RefObject<Set<string>>;
   ingressInsertedRef: React.RefObject<Set<string>>;
   // Fired when the resume POST settles into a terminal outcome (executed /
-  // settled / indeterminate) — the continuation reply is persisted by then, so
-  // the caller refetches the transcript + thread list. Never fired for
-  // pending/unavailable/failure (no persisted reply yet).
+  // settled / indeterminate) — a terminal outcome means any continuation reply
+  // is persisted on the DO path (the continuation is awaited before the ack),
+  // so the caller refetches the transcript + thread list; the refetch is a safe
+  // no-op when nothing new persisted (missing/unsupported/note-less noop). The
+  // legacy no-DO SSE fallback resolves at headers before its continuation runs,
+  // so the refetch there can be early (that flavor is deprecated). Never fired
+  // for pending/unavailable/failure (retryable — no persisted reply yet).
   onResumeSettled?: (() => void) | undefined;
 }): void {
   const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef, onResumeSettled } = args;
