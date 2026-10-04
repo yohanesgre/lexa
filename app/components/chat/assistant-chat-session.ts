@@ -36,10 +36,42 @@ import {
 // Session-scoped hooks for the Assistant chat page. These own the refs and
 // effects that were inline in AssistantChatPage; the page stays an assembler.
 
+// The chat surface's transport (useAssistantAgent) reports the resume POST's
+// HTTP outcome through an optional third parameter; the SSE stream ignores it.
+type ResumeCapableStream = Stream & {
+  send: (url: string, body: unknown, onResult?: (ok: boolean) => void) => void;
+};
+
+// A resumed approval batch must never auto-resume twice — the POST re-executes
+// the approved writes and is NOT idempotent. Persist the batch id per chat so a
+// reload's transcript-driven auto-resume skips it; a FAILED attempt is not
+// persisted, so it stays eligible for retry.
+const resumedBatchesKey = (chatId: string): string => `lexa-chat-resumed:${chatId}`;
+
+export function readResumedBatches(chatId: string): string[] {
+  if (!chatId || typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(resumedBatchesKey(chatId));
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function persistResumedBatch(chatId: string, batchId: string): void {
+  if (!chatId || typeof window === "undefined") return;
+  try {
+    const next = Array.from(new Set([...readResumedBatches(chatId), batchId]));
+    window.localStorage.setItem(resumedBatchesKey(chatId), JSON.stringify(next));
+  } catch {}
+}
+
 // Settling pass (plain function so the effect stays a single decision): see
 // useStreamFrameFreeze for the freeze/resume contract.
 function settleStreamFrame(args: {
-  stream: Stream;
+  stream: ResumeCapableStream;
   setTurns: React.Dispatch<React.SetStateAction<ChatTurn[] | null>>;
   turns: ChatTurn[] | null;
   chatId: string;
@@ -75,9 +107,15 @@ function settleStreamFrame(args: {
   if (!chatId || streaming) return;
   const batchId = resumableBatchId(turns, resumedBatchesRef.current ?? new Set());
   if (batchId === null) return;
+  // In-memory add first: dedupes an in-flight POST if the effect re-runs before
+  // the outcome lands. Persist only on success; a failure un-guards the batch
+  // (in-memory + no persisted id) so a later pass can retry.
   resumedBatchesRef.current?.add(batchId);
   ingressInsertedRef.current?.delete(chatId);
-  stream.send(`/api/assistant/chat/${chatId}/resume`, {});
+  stream.send(`/api/assistant/chat/${chatId}/resume`, {}, (ok) => {
+    if (ok) persistResumedBatch(chatId, batchId);
+    else resumedBatchesRef.current?.delete(batchId);
+  });
 }
 
 
@@ -145,7 +183,7 @@ type Stream = ReturnType<typeof useAssistantStream>;
 // audit trail, then reset the stream session so the resumed turn starts a
 // FRESH assistant entry.
 export function useStreamFrameFreeze(args: {
-  stream: Stream;
+  stream: ResumeCapableStream;
   setTurns: React.Dispatch<React.SetStateAction<ChatTurn[] | null>>;
   turns: ChatTurn[] | null;
   chatId: string;
@@ -169,7 +207,9 @@ export function useStreamFrameFreeze(args: {
       chatRef.current = chatId;
       frozeBatchRef.current = null;
       frozeErrorRef.current = null;
-      resumedBatchesRef.current = new Set();
+      // Seed with this chat's persisted resumes so a reload's transcript-driven
+      // auto-resume skips batches that already succeeded.
+      resumedBatchesRef.current = new Set(readResumedBatches(chatId));
     }
     settleStreamFrame({
       stream,

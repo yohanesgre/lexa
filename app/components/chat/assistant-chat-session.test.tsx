@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useRef, useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
@@ -9,7 +9,8 @@ import { AssistantChatComposer } from "./AssistantChatComposer";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ToastProvider } from "../ui/Toast";
 import { appendEphemeralUserTurn, resolveResendTarget, terminalTranscriptAction } from "./assistant-chat-logic";
-import { useSettledTurns, useTerminalRefetch, useTurnResend } from "./assistant-chat-session";
+import { useSettledTurns, useTerminalRefetch, useTurnResend, useStreamFrameFreeze, readResumedBatches, persistResumedBatch } from "./assistant-chat-session";
+import type { ChatTurn } from "./assistant-chat-utils";
 
 type Stream = ReturnType<typeof useAssistantStream>;
 
@@ -502,6 +503,109 @@ describe("useTurnResend — raw index space", () => {
     const { result, startStream } = renderResend({ turns, rawMessages: raw });
     act(() => result.current.handleRetryTurn(turns[3]!));
     expect(startStream).toHaveBeenCalledWith("hello", [], 2);
+  });
+});
+
+// ── Approval resume idempotency ──
+// The resume POST re-executes the approved writes, so a successful resume must
+// be persisted per chat and never replayed on reload; a failed attempt stays
+// retryable (not persisted).
+function terminalBatchTurn(batchId: string): ChatTurn {
+  return {
+    role: "assistant",
+    text: "proposed",
+    imageCount: 0,
+    rawIndex: -1,
+    batch: {
+      batchId,
+      chips: [{ approvalId: `${batchId}-a1`, batchId, seq: 0, name: "delete_task", diff: {}, state: "approved" }],
+    },
+  } as ChatTurn;
+}
+
+function makeResumeStream() {
+  const calls: Array<{ url: string; onResult?: ((ok: boolean) => void) | undefined }> = [];
+  const send = vi.fn((url: string, _body: unknown, onResult?: (ok: boolean) => void) => {
+    calls.push({ url, onResult });
+  });
+  return { stream: makeStream({ send }), calls };
+}
+
+function renderFreeze(stream: Stream, turns: ChatTurn[], chatId: string) {
+  const setTurns = vi.fn();
+  const ingressInsertedRef = { current: new Set<string>() };
+  const utils = renderHook(() =>
+    useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming: false, ingressInsertedRef })
+  );
+  return { ...utils, setTurns, ingressInsertedRef };
+}
+
+describe("useStreamFrameFreeze — resume idempotency", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("persists a successful resume and skips it on a reload/remount", () => {
+    const turns = [terminalBatchTurn("b1")];
+    const first = makeResumeStream();
+    const { unmount } = renderFreeze(first.stream, turns, "C1");
+    expect(first.calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+
+    act(() => first.calls[0]!.onResult?.(true));
+    expect(readResumedBatches("C1")).toEqual(["b1"]);
+    expect(window.localStorage.getItem("lexa-chat-resumed:C1")).toBe(JSON.stringify(["b1"]));
+
+    // Reload simulation: a fresh mount seeds from storage and suppresses the POST.
+    unmount();
+    const second = makeResumeStream();
+    renderFreeze(second.stream, turns, "C1");
+    expect(second.calls).toHaveLength(0);
+  });
+
+  it("does not persist a failed attempt, so a reload retries it", () => {
+    const turns = [terminalBatchTurn("b1")];
+    const first = makeResumeStream();
+    const { unmount } = renderFreeze(first.stream, turns, "C1");
+    expect(first.calls).toHaveLength(1);
+
+    act(() => first.calls[0]!.onResult?.(false));
+    expect(readResumedBatches("C1")).toEqual([]);
+    expect(window.localStorage.getItem("lexa-chat-resumed:C1")).toBeNull();
+
+    unmount();
+    const second = makeResumeStream();
+    renderFreeze(second.stream, turns, "C1");
+    expect(second.calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+  });
+
+  it("keeps persisted resumes isolated per chat", () => {
+    persistResumedBatch("C1", "b1");
+    expect(readResumedBatches("C1")).toEqual(["b1"]);
+    expect(readResumedBatches("C2")).toEqual([]);
+
+    const other = makeResumeStream();
+    renderFreeze(other.stream, [terminalBatchTurn("b1")], "C2");
+    expect(other.calls).toHaveLength(1);
+  });
+
+  it("resumes when localStorage reads throw (guarded seed)", () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    try {
+      const { stream, calls } = makeResumeStream();
+      renderFreeze(stream, [terminalBatchTurn("b1")], "C1");
+      expect(calls).toHaveLength(1);
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
+  it("ignores a malformed stored value instead of throwing", () => {
+    window.localStorage.setItem("lexa-chat-resumed:C1", "not-json");
+    expect(readResumedBatches("C1")).toEqual([]);
+    window.localStorage.setItem("lexa-chat-resumed:C1", JSON.stringify({ batchId: "b1" }));
+    expect(readResumedBatches("C1")).toEqual([]);
+    window.localStorage.setItem("lexa-chat-resumed:C1", JSON.stringify(["b1", 2, null]));
+    expect(readResumedBatches("C1")).toEqual(["b1"]);
   });
 });
 

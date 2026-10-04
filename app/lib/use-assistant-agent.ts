@@ -77,6 +77,9 @@ const noopSubscribe = (): (() => void) => () => {};
 export interface AssistantAgentStream extends AssistantStream {
   reconnecting: boolean;
   resumed: boolean;
+  // The resume POST is non-idempotent, so its caller can be told the HTTP
+  // outcome (persist a success, retry a failure). Non-resume sends ignore it.
+  send: (url: string, body: unknown, onResult?: (ok: boolean) => void) => void;
   // The thread's single PartySocket. Exposed so the delegated-run hook taps the
   // SAME connection instead of opening a second one. Typed structurally to the
   // `useAgentToolEvents` agent view (`useAgent`'s overloads don't survive
@@ -195,12 +198,16 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   }, [key, agent.identified]);
 
   const send = useCallback(
-    (url: string, body: unknown) => {
+    (url: string, body: unknown, onResult?: (ok: boolean) => void) => {
       const payload = (body ?? {}) as AgentSendBody;
       // Approval resume stays a plain REST POST (docs/API.md B.4 kept path);
-      // the resumed frames then arrive over this socket.
+      // the resumed frames then arrive over this socket. The optional outcome
+      // callback lets the caller persist a successful resume (the POST is not
+      // idempotent) while leaving a failed attempt eligible for retry.
       if (/\/resume$/.test(url)) {
-        void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+        void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+          .then((r) => onResult?.(r.ok))
+          .catch(() => onResult?.(false));
         return;
       }
       bodyRef.current = agentSendMetadata(payload);
