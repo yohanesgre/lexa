@@ -534,6 +534,33 @@ describe("chat resume execution (POST /api/internal/assistant/resume-execute)", 
     expect(result).toEqual({ status: 200, body: { ok: false, reason: "missing" } });
   });
 
+  it("reports an all-rejected batch as noop without executing or noting anything", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b-noop", status: "rejected", seq: 0 });
+    seedPendingWrite({ id: "w2", batchId: "b-noop", status: "rejected", seq: 1, args: { ref: "P-2" } });
+    let called = 0;
+    const result = await call({ batchId: "b-noop" }, IDENTITY, {
+      executeWriteTool: async () => {
+        called += 1;
+        return { ok: true, applied: true, result: {} };
+      },
+    });
+    expect(result).toEqual({ status: 200, body: { ok: false, reason: "noop" } });
+    expect(called).toBe(0);
+  });
+
+  it("surfaces an execute failure as a 'failed (not executed)' note line", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b-fail", status: "approved", seq: 0 });
+    const result = await call({ batchId: "b-fail" }, IDENTITY, {
+      executeWriteTool: async () => ({ ok: false, applied: false, error: "TASK_NOT_FOUND: nope" }),
+    });
+    expect(result.status).toBe(200);
+    const body = result.body as { ok: boolean; note: string };
+    expect(body.ok).toBe(true);
+    expect(body.note).toContain('- update_task "P-1": failed (not executed): TASK_NOT_FOUND: nope');
+  });
+
   it("502s when the write executor is not wired (all rows decided)", async () => {
     seedTask();
     seedPendingWrite({ id: "w1", batchId: "b3", status: "approved", seq: 0 });

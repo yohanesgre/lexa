@@ -851,43 +851,81 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     };
   }
 
-  async resumeBatch(batchId: string | null): Promise<{ ok: true }> {
-    // LX-79/80/82: the DO is the single resume owner. Walk every batch marker
-    // in the transcript newest-first and CLAIM each in DO storage before doing
-    // any work — a duplicate claim means this batch is already resumed, so the
-    // call no-ops early (LX-80; survives reload/wake). Then ask the Worker to
-    // execute the batch's decided rows exactly once. `pending` reports a batch
-    // that is not fully decided: release its claim and try the next older one,
-    // so an older fully-decided batch resumes instead of being stranded (LX-82).
-    // `missing` (no rows for this thread/owner) is likewise released and
-    // skipped. `unavailable` is a transport/HTTP failure: the writes MAY have
-    // applied, so KEEP the claim and never retry. On `executed`, keep the claim
-    // and run exactly ONE continuation, injecting the Worker's results note so
-    // the model does not re-propose the writes.
+  async resumeBatch(batchId: string | null): Promise<{ ok: true; executed?: boolean; reason?: string }> {
     this.ensureResumeClaimsTable();
     const deps = await this.loadInternalDeps();
-    if (!deps) return { ok: true };
+    // No DO→Worker transport at all: the client must NOT persist (a retry is
+    // claim-safe because nothing was claimed), so report `unavailable`.
+    if (!deps) return { ok: true, executed: false, reason: "unavailable" };
+    // The client asks for a specific batch (LX-79 single-owner resume): execute
+    // exactly it, no walk. A `null` batchId keeps the legacy newest-first walk
+    // for older clients / the task path.
+    if (batchId !== null && batchId.length > 0) {
+      return this.resumeRequestedBatch(deps, batchId);
+    }
+    return this.walkResumeBatches(deps);
+  }
+
+  // Execute exactly the batch the client named. The claim makes a duplicate
+  // request (second tab, reload, retry) idempotent: it acks `executed` so the
+  // client persists and never loops.
+  private async resumeRequestedBatch(
+    deps: AssistantInternalDeps,
+    batchId: string
+  ): Promise<{ ok: true; executed?: boolean; reason?: string }> {
+    if (!this.claimResumeBatch(batchId)) return { ok: true, executed: true };
+    const outcome = await executeResumeBatchRemote(deps, batchId);
+    if (outcome.kind === "pending") {
+      this.releaseResumeBatch(batchId);
+      return { ok: true, executed: false, reason: "pending" };
+    }
+    if (outcome.kind === "missing") return { ok: true, executed: false, reason: "settled" };
+    // No approved rows: nothing ran, so no continuation. Keep the claim so a
+    // repeated request stays idempotent, and settle the batch.
+    if (outcome.kind === "noop") return { ok: true, executed: false, reason: "settled" };
+    // Transport/HTTP failure: the writes MAY have applied. Keep the claim and
+    // report indeterminate so the client settles instead of replaying.
+    if (outcome.kind === "unavailable") return { ok: true, executed: false, reason: "indeterminate" };
+    await this.runResumeContinuation(batchId, outcome.note);
+    return { ok: true, executed: true };
+  }
+
+  // Legacy walk: every batch marker newest-first, each CLAIMED before any work.
+  // A duplicate claim must NOT abort the walk (an older, still-decided batch may
+  // be the one that needs executing — LX-82); it only skips that batch.
+  private async walkResumeBatches(
+    deps: AssistantInternalDeps
+  ): Promise<{ ok: true; executed?: boolean; reason?: string }> {
     const scanned = pendingBatchIdsNewestFirst(this.messages);
-    const batches = batchId !== null && batchId.length > 0 && !scanned.includes(batchId) ? [batchId, ...scanned] : scanned;
-    for (const id of batches) {
-      if (!this.claimResumeBatch(id)) return { ok: true };
+    for (const id of scanned) {
+      if (!this.claimResumeBatch(id)) continue;
       const outcome = await executeResumeBatchRemote(deps, id);
       if (outcome.kind === "pending" || outcome.kind === "missing") {
         this.releaseResumeBatch(id);
         continue;
       }
-      if (outcome.kind === "unavailable") return { ok: true };
-      try {
-        await this.continueLastTurn({
-          resumeBatchId: id,
-          ...(outcome.note.trim() !== "" ? { resumeResultsNote: outcome.note } : {}),
-        });
-      } catch (e) {
-        console.warn("[Assistant] resumeBatch continuation failed:", e instanceof Error ? e.message : String(e));
-      }
-      return { ok: true };
+      // Nothing was executed for this batch; keep the claim and try older ones.
+      if (outcome.kind === "noop") continue;
+      if (outcome.kind === "unavailable") return { ok: true, executed: false, reason: "indeterminate" };
+      await this.runResumeContinuation(id, outcome.note);
+      return { ok: true, executed: true };
     }
-    return { ok: true };
+    // Walk exhausted with nothing to execute: settle (the client persists).
+    return { ok: true, executed: false, reason: "settled" };
+  }
+
+  // Exactly ONE continuation after a batch executes, injecting the Worker's
+  // results note so the model does not re-propose the writes. A continuation
+  // failure must not fail the resume (the writes already applied).
+  private async runResumeContinuation(batchId: string, note: string): Promise<void> {
+    try {
+      await this.continueLastTurn({
+        resumeBatchId: batchId,
+        ...(note.trim() !== "" ? { resumeResultsNote: note } : {}),
+      });
+    } catch (e) {
+      console.warn("[Assistant] resumeBatch continuation failed:", e instanceof Error ? e.message : String(e));
+    }
   }
 
   async enqueueRun(input: {

@@ -102,6 +102,13 @@ async function handleInternal(request, env) {
     if (typeof body.batchId === "string" && body.batchId.startsWith("pending")) {
       return Response.json({ ok: false, reason: "pending", remaining: 1 });
     }
+    // A batch the Worker decided but with no approved rows: nothing to execute.
+    if (typeof body.batchId === "string" && body.batchId.startsWith("noop")) {
+      return Response.json({ ok: false, reason: "noop" });
+    }
+    if (typeof body.batchId === "string" && body.batchId.startsWith("missing")) {
+      return Response.json({ ok: false, reason: "missing" });
+    }
     return Response.json({ ok: true, note: '[approved write results]\\n- update_task "P-1": applied' });
   }
   if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "legacy/")) {
@@ -361,6 +368,19 @@ async function persistStep(threadKey: string, messages: unknown[]) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages }),
   });
+}
+
+// A persisted assistant message carrying one pending-batch marker (the
+// `data-assistant-approval` carrier shape the resume walk scans).
+function carrierMessage(id: string, batchId: string): Record<string, unknown> {
+  return {
+    id,
+    role: "assistant",
+    parts: [
+      { type: "text", text: "proposed" },
+      { type: "data-assistant-approval", data: { batchId, approvals: [] } },
+    ],
+  };
 }
 
 async function callThreadControl(op: "reset" | "destroy", threadKey: string) {
@@ -1307,9 +1327,11 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(connection.status).toBe(101);
 
     const first = await callResume(threadKey, "batch-claim-1");
-    expect(await first.json()).toEqual({ ok: true });
+    expect(await first.json()).toEqual({ ok: true, executed: true });
+    // A duplicate request for the same batch acks `executed` (already handled)
+    // so the client persists instead of looping.
     const second = await callResume(threadKey, "batch-claim-1");
-    expect(await second.json()).toEqual({ ok: true });
+    expect(await second.json()).toEqual({ ok: true, executed: true });
 
     // The Worker executed the batch once; the duplicate claim short-circuited
     // before any second execution.
@@ -1324,12 +1346,84 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     const connection = await dispatchWebSocket(await signedHeaders(identity));
     expect(connection.status).toBe(101);
 
-    expect(await (await callResume(threadKey, "pending-1")).json()).toEqual({ ok: true });
-    expect(await (await callResume(threadKey, "pending-1")).json()).toEqual({ ok: true });
+    expect(await (await callResume(threadKey, "pending-1")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "pending",
+    });
+    expect(await (await callResume(threadKey, "pending-1")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "pending",
+    });
 
     // A released claim makes the batch resumable again instead of permanently
     // stranding it.
     const executes = await capturedResumeExecutes();
     expect(executes.filter((e) => e.batchId === "pending-1")).toHaveLength(2);
   }, 60_000);
+
+  it("executes exactly the requested batch — a pending batch never touches an older approved one", async () => {
+    const documentId = "resume-specific";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    // An older approved batch is present in the transcript; the client asks for
+    // the newer, still-pending one. The DO must execute exactly that batch and
+    // must NOT fall back to the older, fully-decided batch.
+    await persistStep(threadKey, [carrierMessage("w-old", "older-approved"), carrierMessage("w-new", "pending-specific")]);
+    await waitFor<number>(
+      () => transcriptOf(documentId).then((m) => (m.length === 2 ? 2 : null)),
+      20_000
+    );
+
+    const res = await callResume(threadKey, "pending-specific");
+    expect(await res.json()).toEqual({ ok: true, executed: false, reason: "pending" });
+
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "pending-specific")).toHaveLength(1);
+    expect(executes.filter((e) => e.batchId === "older-approved")).toHaveLength(0);
+  }, 60_000);
+
+  it("settles a requested noop batch and runs no continuation", async () => {
+    const documentId = "resume-noop";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    await persistStep(threadKey, [carrierMessage("w-noop", "noop-batch")]);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
+
+    const res = await callResume(threadKey, "noop-batch");
+    expect(await res.json()).toEqual({ ok: true, executed: false, reason: "settled" });
+
+    // No continuation: nothing was executed, so the transcript must not grow.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(await transcriptOf(documentId)).toHaveLength(1);
+  }, 60_000);
+
+  it("walks older batches when the newest is already claimed (LX-82)", async () => {
+    const documentId = "resume-walk";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    await persistStep(threadKey, [carrierMessage("w-older", "walk-older"), carrierMessage("w-newer", "walk-newer")]);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 2 ? 2 : null)), 20_000);
+
+    // Claim + execute the NEWER batch first (specific request).
+    expect(await (await callResume(threadKey, "walk-newer")).json()).toEqual({ ok: true, executed: true });
+
+    // The legacy walk now hits the claimed newer batch first: it must SKIP it
+    // (not abort) and execute the older, still-decided batch.
+    expect(await (await callResume(threadKey, null)).json()).toEqual({ ok: true, executed: true });
+
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "walk-newer")).toHaveLength(1);
+    expect(executes.filter((e) => e.batchId === "walk-older")).toHaveLength(1);
+  }, 90_000);
 });

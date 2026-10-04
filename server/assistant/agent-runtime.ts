@@ -519,15 +519,18 @@ function isApprovalPartial(value: unknown): value is { applied: number; failed: 
  * Worker applies the approved rows in seq order and returns the
  * provider-context note. `pending` means the batch is not fully decided (the DO
  * releases its claim and may try an older batch); `missing` means the batch has
- * no rows for this thread/owner. `unavailable` is a transport/HTTP failure: the
- * writes MAY have applied, so the caller must keep the claim and must not
- * retry (no `indeterminate`/`applied:false` claim as fact — same rule as
+ * no rows for this thread/owner. `noop` means the batch holds no approved rows
+ * (all rejected/expired): nothing is executed and the DO runs no continuation.
+ * `unavailable` is a transport/HTTP failure: the writes MAY have applied, so
+ * the caller must keep the claim and must not retry (no
+ * `indeterminate`/`applied:false` claim as fact — same rule as
  * `callWriteExecute`).
  */
 export type ResumeExecuteOutcome =
   | { kind: "executed"; note: string }
   | { kind: "pending"; remaining: number }
   | { kind: "missing" }
+  | { kind: "noop" }
   | { kind: "unavailable" };
 
 export async function executeResumeBatchRemote(
@@ -541,6 +544,10 @@ export async function executeResumeBatchRemote(
       method: "POST",
       headers: await signedHeaders(deps),
       body: JSON.stringify({ batchId }),
+      // Bounded like every other DO → Worker internal call. A hung execute
+      // must not stall the resume; the timeout maps to `unavailable` (writes
+      // MAY have applied → the DO keeps its claim and never retries).
+      signal: AbortSignal.timeout(INTERNAL_CALL_TIMEOUT_MS),
     });
     if (!res.ok) return { kind: "unavailable" };
     const body = (await res.json()) as { ok?: unknown; note?: unknown; reason?: unknown; remaining?: unknown };
@@ -548,6 +555,7 @@ export async function executeResumeBatchRemote(
     if (body.reason === "pending") {
       return { kind: "pending", remaining: typeof body.remaining === "number" ? body.remaining : 0 };
     }
+    if (body.reason === "noop") return { kind: "noop" };
     return { kind: "missing" };
   } catch {
     return { kind: "unavailable" };

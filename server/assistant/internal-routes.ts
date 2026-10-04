@@ -888,6 +888,13 @@ export async function handleInternalAssistantRequest(input: {
     if (pending > 0) {
       return { status: 200, body: { ok: false, reason: "pending", remaining: pending } };
     }
+    // A fully-decided batch with no approved rows (all rejected/expired) has
+    // nothing to execute. Report `noop` instead of running the executor: the DO
+    // keeps its claim, runs no continuation, and the client settles the batch
+    // (no note, no model turn).
+    if (!rows.some((row) => row.status === "approved")) {
+      return { status: 200, body: { ok: false, reason: "noop" } };
+    }
     if (!input.deps?.executeWriteTool) {
       return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Write execution not wired" } } };
     }

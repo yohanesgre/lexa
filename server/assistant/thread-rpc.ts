@@ -17,6 +17,19 @@
 import { Context } from "effect";
 import type { AssistantToolPermissionMode } from "../../shared/assistant";
 
+/**
+ * The DO's discriminated resume acknowledgement. `ok` is always true for a
+ * chat resume; `executed` distinguishes "the writes ran" from a non-executed
+ * outcome, and `reason` names it (`pending` | `settled` | `indeterminate` |
+ * `unavailable`). A missing reason with `executed` undefined is the legacy
+ * undiscriminated ack.
+ */
+export interface ResumeBatchAck {
+  ok: true;
+  executed?: boolean | undefined;
+  reason?: string | undefined;
+}
+
 export interface AssistantThreadRpcShape {
   /**
    * Whether a Durable Object backs this shape. `false` = Bun/no-op flavor, so
@@ -34,8 +47,14 @@ export interface AssistantThreadRpcShape {
     /** Sticky per-thread WRITE permission mode (D2); "ask" fallback. */
     permissionMode: AssistantToolPermissionMode;
   } | null>;
-  /** Resume the suspended approval batch for a thread (`null` batchId = current). */
-  resumeBatch(threadKey: string, batchId: string | null): Promise<{ ok: true } | null>;
+  /**
+   * Resume the suspended approval batch for a thread (`null` batchId = the
+   * legacy walk; a string = execute exactly that batch). The ack is
+   * discriminated: `executed` says whether the writes ran, `reason` explains a
+   * non-executed outcome (`pending` | `settled` | `indeterminate` |
+   * `unavailable`). `null` = no Durable Object answered (Bun/no-op flavor).
+   */
+  resumeBatch(threadKey: string, batchId: string | null): Promise<ResumeBatchAck | null>;
   /** Destroy a thread's DO storage (chat delete). */
   destroyThread(threadKey: string): Promise<{ ok: true } | null>;
   /** Clear the DO transcript but keep the thread (document reset). */

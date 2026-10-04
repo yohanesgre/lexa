@@ -7,7 +7,7 @@ import type { AssistantChatThreadSummary } from "../../lib/api";
 import { useRenameAssistantChat, useDeleteAssistantChat, useUpdateAssistantChatMeta } from "../../lib/queries";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useToast } from "../ui/Toast";
-import { assistantSendForKey } from "../../lib/use-assistant-agent";
+import { assistantSendForKey, shouldPersistResume, type ResumeResult } from "../../lib/use-assistant-agent";
 import { settleTurnsWithRaw } from "./assistant-chat-turns-state";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
@@ -39,7 +39,7 @@ import {
 // The chat surface's transport (useAssistantAgent) reports the resume POST's
 // HTTP outcome through an optional third parameter; the SSE stream ignores it.
 type ResumeCapableStream = Stream & {
-  send: (url: string, body: unknown, onResult?: (ok: boolean) => void) => void;
+  send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => void;
 };
 
 // A resumed approval batch must never auto-resume twice — the POST re-executes
@@ -116,14 +116,16 @@ function settleStreamFrame(args: {
   if (inFlightResumeRef.current?.has(flightKey)) return;
   // In-flight + in-memory add first: dedupes an in-flight POST if the effect
   // re-runs, and the keyed map survives a chat-switch re-seed. Persist only on
-  // success; a failure un-guards the batch (in-flight + in-memory, no persisted
-  // id) so a later pass can retry.
+  // a settled outcome (executed / settled / indeterminate); `pending` /
+  // `unavailable` and an RPC failure un-guard the batch (in-flight + in-memory,
+  // no persisted id) so a later pass can retry. The client names the exact
+  // batch so the DO executes that batch, never a newer walk.
   inFlightResumeRef.current?.add(flightKey);
   resumedBatchesRef.current?.add(batchId);
   ingressInsertedRef.current?.delete(chatId);
-  stream.send(`/api/assistant/chat/${chatId}/resume`, {}, (ok) => {
+  stream.send(`/api/assistant/chat/${chatId}/resume`, { batchId }, (result) => {
     inFlightResumeRef.current?.delete(flightKey);
-    if (ok) persistResumedBatch(chatId, batchId);
+    if (shouldPersistResume(result)) persistResumedBatch(chatId, batchId);
     else resumedBatchesRef.current?.delete(batchId);
   });
 }
