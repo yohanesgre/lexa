@@ -1474,8 +1474,12 @@ export function useSignIn() {
   return useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) => auth.signInEmail({ email, password }),
     onSuccess: (res) => {
-      // Mutation response is authoritative — update the session cache from it.
-      qc.setQueryData(["session"], res);
+      // `/sign-in/email` returns {redirect,token,url,user} — no `session`
+      // field. Seed the true get-session shape so `session.session` consumers
+      // don't read a missing field, then let an authoritative get-session
+      // refetch fill the real session (the cookie is already set).
+      qc.setQueryData<auth.SessionResponse>(["session"], { session: null, user: res.user ?? null });
+      void qc.invalidateQueries({ queryKey: ["session"] });
     },
     // No onError toast: the login page renders the single inline notice
     // (wireframe: generic "Invalid email or password." copy).
@@ -1497,13 +1501,13 @@ export function useSignOut() {
 }
 
 export function useSetPassword() {
-  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: ({ newPassword, token }: { newPassword: string; token: string }) => auth.setPassword({ newPassword, token }),
-    onSuccess: (res) => {
-      qc.setQueryData(["session"], res);
-      void qc.invalidateQueries({ queryKey: ["session"] });
+    onSuccess: () => {
+      // `/reset-password` returns `{ status: true }` (no session body). The
+      // cookie is set server-side; navigation re-reads the real session, so
+      // the mutation path neither seeds nor invalidates the session cache.
       toast.push("success", "Password set — you're signed in");
     },
     onError: (err) => {
@@ -1731,7 +1735,6 @@ export function useRevokeWorkspaceInvite() {
     mutationFn: (inviteId: string) => api.revokeWorkspaceInvite(inviteId),
     onSuccess: (_v, inviteId) => {
       qc.setQueryData<WorkspaceInvite[]>(["workspace-invites"], (old) => (old ?? []).filter((i) => i.id !== inviteId));
-      void qc.invalidateQueries({ queryKey: ["workspace-invites"] });
       toast.push("success", "Invite revoked");
     },
     onError: (err) => {
@@ -2376,22 +2379,17 @@ export function useUpdateAssistantChatMeta(projectId: string | undefined) {
           )
         );
       });
-      void qc.invalidateQueries({ queryKey: ["assistant-chats"] });
     },
     onError: (err) => toast.push("error", "Update failed", toastMessage(err)),
   });
 }
 
 export function useRenameAssistantChat(projectId: string | undefined) {
-  const qc = useQueryClient();
   const meta = useUpdateAssistantChatMeta(projectId);
   const toast = useToast();
   return useMutation({
     mutationFn: ({ chatId, title }: { chatId: string; title: string }) =>
       meta.mutateAsync({ chatId, title }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["assistant-chats"] });
-    },
     onError: (err) => toast.push("error", "Rename failed", toastMessage(err)),
   });
 }

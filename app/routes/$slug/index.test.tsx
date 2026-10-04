@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
+
+const h = vi.hoisted(() => ({ sessionUser: null as null | { role: "superadmin" | "member" } }));
 
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (config: Record<string, unknown>) => ({ ...config, useParams: () => ({ slug: "demo" }) }),
@@ -40,6 +42,7 @@ vi.mock("../../lib/queries", () => {
     useMilestones: () => ({ data: [] }),
     useCreateProject: () => ({ isPending: false, mutate: vi.fn() }),
     useTeams: () => ({ data: [], isLoading: false }),
+    useSession: () => ({ data: { session: null, user: h.sessionUser } }),
     selectProjectHealth: () => health,
   };
 });
@@ -51,6 +54,10 @@ vi.mock("../../components/milestones/MilestoneCard", () => ({ MilestoneCard: () 
 import { Route } from "./index";
 
 describe("project dashboard header", () => {
+  beforeEach(() => {
+    h.sessionUser = null;
+  });
+
   it("New Project button opens CreateProjectModal", async () => {
     const user = userEvent.setup();
     const Component = (Route as unknown as { component: ComponentType }).component;
@@ -59,5 +66,29 @@ describe("project dashboard header", () => {
     await user.click(screen.getByRole("button", { name: /new project/i }));
 
     expect(screen.getByText("Create Project")).toBeInTheDocument();
+  });
+
+  it("a superadmin can submit an unassigned project without picking a team", async () => {
+    h.sessionUser = { role: "superadmin" };
+    const user = userEvent.setup();
+    const Component = (Route as unknown as { component: ComponentType }).component;
+    render(<Component />);
+
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    await user.type(screen.getByLabelText("Name"), "Unassigned");
+
+    expect(screen.getByRole("button", { name: /create project/i })).toBeEnabled();
+  });
+
+  it("a member cannot submit without a team", async () => {
+    h.sessionUser = { role: "member" };
+    const user = userEvent.setup();
+    const Component = (Route as unknown as { component: ComponentType }).component;
+    render(<Component />);
+
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    await user.type(screen.getByLabelText("Name"), "Needs a team");
+
+    expect(screen.getByRole("button", { name: /create project/i })).toBeDisabled();
   });
 });

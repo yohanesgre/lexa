@@ -56,9 +56,8 @@ describe("useRenameAssistantChat", () => {
     const cache = qc.getQueryData<AssistantChatThreadSummary[]>(["assistant-chats", "p1"])!;
     expect(cache.find((t) => t.chatId === "c2")?.title).toBe("Rollback runbook draft");
     expect(cache.find((t) => t.chatId === "c1")?.title).toBe("Payments migration questions");
-    // Cache is patched in place for instant UI; a background refetch also
-    // fires so the server view re-syncs (React Doctor: mutations invalidate).
-    expect(spy).toHaveBeenCalledWith({ queryKey: ["assistant-chats"] });
+    // Invariant #6: the deterministic patch is authoritative — no refetch.
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 describe("useUpdateAssistantChatMeta", () => {
@@ -76,7 +75,8 @@ describe("useUpdateAssistantChatMeta", () => {
     expect(cache.map((t) => t.chatId)).toEqual(["c1", "c2"]);
     expect(cache[0]!.pinned).toBe(true);
     expect((qc.getQueryData<AssistantChatThreadSummary[]>(["assistant-chats", "p1", "runbook"]) ?? [])[0]!.pinned).toBe(true);
-    expect(spy).toHaveBeenCalledWith({ queryKey: ["assistant-chats"] });
+    // Invariant #6: pin toggle patches every cached variant — no refetch.
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 describe("useDeleteAssistantChat", () => {

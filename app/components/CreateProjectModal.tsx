@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
-import { useTeams } from "../lib/queries";
+import { useSession, useTeams } from "../lib/queries";
 import { Field } from "./ui/Field";
 import { TextInput } from "./ui/TextInput";
 import { TextArea } from "./ui/TextArea";
@@ -15,9 +15,14 @@ interface CreateProjectModalProps {
 
 export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateProjectModalProps) {
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
+  const { data: session } = useSession();
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [teamId, setTeamId] = useState<string>("");
+
+  // Unassigned (no team) projects are superadmin-only (server enforces
+  // teamId:null); members must pick a team.
+  const canCreateUnassigned = session?.user?.role === "superadmin";
 
   if (!open) return null;
 
@@ -79,7 +84,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             <button
               type="button"
               className="btn btn-primary"
-              disabled={pending || !name.trim() || !teamId}
+              disabled={pending || !name.trim() || (!teamId && !canCreateUnassigned)}
               onClick={handleCreate}
             >
               <Plus size={14} strokeWidth={1.5} />
