@@ -210,7 +210,7 @@ export function StreamingBubble({
       />
       {stream.pending.length > 0 && (
         <AssistantApprovalBatch
-          chips={stream.pending.map((p) => ({ ...p, state: "pending" as const }))}
+          chips={stream.pending.map((p) => ({ ...p, state: p.state ?? "pending" }))}
           locked
           onDecide={() => {}}
           onApproveAll={() => {}}
