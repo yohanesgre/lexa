@@ -879,7 +879,12 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       this.releaseResumeBatch(batchId);
       return { ok: true, executed: false, reason: "pending" };
     }
-    if (outcome.kind === "missing") return { ok: true, executed: false, reason: "settled" };
+    // No rows for this thread/owner: release so a later request can retry,
+    // mirroring the walk. Settle either way — there is nothing to execute.
+    if (outcome.kind === "missing") {
+      this.releaseResumeBatch(batchId);
+      return { ok: true, executed: false, reason: "settled" };
+    }
     // No approved rows: nothing ran, so no continuation. Keep the claim so a
     // repeated request stays idempotent, and settle the batch.
     if (outcome.kind === "noop") return { ok: true, executed: false, reason: "settled" };

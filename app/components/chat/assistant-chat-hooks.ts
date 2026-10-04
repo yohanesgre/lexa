@@ -85,8 +85,9 @@ export function useChatComposerClearance() {
 export function useChatAutoScroll(args: {
   turns: ChatTurn[] | null;
   stream: ReturnType<typeof useAssistantStream>;
+  chatId: string;
 }) {
-  const { turns, stream } = args;
+  const { turns, stream, chatId } = args;
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
@@ -96,6 +97,13 @@ export function useChatAutoScroll(args: {
   // at-bottom pin, so the normal follow gate would strand the view at the
   // batch top and the continuation would never be followed.
   const prevNewestPendingRef = useRef(false);
+  // Thread switch: the prior thread's scroll position and pending-flip latch
+  // must not carry into the incoming thread's transcript.
+  useEffect(() => {
+    atBottomRef.current = true;
+    prevNewestPendingRef.current = false;
+    setAtBottom(true);
+  }, [chatId]);
   const handleTranscriptScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
