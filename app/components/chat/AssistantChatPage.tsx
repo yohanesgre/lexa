@@ -587,7 +587,17 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const { handleDecide, handleApproveAll, handleRejectAll, batchBusy } = useApprovalDecisions({ setTurns });
 
-  useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef });
+  // The resume continuation persists its assistant reply server-side; the DO
+  // does broadcast the resumed frames, but the SDK continuation has no client
+  // entry to attach out-of-band frames, so a settled resume refetches the
+  // transcript + thread list (same pair as the terminal-refetch branch) to
+  // render the reply live instead of only after reload.
+  const onResumeSettled = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["assistant-chat", chatId] });
+    if (projectId) void qc.invalidateQueries({ queryKey: ["assistant-chats", projectId] });
+  }, [qc, chatId, projectId]);
+
+  useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef, onResumeSettled });
 
   const { scrollRef, atBottom, handleTranscriptScroll, scrollToBottom } = useChatAutoScroll({ turns, stream, chatId });
 

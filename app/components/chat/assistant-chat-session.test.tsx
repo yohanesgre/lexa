@@ -534,11 +534,11 @@ function makeResumeStream() {
   return { stream: makeStream({ send }), calls };
 }
 
-function renderFreeze(stream: Stream, turns: ChatTurn[], chatId: string) {
+function renderFreeze(stream: Stream, turns: ChatTurn[], chatId: string, onResumeSettled?: () => void) {
   const setTurns = vi.fn();
   const ingressInsertedRef = { current: new Set<string>() };
   const utils = renderHook(() =>
-    useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming: false, ingressInsertedRef })
+    useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming: false, ingressInsertedRef, onResumeSettled })
   );
   return { ...utils, setTurns, ingressInsertedRef };
 }
@@ -637,6 +637,50 @@ describe("useStreamFrameFreeze — resume idempotency", () => {
     expect(readResumedBatches("C1")).toEqual([]);
     window.localStorage.setItem("lexa-chat-resumed:C1", JSON.stringify(["b1", 2, null]));
     expect(readResumedBatches("C1")).toEqual(["b1"]);
+  });
+});
+
+describe("useStreamFrameFreeze — settled resume refetches the transcript", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("invokes onResumeSettled when the continuation executed", () => {
+    const { stream, calls } = makeResumeStream();
+    const onResumeSettled = vi.fn();
+    renderFreeze(stream, [terminalBatchTurn("b1")], "C1", onResumeSettled);
+    act(() => calls[0]!.onResult?.({ ok: true, executed: true }));
+    expect(onResumeSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes onResumeSettled on a settled ack", () => {
+    const { stream, calls } = makeResumeStream();
+    const onResumeSettled = vi.fn();
+    renderFreeze(stream, [terminalBatchTurn("b1")], "C1", onResumeSettled);
+    act(() => calls[0]!.onResult?.({ ok: true, executed: false, reason: "settled" }));
+    expect(onResumeSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes onResumeSettled on an indeterminate ack", () => {
+    const { stream, calls } = makeResumeStream();
+    const onResumeSettled = vi.fn();
+    renderFreeze(stream, [terminalBatchTurn("b1")], "C1", onResumeSettled);
+    act(() => calls[0]!.onResult?.({ ok: true, executed: false, reason: "indeterminate" }));
+    expect(onResumeSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not invoke onResumeSettled for pending / unavailable / failed acks", () => {
+    const cases: ResumeResult[] = [
+      { ok: true, executed: false, reason: "pending" },
+      { ok: true, executed: false, reason: "unavailable" },
+      { ok: false },
+    ];
+    for (const result of cases) {
+      window.localStorage.clear();
+      const { stream, calls } = makeResumeStream();
+      const onResumeSettled = vi.fn();
+      renderFreeze(stream, [terminalBatchTurn("b1")], "C1", onResumeSettled);
+      act(() => calls[0]!.onResult?.(result));
+      expect(onResumeSettled).not.toHaveBeenCalled();
+    }
   });
 });
 
