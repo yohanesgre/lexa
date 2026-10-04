@@ -101,9 +101,10 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
   const usedTypeIds = useMemo(() => new Set((board?.tasks ?? []).map((t) => t.type)), [board]);
 
   const handleOptionDragEnd = (event: DragEndEvent, kind: "priority" | "type") => {
+    if (!event.over) return;
     const ids = kind === "priority" ? optionOrder.priorities : optionOrder.types;
     const oldIndex = ids.indexOf(event.active.id as string);
-    const newIndex = ids.indexOf(event.over!.id as string);
+    const newIndex = ids.indexOf(event.over.id as string);
     if (oldIndex === newIndex || !fieldConfig) return;
     const reordered = arrayMove(ids, oldIndex, newIndex);
     setOptionOrder((prev) => ({ ...prev, [kind]: reordered }));
@@ -168,8 +169,9 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const handleColumnDragEnd = (event: DragEndEvent) => {
+    if (!event.over) return;
     const oldIndex = colOrder.indexOf(event.active.id as string);
-    const newIndex = colOrder.indexOf(event.over!.id as string);
+    const newIndex = colOrder.indexOf(event.over.id as string);
     if (oldIndex === newIndex) return;
     const reordered = arrayMove(colOrder, oldIndex, newIndex);
     setColOrder(reordered);

@@ -21,6 +21,7 @@ import { byPosition, cardProps, cellDropId, tasksReducer, useLinkMaps } from "./
 import { emptyFilters, type FilterState } from "../../lib/filters";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
 import { useMoveGuard } from "../../lib/useMoveGuard";
+import { useToast } from "../ui/Toast";
 
 export type { MoveTarget } from "./board-drop";
 
@@ -46,6 +47,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   const [newTaskIds, setNewTaskIds] = useState<Set<string>>(new Set());
   const flashTimer = useRef<number | null>(null);
   const shakeTimer = useRef<number | null>(null);
+  const newTaskTimer = useRef<number | null>(null);
   const prevTaskIds = useRef<Set<string>>(new Set());
   // Invalid drop feedback (DESIGN_SYSTEM: 200ms horizontal shake) + revert:
   // the optimistic move lives in localTasks, so when the server rejects the
@@ -61,7 +63,19 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   );
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(new Set());
-  const { childrenByParent, blockedBy } = useLinkMaps(board);
+  const { childrenByParent, parentOf, blockedBy } = useLinkMaps(board);
+  const toast = useToast();
+  // useMoveTask.onError swallows WIP_LIMIT (no toast) — both move paths
+  // surface it here with a toast plus a column flash so rejection is visible.
+  const flashWipLimit = useCallback(
+    (columnId: string, err: unknown) => {
+      toast.push("warning", "WIP limit reached", (err as { message?: string }).message ?? "Column is at its WIP limit");
+      setFlashColumnId(columnId);
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+      flashTimer.current = window.setTimeout(() => setFlashColumnId(null), 1500);
+    },
+    [toast]
+  );
   const [filters, setFilters] = useState<FilterState>(() => {
     const f = emptyFilters();
     if (initialSwimlaneId) f.swimlanes.add(initialSwimlaneId);
@@ -79,12 +93,20 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     const prev = prevTaskIds.current;
     const added = new Set<string>();
     for (const id of currentIds) if (!prev.has(id)) added.add(id);
-    if (added.size > 0) {
-      setNewTaskIds(added);
-      const t = window.setTimeout(() => setNewTaskIds(new Set()), 200);
-      return () => window.clearTimeout(t);
-    }
+    // Commit the snapshot before the early return so subsequent moves/updates
+    // (same id set) don't re-mark every card as new and replay card-enter.
     prevTaskIds.current = currentIds;
+    if (added.size === 0) return;
+    // Reset timer lives in a ref, not effect cleanup: a localTasks change
+    // inside the 200ms window (optimistic move/refetch, same id set) would
+    // otherwise cancel the timer and never reschedule, leaving newTaskIds
+    // populated and replaying the enter animation.
+    if (newTaskTimer.current !== null) window.clearTimeout(newTaskTimer.current);
+    setNewTaskIds(added);
+    newTaskTimer.current = window.setTimeout(() => {
+      setNewTaskIds(new Set());
+      newTaskTimer.current = null;
+    }, 200);
   }, [localTasks]);
 
   useEffect(() => {
@@ -95,6 +117,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     () => () => {
       if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
       if (shakeTimer.current !== null) window.clearTimeout(shakeTimer.current);
+      if (newTaskTimer.current !== null) window.clearTimeout(newTaskTimer.current);
     },
     []
   );
@@ -187,7 +210,23 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     const commit = confirmMove(task, target);
     if (!commit) return;
     dispatch({ type: "move", taskId: task.id, columnId: target.columnId, swimlaneId: target.swimlaneId, position });
-    void commit.catch(() => revertMove(task.id));
+    void commit.catch((err) => {
+      revertMove(task.id);
+      if ((err as { code?: string }).code !== "WIP_LIMIT") return;
+      flashWipLimit(target.columnId, err);
+    });
+  };
+
+  // Confirm-dialog path: no optimistic local state, so no revert — but its WIP
+  // rejection still needs the same toast + column flash as the free path.
+  const handleResolve = (clearDueAt: boolean) => {
+    const columnId = pending?.target.columnId;
+    const promise = resolve(clearDueAt);
+    if (!promise) return;
+    void promise.catch((err) => {
+      if ((err as { code?: string }).code !== "WIP_LIMIT" || columnId === undefined) return;
+      flashWipLimit(columnId, err);
+    });
   };
 
   return (
@@ -220,6 +259,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           showArchived={!!showArchived}
           localTasks={localTasks}
           childrenByParent={childrenByParent}
+          parentOf={parentOf}
           blockedBy={blockedBy}
           cardHidden={cardHidden}
           cardDimmed={cardDimmed}
@@ -254,7 +294,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
-      <MoveConfirmDialog board={board} pending={pending} resolve={resolve} cancel={cancel} />
+      <MoveConfirmDialog board={board} pending={pending} resolve={handleResolve} cancel={cancel} />
       {isColumnCreateOpen && (
         <ColumnForm
           slug={board.project.slug}
