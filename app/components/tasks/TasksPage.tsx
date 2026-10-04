@@ -284,38 +284,38 @@ function BulkActionBar({ count, archivedView, columns, swimlanes, fieldConfig, a
     <div className="bulk-bar" role="toolbar" aria-label="Bulk actions" data-pending={pending ? "true" : undefined}>
       <span className="bulk-bar-count">{count} selected</span>
       <span className="bulk-bar-sep" />
-      <Menu align="left" trigger={({ toggle }) => (
-        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Move to column…</button>
+      <Menu align="left" trigger={({ open, toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending} aria-haspopup="menu" aria-expanded={open}>Move to column…</button>
       )}>
         {columns.map((c) => (
-          <button key={c.id} type="button" className="menu-item" onClick={() => onAction({ action: "move", columnId: c.id })}>
+          <button key={c.id} type="button" role="menuitem" className="menu-item" onClick={() => onAction({ action: "move", columnId: c.id })}>
             {c.name}
           </button>
         ))}
       </Menu>
-      <Menu align="left" trigger={({ toggle }) => (
-        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Move to sprint…</button>
+      <Menu align="left" trigger={({ open, toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending} aria-haspopup="menu" aria-expanded={open}>Move to sprint…</button>
       )}>
         {swimlanes.map((l) => (
-          <button key={l.id} type="button" className="menu-item" onClick={() => onAction({ action: "move", swimlaneId: l.id })}>
+          <button key={l.id} type="button" role="menuitem" className="menu-item" onClick={() => onAction({ action: "move", swimlaneId: l.id })}>
             {l.name}
           </button>
         ))}
       </Menu>
-      <Menu align="left" trigger={({ toggle }) => (
-        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Set assignee…</button>
+      <Menu align="left" trigger={({ open, toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending} aria-haspopup="menu" aria-expanded={open}>Set assignee…</button>
       )}>
         {assigneeOptions.map((name) => (
-          <button key={name} type="button" className="menu-item" onClick={() => onAction({ action: "update", assignees: [name] })}>
+          <button key={name} type="button" role="menuitem" className="menu-item" onClick={() => onAction({ action: "update", assignees: [name] })}>
             {name}
           </button>
         ))}
       </Menu>
-      <Menu align="left" trigger={({ toggle }) => (
-        <button type="button" className={triggerClass} onClick={toggle} disabled={pending}>Set priority…</button>
+      <Menu align="left" trigger={({ open, toggle }) => (
+        <button type="button" className={triggerClass} onClick={toggle} disabled={pending} aria-haspopup="menu" aria-expanded={open}>Set priority…</button>
       )}>
         {(fieldConfig?.priorities ?? []).map((o) => (
-          <button key={o.id} type="button" className="menu-item" onClick={() => onAction({ action: "update", priority: o.id })}>
+          <button key={o.id} type="button" role="menuitem" className="menu-item" onClick={() => onAction({ action: "update", priority: o.id })}>
             <span className="priority-dot" style={{ background: o.color }} />
             {o.label}
           </button>

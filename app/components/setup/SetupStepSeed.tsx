@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Database } from "lucide-react";
 import { completeSetup, seedSampleData, type SeedFlavor } from "../../lib/api";
+import { NoticeDanger } from "../ui/NoticeDanger";
 
 // Step 2 (local installs) — optional sample data before completing setup.
 // Wireframe: wireframes/src/setup-wizard.html step 2.
@@ -25,18 +26,33 @@ const OPTIONS: { flavor: SeedFlavor | "none"; title: string; description: string
 export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
   const [choice, setChoice] = useState<SeedFlavor | "none">("minimal");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const groupRef = useRef<HTMLDivElement>(null);
 
   const finish = async () => {
     setBusy(true);
+    setError(null);
     try {
-      if (choice !== "none") {
-        await seedSampleData(choice).catch(() => {});
-      }
-      await completeSetup().catch(() => {});
+      if (choice !== "none") await seedSampleData(choice);
+      await completeSetup();
       onDone();
+    } catch (err) {
+      setError((err as Error).message || "Setup could not be completed. Is the server running?");
     } finally {
       setBusy(false);
     }
+  };
+
+  const onRadioKeyDown = (event: React.KeyboardEvent) => {
+    const idx = OPTIONS.findIndex((o) => o.flavor === choice);
+    let next = idx;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (idx + 1) % OPTIONS.length;
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (idx - 1 + OPTIONS.length) % OPTIONS.length;
+    else return;
+    event.preventDefault();
+    const option = OPTIONS[next]!;
+    setChoice(option.flavor);
+    groupRef.current?.querySelector<HTMLButtonElement>(`[data-flavor="${option.flavor}"]`)?.focus();
   };
 
   return (
@@ -49,13 +65,21 @@ export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: 
         Optional demo data so you can explore Lexa right away. Choose how much to load — you can delete it later.
       </p>
 
-      <div role="radiogroup" aria-label="Sample data" className="flex flex-col gap-2 mb-4">
+      <div
+        ref={groupRef}
+        role="radiogroup"
+        aria-label="Sample data"
+        className="flex flex-col gap-2 mb-4"
+        onKeyDown={onRadioKeyDown}
+      >
         {OPTIONS.map((option) => (
           <button
             key={option.flavor}
             type="button"
             role="radio"
+            data-flavor={option.flavor}
             aria-checked={choice === option.flavor}
+            tabIndex={choice === option.flavor ? 0 : -1}
             className="check-row"
             style={{ alignItems: "flex-start", textAlign: "left", width: "100%" }}
             onClick={() => setChoice(option.flavor)}
@@ -68,6 +92,8 @@ export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: 
           </button>
         ))}
       </div>
+
+      {error && <NoticeDanger>{error}</NoticeDanger>}
 
       <div className="flex justify-between mt-5">
         <button type="button" className="btn btn-ghost" onClick={onBack}>

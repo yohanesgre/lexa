@@ -62,7 +62,7 @@ interface ActivityTimelineProps {
   members: { id: string; name: string }[];
   currentUser: CurrentUser;
   onDeleteComment: (commentId: number) => void;
-  onUpdateComment: (commentId: number, body: TaskComment["body"]) => void;
+  onUpdateComment: (commentId: number, body: TaskComment["body"]) => void | Promise<void>;
 }
 
 export function ActivityTimeline({ items, members, currentUser, onDeleteComment, onUpdateComment }: ActivityTimelineProps) {

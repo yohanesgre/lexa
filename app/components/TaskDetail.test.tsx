@@ -149,7 +149,7 @@ describe("TaskDetail swimlane labels", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Sprint 6" }));
-    expect(screen.getByRole("button", { name: "Sprint 6 - v1.0" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Sprint 6 - v1.0" })).toBeInTheDocument();
     expect(screen.getAllByText("Sprint 6")).toHaveLength(2);
   });
 
@@ -217,7 +217,7 @@ describe("TaskDetail lane-only move anchors", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Sprint 6" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sprint 7" }));
+    fireEvent.click(screen.getByRole("option", { name: "Sprint 7" }));
 
     expect(onMove).toHaveBeenCalledWith("t1", {
       columnId: "c1",
@@ -239,7 +239,7 @@ describe("TaskDetail lane-only move anchors", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Sprint 6" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sprint 7" }));
+    fireEvent.click(screen.getByRole("option", { name: "Sprint 7" }));
 
     expect(onMove).toHaveBeenCalledWith("t1", {
       columnId: "c1",
@@ -260,7 +260,7 @@ describe("TaskDetail lane-only move anchors", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Todo" }));
-    fireEvent.click(screen.getByRole("button", { name: "Doing" }));
+    fireEvent.click(screen.getByRole("option", { name: "Doing" }));
 
     expect(onMove).toHaveBeenCalledWith("t1", { columnId: "c2", swimlaneId: "sp1" });
   });

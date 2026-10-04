@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect, useNavigate, useRouterState } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import phosphorCss from "../styles/phosphor.css?url";
-import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ToastProvider } from "../components/ui/Toast";
 import { ProjectSelectionProvider } from "../lib/project-selection";
 import { TeamSelectionProvider } from "../lib/team-selection";
@@ -76,18 +75,18 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 // build.
 function useAuthBounce() {
   const navigate = useNavigate();
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const location = useRouterState({ select: (s) => s.location });
   useEffect(() => {
-    if (PUBLIC_PATHS.has(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return;
+    if (PUBLIC_PATHS.has(location.pathname) || PUBLIC_PREFIXES.some((p) => location.pathname.startsWith(p))) return;
     let alive = true;
     void getSession().then((res) => {
       if (!alive || res.session) return;
-      void navigate({ to: "/login", search: { redirect: pathname }, replace: true });
+      void navigate({ to: "/login", search: { redirect: location.href }, replace: true });
     });
     return () => {
       alive = false;
     };
-  }, [pathname, navigate]);
+  }, [location, navigate]);
 }
 
 function RootComponent() {
@@ -104,15 +103,13 @@ function RootComponent() {
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          <ModalStackProvider>
-            <ToastProvider>
-              <TeamSelectionProvider>
-                <ProjectSelectionProvider>
-                  <AppShell />
-                </ProjectSelectionProvider>
-              </TeamSelectionProvider>
-            </ToastProvider>
-          </ModalStackProvider>
+          <ToastProvider>
+            <TeamSelectionProvider>
+              <ProjectSelectionProvider>
+                <AppShell />
+              </ProjectSelectionProvider>
+            </TeamSelectionProvider>
+          </ToastProvider>
         </QueryClientProvider>
         <Scripts />
       </body>

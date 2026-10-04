@@ -85,7 +85,7 @@ describe("TaskPropertyBar column + lane moves", () => {
     render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Doing" }));
+    fireEvent.click(screen.getByRole("option", { name: "Doing" }));
 
     expect(props.setSelectedColumnId).toHaveBeenCalledWith("c2");
     expect(props.onMove).toHaveBeenCalledWith("t1", { columnId: "c2", swimlaneId: "s1" });
@@ -98,7 +98,7 @@ describe("TaskPropertyBar column + lane moves", () => {
     render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Doing" }));
+    fireEvent.click(screen.getByRole("option", { name: "Doing" }));
 
     await waitFor(() => expect(props.setSelectedColumnId).toHaveBeenLastCalledWith("c1"));
   });
@@ -108,7 +108,7 @@ describe("TaskPropertyBar column + lane moves", () => {
     render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Lane A/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Lane B" }));
+    fireEvent.click(screen.getByRole("option", { name: "Lane B" }));
 
     expect(props.setSelectedSwimlaneId).toHaveBeenCalledWith("s2");
     expect(props.onMove).toHaveBeenCalledWith("t1", { columnId: "c1", swimlaneId: "s2" });
@@ -120,7 +120,7 @@ describe("TaskPropertyBar column + lane moves", () => {
     render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Lane A/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Lane B" }));
+    fireEvent.click(screen.getByRole("option", { name: "Lane B" }));
 
     await waitFor(() => expect(props.setSelectedSwimlaneId).toHaveBeenLastCalledWith("s1"));
   });
@@ -163,9 +163,9 @@ describe("TaskPropertyBar column + lane moves", () => {
     render(<TaskPropertyBar {...(props as unknown as BarProps)} />);
 
     fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Doing" }));
+    fireEvent.click(screen.getByRole("option", { name: "Doing" }));
     fireEvent.click(screen.getByRole("button", { name: /Todo/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    fireEvent.click(screen.getByRole("option", { name: "Review" }));
 
     await waitFor(() => expect(props.setSelectedColumnId).toHaveBeenCalledTimes(2));
     rejectFirst!(new Error("nope"));

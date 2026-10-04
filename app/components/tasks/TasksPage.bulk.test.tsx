@@ -136,7 +136,7 @@ async function selectTwo() {
 
 function clickMenuItem(trigger: string, item: string) {
   fireEvent.click(screen.getByRole("button", { name: trigger }));
-  fireEvent.click(screen.getByRole("button", { name: item }));
+  fireEvent.click(screen.getByRole("menuitem", { name: item }));
 }
 
 afterEach(() => {

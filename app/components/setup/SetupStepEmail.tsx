@@ -99,7 +99,7 @@ export function SetupStepEmail({
         <button
           type="button"
           className="password-toggle"
-          aria-label="Show password"
+          aria-label={showPassword ? "Hide password" : "Show password"}
           aria-pressed={showPassword}
           title={showPassword ? "Hide password" : "Show password"}
           onClick={() => setShowPassword((v) => !v)}

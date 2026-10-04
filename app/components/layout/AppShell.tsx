@@ -91,9 +91,9 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
         </span>
         <ChevronDown size={14} strokeWidth={1.5} className={projectListOpen ? "rotate-180" : ""} style={{ transition: "transform 200ms", flexShrink: 0 }} />
       </button>
-      {projectListOpen && projects.length > 1 && (
+      {projectListOpen && (
         <div className="app-nav-menu-project-list">
-          {projects.map((p) => (
+          {projects.length > 1 && projects.map((p) => (
             <button
               key={p.id}
               type="button"
@@ -103,7 +103,7 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
               {p.name}
             </button>
           ))}
-          <div className="app-nav-menu-divider" />
+          {projects.length > 1 && <div className="app-nav-menu-divider" />}
           {selectedProjectId && (
             <Link
               to="/settings/project/$projectId"

@@ -18,6 +18,7 @@ export function TextArea({ value, onChange, invalid, className, ...rest }: TextA
       onChange={(e) => onChange(e.target.value)}
       style={{ resize: "vertical", minHeight: 80, ...(isInvalid ? { borderColor: "var(--lx-text-danger)" } : {}), ...rest.style }}
       aria-invalid={isInvalid || undefined}
+      aria-describedby={field.descId ?? rest["aria-describedby"]}
     />
   );
 }

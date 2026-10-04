@@ -60,7 +60,7 @@ export function ActivityTab({ slug, taskId, isArchived }: ActivityTabProps) {
           members={memberList}
           currentUser={currentUser}
           onDeleteComment={(commentId) => deleteComment.mutate(commentId)}
-          onUpdateComment={(commentId, body) => updateComment.mutate({ commentId, body })}
+          onUpdateComment={(commentId, body) => updateComment.mutateAsync({ commentId, body }).then(() => undefined)}
         />
       )}
       {isArchived ? (

@@ -110,25 +110,27 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
                 className={cn("icon-btn", open && "active")}
                 onClick={toggle}
                 title="Column menu"
+                aria-haspopup="menu"
+                aria-expanded={open}
               >
                 <MoreHorizontal size={14} />
               </button>
             )}
           >
-            <button type="button" className="menu-item" onClick={onOpenCreate}>
+            <button type="button" role="menuitem" className="menu-item" onClick={onOpenCreate}>
               <Plus size={14} />
               Add task
             </button>
-            <button type="button" className="menu-item" onClick={() => setIsEditOpen(true)}>
+            <button type="button" role="menuitem" className="menu-item" onClick={() => setIsEditOpen(true)}>
               <SlidersHorizontal size={14} />
               Edit column
             </button>
             <div className="menu-separator" />
-            <button type="button" className="menu-item danger" onClick={() => setDeleteConfirm(true)}>
+            <button type="button" role="menuitem" className="menu-item danger" onClick={() => setDeleteConfirm(true)}>
               <Trash2 size={14} />
               Delete
             </button>
-            <button type="button" className="menu-item danger" onClick={() => setClearConfirm(true)}>
+            <button type="button" role="menuitem" className="menu-item danger" onClick={() => setClearConfirm(true)}>
               <Eraser size={14} />
               Clear all tasks
             </button>

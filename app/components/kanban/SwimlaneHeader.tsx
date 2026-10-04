@@ -45,27 +45,29 @@ function SwimlaneActionsMenu({ lane, collapsed, onToggle, onRename, onOpenSettin
             toggle();
           }}
           title="Swimlane menu"
+          aria-haspopup="menu"
+          aria-expanded={open}
         >
           <MoreHorizontal size={14} />
         </button>
       )}
     >
       {onToggle && (
-        <button type="button" className="menu-item" onClick={onToggle}>
+        <button type="button" role="menuitem" className="menu-item" onClick={onToggle}>
           {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
           {collapsed ? "Expand" : "Collapse"}
         </button>
       )}
-      <button type="button" className="menu-item" onClick={onOpenSettings}>
+      <button type="button" role="menuitem" className="menu-item" onClick={onOpenSettings}>
         <Settings size={14} />
         Settings
       </button>
       <div className="menu-separator" />
-      <button type="button" className="menu-item" onClick={onRename}>
+      <button type="button" role="menuitem" className="menu-item" onClick={onRename}>
         <Pencil size={14} />
         Rename
       </button>
-      <button type="button" className="menu-item" onClick={onOpenAddColumn}>
+      <button type="button" role="menuitem" className="menu-item" onClick={onOpenAddColumn}>
         <Plus size={14} />
         Add column
       </button>
@@ -74,6 +76,7 @@ function SwimlaneActionsMenu({ lane, collapsed, onToggle, onRename, onOpenSettin
           <div className="menu-separator" />
           <button
             type="button"
+            role="menuitem"
             className="menu-item"
             onClick={() => archiveSwimlane.mutate({ id: lane.id })}
           >
@@ -87,6 +90,7 @@ function SwimlaneActionsMenu({ lane, collapsed, onToggle, onRename, onOpenSettin
           <div className="menu-separator" />
           <button
             type="button"
+            role="menuitem"
             className="menu-item"
             onClick={() => restoreSwimlane.mutate({ id: lane.id })}
           >
@@ -96,7 +100,7 @@ function SwimlaneActionsMenu({ lane, collapsed, onToggle, onRename, onOpenSettin
         </>
       )}
       <div className="menu-separator" />
-      <button type="button" className="menu-item danger" onClick={onRequestDelete}>
+      <button type="button" role="menuitem" className="menu-item danger" onClick={onRequestDelete}>
         <Trash2 size={14} />
         Delete swimlane
       </button>

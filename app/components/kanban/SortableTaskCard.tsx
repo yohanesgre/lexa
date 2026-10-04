@@ -53,24 +53,26 @@ const CardMenu = memo(function CardMenu({
           }}
           title="Card menu"
           aria-label="Card menu"
+          aria-haspopup="menu"
+          aria-expanded={open}
         >
           <MoreHorizontal size={14} />
         </button>
       )}
     >
       {archived ? (
-        <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onRestore?.(taskId); }}>
+        <button type="button" role="menuitem" className="menu-item" onClick={(e) => { e.stopPropagation(); onRestore?.(taskId); }}>
           <Archive size={14} />
           Restore
         </button>
       ) : (
-        <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onArchive?.(taskId); }}>
+        <button type="button" role="menuitem" className="menu-item" onClick={(e) => { e.stopPropagation(); onArchive?.(taskId); }}>
           <Archive size={14} />
           Archive
         </button>
       )}
       <div className="menu-separator" />
-      <button type="button" className="menu-item danger" onClick={(e) => { e.stopPropagation(); onDelete?.(taskId); }}>
+      <button type="button" role="menuitem" className="menu-item danger" onClick={(e) => { e.stopPropagation(); onDelete?.(taskId); }}>
         <Trash2 size={14} />
         Delete
       </button>
