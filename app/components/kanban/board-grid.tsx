@@ -15,6 +15,7 @@ export interface BoardGridProps {
   showArchived: boolean;
   localTasks: Task[];
   childrenByParent: Map<string, string[]>;
+  parentOf: Map<string, string>;
   blockedBy: Map<string, string[]>;
   cardHidden: (task: Task) => boolean;
   cardDimmed: (task: Task) => boolean;
@@ -40,7 +41,7 @@ export interface BoardGridProps {
 export function BoardGrid(props: BoardGridProps) {
   const {
     slug, board, columns, rows, archivedLanes, showArchived, localTasks,
-    childrenByParent, blockedBy, cardHidden, cardDimmed, columnTotalCount, columnDimmed,
+    childrenByParent, parentOf, blockedBy, cardHidden, cardDimmed, columnTotalCount, columnDimmed,
     cellDropId, flashColumnId, collapsed, toggleLane, onOpenCreateTask, onSelectTask,
     onDelete, selectedTaskId, newTaskIds, shakeTaskId, archiveTask, restoreTask,
     collapsedParents, setCollapsedParents, onAddColumn,
@@ -80,6 +81,7 @@ export function BoardGrid(props: BoardGridProps) {
             board={board}
             localTasks={localTasks}
             childrenByParent={childrenByParent}
+            parentOf={parentOf}
             blockedBy={blockedBy}
             cardHidden={cardHidden}
             cardDimmed={cardDimmed}

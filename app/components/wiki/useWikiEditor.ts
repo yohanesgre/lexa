@@ -46,17 +46,20 @@ function initEditState(page: WikiPage): EditState {
 }
 
 type EditAction =
+  | { type: "reset"; page: WikiPage }
   | { type: "start"; page: WikiPage }
   | { type: "title"; title: string }
   | { type: "dirty" }
   | { type: "saving" }
-  | { type: "saved"; page: WikiPage; at: Date }
+  | { type: "saved"; page: WikiPage; at: Date; stale?: boolean }
   | { type: "cancel"; page: WikiPage }
   | { type: "stopEditing" }
   | { type: "done" };
 
 function editReducer(state: EditState, action: EditAction): EditState {
   switch (action.type) {
+    case "reset":
+      return initEditState(action.page);
     case "start":
       return { ...initEditState(action.page), isEditing: true };
     case "title":
@@ -66,6 +69,11 @@ function editReducer(state: EditState, action: EditAction): EditState {
     case "saving":
       return { ...state, isSaving: true };
     case "saved":
+      // A save that overlapped further edits must not adopt the server title
+      // or clear the dirty flag — those edits would be silently dropped.
+      if (action.stale) {
+        return { ...state, lastSavedPage: action.page, lastSavedAt: action.at };
+      }
       return { ...state, title: action.page.title, lastSavedPage: action.page, lastSavedAt: action.at, isDirty: false };
     case "cancel":
       return { ...state, title: action.page.title, lastSavedPage: action.page, isDirty: false };
@@ -106,16 +114,46 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
 
   const editorRef = useRef<Editor | null>(null);
   const titleRef = useRef(title);
+  // Monotonic edit counter: bumped on every meaningful edit so an in-flight
+  // save can tell whether newer edits landed while it awaited the server.
+  const editVersionRef = useRef(0);
   const embeds = useAttachmentEmbeds({ slug, documentType: "wiki", documentId: page.slug });
   const markDirtyRef = useRef<() => void>(() => {});
   const reviewActiveRef = useRef(false);
   const historyPreviewRef = useRef<string | null>(null);
   const previewSnapshotRef = useRef<TipTapDoc | null>(null);
   const autosaveHandleRef = useRef<ReturnType<typeof createWikiAutosaveEffect> | null>(null);
+  // Latest async handles for the debounced autosave effect, whose deps stay
+  // stable (autosaveDelay / page.slug / slug) so a re-render never destroys the
+  // armed timer. `useMutation` returns a new object every render.
+  const autosaveMutationRef = useRef(updateWikiPage.mutateAsync);
+  const navigateRef = useRef(navigate);
+  const slugRef = useRef(slug);
+  const pageSlugRef = useRef(page.slug);
 
   useEffect(() => {
     titleRef.current = title;
   }, [title]);
+
+  // P0-5 backstop: if the page prop changes without a remount (missing key),
+  // reset edit state and swap the editor doc so A's content can never be
+  // PATCHed into B's slug.
+  const previousSlugRef = useRef(page.slug);
+  useEffect(() => {
+    if (previousSlugRef.current === page.slug) return;
+    previousSlugRef.current = page.slug;
+    // Bump the edit counter so any save already in flight is recognised as
+    // stale on resolve — its response must not adopt the previous page's
+    // title/state onto the new page.
+    editVersionRef.current += 1;
+    autosaveHandleRef.current?.cancel();
+    previewSnapshotRef.current = null;
+    setHistoryPreviewId(null);
+    dispatch({ type: "reset", page });
+    editorRef.current?.setEditable(true);
+    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
+    setPreviewContent(page.content ?? emptyDoc);
+  }, [page]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -184,7 +222,12 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     const editor = editorRef.current;
     if (!editor) return;
     autosaveHandleRef.current?.cancel();
+    const versionAtStart = editVersionRef.current;
     dispatch({ type: "saving" });
+    // Lock the editor for the manual save's duration so the request payload is
+    // the doc the user saw when they pressed Save.
+    if (saveType === "manual") editor.setEditable(false);
+    let stale = false;
     try {
       const savedPage = await updateWikiPage.mutateAsync({
         pageSlug: page.slug,
@@ -192,7 +235,8 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
         content: editor.getJSON() as unknown as TipTapDoc,
         saveType,
       });
-      dispatch({ type: "saved", page: savedPage, at: new Date() });
+      stale = editVersionRef.current !== versionAtStart;
+      dispatch({ type: "saved", page: savedPage, at: new Date(), stale });
       if (savedPage.slug !== page.slug) {
         navigate({
           to: "/$slug/wiki/$pageSlug",
@@ -201,13 +245,19 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
         });
       }
     } finally {
+      if (saveType === "manual" && editorRef.current === editor) editor.setEditable(true);
       dispatch({ type: "done" });
     }
+    return stale;
   };
 
   const saveRef = useRef(save);
   useEffect(() => {
     saveRef.current = save;
+    autosaveMutationRef.current = updateWikiPage.mutateAsync;
+    navigateRef.current = navigate;
+    slugRef.current = slug;
+    pageSlugRef.current = page.slug;
   });
 
   useEffect(() => {
@@ -217,28 +267,34 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
         Effect.tryPromise({
           try: () => {
             const ed = editorRef.current;
-            if (!ed) return Promise.resolve(undefined as unknown as WikiPage);
+            if (!ed) return Promise.resolve(null);
+            const versionAtStart = editVersionRef.current;
             dispatch({ type: "saving" });
-            return updateWikiPage.mutateAsync({
-              pageSlug: page.slug,
+            return autosaveMutationRef.current({
+              pageSlug: pageSlugRef.current,
               title: titleRef.current,
               content: decodedDoc,
               saveType: "autosave",
-            });
+            }).then((saved) => ({ saved, versionAtStart }));
           },
           catch: (e) => e as unknown as Error,
         }).pipe(
-          Effect.flatMap((savedPage) =>
+          Effect.flatMap((result) =>
             Effect.sync(() => {
-              if (savedPage) {
-                dispatch({ type: "saved", page: savedPage as WikiPage, at: new Date() });
-                if ((savedPage as WikiPage).slug !== page.slug) {
-                  navigate({
-                    to: "/$slug/wiki/$pageSlug",
-                    params: { slug, pageSlug: (savedPage as WikiPage).slug },
-                    replace: true,
-                  });
-                }
+              if (!result) return;
+              const { saved, versionAtStart } = result as { saved: WikiPage; versionAtStart: number };
+              dispatch({
+                type: "saved",
+                page: saved,
+                at: new Date(),
+                stale: editVersionRef.current !== versionAtStart,
+              });
+              if (saved.slug !== pageSlugRef.current) {
+                navigateRef.current({
+                  to: "/$slug/wiki/$pageSlug",
+                  params: { slug: slugRef.current, pageSlug: saved.slug },
+                  replace: true,
+                });
               }
             })
           ),
@@ -249,9 +305,10 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     );
     autosaveHandleRef.current = handle;
     return () => handle.destroy();
-  }, [autosaveDelay, page.slug, slug, navigate, updateWikiPage]);
+  }, [autosaveDelay, page.slug, slug]);
 
   const markDirty = useCallback(() => {
+    editVersionRef.current += 1;
     dispatch({ type: "dirty" });
     if (reviewActiveRef.current) return;
     if (!autosaveEnabled) return;
@@ -354,7 +411,18 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   };
 
   const handleSave = async () => {
-    if (isDirty) await saveRef.current("manual");
+    if (isDirty) {
+      let stale = false;
+      try {
+        stale = (await saveRef.current("manual")) ?? false;
+      } catch {
+        // Save failed — stay in edit mode so the user can retry.
+        return;
+      }
+      // Edits landed while the save was in flight — the server now holds an
+      // older doc, so leaving edit mode here would silently drop them.
+      if (stale) return;
+    }
     editorRef.current?.setEditable(false);
     dispatch({ type: "stopEditing" });
   };

@@ -20,10 +20,14 @@ export function useMoveGuard(slug: string, board: Board | undefined) {
     setPending({ task, target });
     return false;
   };
-  const resolve = (clearDueAt: boolean) => {
-    if (!pending) return;
-    void moveTask.mutateAsync({ id: pending.task.id, ...pending.target, ...(clearDueAt ? { clearDueAt: true } : {}) });
+  // Returns the in-flight mutation promise so the caller can route the
+  // confirm-dialog move's rejection (e.g. WIP_LIMIT) through the same
+  // feedback handler as the free path.
+  const resolve = (clearDueAt: boolean): Promise<unknown> | undefined => {
+    if (!pending) return undefined;
+    const { task, target } = pending;
     setPending(null);
+    return moveTask.mutateAsync({ id: task.id, ...target, ...(clearDueAt ? { clearDueAt: true } : {}) });
   };
   return { confirmMove, pending, resolve, cancel: () => setPending(null) };
 }

@@ -59,3 +59,56 @@ describe("useTaskDetailActions create swimlane", () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ swimlaneId: undefined }));
   });
 });
+
+describe("useTaskDetailActions required-field gate", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it("does not create when a required description is empty (Enter path)", async () => {
+    const { args, onCreate } = baseArgs({ columnRequiredFields: [{ columnId: "c1", fields: ["description"] }] });
+    const { result } = renderHook(() => useTaskDetailActions(args as never));
+
+    act(() => result.current.setCreateTitle("Needs a body"));
+    await act(async () => {
+      await result.current.handleCreate();
+    });
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not create when a required description is whitespace-only", async () => {
+    const { args, onCreate } = baseArgs({ columnRequiredFields: [{ columnId: "c1", fields: ["description"] }] });
+    const { result } = renderHook(() => useTaskDetailActions(args as never));
+
+    act(() => result.current.setCreateTitle("Needs a body"));
+    act(() =>
+      result.current.setCreateDescription({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "   " }] }],
+      })
+    );
+    await act(async () => {
+      await result.current.handleCreate();
+    });
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("creates once the required fields are satisfied", async () => {
+    const { args, onCreate } = baseArgs({ columnRequiredFields: [{ columnId: "c1", fields: ["assignee", "description"] }] });
+    const { result } = renderHook(() => useTaskDetailActions(args as never));
+
+    act(() => result.current.setCreateTitle("Ready"));
+    act(() => result.current.setCreateAssignees(["Ada"]));
+    act(() =>
+      result.current.setCreateDescription({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Body" }] }],
+      })
+    );
+    await act(async () => {
+      await result.current.handleCreate();
+    });
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ title: "Ready", columnId: "c1" }));
+  });
+});

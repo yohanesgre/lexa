@@ -48,6 +48,9 @@ const CardMenu = memo(function CardMenu({
             e.stopPropagation();
             toggle();
           }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") e.stopPropagation();
+          }}
           title="Card menu"
           aria-label="Card menu"
         >
@@ -142,6 +145,9 @@ export function SortableTaskCard({
         if (!isDragging && !archived) { e.stopPropagation(); onSelect?.(task); }
       }}
       onKeyDown={(e) => {
+        // Only the card itself activates on Enter/Space — nested controls
+        // (menu trigger, subtask chevron) handle their own keyboard events.
+        if (e.target !== e.currentTarget) return;
         if ((e.key === "Enter" || e.key === " ") && !isDragging && !archived) {
           e.preventDefault();
           e.stopPropagation();

@@ -352,9 +352,12 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
           updateSwimlane.mutate({
             id: lane.id,
             name: input.name,
-            description: input.description ?? undefined,
-            dueAt: input.dueAt ?? undefined,
-            startAt: input.startAt ?? undefined,
+            // PATCH writes a field only when it is !== undefined — pass the
+            // cleared value through ("" for description, null for dates) or
+            // clearing a field would silently save nothing.
+            description: input.description ?? "",
+            dueAt: input.dueAt,
+            startAt: input.startAt,
             milestoneId: input.milestoneId ?? null,
           });
           setIsSettingsOpen(false);

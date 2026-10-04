@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { Milestone, Swimlane, Task } from "../../shared/types";
+import type { Board, Milestone, Swimlane, Task } from "../../shared/types";
 import { createQueryWrapper, createTestQueryClient, json } from "../test-utils";
 import { TaskDetail } from "./TaskDetail";
 
@@ -173,5 +173,95 @@ describe("TaskDetail swimlane labels", () => {
     expect(screen.getByRole("option", { name: "Sprint 6 - v1.0" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sprint 6" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Sprint 7 - v2.0 (archived)" })).toBeInTheDocument();
+  });
+});
+
+function boardTask(id: string, columnId: string, position: string): Task {
+  return { ...TASK, id, key: id, columnId, position };
+}
+
+const MID_TASK: Task = boardTask("t1", "c1", "a1");
+
+function laneBoard(overrides: Partial<Swimlane>[] = []): Board {
+  return {
+    project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+    columns: [
+      { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: false },
+      { id: "c2", projectId: "p1", name: "Doing", position: 1, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: false },
+    ],
+    swimlanes: [
+      lane({ id: "sp1", name: "Sprint 6" }),
+      lane({ id: "sp2", name: "Sprint 7" }),
+      ...overrides,
+    ],
+    milestones: [],
+    fieldConfig: { priorities: [], types: [] },
+    links: [],
+    tasks: [
+      boardTask("b0", "c1", "a0"),
+      MID_TASK,
+      boardTask("b2", "c1", "a2"),
+    ],
+  } as unknown as Board;
+}
+
+describe("TaskDetail lane-only move anchors", () => {
+  it("injects same-column neighbors for a lane-only move", () => {
+    const onMove = vi.fn().mockResolvedValue(undefined);
+    queryClient.setQueryData<Board>(["board", "demo", false], laneBoard());
+    renderDetail({
+      task: MID_TASK,
+      onMove,
+      columns: [{ id: "c1", name: "Todo" }, { id: "c2", name: "Doing" }],
+      swimlanes: [lane({ id: "sp1", name: "Sprint 6" }), lane({ id: "sp2", name: "Sprint 7" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sprint 6" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sprint 7" }));
+
+    expect(onMove).toHaveBeenCalledWith("t1", {
+      columnId: "c1",
+      swimlaneId: "sp2",
+      beforeTaskId: "b0",
+      afterTaskId: "b2",
+    });
+  });
+
+  it("falls back to the boardTasks prop when no board cache is present", () => {
+    const onMove = vi.fn().mockResolvedValue(undefined);
+    queryClient.clear();
+    renderDetail({
+      task: MID_TASK,
+      boardTasks: laneBoard().tasks,
+      onMove,
+      columns: [{ id: "c1", name: "Todo" }, { id: "c2", name: "Doing" }],
+      swimlanes: [lane({ id: "sp1", name: "Sprint 6" }), lane({ id: "sp2", name: "Sprint 7" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sprint 6" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sprint 7" }));
+
+    expect(onMove).toHaveBeenCalledWith("t1", {
+      columnId: "c1",
+      swimlaneId: "sp2",
+      beforeTaskId: "b0",
+      afterTaskId: "b2",
+    });
+  });
+
+  it("sends no anchors for a column move", () => {
+    const onMove = vi.fn().mockResolvedValue(undefined);
+    queryClient.setQueryData<Board>(["board", "demo", false], laneBoard());
+    renderDetail({
+      task: MID_TASK,
+      onMove,
+      columns: [{ id: "c1", name: "Todo" }, { id: "c2", name: "Doing" }],
+      swimlanes: [lane({ id: "sp1", name: "Sprint 6" }), lane({ id: "sp2", name: "Sprint 7" })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Todo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Doing" }));
+
+    expect(onMove).toHaveBeenCalledWith("t1", { columnId: "c2", swimlaneId: "sp1" });
   });
 });
