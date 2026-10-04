@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import type { Task, TipTapDoc, GithubIssue, Milestone, Swimlane } from "../../shared/types";
-import { extractText } from "../../shared/tiptap-text";
+import type { Board, Task, TipTapDoc, GithubIssue, Milestone, Swimlane } from "../../shared/types";
+import { isEmptyDoc } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
 import { GithubMark, TrashIcon, ArchiveIcon, LinkIcon } from "./icons";
 import { TextEditor } from "./TextEditor";
@@ -22,6 +23,7 @@ import { AttachmentsPanel } from "./AttachmentsPanel";
 import { TaskFooter } from "./TaskFooter";
 import { Toolbar } from "./TextEditor";
 import { textEditorExtensions } from "../lib/tiptap";
+import { laneNeighbors } from "../lib/lane-neighbors";
 import { SourcesSection } from "./document/SourcesSection";
 import { LinksSection } from "./document/LinksSection";
 import { ActivityTab } from "./activity/ActivityTab";
@@ -41,6 +43,7 @@ interface TaskDetailProps {
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
   swimlanes?: Swimlane[];
   milestones?: Milestone[];
+  boardTasks?: Task[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
   taskTitles?: Map<string, string>;    // taskId → title, for link display
@@ -48,7 +51,7 @@ interface TaskDetailProps {
   fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
-  onMove?: (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string }) => void;
+  onMove?: (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined }) => void | Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   onArchive?: (id: string) => Promise<void>;
   onRestore?: (id: string) => Promise<void>;
@@ -78,7 +81,7 @@ function getMissingRequiredFields(
   for (const field of required) {
     if (field === "assignee" && values.assignees.length === 0) {
       missing.push("assignee");
-    } else if (field === "description" && extractText(values.description) === "") {
+    } else if (field === "description" && isEmptyDoc(values.description)) {
       missing.push("description");
     }
   }
@@ -277,9 +280,10 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
   );
 }
 
-export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, boardTasks, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const slug = params.slug;
   const isCreate = mode === "create";
   const isPage = variant === "page";
@@ -337,6 +341,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
     defaultColumnId,
     defaultSwimlaneId,
     columns,
+    columnRequiredFields,
     fieldConfig,
     emptyDoc,
     onLinkGithub,
@@ -344,6 +349,16 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
     onCreate,
     onClose: handleClose,
   });
+
+  const handleMove = (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined }) => {
+    if (!onMove) return;
+    if (task && target.columnId === task.columnId && target.swimlaneId !== task.swimlaneId && !target.beforeTaskId && !target.afterTaskId) {
+      const cached = queryClient.getQueryData<Board>(["board", slug, false]) ?? queryClient.getQueryData<Board>(["board", slug, true]);
+      const tasks = cached?.tasks ?? boardTasks ?? [];
+      return onMove(id, { ...target, ...laneNeighbors(tasks, task) });
+    }
+    return onMove(id, target);
+  };
 
   const title = useTaskTitleEditing(task, onUpdate);
   const { deleting, confirmDelete } = useDeleteConfirmation(task, onDelete);
@@ -424,7 +439,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           selectedSwimlaneId={selectedSwimlaneId}
           setSelectedSwimlaneId={setSelectedSwimlaneId}
           onUpdate={onUpdate!}
-          onMove={onMove!}
+          onMove={handleMove}
           createColumnId={createColumnId}
           setCreateColumnId={setCreateColumnId}
           createSwimlaneId={createSwimlaneId}

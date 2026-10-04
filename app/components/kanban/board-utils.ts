@@ -47,6 +47,6 @@ export function useLinkMaps(board: Board) {
         blockedBy.set(link.fromTaskId, blockers);
       }
     }
-    return { childrenByParent, blockedBy };
+    return { childrenByParent, parentOf, blockedBy };
   }, [board.links, board.tasks]);
 }

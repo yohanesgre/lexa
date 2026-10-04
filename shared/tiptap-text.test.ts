@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractText } from "./tiptap-text";
+import { extractText, isEmptyDoc } from "./tiptap-text";
 import type { TipTapDoc } from "./types";
 
 describe("extractText", () => {
@@ -113,5 +113,37 @@ describe("extractText", () => {
       ],
     };
     expect(extractText(doc)).toBe("A\nB");
+  });
+});
+
+describe("isEmptyDoc", () => {
+  it("treats a content-less doc as empty", () => {
+    expect(isEmptyDoc({ type: "doc", content: [] })).toBe(true);
+    expect(isEmptyDoc(null as unknown as TipTapDoc)).toBe(true);
+  });
+
+  it("treats whitespace-only text as empty", () => {
+    const doc: TipTapDoc = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "   " }] }],
+    };
+    expect(isEmptyDoc(doc)).toBe(true);
+  });
+
+  it("treats text content as non-empty", () => {
+    const doc: TipTapDoc = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }],
+    };
+    expect(isEmptyDoc(doc)).toBe(false);
+  });
+
+  it("counts image/hr/table leaves as content", () => {
+    const image: TipTapDoc = { type: "doc", content: [{ type: "image", attrs: { src: "x" } }] };
+    const rule: TipTapDoc = { type: "doc", content: [{ type: "horizontalRule" }] };
+    const table: TipTapDoc = { type: "doc", content: [{ type: "table" }] };
+    expect(isEmptyDoc(image)).toBe(false);
+    expect(isEmptyDoc(rule)).toBe(false);
+    expect(isEmptyDoc(table)).toBe(false);
   });
 });

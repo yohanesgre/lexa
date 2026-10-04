@@ -75,14 +75,58 @@ describe("AssistantWriteToolsSection — canonical write-tool list", () => {
     }
   });
 
-  it("saves the full hydrated selection back — no write-back truncation", async () => {
+  it("saves the full selection back — no write-back truncation", async () => {
+    const stored = ASSISTANT_WRITE_TOOL_NAMES.filter((t) => t !== "delete_task");
+    h.settings = settings({ writeTools: [...stored] });
+    const user = userEvent.setup();
+    render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "delete_task" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(h.saved).toHaveLength(1);
+    const savedTools = h.saved[0]?.writeTools as string[];
+    expect(savedTools).toHaveLength(ASSISTANT_WRITE_TOOL_NAMES.length);
+    expect([...savedTools].sort()).toEqual([...ASSISTANT_WRITE_TOOL_NAMES].sort());
+  });
+
+  it("blocks a no-op Save when the selection is unchanged", async () => {
     h.settings = settings({ writeTools: [...ASSISTANT_WRITE_TOOL_NAMES] });
     const user = userEvent.setup();
     render(<AssistantWriteToolsSection project={PROJECT} />);
 
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(h.saved).toHaveLength(0);
+  });
+
+  it("carries every persisted masked field forward on save", async () => {
+    h.settings = {
+      ...settings({ writeTools: [] }),
+      searchProvider: "exa",
+      urlAllowlist: "https://docs.example",
+      primarySupportsImages: true,
+      reasoningEffort: "high",
+      providerId: "prov-1",
+      modelId: "model-1",
+      fallbackModelIds: ["model-2"],
+    };
+    const user = userEvent.setup();
+    render(<AssistantWriteToolsSection project={PROJECT} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "create_task" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(h.saved).toHaveLength(1);
-    expect(h.saved[0]?.writeTools).toEqual([...ASSISTANT_WRITE_TOOL_NAMES]);
+    expect(h.saved[0]).toMatchObject({
+      searchProvider: "exa",
+      urlAllowlist: "https://docs.example",
+      primarySupportsImages: true,
+      reasoningEffort: "high",
+      providerId: "prov-1",
+      modelId: "model-1",
+      fallbackModelIds: ["model-2"],
+      writeTools: ["create_task"],
+    });
   });
 
   it("master toggle from empty selects all 19", async () => {

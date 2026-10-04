@@ -7,6 +7,7 @@ import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound, Db, withTx, run, batch } from "../db/db";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
+import { isEmptyDoc } from "../../shared/tiptap-text";
 import {
   TaskNotFound,
   TaskHasChildren,
@@ -38,27 +39,13 @@ import {
 } from "../repos/task-batch";
 import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType } from "../../shared/types";
 
+// Re-exported for callers that historically imported it from this module; the
+// single implementation lives in shared (invariant 10 parity).
+export { isEmptyDoc };
+
 // Hard request cap for POST /projects/:slug/tasks/bulk — an oversized batch is
 // refused with InvalidArgs (422) before any write.
 export const BULK_TASK_ID_CAP = 100;
-
-export function isEmptyDoc(doc: TipTapDoc): boolean {
-  // A doc is empty when it holds no text and no meaningful content nodes
-  // (image, horizontalRule, table). Container nodes (paragraph, heading,
-  // blockquote, list) always recurse — a paragraph of whitespace is empty.
-  const hasContent = (node: Record<string, unknown>): boolean => {
-    const children = node.content as Record<string, unknown>[] | undefined;
-    if (node.type === "text") {
-      return (typeof node.text === "string" ? node.text : "").trim().length > 0;
-    }
-    if (children && children.length > 0) {
-      return children.some(hasContent);
-    }
-    // Leaf node that is not text: image, horizontalRule, table, checkbox, etc.
-    return node.type !== "paragraph" && node.type !== "doc";
-  };
-  return !hasContent(doc as unknown as Record<string, unknown>);
-}
 
 function validateRequiredFields(
   taskLike: Record<string, unknown>,

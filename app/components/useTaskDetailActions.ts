@@ -1,11 +1,13 @@
 import { useState } from "react";
 import type { TipTapDoc } from "../../shared/types";
+import { isEmptyDoc } from "../../shared/tiptap-text";
 
 interface UseTaskDetailActionsArgs {
   task: { id: string; columnId: string | null; swimlaneId: string | null; title: string } | null | undefined;
   defaultColumnId?: string | null | undefined;
   defaultSwimlaneId?: string | null | undefined;
   columns?: { id: string }[] | undefined;
+  columnRequiredFields?: { columnId: string; fields: string[] }[] | undefined;
   fieldConfig?: { priorities: { id: string }[]; types: { id: string }[] } | undefined;
   emptyDoc: TipTapDoc;
   onLinkGithub?: ((id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>) | undefined;
@@ -34,8 +36,31 @@ function dueAtOrNull(dueAt: string) {
   return dueAt === "" ? null : dueAt;
 }
 
-function canCreate(title: string, createColumnId: string, onCreate: UseTaskDetailActionsArgs["onCreate"], creating: boolean) {
-  return Boolean(title && createColumnId && onCreate && !creating);
+function hasMissingRequired(
+  columnId: string,
+  requiredFieldsMap: { columnId: string; fields: string[] }[] | undefined,
+  assignees: string[],
+  description: TipTapDoc,
+): boolean {
+  const required = requiredFieldsMap?.find((column) => column.columnId === columnId)?.fields ?? [];
+  for (const field of required) {
+    if (field === "assignee" && assignees.length === 0) return true;
+    if (field === "description" && isEmptyDoc(description)) return true;
+  }
+  return false;
+}
+
+function canCreate(
+  title: string,
+  createColumnId: string,
+  columnRequiredFields: UseTaskDetailActionsArgs["columnRequiredFields"],
+  assignees: string[],
+  description: TipTapDoc,
+  onCreate: UseTaskDetailActionsArgs["onCreate"],
+  creating: boolean,
+) {
+  if (!(title && createColumnId && onCreate && !creating)) return false;
+  return !hasMissingRequired(createColumnId, columnRequiredFields, assignees, description);
 }
 
 function useFollow(value: string, apply: (value: string) => void) {
@@ -78,7 +103,7 @@ async function requestUnlinkIssue(
 }
 
 export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
-  const { task, defaultColumnId, defaultSwimlaneId, columns, fieldConfig, emptyDoc, onLinkGithub, onUnlinkGithub, onCreate, onClose } = args;
+  const { task, defaultColumnId, defaultSwimlaneId, columns, columnRequiredFields, fieldConfig, emptyDoc, onLinkGithub, onUnlinkGithub, onCreate, onClose } = args;
   const [createTitle, setCreateTitle] = useState("");
   const [createColumnId, setCreateColumnId] = useState(() => initialCreateColumnId(defaultColumnId, columns));
   const [createSwimlaneId, setCreateSwimlaneId] = useState<string>(() => defaultSwimlaneId ?? "");
@@ -119,7 +144,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
 
   const handleCreate = async () => {
     const title = createTitle.trim();
-    if (!canCreate(title, createColumnId, onCreate, creating)) return;
+    if (!canCreate(title, createColumnId, columnRequiredFields, createAssignees, createDescription, onCreate, creating)) return;
     setCreating(true);
     try {
       await onCreate!({
