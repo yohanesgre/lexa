@@ -357,7 +357,7 @@ describe("SwimlaneHeader archived lane", () => {
     render(<SwimlaneHeader slug="demo" lane={{ ...LANE, tasksTotal: 3 }} count={0} onToggle={vi.fn()} />);
 
     await user.click(screen.getByTitle("Swimlane menu"));
-    await user.click(screen.getByRole("button", { name: /delete swimlane/i }));
+    await user.click(screen.getByRole("menuitem", { name: /delete swimlane/i }));
 
     expect(screen.getByText(/This swimlane has 3 tasks\. Reassign them/)).toBeInTheDocument();
   });
