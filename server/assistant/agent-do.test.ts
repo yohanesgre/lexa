@@ -1407,11 +1407,14 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     await persistStep(threadKey, [carrierMessage("w-noop", "noop-batch")]);
     await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
 
+    capturedProviderRequest = null;
     const res = await callResume(threadKey, "noop-batch");
     expect(await res.json()).toEqual({ ok: true, executed: false, reason: "settled" });
 
-    // No continuation: nothing was executed, so the transcript must not grow.
+    // No continuation: nothing was executed, so no provider call runs (the
+    // capture is the direct signal) and the transcript must not grow.
     await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(capturedProviderRequest).toBeNull();
     expect(await transcriptOf(documentId)).toHaveLength(1);
   }, 60_000);
 
@@ -1428,6 +1431,36 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     capturedProviderRequest = null;
     const res = await callResume(threadKey, "noop-note-batch");
     expect(await res.json()).toEqual({ ok: true, executed: false, reason: "settled" });
+
+    // The note drives a continuation: a provider call runs and the assistant
+    // message grows beyond the carrier's original "proposed" text.
+    await waitFor<string>(() => Promise.resolve(capturedProviderRequest), 20_000);
+    await waitFor<boolean>(
+      () => transcriptOf(documentId).then((m) => (JSON.stringify(m).includes('"ok"') ? true : null)),
+      20_000
+    );
+  }, 60_000);
+
+  it("walks a noted noop batch, running the continuation before continuing (never silent)", async () => {
+    const documentId = "resume-walk-noop-note";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    await persistStep(threadKey, [carrierMessage("w-walk-noop-note", "noop-note-walk")]);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
+
+    // A null batch id takes the legacy walk. A noted noop it finds must run its
+    // rejection acknowledgment continuation — not silently claim-and-continue,
+    // which would strand the note once a later request short-circuits on the
+    // kept claim.
+    capturedProviderRequest = null;
+    expect(await (await callResume(threadKey, null)).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
 
     // The note drives a continuation: a provider call runs and the assistant
     // message grows beyond the carrier's original "proposed" text.
