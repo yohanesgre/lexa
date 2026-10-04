@@ -140,6 +140,61 @@ export function sanitizeProviderMessages<T = unknown>(messages: readonly T[]): T
   return touched ? out : (messages as T[]);
 }
 
+// `@tanstack/ai`'s provider pipeline reads text from `part.content`, but the
+// `ai`-UIMessage mirror shape (the DO canonical transcript, persisted to the D1
+// mirror) carries `part.text`. A parts-shaped transcript therefore collapsed to
+// empty provider messages and the openai-chat adapter rejected the run
+// ("User message for openai-chat has no content parts."). Convert parts-shaped
+// messages to the provider shape the Bun-era transcripts used — role + content
+// (string, or an array of ContentParts) — extracting text and dropping every
+// non-provider part (`step-start`, `data-*`, `reasoning`, `tool-*`/`dynamic-tool`
+// display parts, sources). Content-shaped (legacy / Bun) messages pass through
+// untouched, so only the provider INPUT is normalized. Mirrors the text mapping
+// in `legacyFromUIMessages` but stays provider-shaped: no metadata, media parts
+// mapped to the accepted ContentPart shape, and a user turn with no provider
+// content is dropped rather than sent as an empty message.
+function providerMediaPart(part: Record<string, unknown>): unknown | null {
+  if ((part.type === "image" || part.type === "audio" || part.type === "document") && part.source !== null && typeof part.source === "object") {
+    return part;
+  }
+  if (part.type === "file" && typeof part.mediaType === "string" && typeof part.url === "string") {
+    const top = part.mediaType.split("/")[0];
+    if (top === "image" || top === "audio") return { type: top, source: { type: "url", value: part.url } };
+  }
+  return null;
+}
+
+export function normalizeProviderMessages<T = unknown>(messages: readonly T[]): T[] {
+  const isPartsShaped = (m: T): boolean => m !== null && typeof m === "object" && Array.isArray((m as { parts?: unknown }).parts);
+  if (!messages.some(isPartsShaped)) return messages as T[];
+  const out: T[] = [];
+  for (const message of messages) {
+    if (!isPartsShaped(message)) { out.push(message); continue; }
+    const rec = message as unknown as Record<string, unknown>;
+    const role = rec.role;
+    if (role !== "user" && role !== "assistant" && role !== "system" && role !== "tool") continue;
+    const text: string[] = [];
+    const media: unknown[] = [];
+    for (const raw of rec.parts as unknown[]) {
+      if (raw === null || typeof raw !== "object") continue;
+      const part = raw as Record<string, unknown>;
+      if (part.type === "text") {
+        const value = typeof part.text === "string" ? part.text : typeof part.content === "string" ? part.content : null;
+        if (value !== null) text.push(value);
+        continue;
+      }
+      const mapped = providerMediaPart(part);
+      if (mapped !== null) media.push(mapped);
+    }
+    if (role === "user" && text.length === 0 && media.length === 0) continue;
+    const content: string | unknown[] = media.length === 0
+      ? text.join("")
+      : [...text.map((t) => ({ type: "text", content: t })), ...media];
+    out.push({ role, content } as T);
+  }
+  return out;
+}
+
 export type PendingApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 
 // One decision row as read from assistant_pending_writes. `seq`/`name`/`diff`
@@ -396,7 +451,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           const { streamChat } = await import("./provider");
           const withImages = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
           const hydrated = ctx.loadDocumentText ? await hydrateDocumentParts(withImages, ctx.loadDocumentText) : withImages;
-          let prepared = sanitizeProviderMessages(hydrated);
+          let prepared = sanitizeProviderMessages(normalizeProviderMessages(hydrated));
           if (ctx.resumeResultsNote !== undefined && ctx.resumeResultsNote.trim() !== "") {
             prepared = [...prepared, { role: "user", content: ctx.resumeResultsNote }];
           }
