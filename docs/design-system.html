@@ -33,6 +33,7 @@
   --lx-border-strong: #4A443D;
   --lx-border-focus: #F0C040;
   --lx-border-input: #6B6560;
+  --lx-border-input-hover: #8A837C;
 
   --lx-text-primary: #F5F0EB;
   --lx-text-secondary: #948E88;
@@ -2076,6 +2077,7 @@ mark {
   --lx-border-strong: #C4BAB0;
   --lx-border-focus: #A07908;
   --lx-border-input: #888078;
+  --lx-border-input-hover: #5C554F;
 
   --lx-text-primary: #1A1714;
   --lx-text-secondary: #5C554F;
@@ -2826,7 +2828,7 @@ mark {
   cursor: pointer;
   transition: border-color 100ms;
 }
-.filter-select:hover { border-color: var(--lx-border-strong); }
+.filter-select:hover { border-color: var(--lx-border-input-hover); }
 .filter-select.has-value { color: var(--lx-text-primary); border-color: rgba(240, 192, 64, 0.35); }
 .filter-select svg {
   width: 12px;
@@ -4571,7 +4573,7 @@ button.history-item {
   cursor: pointer;
   transition: border-color 100ms;
 }
-.tasks-select:hover { border-color: var(--lx-border-strong); }
+.tasks-select:hover { border-color: var(--lx-border-input-hover); }
 
 .tasks-archive-toggle {
   display: inline-flex;
@@ -4931,7 +4933,7 @@ button.history-item {
   transition: border-color 100ms, background 100ms;
 }
 .datepicker-trigger:hover {
-  border-color: var(--lx-border-strong);
+  border-color: var(--lx-border-input-hover);
   background: var(--lx-surface-card-hover);
 }
 .datepicker-trigger svg {
@@ -5184,8 +5186,10 @@ button.history-item {
   color: var(--lx-text-primary);
   cursor: pointer;
   white-space: nowrap;
+  transition: border-color 100ms, background 100ms;
 }
 .ms-selector-trigger:hover {
+  border-color: var(--lx-border-input-hover);
   background: var(--lx-surface-card-hover);
 }
 .ms-selector-popover {
@@ -6199,6 +6203,11 @@ button.history-item {
           <div class="swatch" style="background:var(--lx-border-input);"></div>
           <div class="token-name font-mono text-xs">--lx-border-input</div>
           <div class="token-value text-2xs color-muted">#6B6560 / #888078</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-border-input-hover);"></div>
+          <div class="token-name font-mono text-xs">--lx-border-input-hover</div>
+          <div class="token-value text-2xs color-muted">#8A837C / #5C554F</div>
         </div>
       </div>
 
