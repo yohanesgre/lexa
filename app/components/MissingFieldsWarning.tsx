@@ -1,15 +1,9 @@
 import { X } from "lucide-react";
 
-const FIELD_LABELS: Record<string, string> = {
-  assignee: "assignee",
-  description: "description",
-};
-
 function joinFieldLabels(fields: string[]): string {
-  const labels = fields.map((f) => FIELD_LABELS[f] ?? f);
-  if (labels.length <= 1) return labels[0] ?? "";
-  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
-  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+  if (fields.length <= 1) return fields[0] ?? "";
+  if (fields.length === 2) return `${fields[0]} and ${fields[1]}`;
+  return `${fields.slice(0, -1).join(", ")}, and ${fields[fields.length - 1]}`;
 }
 
 export function MissingFieldsWarning({ columnName, fields, onDismiss }: { columnName: string | null; fields: string[]; onDismiss: () => void }) {

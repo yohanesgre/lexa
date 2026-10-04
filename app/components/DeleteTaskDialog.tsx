@@ -15,6 +15,7 @@ const FOCUSABLE = 'button:not([disabled]), [href], input, select, textarea, [tab
 
 export function DeleteTaskDialog({ task, open, deleting, onClose, onDelete }: DeleteTaskDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -45,6 +46,11 @@ export function DeleteTaskDialog({ task, open, deleting, onClose, onDelete }: De
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open || !deleting) return;
+    cancelRef.current?.focus();
+  }, [open, deleting]);
+
   if (!open) return null;
   return (
 <>
@@ -72,6 +78,7 @@ export function DeleteTaskDialog({ task, open, deleting, onClose, onDelete }: De
       <div className="flex items-center gap-2 mt-4 justify-end">
         <button
           type="button"
+          ref={cancelRef}
           className="btn btn-ghost"
           onClick={onClose}
         >

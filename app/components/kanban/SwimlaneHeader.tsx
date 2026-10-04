@@ -386,7 +386,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
       )}
 
       {deleteConfirm && (
-        <DeleteSwimlaneDialog target={lane} taskCount={count} onClose={() => setDeleteConfirm(false)} onDelete={handleDelete} />
+        <DeleteSwimlaneDialog target={lane} taskCount={lane.tasksTotal} onClose={() => setDeleteConfirm(false)} onDelete={handleDelete} />
       )}
 
       {isDescOpen && (

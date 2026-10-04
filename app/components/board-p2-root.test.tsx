@@ -29,12 +29,12 @@ const TASK: Task = {
 };
 
 describe("DeleteTaskDialog focus management", () => {
-  function Harness({ open }: { open: boolean }) {
+  function Harness({ open, deleting = false }: { open: boolean; deleting?: boolean }) {
     return (
       <>
         <button type="button" data-testid="outside">outside</button>
         {open && (
-          <DeleteTaskDialog task={TASK} open deleting={false} onClose={vi.fn()} onDelete={vi.fn()} />
+          <DeleteTaskDialog task={TASK} open deleting={deleting} onClose={vi.fn()} onDelete={vi.fn()} />
         )}
       </>
     );
@@ -57,6 +57,16 @@ describe("DeleteTaskDialog focus management", () => {
 
     rerender(<Harness open={false} />);
     expect(outside).toHaveFocus();
+  });
+
+  it("moves focus to Cancel when Delete becomes disabled mid-delete", () => {
+    const { rerender } = render(<Harness open />);
+    const del = screen.getByRole("button", { name: "Delete" });
+    del.focus();
+    expect(del).toHaveFocus();
+
+    rerender(<Harness open deleting />);
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
   });
 });
 

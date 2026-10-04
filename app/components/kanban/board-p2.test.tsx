@@ -99,6 +99,13 @@ describe("FilterCheckbox pressed state", () => {
 describe("Column inline create", () => {
   it("keeps the typed title when the create fails", async () => {
     const user = userEvent.setup();
+    createTaskMutate.mockImplementation(
+      (_input: unknown, options?: { onError?: (error: unknown) => void; onSettled?: (data: unknown, error: unknown) => void }) => {
+        const error = new Error("create failed");
+        options?.onError?.(error);
+        options?.onSettled?.(undefined, error);
+      }
+    );
     render(
       <DndContext>
         <BoardColumn id="cell" slug="demo" columnId="c1" swimlaneId="s1" isEmpty children={null} />

@@ -374,7 +374,7 @@ function ArchivedMilestoneActions({ canDelete, onRestore, onDelete }: {
           className="btn btn-ghost btn-sm"
           style={{ color: "var(--lx-text-danger)" }}
           disabled={!canDelete}
-          title={canDelete ? undefined : "Archive its sprints first"}
+          title={canDelete ? undefined : "Delete its sprints first"}
           onClick={onDelete}
         >
           Delete
