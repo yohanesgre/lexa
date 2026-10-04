@@ -22,8 +22,11 @@ import { useAssistantChatList, useRenameAssistantChat, useDeleteAssistantChat, u
 const mockedApi = vi.mocked(api);
 
 const THREADS: AssistantChatThreadSummary[] = [
-  { chatId: "c1", title: "Payments migration questions", pinned: false, snippet: null, createdAt: "2026-08-22T09:00:00Z", updatedAt: "2026-08-22T10:00:00Z" },
-  { chatId: "c2", title: null, pinned: true, snippet: null, createdAt: "2026-08-21T09:00:00Z", updatedAt: "2026-08-21T11:00:00Z" },
+  // c1 (the toggled row) is the OLDEST on purpose: the server bumps
+  // `updatedAt` on PATCH, so the patched cache must move it to the top of
+  // the pinned group. Dropping `updatedAt` would leave c2 first.
+  { chatId: "c1", title: "Payments migration questions", pinned: false, snippet: null, createdAt: "2026-08-21T09:00:00Z", updatedAt: "2026-08-21T10:00:00Z" },
+  { chatId: "c2", title: null, pinned: true, snippet: null, createdAt: "2026-08-22T09:00:00Z", updatedAt: "2026-08-22T11:00:00Z" },
 ];
 
 function makeWrapper(qc: QueryClient) {
@@ -74,6 +77,9 @@ describe("useUpdateAssistantChatMeta", () => {
     const cache = qc.getQueryData<AssistantChatThreadSummary[]>(["assistant-chats", "p1"])!;
     expect(cache.map((t) => t.chatId)).toEqual(["c1", "c2"]);
     expect(cache[0]!.pinned).toBe(true);
+    // The server bumps updatedAt on PATCH; the patch must mirror it or the
+    // pinned group re-sorts wrong (c2 would win on its newer timestamp).
+    expect(cache[0]!.updatedAt).not.toBe(THREADS[0]!.updatedAt);
     expect((qc.getQueryData<AssistantChatThreadSummary[]>(["assistant-chats", "p1", "runbook"]) ?? [])[0]!.pinned).toBe(true);
     // Invariant #6: pin toggle patches every cached variant — no refetch.
     expect(spy).not.toHaveBeenCalled();

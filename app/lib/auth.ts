@@ -5,7 +5,11 @@ import type { LexaUser } from "../../shared/types";
 // mounted at /api/auth/*). The FE talks to it over plain fetch — the cookie
 // (httpOnly, secure, 7d sliding) is managed by the browser, no client SDK.
 
-export interface SessionUser extends LexaUser {}
+export interface SessionUser extends Omit<LexaUser, "lastSeen"> {
+  // `lastSeen` is an app-managed column (`users.last_seen`), not a Better Auth
+  // additional field, so it is absent from get-session and sign-in payloads.
+  lastSeen?: LexaUser["lastSeen"];
+}
 
 export interface AuthSession {
   id: string;
@@ -22,13 +26,17 @@ export interface SessionResponse {
 }
 
 // Better Auth `/sign-in/email` body: the raw session token + user, NOT the
-// get-session shape (no `session` field). Consumers must never cast this to
-// SessionResponse — seed `{ session: null, user }` and refetch get-session.
+// get-session shape (no `session` field) and the user carries no `lastSeen`
+// (that column is app-managed, not a Better Auth additional field). Consumers
+// must never cast this to SessionResponse — seed `{ session: null, user }`
+// and refetch get-session.
+export type SignInUser = Omit<SessionUser, "lastSeen">;
+
 export interface SignInResponse {
   redirect: boolean;
   token?: string | undefined;
   url?: string | undefined;
-  user?: SessionUser | undefined;
+  user?: SignInUser | undefined;
 }
 
 const AUTH_BASE = "/api/auth";

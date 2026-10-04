@@ -178,7 +178,7 @@ describe("project mutations", () => {
     expect(dash.projects.map((h) => h.project.id)).toEqual(["p2", "p1"]);
     expect(dash.stats.activeProjects).toBe(2);
     expect(queryClient.getQueryData<Project[]>(["projects"])!.filter((p) => p.id === "p2")).toHaveLength(1);
-    expect(result.current.error).toBeInstanceOf(Error);
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
     expect((result.current.error as Error).message).toBe("Slug already taken");
   });
 
@@ -860,16 +860,21 @@ describe("progress counts stay fresh after mutations (LX 63450bf5)", () => {
 describe("session + invite mutation paths (LX-100/LX-102/LX-103)", () => {
   const USER = { id: "u1", email: "y@lexa.test", name: "Y", role: "superadmin" as const, createdAt: "t", lastSeen: null };
 
-  it("useSignIn seeds the true get-session shape and marks the session stale for an authoritative refetch", async () => {
+  it("useSignIn seeds the get-session shape, then writes the authoritative read back — never invalidate", async () => {
+    const SERVER_SESSION = { session: { id: "s1", userId: "u1", expiresAt: "t", createdAt: "t" }, user: USER };
     routes.set("POST /api/auth/sign-in/email", { redirect: false, token: "tok", url: "/", user: USER });
+    routes.set("GET /api/auth/get-session", SERVER_SESSION);
     const spy = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useSignIn(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ email: "y@lexa.test", password: "pw" }); });
 
-    const cached = queryClient.getQueryData<SessionResponse>(["session"]);
-    expect(cached).toEqual({ session: null, user: USER });
-    expect(cached).not.toHaveProperty("token");
-    expect(spy).toHaveBeenCalledWith({ queryKey: ["session"] });
+    // The sign-in seed is replaced by the authoritative get-session read
+    // written through setQueryData — invariant 6, no invalidateQueries.
+    await waitFor(() => {
+      expect(queryClient.getQueryData<SessionResponse>(["session"])).toEqual(SERVER_SESSION);
+    });
+    expect(queryClient.getQueryData<SessionResponse>(["session"])).not.toHaveProperty("token");
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("useSetPassword neither seeds nor invalidates the session cache", async () => {

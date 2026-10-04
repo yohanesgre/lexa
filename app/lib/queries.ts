@@ -1476,10 +1476,11 @@ export function useSignIn() {
     onSuccess: (res) => {
       // `/sign-in/email` returns {redirect,token,url,user} — no `session`
       // field. Seed the true get-session shape so `session.session` consumers
-      // don't read a missing field, then let an authoritative get-session
-      // refetch fill the real session (the cookie is already set).
+      // don't read a missing field, then write the authoritative get-session
+      // read back through setQueryData (the cookie is already set). Invariant
+      // 6: never invalidateQueries on the mutation path.
       qc.setQueryData<auth.SessionResponse>(["session"], { session: null, user: res.user ?? null });
-      void qc.invalidateQueries({ queryKey: ["session"] });
+      void auth.getSession().then((session) => qc.setQueryData<auth.SessionResponse>(["session"], session));
     },
     // No onError toast: the login page renders the single inline notice
     // (wireframe: generic "Invalid email or password." copy).
@@ -1505,9 +1506,11 @@ export function useSetPassword() {
   return useMutation({
     mutationFn: ({ newPassword, token }: { newPassword: string; token: string }) => auth.setPassword({ newPassword, token }),
     onSuccess: () => {
-      // `/reset-password` returns `{ status: true }` (no session body). The
-      // cookie is set server-side; navigation re-reads the real session, so
-      // the mutation path neither seeds nor invalidates the session cache.
+      // `/reset-password` returns `{ status: true }` and sets no session
+      // cookie (better-auth `revokeSessionsOnPasswordReset: true` at
+      // server/auth.ts:363 revokes existing sessions). The user must sign in
+      // afterwards; the mutation path neither seeds nor invalidates the
+      // session cache.
       toast.push("success", "Password set — you're signed in");
     },
     onError: (err) => {
@@ -2358,10 +2361,11 @@ function sortThreads(threads: api.AssistantChatThreadSummary[]): api.AssistantCh
 }
 
 // PATCH /assistant/chat/:chatId ({title?, pinned?}). The response body is not
-// part of the pinned contract, so the cache is patched from the request
-// args (deterministic — the caller knows what it sent). A pin toggle also
-// re-sorts locally (pinned-first then updatedAt DESC, the server's list
-// ordering) so no refetch is needed.
+// part of the pinned contract, so the cache is patched from the request args
+// (deterministic — the caller knows what it sent), plus the server-bumped
+// `updatedAt` so the pinned-first / updatedAt DESC ordering cannot diverge
+// from the server's list ordering. A pin toggle also re-sorts locally so no
+// refetch is needed.
 export function useUpdateAssistantChatMeta(projectId: string | undefined) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -2374,7 +2378,7 @@ export function useUpdateAssistantChatMeta(projectId: string | undefined) {
         return sortThreads(
           old.map((t) =>
             t.chatId === chatId
-              ? { ...t, ...(title !== undefined ? { title } : {}), ...(pinned !== undefined ? { pinned } : {}) }
+              ? { ...t, ...(title !== undefined ? { title } : {}), ...(pinned !== undefined ? { pinned } : {}), updatedAt: new Date().toISOString() }
               : t
           )
         );

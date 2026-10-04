@@ -30,7 +30,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
     onSubmit({
       name: name.trim(),
       description: desc.trim() || undefined,
-      teamId: teamId || null,
+      teamId: teamId && teamId !== "global" ? teamId : null,
     });
     setName("");
     setDesc("");
@@ -67,6 +67,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             <Field label="Team" htmlFor="create-project-team" hint="The owning team scopes who can see and use the project. Unassigned (no team) is superadmin-only." className="field">
               <SelectInput id="create-project-team" value={teamId} onChange={setTeamId} disabled={pending || teamsLoading} aria-label="Project team" className="w-full">
                 <option value="">Select a team…</option>
+                {canCreateUnassigned && <option value="global">Global (no team)</option>}
                 {teams.map((t) => (
                   <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>
                 ))}
