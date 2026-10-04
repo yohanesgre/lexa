@@ -40,6 +40,7 @@ export const INTERNAL_RUN_COUNTS_PATH = "/api/internal/assistant/run-counts";
 export const INTERNAL_TOOL_PATH = "/api/internal/assistant/tool";
 export const INTERNAL_WRITE_TOOL_PATH = "/api/internal/assistant/write-tool";
 export const INTERNAL_WRITE_EXECUTE_PATH = "/api/internal/assistant/write-execute";
+export const INTERNAL_RESUME_EXECUTE_PATH = "/api/internal/assistant/resume-execute";
 
 // Bound every DO → Worker internal call: a hung fetch must not stall the
 // turn's `onEnd`/`failAttempt` terminal writes (the retry re-arms the signal).
@@ -510,4 +511,53 @@ function isApprovalPartial(value: unknown): value is { applied: number; failed: 
     typeof (value as { applied?: unknown }).applied === "number" &&
     typeof (value as { failed?: unknown }).failed === "number"
   );
+}
+
+/**
+ * Execute an already-decided chat approval batch in the Worker (LX-79). The DO
+ * calls this exactly once per batch after its synchronous SQLite claim; the
+ * Worker applies the approved rows in seq order and returns the
+ * provider-context note. `pending` means the batch is not fully decided (the DO
+ * releases its claim and may try an older batch); `missing` means the batch has
+ * no rows for this thread/owner. `noop` means the batch holds no approved rows
+ * (all rejected/expired): nothing is executed and the DO runs no continuation.
+ * `unavailable` is a transport/HTTP failure: the writes MAY have applied, so
+ * the caller must keep the claim and must not retry (no
+ * `indeterminate`/`applied:false` claim as fact — same rule as
+ * `callWriteExecute`).
+ */
+export type ResumeExecuteOutcome =
+  | { kind: "executed"; note: string }
+  | { kind: "pending"; remaining: number }
+  | { kind: "missing" }
+  | { kind: "noop" }
+  | { kind: "unavailable" };
+
+export async function executeResumeBatchRemote(
+  deps: AssistantInternalDeps,
+  batchId: string
+): Promise<ResumeExecuteOutcome> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input_, init) => fetch(input_, init));
+  const url = `${originOf(deps)}${INTERNAL_RESUME_EXECUTE_PATH}`;
+  try {
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: await signedHeaders(deps),
+      body: JSON.stringify({ batchId }),
+      // Bounded like every other DO → Worker internal call. A hung execute
+      // must not stall the resume; the timeout maps to `unavailable` (writes
+      // MAY have applied → the DO keeps its claim and never retries).
+      signal: AbortSignal.timeout(INTERNAL_CALL_TIMEOUT_MS),
+    });
+    if (!res.ok) return { kind: "unavailable" };
+    const body = (await res.json()) as { ok?: unknown; note?: unknown; reason?: unknown; remaining?: unknown };
+    if (body.ok === true) return { kind: "executed", note: typeof body.note === "string" ? body.note : "" };
+    if (body.reason === "pending") {
+      return { kind: "pending", remaining: typeof body.remaining === "number" ? body.remaining : 0 };
+    }
+    if (body.reason === "noop") return { kind: "noop" };
+    return { kind: "missing" };
+  } catch {
+    return { kind: "unavailable" };
+  }
 }

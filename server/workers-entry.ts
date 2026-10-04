@@ -86,7 +86,7 @@ import { handleInternalAssistantRequest } from "./assistant/internal-routes";
 import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerHarnessContext } from "./assistant/worker-tools";
 import { dispatchDueSchedules } from "./scheduled/schedules";
 import { reconcileStaleRuns } from "./assistant/run-registry";
-import type { AssistantThreadRpcShape } from "./assistant/thread-rpc";
+import type { AssistantThreadRpcShape, ResumeBatchAck } from "./assistant/thread-rpc";
 import type {
   AssistantRunRow,
   AssistantScheduleRow,
@@ -110,7 +110,7 @@ type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
 function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadRpcShape {
   interface Stub {
     getTranscript(): Promise<{ messages: unknown[]; summary: string | null; summarizedCount: number | null; permissionMode: AssistantToolPermissionMode }>;
-    resumeBatch(batchId: string | null): Promise<{ ok: true }>;
+    resumeBatch(batchId: string | null): Promise<ResumeBatchAck>;
     destroyThread(): Promise<{ ok: true }>;
     resetThread(): Promise<{ ok: true }>;
     enqueueRun(input: {

@@ -304,13 +304,29 @@ export function nextTurnsAfterStreamError(
   return [...arr, { role: "assistant", text: args.text, imageCount: 0, rawIndex: -1, error: args.error, ...(args.activity ? { activity: args.activity } : {}) }];
 }
 
-// First frozen batch (scanning from the tail) whose chips have ALL reached
-// a terminal state and that has not been resumed yet.
+// The newest frozen batch that is safe to auto-resume (LX-81/82):
+//   - Trailing region only: a batch the user has since moved past with a new
+//     user turn is settled history, never re-opened.
+//   - Fully terminal: any pending chip blocks that batch (the user has not
+//     finished deciding) but is SKIPPED, not a stop, so an older fully-decided
+//     batch is not stranded behind it.
+//   - Approved-only: a batch with only rejected/expired chips has nothing to
+//     execute, so it must not trigger a resume.
+//   - Not already resumed (persisted across reload / in-flight).
 export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>): string | null {
-  for (let i = (turns ?? []).length - 1; i >= 0; i--) {
-    const b = turns?.[i]!.batch;
+  const list = turns ?? [];
+  let trailingStart = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i]!.role === "user") {
+      trailingStart = i + 1;
+      break;
+    }
+  }
+  for (let i = list.length - 1; i >= trailingStart; i--) {
+    const b = list[i]!.batch;
     if (!b || resumed.has(b.batchId)) continue;
-    if (b.chips.some((c) => c.state === "pending")) return null;
+    if (b.chips.some((c) => c.state === "pending")) continue;
+    if (!b.chips.some((c) => c.state === "approved")) continue;
     return b.batchId;
   }
   return null;

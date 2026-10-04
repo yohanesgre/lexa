@@ -122,6 +122,10 @@ const AssistantChatStreamInput = Schema.Struct({
 
 const AssistantChatPath = Schema.Struct({ chatId: Schema.String });
 
+// The client names the exact approval batch to execute (LX-79 single-owner
+// resume). Optional: an older client / the legacy walk omits it (null).
+const ResumeChatPayload = Schema.Struct({ batchId: Schema.optional(Schema.String) });
+
 const AssistantChatTranscriptSchema = Schema.Struct({
   chatId: Schema.String,
   projectId: Schema.String,
@@ -231,7 +235,7 @@ const assistantGroup = HttpApiGroup.make("assistant")
     .setPayload(Schema.Struct({ verdict: Schema.Literal("approve", "reject") }))
     .addSuccess(Schema.Struct({ approvalId: Schema.String, batchId: Schema.String, status: Schema.String, remaining: Schema.Number })))
   .add(HttpApiEndpoint.post("resumeAssistantChat", "/assistant/chat/:chatId/resume")
-    .setPath(AssistantChatPath).addSuccess(Schema.Void))
+    .setPath(AssistantChatPath).setPayload(ResumeChatPayload).addSuccess(Schema.Void))
   .add(HttpApiEndpoint.post("resumeAssistantThread", "/assistant/threads/:documentType/:documentId/resume")
     .setPath(AssistantThreadPath).addSuccess(Schema.Void))
   .add(HttpApiEndpoint.get("getAssistantRun", "/assistant/runs/:runId")

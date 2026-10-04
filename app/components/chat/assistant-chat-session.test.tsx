@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { useRef, useState } from "react";
+import type { RefObject } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -523,10 +524,12 @@ function terminalBatchTurn(batchId: string): ChatTurn {
   } as ChatTurn;
 }
 
+type ResumeResult = { ok: boolean; executed?: boolean | undefined; reason?: string | undefined };
+
 function makeResumeStream() {
-  const calls: Array<{ url: string; onResult?: ((ok: boolean) => void) | undefined }> = [];
-  const send = vi.fn((url: string, _body: unknown, onResult?: (ok: boolean) => void) => {
-    calls.push({ url, onResult });
+  const calls: Array<{ url: string; body: unknown; onResult?: ((result: ResumeResult) => void) | undefined }> = [];
+  const send = vi.fn((url: string, body: unknown, onResult?: (result: ResumeResult) => void) => {
+    calls.push({ url, body, onResult });
   });
   return { stream: makeStream({ send }), calls };
 }
@@ -548,8 +551,10 @@ describe("useStreamFrameFreeze — resume idempotency", () => {
     const first = makeResumeStream();
     const { unmount } = renderFreeze(first.stream, turns, "C1");
     expect(first.calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+    // The client names the exact batch so the DO executes that batch.
+    expect(first.calls[0]!.body).toEqual({ batchId: "b1" });
 
-    act(() => first.calls[0]!.onResult?.(true));
+    act(() => first.calls[0]!.onResult?.({ ok: true, executed: true }));
     expect(readResumedBatches("C1")).toEqual(["b1"]);
     expect(window.localStorage.getItem("lexa-chat-resumed:C1")).toBe(JSON.stringify(["b1"]));
 
@@ -566,7 +571,7 @@ describe("useStreamFrameFreeze — resume idempotency", () => {
     const { unmount } = renderFreeze(first.stream, turns, "C1");
     expect(first.calls).toHaveLength(1);
 
-    act(() => first.calls[0]!.onResult?.(false));
+    act(() => first.calls[0]!.onResult?.({ ok: false }));
     expect(readResumedBatches("C1")).toEqual([]);
     expect(window.localStorage.getItem("lexa-chat-resumed:C1")).toBeNull();
 
@@ -574,6 +579,32 @@ describe("useStreamFrameFreeze — resume idempotency", () => {
     const second = makeResumeStream();
     renderFreeze(second.stream, turns, "C1");
     expect(second.calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+  });
+
+  it("does not persist a pending/unavailable ack, so a later pass retries", () => {
+    const turns = [terminalBatchTurn("b1")];
+    const pending = makeResumeStream();
+    renderFreeze(pending.stream, turns, "C1");
+    act(() => pending.calls[0]!.onResult?.({ ok: true, executed: false, reason: "pending" }));
+    expect(readResumedBatches("C1")).toEqual([]);
+
+    const unavailable = makeResumeStream();
+    renderFreeze(unavailable.stream, turns, "C1");
+    act(() => unavailable.calls[0]!.onResult?.({ ok: true, executed: false, reason: "unavailable" }));
+    expect(readResumedBatches("C1")).toEqual([]);
+  });
+
+  it("persists a settled/indeterminate ack (nothing more to retry)", () => {
+    const turns = [terminalBatchTurn("b1")];
+    const settled = makeResumeStream();
+    renderFreeze(settled.stream, turns, "C1");
+    act(() => settled.calls[0]!.onResult?.({ ok: true, executed: false, reason: "settled" }));
+    expect(readResumedBatches("C1")).toEqual(["b1"]);
+
+    const indeterminate = makeResumeStream();
+    renderFreeze(indeterminate.stream, [terminalBatchTurn("b2")], "C1");
+    act(() => indeterminate.calls[0]!.onResult?.({ ok: true, executed: false, reason: "indeterminate" }));
+    expect(readResumedBatches("C1")).toEqual(["b1", "b2"]);
   });
 
   it("keeps persisted resumes isolated per chat", () => {
@@ -605,6 +636,50 @@ describe("useStreamFrameFreeze — resume idempotency", () => {
     window.localStorage.setItem("lexa-chat-resumed:C1", JSON.stringify({ batchId: "b1" }));
     expect(readResumedBatches("C1")).toEqual([]);
     window.localStorage.setItem("lexa-chat-resumed:C1", JSON.stringify(["b1", 2, null]));
+    expect(readResumedBatches("C1")).toEqual(["b1"]);
+  });
+});
+
+describe("useStreamFrameFreeze — in-flight resume survives a chat switch (LX-83)", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("does not re-issue the POST when the batch is still in flight across a switch away and back", () => {
+    // The persisted/in-memory resumed set is re-seeded per chat, so a switch
+    // away and back while the POST is unsettled would re-issue it — unless the
+    // component-lifetime in-flight map dedupes. This pins the map.
+    const { stream, calls } = makeResumeStream();
+    interface Props {
+      turns: ChatTurn[];
+      chatId: string;
+      ingressInsertedRef: RefObject<Set<string>>;
+    }
+    const refOf = (): RefObject<Set<string>> => ({ current: new Set<string>() });
+    const { rerender } = renderHook(
+      (props: Props) =>
+        useStreamFrameFreeze({
+          stream,
+          setTurns: () => {},
+          turns: props.turns,
+          chatId: props.chatId,
+          streaming: false,
+          ingressInsertedRef: props.ingressInsertedRef,
+        }),
+      {
+        initialProps: {
+          turns: [terminalBatchTurn("b1")],
+          chatId: "C1",
+          ingressInsertedRef: refOf(),
+        } satisfies Props,
+      }
+    );
+    expect(calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+
+    rerender({ turns: [], chatId: "C2", ingressInsertedRef: refOf() });
+    rerender({ turns: [terminalBatchTurn("b1")], chatId: "C1", ingressInsertedRef: refOf() });
+
+    expect(calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+
+    act(() => calls[0]!.onResult?.({ ok: true, executed: true }));
     expect(readResumedBatches("C1")).toEqual(["b1"]);
   });
 });
