@@ -52,13 +52,15 @@ describe("Menu", () => {
     expect(screen.getByRole("button", { name: "Two" })).toHaveFocus();
   });
 
-  it("closes on Escape from inside the menu", () => {
+  it("closes on Escape from inside the menu and restores focus to the trigger", () => {
     renderMenu();
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const trigger = screen.getByRole("button", { name: "Open" });
+    fireEvent.click(trigger);
     expect(screen.getByRole("menu")).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByRole("button", { name: "One" }), { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
+    expect(trigger).toHaveFocus();
   });
 
   it("re-anchors the popover on window scroll", () => {

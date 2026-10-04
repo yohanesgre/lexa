@@ -45,6 +45,8 @@ function SwimlaneActionsMenu({ lane, collapsed, onToggle, onRename, onOpenSettin
             toggle();
           }}
           title="Swimlane menu"
+          aria-haspopup="menu"
+          aria-expanded={open}
         >
           <MoreHorizontal size={14} />
         </button>

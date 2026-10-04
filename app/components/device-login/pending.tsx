@@ -13,11 +13,20 @@ export function PendingVariant({ clientName, code, expiresAt, busy, onApprove, o
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    const expiresMs = new Date(expiresAt).getTime();
+    // Already terminal — no ticking needed.
+    if (expiresMs <= Date.now()) return;
     // 1s while pending so the flip to expired (and the countdown label) is
     // never stale by more than a second; Approve/Deny must not stay live.
-    const t = setInterval(() => setNow(Date.now()), 1_000);
+    // Clear once expired so the tick doesn't fire forever behind the
+    // ExpiredVariant early return.
+    const t = setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= expiresMs) clearInterval(t);
+    }, 1_000);
     return () => clearInterval(t);
-  }, []);
+  }, [expiresAt]);
 
   // The request is terminal once it expires — flip to the expired variant
   // instead of leaving Approve/Deny live on a dead request.

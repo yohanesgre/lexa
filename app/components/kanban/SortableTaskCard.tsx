@@ -53,6 +53,8 @@ const CardMenu = memo(function CardMenu({
           }}
           title="Card menu"
           aria-label="Card menu"
+          aria-haspopup="menu"
+          aria-expanded={open}
         >
           <MoreHorizontal size={14} />
         </button>

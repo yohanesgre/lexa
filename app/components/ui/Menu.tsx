@@ -67,9 +67,15 @@ export function Menu({ trigger, children, align = "right", gap = 8 }: MenuProps)
 
   // Opening must move focus into the popover; otherwise keydowns stay on the
   // trigger and never reach handlePopoverKeyDown, leaving arrow keys dead.
+  // On close, return focus to the trigger (the first focusable in the
+  // container — the popover lives in a portal) so WAI-ARIA menu-button focus
+  // never falls back to <body>.
   useEffect(() => {
     if (!open) return;
     popoverRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
+    return () => {
+      containerRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus();
+    };
   }, [open]);
 
   const toggle = () => {

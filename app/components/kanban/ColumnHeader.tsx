@@ -110,6 +110,8 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
                 className={cn("icon-btn", open && "active")}
                 onClick={toggle}
                 title="Column menu"
+                aria-haspopup="menu"
+                aria-expanded={open}
               >
                 <MoreHorizontal size={14} />
               </button>
