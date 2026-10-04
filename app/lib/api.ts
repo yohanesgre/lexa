@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
-import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantProjectSettings, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
+import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
 
 const BASE = "/api";
 
@@ -471,6 +471,10 @@ export function createTeam(input: { name: string; slug?: string }): Promise<Team
   return request(`${BASE}/teams`, { method: "POST", body: JSON.stringify(input) });
 }
 
+export function updateTeam(teamId: string, input: { name: string }): Promise<Team> {
+  return request(`${BASE}/teams/${teamId}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
 export function deleteTeam(teamId: string): Promise<void> {
   return request(`${BASE}/teams/${teamId}`, { method: "DELETE" });
 }
@@ -928,13 +932,15 @@ export interface AssistantRunRow {
   id: string;
   key: string;
   projectId: string;
-  documentType: "task" | "wiki";
+  kind: "chat_run" | "document" | "schedule";
+  documentType: "task" | "wiki" | null;
   documentId: string;
   documentTitle: string;
   agentId: string;
   skillId: string;
   agentName: string;
   skillName: string;
+  threadKey: string | null;
   status: AssistantRunStatus;
   error: string | null;
   createdAt: string;
@@ -1025,14 +1031,6 @@ export function listAssistantBindings(): Promise<{ data: AssistantBindingRow[] }
 
 export function syncAssistantPrices(): Promise<AssistantPriceSyncResult> {
   return request(`${BASE}/admin/assistant/prices/sync`, { method: "POST" });
-}
-
-export function getAssistantProjectSettings(projectId: string): Promise<AssistantProjectSettings> {
-  return request(`${BASE}/assistant/settings/${projectId}`);
-}
-
-export function putAssistantProjectSettings(projectId: string, input: { providerId: string | null; modelId: string | null; fallbackModelIds: string[] }): Promise<AssistantProjectSettings> {
-  return request(`${BASE}/assistant/settings/${projectId}`, { method: "PUT", body: JSON.stringify({ providerId: input.providerId, modelId: input.modelId, fallbackModelIds: input.fallbackModelIds }) });
 }
 
 export function createAssistantTask(input: {

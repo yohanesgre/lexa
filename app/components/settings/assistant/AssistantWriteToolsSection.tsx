@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAssistantSettings, useSaveAssistantWriteTools } from "../../../lib/queries";
 import { ASSISTANT_WRITE_TOOL_NAMES } from "../../../../shared/assistant";
-import type { AssistantSettingsInput } from "../../../../shared/assistant";
 import type { Project } from "../../../../shared/types";
 
 // ── Write tools (assistant-write-approvals.html State 4) ──
@@ -25,6 +24,9 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
 
   const enabled = selected.length > 0;
 
+  const storedTools = (settings?.writeTools ?? []).filter((t) => (ASSISTANT_WRITE_TOOL_NAMES as readonly string[]).includes(t));
+  const isDirty = selected.length !== storedTools.length || selected.some((t) => !storedTools.includes(t));
+
   const toggleTool = (tool: string) =>
     setSelected((prev) => (prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]));
 
@@ -34,14 +36,17 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
   const toggleMaster = () => setSelected((prev) => (prev.length > 0 ? [] : [...ASSISTANT_WRITE_TOOL_NAMES]));
 
   const handleSave = () => {
-    if (!settings) return;
+    if (!settings || !isDirty) return;
     save.mutate({
-      ...(settings.kind !== undefined ? { kind: settings.kind } : {}),
-      ...(settings.baseUrl !== undefined ? { baseUrl: settings.baseUrl } : {}),
-      ...(settings.model !== undefined ? { model: settings.model } : {}),
-      ...(settings.fallbackModelIds !== undefined ? { fallbackModelIds: [...settings.fallbackModelIds] } : {}),
+      searchProvider: settings.searchProvider,
+      urlAllowlist: settings.urlAllowlist,
+      primarySupportsImages: settings.primarySupportsImages,
+      reasoningEffort: settings.reasoningEffort,
+      providerId: settings.providerId,
+      modelId: settings.modelId,
+      fallbackModelIds: [...(settings.fallbackModelIds ?? [])],
       writeTools: selected,
-    } as AssistantSettingsInput);
+    });
   };
 
   // No provider row yet — PUT needs kind/baseUrl/model, so this section stays
@@ -100,7 +105,7 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>
           <span className="field-hint">Empty selection = read-only. Applies from the next turn.</span>
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending}>
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending || !isDirty}>
             {save.isPending ? "Saving…" : "Save"}
           </button>
         </div>

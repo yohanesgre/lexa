@@ -1,5 +1,5 @@
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { AssistantProvider, AssistantProviderModel } from "../../../shared/assistant";
+import type { AssistantProvider, AssistantProviderModel, AssistantSettingsInput } from "../../../shared/assistant";
 import * as api from "../api";
 import { useToast } from "../../components/ui/Toast";
 
@@ -428,7 +428,7 @@ export function useAssistantProjectSettings(projectId: string | undefined) {
     queryKey: ["assistant-settings", projectId],
     queryFn: async () => {
       try {
-        return await api.getAssistantProjectSettings(projectId!);
+        return await api.getAssistantSettings(projectId!);
       } catch (err) {
         if ((err as { code?: string }).code === "PROVIDER_NOT_CONFIGURED") return null;
         throw err;
@@ -443,8 +443,7 @@ export function useSaveAssistantProjectSettings(projectId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (input: { providerId: string | null; modelId: string | null; fallbackModelIds: string[] }) =>
-      api.putAssistantProjectSettings(projectId, input),
+    mutationFn: (input: AssistantSettingsInput) => api.putAssistantSettings(projectId, input),
     onSuccess: (settings) => {
       qc.setQueryData(["assistant-settings", projectId], settings);
       toast.push("success", "Assistant provider saved");

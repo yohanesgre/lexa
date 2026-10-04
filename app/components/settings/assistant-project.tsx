@@ -27,12 +27,18 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
   const { data: projectSettings, isLoading: settingsLoading } = useAssistantProjectSettings(project.id);
   const save = useSaveAssistantProjectSettings(project.id);
 
-  const settings = (projectSettings as unknown as { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[]; searchProvider?: string | null | undefined; urlAllowlist?: string | null | undefined; hasSearchKey?: boolean | undefined; reasoningEffort?: string | null | undefined; engine?: string } | null) ?? null;
-
-  const modelState = useAssistantProjectModels({ settings, legacySettings, settingsLoading, providersLoading, providers });
+  const modelState = useAssistantProjectModels({ settings: projectSettings, legacySettings, settingsLoading, providersLoading, providers });
   const { providerId, setProviderId, modelId, setModelId, fallbacks, setFallbacks } = modelState;
 
   const [addFallbackId, setAddFallbackId] = useState<string>("");
+
+  const persistedProviderId = projectSettings?.providerId ?? "";
+  const persistedModelId = projectSettings?.modelId ?? "";
+  const persistedFallbacks = projectSettings?.fallbackModelIds ?? [];
+  const isDirty =
+    providerId !== persistedProviderId ||
+    modelId !== persistedModelId ||
+    JSON.stringify(fallbacks) !== JSON.stringify(persistedFallbacks);
 
   const selectedProvider = providers.find((p) => p.id === providerId);
   const enabledModels = enabledModelsOf(selectedProvider);
@@ -64,7 +70,8 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
   };
 
   const handleSave = () => {
-    save.mutate(savePayload(providerId, modelId, fallbacks));
+    if (!isDirty) return;
+    save.mutate(savePayload(projectSettings, providerId, modelId, fallbacks));
   };
 
   if (providersLoading || settingsLoading) {
@@ -76,7 +83,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
     );
   }
 
-  const notConfigured = !settings?.providerId;
+  const notConfigured = !projectSettings?.providerId;
 
   return (
     <section className="mb-8 mt-4">
@@ -160,7 +167,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
         </div>
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending || !hasPrimary(providerId, modelId)}>
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending || !hasPrimary(providerId, modelId) || !isDirty}>
             {save.isPending ? "Saving…" : "Save"}
           </button>
         </div>

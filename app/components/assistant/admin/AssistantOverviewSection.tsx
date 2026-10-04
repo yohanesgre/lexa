@@ -5,7 +5,7 @@ import { useAssistantRuns } from "../../../lib/queries/assistant-admin";
 import { useProjects } from "../../../lib/queries";
 import { UsageKpiCards } from "../UsageKpiCards";
 import { GatewayHealthSection } from "../GatewayHealthSection";
-import { formatDuration, formatTimestamp, RunStatusChip } from "./run-display";
+import { formatDuration, formatTimestamp, RunStatusChip, runKindLabel } from "./run-display";
 
 export function AssistantOverviewSection() {
   const { data: usage } = useAssistantOverviewSummary();
@@ -49,7 +49,7 @@ export function AssistantOverviewSection() {
                   <td className="font-mono text-xs color-secondary">{formatTimestamp(r.createdAt, { seconds: false })}</td>
                   <td className="text-xs weight-500 color-primary">{projectById.get(r.projectId)?.name ?? "—"}</td>
                   <td className="text-xs color-primary">
-                    <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{r.documentType === "task" ? "Task" : "Wiki"}</span> · {r.documentTitle || "—"}
+                    <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{runKindLabel(r)}</span> · {r.documentTitle || "—"}
                   </td>
                   <td className="text-xs color-secondary">{r.agentName || "—"}</td>
                   <td className="text-xs color-secondary">{r.skillName || "—"}</td>

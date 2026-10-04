@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
 import { useSession, useTeams, useTeamMembers, useAddTeamMember, useUpdateTeamMemberRole, useRemoveTeamMember, useWorkspaceMembers, useDashboard } from "../../lib/queries";
+import { useUpdateTeam } from "../../lib/queries/team";
 import { InlineDropdown } from "./SettingsSections";
 import { useTeamSelection } from "../../lib/team-selection";
 import type { Team, TeamMember, TeamMemberRole, Project } from "../../../shared/types";
@@ -125,9 +126,9 @@ function TeamSwitcher({ teams, activeTeamId, onSelect }: { teams: Team[]; active
 // Team profile: name editable, slug read-only (no rename endpoint).
 function TeamProfileSection({ team }: { team: Team }) {
   const [name, setName] = useState(team.name);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const updateTeam = useUpdateTeam();
 
   // Team switch while mounted → re-seed the editable name (render-time adjust).
   const [prevTeamId, setPrevTeamId] = useState(team.id);
@@ -138,29 +139,21 @@ function TeamProfileSection({ team }: { team: Team }) {
     setError(null);
   }
 
-  const handleSave = async () => {
+  const handleSave = () => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setSaving(true);
     setError(null);
-    try {
-      const res = await fetch(`/api/teams/${team.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({})) as { error?: { message?: string } };
-        throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+    setSaved(false);
+    updateTeam.mutate(
+      { teamId: team.id, name: trimmed },
+      {
+        onSuccess: (updated) => {
+          setName(updated.name ?? trimmed);
+          setSaved(true);
+        },
+        onError: (err) => setError((err as Error).message),
       }
-      const updated = (await res.json()) as Team;
-      setName(updated.name ?? trimmed);
-      setSaved(true);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
+    );
   };
 
   return (
@@ -177,8 +170,8 @@ function TeamProfileSection({ team }: { team: Team }) {
               <span className="text-xs text-lx-text-muted">read-only</span>
             </div>
           </Field>
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || !name.trim()}>
-            {saving ? "Saving…" : "Save"}
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={updateTeam.isPending || !name.trim()}>
+            {updateTeam.isPending ? "Saving…" : "Save"}
           </button>
         </div>
         {error && <div className="field-hint-danger mt-2">{error}</div>}
