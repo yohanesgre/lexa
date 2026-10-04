@@ -143,6 +143,8 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
   const handleAdd = () => {
     const v = value.trim();
     if (!v) return;
+    // Guard against key-repeat double-adds (mirrors selectWiki).
+    if (addSource.isPending) return;
     if (mention) {
       if (wikiMatches.length === 0) return;
       selectWiki(wikiMatches[highlight >= 0 ? highlight : 0]!);

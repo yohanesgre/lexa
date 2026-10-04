@@ -35,6 +35,18 @@ function findNodeById(nodes: WikiNode[], id: string | null): WikiNode | null {
   return null;
 }
 
+// A node is rendered only when every ancestor is expanded — a node that is in
+// the tree but hidden under a collapsed ancestor has no [data-node-id] element,
+// so it can never be the tabbable treeitem.
+function isNodeVisible(nodes: WikiNode[], id: string | null, expanded: Set<string>): boolean {
+  if (!id) return false;
+  for (const node of nodes) {
+    if (node.id === id) return true;
+    if (expanded.has(node.id) && isNodeVisible(node.children, id, expanded)) return true;
+  }
+  return false;
+}
+
 type ListState = "loading" | "error" | "empty" | "ready";
 
 function SidebarList({
@@ -79,9 +91,12 @@ function SidebarList({
   const treeRef = useRef<HTMLDivElement | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const activeNodeId = findNodeIdBySlug(tree, activePageSlug);
-  // A focused row can vanish (page deleted) — fall back to the active/first row
+  // A focused row can vanish (page deleted) or be hidden under a collapsed
+  // ancestor — fall back to the active row (if rendered) then the first row,
   // so the tree always keeps exactly one tabbable treeitem.
-  const tabbableId = findNodeById(tree, focusedId) ? focusedId : activeNodeId ?? tree[0]?.id ?? null;
+  const focusedVisible = focusedId !== null && isNodeVisible(tree, focusedId, expanded);
+  const activeVisible = activeNodeId !== null && isNodeVisible(tree, activeNodeId, expanded);
+  const tabbableId = focusedVisible ? focusedId : activeVisible ? activeNodeId : tree[0]?.id ?? null;
 
   const treeItems = () =>
     Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? []);

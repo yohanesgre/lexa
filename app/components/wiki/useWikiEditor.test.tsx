@@ -33,7 +33,10 @@ const editorMock = vi.hoisted(() => {
           if (options?.emitUpdate !== false) onUpdate?.();
         },
       },
-      setEditable: () => {},
+      // Mirror Tiptap v3: setEditable emits an update unless emitUpdate is false.
+      setEditable: (_editable: boolean, emitUpdate = true) => {
+        if (emitUpdate !== false) onUpdate?.();
+      },
     },
   };
 });
