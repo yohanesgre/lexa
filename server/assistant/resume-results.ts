@@ -78,7 +78,25 @@ export const collectResumeResults = <R extends ResumeRow, E, Req>(
       } else if (row.status === "rejected") {
         results.push({ approvalId: row.id, status: "denied" });
         noteLines.push({ tool: row.tool_name, target: targetOf(row), status: "denied" });
+      } else if (row.status === "expired") {
+        // Expired rows never ran and carry no approval result; report them in
+        // the note so a mixed batch is not silently missing them.
+        noteLines.push({ tool: row.tool_name, target: targetOf(row), status: "expired" });
       }
     }
     return { results, noteLines };
   });
+
+// Note lines for a fully-decided batch with no approved rows (all
+// rejected/expired). The DO resumes the turn on this note so the user is never
+// left with silent feedback.
+export function settledNoteLines(
+  rows: readonly Pick<ResumeRow, "tool_name" | "args" | "status">[]
+): ResumeResultLine[] {
+  const lines: ResumeResultLine[] = [];
+  for (const row of rows) {
+    if (row.status === "rejected") lines.push({ tool: row.tool_name, target: targetOf(row), status: "denied" });
+    else if (row.status === "expired") lines.push({ tool: row.tool_name, target: targetOf(row), status: "expired" });
+  }
+  return lines;
+}

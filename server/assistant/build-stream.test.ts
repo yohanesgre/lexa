@@ -290,6 +290,12 @@ describe("buildResumeResultsNote", () => {
     expect(note).toContain('- delete_task "EG-3": rejected (not executed)');
   });
 
+  it("notes an expired write honestly as not executed", () => {
+    const note = buildResumeResultsNote([{ tool: "update_task", target: "EG-4", status: "expired" }]);
+    expect(note).toContain("None of the proposed writes were executed.");
+    expect(note).toContain('- update_task "EG-4": expired (not executed)');
+  });
+
   it("notes a failed write, its status and error", () => {
     const note = buildResumeResultsNote([{ tool: "update_task", target: "EG-1", status: "failed", error: "TASK_NOT_FOUND: x" }]);
     expect(note).toContain('- update_task "EG-1": failed (not executed): TASK_NOT_FOUND: x');

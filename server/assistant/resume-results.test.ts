@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { targetOf, collectResumeResults } from "./resume-results";
+import { targetOf, collectResumeResults, settledNoteLines } from "./resume-results";
 import { buildResumeResultsNote } from "./build-stream";
 
 describe("targetOf bulk args", () => {
@@ -66,5 +66,35 @@ describe("collectResumeResults bulk target in the executed-writes note", () => {
     );
     expect(results[0]!.partial).toBeUndefined();
     expect(buildResumeResultsNote(noteLines)).toContain('- delete_task "2 tasks": applied');
+  });
+
+  it("notes an expired row without an approval result", async () => {
+    const rows = [
+      { id: "a1", tool_name: "update_task", args: JSON.stringify({ ref: "EG-1" }), status: "expired" },
+    ];
+    const { results, noteLines } = await Effect.runPromise(
+      collectResumeResults(rows, () => Effect.succeed({ ok: true as const, result: undefined }))
+    );
+    expect(results).toEqual([]);
+    expect(buildResumeResultsNote(noteLines)).toContain('- update_task "EG-1": expired (not executed)');
+  });
+});
+
+describe("settledNoteLines", () => {
+  it("maps rejected to denied and expired to expired, skipping approved", () => {
+    const lines = settledNoteLines([
+      { tool_name: "update_task", args: JSON.stringify({ ref: "EG-1" }), status: "rejected" },
+      { tool_name: "delete_task", args: JSON.stringify({ ref: "EG-2" }), status: "expired" },
+      { tool_name: "create_task", args: JSON.stringify({ title: "x" }), status: "approved" },
+    ]);
+    const note = buildResumeResultsNote(lines);
+    expect(note).toContain("None of the proposed writes were executed.");
+    expect(note).toContain('- update_task "EG-1": rejected (not executed)');
+    expect(note).toContain('- delete_task "EG-2": expired (not executed)');
+    expect(note).not.toContain("create_task");
+  });
+
+  it("returns an empty note when no rows are settled", () => {
+    expect(buildResumeResultsNote(settledNoteLines([]))).toBe("");
   });
 });

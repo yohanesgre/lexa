@@ -261,6 +261,16 @@ describe("executeResumeBatchRemote", () => {
     ).resolves.toEqual({ kind: "pending", remaining: 2 });
     await expect(executeResumeBatchRemote(deps(withBody({ ok: false, reason: "noop" })), "b1")).resolves.toEqual({
       kind: "noop",
+      note: "",
+    });
+    await expect(
+      executeResumeBatchRemote(
+        deps(withBody({ ok: false, reason: "noop", note: '[approved write results]\n- update_task "P-1": rejected (not executed)' })),
+        "b1"
+      )
+    ).resolves.toEqual({
+      kind: "noop",
+      note: '[approved write results]\n- update_task "P-1": rejected (not executed)',
     });
     await expect(executeResumeBatchRemote(deps(withBody({ ok: false, reason: "missing" })), "b1")).resolves.toEqual({
       kind: "missing",

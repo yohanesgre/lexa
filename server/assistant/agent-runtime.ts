@@ -520,7 +520,9 @@ function isApprovalPartial(value: unknown): value is { applied: number; failed: 
  * provider-context note. `pending` means the batch is not fully decided (the DO
  * releases its claim and may try an older batch); `missing` means the batch has
  * no rows for this thread/owner. `noop` means the batch holds no approved rows
- * (all rejected/expired): nothing is executed and the DO runs no continuation.
+ * (all rejected/expired): nothing is executed, but `note` carries the settled
+ * result lines so the DO can run a rejection acknowledgment continuation (empty
+ * note = old Worker, silent legacy settle).
  * `unsupported` means the thread is not chat (task/wiki): the route applies
  * nothing, so the DO releases its claim and no-ops — task/wiki continuation is
  * owned in-process by `resumeThreadStream`.
@@ -533,7 +535,7 @@ export type ResumeExecuteOutcome =
   | { kind: "executed"; note: string }
   | { kind: "pending"; remaining: number }
   | { kind: "missing" }
-  | { kind: "noop" }
+  | { kind: "noop"; note: string }
   | { kind: "unsupported" }
   | { kind: "unavailable" };
 
@@ -559,7 +561,7 @@ export async function executeResumeBatchRemote(
     if (body.reason === "pending") {
       return { kind: "pending", remaining: typeof body.remaining === "number" ? body.remaining : 0 };
     }
-    if (body.reason === "noop") return { kind: "noop" };
+    if (body.reason === "noop") return { kind: "noop", note: typeof body.note === "string" ? body.note : "" };
     if (body.reason === "unsupported") return { kind: "unsupported" };
     return { kind: "missing" };
   } catch {

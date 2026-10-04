@@ -891,9 +891,20 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       this.releaseResumeBatch(batchId);
       return { ok: true, executed: false, reason: "settled" };
     }
-    // No approved rows: nothing ran, so no continuation. Keep the claim so a
-    // repeated request stays idempotent, and settle the batch.
-    if (outcome.kind === "noop") return { ok: true, executed: false, reason: "settled" };
+    // No approved rows: nothing ran, but a settled note (all rejected/expired)
+    // still warrants a rejection acknowledgment so the user is never left with
+    // silent feedback. Keep the claim so a repeated request stays idempotent,
+    // and settle the batch. A note-less noop (old Worker) stays silent.
+    if (outcome.kind === "noop") {
+      // Trade-off (accepted, narrow): the durable claim is written before this
+      // continuation. A crash/eviction in between leaves the claim set, so a
+      // retry short-circuits at the `claimResumeBatch` guard above
+      // (`executed: true`) and the acknowledgment note is never delivered.
+      // Claiming after the continuation would risk duplicate work; the
+      // pre-continuation claim is what makes a duplicate request idempotent.
+      if (outcome.note.trim() !== "") await this.runResumeContinuation(batchId, outcome.note);
+      return { ok: true, executed: false, reason: "settled" };
+    }
     // Non-chat thread (task/wiki): the route applies nothing and the
     // continuation is owned in-process by `resumeThreadStream`, so there is no
     // DO-side work to do. Writes definitely did not apply → release the claim
@@ -923,8 +934,14 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         this.releaseResumeBatch(id);
         continue;
       }
-      // Nothing was executed for this batch; keep the claim and try older ones.
-      if (outcome.kind === "noop") continue;
+      // A settled note still needs its rejection acknowledgment so the user is
+      // never left with silent feedback; mirror the requested path. The walk
+      // keeps the claim for idempotency and continues to older batches (legacy
+      // clients only). A note-less noop stays silent.
+      if (outcome.kind === "noop") {
+        if (outcome.note.trim() !== "") await this.runResumeContinuation(id, outcome.note);
+        continue;
+      }
       // Non-chat thread: nothing to execute DO-side (task/wiki continuation is
       // in-process via `resumeThreadStream`). Release the claim so a retry
       // re-reaches the Worker instead of stranding the batch forever.

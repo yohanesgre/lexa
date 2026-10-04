@@ -276,7 +276,7 @@ export interface ResumeResultLine {
   tool: string;
   target?: string | undefined;
   created?: string | undefined;
-  status: "applied" | "failed" | "denied";
+  status: "applied" | "failed" | "denied" | "expired";
   error?: string | undefined;
   partial?: ApprovalPartial | undefined;
 }
@@ -316,7 +316,8 @@ export function buildResumeResultsNote(lines: readonly ResumeResultLine[]): stri
     else if (l.status === "failed") {
       const error = l.error === undefined ? "" : noteText(l.error);
       out.push(`- ${label}: failed (not executed)${error !== "" ? `: ${error}` : ""}`);
-    } else out.push(`- ${label}: rejected (not executed)`);
+    } else if (l.status === "denied") out.push(`- ${label}: rejected (not executed)`);
+    else out.push(`- ${label}: expired (not executed)`);
   }
   return out.join("\n");
 }
