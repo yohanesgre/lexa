@@ -119,6 +119,9 @@ function EmptyMilestones({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => vo
 export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "timeline" }) {
   const { data: milestones = [], isLoading, error, refetch } = useMilestones(slug);
   const { data: board } = useBoard(slug);
+  // Archived-inclusive board for the completion dialog: the default board drops
+  // archived tasks, so "already archived" counts would always read zero.
+  const { data: boardAll } = useBoard(slug, true);
   // Warm the standalone (includeArchived) lane list so sprint-count syncs read
   // a complete source even when the board is in its default archived=false view.
   useSwimlanes(slug);
@@ -137,7 +140,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const { active, archived } = splitByArchive(milestones);
-  const archivingSprints = archiving ? milestoneRemainingSprints(board, archiving.id) : [];
+  const archivingSprints = archiving ? milestoneRemainingSprints(boardAll, archiving.id) : [];
 
   const toggleCollapsed = (id: string) =>
     setCollapsed((prev) => {
@@ -352,7 +355,8 @@ function ActiveMilestoneActions({ canDelete, onArchive, onEdit, onDelete }: {
   );
 }
 
-function ArchivedMilestoneActions({ onRestore, onDelete }: {
+function ArchivedMilestoneActions({ canDelete, onRestore, onDelete }: {
+  canDelete: boolean;
   onRestore: (() => void) | undefined;
   onDelete: () => void;
 }) {
@@ -365,7 +369,14 @@ function ArchivedMilestoneActions({ onRestore, onDelete }: {
       </div>
       <span className="ms-actions-spacer" />
       <div className="ms-actions-right">
-        <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          style={{ color: "var(--lx-text-danger)" }}
+          disabled={!canDelete}
+          title={canDelete ? undefined : "Delete its sprints first"}
+          onClick={onDelete}
+        >
           Delete
         </button>
       </div>
@@ -434,7 +445,7 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
           {!archived ? (
             <ActiveMilestoneActions canDelete={canDelete} onArchive={onArchive} onEdit={onEdit} onDelete={onDelete} />
           ) : (
-            <ArchivedMilestoneActions onRestore={onRestore} onDelete={onDelete} />
+            <ArchivedMilestoneActions canDelete={canDelete} onRestore={onRestore} onDelete={onDelete} />
           )}
         </div>
       )}

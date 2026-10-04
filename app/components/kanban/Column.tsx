@@ -114,7 +114,7 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
         priority,
         type,
       },
-      { onSettled: resetForm }
+      { onSuccess: resetForm }
     );
   };
 

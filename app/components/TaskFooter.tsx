@@ -4,6 +4,7 @@ interface TaskFooterProps {
   isCreate: boolean;
   isArchived: boolean;
   creating: boolean;
+  archivePending: boolean;
   createTitle: string;
   createColumnId: string;
   createBlocked: boolean;
@@ -15,7 +16,7 @@ interface TaskFooterProps {
   taskId: string;
 }
 
-export function TaskFooter({ isCreate, isArchived, creating, createTitle, createColumnId, createBlocked, onClose, onCreate, onArchive, onRestore, onDeleteClick, taskId }: TaskFooterProps) {
+export function TaskFooter({ isCreate, isArchived, creating, archivePending, createTitle, createColumnId, createBlocked, onClose, onCreate, onArchive, onRestore, onDeleteClick, taskId }: TaskFooterProps) {
   const handleClose = onClose;
   const handleCreate = onCreate;
   return (
@@ -39,12 +40,12 @@ export function TaskFooter({ isCreate, isArchived, creating, createTitle, create
   ) : (
     <>
       {isArchived ? (
-        <button type="button" className="btn btn-ghost" onClick={() => onRestore(taskId)} title="Restore this task to the board">
+        <button type="button" className="btn btn-ghost" onClick={() => onRestore(taskId)} disabled={archivePending} title="Restore this task to the board">
           <ArchiveIcon size={14} />
           Restore
         </button>
       ) : (
-        <button type="button" className="btn btn-ghost" onClick={() => onArchive(taskId)} title="Archive this task">
+        <button type="button" className="btn btn-ghost" onClick={() => onArchive(taskId)} disabled={archivePending} title="Archive this task">
           <ArchiveIcon size={14} />
           Archive
         </button>

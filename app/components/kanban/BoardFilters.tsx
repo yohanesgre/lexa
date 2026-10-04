@@ -41,7 +41,7 @@ function FilterCheckbox({
   label: string;
 }) {
   return (
-    <button type="button" className="check-row" onClick={onChange}>
+    <button type="button" className="check-row" aria-pressed={checked} onClick={onChange}>
       <span className={cn("checkbox", checked && "checked")} />
       {icon}
       <span>{label}</span>

@@ -362,6 +362,17 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
 
   const title = useTaskTitleEditing(task, onUpdate);
   const { deleting, confirmDelete } = useDeleteConfirmation(task, onDelete);
+  const [archiveTogglePending, setArchiveTogglePending] = useState(false);
+  // Guard double-clicks: one archive/restore in flight at a time.
+  const runArchiveToggle = async (fn: ((id: string) => Promise<void>) | undefined, id: string) => {
+    if (!fn || archiveTogglePending) return;
+    setArchiveTogglePending(true);
+    try {
+      await fn(id);
+    } finally {
+      setArchiveTogglePending(false);
+    }
+  };
 
   const ctx = resolveDetailContext({
     isCreate,
@@ -490,13 +501,14 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           isCreate={isCreate}
           isArchived={ctx.isArchived}
           creating={creating}
+          archivePending={archiveTogglePending}
           createTitle={createTitle}
           createColumnId={createColumnId}
           createBlocked={missingFields.length > 0}
           onClose={handleClose}
           onCreate={handleCreate}
-          onArchive={onArchive!}
-          onRestore={onRestore!}
+          onArchive={(id) => { void runArchiveToggle(onArchive, id); }}
+          onRestore={(id) => { void runArchiveToggle(onRestore, id); }}
           onDeleteClick={() => setShowDeleteDialog(true)}
           taskId={task?.id ?? ""}
         />

@@ -351,6 +351,16 @@ describe("SwimlaneHeader archived lane", () => {
     render(<SwimlaneHeader slug="demo" lane={{ ...ARCHIVED_LANE, archivedAt: null }} count={6} />);
     expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
   });
+
+  it("uses the archived-inclusive task total in the delete dialog", async () => {
+    const user = userEvent.setup();
+    render(<SwimlaneHeader slug="demo" lane={{ ...LANE, tasksTotal: 3 }} count={0} onToggle={vi.fn()} />);
+
+    await user.click(screen.getByTitle("Swimlane menu"));
+    await user.click(screen.getByRole("button", { name: /delete swimlane/i }));
+
+    expect(screen.getByText(/This swimlane has 3 tasks\. Reassign them/)).toBeInTheDocument();
+  });
 });
 
 const LANE: Swimlane = {
