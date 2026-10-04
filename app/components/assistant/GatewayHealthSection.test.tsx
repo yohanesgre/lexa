@@ -152,4 +152,15 @@ describe("GatewayHealthSection (redesigned)", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
+
+  it("never leaves the header stuck on Checking when a health read fails", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/health")) return Promise.resolve({ ok: false, json: async () => ({ error: { message: "boom" } }) });
+      return Promise.resolve({ ok: true, json: async () => providers });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GatewayHealthSection />, { wrapper: wrapper() });
+    await screen.findByText("Some checks unavailable");
+    expect(screen.queryAllByText("Checking…")).toHaveLength(0);
+  });
 });

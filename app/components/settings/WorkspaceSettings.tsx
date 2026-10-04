@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects } from "../../lib/queries";
@@ -20,6 +20,17 @@ import type { WorkspaceMember } from "../../lib/api";
 
 function LinkCopyModal({ title, link, onDone }: { title: string; link: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  useEffect(() => {
+    closeRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onDoneRef.current();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
   const handleCopy = async () => {
     const ok = await copyToClipboard(link);
     setCopied(ok);
@@ -37,7 +48,7 @@ function LinkCopyModal({ title, link, onDone }: { title: string; link: string; o
             <code>{link}</code>
           </div>
           <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onDone}>Close</button>
+            <button ref={closeRef} type="button" className="btn btn-ghost" onClick={onDone}>Close</button>
             <button type="button" className="btn btn-primary" onClick={handleCopy}>
               {copied ? <Check size={14} strokeWidth={1.5} /> : <Copy size={14} strokeWidth={1.5} />}
               {copied ? "Copied to clipboard" : "Copy link"}
@@ -50,7 +61,7 @@ function LinkCopyModal({ title, link, onDone }: { title: string; link: string; o
 }
 
 function WorkspaceMembersSection() {
-  const { data: members = [], isLoading } = useWorkspaceMembers();
+  const { data: members = [], isLoading, isError: membersError } = useWorkspaceMembers();
   const { data: session } = useSession();
   const updateMember = useUpdateWorkspaceMember();
   const deleteMember = useDeleteWorkspaceMember();
@@ -95,6 +106,8 @@ function WorkspaceMembersSection() {
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : membersError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center" role="alert">Failed to load members.</div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
@@ -220,7 +233,7 @@ function MemberDeleteModal({ name, onCancel, onConfirm }: { name: string; onCanc
 }
 
 function TeamsSection() {
-  const { data: teams = [], isLoading } = useTeams();
+  const { data: teams = [], isLoading, isError: teamsError } = useTeams();
   const { data: members = [] } = useWorkspaceMembers();
   const { data: projects = [] } = useProjects();
   const createTeam = useCreateTeam();
@@ -264,6 +277,8 @@ function TeamsSection() {
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : teamsError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center" role="alert">Failed to load teams.</div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
@@ -341,12 +356,35 @@ export function WorkspaceSettings({ initialTab, githubResult }: { initialTab?: W
   const { data: session } = useSession();
   const isSuperadmin = session?.user?.role === "superadmin";
   const [tab, setTab] = useState<WorkspaceTab>(initialTab ?? "members");
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   // The callback lands with ?tab=integrations — keep local tab state in sync
   // with search-driven changes without making every tab click a navigation.
   useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
+
+  const handleTablistKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const idx = WORKSPACE_TABS.findIndex((t) => t.id === tab);
+    let nextIdx: number;
+    if (event.key === "ArrowRight") nextIdx = (idx + 1) % WORKSPACE_TABS.length;
+    else if (event.key === "ArrowLeft") nextIdx = (idx - 1 + WORKSPACE_TABS.length) % WORKSPACE_TABS.length;
+    else if (event.key === "Home") nextIdx = 0;
+    else if (event.key === "End") nextIdx = WORKSPACE_TABS.length - 1;
+    else return;
+    event.preventDefault();
+    const next = WORKSPACE_TABS[nextIdx];
+    if (!next) return;
+    setTab(next.id);
+    tabRefs.current[next.id]?.focus();
+  };
+
+  const panelProps = (id: WorkspaceTab) => ({
+    role: "tabpanel" as const,
+    id: `workspace-panel-${id}`,
+    "aria-labelledby": `workspace-tab-${id}`,
+    tabIndex: 0,
+  });
 
   return (
     <main className="page-frame page-frame-narrow">
@@ -363,13 +401,17 @@ export function WorkspaceSettings({ initialTab, githubResult }: { initialTab?: W
         </div>
       )}
 
-      <div className="ms-tabs" role="tablist" aria-label="Workspace settings sections">
+      <div className="ms-tabs" role="tablist" aria-label="Workspace settings sections" onKeyDown={handleTablistKeyDown}>
         {WORKSPACE_TABS.map((t) => (
           <button
             key={t.id}
+            ref={(el) => { tabRefs.current[t.id] = el; }}
+            id={`workspace-tab-${t.id}`}
             type="button"
             role="tab"
             aria-selected={tab === t.id}
+            aria-controls={`workspace-panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
             className={tab === t.id ? "ms-tab active" : "ms-tab"}
             onClick={() => setTab(t.id)}
           >
@@ -378,21 +420,21 @@ export function WorkspaceSettings({ initialTab, githubResult }: { initialTab?: W
         ))}
       </div>
 
-      {tab === "members" && <WorkspaceMembersSection />}
-      {tab === "teams" && <TeamsSection />}
+      {tab === "members" && <div {...panelProps("members")}><WorkspaceMembersSection /></div>}
+      {tab === "teams" && <div {...panelProps("teams")}><TeamsSection /></div>}
       {tab === "access" && (
-        <>
+        <div {...panelProps("access")}>
           <ApiKeysSection />
           <RateLimitSection />
-        </>
+        </div>
       )}
       {tab === "integrations" && (
-        <>
+        <div {...panelProps("integrations")}>
           <GithubSyncSection githubResult={githubResult} />
           {isSuperadmin && <AssistantProvidersSection />}
           {isSuperadmin && <AssistantMcpSection />}
           <AgentsSkillsSections />
-        </>
+        </div>
       )}
     </main>
   );

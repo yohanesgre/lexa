@@ -95,4 +95,20 @@ describe("UsageChart", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("gives Retry an explicit button type", async () => {
+    render(<UsageChart byDay={rows} isError onRetry={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "Retry" })).toHaveAttribute("type", "button");
+  });
+
+  it("exposes the per-day data on keyboard focus and arrow keys", async () => {
+    render(<UsageChart byDay={rows} />);
+    await waitFor(() => expect(ctx.arc).toHaveBeenCalled());
+    const canvas = document.querySelector("canvas#assistant-by-day")!;
+    fireEvent.focus(canvas);
+    const first = await screen.findByTestId("assistant-chart-tooltip");
+    expect(first.textContent).toContain("2026-08-01");
+    fireEvent.keyDown(canvas, { key: "ArrowRight" });
+    await waitFor(() => expect(screen.getByTestId("assistant-chart-tooltip").textContent).toContain("2026-08-02"));
+  });
 });

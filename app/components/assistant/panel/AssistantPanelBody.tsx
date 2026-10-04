@@ -108,7 +108,7 @@ export function AssistantPanelBody({
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              style={{ borderColor: "rgba(255,68,68,0.45)", color: "var(--lx-text-danger)" }}
+              style={{ borderColor: "color-mix(in srgb, var(--lx-status-danger) 45%, transparent)", color: "var(--lx-text-danger)" }}
               onClick={onStop}
             >
               <Square size={12} strokeWidth={1.5} fill="currentColor" />
@@ -144,7 +144,7 @@ export function AssistantPanelBody({
       <div style={{ padding: 12 }}>
         <div className="notice notice-danger" role="alert" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
           <div className="flex items-center gap-2">
-            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true" style={{ flexShrink: 0 }}>
               <circle cx="12" cy="12" r="10" />
               <path d="M12 8v4" />
               <path d="M12 16h.01" />

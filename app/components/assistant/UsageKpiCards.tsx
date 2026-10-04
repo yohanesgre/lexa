@@ -1,12 +1,35 @@
 import type { AssistantUsageSummary } from "../../lib/assistant-usage.query";
 
-export function UsageKpiCards({ summary }: { summary: AssistantUsageSummary | null | undefined }) {
+export function UsageKpiCards({
+  summary,
+  isLoading,
+  isError,
+  onRetry,
+}: {
+  summary: AssistantUsageSummary | null | undefined;
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
+}) {
+  if (isError) {
+    return (
+      <div className="kpi-grid">
+        <div className="kpi-card" style={{ gridColumn: "1 / -1" }}>
+          <div className="kpi-label" style={{ color: "var(--lx-text-danger)" }}>Usage summary unavailable</div>
+          <div className="text-xs color-secondary mt-1">Couldn&apos;t load usage metrics.</div>
+          {onRetry ? (
+            <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={onRetry}>Retry</button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   if (!summary) {
     return (
       <div className="kpi-grid">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="kpi-card">
-            <div className="kpi-label" style={{ opacity: 0.5 }}>—</div>
+            <div className="kpi-label" style={{ opacity: 0.5 }}>{isLoading ? "Loading…" : "—"}</div>
             <div className="kpi-value">—</div>
           </div>
         ))}

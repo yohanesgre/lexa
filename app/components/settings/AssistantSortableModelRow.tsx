@@ -24,7 +24,7 @@ export function AssistantSortableModelRow({ providerId, model }: { providerId: s
         </span>
       </td>
       <td className="font-mono text-xs" style={{ color: model.enabled ? "var(--lx-text-primary)" : "var(--lx-text-secondary)" }}>{mid}</td>
-      <td><span style={{ background: model.kind === "anthropic_compatible" ? "var(--lx-bg-success-subtle)" : model.kind === "openai_responses" ? "rgba(139, 92, 246, 0.12)" : "var(--lx-bg-accent-subtle)", color: model.kind === "anthropic_compatible" ? "var(--lx-text-success)" : model.kind === "openai_responses" ? "#a78bfa" : "var(--lx-text-link)", padding: "2px 6px", borderRadius: 9999, fontSize: 11 }}>{model.kind}</span></td>
+      <td><span style={{ background: model.kind === "anthropic_compatible" ? "var(--lx-bg-success-subtle)" : "var(--lx-bg-accent-subtle)", color: model.kind === "anthropic_compatible" ? "var(--lx-text-success)" : "var(--lx-text-link)", padding: "2px 6px", borderRadius: 9999, fontSize: 11 }}>{model.kind}</span></td>
       <td className="font-mono text-xs text-lx-text-secondary">{model.priority}</td>
       <td>
         <button

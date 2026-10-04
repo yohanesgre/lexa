@@ -1,5 +1,6 @@
 import { parseApiDate } from "../../../lib/date";
 import type { AssistantRunStatus } from "../../../lib/api";
+import type { AssistantCallLogStatus } from "../../../../shared/assistant";
 
 // Shared display helpers for the admin runs + calls tables.
 
@@ -37,6 +38,25 @@ const runStatusMeta: Record<AssistantRunStatus, { label: string; color: string }
 
 export function RunStatusChip({ status }: { status: AssistantRunStatus }) {
   const meta = runStatusMeta[status];
+  return (
+    <span className="status-chip" style={{ cursor: "default" }}>
+      <span className="status-dot" style={{ background: meta.color }} />
+      {meta.label}
+    </span>
+  );
+}
+
+const callStatusMeta: Record<AssistantCallLogStatus, { label: string; color: string }> = {
+  done: { label: "Ok", color: "var(--lx-text-success)" },
+  error: { label: "Error", color: "var(--lx-text-danger)" },
+  suspended: { label: "Suspended", color: "var(--lx-text-warning)" },
+  aborted: { label: "Aborted", color: "var(--lx-text-muted)" },
+};
+
+// Every call-log status gets its own chip — suspended/aborted must not collapse
+// into "error" (audit LX-99).
+export function CallStatusChip({ status }: { status: AssistantCallLogStatus }) {
+  const meta = callStatusMeta[status];
   return (
     <span className="status-chip" style={{ cursor: "default" }}>
       <span className="status-dot" style={{ background: meta.color }} />

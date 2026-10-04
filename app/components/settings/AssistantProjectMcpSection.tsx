@@ -8,7 +8,7 @@ import { endpointOf } from "./assistant-mcp-logic";
 // is the master switch — a globally-disabled client renders a disabled toggle
 // with "Global off" and can never be turned on here.
 export function AssistantProjectMcpSection({ project }: { project: Project }) {
-  const { data: servers = [], isLoading } = useMcpServers();
+  const { data: servers = [], isLoading, isError } = useMcpServers();
   const { data: rows = [] } = useProjectMcpServers(project.id);
   const save = useSetProjectMcpServers(project.id);
 
@@ -33,6 +33,10 @@ export function AssistantProjectMcpSection({ project }: { project: Project }) {
       {isLoading ? (
         <div className="card-panel card-panel--elevated">
           <div className="text-sm text-lx-text-muted py-6 text-center">Loading…</div>
+        </div>
+      ) : isError ? (
+        <div className="card-panel card-panel--elevated">
+          <div className="text-sm text-lx-text-danger py-6 text-center" role="alert">Failed to load MCP clients.</div>
         </div>
       ) : servers.length === 0 ? (
         <div className="empty-box" style={{ padding: "20px 16px" }}>

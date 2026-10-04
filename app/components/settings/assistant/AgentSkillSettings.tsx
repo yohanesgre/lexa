@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Plus, Settings, Trash2 } from "lucide-react";
-import { useAgents, useSkills } from "../../../lib/queries";
+import { useAgents, useSkills, useDeleteSkill } from "../../../lib/queries";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import { PromptEditorModal } from "./PromptEditorModal";
 import type { LexaAgent, LexaSkill } from "../../../../shared/types";
 
@@ -101,7 +102,9 @@ function SettingsTableHead({ labels }: { labels: string[] }) {
 export function SkillsSettingsSection() {
   const { data: skills = [], isLoading, isError } = useSkills();
   const { data: agents = [] } = useAgents();
+  const deleteSkill = useDeleteSkill();
   const [editing, setEditing] = useState<LexaSkill | "new" | null>(null);
+  const [deleting, setDeleting] = useState<LexaSkill | null>(null);
 
   const usedBy = (skillId: string): string => {
     let names = "";
@@ -157,7 +160,7 @@ export function SkillsSettingsSection() {
                         type="button"
                         className="btn btn-danger"
                         style={{ width: 28, height: 28, padding: 0, fontSize: 12 }}
-                        onClick={() => setEditing(s)}
+                        onClick={() => setDeleting(s)}
                         aria-label={`Delete ${s.name}`}
                         title="Delete skill"
                       >
@@ -186,6 +189,19 @@ export function SkillsSettingsSection() {
           entity={editing === "new" ? null : editing}
           allAgents={agents}
           onClose={() => setEditing(null)}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete skill"
+          body={<>Delete skill &lsquo;{deleting.name}&rsquo;? This cannot be undone.</>}
+          confirmLabel="Delete"
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            const target = deleting;
+            deleteSkill.mutate(target.id, { onSuccess: () => setDeleting(null) });
+          }}
         />
       )}
     </section>

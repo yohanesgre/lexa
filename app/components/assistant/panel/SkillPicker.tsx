@@ -101,7 +101,7 @@ function ChipRow({ items, selectedId, onSelect, height, fontSize, labelId }: {
             ref={triggerRef}
             type="button"
             className="btn btn-ghost"
-            style={chipStyle(false)}
+            style={chipStyle(rest.some((item) => item.id === selectedId))}
             aria-label="More skills"
             aria-haspopup="menu"
             aria-expanded={restOpen}

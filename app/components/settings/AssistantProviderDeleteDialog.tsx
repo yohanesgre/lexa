@@ -1,27 +1,23 @@
-import { createPortal } from "react-dom";
-import { Trash2 } from "lucide-react";
 import { useDeleteProvider } from "../../lib/queries/assistant-admin";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 
-// Delete confirmation dialog (portal). Deleting a provider leaves projects
+// Delete confirmation dialog. Deleting a provider leaves projects
 // referencing it failing 409 until reassigned — hence the hard confirm.
+// Uses the shared ConfirmDialog so Escape/initial focus/modal semantics are
+// handled once (audit LX-99).
 export function AssistantProviderDeleteDialog({ providerId, onClose }: { providerId: string; onClose: () => void }) {
   const del = useDeleteProvider();
-  if (typeof document === "undefined") return null;
 
-  return createPortal(
-    <>
-      <button type="button" className="dialog-overlay" onClick={onClose} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" style={{ maxWidth: 420 }}>
-          <h3 className="font-display text-base font-medium text-lx-text-primary">Delete provider?</h3>
-          <p className="text-sm text-lx-text-secondary mt-2">This will permanently delete the provider. Reassign its projects first, or they'll stop working.</p>
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" disabled={del.isPending} onClick={() => del.mutate(providerId, { onSuccess: onClose })}><Trash2 size={14} strokeWidth={1.5} /> {del.isPending ? "Deleting…" : "Delete"}</button>
-          </div>
-        </div>
-      </div>
-    </>,
-    document.body,
+  return (
+    <ConfirmDialog
+      title="Delete provider?"
+      body="This will permanently delete the provider. Reassign its projects first, or they'll stop working."
+      confirmLabel="Delete"
+      onCancel={onClose}
+      onConfirm={() => {
+        if (del.isPending) return;
+        del.mutate(providerId, { onSuccess: onClose });
+      }}
+    />
   );
 }

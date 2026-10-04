@@ -28,7 +28,7 @@ import {
 // nothing here assumes it. The two hooks share one query key, so the flag and
 // the rows always describe the same read.
 export function AssistantMcpSection() {
-  const { data: servers = [], isLoading } = useMcpServers();
+  const { data: servers = [], isLoading, isError } = useMcpServers();
   // Tri-state, kept to the render: true (key present), false (the server said
   // it is absent), undefined (unanswered — in flight, or a failed list request,
   // which never retries). Only `false` is a fact the warning notice may state;
@@ -104,6 +104,10 @@ export function AssistantMcpSection() {
                 <td><div className="skeleton" style={{ width: 70, height: 14 }} /></td>
                 <td><div className="skeleton" style={{ width: 120, height: 14, marginLeft: "auto" }} /></td>
               </tr>
+            ) : isError ? (
+              <tr>
+                <td colSpan={6} className="text-sm text-lx-text-danger" role="alert" style={{ textAlign: "center", padding: 24 }}>Failed to load MCP clients.</td>
+              </tr>
             ) : (
               servers.map((server) => (
                 <McpClientRow
@@ -121,7 +125,7 @@ export function AssistantMcpSection() {
         </table>
       </div>
 
-      {!isLoading && servers.length === 0 && (
+      {!isLoading && !isError && servers.length === 0 && (
         <div className="card-panel mt-3" style={{ background: "var(--lx-surface-elevated)" }}>
           <span className="text-sm font-medium text-lx-text-primary">No MCP clients yet</span>
           <p className="text-xs text-lx-text-secondary mt-1">Add a remote MCP client below. No clients are pre-seeded.</p>

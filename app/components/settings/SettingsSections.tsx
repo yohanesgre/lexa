@@ -36,6 +36,25 @@ export function InlineDropdown({ items, onSelect, onClose }: { items: { name: st
 function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const copyRef = useRef<HTMLButtonElement>(null);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    copyRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onDoneRef.current();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, []);
 
   const handleCopyKey = async () => {
     const ok = await copyToClipboard(fullKey);
@@ -67,11 +86,11 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
               <div className="key-display">
                 <code style={{ userSelect: "all" }}>{fullKey}</code>
                 <button
+                  ref={copyRef}
                   type="button"
                   className="btn btn-ghost flex-shrink-0"
                   style={{ height: 28, padding: "0 10px", fontSize: 12 }}
                   onClick={handleCopyKey}
-                  autoFocus
                 >
                   {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
                   {copied ? "Copied" : "Copy"}
@@ -116,26 +135,13 @@ export { DeleteKeyModal };
 
 function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove GitHub sync?</h2>
-
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            This removes the stored App ID, private key, and webhook secret. GitHub sync stops immediately — already-linked issues stay linked but stop syncing. This action cannot be undone.
-          </p>
-
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Remove
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
+    <ConfirmDialog
+      title="Remove GitHub sync?"
+      body="This removes the stored App ID, private key, and webhook secret. GitHub sync stops immediately — already-linked issues stay linked but stop syncing. This action cannot be undone."
+      confirmLabel="Remove"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -402,8 +408,8 @@ function GithubAppConnectedCard({ data, onConnect, connecting }: { data: { appId
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label="App ID" htmlFor="github-app-id" className="field mb-0">
-          <input id="github-app-id" className="prop-input font-mono" value={data.appId} readOnly style={{ width: "100%" }} />
+        <Field label="App ID" htmlFor="github-connected-app-id" className="field mb-0">
+          <input id="github-connected-app-id" className="prop-input font-mono" value={data.appId} readOnly style={{ width: "100%" }} />
         </Field>
         {hasGithubAppSlug(data) && (
           <Field label="App slug" htmlFor="github-app-slug" className="field mb-0">

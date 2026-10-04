@@ -153,8 +153,8 @@ export function PriceEditor({
                     <input className="prop-input font-mono" aria-label={`cached_write_price for ${model}`} value={e.cached_write_price} onChange={setField("cached_write_price")} readOnly={pricesErrored} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
                   </td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => handleSave(model)} disabled={pricesErrored || modelPending}>{modelPending ? "Saving…" : "Save"}</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => handleReset(model)} disabled={pricesErrored} style={{ marginLeft: 6 }}>Reset</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => handleSave(model)} disabled={pricesErrored || modelPending}>{modelPending ? "Saving…" : "Save"}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleReset(model)} disabled={pricesErrored} style={{ marginLeft: 6 }}>Reset</button>
                     {e.error ? <div className="font-micro text-2xs" style={{ color: "var(--lx-text-danger)", marginTop: 4 }}>{e.error}</div> : null}
                     {serverError ? <div className="font-micro text-2xs" style={{ color: "var(--lx-text-danger)", marginTop: 4 }}>{serverError}</div> : null}
                   </td>
@@ -164,7 +164,7 @@ export function PriceEditor({
           </tbody>
         </table>
       </div>
-      <div className="card-panel mt-3" style={{ background: "var(--lx-bg-accent-subtle)", borderColor: "rgba(240,192,64,0.18)", padding: "12px 14px" }}>
+      <div className="card-panel mt-3" style={{ background: "var(--lx-bg-accent-subtle)", borderColor: "color-mix(in srgb, var(--lx-text-link) 18%, transparent)", padding: "12px 14px" }}>
         <div className="flex items-center gap-2">
           <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-warning)" strokeWidth={1.5}><circle cx={12} cy={12} r={10} /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>
           <span className="text-sm weight-500" style={{ color: "var(--lx-text-warning)" }}>Price change affects future cost only — past usage keeps the price it was recorded with.</span>

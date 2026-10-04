@@ -10,7 +10,7 @@ import type { Project } from "../../../../shared/types";
 // (Ask / Auto / Blocked) decides whether a proposed write executes.
 
 export function AssistantWriteToolsSection({ project }: { project: Project }) {
-  const { data: settings, isLoading } = useAssistantSettings(project.id);
+  const { data: settings, isLoading, isError } = useAssistantSettings(project.id);
   const save = useSaveAssistantWriteTools(project.id);
   const [selected, setSelected] = useState<string[]>([]);
   const hydratedRef = useRef<string | null>(null);
@@ -48,6 +48,15 @@ export function AssistantWriteToolsSection({ project }: { project: Project }) {
       writeTools: selected,
     });
   };
+
+  if (isError) {
+    return (
+      <section className="mb-8">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Write tools</h2>
+        <div className="text-sm text-lx-text-danger py-6 text-center" role="alert">Failed to load write tools.</div>
+      </section>
+    );
+  }
 
   // No provider row yet — PUT needs kind/baseUrl/model, so this section stays
   // hidden until the provider is configured.

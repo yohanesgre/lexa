@@ -3,10 +3,11 @@ import { ASSISTANT_AGENT_ID } from "../../../lib/assistant-agent";
 
 // ── Agent skill availability (settings-project-assistant.html) ──
 
-function AgentSkillColumn({ agentId, agents, skills, onToggle }: {
+function AgentSkillColumn({ agentId, agents, skills, disabled, onToggle }: {
   agentId: string;
   agents: { id: string; name: string; skillIds: string[] }[];
   skills: { id: string; name: string }[];
+  disabled: boolean;
   onToggle: (agentId: string, skillIds: string[]) => void;
 }) {
   const agent = agents.find((a) => a.id === agentId);
@@ -20,10 +21,11 @@ function AgentSkillColumn({ agentId, agents, skills, onToggle }: {
       </div>
       <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
         {skills.map((skill) => (
-          <label key={skill.id} className="check-row" style={{ cursor: "pointer" }}>
+          <label key={skill.id} className="check-row" style={{ cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : undefined }}>
             <input
               type="checkbox"
               checked={attached.has(skill.id)}
+              disabled={disabled}
               onChange={(e) => {
                 const next = e.target.checked ? [...attached, skill.id] : [...attached].filter((id) => id !== skill.id);
                 onToggle(agent.id, next);
@@ -61,7 +63,7 @@ export function AgentSkillAvailabilitySection({ projectId }: { projectId: string
 
       <div className="card-panel card-panel--elevated">
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 24, maxWidth: 640 }}>
-          <AgentSkillColumn agentId={ASSISTANT_AGENT_ID} agents={agents} skills={skills} onToggle={handleToggle} />
+          <AgentSkillColumn agentId={ASSISTANT_AGENT_ID} agents={agents} skills={skills} disabled={replaceSkills.isPending && replaceSkills.variables?.id === ASSISTANT_AGENT_ID} onToggle={handleToggle} />
         </div>
         <div className="field-hint" style={{ marginTop: 10 }}>
           Checkbox writes apply immediately. The assistant agent can&apos;t generate with zero attached skills — the popover shows its empty-skills state with Generate disabled. The builtin agent is editable + Reset-to-default in Settings → Agents &amp; Skills; never deletable.

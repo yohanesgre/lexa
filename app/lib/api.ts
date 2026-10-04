@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
-import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
+import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCallLogRow, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
 
 const BASE = "/api";
 
@@ -918,7 +918,7 @@ export function getAssistantUsage(): Promise<AssistantUsage> {
   return request(`${BASE}/admin/assistant/usage`);
 }
 
-export function listAssistantCalls(params?: { projectId?: string | undefined; limit?: number }): Promise<{ data: AssistantCall[] }> {
+export function listAssistantCalls(params?: { projectId?: string | undefined; limit?: number }): Promise<{ data: AssistantCallLogRow[] }> {
   const qs = new URLSearchParams();
   if (params?.projectId) qs.set("projectId", params.projectId);
   if (params?.limit) qs.set("limit", String(params.limit));

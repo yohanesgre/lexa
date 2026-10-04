@@ -1,24 +1,12 @@
 import { useAssistantCalls } from "../../../lib/queries/assistant-admin";
-import { formatTimestamp } from "./run-display";
+import { CallStatusChip, formatTimestamp } from "./run-display";
 
 // Raw per-call log rows (assistant_call_logs), distinct from runs
 // (assistant_tasks): one row per provider call including retries/fallbacks.
 // Read-only — surfaces useAssistantCalls + GET /api/admin/assistant/calls.
-interface CallRow {
-  id: string;
-  model: string;
-  status: string;
-  latencyMs: number | null;
-  usageIn: number;
-  usageOut: number;
-  costCents: number;
-  errorCode: string | null;
-  createdAt: string;
-}
-
 export function AssistantCallsTable() {
   const { data, isLoading, isError, refetch } = useAssistantCalls({ limit: 50 });
-  const rows = (data ?? []) as unknown as CallRow[];
+  const rows = data ?? [];
 
   return (
     <section className="card-panel mt-4" style={{ overflow: "hidden", padding: 0 }}>
@@ -59,17 +47,13 @@ export function AssistantCallsTable() {
                 </td>
               </tr>
             ) : rows.map((c) => {
-              const ok = c.status === "done";
               const tokens = (c.usageIn ?? 0) + (c.usageOut ?? 0);
               return (
                 <tr key={c.id}>
                   <td className="font-mono text-xs color-secondary">{formatTimestamp(c.createdAt)}</td>
                   <td className="font-mono text-xs color-primary">{c.model}</td>
                   <td>
-                    <span className="status-chip" style={{ cursor: "default" }}>
-                      <span className="status-dot" style={{ background: ok ? "var(--lx-text-success)" : "var(--lx-text-danger)" }} />
-                      {ok ? "ok" : "error"}
-                    </span>
+                    <CallStatusChip status={c.status} />
                   </td>
                   <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{c.latencyMs != null ? `${c.latencyMs.toLocaleString()} ms` : "—"}</td>
                   <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{tokens.toLocaleString()}</td>

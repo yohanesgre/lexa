@@ -9,7 +9,7 @@ import { AssistantProviderDeleteDialog } from "./AssistantProviderDeleteDialog";
 // Workspace → Assistant Providers registry (superadmin-gated). Projects pick a
 // provider + model from this list; keys and base URLs live only here.
 export function AssistantProvidersSection() {
-  const { data: providers = [], isLoading, secretsEnabled } = useAssistantProviders();
+  const { data: providers = [], isLoading, isError, secretsEnabled } = useAssistantProviders();
   const test = useTestProvider();
   const fetchModels = useFetchModels();
 
@@ -45,6 +45,8 @@ export function AssistantProvidersSection() {
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : isError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center" role="alert">Failed to load providers.</div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">

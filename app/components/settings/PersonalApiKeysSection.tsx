@@ -134,7 +134,7 @@ export function PersonalApiKeysSection() {
           </button>
         </div>
         <div className="field-hint" style={{ marginTop: 8 }}>
-          Key ini terikat ke akunmu — pakai <KeyCode>lx login &lt;URL&gt;</KeyCode> untuk masuk tanpa key manual.
+          This key is bound to your account — use <KeyCode>lx login &lt;URL&gt;</KeyCode> to sign in without a manual key.
         </div>
       </div>
 

@@ -5,7 +5,7 @@ import type { AssistantMemoryEntry } from "../../../lib/api";
 import { formatRelative } from "../../../lib/relative-time";
 
 export function ProjectMemorySection({ projectId }: { projectId: string }) {
-  const { data: memories = [], isLoading } = useAssistantMemory(projectId);
+  const { data: memories = [], isLoading, isError } = useAssistantMemory(projectId);
   const addMemory = useAddAssistantMemory(projectId);
   const removeMemory = useRemoveAssistantMemory(projectId);
   const [draft, setDraft] = useState("");
@@ -28,6 +28,8 @@ export function ProjectMemorySection({ projectId }: { projectId: string }) {
       <div className="card-panel card-panel--elevated">
         {isLoading ? (
           <div className="skeleton" style={{ height: 80 }} />
+        ) : isError ? (
+          <div className="text-sm text-lx-text-danger py-6 text-center" role="alert">Failed to load project memory.</div>
         ) : memories.length === 0 ? (
           <div className="empty-box" style={{ padding: "20px 16px" }}>
             <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }}>
@@ -81,7 +83,7 @@ function MemoryRow({ memory, onDelete, deleting }: { memory: AssistantMemoryEntr
         <div className="flex items-center gap-2 mt-1">
           <span
             className="agent-tag"
-            style={isAssistant ? { background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", borderColor: "rgba(240,192,64,0.25)" } : undefined}
+            style={isAssistant ? { background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)" } : undefined}
           >
             {memory.source}
           </span>

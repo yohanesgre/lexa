@@ -157,6 +157,16 @@ export function UsageChart({
     setHover(null);
   }, [byDay, size.w, size.h]);
 
+  const showPoint = (index: number) => {
+    const geometry = geometryRef.current;
+    if (!geometry || geometry.xs.length === 0) return;
+    const clamped = Math.max(0, Math.min(geometry.xs.length - 1, index));
+    const row = byDay[clamped];
+    if (!row) return;
+    const maxX = Math.max(60, geometry.cssW - 60);
+    setHover({ row, x: Math.min(Math.max(geometry.xs[clamped]!, 60), maxX), y: geometry.tokensY[clamped] ?? 0 });
+  };
+
   const handleMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const geometry = geometryRef.current;
     if (!geometry || geometry.xs.length === 0) return;
@@ -171,10 +181,38 @@ export function UsageChart({
         best = i;
       }
     });
-    const row = byDay[best];
-    if (!row) return;
-    const maxX = Math.max(60, geometry.cssW - 60);
-    setHover({ row, x: Math.min(Math.max(geometry.xs[best]!, 60), maxX), y: geometry.tokensY[best] ?? 0 });
+    showPoint(best);
+  };
+
+  // Keyboard path to the same per-day data the hover tooltip shows.
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (!hasData) return;
+    const current = hover ? byDay.indexOf(hover.row) : -1;
+    switch (event.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        event.preventDefault();
+        showPoint(current + 1);
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        event.preventDefault();
+        showPoint(current < 0 ? byDay.length - 1 : current - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        showPoint(0);
+        break;
+      case "End":
+        event.preventDefault();
+        showPoint(byDay.length - 1);
+        break;
+      case "Escape":
+        setHover(null);
+        break;
+      default:
+        break;
+    }
   };
 
   let overlay: string | null = null;
@@ -196,9 +234,14 @@ export function UsageChart({
           id="assistant-by-day"
           width={DEFAULT_W}
           height={DEFAULT_H}
-          aria-label="Tokens and cost per day line chart"
+          tabIndex={0}
+          role="img"
+          aria-label="Tokens and cost per day line chart. Use arrow keys to inspect each day."
           onMouseMove={handleMove}
           onMouseLeave={() => setHover(null)}
+          onKeyDown={handleKeyDown}
+          onFocus={() => { if (hasData && !hover) showPoint(0); }}
+          onBlur={() => setHover(null)}
         />
         {overlay ? (
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: showRetry ? "auto" : "none", padding: 12 }}>
@@ -206,7 +249,7 @@ export function UsageChart({
               {overlay}
             </div>
             {showRetry && onRetry ? (
-              <button className="btn btn-ghost btn-sm mt-2" style={{ pointerEvents: "auto" }} onClick={onRetry}>
+              <button type="button" className="btn btn-ghost btn-sm mt-2" style={{ pointerEvents: "auto" }} onClick={onRetry}>
                 Retry
               </button>
             ) : null}

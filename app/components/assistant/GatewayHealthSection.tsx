@@ -66,7 +66,7 @@ function enabledModelLabels(models: { modelId: string; enabled: boolean }[] | un
 }
 
 function noteFor(status: HealthStatus, h: AssistantProviderHealth | undefined): string {
-  if (!h) return "Checking…";
+  if (!h) return "No checks recorded yet · run a test connection to start monitoring";
   const failureSuffix = h.lastFailureCode ? ` (${h.lastFailureCode})` : "";
   if (status === "working") return `Checked ${h.lastCheckedAt ? formatRelative(h.lastCheckedAt) : "just now"} · refreshes every 30s`;
   if (status === "slow") return `Responded in ${h.latencyMs?.toLocaleString()} ms · above the ${SLOW_LATENCY_MS / 1000}s watch threshold`;
@@ -123,7 +123,11 @@ export function GatewayHealthSection() {
   const headerPill = (() => {
     if (isLoading || !providers) return <span className="health-status health-status--muted"><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} aria-hidden="true" />Checking providers…</span>;
     if (isError) return null;
-    if (!overall || overall.worst === null) return <span className="health-status health-status--muted"><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} aria-hidden="true" />Checking…</span>;
+    if ((providers ?? []).length === 0) return null;
+    if (!settled) return <span className="health-status health-status--muted"><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} aria-hidden="true" />Checking…</span>;
+    // Settled but no aggregate: at least one provider's health read failed —
+    // never leave the header spinning forever.
+    if (!overall || overall.worst === null) return <StatusPill status="unknown" text="Some checks unavailable" />;
     if (overall.worst === "working") return <StatusPill status="working" text="All systems working" />;
     const n = overall.counts[overall.worst];
     const unit = `${n} provider${n === 1 ? "" : "s"}`;
@@ -149,12 +153,13 @@ export function GatewayHealthSection() {
     <div className="flex flex-col" style={{ gap: 8 }}>
       {(list ?? []).map((p) => {
         const h = byId.get(p.id);
-        const status = h?.isPending ? null : statusOf(h?.data);
+        const healthError = h?.isError === true;
+        const status = h?.isPending || healthError ? null : statusOf(h?.data);
         const meta = status ? statusMeta[status] : null;
         const models = enabledModelLabels(p.models);
         const metaLine = models.length > 0 ? `Serving ${models.length} model${models.length === 1 ? "" : "s"} · ${models.join(" · ")}` : "No models enabled";
         const probing = probe.isPending && probe.variables === p.id;
-        const needsAttention = status === "offline" || status === "trouble";
+        const needsAttention = status === "offline" || status === "trouble" || healthError;
         return (
           <div key={p.id} className={`card-row${meta ? ` card-row--${meta.accent}` : ""}`}>
             <div className="flex items-start justify-between" style={{ gap: 12, flexWrap: "wrap" }}>
@@ -163,14 +168,18 @@ export function GatewayHealthSection() {
                   <span className="health-provider-label">{p.label}</span>
                   {status && meta ? (
                     <StatusPill status={status} />
-                  ) : h?.isError ? (
+                  ) : healthError ? (
                     <span className="health-status health-status--danger"><StatusIcon status="offline" />error</span>
                   ) : (
                     <span className="health-status health-status--muted"><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} aria-hidden="true" />Checking…</span>
                   )}
                 </div>
                 <div className="health-provider-meta mt-1">{metaLine}</div>
-                {status ? <div className="health-provider-note mt-1">{noteFor(status, h?.data)}</div> : null}
+                {status ? (
+                  <div className="health-provider-note mt-1">{noteFor(status, h?.data)}</div>
+                ) : healthError ? (
+                  <div className="health-provider-note mt-1">Couldn&apos;t read this provider&apos;s health · retries every 30s</div>
+                ) : null}
               </div>
               <div className="health-provider-actions">
                 <button

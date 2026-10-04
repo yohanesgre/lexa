@@ -11,6 +11,15 @@ interface ReviewBannerProps {
   onReject: () => void;
 }
 
+// Escape must not reject the pending result while the user is typing in the
+// editor, the review note, or any other field — only when focus is on the page
+// chrome (audit LX-99).
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
+}
+
 // Review-in-editor banner, rendered inside the review panel (hearth-review
 // wireframe) — between the toolbar and the editor content, full width. The
 // document is NOT modified while the banner is up — Accept inserts the
@@ -18,7 +27,7 @@ interface ReviewBannerProps {
 export function ReviewBanner({ skillName, agentName, diff, onAccept, onReject }: ReviewBannerProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onReject();
+      if (e.key === "Escape" && !isEditableTarget(e.target)) onReject();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

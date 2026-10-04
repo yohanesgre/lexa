@@ -30,6 +30,13 @@ export function AssistantRunsTable() {
   const rows = data?.data ?? [];
   const counts = data?.counts;
   const total = counts ? counts.queued + counts.running + counts.completed + counts.failed + counts.cancelled : 0;
+  // The server's `counts` are global, not filter-scoped. Only claim a total the
+  // filter actually covers: a status filter alone maps to its global count; a
+  // project filter has no scoped total available, so show the page size only
+  // (audit LX-99).
+  const filtered = status !== null || projectId !== "";
+  const scopedTotal = status !== null && !projectId && counts ? counts[status] : null;
+  const footerTotal = filtered ? scopedTotal : (counts ? total : null);
 
   const resetPage = () => { setCursorStack([null]); setExpanded(null); };
   const applyStatus = (value: AssistantRunStatus | null) => { setStatus(value); resetPage(); };
@@ -189,7 +196,7 @@ export function AssistantRunsTable() {
       </div>
 
       <div style={{ padding: "12px 16px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid var(--lx-border-subtle)" }}>
-        <span className="text-xs color-secondary">Showing {rows.length} of {total.toLocaleString()} runs · newest first</span>
+        <span className="text-xs color-secondary">Showing {rows.length}{footerTotal != null ? ` of ${footerTotal.toLocaleString()}` : ""} runs · newest first</span>
         <div className="flex items-center gap-2">
           <button type="button" className="btn btn-ghost btn-sm" disabled={cursorStack.length <= 1} onClick={() => setCursorStack((s) => s.slice(0, -1))}>Previous</button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={!data?.nextCursor} onClick={() => data?.nextCursor && setCursorStack((s) => [...s, data.nextCursor])}>Load more</button>

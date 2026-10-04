@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { arrayMove } from "@dnd-kit/sortable";
 import { useAssistantProviders, useAssistantProjectSettings, useSaveAssistantProjectSettings } from "../../lib/queries/assistant-admin";
 import { useAssistantSettings } from "../../lib/queries";
 import { useAssistantProjectModels } from "../../lib/use-assistant-project-models";
@@ -22,9 +23,9 @@ import { AssistantTestSection } from "./AssistantTestSection";
 import type { Project } from "../../../shared/types";
 
 export function AssistantProjectProviderSection({ project }: { project: Project }) {
-  const { data: providers = [], isLoading: providersLoading } = useAssistantProviders();
+  const { data: providers = [], isLoading: providersLoading, isError: providersError } = useAssistantProviders();
   const { data: legacySettings } = useAssistantSettings(project.id);
-  const { data: projectSettings, isLoading: settingsLoading } = useAssistantProjectSettings(project.id);
+  const { data: projectSettings, isLoading: settingsLoading, isError: settingsError } = useAssistantProjectSettings(project.id);
   const save = useSaveAssistantProjectSettings(project.id);
 
   const modelState = useAssistantProjectModels({ settings: projectSettings, legacySettings, settingsLoading, providersLoading, providers });
@@ -61,6 +62,8 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
 
   const handleMoveFallback = (idx: number, dir: -1 | 1) => setFallbacks(moveFallback(fallbacks, idx, dir));
 
+  const handleReorderFallback = (from: number, to: number) => setFallbacks((prev) => arrayMove(prev, from, to));
+
   const handleRemoveFallback = (idx: number) => setFallbacks((prev) => prev.filter((_, i) => i !== idx));
 
   const handleAddFallback = () => {
@@ -73,6 +76,15 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
     if (!isDirty) return;
     save.mutate(savePayload(projectSettings, providerId, modelId, fallbacks));
   };
+
+  if (providersError || settingsError) {
+    return (
+      <section className="mb-8 mt-4">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Assistant provider</h2>
+        <div className="text-sm text-lx-text-danger py-6 text-center" role="alert">Failed to load Assistant provider settings.</div>
+      </section>
+    );
+  }
 
   if (providersLoading || settingsLoading) {
     return (
@@ -148,6 +160,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
             onAddFallbackIdChange={setAddFallbackId}
             onAdd={handleAddFallback}
             onMove={handleMoveFallback}
+            onReorder={handleReorderFallback}
             onRemove={handleRemoveFallback}
             modelId={modelId}
           />

@@ -12,6 +12,11 @@ export interface AssistantPanelSession {
 const EMPTY: AssistantPanelSession = Object.freeze({ taskId: null, prompt: "", skillId: "" });
 const sessions = new Map<string, AssistantPanelSession>();
 
+// Bounded per-document memory: the popover unmounts on close and sessions are
+// never explicitly removed, so each visited document would otherwise leak a
+// bucket for the whole tab lifetime. Evict the least-recently-patched key.
+const MAX_SESSIONS = 200;
+
 export function assistantPanelSessionKey(projectSlug: string, documentType: "task" | "wiki", documentId: string): string {
   // Wiki page slugs are only unique per project (docs/SCHEMA.md), so the
   // project must be part of the key or two projects sharing a slug share one
@@ -34,7 +39,16 @@ export function patchAssistantPanelSession(
 ): void {
   if (!documentId) return;
   const key = assistantPanelSessionKey(projectSlug, documentType, documentId);
-  sessions.set(key, { ...(sessions.get(key) ?? EMPTY), ...patch });
+  const next = { ...(sessions.get(key) ?? EMPTY), ...patch };
+  // Move an existing key to the end so eviction is least-recently-patched.
+  sessions.delete(key);
+  if (next.taskId === null && next.prompt === "" && next.skillId === "") return;
+  sessions.set(key, next);
+  while (sessions.size > MAX_SESSIONS) {
+    const oldest = sessions.keys().next().value;
+    if (oldest === undefined) break;
+    sessions.delete(oldest);
+  }
 }
 
 // Test-only: clear the per-document memory between cases.

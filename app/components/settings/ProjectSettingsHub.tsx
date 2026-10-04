@@ -181,7 +181,7 @@ function ProjectBasicSection({ project }: { project: Project }) {
 // every project payload carries its repos[]) plus GitHub App search results.
 // Selecting a suggestion links the repo to this project immediately.
 function LinkedReposSection({ slug }: { slug: string }) {
-  const { data: repos = [], isLoading } = useProjectRepos(slug);
+  const { data: repos = [], isLoading, isError: reposError } = useProjectRepos(slug);
   const { data: projects = [] } = useProjects();
   const replaceRepos = useReplaceProjectRepos();
   const [query, setQuery] = useState("");
@@ -312,6 +312,8 @@ function LinkedReposSection({ slug }: { slug: string }) {
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : reposError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center" role="alert">Failed to load linked repos.</div>
       ) : repos.length === 0 ? (
         <div className="empty-box mb-4">
           <div className="text-sm font-medium text-lx-text-primary">No linked repos</div>
@@ -382,40 +384,29 @@ function LinkedReposSection({ slug }: { slug: string }) {
 
 function RemoveRepoModal({ repo, onCancel, onConfirm }: { repo?: string | undefined; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">{repo ? "Remove repo?" : "Remove all repos?"}</h2>
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            {repo ? (
-              <>
-                Remove{" "}
-                <span className="chip font-mono text-xs text-lx-text-primary">
-                  {repo}
-                </span>
-                {" "}from this project? Existing task↔issue links keep syncing.
-              </>
-            ) : (
-              "Remove all repos from this project? Existing task↔issue links keep syncing."
-            )}
-          </p>
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Remove
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
+    <ConfirmDialog
+      title={repo ? "Remove repo?" : "Remove all repos?"}
+      body={repo ? (
+        <>
+          Remove{" "}
+          <span className="chip font-mono text-xs text-lx-text-primary">
+            {repo}
+          </span>
+          {" "}from this project? Existing task↔issue links keep syncing.
+        </>
+      ) : (
+        "Remove all repos from this project? Existing task↔issue links keep syncing."
+      )}
+      confirmLabel="Remove"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
 // Project members — add/remove, sourced from the workspace user list.
 function ProjectMembersSection({ slug }: { slug: string }) {
-  const { data: members = [], isLoading } = useProjectMembers(slug);
+  const { data: members = [], isLoading, isError: membersError } = useProjectMembers(slug);
   const { data: project } = useQuery({ queryKey: ["project", slug], queryFn: () => api.getProject(slug) });
   const { data: users = [] } = useUsers();
   const addMember = useAddProjectMember(slug);
@@ -423,7 +414,6 @@ function ProjectMembersSection({ slug }: { slug: string }) {
   const [memberQuery, setMemberQuery] = useState("");
   const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
-
   const memberEmails = new Set(members.map((m) => m.email));
   const memberSuggestions = users.filter(
     (u) => !memberEmails.has(u.email) && (u.email.includes(memberQuery) || u.name.toLowerCase().includes(memberQuery.toLowerCase()))
@@ -468,6 +458,8 @@ function ProjectMembersSection({ slug }: { slug: string }) {
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : membersError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center" role="alert">Failed to load project members.</div>
       ) : members.length === 0 ? (
         <div className="empty-box mb-4">
           <Users size={20} strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }} />
@@ -492,7 +484,7 @@ function ProjectMembersSection({ slug }: { slug: string }) {
                     <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{m.role}</span>
                   </td>
                   <td>
-                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Remove ${m.name} from project`} onClick={() => setRemoving(m.name)}>
+                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Remove ${m.name} from project`} onClick={() => setRemoving(m.email)}>
                       <Trash2 size={12} strokeWidth={1.5} />
                     </button>
                   </td>
@@ -505,11 +497,10 @@ function ProjectMembersSection({ slug }: { slug: string }) {
 
       {removing && (
         <RemoveMemberModal
-          name={removing}
+          name={members.find((m) => m.email === removing)?.name ?? removing}
           onCancel={() => setRemoving(null)}
           onConfirm={() => {
-            const member = members.find((m) => m.name === removing);
-            const user = member ? users.find((u) => u.email === member.email) : undefined;
+            const user = users.find((u) => u.email === removing);
             if (user && project) removeMember.mutate({ userId: user.id, projectId: project.id });
             setRemoving(null);
           }}

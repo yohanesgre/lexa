@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useCreateAgent, useCreateSkill, useDeleteAgent, useDeleteSkill, useReplaceAgentSkills, useResetAgent, useResetSkill, useUpdateAgent, useUpdateSkill } from "../../../lib/queries";
+import { ConfirmDialog } from "../../ui/ConfirmDialog";
 import type { LexaAgent, LexaSkill } from "../../../../shared/types";
 
 interface PromptEditorModalProps {
@@ -273,6 +274,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = []
   const [description, setDescription] = useState(initial.description);
   const [instructions, setInstructions] = useState(initial.instructions);
   const [attachedSkillIds, setAttachedSkillIds] = useState<string[]>(initial.attachedSkillIds);
+  const [askingDelete, setAskingDelete] = useState(false);
 
   const createAgent = useCreateAgent();
   const updateAgent = useUpdateAgent();
@@ -301,7 +303,11 @@ export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = []
 
   const handleDelete = () => {
     if (!entity) return;
-    if (!window.confirm(`Delete ${kind} '${entity.name}'? This cannot be undone.`)) return;
+    setAskingDelete(true);
+  };
+
+  const confirmDelete = () => {
+    if (!entity) return;
     (isAgent ? deleteAgent : deleteSkill).mutate(entity.id, { onSuccess: onClose });
   };
 
@@ -310,8 +316,18 @@ export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = []
     (isAgent ? resetAgent : resetSkill).mutate(entity.id, { onSuccess: onClose });
   };
 
+  useEffect(() => {
+    if (askingDelete) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [askingDelete, onClose]);
+
   return (
-    <div className="modal dialog-enter" style={{ width: 600 }}>
+    <>
+    <div className="modal dialog-enter" role="dialog" aria-modal="true" aria-label={isNew ? `New ${kind}` : `Edit ${kind}`} style={{ width: 600 }}>
       <div className="modal-header">
         <span className="modal-title">{isNew ? `New ${kind}` : `Edit ${kind} — ${entity!.name}`}</span>
         <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close">
@@ -375,5 +391,15 @@ export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = []
         />
       </div>
     </div>
+    {askingDelete && entity && (
+      <ConfirmDialog
+        title={`Delete ${kind}`}
+        body={<>Delete {kind} &lsquo;{entity.name}&rsquo;? This cannot be undone.</>}
+        confirmLabel="Delete"
+        onCancel={() => setAskingDelete(false)}
+        onConfirm={confirmDelete}
+      />
+    )}
+    </>
   );
 }

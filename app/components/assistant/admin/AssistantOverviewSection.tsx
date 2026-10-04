@@ -8,15 +8,15 @@ import { GatewayHealthSection } from "../GatewayHealthSection";
 import { formatDuration, formatTimestamp, RunStatusChip, runKindLabel } from "./run-display";
 
 export function AssistantOverviewSection() {
-  const { data: usage } = useAssistantOverviewSummary();
-  const { data: runs } = useAssistantRuns({ limit: 5 });
+  const { data: usage, isLoading: usageLoading, isError: usageError, refetch: refetchUsage } = useAssistantOverviewSummary();
+  const { data: runs, isLoading: runsLoading, isError: runsError, refetch: refetchRuns } = useAssistantRuns({ limit: 5 });
   const { data: projects } = useProjects();
   const projectById = useMemo(() => new Map((projects ?? []).map((p) => [p.id, p])), [projects]);
   const recent = runs?.data ?? [];
 
   return (
     <>
-      <UsageKpiCards summary={usage?.summary} />
+      <UsageKpiCards summary={usage?.summary} isLoading={usageLoading} isError={usageError} onRetry={() => refetchUsage()} />
 
       <GatewayHealthSection />
 
@@ -38,7 +38,20 @@ export function AssistantOverviewSection() {
               </tr>
             </thead>
             <tbody>
-              {recent.length === 0 ? (
+              {runsLoading && recent.length === 0 ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={7} style={{ padding: "10px 12px" }}><div className="skeleton" style={{ height: 12, width: "100%" }} /></td>
+                  </tr>
+                ))
+              ) : runsError ? (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "14px 12px" }}>
+                    <div className="font-mono text-xs" style={{ color: "var(--lx-text-danger)" }}>Failed to load runs.</div>
+                    <button type="button" className="btn btn-ghost btn-sm mt-2" onClick={() => refetchRuns()}>Retry</button>
+                  </td>
+                </tr>
+              ) : recent.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: "center", padding: "14px 12px" }}>
                     <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No runs yet</div>
