@@ -15,10 +15,18 @@ const PRICE_ERROR = "Enter a price ≥ 0, no exponent, max 6 decimals";
 
 // Number#toString switches to exponent notation below 1e-6 (e.g. 5e-7 → "5e-7"),
 // which parsePrice rejects and an input cannot display. Render the shortest
-// plain-decimal form so an unchanged stored value round-trips exactly.
+// plain-decimal form so an unchanged stored value round-trips exactly. A value
+// below 5e-21 rounds to "0" under toLocaleString's 20-digit cap, so fall back to
+// a plain expansion derived from the canonical exponential string — never let an
+// unchanged save silently write 0 over a stored nonzero.
 function formatPrice(n: number): string {
   if (!Number.isFinite(n)) return "";
-  return n.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+  const rounded = n.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+  if (Number(rounded) === n) return rounded;
+  const [mantissa, expPart] = String(n).split("e");
+  const exp = Number(expPart);
+  const fracDigits = mantissa!.includes(".") ? mantissa!.split(".")[1]!.length : 0;
+  return n.toFixed(Math.min(100, Math.max(0, -exp + fracDigits)));
 }
 
 // The raw string is validated, never Number()'s coercion: blank, exponent

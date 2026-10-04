@@ -102,6 +102,23 @@ describe("PriceEditor", () => {
     expect(body.prompt_price).toBe(5e-7);
   });
 
+  it("does not write 0 over a stored value below 5e-21 on an unchanged save", async () => {
+    const tinyPrices = { data: [{ model: "m1", prompt_price: 1e-21, completion_price: 0, cached_read_price: 0, cached_write_price: 0, updated_at: "t" }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => tinyPrices })
+      .mockResolvedValueOnce({ ok: true, json: async () => tinyPrices.data[0] });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<PriceEditor byModel={[]} />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("prompt_price for m1") as HTMLInputElement;
+    expect(input.value).toBe("0.000000000000000000001");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const [, init] = fetchMock.mock.calls[1]!;
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.prompt_price).toBe(1e-21);
+  });
+
   it("surfaces a server error on the row it failed for", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => prices })

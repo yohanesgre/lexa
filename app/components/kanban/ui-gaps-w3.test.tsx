@@ -17,9 +17,10 @@ import { SwimlaneForm } from "./SwimlaneForm";
 import { emptyFilters } from "../../lib/filters";
 
 const restoreMutate = vi.hoisted(() => vi.fn());
+const updateMutate = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/queries", () => ({
-  useUpdateSwimlane: () => ({ mutate: vi.fn() }),
+  useUpdateSwimlane: () => ({ mutate: updateMutate }),
   useDeleteSwimlane: () => ({ mutate: vi.fn() }),
   useCreateColumn: () => ({ mutate: vi.fn() }),
   useArchiveSwimlane: () => ({ mutate: vi.fn() }),
@@ -377,6 +378,32 @@ const LANE: Swimlane = {
   tasksDone: 0,
   tasksTotal: 0,
 };
+
+describe("SwimlaneHeader settings save", () => {
+  it("omits protected fields from the mutate body when saving a backlog lane", async () => {
+    const user = userEvent.setup();
+    updateMutate.mockClear();
+    render(
+      <SwimlaneHeader
+        slug="demo"
+        lane={{ ...LANE, name: "Backlog", kind: "backlog" }}
+        count={0}
+        onToggle={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByTitle("Swimlane menu"));
+    await user.click(screen.getByRole("menuitem", { name: /settings/i }));
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(updateMutate).toHaveBeenCalledTimes(1);
+    const body = updateMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(body).toMatchObject({ id: "s1", name: "Backlog", description: "" });
+    expect(body).not.toHaveProperty("milestoneId");
+    expect(body).not.toHaveProperty("dueAt");
+    expect(body).not.toHaveProperty("startAt");
+  });
+});
 
 describe("SwimlaneForm delete", () => {
   it("edit mode calls onDelete with the swimlane instead of closing", async () => {
