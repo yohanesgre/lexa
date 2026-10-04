@@ -7,9 +7,13 @@ import type { TipTapDoc, WikiPage } from "../../../shared/types";
 const editorMock = vi.hoisted(() => {
   const state: { content: unknown } = { content: { type: "doc", content: [] } };
   const listeners = new Map<string, Array<() => void>>();
+  let onUpdate: (() => void) | undefined;
   return {
     reset(content: unknown) {
       state.content = content;
+    },
+    bindOnUpdate(cb: (() => void) | undefined) {
+      onUpdate = cb;
     },
     editor: {
       getJSON: () => state.content,
@@ -23,11 +27,16 @@ const editorMock = vi.hoisted(() => {
         listeners.set(event, arr.filter((fn) => fn !== cb));
       },
       commands: {
-        setContent: (content: unknown) => {
+        // Mirror Tiptap: setContent emits an update unless emitUpdate is false.
+        setContent: (content: unknown, options?: { emitUpdate?: boolean }) => {
           state.content = content;
+          if (options?.emitUpdate !== false) onUpdate?.();
         },
       },
-      setEditable: () => {},
+      // Mirror Tiptap v3: setEditable emits an update unless emitUpdate is false.
+      setEditable: (_editable: boolean, emitUpdate = true) => {
+        if (emitUpdate !== false) onUpdate?.();
+      },
     },
   };
 });
@@ -35,7 +44,12 @@ const editorMock = vi.hoisted(() => {
 const mutationMock = vi.hoisted(() => ({ mutateAsync: vi.fn(), isPending: false }));
 const navigateMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@tiptap/react", () => ({ useEditor: () => editorMock.editor }));
+vi.mock("@tiptap/react", () => ({
+  useEditor: (config: { onUpdate?: () => void }) => {
+    editorMock.bindOnUpdate(config.onUpdate);
+    return editorMock.editor;
+  },
+}));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigateMock }));
 vi.mock("../../lib/queries", () => ({
   // Mirror @tanstack/react-query's useMutation: a fresh object every render.
@@ -82,9 +96,13 @@ function Harness({ page }: { page: WikiPage }) {
       <span data-testid="editing">{String(w.isEditing)}</span>
       <span data-testid="dirty">{String(w.isDirty)}</span>
       <span data-testid="lastSavedAt">{w.lastSavedAt ? "yes" : "no"}</span>
+      <span data-testid="lastSavedTitle">{w.lastSavedPage.title}</span>
       <span data-testid="title">{w.title}</span>
       <button type="button" onClick={w.handleStartEditing}>
         edit
+      </button>
+      <button type="button" onClick={w.handleCancel}>
+        cancel
       </button>
       <button type="button" onClick={() => w.handleTitleChange("Renamed")}>
         rename
@@ -205,10 +223,67 @@ describe("useWikiEditor page switch", () => {
     rerender(<Harness page={pageB} />);
     await waitFor(() => expect(screen.getByTestId("title")).toHaveTextContent("Beta"));
 
-    // Save for Alpha resolves after the switch. It must not overwrite Beta.
+    // Save for Alpha resolves after the switch. It must not overwrite Beta —
+    // neither the live title nor the saved-page identity used by cancel.
     await act(async () => {
       resolveSave({ ...pageA, title: "Renamed" });
     });
     expect(screen.getByTestId("title")).toHaveTextContent("Beta");
+    expect(screen.getByTestId("lastSavedTitle")).toHaveTextContent("Beta");
+  });
+});
+
+describe("useWikiEditor cancel (LX-93)", () => {
+  it("does not adopt a save that resolves after cancel", async () => {
+    localStorage.setItem("lexa-wiki-autosave", "false");
+
+    let resolveSave!: (page: WikiPage) => void;
+    mutationMock.mutateAsync.mockReturnValue(
+      new Promise<WikiPage>((resolve) => {
+        resolveSave = resolve;
+      })
+    );
+
+    render(<Harness page={pageA} />);
+    fireEvent.click(screen.getByText("edit"));
+    fireEvent.click(screen.getByText("rename"));
+    fireEvent.click(screen.getByText("save"));
+    await waitFor(() => expect(mutationMock.mutateAsync).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByText("cancel"));
+    expect(screen.getByTestId("editing")).toHaveTextContent("false");
+    expect(screen.getByTestId("title")).toHaveTextContent("Alpha");
+
+    // The in-flight response carries the discarded "Renamed" title. It must not
+    // adopt it — the cancel already returned the page to its saved content.
+    await act(async () => {
+      resolveSave({ ...pageA, title: "Renamed" });
+    });
+    expect(screen.getByTestId("title")).toHaveTextContent("Alpha");
+    expect(screen.getByTestId("lastSavedTitle")).toHaveTextContent("Alpha");
+    expect(screen.getByTestId("dirty")).toHaveTextContent("false");
+  });
+
+  it("does not re-arm autosave when restoring content on cancel", async () => {
+    localStorage.setItem("lexa-wiki-autosave", "true");
+    localStorage.setItem("lexa-wiki-autosave-delay", "10");
+    mutationMock.mutateAsync.mockResolvedValue({ ...pageA });
+
+    render(<Harness page={pageA} />);
+    fireEvent.click(screen.getByText("edit"));
+    fireEvent.click(screen.getByText("rename"));
+
+    await waitFor(() => expect(mutationMock.mutateAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("dirty")).toHaveTextContent("false"));
+
+    fireEvent.click(screen.getByText("cancel"));
+    expect(screen.getByTestId("editing")).toHaveTextContent("false");
+
+    // If the content swap emitted an update, markDirty would re-arm the
+    // debounced autosave and a second PATCH would fire after the delay.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(mutationMock.mutateAsync).toHaveBeenCalledTimes(1);
   });
 });

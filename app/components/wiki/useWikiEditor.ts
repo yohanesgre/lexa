@@ -70,9 +70,12 @@ function editReducer(state: EditState, action: EditAction): EditState {
       return { ...state, isSaving: true };
     case "saved":
       // A save that overlapped further edits must not adopt the server title
-      // or clear the dirty flag — those edits would be silently dropped.
+      // or clear the dirty flag — those edits would be silently dropped. It
+      // must also not overwrite lastSavedPage: after a page switch the in-flight
+      // response belongs to the previous page (LX-93), and after a cancel it
+      // carries the discarded edits.
       if (action.stale) {
-        return { ...state, lastSavedPage: action.page, lastSavedAt: action.at };
+        return { ...state, lastSavedAt: action.at };
       }
       return { ...state, title: action.page.title, lastSavedPage: action.page, lastSavedAt: action.at, isDirty: false };
     case "cancel":
@@ -150,8 +153,8 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     previewSnapshotRef.current = null;
     setHistoryPreviewId(null);
     dispatch({ type: "reset", page });
-    editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
+    editorRef.current?.setEditable(true, false);
+    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
     setPreviewContent(page.content ?? emptyDoc);
   }, [page]);
 
@@ -226,7 +229,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     dispatch({ type: "saving" });
     // Lock the editor for the manual save's duration so the request payload is
     // the doc the user saw when they pressed Save.
-    if (saveType === "manual") editor.setEditable(false);
+    if (saveType === "manual") editor.setEditable(false, false);
     let stale = false;
     try {
       const savedPage = await updateWikiPage.mutateAsync({
@@ -245,7 +248,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
         });
       }
     } finally {
-      if (saveType === "manual" && editorRef.current === editor) editor.setEditable(true);
+      if (saveType === "manual" && editorRef.current === editor) editor.setEditable(true, false);
       dispatch({ type: "done" });
     }
     return stale;
@@ -333,7 +336,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
         previewSnapshotRef.current = editor.getJSON() as unknown as TipTapDoc;
       }
       editor?.commands.setContent(revision.content as unknown as JSONContent, { emitUpdate: false });
-      editor?.setEditable(false);
+      editor?.setEditable(false, false);
       setHistoryPreviewId(revisionId);
       setPreviewContent(revision.content);
     } catch {
@@ -342,7 +345,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
         previewSnapshotRef.current = null;
         const editor = editorRef.current;
         editor?.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
-        editor?.setEditable(true);
+        editor?.setEditable(true, false);
       }
       setHistoryPreviewId(null);
     }
@@ -355,7 +358,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     const editor = editorRef.current;
     if (editor) {
       if (snapshot) editor.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
-      editor.setEditable(true);
+      editor.setEditable(true, false);
       setPreviewContent(editor.getJSON() as unknown as TipTapDoc);
     }
   };
@@ -366,10 +369,10 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
       const restored = await restoreWikiPage.mutateAsync({ pageSlug: page.slug, revisionId });
       dispatch({ type: "title", title: restored.title });
       dispatch({ type: "saved", page: restored, at: new Date() });
-      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent);
+      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
       autosaveHandleRef.current?.cancel();
       previewSnapshotRef.current = null;
-      editorRef.current?.setEditable(true);
+      editorRef.current?.setEditable(true, false);
       setHistoryPreviewId(null);
       setPreviewContent(restored.content ?? emptyDoc);
       if (restored.slug !== page.slug) {
@@ -396,17 +399,24 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   const handleStartEditing = () => {
     dispatch({ type: "start", page });
     setPreviewContent(page.content ?? emptyDoc);
-    editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
+    editorRef.current?.setEditable(true, false);
+    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
   };
 
   const handleCancel = () => {
+    // No AbortSignal on the PATCH, so an in-flight autosave cannot be recalled.
+    // Bump the edit counter first: when it resolves it is treated as stale and
+    // cannot adopt the discarded content (LX-93). The content swap below must
+    // not emit an update either, or markDirty re-arms autosave after cancel.
+    editVersionRef.current += 1;
     autosaveHandleRef.current?.cancel();
     previewSnapshotRef.current = null;
     setHistoryPreviewId(null);
     dispatch({ type: "cancel", page: lastSavedPage });
-    editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
+    // Tiptap emits an update by default on setEditable; that would re-arm
+    // autosave with the discarded doc right after cancel. Suppress it.
+    editorRef.current?.setEditable(true, false);
+    editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent, { emitUpdate: false });
     dispatch({ type: "stopEditing" });
   };
 
@@ -423,7 +433,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
       // older doc, so leaving edit mode here would silently drop them.
       if (stale) return;
     }
-    editorRef.current?.setEditable(false);
+    editorRef.current?.setEditable(false, false);
     dispatch({ type: "stopEditing" });
   };
 

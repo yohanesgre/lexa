@@ -127,6 +127,14 @@ describe("WikiDeletePageDialog focus contract", () => {
     expect(screen.getByText(/has child pages/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
   });
+
+  it("renders the title as an h2 and a decorative trash icon on the confirm button", () => {
+    render(
+      <WikiDeletePageDialog page={parent} pending={false} hasChildren={false} onConfirm={vi.fn()} onCancel={vi.fn()} />
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Delete page" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" }).querySelector("svg")).not.toBeNull();
+  });
 });
 
 describe("ShareDialog focus contract", () => {
@@ -187,6 +195,32 @@ describe("ShareDialog focus contract", () => {
     act(() => close.focus());
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
     expect(popover!.contains(document.activeElement)).toBe(true);
+  });
+
+  it("wraps Tab from the portaled DatePicker popover back into the dialog", () => {
+    render(<Harness />);
+    const trigger = screen.getByText("share");
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+
+    const dialog = document.querySelector("dialog")!;
+    const close = within(dialog).getByRole("button", { name: "Close" });
+    const create = within(dialog).getByRole("button", { name: /Create link/ });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "No expiry" }));
+    const popover = document.querySelector<HTMLElement>(".datepicker-popover")!;
+    const popItems = Array.from(popover.querySelectorAll<HTMLElement>("button"));
+    expect(popItems.length).toBeGreaterThan(0);
+
+    // Tab off the calendar's last item wraps to the dialog's first control.
+    act(() => popItems[popItems.length - 1]!.focus());
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+
+    // Shift+Tab off the calendar's first item wraps to the dialog's last control.
+    act(() => popItems[0]!.focus());
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(create);
   });
 
   it("lets Escape close the DatePicker popover before the dialog", async () => {

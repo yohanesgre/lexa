@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { Trash2 } from "lucide-react";
 import type { WikiPageMeta } from "../../../shared/types";
 import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 
@@ -45,9 +46,9 @@ export function WikiDeletePageDialog({
           aria-modal="true"
           aria-labelledby="delete-page-title"
         >
-          <h3 id="delete-page-title" className="font-display text-lg font-medium text-lx-text-primary">
+          <h2 id="delete-page-title" className="font-display text-lg font-medium text-lx-text-primary">
             Delete page
-          </h3>
+          </h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             Delete <span className="text-lx-text-primary font-medium">&lsquo;{page.title}&rsquo;</span>? This cannot be undone.
           </p>
@@ -66,6 +67,7 @@ export function WikiDeletePageDialog({
               onClick={onConfirm}
               disabled={pending || hasChildren}
             >
+              <Trash2 size={14} strokeWidth={1.5} />
               Delete
             </button>
           </div>

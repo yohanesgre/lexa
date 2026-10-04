@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pencil, Share2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
@@ -68,7 +68,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, he
       <div
         className={`wiki-content wiki-read-area${hasOutline ? " wiki-read-area--outline" : ""}`}
       >
-        <div className="wiki-prose" style={{ maxWidth: 760, margin: "0 auto" }}>
+        <div className="wiki-prose">
           <div className="text-xs text-lx-text-muted font-body" style={{ marginBottom: 4 }}>
             {breadcrumb}
           </div>
@@ -180,12 +180,17 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     .map((a) => a.title)
     .join(" / ");
 
-  if (!isEditing) {
+  // Stable identity so useScrollSpy's observer is not torn down and rebuilt on
+  // every render of the viewer.
+  const headings = useMemo(() => {
     const rawHeadings = extractHeadings(page.content as unknown as import("../tiptap-render").TTNode);
-    const headings = [
+    return [
       { level: 1, text: page.title, id: slugifyHeading(page.title) },
       ...rawHeadings.filter((h) => h.level >= 2),
     ];
+  }, [page.content, page.title]);
+
+  if (!isEditing) {
     return (
       <>
         <WikiReadView

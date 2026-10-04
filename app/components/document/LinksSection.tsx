@@ -47,6 +47,8 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
 
   const displayKey = (otherTaskId: string) => taskKeyById?.get(otherTaskId);
 
+  const dropdownOpen = focused && query.trim().length >= 2 && suggestions.length > 0;
+
   return (
     <div className={cn(className)}>
       <div className="flex items-center gap-2 mb-2">
@@ -106,7 +108,9 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
             onFocus={() => setFocused(true)}
             onBlur={() => window.setTimeout(() => setFocused(false), 150)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && suggestions.length > 0) {
+              // Enter activates a visible suggestion only — a hidden dropdown
+              // (blurred, short query, no matches) must not add blindly.
+              if (e.key === "Enter" && dropdownOpen) {
                 e.preventDefault();
                 addLink.mutate({ toTaskId: suggestions[0]!.id, relation });
                 setQuery("");
@@ -127,7 +131,7 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
           </select>
         </div>
 
-        {focused && query.trim().length >= 2 && suggestions.length > 0 && (
+        {dropdownOpen && (
           <div className="menu-popover" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30 }}>
             {suggestions.map((s) => (
               <button

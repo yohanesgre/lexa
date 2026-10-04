@@ -117,4 +117,15 @@ describe("WikiLayout sidebar state", () => {
     });
     expect(document.activeElement).toBe(row);
   });
+
+  it("opens the row action menu from the keyboard", () => {
+    stubViewport(true);
+    wikiState.pages = [page];
+    renderLayout();
+
+    const row = screen.getByRole("treeitem");
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menu", { name: "Page actions" })).toBeInTheDocument();
+  });
 });
