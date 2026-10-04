@@ -208,8 +208,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     throwOnError: false,
     staleTime: Infinity,
   });
-  const rawMessages = useMemo(() => transcript.data?.messages ?? [], [transcript.data]);
-
   // A cached transcript must be re-read whenever its thread becomes active:
   // GET /assistant/chat/:chatId reconciles persisted approval markers against
   // live decisions (terminal chip statuses only the read carries). chatId
@@ -240,7 +238,16 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const [acceptedChatId, setAcceptedChatId] = useState("");
   const sendAccepted = !!chatId && acceptedChatId === chatId;
 
-  const { turns, setTurns } = useSettledTurns({
+  // Starter-chip seed (hero only). Declared before the send handler so an
+  // accepted send can clear it synchronously: the landing→dock swap remounts
+  // the composer, and a seed still set when the docked composer mounts would
+  // re-prefill its draft with the chip text just sent (A7).
+  const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
+
+  // `raw` is the snapshot the settled turns' rawIndex values point into. After a
+  // shorter-transcript reconcile it is a merged array (kept history ++ server
+  // tail) so edit/regenerate/retry still resolve on earlier turns (M1).
+  const { turns, setTurns, raw: settledRaw } = useSettledTurns({
     chatId,
     transcriptData: transcript.data,
     transcriptError: transcript.error,
@@ -413,6 +420,11 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       // The send is accepted: the landing must dock for THIS chat even before
       // the stream status flips (the fresh-thread write is deferred).
       setAcceptedChatId(threadId);
+      // Clear the starter seed at acceptance, not via the turns>0 effect: the
+      // landing→dock remount would otherwise mount the docked composer with the
+      // stale seed and re-prefill the draft with the text just sent (A7). The
+      // turns>0 effect remains as the safety net for server-arriving turns.
+      setSeed(null);
       // Carry an AUTHORITATIVE mode onto the (possibly just-minted) thread so
       // the picker stays in sync before its transcript is read back. A display
       // fallback must NOT be stored — it would later override transcript
@@ -493,7 +505,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     (turns?.length ?? 0) === 0 &&
     !sendAccepted &&
     !streaming;
-  const [seed, setSeed] = useState<{ text: string; nonce: number } | null>(null);
 
   // A starter-chip seed prefills the composer draft once. Once a turn exists the
   // draft is no longer a fresh landing, so drop the seed: otherwise returning to
@@ -506,7 +517,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const { handleEditSave, handleRegenerate, handleRetryTurn } = useTurnResend({
     turns,
     setTurns,
-    rawMessages,
+    rawMessages: settledRaw,
     streaming,
     startStream,
   });

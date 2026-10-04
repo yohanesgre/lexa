@@ -8,7 +8,7 @@ import { useRenameAssistantChat, useDeleteAssistantChat, useUpdateAssistantChatM
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useToast } from "../ui/Toast";
 import { assistantSendForKey } from "../../lib/use-assistant-agent";
-import { settleTurns } from "./assistant-chat-turns-state";
+import { settleTurnsWithRaw } from "./assistant-chat-turns-state";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
 import type { ChatAttachmentRef } from "../../lib/assistant-image";
@@ -262,7 +262,11 @@ export function useSettledTurns(args: {
   transcriptUpdatedAt?: number | undefined;
 }) {
   const { chatId, transcriptData, transcriptError, streaming, stream, sendAccepted = false, transcriptUpdatedAt } = args;
-  const [turns, setTurns] = useState<ChatTurn[] | null>(null);
+  // Turns ride together with the raw snapshot their rawIndex values point into:
+  // after a reconcile the kept turns keep positions from the raw read they were
+  // derived from, so resends must resolve against that merged snapshot rather
+  // than the shorter live read (M1).
+  const [settled, setSettled] = useState<{ turns: ChatTurn[] | null; raw: unknown[] }>({ turns: null, raw: [] });
   const [syncedKey, setSyncedKey] = useState("");
   const chatRef = useRef("");
   // chatId is part of the key: two threads can share a message count and stream
@@ -281,19 +285,22 @@ export function useSettledTurns(args: {
     const keepAcrossChange = sendAccepted && chatChanged && prevChatId === "";
     chatRef.current = chatId;
     setSyncedKey(syncKey);
-    setTurns((prev) => {
+    setSettled((prev) => {
+      const prevTurns = chatChanged && !keepAcrossChange ? null : prev.turns;
+      const prevRaw = chatChanged && !keepAcrossChange ? [] : prev.raw;
       if (transcriptError) {
         // A live turn (connecting/streaming, any ingress, or an accepted send
         // whose flush is still pending) means the fresh thread's write is in
         // flight or landed — the 404 is stale, so the optimistic turns (the
         // send's ephemeral user turn) must survive. Only a genuinely dead
         // thread (no stream activity, no ingress) clears.
-        if (stream.hasIngress || streaming || keepAcrossChange) return chatChanged && !keepAcrossChange ? null : prev;
-        return [];
+        if (stream.hasIngress || streaming || keepAcrossChange) return { turns: prevTurns, raw: prevRaw };
+        return { turns: [], raw: [] };
       }
-      if (!transcriptData) return chatChanged && !keepAcrossChange ? null : prev;
-      return settleTurns({
-        prev: chatChanged && !keepAcrossChange ? null : prev,
+      if (!transcriptData) return { turns: prevTurns, raw: prevRaw };
+      return settleTurnsWithRaw({
+        prev: prevTurns,
+        prevRaw,
         messages: transcriptData.messages,
         streaming,
         streamStatus: stream.status,
@@ -301,7 +308,13 @@ export function useSettledTurns(args: {
       });
     });
   }
-  return { turns, setTurns };
+  // External turn mutations (ephemeral append, freeze, truncate) keep the raw
+  // snapshot: they only add index -1 turns or drop a tail, so existing rawIndex
+  // values stay valid until the next transcript read re-derives both.
+  const setTurns = useCallback<React.Dispatch<React.SetStateAction<ChatTurn[] | null>>>((action) => {
+    setSettled((s) => ({ turns: typeof action === "function" ? action(s.turns) : action, raw: s.raw }));
+  }, []);
+  return { turns: settled.turns, setTurns, raw: settled.raw };
 }
 
 // Terminal stream frame → refetch the transcript (except 404s, which would

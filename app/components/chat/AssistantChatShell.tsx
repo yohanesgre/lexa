@@ -458,7 +458,7 @@ export function ChatComposerArea({
           queued={queued}
           onQueue={onQueue}
           onUnqueue={onUnqueue}
-          seed={seed}
+          seed={landing ? seed : undefined}
           ensureChatId={ensureChatId}
           uploadAttachment={uploadAttachment}
           rail={
