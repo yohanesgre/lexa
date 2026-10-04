@@ -68,6 +68,20 @@ describe("WikiLayout delete flow", () => {
     expect(deleteMock.mutateAsync).not.toHaveBeenCalled();
   });
 
+  it("moves focus to a neighboring row after deleting the active page", async () => {
+    const sibling: WikiPageMeta = { ...parent, id: "p2", title: "Sibling", slug: "sibling", position: 1 };
+    wikiState.pages = [parent, sibling];
+    deleteMock.mutateAsync.mockResolvedValue(undefined);
+    renderLayout("parent");
+    openDeleteOnFirstRow();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      const rows = screen.getAllByRole("treeitem");
+      expect(document.activeElement).toBe(rows[1]);
+    });
+  });
+
   it("navigates away only after the delete resolves", async () => {
     wikiState.pages = [parent];
     let resolveDelete!: () => void;

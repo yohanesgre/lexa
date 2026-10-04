@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
 import { DatePicker } from "../ui/DatePicker";
 import { useCreateWikiShareLink, useRevokeWikiShareLink, useWikiShareLinks } from "../../lib/queries";
@@ -38,13 +38,22 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
   const [error, setError] = useState<string | null>(null);
 
   const dialogRef = useRef<HTMLDialogElement | null>(null);
-  // Focus contract: initial focus inside, Tab trapped while open, focus
-  // returned to the Share trigger on close.
-  useOverlayFocusTrap(isOpen, dialogRef);
+  // The DatePicker inside the dialog portals its calendar to document.body, so
+  // the trap must be told to treat that popover as part of the cycle.
+  const getPortaledPopover = useCallback(
+    () => [document.querySelector<HTMLElement>(".datepicker-popover")],
+    []
+  );
+  // Focus contract: initial focus inside, Tab trapped while open (including the
+  // portaled DatePicker popover), focus returned to the Share trigger on close.
+  useOverlayFocusTrap(isOpen, dialogRef, undefined, getPortaledPopover);
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        // While the portaled DatePicker popover is open it owns Escape;
+        // closing the dialog here would dismiss both layers at once.
+        if (document.querySelector(".datepicker-popover")) return;
         event.stopPropagation();
         onClose();
       }

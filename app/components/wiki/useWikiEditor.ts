@@ -142,6 +142,10 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   useEffect(() => {
     if (previousSlugRef.current === page.slug) return;
     previousSlugRef.current = page.slug;
+    // Bump the edit counter so any save already in flight is recognised as
+    // stale on resolve — its response must not adopt the previous page's
+    // title/state onto the new page.
+    editVersionRef.current += 1;
     autosaveHandleRef.current?.cancel();
     previewSnapshotRef.current = null;
     setHistoryPreviewId(null);

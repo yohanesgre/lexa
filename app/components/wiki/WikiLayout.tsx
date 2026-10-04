@@ -21,6 +21,17 @@ interface WikiLayoutProps {
   children: (pages: WikiPageMeta[], ctx: WikiLayoutContext) => React.ReactNode;
 }
 
+// After a successful delete the originating tree row is gone, so the dialog's
+// return-focus target no longer exists and focus would drop to body. Pick the
+// row that takes its place (next sibling, else previous) before the row is
+// removed from the DOM.
+function neighborTreeItemId(deletedId: string): string | null {
+  const items = Array.from(document.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+  const index = items.findIndex((el) => el.dataset.nodeId === deletedId);
+  if (index === -1) return items[0]?.dataset.nodeId ?? null;
+  return (items[index + 1] ?? items[index - 1])?.dataset.nodeId ?? null;
+}
+
 interface WikiContextMenuState {
   pageId: string;
   pageTitle: string;
@@ -158,6 +169,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     page: null,
   });
   const [deleteConfirm, setDeleteConfirm] = useState<WikiPageMeta | null>(null);
+  const pendingFocusNodeIdRef = useRef<string | null>(null);
 
   const openNewPage = useCallback(
     (defaultParentId: string | null) => setNewPageModal({ isOpen: true, defaultParentId }),
@@ -172,17 +184,32 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
   const handleDelete = useCallback(async () => {
     if (!deleteConfirm) return;
     if (deleteHasChildren) return;
+    // Capture the fallback focus target while the deleted row still exists.
+    const neighborId = neighborTreeItemId(deleteConfirm.id);
     try {
       await deletePage.mutateAsync(deleteConfirm.slug);
     } catch {
       // Server rejected (e.g. HAS_CHILDREN) — keep the dialog open, no bounce.
       return;
     }
+    pendingFocusNodeIdRef.current = neighborId;
     if (deleteConfirm.slug === activePageSlug) {
       navigate({ to: "/$slug/wiki", params: { slug } });
     }
     setDeleteConfirm(null);
   }, [deleteConfirm, deleteHasChildren, activePageSlug, slug, deletePage, navigate]);
+
+  // Runs after the dialog unmounts (and after its trap's return-focus cleanup),
+  // moving focus to a surviving neighbor row instead of letting it drop to body.
+  useEffect(() => {
+    const nodeId = pendingFocusNodeIdRef.current;
+    if (deleteConfirm !== null || nodeId === null) return;
+    pendingFocusNodeIdRef.current = null;
+    const row =
+      document.querySelector<HTMLElement>(`[role="treeitem"][data-node-id="${nodeId}"]`) ??
+      document.querySelector<HTMLElement>('[role="treeitem"]');
+    row?.focus();
+  }, [deleteConfirm]);
 
   const contextMenu = useWikiPageContextMenu(pages, {
     onAddChild: (pageId) => openNewPage(pageId),

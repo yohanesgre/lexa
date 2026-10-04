@@ -41,7 +41,7 @@ export function WikiDeletePageDialog({
           ref={dialogRef}
           open
           className="dialog dialog-enter pointer-events-auto p-4"
-          style={{ width: 360, maxWidth: "calc(100vw - 48px)" }}
+          style={{ maxWidth: "calc(100vw - 48px)" }}
           aria-modal="true"
           aria-labelledby="delete-page-title"
         >
@@ -57,7 +57,7 @@ export function WikiDeletePageDialog({
             </p>
           )}
           <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
               Cancel
             </button>
             <button

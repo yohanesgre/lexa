@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TipTapDoc, WikiPage } from "../../../shared/types";
 
@@ -184,5 +184,31 @@ describe("useWikiEditor page switch", () => {
     fireEvent.click(screen.getByText("save"));
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(mutationMock.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("does not adopt a late save response from the previous page", async () => {
+    localStorage.setItem("lexa-wiki-autosave", "false");
+
+    let resolveSave!: (page: WikiPage) => void;
+    mutationMock.mutateAsync.mockReturnValue(
+      new Promise<WikiPage>((resolve) => {
+        resolveSave = resolve;
+      })
+    );
+
+    const { rerender } = render(<Harness page={pageA} />);
+    fireEvent.click(screen.getByText("edit"));
+    fireEvent.click(screen.getByText("rename"));
+    fireEvent.click(screen.getByText("save"));
+    await waitFor(() => expect(mutationMock.mutateAsync).toHaveBeenCalledTimes(1));
+
+    rerender(<Harness page={pageB} />);
+    await waitFor(() => expect(screen.getByTestId("title")).toHaveTextContent("Beta"));
+
+    // Save for Alpha resolves after the switch. It must not overwrite Beta.
+    await act(async () => {
+      resolveSave({ ...pageA, title: "Renamed" });
+    });
+    expect(screen.getByTestId("title")).toHaveTextContent("Beta");
   });
 });

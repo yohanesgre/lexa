@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import type { WikiPageMeta } from "../../../shared/types";
@@ -153,5 +153,54 @@ describe("ShareDialog focus contract", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("traps Tab across the dialog and into the portaled DatePicker calendar", () => {
+    render(<Harness />);
+    const trigger = screen.getByText("share");
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+
+    const dialog = document.querySelector("dialog")!;
+    const close = within(dialog).getByRole("button", { name: "Close" });
+    const create = within(dialog).getByRole("button", { name: /Create link/ });
+
+    act(() => create.focus());
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+
+    act(() => close.focus());
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(create);
+
+    // Open the DatePicker — its calendar portals to document.body.
+    fireEvent.click(within(dialog).getByRole("button", { name: "No expiry" }));
+    const popover = document.querySelector<HTMLElement>(".datepicker-popover");
+    expect(popover).not.toBeNull();
+
+    // Tab off the last dialog control enters the portaled calendar as a group.
+    act(() => create.focus());
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(popover!.contains(document.activeElement)).toBe(true);
+
+    // Shift+Tab off the first dialog control lands on the calendar's last item.
+    act(() => close.focus());
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(popover!.contains(document.activeElement)).toBe(true);
+  });
+
+  it("lets Escape close the DatePicker popover before the dialog", async () => {
+    render(<Harness />);
+    const trigger = screen.getByText("share");
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+
+    const dialog = document.querySelector("dialog")!;
+    fireEvent.click(within(dialog).getByRole("button", { name: "No expiry" }));
+    expect(document.querySelector(".datepicker-popover")).not.toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector(".datepicker-popover")).toBeNull());
+    expect(screen.getByText("Share page")).toBeInTheDocument();
   });
 });

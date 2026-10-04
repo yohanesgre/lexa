@@ -155,7 +155,12 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
           }}
         >
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-            {lastSavedLabel}{!isSaving && updatedByName ? ` by ${updatedByName}` : ""}
+            {isDirty ? null : (
+              <>
+                {lastSavedLabel}
+                {!isSaving && updatedByName ? ` by ${updatedByName}` : ""}
+              </>
+            )}
           </span>
           {isSaving ? (
             <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Saving…</span>
