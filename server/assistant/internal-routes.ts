@@ -8,12 +8,14 @@
 //   POST /api/internal/assistant/mirror              → { ok: true }
 //   POST /api/internal/assistant/tool                → { ok, result, error }   (read tool)
 //   POST /api/internal/assistant/write-tool          → { proposed, approvalId, error } (write proposal)
-//   POST /api/internal/assistant/write-execute       → { ok, applied, result, error, partial } (auto-mode write)
+//   POST /api/internal/assistant/write-execute        → { ok, applied, result, error, partial } (auto-mode write)
+//   POST /api/internal/assistant/resume-execute       → { ok, note } | { ok: false, reason, remaining } (chat resume)
 
 import { Effect } from "effect";
 import type { DbDriver } from "../db/db";
 import {
   batch,
+  queryAll,
   queryFirst,
   run,
   runReturning,
@@ -51,6 +53,8 @@ import {
   getAssistantRun,
   transitionAssistantRunRegistry,
 } from "./run-registry";
+import { collectResumeResults } from "./resume-results";
+import { buildResumeResultsNote, type ResumeResultLine } from "./build-stream";
 
 export interface MirrorThreadInput {
   threadKey: string;
@@ -575,6 +579,15 @@ export interface InternalAssistantRouteResult {
   body: unknown;
 }
 
+/** One persisted decision row read by the resume-execute route. */
+interface ResumeWriteRow {
+  id: string;
+  tool_name: string;
+  args: string;
+  status: string;
+  seq: number;
+}
+
 /** Wire body for the per-turn harness context bundle (ADR-0004 §1). */
 export interface HarnessTurnContextRequest {
   threadKey: string;
@@ -833,6 +846,75 @@ export async function handleInternalAssistantRequest(input: {
       ownerUserId: identity.actorUserId,
     });
     return { status: 200, body: result };
+  }
+
+  // Resume execution (LX-79): the DO claims a chat approval batch, then calls
+  // here to execute its approved rows EXACTLY once and receive the
+  // provider-context note (so the continuation does not re-propose them). The
+  // DO's synchronous SQLite claim is the atomic exactly-once gate; this route
+  // only reports the decision outcome and applies approved rows in seq order.
+  // A still-pending batch is reported, never executed, so the claim can be
+  // released and an older fully-decided batch resumes instead.
+  if (method === "POST" && path === "/api/internal/assistant/resume-execute") {
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0 || identity.actorUserId.length === 0 || identity.threadKey.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal identity" } } };
+    }
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const batchId = typeof payload.batchId === "string" ? payload.batchId : "";
+    if (batchId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "batchId is required" } } };
+    }
+    const parsed = parseThreadKey(identity.threadKey);
+    if (!parsed || parsed.documentType !== "chat") {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "resume-execute is chat-only" } } };
+    }
+    const rows = await Effect.runPromise(
+      queryAll<ResumeWriteRow>(
+        driver,
+        `SELECT id, tool_name, args, status, seq FROM assistant_pending_writes
+         WHERE batch_id = ? AND document_type = 'chat' AND document_id = ? AND project_id = ? AND owner_user_id = ?
+         ORDER BY seq`,
+        batchId,
+        parsed.documentId,
+        identity.projectId,
+        identity.actorUserId
+      )
+    );
+    if (rows.length === 0) {
+      return { status: 200, body: { ok: false, reason: "missing" } };
+    }
+    const pending = rows.filter((row) => row.status === "pending").length;
+    if (pending > 0) {
+      return { status: 200, body: { ok: false, reason: "pending", remaining: pending } };
+    }
+    if (!input.deps?.executeWriteTool) {
+      return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Write execution not wired" } } };
+    }
+    const execute = input.deps.executeWriteTool;
+    const ownerUserId = identity.actorUserId;
+    const projectId = identity.projectId;
+    const { noteLines } = await Effect.runPromise(
+      collectResumeResults(rows, (row) =>
+        Effect.promise(async (): Promise<{ ok: true; result: unknown } | { ok: false; error: string }> => {
+          let args: Record<string, unknown> = {};
+          try {
+            const raw = JSON.parse(row.args) as unknown;
+            if (raw !== null && typeof raw === "object") args = raw as Record<string, unknown>;
+          } catch {
+            args = {};
+          }
+          try {
+            const result = await execute({ name: row.tool_name, args, projectId, ownerUserId });
+            return result.ok ? { ok: true, result: result.result } : { ok: false, error: result.error };
+          } catch (e) {
+            return { ok: false, error: e instanceof Error ? e.message : "write execution failed" };
+          }
+        })
+      )
+    );
+    const note: string = buildResumeResultsNote(noteLines as ResumeResultLine[]);
+    return { status: 200, body: { ok: true, note } };
   }
 
   // One `assistant_call_logs` row per provider call (engine onEnd/onError).

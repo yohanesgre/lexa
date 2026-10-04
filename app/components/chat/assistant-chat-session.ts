@@ -79,9 +79,14 @@ function settleStreamFrame(args: {
   frozeBatchRef: React.RefObject<string | null>;
   frozeErrorRef: React.RefObject<string | null>;
   resumedBatchesRef: React.RefObject<Set<string>>;
+  // In-flight resume POSTs keyed `${chatId}:${batchId}`, component-lifetime
+  // (never reset on chat switch). The persisted/in-memory `resumedBatchesRef`
+  // is per-chat and is re-seeded on selection, so without this a switch away
+  // and back while the POST is still in flight would re-issue it (LX-83).
+  inFlightResumeRef: React.RefObject<Set<string>>;
   ingressInsertedRef: React.RefObject<Set<string>>;
 }): void {
-  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, ingressInsertedRef } = args;
+  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, inFlightResumeRef, ingressInsertedRef } = args;
   if (stream.status === "suspended") {
     const batchId = stream.suspendedBatchId ?? "";
     if (batchId && frozeBatchRef.current !== batchId) {
@@ -107,12 +112,17 @@ function settleStreamFrame(args: {
   if (!chatId || streaming) return;
   const batchId = resumableBatchId(turns, resumedBatchesRef.current ?? new Set());
   if (batchId === null) return;
-  // In-memory add first: dedupes an in-flight POST if the effect re-runs before
-  // the outcome lands. Persist only on success; a failure un-guards the batch
-  // (in-memory + no persisted id) so a later pass can retry.
+  const flightKey = `${chatId}:${batchId}`;
+  if (inFlightResumeRef.current?.has(flightKey)) return;
+  // In-flight + in-memory add first: dedupes an in-flight POST if the effect
+  // re-runs, and the keyed map survives a chat-switch re-seed. Persist only on
+  // success; a failure un-guards the batch (in-flight + in-memory, no persisted
+  // id) so a later pass can retry.
+  inFlightResumeRef.current?.add(flightKey);
   resumedBatchesRef.current?.add(batchId);
   ingressInsertedRef.current?.delete(chatId);
   stream.send(`/api/assistant/chat/${chatId}/resume`, {}, (ok) => {
+    inFlightResumeRef.current?.delete(flightKey);
     if (ok) persistResumedBatch(chatId, batchId);
     else resumedBatchesRef.current?.delete(batchId);
   });
@@ -194,6 +204,9 @@ export function useStreamFrameFreeze(args: {
   const frozeBatchRef = useRef<string | null>(null);
   const frozeErrorRef = useRef<string | null>(null);
   const resumedBatchesRef = useRef<Set<string>>(new Set());
+  // Survives chat switches by design (LX-83): the per-chat resumed set below is
+  // re-seeded on selection, but an in-flight resume POST must not be re-issued.
+  const inFlightResumeRef = useRef<Set<string>>(new Set());
   const chatRef = useRef("");
 
   // One settling effect (not a chain): freezes the terminal stream frame
@@ -220,6 +233,7 @@ export function useStreamFrameFreeze(args: {
       frozeBatchRef,
       frozeErrorRef,
       resumedBatchesRef,
+      inFlightResumeRef,
       ingressInsertedRef,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per terminal frame; snapshot fields are read at flip time

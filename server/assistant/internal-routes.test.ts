@@ -466,6 +466,93 @@ describe("auto-mode write execution (POST /api/internal/assistant/write-execute)
   });
 });
 
+describe("chat resume execution (POST /api/internal/assistant/resume-execute)", () => {
+  const driverOf = () => createBunSqliteDriver(db);
+
+  function seedPendingWrite(over: { id: string; batchId: string; status: string; seq: number; tool?: string; args?: Record<string, unknown> }) {
+    db.prepare(
+      `INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+       VALUES (?, 'p1', 'chat', 'c1', 'u1', ?, ?, ?, ?, '{}', ?, '2099-01-01T00:00:00Z')`
+    ).run(over.id, over.batchId, over.seq, over.tool ?? "update_task", JSON.stringify(over.args ?? { ref: "P-1", title: "New title" }), over.status);
+  }
+
+  const call = (body: unknown, identityOrUndefined: typeof IDENTITY | null = IDENTITY, deps?: { executeWriteTool: (input: { name: string; args: Record<string, unknown>; projectId: string; ownerUserId: string }) => Promise<{ ok: true; applied: true; result?: unknown } | { ok: false; applied: false; error: string }> }) =>
+    handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/resume-execute",
+      body,
+      driver: driverOf(),
+      ...(identityOrUndefined ? { identity: identityOrUndefined } : {}),
+      ...(deps ? { deps } : {}),
+    });
+
+  it("executes the approved rows in seq order and returns the results note", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b1", status: "approved", seq: 0 });
+    seedPendingWrite({ id: "w2", batchId: "b1", status: "rejected", seq: 1, args: { ref: "P-2" } });
+    seedPendingWrite({ id: "w3", batchId: "b1", status: "approved", seq: 2, args: { ref: "P-3" } });
+    const seen: Array<{ name: string; args: Record<string, unknown>; projectId: string; ownerUserId: string }> = [];
+    const result = await call({ batchId: "b1" }, IDENTITY, {
+      executeWriteTool: async (input) => {
+        seen.push(input);
+        return { ok: true, applied: true, result: { id: input.args.ref } };
+      },
+    });
+    expect(result.status).toBe(200);
+    const body = result.body as { ok: boolean; note: string };
+    expect(body.ok).toBe(true);
+    expect(body.note).toContain("[approved write results]");
+    expect(body.note).toContain('update_task "P-1": applied');
+    expect(body.note).toContain('update_task "P-3": applied');
+    expect(body.note).toContain('update_task "P-2": rejected (not executed)');
+    // Rejected rows never execute; approved rows execute in seq order.
+    expect(seen.map((s) => s.args.ref)).toEqual(["P-1", "P-3"]);
+    expect(seen.every((s) => s.projectId === "p1" && s.ownerUserId === "u1")).toBe(true);
+  });
+
+  it("reports a not-fully-decided batch as pending without executing anything", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b2", status: "approved", seq: 0 });
+    seedPendingWrite({ id: "w2", batchId: "b2", status: "pending", seq: 1 });
+    let called = 0;
+    const result = await call({ batchId: "b2" }, IDENTITY, {
+      executeWriteTool: async () => {
+        called += 1;
+        return { ok: true, applied: true, result: {} };
+      },
+    });
+    expect(result).toEqual({ status: 200, body: { ok: false, reason: "pending", remaining: 1 } });
+    expect(called).toBe(0);
+  });
+
+  it("reports a batch with no rows for this thread/owner as missing", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "other", status: "approved", seq: 0 });
+    const result = await call({ batchId: "nope" }, IDENTITY, {
+      executeWriteTool: async () => ({ ok: true, applied: true, result: {} }),
+    });
+    expect(result).toEqual({ status: 200, body: { ok: false, reason: "missing" } });
+  });
+
+  it("502s when the write executor is not wired (all rows decided)", async () => {
+    seedTask();
+    seedPendingWrite({ id: "w1", batchId: "b3", status: "approved", seq: 0 });
+    const result = await call({ batchId: "b3" });
+    expect(result.status).toBe(502);
+    expect((result.body as { error: { code: string } }).error.code).toBe("ASSISTANT_UNAVAILABLE");
+  });
+
+  it("400s a missing batchId, a missing identity, and a non-chat thread key", async () => {
+    seedTask();
+    const noBatch = await call({});
+    expect(noBatch.status).toBe(400);
+    const noIdentity = await call({ batchId: "b1" }, null);
+    expect(noIdentity.status).toBe(400);
+    const nonChat = await call({ batchId: "b1" }, { actorUserId: "u1", projectId: "p1", threadKey: "task:t1" });
+    expect(nonChat.status).toBe(400);
+  });
+});
+
 describe("applyAssistantWrite authorization", () => {
   it("denies before any service call when the owner has no project access", async () => {
     const ctx = {

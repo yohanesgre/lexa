@@ -87,11 +87,23 @@ LexaAssistantAgent.prototype.__testStorageKeys = async function () {
 const INTERNAL = "/api/internal/assistant/";
 // Captured run-update bodies (the DO posts here from onRunFinished / dispatch).
 const RUN_UPDATES = [];
+// Captured resume-execute bodies (the DO posts here from resumeBatch).
+const RESUME_EXECUTES = [];
 // The one schedule run the inline run-get route answers for.
 const SCHEDULE_RUN_ID = "schedule-run-1";
 
 async function handleInternal(request, env) {
   const url = new URL(request.url);
+  if (request.method === "POST" && url.pathname === INTERNAL + "resume-execute") {
+    const body = await request.json();
+    RESUME_EXECUTES.push(body);
+    // A batch id prefixed "pending" exercises the not-fully-decided path: the
+    // DO must release its claim and leave the batch resumable.
+    if (typeof body.batchId === "string" && body.batchId.startsWith("pending")) {
+      return Response.json({ ok: false, reason: "pending", remaining: 1 });
+    }
+    return Response.json({ ok: true, note: '[approved write results]\\n- update_task "P-1": applied' });
+  }
   if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "legacy/")) {
     const threadKey = decodeURIComponent(url.pathname.slice((INTERNAL + "legacy/").length));
     const sep = threadKey.indexOf(":");
@@ -210,6 +222,15 @@ export default {
       const body = await request.json();
       const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
       return Response.json(await stub.enqueueRun(body));
+    }
+    if (url.pathname === "/__test/resume") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.resumeBatch(body.batchId ?? null));
+    }
+    if (url.pathname === "/__test/resume-executes") {
+      return Response.json(RESUME_EXECUTES);
     }
     if (url.pathname === "/__test/onRunFinished") {
       const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
@@ -352,6 +373,19 @@ async function enqueueRun(threadKey: string, input: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+async function callResume(threadKey: string, batchId: string | null) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/resume?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ batchId }),
+  });
+}
+
+async function capturedResumeExecutes(): Promise<Array<Record<string, unknown>>> {
+  const res = await mf!.dispatchFetch("http://assistant-smoke/__test/resume-executes");
+  return (await res.json()) as Array<Record<string, unknown>>;
 }
 
 async function callOnRunFinished(threadKey: string, run: unknown, result: unknown) {
@@ -1264,4 +1298,38 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(after.slice(0, 2)).toEqual(turn1);
     expect(messageIds(after)).toContain("s2-u2");
   }, 90_000);
+
+  it("claims a resume batch exactly once so a duplicate call no-ops (LX-80)", async () => {
+    const documentId = "resume-claim";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const first = await callResume(threadKey, "batch-claim-1");
+    expect(await first.json()).toEqual({ ok: true });
+    const second = await callResume(threadKey, "batch-claim-1");
+    expect(await second.json()).toEqual({ ok: true });
+
+    // The Worker executed the batch once; the duplicate claim short-circuited
+    // before any second execution.
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "batch-claim-1")).toHaveLength(1);
+  }, 60_000);
+
+  it("releases the claim for a batch the Worker reports pending so a later attempt retries (LX-82)", async () => {
+    const documentId = "resume-pending";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    expect(await (await callResume(threadKey, "pending-1")).json()).toEqual({ ok: true });
+    expect(await (await callResume(threadKey, "pending-1")).json()).toEqual({ ok: true });
+
+    // A released claim makes the batch resumable again instead of permanently
+    // stranding it.
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "pending-1")).toHaveLength(2);
+  }, 60_000);
 });

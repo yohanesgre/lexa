@@ -101,6 +101,25 @@ export function findNewestPendingBatch(messages: unknown[]): string | null {
   }
   return null;
 }
+// Every batch marker in the transcript across BOTH persisted shapes, newest
+// first and deduped. The DO resume walk tries each in turn: a newer batch that
+// is not fully decided is reported pending by the Worker and skipped, so an
+// older fully-decided batch can still resume (LX-82) instead of being stranded.
+export function pendingBatchIdsNewestFirst(messages: unknown[]): string[] {
+  const out: string[] = [];
+  const add = (id: string | null): void => {
+    if (id !== null && id.length > 0 && !out.includes(id)) out.push(id);
+  };
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    const legacy = m && typeof m === "object" ? pendingBatchIdOf((m as { pendingBatch?: unknown }).pendingBatch) : null;
+    add(legacy);
+    const carriers = approvalCarriersOf(m);
+    for (let c = carriers.length - 1; c >= 0; c -= 1) add(carriers[c]!.batchId);
+  }
+  return out;
+}
+
 export function applyResumeResults(messages: unknown[], resolvedBatchIds: string[]): unknown[] {
   const done = new Set(resolvedBatchIds);
   return messages.map((m) => {

@@ -371,9 +371,22 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         yield* requireProjectReadById(t.projectId);
+        // LX-79 single-owner resume: with a Durable Object present, the DO owns
+        // the whole resume — it atomically claims the batch, executes the
+        // approved writes once through the Worker, then continues the turn on
+        // its own socket. The route is only the handoff and acks with 202; it
+        // must NEVER also start the in-process stream, or the same batch would
+        // be executed twice.
+        const rpc = yield* AssistantThreadRpc;
+        if (rpc.available) {
+          yield* threadRpcCall((r) => r.resumeBatch(`chat:${req.path.chatId}`, null));
+          return HttpServerResponse.unsafeJson({ ok: true }, { status: 202 });
+        }
+        // No Durable Object (Bun flavor / P5-deprecated server path): nothing
+        // else can own the resume, so the in-process engine runs it and the
+        // frames stream to the client. Kept only for that no-DO surface.
         const service = yield* AssistantService;
         const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
-        yield* threadRpcCall((rpc) => rpc.resumeBatch(`chat:${req.path.chatId}`, null));
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
         return sseHttpResponse(frames);
       }))

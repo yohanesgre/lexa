@@ -72,6 +72,22 @@ export interface AssistantAgentOptions {
 // SSE `AssistantStream`; the chat page only reads the snapshot fields.
 const noopSubscribe = (): (() => void) => () => {};
 
+// LX-84: the resume route answers with the RPC handoff ack `{ok:true}` (202).
+// Success requires that explicit JSON `ok:true` — a 2xx with a non-JSON body is
+// only trusted for the legacy SSE path (no Durable Object), and a JSON body
+// without `ok:true` is a failure even when the status is 2xx. A malformed JSON
+// body is a failure.
+export async function resumeOutcome(response: Response): Promise<boolean> {
+  const contentType = response.headers?.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) return response.ok;
+  try {
+    const body = (await response.json()) as { ok?: unknown };
+    return body.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 // The agent-backed stream adds the transport-only reconnect signals the chat
 // surface renders (herald-chat.html "Connection lost → auto-resume").
 export interface AssistantAgentStream extends AssistantStream {
@@ -206,7 +222,8 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
       // idempotent) while leaving a failed attempt eligible for retry.
       if (/\/resume$/.test(url)) {
         void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
-          .then((r) => onResult?.(r.ok))
+          .then((r) => resumeOutcome(r))
+          .then((ok) => onResult?.(ok))
           .catch(() => onResult?.(false));
         return;
       }

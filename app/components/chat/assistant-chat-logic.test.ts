@@ -239,15 +239,21 @@ describe("chipStateFromError", () => {
   });
 });
 
-describe("resumableBatchId — resumed-set suppression", () => {
-  const batchTurn = (batchId: string, state: "pending" | "approved"): ChatTurn =>
+describe("resumableBatchId — resume guards (LX-81/82/83)", () => {
+  type ChipState = "pending" | "approved" | "rejected" | "expired";
+  const batchTurn = (batchId: string, ...states: ChipState[]): ChatTurn =>
     ({
       role: "assistant",
       text: "",
       imageCount: 0,
       rawIndex: -1,
-      batch: { batchId, chips: [{ approvalId: `${batchId}-a`, batchId, seq: 0, name: "t", diff: {}, state }] },
+      batch: {
+        batchId,
+        chips: states.map((state, seq) => ({ approvalId: `${batchId}-${seq}`, batchId, seq, name: "t", diff: {}, state })),
+      },
     }) as ChatTurn;
+  const userTurn = (): ChatTurn =>
+    ({ role: "user", text: "go", imageCount: 0, rawIndex: -1 }) as ChatTurn;
 
   it("skips a batch already in the resumed set (persisted across reload)", () => {
     const turns = [batchTurn("b1", "approved")];
@@ -257,5 +263,29 @@ describe("resumableBatchId — resumed-set suppression", () => {
 
   it("never resumes a batch that still has a pending chip", () => {
     expect(resumableBatchId([batchTurn("b1", "pending")], new Set())).toBeNull();
+    // Mixed pending + approved: still awaiting a decision, so not resumable.
+    expect(resumableBatchId([batchTurn("b1", "approved", "pending")], new Set())).toBeNull();
+  });
+
+  it("requires at least one approved chip — a fully rejected/expired batch has nothing to execute", () => {
+    expect(resumableBatchId([batchTurn("b1", "rejected")], new Set())).toBeNull();
+    expect(resumableBatchId([batchTurn("b1", "expired", "rejected")], new Set())).toBeNull();
+  });
+
+  it("only considers the trailing region after the last user turn", () => {
+    // The batch precedes the newest user turn: settled history, never resumed.
+    expect(resumableBatchId([batchTurn("b1", "approved"), userTurn()], new Set())).toBeNull();
+    // The batch follows the newest user turn: eligible.
+    expect(resumableBatchId([userTurn(), batchTurn("b1", "approved")], new Set())).toBe("b1");
+  });
+
+  it("scans past a pending newer batch to an older fully-terminal one (LX-82)", () => {
+    expect(resumableBatchId([batchTurn("b1", "approved"), batchTurn("b2", "pending")], new Set())).toBe("b1");
+  });
+
+  it("picks the newest fully-terminal not-yet-resumed batch", () => {
+    const turns = [batchTurn("b1", "approved"), batchTurn("b2", "approved")];
+    expect(resumableBatchId(turns, new Set())).toBe("b2");
+    expect(resumableBatchId(turns, new Set(["b2"]))).toBe("b1");
   });
 });

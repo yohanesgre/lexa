@@ -21,7 +21,7 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, recordProviderHealthRemote, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, recordProviderHealthRemote, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, executeResumeBatchRemote, type AssistantInternalDeps } from "./agent-runtime";
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
 import { buildMcpToolSet, buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
 import { MAX_WRITES_PER_TURN } from "./write-tool-names";
@@ -30,6 +30,7 @@ import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from ".
 import { firstUserText, lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
 import { withApprovalCarriers } from "./approval-carrier";
+import { pendingBatchIdsNewestFirst } from "./build-stream";
 import { summaryWindow, summarizeTranscript } from "./summarize";
 import { assistantTraceParams, tracedAI } from "./tracing";
 import { LexaAssistantRunner } from "./runner";
@@ -90,6 +91,15 @@ const THREAD_META_DDL = `CREATE TABLE IF NOT EXISTS thread_meta (
   summary TEXT,
   summarized_count INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`;
+
+// LX-80: one reservation per approval batch so a retry, a double-click, or two
+// tabs cannot re-execute the same approved writes. `INSERT OR IGNORE` is
+// synchronous and atomic inside the DO's single input gate; a duplicate claim
+// writes 0 rows and the caller no-ops.
+const RESUME_CLAIMS_DDL = `CREATE TABLE IF NOT EXISTS resume_claims (
+  batch_id TEXT PRIMARY KEY,
+  claimed_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`;
 
 const INTERNAL_ORIGIN_KEY = "internalOrigin";
@@ -190,6 +200,23 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     if (!columns.some((column) => column.name === "summarized_count")) {
       this.ctx.storage.sql.exec("ALTER TABLE thread_meta ADD COLUMN summarized_count INTEGER NOT NULL DEFAULT 0");
     }
+  }
+
+  private ensureResumeClaimsTable(): void {
+    this.ctx.storage.sql.exec(RESUME_CLAIMS_DDL);
+  }
+
+  // Atomic claim: true when this call inserted the reservation, false when a
+  // prior claim (retry, second tab, reload) already owns the batch.
+  private claimResumeBatch(batchId: string): boolean {
+    const cursor = this.ctx.storage.sql.exec("INSERT OR IGNORE INTO resume_claims (batch_id) VALUES (?)", batchId);
+    return cursor.rowsWritten > 0;
+  }
+
+  // A batch that turned out not to be executable (still pending / no rows) is
+  // released so a later attempt can resume it once it is fully decided.
+  private releaseResumeBatch(batchId: string): void {
+    this.ctx.storage.sql.exec("DELETE FROM resume_claims WHERE batch_id = ?", batchId);
   }
 
   private readThreadMeta(threadKey: string): ThreadMetaRow | null {
@@ -517,6 +544,14 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // resume continuation (`resumeBatch`) passes `resumeBatchId`, switching the
     // Worker to `mode: "resume"` (Jev preflight skipped, R2).
     const turnMode: "turn" | "resume" = options?.body && "resumeBatchId" in options.body ? "resume" : "turn";
+    // The DO resume continuation carries the Worker's executed-write note so the
+    // model sees the approved results; appended to the provider input only,
+    // never persisted as a transcript turn (the SSE path used the equivalent
+    // `resumeResultsNote`).
+    const resumeResultsNote =
+      options?.body && typeof options.body.resumeResultsNote === "string" && options.body.resumeResultsNote.trim() !== ""
+        ? options.body.resumeResultsNote
+        : null;
     const harness = await resolveHarnessContext(deps, {
       threadKey,
       userText: lastUserText(this.messages),
@@ -578,7 +613,17 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         projectId: meta.project_id,
         threadKey,
         sessionId,
-        messages: this.messages,
+        messages:
+          resumeResultsNote !== null
+            ? [
+                ...this.messages,
+                {
+                  id: `resume-results-${crypto.randomUUID()}`,
+                  role: "user",
+                  parts: [{ type: "text", text: resumeResultsNote }],
+                },
+              ]
+            : this.messages,
         tools,
         system,
         stopWhen,
@@ -807,16 +852,40 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   }
 
   async resumeBatch(batchId: string | null): Promise<{ ok: true }> {
-    // Real resume: continue the last assistant turn so the model sees the
-    // approved writes. `resumeBatchId` in the turn body switches the Worker
-    // context to `mode: "resume"` (Jev preflight skipped, R2). Best-effort:
-    // an RPC from the approval route must never fail the decision.
-    try {
-      if (this.messages.some((m) => m.role === "assistant")) {
-        await this.continueLastTurn({ resumeBatchId: batchId });
+    // LX-79/80/82: the DO is the single resume owner. Walk every batch marker
+    // in the transcript newest-first and CLAIM each in DO storage before doing
+    // any work — a duplicate claim means this batch is already resumed, so the
+    // call no-ops early (LX-80; survives reload/wake). Then ask the Worker to
+    // execute the batch's decided rows exactly once. `pending` reports a batch
+    // that is not fully decided: release its claim and try the next older one,
+    // so an older fully-decided batch resumes instead of being stranded (LX-82).
+    // `missing` (no rows for this thread/owner) is likewise released and
+    // skipped. `unavailable` is a transport/HTTP failure: the writes MAY have
+    // applied, so KEEP the claim and never retry. On `executed`, keep the claim
+    // and run exactly ONE continuation, injecting the Worker's results note so
+    // the model does not re-propose the writes.
+    this.ensureResumeClaimsTable();
+    const deps = await this.loadInternalDeps();
+    if (!deps) return { ok: true };
+    const scanned = pendingBatchIdsNewestFirst(this.messages);
+    const batches = batchId !== null && batchId.length > 0 && !scanned.includes(batchId) ? [batchId, ...scanned] : scanned;
+    for (const id of batches) {
+      if (!this.claimResumeBatch(id)) return { ok: true };
+      const outcome = await executeResumeBatchRemote(deps, id);
+      if (outcome.kind === "pending" || outcome.kind === "missing") {
+        this.releaseResumeBatch(id);
+        continue;
       }
-    } catch (e) {
-      console.warn("[Assistant] resumeBatch continuation failed:", e instanceof Error ? e.message : String(e));
+      if (outcome.kind === "unavailable") return { ok: true };
+      try {
+        await this.continueLastTurn({
+          resumeBatchId: id,
+          ...(outcome.note.trim() !== "" ? { resumeResultsNote: outcome.note } : {}),
+        });
+      } catch (e) {
+        console.warn("[Assistant] resumeBatch continuation failed:", e instanceof Error ? e.message : String(e));
+      }
+      return { ok: true };
     }
     return { ok: true };
   }
