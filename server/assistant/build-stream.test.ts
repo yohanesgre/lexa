@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
-import { buildStream, buildResumeResultsNote, findNewestPendingBatch, isWriteIntentClaim, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
+import { buildStream, buildResumeResultsNote, findNewestPendingBatch, isWriteIntentClaim, normalizeProviderMessages, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { QueuedProposal } from "./write-tools";
 
@@ -218,6 +218,66 @@ describe("sanitizeProviderMessages", () => {
   });
 });
 
+describe("normalizeProviderMessages", () => {
+  it("converts a parts-shaped user message to role + content so it is not empty", () => {
+    const messages = [{ id: "m1", role: "user", parts: [{ type: "text", text: "create a task" }] }];
+    const out = normalizeProviderMessages(messages);
+    expect(out).toEqual([{ role: "user", content: "create a task" }]);
+    expect((out[0] as { parts?: unknown }).parts).toBeUndefined();
+  });
+
+  it("extracts assistant text and drops the approval carrier + display tool parts", () => {
+    const messages = [
+      {
+        id: "m2",
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          { type: "reasoning", text: "hmm" },
+          { type: "text", text: "I can do that." },
+          { type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } },
+          { type: "tool-create_task", toolCallId: "call_1", state: "output-available", output: "{}" },
+        ],
+      },
+    ];
+    const out = normalizeProviderMessages(messages);
+    expect(out).toEqual([{ role: "assistant", content: "I can do that." }]);
+  });
+
+  it("maps an image file part to the accepted ContentPart shape", () => {
+    const messages = [
+      { id: "m3", role: "user", parts: [{ type: "text", text: "look" }, { type: "file", mediaType: "image/png", url: "data:image/png;base64,AAAA" }] },
+    ];
+    const out = normalizeProviderMessages(messages);
+    expect(out).toEqual([
+      { role: "user", content: [{ type: "text", content: "look" }, { type: "image", source: { type: "url", value: "data:image/png;base64,AAAA" } }] },
+    ]);
+  });
+
+  it("drops a user turn that carries no provider content instead of sending it empty", () => {
+    const messages = [
+      { id: "m4", role: "user", parts: [{ type: "data-attachment", data: { storageKey: "blob-1", mimeType: "image/png", name: "x.png" } }] },
+      { id: "m5", role: "assistant", parts: [{ type: "text", text: "ok" }] },
+    ];
+    const out = normalizeProviderMessages(messages);
+    expect(out).toEqual([{ role: "assistant", content: "ok" }]);
+  });
+
+  it("leaves legacy content-shaped messages untouched and preserves array identity", () => {
+    const messages = [{ role: "user", content: "legacy" }, { role: "assistant", content: "reply", toolLog: [{ name: "x" }] }];
+    const out = normalizeProviderMessages(messages);
+    expect(out).toBe(messages);
+  });
+
+  it("passes content-shaped messages through when another message is parts-shaped", () => {
+    const legacy = { role: "user", content: "legacy" };
+    const messages = [legacy, { id: "m6", role: "user", parts: [{ type: "text", text: "parts" }] }];
+    const out = normalizeProviderMessages(messages);
+    expect(out[0]).toBe(legacy);
+    expect(out[1]).toEqual({ role: "user", content: "parts" });
+  });
+});
+
 describe("buildResumeResultsNote", () => {
   it("lists the tool, target, created id and status", () => {
     expect(buildResumeResultsNote([{ tool: "create_task", target: "New task", created: "EG-2", status: "applied" }]))
@@ -313,6 +373,53 @@ describe("buildStream provider-boundary sanitization", () => {
     expect(frames.at(-1)?.type).toBe("done");
     const assistant = seen!.find((m) => m.role === "assistant")!;
     expect(assistant.toolCalls).toBeUndefined();
+  });
+
+  it("normalizes a parts-shaped (DO mirror) transcript so no user message is empty and the text survives", async () => {
+    let seen: Array<Record<string, unknown>> | null = null;
+    const c = ctx((input: unknown) => {
+      seen = (input as { messages: Array<Record<string, unknown>> }).messages;
+      return doneStream();
+    });
+    c.skipUserEntry = true;
+    c.resumeResultsNote = '[approved write results]\n- create_task "New task" [EG-2]: applied';
+    c.history = [
+      { id: "m1", role: "user", parts: [{ type: "text", text: "create a task called New task" }] },
+      {
+        id: "m2",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "Shall I go ahead?" },
+          { type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } },
+          { type: "tool-create_task", toolCallId: "call_1", state: "output-available", output: "{}" },
+        ],
+      },
+    ];
+    const frames = await drain(buildStream(c));
+    expect(frames.at(-1)?.type).toBe("done");
+
+    expect(seen!.every((m) => !Array.isArray(m.parts))).toBe(true);
+    expect(seen!.some((m) => m.role === "user" && String(m.content).trim() === "")).toBe(false);
+    expect(seen).toContainEqual({ role: "user", content: "create a task called New task" });
+    expect(seen).toContainEqual({ role: "assistant", content: "Shall I go ahead?" });
+
+    const note = seen!.find((m) => m.role === "user" && String(m.content).includes("[approved write results]"))!;
+    expect(typeof note.content).toBe("string");
+    expect(String(note.content)).toContain("[EG-2]");
+  });
+
+  it("leaves a legacy (Bun) content-shaped transcript unchanged", async () => {
+    let seen: Array<Record<string, unknown>> | null = null;
+    const c = ctx((input: unknown) => {
+      seen = (input as { messages: Array<Record<string, unknown>> }).messages;
+      return doneStream();
+    });
+    c.skipUserEntry = true;
+    const history = [{ role: "user", content: "legacy prompt" }, { role: "assistant", content: "legacy reply" }];
+    c.history = history;
+    await drain(buildStream(c));
+    expect(seen![0]).toEqual(history[0]);
+    expect(seen![1]).toEqual(history[1]);
   });
 });
 
