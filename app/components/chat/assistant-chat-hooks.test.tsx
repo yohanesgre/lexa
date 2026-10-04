@@ -76,6 +76,9 @@ describe("useChatAutoScroll — proposal arrival", () => {
 
       expect(scrollIntoView).toHaveBeenCalledTimes(1);
       expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "smooth" });
+      // The receiver must be the mounted newest `.approval-batch` element — the
+      // ones inside `mountScroller()` — not any generic Element.
+      expect(scrollIntoView.mock.instances[0]).toBe(scroll.querySelector(".approval-batch"));
     } finally {
       scroll.remove();
     }
@@ -121,6 +124,63 @@ describe("useChatAutoScroll — proposal arrival", () => {
       rerender({ turns: [userTurn(), decidedBatchTurn()] });
 
       expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(scrollTo).toHaveBeenCalledWith({ top: scroll.scrollHeight, behavior: "auto" });
+    } finally {
+      scroll.remove();
+    }
+  });
+
+  it("does not scroll to the batch header after the user has scrolled up", () => {
+    const scrollIntoView = vi.fn();
+    const scrollTo = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true, writable: true });
+    Object.defineProperty(Element.prototype, "scrollTo", { value: scrollTo, configurable: true, writable: true });
+    stubMatchMedia(false);
+    const scroll = mountScroller();
+    Object.defineProperty(scroll, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(scroll, "clientHeight", { value: 100, configurable: true });
+    scroll.scrollTop = 0;
+
+    try {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+        initialProps: { turns: [userTurn()] },
+      });
+      act(() => {
+        result.current.scrollRef.current = scroll;
+      });
+      // 1000 - 0 - 100 = 900 ≥ 24 → the user is scrolled up, pin released.
+      act(() => {
+        result.current.handleTranscriptScroll();
+      });
+      rerender({ turns: [userTurn(), pendingBatchTurn()] });
+
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      scroll.remove();
+    }
+  });
+
+  it("scrolls to the bottom when the newest batch flips from pending to all-terminal", () => {
+    const scrollIntoView = vi.fn();
+    const scrollTo = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true, writable: true });
+    Object.defineProperty(Element.prototype, "scrollTo", { value: scrollTo, configurable: true, writable: true });
+    stubMatchMedia(false);
+    const scroll = mountScroller();
+
+    try {
+      const { result, rerender } = renderHook(({ turns }: { turns: ChatTurn[] }) => useChatAutoScroll({ turns, stream: STREAM }), {
+        initialProps: { turns: [userTurn(), pendingBatchTurn()] },
+      });
+      act(() => {
+        result.current.scrollRef.current = scroll;
+      });
+      scrollTo.mockClear();
+      rerender({ turns: [userTurn(), decidedBatchTurn()] });
+
+      // One motionless jump to the bottom so the resume continuation is followed.
+      expect(scrollTo).toHaveBeenCalledTimes(1);
       expect(scrollTo).toHaveBeenCalledWith({ top: scroll.scrollHeight, behavior: "auto" });
     } finally {
       scroll.remove();

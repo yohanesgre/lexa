@@ -90,6 +90,12 @@ export function useChatAutoScroll(args: {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  // Whether the newest turn carried a still-pending batch on the previous
+  // render. The pending → all-terminal flip is the resume moment: the arrival
+  // scroll landed the batch header at the scroller top and released the
+  // at-bottom pin, so the normal follow gate would strand the view at the
+  // batch top and the continuation would never be followed.
+  const prevNewestPendingRef = useRef(false);
   const handleTranscriptScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -107,15 +113,27 @@ export function useChatAutoScroll(args: {
     }
   }, []);
   useEffect(() => {
-    if (!atBottomRef.current) return;
     const root = scrollRef.current;
     const newest = turns && turns.length > 0 ? turns[turns.length - 1] : undefined;
+    const newestPending = newest?.batch?.chips.some((chip) => chip.state === "pending") === true;
+    // Resume moment (herald-write-approvals.html): the newest batch flipped
+    // from pending to all-terminal. The arrival scroll released the at-bottom
+    // pin, so scroll the continuation into view once — checked BEFORE the
+    // atBottomRef gate, otherwise the released pin would suppress it. The ref
+    // update makes it fire exactly once per transition.
+    if (!newestPending && prevNewestPendingRef.current) {
+      prevNewestPendingRef.current = false;
+      scrollToBottom(false);
+      return;
+    }
+    prevNewestPendingRef.current = newestPending;
+    if (!atBottomRef.current) return;
     // Proposal arrival (herald-write-approvals.html): when the newest turn
     // carries a still-pending batch, land the batch header at the scroller's
     // top (below the header scrim via `scroll-padding-top`) instead of pinning
     // to the bottom — the bulk actions must be reachable at rest. No pending
     // batch → follow the stream to the bottom as before.
-    if (root && newest?.batch?.chips.some((chip) => chip.state === "pending")) {
+    if (root && newestPending) {
       lastApprovalBatch(root)?.scrollIntoView({
         block: "start",
         behavior: matchMedia("(prefers-reduced-motion: reduce)") ? "auto" : "smooth",
