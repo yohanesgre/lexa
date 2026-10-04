@@ -116,9 +116,12 @@ const turnKey = (t: ChatTurn) => `${t.role}\u0000${t.text}`;
 // the existing reset semantics (callers pass prev=null on a thread swap).
 //
 // Returns the merged raw snapshot alongside the turns so resend targets resolve
-// against the array the kept turns were derived from (M1). A tail that already
-// exists earlier in prev is a stale full read (duplicate prompt text): replace
-// from the block's own start instead of splicing at the newest duplicate (N1).
+// against the array the kept turns were derived from (M1). A read that begins
+// at prev's start and reaches prev's last user turn is a stale full read
+// (duplicate prompt text): replace from that start instead of splicing at the
+// newest duplicate (N1). A read that merely coincides with an earlier block but
+// stops short of prev's last user turn is the new run's scope and is spliced at
+// that last user turn (F3).
 function reconcileShorterTranscript(
   prev: ChatTurn[],
   serverTurns: ChatTurn[],
@@ -137,11 +140,25 @@ function reconcileShorterTranscript(
     const add = shiftRaw(serverTurns, offset).filter((t) => !existing.has(turnKey(t)));
     return { turns: add.length > 0 ? [...prev, ...add] : prev, raw: [...prevRaw, ...messages] };
   }
+  // A prompt-only read (no assistant turn after the run prompt) is a repeat /
+  // stale prefix, not a run scope — keep the settled history rather than
+  // slicing it down to the bare prompt (which would drop a persisted reply the
+  // read omitted).
+  if (!serverTurns.some((t, i) => i > firstUser && t.role === "assistant")) {
+    return { turns: prev, raw: prevRaw };
+  }
   const start = blockStart(prev, serverTurns);
-  if (start >= 0 && start < lastUser) {
-    // The tail already exists earlier in prev — a stale full read carrying a
-    // duplicate prompt text. Replace from its own start; anchoring at prev's
-    // last user turn would duplicate the prefix.
+  // A stale FULL read re-sends prev's own settled prefix (all of the read
+  // already exists at prev's start) and reaches prev's last user turn; replace
+  // from the block's own start rather than splicing at the newest duplicate
+  // prompt (N1). The branch is restricted to start === 0 so the kept prefix is
+  // empty and `raw: messages` stays one index space (F2). A run-scoped read
+  // that merely COINCIDES with an earlier block (same prompt re-sent, reply
+  // text repeats) has start === 0 but stops short of prev's last user turn —
+  // it must fall through to the anchored splice below (F3). Deliberate
+  // trade-off (N1): the just-sent optimistic duplicate prompt is dropped, since
+  // the read already holds its text and re-attaching would duplicate it.
+  if (start === 0 && start + serverTurns.length >= lastUser) {
     return { turns: [...prev.slice(0, start), ...serverTurns], raw: messages };
   }
   // Run-scoped tail: keep the settled prefix up to the run prompt, splice the
@@ -177,17 +194,16 @@ export function settleTurnsWithRaw(args: {
     return { turns: overlayDecisions(prev ?? [], terminalDecisions(serverTurns)), raw: prevRaw };
   }
   // A8/M2: at a terminal frame a shorter server read must not erase the settled
-  // history — but reconcile ONLY when the read actually covers the current run.
-  // Its first user turn must be prev's last user turn AND prev must hold only
-  // optimistic turns after it; otherwise the read is an older/partial prefix
-  // (e.g. one that predates the just-sent user turn) and must fall through to
-  // the error/ephemeral preservation branches below instead of erasing them.
+  // history. This holds UNCONDITIONALLY — no non-empty shorter read may fall
+  // through to bare serverTurns. A run-scoped tail splices onto prev; a repeat
+  // / stale read keeps prev (and prevRaw); an assistant-only tail appends. (An
+  // EMPTY read keeps the reset/delete semantics below.) The reconcile itself
+  // decides how much of the read to keep, so the old `coversRun` /
+  // `suffixOptimistic` gate — which misread a trailing assistant carrying a
+  // shifted rawIndex (post-reconcile, settled thread, foreign run) as
+  // unreconcilable and collapsed the view — is gone (F1).
   if (prev && !streaming && streamStatus !== "connecting" && serverTurns.length > 0 && serverTurns.length < prev.length) {
-    const firstUser = serverTurns.findIndex((t) => t.role === "user");
-    const lastUser = lastUserIndex(prev);
-    const suffixOptimistic = prev.slice(lastUser + 1).every((t) => t.rawIndex < 0);
-    const coversRun = firstUser < 0 || (prev[lastUser]!.text === serverTurns[firstUser]!.text && suffixOptimistic);
-    if (coversRun) return reconcileShorterTranscript(prev, serverTurns, prevRaw, messages);
+    return reconcileShorterTranscript(prev, serverTurns, prevRaw, messages);
   }
   const ephemeralUsers = (prev ?? []).filter((t) => t.role === "user" && t.rawIndex === -1);
   if (ephemeralUsers.length > 0 && (streaming || hasIngress || streamStatus === "suspended")) {
