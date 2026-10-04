@@ -58,6 +58,34 @@ export function carryKnownDecisions(prev: ChatTurn[] | null, turns: ChatTurn[]):
   return overlayDecisions(turns, terminalDecisions(prev));
 }
 
+// A8: a terminal transcript read that is SHORTER than the settled local view is
+// a transient server regression — a DO read still scoped to the current run
+// drops the previously persisted turns. Never replace the settled history with
+// it: keep prev's earlier turns and splice in the server's own tail (the
+// current run's messages, so the new reply survives). The run's prompt is
+// located by the last user turn in prev carrying the server tail's first user
+// text. An EMPTY server list is not reconciled — a genuinely cleared transcript
+// keeps the existing reset semantics (callers pass prev=null on a thread swap).
+function reconcileShorterTranscript(prev: ChatTurn[], serverTurns: ChatTurn[]): ChatTurn[] {
+  const firstUser = serverTurns.findIndex((t) => t.role === "user");
+  // A tail with no user turn to anchor on (an assistant-only read): keep the
+  // settled history and append what the server knows.
+  if (firstUser < 0) return [...prev, ...serverTurns];
+  const prompt = serverTurns[firstUser]!;
+  let cut = -1;
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i]!.role === "user" && prev[i]!.text === prompt.text) {
+      cut = i;
+      break;
+    }
+  }
+  // Cannot locate the run's prompt in prev (its text was rewritten, or the
+  // optimistic turn is gone): keep the settled history and append the server
+  // tail rather than discarding it.
+  if (cut < 0) return [...prev, ...serverTurns];
+  return [...prev.slice(0, cut), ...serverTurns];
+}
+
 export function settleTurns(args: {
   prev: ChatTurn[] | null;
   messages: unknown[];
@@ -78,6 +106,12 @@ export function settleTurns(args: {
     // over prev — every still-pending chip and the suspension structure stay
     // optimistic.
     return overlayDecisions(prev ?? [], terminalDecisions(serverTurns));
+  }
+  // A8: at a terminal frame a shorter server read must not erase the settled
+  // history. Reconcile (keep earlier turns + merge the server tail) instead of
+  // replacing; active streams keep the existing live-merge below.
+  if (prev && !streaming && streamStatus !== "connecting" && serverTurns.length > 0 && serverTurns.length < prev.length) {
+    return reconcileShorterTranscript(prev, serverTurns);
   }
   const ephemeralUsers = (prev ?? []).filter((t) => t.role === "user" && t.rawIndex === -1);
   if (ephemeralUsers.length > 0 && (streaming || hasIngress || streamStatus === "suspended")) {

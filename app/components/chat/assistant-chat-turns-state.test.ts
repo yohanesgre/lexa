@@ -192,3 +192,68 @@ describe("settleTurns — decided batch survives a transcript rebuild", () => {
     expect(settleTurns({ prev, messages, streaming: false, streamStatus: "idle", hasIngress: false })).toBe(prev);
   });
 });
+
+// A8: at a terminal frame the server transcript read can be transiently
+// run-scoped (a DO read that holds only the current turn). Replacing the
+// settled local view with it erases earlier turns; settleTurns must reconcile
+// instead — keep prev's earlier turns and merge the server's own tail.
+describe("settleTurns — terminal shorter transcript reconciliation (A8)", () => {
+  function turn(role: "user" | "assistant", text: string, rawIndex: number): ChatTurn {
+    return { role, text, imageCount: 0, rawIndex };
+  }
+
+  it("keeps earlier turns and merges the server's new tail at done", () => {
+    const prev: ChatTurn[] = [
+      turn("user", "one", 0),
+      turn("assistant", "reply one", 1),
+      turn("user", "two", 2),
+      turn("assistant", "reply two", 3),
+      // The in-flight run's optimistic user turn.
+      turn("user", "three", -1),
+    ];
+    // The captured terminal GET: only the current run's messages.
+    const messages = [
+      { role: "user", content: "three" },
+      { role: "assistant", content: "reply three" },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "done", hasIngress: true });
+    expect(out?.map((t) => t.text)).toEqual(["one", "reply one", "two", "reply two", "three", "reply three"]);
+  });
+
+  it("appends an assistant-only server tail without dropping history", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1), turn("user", "two", -1)];
+    const out = settleTurns({
+      prev,
+      messages: [{ role: "assistant", content: "tail reply" }],
+      streaming: false,
+      streamStatus: "done",
+      hasIngress: true,
+    });
+    expect(out?.map((t) => t.text)).toEqual(["one", "reply one", "two", "tail reply"]);
+  });
+
+  it("does not reconcile a full server read (only a shorter one regresses)", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1), turn("user", "two", -1)];
+    const messages = [
+      { role: "user", content: "one" },
+      { role: "assistant", content: "reply one" },
+      { role: "user", content: "two" },
+      { role: "assistant", content: "reply two" },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "done", hasIngress: true });
+    expect(out?.map((t) => t.text)).toEqual(["one", "reply one", "two", "reply two"]);
+  });
+
+  it("follows reset semantics for a genuinely cleared transcript (no history resurrection)", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1)];
+    const out = settleTurns({ prev, messages: [], streaming: false, streamStatus: "done", hasIngress: true });
+    expect(out).toEqual([]);
+  });
+
+  it("leaves active-stream merging untouched (no terminal reconcile)", () => {
+    const prev: ChatTurn[] = [turn("user", "one", 0), turn("assistant", "reply one", 1), turn("user", "two", -1)];
+    const messages = [{ role: "assistant", content: "live" }];
+    const out = settleTurns({ prev, messages, streaming: true, streamStatus: "streaming", hasIngress: true });
+    expect(out?.map((t) => t.text)).toEqual(["live", "two"]);
+  });
+});

@@ -72,6 +72,19 @@ describe("ChatComposerArea — floating composer", () => {
     expect(composer.querySelector(".chat-composer-scrim")).toBeNull();
   });
 
+  // A7: the landing→dock transition remounts the composer. The seed (starter
+  // chip) must apply on the landing but never on the docked composer, or the
+  // just-sent text re-prefills the docked draft.
+  it("applies a starter seed on the landing composer", () => {
+    renderComposerArea(true, { seed: { text: "Create a task from my notes", nonce: 1 } });
+    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).value).toBe("Create a task from my notes");
+  });
+
+  it("ignores a residual starter seed on the docked composer", () => {
+    renderComposerArea(false, { seed: { text: "Create a task from my notes", nonce: 1 } });
+    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).value).toBe("");
+  });
+
   it("writes the measured clearance, tracks growth, and cleans up on unmount", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
     const measure = vi
