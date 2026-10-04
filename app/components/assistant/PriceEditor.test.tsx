@@ -50,4 +50,58 @@ describe("PriceEditor", () => {
     expect(screen.getByText("Loading prices…")).toBeTruthy();
     expect(screen.queryByText("No models yet")).toBeNull();
   });
+
+  it("renders a missing model's inputs blank, never 0", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) }));
+    render(<PriceEditor byModel={[{ model: "m2", tokens: 0, costCents: 0, costUsd: 0, avgLatencyMs: null, calls: 0, errorRate: 0 }]} />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("prompt_price for m2");
+    expect((input as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("completion_price for m2") as HTMLInputElement).value).toBe("");
+  });
+
+  it("rejects an empty price and never PUTs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => prices });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<PriceEditor byModel={[]} />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("prompt_price for m1");
+    await user.clear(input);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Enter a price/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects exponent notation and never PUTs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => prices });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<PriceEditor byModel={[]} />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("prompt_price for m1");
+    await user.clear(input);
+    await user.type(input, "1e3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Enter a price/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a server error on the row it failed for", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => prices })
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: { message: "Server rejected", code: "ERR" } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<PriceEditor byModel={[]} />, { wrapper: wrapper() });
+    await screen.findByLabelText("completion_price for m1");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Server rejected")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks Save and makes inputs read-only when the prices query errored", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: { message: "nope", code: "ERR" } }) }));
+    render(<PriceEditor byModel={[{ model: "m1", tokens: 0, costCents: 0, costUsd: 0, avgLatencyMs: null, calls: 0, errorRate: 0 }]} />, { wrapper: wrapper() });
+    const input = await screen.findByLabelText("prompt_price for m1");
+    await waitFor(() => expect((input as HTMLInputElement).readOnly).toBe(true));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
 });

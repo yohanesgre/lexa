@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAssistantRuns } from "../../../lib/queries/assistant-admin";
 import { useProjects } from "../../../lib/queries";
-import { formatDuration, formatTimestamp, RunStatusChip } from "./run-display";
+import { formatDuration, formatTimestamp, RunStatusChip, runDocumentTarget, runKindLabel } from "./run-display";
 import type { AssistantRunRow, AssistantRunStatus } from "../../../lib/api";
 
 const STATUS_FILTERS: { value: AssistantRunStatus | null; label: string; color: string }[] = [
@@ -39,20 +39,21 @@ export function AssistantRunsTable() {
     const project = projectById.get(r.projectId);
     const prefix = (
       <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        {r.documentType === "task" ? "Task" : "Wiki"}
+        {runKindLabel(r)}
       </span>
     );
     const label = <>{prefix} · {r.documentTitle || "—"}</>;
-    if (!project) return <span className="text-xs color-primary">{label}</span>;
-    if (r.documentType === "task") {
+    const target = runDocumentTarget(r);
+    if (!project || !target) return <span className="text-xs color-primary">{label}</span>;
+    if (target.kind === "task") {
       return (
-        <Link to="/$slug/tasks/$taskId" params={{ slug: project.slug, taskId: r.key || r.documentId }} className="text-xs color-primary" style={{ textDecoration: "none" }}>
+        <Link to="/$slug/tasks/$taskId" params={{ slug: project.slug, taskId: target.value }} className="text-xs color-primary" style={{ textDecoration: "none" }}>
           {label}
         </Link>
       );
     }
     return (
-      <Link to="/$slug/wiki/$pageSlug" params={{ slug: project.slug, pageSlug: r.documentId }} className="text-xs color-primary" style={{ textDecoration: "none" }}>
+      <Link to="/$slug/wiki/$pageSlug" params={{ slug: project.slug, pageSlug: target.value }} className="text-xs color-primary" style={{ textDecoration: "none" }}>
         {label}
       </Link>
     );

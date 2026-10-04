@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "../components/ui/Toast";
 
 export interface AssistantUsageFilters {
   from?: string | null | undefined;
@@ -138,6 +139,7 @@ export function useAssistantPrices() {
 
 export function usePutAssistantPrice() {
   const qc = useQueryClient();
+  const toast = useToast();
   return useMutation({
     mutationFn: (input: { model: string; prompt_price: number; completion_price: number; cached_read_price: number; cached_write_price: number }) =>
       requestJson<AssistantPriceRow>(`/api/admin/assistant/prices`, {
@@ -151,6 +153,9 @@ export function usePutAssistantPrice() {
         const next = idx === -1 ? [...rows, row] : rows.map((r, i) => (i === idx ? row : r));
         return { data: next };
       });
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save price", err instanceof Error ? err.message : undefined);
     },
   });
 }

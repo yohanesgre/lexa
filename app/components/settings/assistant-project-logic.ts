@@ -1,4 +1,4 @@
-import type { AssistantProviderModel } from "../../../shared/assistant";
+import type { AssistantProviderModel, AssistantSettingsInput, AssistantReasoningEffort } from "../../../shared/assistant";
 
 // Pure logic for assistant-project.tsx (Project Settings → Assistant provider):
 // model/fallback list algebra, hydration & default settling, connection test.
@@ -160,8 +160,25 @@ export function defaultsStep(providers: ProviderLike[], providerId: string, mode
 
 export type ConnectionTestResult = { ok: true; latencyMs: number } | { ok: false; code: string; msg: string };
 
-export function savePayload(providerId: string, modelId: string, fallbacks: string[]): { providerId: string | null; modelId: string | null; fallbackModelIds: string[] } {
-  return { providerId: providerId || null, modelId: modelId || null, fallbackModelIds: fallbacks };
+// PUT is a full-row upsert (server nulls omitted search/allowlist/images/effort
+// and clears write_tools), so carry every persisted masked field forward and
+// override only the three the provider form owns.
+export function savePayload(
+  settings: { searchProvider?: "exa" | null | undefined; urlAllowlist?: string | null | undefined; primarySupportsImages?: boolean | undefined; reasoningEffort?: AssistantReasoningEffort | null | undefined; writeTools?: readonly string[] | undefined } | null | undefined,
+  providerId: string,
+  modelId: string,
+  fallbacks: string[]
+): AssistantSettingsInput {
+  return {
+    searchProvider: settings?.searchProvider ?? null,
+    urlAllowlist: settings?.urlAllowlist ?? null,
+    primarySupportsImages: settings?.primarySupportsImages ?? false,
+    reasoningEffort: settings?.reasoningEffort ?? null,
+    writeTools: [...(settings?.writeTools ?? [])],
+    providerId: providerId || null,
+    modelId: modelId || null,
+    fallbackModelIds: fallbacks,
+  };
 }
 
 export function hasPrimary(providerId: string, modelId: string): boolean {
