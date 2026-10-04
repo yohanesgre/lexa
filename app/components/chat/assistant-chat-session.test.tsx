@@ -684,6 +684,62 @@ describe("useStreamFrameFreeze — in-flight resume survives a chat switch (LX-8
   });
 });
 
+// ── In-session settle acknowledgment ──
+// A batch the client watched pending this session must still earn the resume
+// continuation once every chip is terminal, even with no approved chip
+// (all-rejected/expired). A terminal batch merely loaded from the transcript
+// must not (no in-session observation).
+function decidedBatchTurn(batchId: string, state: "pending" | "rejected" | "expired"): ChatTurn {
+  return {
+    role: "assistant",
+    text: "proposed",
+    imageCount: 0,
+    rawIndex: -1,
+    batch: {
+      batchId,
+      chips: [{ approvalId: `${batchId}-a1`, batchId, seq: 0, name: "create_task", diff: {}, state }],
+    },
+  } as ChatTurn;
+}
+
+function renderFreezeTurns(stream: Stream, initialTurns: ChatTurn[], chatId = "C1") {
+  const setTurns = vi.fn();
+  const ingressInsertedRef = { current: new Set<string>() };
+  const utils = renderHook(
+    ({ turns }: { turns: ChatTurn[] }) =>
+      useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming: false, ingressInsertedRef }),
+    { initialProps: { turns: initialTurns } }
+  );
+  return { ...utils, setTurns };
+}
+
+describe("useStreamFrameFreeze — in-session settle acknowledgment", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("resumes an all-rejected batch that was pending earlier this session", () => {
+    const { stream, calls } = makeResumeStream();
+    const { rerender } = renderFreezeTurns(stream, [decidedBatchTurn("b1", "pending")]);
+    expect(calls).toHaveLength(0);
+
+    rerender({ turns: [decidedBatchTurn("b1", "rejected")] });
+    expect(calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+    expect(calls[0]!.body).toEqual({ batchId: "b1" });
+  });
+
+  it("resumes an all-expired batch observed pending in-session", () => {
+    const { stream, calls } = makeResumeStream();
+    const { rerender } = renderFreezeTurns(stream, [decidedBatchTurn("b1", "pending")]);
+    rerender({ turns: [decidedBatchTurn("b1", "expired")] });
+    expect(calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+  });
+
+  it("does not resume a transcript-loaded terminal batch never observed pending", () => {
+    const { stream, calls } = makeResumeStream();
+    renderFreezeTurns(stream, [decidedBatchTurn("b1", "rejected")]);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 // A suspension flips on the FIRST carrier part of a batch; the rest of the
 // batch's carriers can arrive in later stream frames. The freeze guard must
 // union them into the frozen turn so every chip is live without a reload

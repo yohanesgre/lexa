@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { carryKnownDecisions, settleTurns, settleTurnsWithRaw } from "./assistant-chat-turns-state";
+import {
+  EMPTY_KNOWN_DECISIONS,
+  carryKnownDecisions,
+  knownApprovalDecisions,
+  knownDecisionsEqual,
+  settleTurns,
+  settleTurnsWithRaw,
+} from "./assistant-chat-turns-state";
 import type { ChatTurn } from "./assistant-chat-utils";
 import type { ApprovalChip } from "./AssistantApprovals";
 
@@ -102,6 +109,72 @@ describe("carryKnownDecisions", () => {
     ];
     expect(carryKnownDecisions(prev, rebuilt)).toBe(rebuilt);
     expect(carryKnownDecisions(null, rebuilt)).toBe(rebuilt);
+  });
+});
+
+describe("knownApprovalDecisions", () => {
+  it("collects terminal decisions by approvalId and the fully-settled batches", () => {
+    const turns: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1", state: "approved" }), chip({ approvalId: "a2", state: "rejected" })] },
+      },
+    ];
+    const known = knownApprovalDecisions(turns);
+    expect([...known.byApproval.entries()]).toEqual([
+      ["a1", "approved"],
+      ["a2", "rejected"],
+    ]);
+    expect([...known.settledBatches]).toEqual(["b1"]);
+  });
+
+  it("treats a batch with any pending chip as not settled and omits pending from byApproval", () => {
+    const turns: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1", state: "approved" }), chip({ approvalId: "a2", state: "pending" })] },
+      },
+    ];
+    const known = knownApprovalDecisions(turns);
+    expect(known.byApproval.has("a2")).toBe(false);
+    expect(known.settledBatches.has("b1")).toBe(false);
+  });
+
+  it("counts `failed` as terminal for settling but drops it from the overlay map", () => {
+    const turns: ChatTurn[] = [
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1", state: "failed" })] },
+      },
+    ];
+    const known = knownApprovalDecisions(turns);
+    expect(known.settledBatches.has("b1")).toBe(true);
+    expect(known.byApproval.has("a1")).toBe(false);
+  });
+
+  it("is empty for an absent turn list", () => {
+    expect(knownDecisionsEqual(knownApprovalDecisions(null), EMPTY_KNOWN_DECISIONS)).toBe(true);
+  });
+});
+
+describe("knownDecisionsEqual", () => {
+  it("compares byApproval and settledBatches by value", () => {
+    const a = { byApproval: new Map([["a1", "approved" as const]]), settledBatches: new Set(["b1"]) };
+    const b = { byApproval: new Map([["a1", "approved" as const]]), settledBatches: new Set(["b1"]) };
+    const c = { byApproval: new Map([["a1", "rejected" as const]]), settledBatches: new Set(["b1"]) };
+    expect(knownDecisionsEqual(a, b)).toBe(true);
+    expect(knownDecisionsEqual(a, c)).toBe(false);
+    expect(knownDecisionsEqual(a, { byApproval: new Map([["a1", "approved" as const]]), settledBatches: new Set() })).toBe(false);
+    expect(knownDecisionsEqual(a, { byApproval: new Map(), settledBatches: new Set(["b1"]) })).toBe(false);
   });
 });
 
@@ -470,5 +543,35 @@ describe("settleTurns — terminal shorter read never shrinks below prev (F1/F2/
     ];
     const out = settleTurns({ prev, messages, streaming: false, streamStatus: "done", hasIngress: true });
     expect(out?.map((t) => t.text)).toEqual(["hello", "hi", "other", "ok", "hello", "hi"]);
+  });
+});
+
+// Latch C: a marker-only optimistic suspension (no chip payloads) whose server
+// read now proves the batch fully terminal must clear — the marker is stale.
+// A server read that is still marker-only keeps it.
+describe("settleTurns — latch C clears a settled marker", () => {
+  const markerTurn: ChatTurn = { role: "assistant", text: "proposed", imageCount: 0, rawIndex: 1, suspendedBatchId: "b1" };
+
+  it("clears a marker-only suspension once the server read proves the batch terminal", () => {
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: { batchId: "b1", approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "rejected" }] },
+      },
+    ];
+    const out = settleTurns({ prev: [markerTurn], messages, streaming: false, streamStatus: "suspended", hasIngress: true })!;
+    expect(out.some((t) => !!t.suspendedBatchId)).toBe(false);
+    expect(out.find((t) => t.batch)!.batch!.chips[0]!.state).toBe("rejected");
+  });
+
+  it("keeps a marker-only suspension when the server read is marker-only too", () => {
+    const messages = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: "proposed", pendingBatch: { batchId: "b1", approvals: [] } },
+    ];
+    const out = settleTurns({ prev: [markerTurn], messages, streaming: false, streamStatus: "suspended", hasIngress: true })!;
+    expect(out.some((t) => t.suspendedBatchId === "b1")).toBe(true);
   });
 });

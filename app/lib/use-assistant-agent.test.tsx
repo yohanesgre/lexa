@@ -40,6 +40,7 @@ vi.mock("@cloudflare/ai-chat/react", () => ({
 }));
 
 import { useAssistantAgent } from "./use-assistant-agent";
+import type { KnownApprovalDecisions } from "./assistant-agent-adapter";
 
 type UseAgentArgs = {
   basePath?: string;
@@ -188,6 +189,44 @@ describe("useAssistantAgent — suspended carrier projection (LX-120)", () => {
     expect(result.current.suspendedBatchId).toBeNull();
     expect(result.current.status).toBe("done");
     expect(result.current.pending.map((c) => c.state)).toEqual(["approved"]);
+  });
+});
+
+describe("useAssistantAgent — known decisions overlay", () => {
+  const EMPTY: KnownApprovalDecisions = { byApproval: new Map(), settledBatches: new Set() };
+
+  it("settles a pending carrier once the client knows the batch is decided", () => {
+    chatFx.state.current = {
+      ...chatFx.idle(),
+      messages: [
+        { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] },
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-create_task",
+              toolCallId: "c1",
+              state: "output-available",
+              input: {},
+              output: { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", diff: {} },
+            },
+          ],
+        },
+      ],
+    };
+    const { result, rerender } = renderHook(
+      ({ decisions }: { decisions: KnownApprovalDecisions }) =>
+        useAssistantAgent("assistant-chat:c1", { projectId: "p1", decisions }),
+      { initialProps: { decisions: EMPTY } }
+    );
+    expect(result.current.status).toBe("suspended");
+    expect(result.current.suspendedBatchId).toBe("b1");
+
+    rerender({ decisions: { byApproval: new Map([["a1", "rejected" as const]]), settledBatches: new Set(["b1"]) } });
+    expect(result.current.suspendedBatchId).toBeNull();
+    expect(result.current.status).toBe("done");
+    expect(result.current.pending.map((c) => c.state)).toEqual(["rejected"]);
   });
 });
 

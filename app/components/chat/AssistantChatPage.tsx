@@ -50,6 +50,12 @@ import {
   useChatProjectQueries,
   useThreadKnowledge,
 } from "./assistant-chat-session";
+import {
+  EMPTY_KNOWN_DECISIONS,
+  knownApprovalDecisions,
+  knownDecisionsEqual,
+} from "./assistant-chat-turns-state";
+import type { KnownApprovalDecisions } from "../../lib/assistant-agent-adapter";
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
@@ -235,8 +241,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     void qc.refetchQueries({ queryKey: ["assistant-chat", chatId], exact: true, type: "active" });
   }, [chatId, qc]);
 
+  // Client-known approval decisions for the live projection. Declared BEFORE
+  // `useAssistantAgent` (hook order) and fed from the settled turns below via a
+  // render-adjust, mirroring `useSettledTurns`. Settles a batch decided in this
+  // session without a reload.
+  const [knownDecisions, setKnownDecisions] = useState<KnownApprovalDecisions>(EMPTY_KNOWN_DECISIONS);
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
-  const stream = useAssistantAgent(streamKey, { projectId });
+  const stream = useAssistantAgent(streamKey, { projectId, decisions: knownDecisions });
   const streaming = stream.status === "connecting" || stream.status === "streaming";
   // Sticky "a send was accepted for this chat" signal. A fresh-thread send is
   // deferred until the socket identifies (assistantSendForKey), so `streaming`
@@ -264,6 +275,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     sendAccepted,
     transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
+
+  // Project the settled turns' terminal decisions for the live stream so a
+  // batch decided in-session settles locally (composer unlock + resume gate).
+  // Render-adjust instead of an effect so the stream sees the fresh overlay on
+  // the same pass the turns change.
+  const nextKnown = useMemo(() => knownApprovalDecisions(turns), [turns]);
+  if (!knownDecisionsEqual(knownDecisions, nextKnown)) setKnownDecisions(nextKnown);
 
   // Delegated runs (ADR-0004): live state taps the SAME thread socket the chat
   // stream rides; the durable rows come from `assistant_runs` per spawn ref

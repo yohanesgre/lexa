@@ -1,6 +1,8 @@
 import { renderTranscript } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
 import type { ApprovalChip } from "./AssistantApprovals";
+import type { AssistantPendingChip } from "../../lib/use-assistant-stream";
+import type { KnownApprovalDecisions } from "../../lib/assistant-agent-adapter";
 import { mergeBatchChips } from "./assistant-chat-logic";
 
 // Turn-settle policy for the Assistant chat transcript (pure): merge the
@@ -25,6 +27,58 @@ function terminalDecisions(turns: ChatTurn[] | null): Map<string, ApprovalChip["
     }
   }
   return decided;
+}
+
+// Batch ids whose turn holds at least one chip and no pending chip — the
+// transcript read (or the optimistic view) proves the batch is fully decided.
+function settledBatchIds(turns: ChatTurn[] | null): Set<string> {
+  const totals = new Map<string, { count: number; pending: number }>();
+  for (const t of turns ?? []) {
+    const b = t.batch;
+    if (!b) continue;
+    const agg = totals.get(b.batchId) ?? { count: 0, pending: 0 };
+    for (const c of b.chips) {
+      agg.count += 1;
+      if (c.state === "pending") agg.pending += 1;
+    }
+    totals.set(b.batchId, agg);
+  }
+  const settled = new Set<string>();
+  for (const [batchId, agg] of totals) {
+    if (agg.count > 0 && agg.pending === 0) settled.add(batchId);
+  }
+  return settled;
+}
+
+// The projection overlay for the raw carrier set: terminal decisions by
+// approvalId (the carrier chip shape cannot carry `failed`, so it is dropped)
+// plus the fully-settled batch ids. Never mutates; a fresh value each call.
+export const EMPTY_KNOWN_DECISIONS: KnownApprovalDecisions = {
+  byApproval: new Map<string, Exclude<AssistantPendingChip["state"], "pending">>(),
+  settledBatches: new Set<string>(),
+};
+
+export function knownApprovalDecisions(turns: ChatTurn[] | null): KnownApprovalDecisions {
+  const byApproval = new Map<string, Exclude<AssistantPendingChip["state"], "pending">>();
+  for (const [approvalId, state] of terminalDecisions(turns)) {
+    if (state === "approved" || state === "rejected" || state === "expired") byApproval.set(approvalId, state);
+  }
+  return { byApproval, settledBatches: settledBatchIds(turns) };
+}
+
+// Value equality for the render-adjust sync: identity when unchanged, so the
+// decisions memo does not churn the hook's projection on every render.
+export function knownDecisionsEqual(a: KnownApprovalDecisions, b: KnownApprovalDecisions): boolean {
+  if (a === b) return true;
+  if (a.byApproval.size !== b.byApproval.size) return false;
+  for (const [approvalId, state] of a.byApproval) {
+    if (b.byApproval.get(approvalId) !== state) return false;
+  }
+  if (a.settledBatches.size !== b.settledBatches.size) return false;
+  for (const batchId of a.settledBatches) {
+    if (!b.settledBatches.has(batchId)) return false;
+  }
+  return true;
 }
 
 // Overlay terminal decisions onto a turn list by approvalId. Only terminal
@@ -215,7 +269,16 @@ export function settleTurnsWithRaw(args: {
     // (carrier parts that arrived after the freeze) — union them in so the whole
     // batch is decidable without a reload.
     const overlaid = overlayDecisions(prev ?? [], terminalDecisions(serverTurns));
-    return { turns: mergeServerBatchChips(overlaid, serverTurns), raw: prevRaw };
+    const merged = mergeServerBatchChips(overlaid, serverTurns);
+    // Latch C: server truth can prove a marker-only batch fully decided (chips
+    // present, all terminal) — clear its marker so the composer settles without
+    // a reload. A marker-only READ (no chips) keeps the marker.
+    const settled = settledBatchIds(serverTurns);
+    const hasSettledMarker = settled.size > 0 && merged.some((t) => !!t.suspendedBatchId && settled.has(t.suspendedBatchId));
+    const nextTurns = hasSettledMarker
+      ? merged.map((t) => (t.suspendedBatchId && settled.has(t.suspendedBatchId) ? { ...t, suspendedBatchId: undefined } : t))
+      : merged;
+    return { turns: nextTurns, raw: prevRaw };
   }
   // A8/M2: at a terminal frame a shorter server read must not erase the settled
   // history. This holds UNCONDITIONALLY — no non-empty shorter read may fall

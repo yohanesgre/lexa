@@ -16,6 +16,7 @@ import {
   suspensionFromMessages,
   usageFromMessage,
 } from "./assistant-agent-adapter";
+import type { KnownApprovalDecisions } from "./assistant-agent-adapter";
 
 // ADR-0003 P4b (WS1): pure adapter tests. No React, no transport — every case
 // builds a UIMessage from the AI SDK part shapes and asserts the legacy
@@ -487,6 +488,49 @@ describe("segmentFromMessages — merged suspension projection (LX-120)", () => 
     expect(pending).toEqual([
       { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "rejected", diff: DIFF },
     ]);
+  });
+});
+
+describe("suspensionFromMessages — KnownApprovalDecisions overlay", () => {
+  type KnownTerminal = "approved" | "rejected" | "expired";
+  function known(byApproval: Record<string, KnownTerminal>, settledBatches: string[]): KnownApprovalDecisions {
+    return { byApproval: new Map(Object.entries(byApproval)), settledBatches: new Set(settledBatches) };
+  }
+  const carrier = (approvalId: string, status?: string) =>
+    assistant([
+      dataPart("assistant-approval", {
+        batchId: "b1",
+        approvals: [{ approvalId, seq: 0, name: "create_task", diff: DIFF, ...(status ? { status } : {}) }],
+      }),
+    ]);
+  const marker = assistant([text("proposed"), dataPart("assistant-approval", { batchId: "b9", approvals: [] })]);
+
+  it("overlays a client decision onto a still-pending carrier chip", () => {
+    const messages = [user("go"), carrier("a1")];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages, known({ a1: "rejected" }, ["b1"]));
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([{ approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "rejected", diff: DIFF }]);
+  });
+
+  it("does not override a terminal carrier with an older client decision", () => {
+    const messages = [user("go"), carrier("a1", "approved")];
+    const { pending, suspendedBatchId } = suspensionFromMessages(messages, known({ a1: "rejected" }, []));
+    expect(suspendedBatchId).toBeNull();
+    expect(pending).toEqual([{ approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF }]);
+  });
+
+  it("settles a marker-only carrier for a batch the client knows is decided", () => {
+    expect(suspensionFromMessages([user("go"), marker], known({}, ["b9"])).suspendedBatchId).toBeNull();
+  });
+
+  it("keeps a marker-only suspension when the batch is not in the settled set", () => {
+    expect(suspensionFromMessages([user("go"), marker], known({ a1: "rejected" }, ["other"])).suspendedBatchId).toBe("b9");
+  });
+
+  it("overlays through segmentFromMessages", () => {
+    const segment = segmentFromMessages([user("go"), carrier("a1")], known({ a1: "expired" }, ["b1"]));
+    expect(segment.suspendedBatchId).toBeNull();
+    expect(segment.pending[0]!.state).toBe("expired");
   });
 });
 

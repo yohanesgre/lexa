@@ -333,9 +333,15 @@ export function nextTurnsAfterStreamError(
 //     finished deciding) but is SKIPPED, not a stop, so an older fully-decided
 //     batch is not stranded behind it.
 //   - Approved-only: a batch with only rejected/expired chips has nothing to
-//     execute, so it must not trigger a resume.
+//     execute, so it must not trigger a resume — UNLESS it was observed pending
+//     earlier this session (`decidedInSession`), where the all-rejected/expired
+//     outcome still earns the acknowledgment continuation.
 //   - Not already resumed (persisted across reload / in-flight).
-export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>): string | null {
+export function resumableBatchId(
+  turns: ChatTurn[] | null,
+  resumed: Set<string>,
+  decidedInSession?: ReadonlySet<string>
+): string | null {
   const list = turns ?? [];
   let trailingStart = 0;
   for (let i = list.length - 1; i >= 0; i--) {
@@ -348,8 +354,8 @@ export function resumableBatchId(turns: ChatTurn[] | null, resumed: Set<string>)
     const b = list[i]!.batch;
     if (!b || resumed.has(b.batchId)) continue;
     if (b.chips.some((c) => c.state === "pending")) continue;
-    if (!b.chips.some((c) => c.state === "approved")) continue;
-    return b.batchId;
+    if (b.chips.some((c) => c.state === "approved")) return b.batchId;
+    if (b.chips.length > 0 && decidedInSession?.has(b.batchId)) return b.batchId;
   }
   return null;
 }
