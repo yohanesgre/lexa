@@ -1460,6 +1460,54 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     expect(executes.filter((e) => e.batchId === "unsupported-1")).toHaveLength(2);
   }, 60_000);
 
+  it("walks older unsupported (non-chat) batches, releasing each claim (LX-116)", async () => {
+    // The reachable production branch: a non-chat thread resumes with a null
+    // batch id (the only non-chat caller passes `null`), so `resumeBatch` walks
+    // the transcript. Both carriers report `unsupported`; the DO must release
+    // each claim and CONTINUE the walk (agent.ts walkResumeBatches) rather than
+    // abort or strand the batch.
+    const documentId = "resume-walk-unsupported";
+    const threadKey = `task:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const taskTranscript = async (): Promise<unknown[]> => {
+      const res = await mf!.dispatchFetch(
+        `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+      );
+      const body = (await res.json()) as { messages?: unknown[] };
+      return Array.isArray(body.messages) ? body.messages : [];
+    };
+
+    // Distinct ids: `RESUME_EXECUTES` is file-global and the requested-batch
+    // test above already uses `unsupported-1`.
+    await persistStep(threadKey, [
+      carrierMessage("w-u1", "unsupported-walk-1"),
+      carrierMessage("w-u2", "unsupported-walk-2"),
+    ]);
+    await waitFor<number>(() => taskTranscript().then((m) => (m.length === 2 ? 2 : null)), 20_000);
+
+    // Walk once: both batches reach the Worker, neither executes, and the walk
+    // still settles instead of returning `executed`.
+    expect(await (await callResume(threadKey, null)).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+    // Released claims let a retry re-reach the Worker for each batch — a kept
+    // claim would short-circuit to `executed: true` and strand them.
+    expect(await (await callResume(threadKey, null)).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "unsupported-walk-1")).toHaveLength(2);
+    expect(executes.filter((e) => e.batchId === "unsupported-walk-2")).toHaveLength(2);
+  }, 60_000);
+
   it("walks older batches when the newest is already claimed (LX-82)", async () => {
     const documentId = "resume-walk";
     const threadKey = `chat:${documentId}`;

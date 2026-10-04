@@ -188,6 +188,14 @@ describe("teams + workspace + sessions endpoints", () => {
     // 422 — name longer than 80 chars
     const long = await withKey("PATCH", `/api/teams/${team.id}`, { name: "x".repeat(81) });
     expect(long.status).toBe(422);
+    expect(((await long.json()) as { error: { code: string } }).error.code).toBe("INVALID_NAME");
+    // success — a team-admin *session* (not the superadmin key) may rename:
+    // member2 is promoted to admin on this team, then patches it by cookie.
+    const promote = await withKey("POST", `/api/teams/${team.id}/members`, { email: "member2@lexa.test", role: "admin" });
+    expect(promote.status).toBe(201);
+    const asAdmin = await withCookie(await signIn("member2@lexa.test"), "PATCH", `/api/teams/${team.id}`, { name: "Renamed by Team Admin" });
+    expect(asAdmin.status).toBe(200);
+    expect(((await asAdmin.json()) as { name: string }).name).toBe("Renamed by Team Admin");
   });
 
   it("team admin adds existing workspace members; unknown email → 422 with details.available", async () => {
