@@ -38,7 +38,7 @@ function WikiPagePage() {
           return <div className="text-lx-text-danger">Failed to load page: {(error as Error).message}</div>;
         }
         if (!page) return <div className="text-lx-text-muted">Page not found.</div>;
-        return <WikiPageViewer slug={slug} page={page} pages={pages} />;
+        return <WikiPageViewer key={page.slug} slug={slug} page={page} pages={pages} />;
       }}
     </WikiLayout>
   );

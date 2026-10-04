@@ -12,8 +12,16 @@ interface RenamePageModalProps {
 
 export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModalProps) {
   const updatePage = useUpdateWikiPage(slug);
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(page?.title ?? "");
   const [error, setError] = useState<string | null>(null);
+
+  // Seed the field whenever the dialog opens (or targets a different page);
+  // it otherwise mounts blank.
+  useEffect(() => {
+    if (!isOpen) return;
+    setTitle(page?.title ?? "");
+    setError(null);
+  }, [isOpen, page?.id, page?.title]);
 
   const onEscape = useEffectEvent((event: KeyboardEvent) => {
     if (event.key === "Escape") {

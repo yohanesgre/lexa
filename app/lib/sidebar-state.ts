@@ -8,7 +8,7 @@
 // breakpoint is a live `matchMedia` subscription (both directions), not a
 // mount snapshot.
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { hasMatchMedia } from "./viewport";
 
 export interface UseSidebarStateOptions {
@@ -198,11 +198,23 @@ function resolveReturnFocus(
 // outside mousedown targeting another control) skip the return-focus restore,
 // so closing the panel never yanks focus back to its trigger. Programmatic
 // dismissals (Esc / scrim / row select) leave it false and still restore.
+//
+// `getExtraContainers` extends the trap with nodes that live OUTSIDE the
+// container because they are portaled (e.g. a DatePicker popover appended to
+// document.body). Without it, Tab cannot leave the container for the portal
+// and the trap wraps back to its own first item. The callback is read on each
+// keydown (not captured at mount), so a popover opened after the trap is
+// picked up live. Within a group native DOM order still drives Tab; the trap
+// only owns the boundaries between groups and the overall wrap.
 export function useOverlayFocusTrap(
   active: boolean,
   containerRef: React.RefObject<HTMLElement | null>,
-  suppressReturnFocusRef?: React.RefObject<boolean>
+  suppressReturnFocusRef?: React.RefObject<boolean>,
+  getExtraContainers?: () => Array<HTMLElement | null>
 ): void {
+  const getExtraContainersRef = useRef(getExtraContainers);
+  getExtraContainersRef.current = getExtraContainers;
+
   useEffect(() => {
     if (!active) return;
     const container = containerRef.current;
@@ -217,23 +229,37 @@ export function useOverlayFocusTrap(
       if (event.key !== "Tab") return;
       const node = containerRef.current;
       if (!node) return;
-      const items = focusableWithin(node);
+      const extras = (getExtraContainersRef.current?.() ?? []).filter(
+        (el): el is HTMLElement => el !== null && el.isConnected
+      );
+      const groups = [node, ...extras]
+        .map((root) => focusableWithin(root))
+        .filter((items) => items.length > 0);
+      const items = groups.flatMap((group) => group);
       if (items.length === 0) {
         event.preventDefault();
         return;
       }
-      const first = items[0]!;
-      const last = items[items.length - 1]!;
-      const current = document.activeElement;
-      if (event.shiftKey) {
-        if (current === first || !node.contains(current)) {
+      const current = document.activeElement as HTMLElement | null;
+      for (let gi = 0; gi < groups.length; gi += 1) {
+        const group = groups[gi]!;
+        const pos = current ? group.indexOf(current) : -1;
+        if (pos === -1) continue;
+        if (!event.shiftKey) {
+          if (pos === group.length - 1) {
+            event.preventDefault();
+            const next = groups[gi + 1] ?? groups[0]!;
+            next[0]!.focus();
+          }
+        } else if (pos === 0) {
           event.preventDefault();
-          last.focus();
+          const prev = groups[gi - 1] ?? groups[groups.length - 1]!;
+          prev[prev.length - 1]!.focus();
         }
-      } else if (current === last || !node.contains(current)) {
-        event.preventDefault();
-        first.focus();
+        return;
       }
+      event.preventDefault();
+      (event.shiftKey ? items[items.length - 1]! : items[0]!).focus();
     }
 
     document.addEventListener("keydown", handleKeyDown);
