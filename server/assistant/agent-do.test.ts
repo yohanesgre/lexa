@@ -109,6 +109,11 @@ async function handleInternal(request, env) {
     if (typeof body.batchId === "string" && body.batchId.startsWith("missing")) {
       return Response.json({ ok: false, reason: "missing" });
     }
+    // LX-116: a non-chat thread. The Worker applies nothing and reports
+    // unsupported; the DO must release its claim and no-op.
+    if (typeof body.batchId === "string" && body.batchId.startsWith("unsupported")) {
+      return Response.json({ ok: false, reason: "unsupported" });
+    }
     return Response.json({ ok: true, note: '[approved write results]\\n- update_task "P-1": applied' });
   }
   if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "legacy/")) {
@@ -1427,6 +1432,32 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     // lets the second request re-reach the Worker and stay symmetric with the walk.
     const executes = await capturedResumeExecutes();
     expect(executes.filter((e) => e.batchId === "missing-1")).toHaveLength(2);
+  }, 60_000);
+
+  it("releases the claim and no-ops for an unsupported (non-chat) batch (LX-116)", async () => {
+    const documentId = "resume-unsupported";
+    const threadKey = `task:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    // Task/wiki continuation is owned in-process by `resumeThreadStream`; the
+    // DO applies nothing and settles.
+    expect(await (await callResume(threadKey, "unsupported-1")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+    // The claim was released: the retry re-reaches the Worker. A kept claim
+    // would short-circuit to `executed: true` and strand the batch forever.
+    expect(await (await callResume(threadKey, "unsupported-1")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+
+    const executes = await capturedResumeExecutes();
+    expect(executes.filter((e) => e.batchId === "unsupported-1")).toHaveLength(2);
   }, 60_000);
 
   it("walks older batches when the newest is already claimed (LX-82)", async () => {
