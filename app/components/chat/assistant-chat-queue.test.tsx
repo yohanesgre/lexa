@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { AssistantChatComposer, lastApprovalBatch } from "./AssistantChatComposer";
 import { useChatQueue } from "./useChatQueue";
+import { stubMatchMedia } from "../../test-utils";
 import type { ChatAttachmentRef, ComposerAttachment } from "../../lib/assistant-image";
 import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
 
@@ -337,5 +338,57 @@ describe("AssistantChatComposer — queue controls", () => {
     root.innerHTML =
       '<div class="chat-scroll"><div class="approval-batch" data-id="old"></div><div class="approval-batch" data-id="new"></div></div>';
     expect(lastApprovalBatch(root.querySelector(".chat-scroll")!)?.getAttribute("data-id")).toBe("new");
+  });
+});
+
+describe("AssistantChatComposer — Review ↑ reachability", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  function mountBatchInScroller() {
+    const batch = document.createElement("div");
+    batch.className = "approval-batch";
+    batch.setAttribute("data-id", "newest");
+    const scroll = document.createElement("div");
+    scroll.className = "chat-scroll";
+    scroll.appendChild(batch);
+    document.body.appendChild(scroll);
+    return scroll;
+  }
+
+  function stubScrollIntoView() {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", { value: scrollIntoView, configurable: true, writable: true });
+    return scrollIntoView;
+  }
+
+  it("scrolls the last approval batch to block:start (smooth by default)", () => {
+    const scrollIntoView = stubScrollIntoView();
+    stubMatchMedia(false);
+    const scroll = mountBatchInScroller();
+    try {
+      renderComposer({ suspendedLock: true, suspendCount: 1 });
+      fireEvent.click(screen.getByRole("button", { name: /Review/ }));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "smooth" });
+    } finally {
+      scroll.remove();
+    }
+  });
+
+  it("clears the header instantly under prefers-reduced-motion", () => {
+    const scrollIntoView = stubScrollIntoView();
+    stubMatchMedia(true);
+    const scroll = mountBatchInScroller();
+    try {
+      renderComposer({ suspendedLock: true, suspendCount: 1 });
+      fireEvent.click(screen.getByRole("button", { name: /Review/ }));
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "auto" });
+    } finally {
+      scroll.remove();
+    }
   });
 });

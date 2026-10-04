@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { hasMatchMedia, matchMedia } from "../../lib/viewport";
+import { lastApprovalBatch, type ChatTurn } from "./assistant-chat-utils";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 
 // Small self-contained hooks for the Assistant chat page. The page-level
@@ -82,7 +83,7 @@ export function useChatComposerClearance() {
 // view pinned to new deltas while at bottom; scrolling up releases the pin
 // until a jump back (button click or manual scroll to bottom).
 export function useChatAutoScroll(args: {
-  turns: unknown;
+  turns: ChatTurn[] | null;
   stream: ReturnType<typeof useAssistantStream>;
 }) {
   const { turns, stream } = args;
@@ -106,7 +107,22 @@ export function useChatAutoScroll(args: {
     }
   }, []);
   useEffect(() => {
-    if (atBottomRef.current) scrollToBottom(false);
+    if (!atBottomRef.current) return;
+    const root = scrollRef.current;
+    const newest = turns && turns.length > 0 ? turns[turns.length - 1] : undefined;
+    // Proposal arrival (herald-write-approvals.html): when the newest turn
+    // carries a still-pending batch, land the batch header at the scroller's
+    // top (below the header scrim via `scroll-padding-top`) instead of pinning
+    // to the bottom — the bulk actions must be reachable at rest. No pending
+    // batch → follow the stream to the bottom as before.
+    if (root && newest?.batch?.chips.some((chip) => chip.state === "pending")) {
+      lastApprovalBatch(root)?.scrollIntoView({
+        block: "start",
+        behavior: matchMedia("(prefers-reduced-motion: reduce)") ? "auto" : "smooth",
+      });
+      return;
+    }
+    scrollToBottom(false);
     // stream.items covers tool/reasoning/text item growth — bubble height
     // changes whenever ANY timeline element mounts, not just text deltas.
   }, [turns, stream.text, stream.reasoningText, stream.items, scrollToBottom]);
