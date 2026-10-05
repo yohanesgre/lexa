@@ -365,6 +365,20 @@ export interface PendingBatchMarker {
 // unchanged and a reload mid-suspension rebuilds the decidable chips.
 export const ASSISTANT_APPROVAL_DATA_PART = "data-assistant-approval";
 
+// LX-124 continuation boundary (ADR-0003 §B.3): a zero-text assistant message
+// whose only part is this data part marks the seam between a decided proposal
+// bubble and the resume continuation's own bubble. The resume clone otherwise
+// appends to the same assistant message (SDK `continuation: true`), so the
+// boundary message is persisted immediately before the continuation so the two
+// render as separate turns. `batchId` names the resumed batch; `ts` freezes the
+// split time. `renderTranscript` skips the empty marker turn.
+export const ASSISTANT_CONTINUATION_DATA_PART = "data-continuation";
+
+export interface AssistantContinuationBoundary {
+  batchId: string;
+  ts: string;
+}
+
 export interface AssistantApprovalCarrierApproval {
   approvalId: string;
   seq: number;

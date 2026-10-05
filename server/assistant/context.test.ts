@@ -95,6 +95,35 @@ describe("firstUserText", () => {
   });
 });
 
+// LX-124 design risk #4: the zero-text `data-continuation` marker is an
+// assistant message, so the user-role probes must ignore it entirely.
+describe("continuation boundary does not perturb user-text probes (LX-124)", () => {
+  const transcript = [
+    { role: "user", content: "go" },
+    {
+      role: "assistant",
+      parts: [
+        { type: "text", text: "proposed" },
+        { type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } },
+      ],
+    },
+    { role: "assistant", parts: [{ type: "data-continuation", data: { batchId: "b1", ts: "2026-01-01T00:00:00Z" } }] },
+    { role: "assistant", parts: [{ type: "text", text: "Done — nothing ran." }] },
+  ];
+
+  it("lastUserText returns the last user turn, not the assistant marker", () => {
+    expect(lastUserText(transcript)).toBe("go");
+  });
+
+  it("firstUserText returns the first user turn, not the assistant marker", () => {
+    expect(firstUserText(transcript)).toBe("go");
+  });
+
+  it("a trailing user turn after a continuation still wins", () => {
+    expect(lastUserText([...transcript, { role: "user", parts: [{ type: "text", text: "again" }] }])).toBe("again");
+  });
+});
+
 describe("resolveMentionContext", () => {
   function deps(over: Partial<MentionResolverDeps> = {}): MentionResolverDeps {
     return {

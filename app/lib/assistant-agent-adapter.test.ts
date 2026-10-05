@@ -534,6 +534,31 @@ describe("suspensionFromMessages — KnownApprovalDecisions overlay", () => {
   });
 });
 
+describe("segmentFromMessages — LX-124 continuation boundary", () => {
+  it("projects the continuation as the last turn and ignores the marker", () => {
+    const messages = [
+      user("go"),
+      assistant([
+        text("proposed"),
+        dataPart("assistant-approval", {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
+        }),
+      ]),
+      assistant([dataPart("continuation", { batchId: "b1", ts: "2026-01-01T00:00:00Z" })]),
+      assistant([text("Done — nothing ran.")]),
+    ];
+    const segment = segmentFromMessages(messages);
+
+    // The continuation message is the last assistant turn; the marker adds none.
+    expect((lastAssistantMessage(messages)!.parts[0] as { text?: string }).text).toBe("Done — nothing ran.");
+    expect(segment.text).toBe("Done — nothing ran.");
+    // Terminal carrier → no re-arm; the marker contributes no chips.
+    expect(segment.suspendedBatchId).toBeNull();
+    expect(segment.pending.map((c) => c.approvalId)).toEqual(["a1"]);
+  });
+});
+
 describe("lastAssistantMessage / hasUserMessage", () => {
   it("returns the last assistant message and detects user ingress", () => {
     const a1 = assistant([text("first")]);

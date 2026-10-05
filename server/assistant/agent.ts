@@ -29,7 +29,7 @@ import { deriveChatTitle, resolveAssistantToolPermissionMode, resolveThreadToolP
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
 import { firstUserText, lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
-import { withApprovalCarriers } from "./approval-carrier";
+import { withApprovalCarriers, withContinuationBoundary } from "./approval-carrier";
 import { pendingBatchIdsNewestFirst } from "./build-stream";
 import { summaryWindow, summarizeTranscript } from "./summarize";
 import { assistantTraceParams, tracedAI } from "./tracing";
@@ -398,10 +398,19 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     excludeBroadcastIds?: string[],
     options?: { _deleteStaleRows?: boolean }
   ): Promise<void> {
+    // LX-124: a resume continuation clones the proposal message (same id) and
+    // appends its parts, which would render the follow-up inside the proposal
+    // bubble. Split STRUCTURALLY on the incoming array — BEFORE deriving
+    // carriers — so a freshly-derived carrier cannot move the seam to the end
+    // of the message and no in-memory signal is needed (survives DO eviction).
+    // A carrier with no parts after it (the proposal alone, a repaired persist,
+    // a `[...messages, card]` write) is left untouched.
+    const split = withContinuationBoundary(messages);
     // W7b/WS1: append the `data-assistant-approval` carrier to any assistant
     // message holding successful write proposals, so the DO canonical store and
-    // the D1 mirror both carry the approvals marker (idempotent).
-    const withCarriers = withApprovalCarriers(messages);
+    // the D1 mirror both carry the approvals marker (idempotent). Runs after the
+    // split so a continuation that re-proposes writes gets its own carrier.
+    const prepared = withApprovalCarriers(split);
     // Do NOT hand-patch `this.messages` from the argument: the SDK persists an
     // incoming array that can be run-scoped (only the current run's messages,
     // e.g. the programmatic `saveMessages` write and the client chat-request
@@ -411,7 +420,7 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // to the current run and made the terminal REST refetch erase earlier turns
     // (A9). The change feed is the sole writer of the in-memory cache; the
     // stored transcript was already correct, so delete/reset stays authoritative.
-    await super.persistMessages(withCarriers, excludeBroadcastIds, options);
+    await super.persistMessages(prepared, excludeBroadcastIds, options);
     // Compact first, then mirror the freshened summary/count to D1.
     await this.maybeSummarize();
     await this.mirrorCurrent();
@@ -959,7 +968,9 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
 
   // Exactly ONE continuation after a batch executes, injecting the Worker's
   // results note so the model does not re-propose the writes. A continuation
-  // failure must not fail the resume (the writes already applied).
+  // failure must not fail the resume (the writes already applied). The LX-124
+  // boundary split is structural in `persistMessages` (carrier + trailing
+  // parts), so no per-continuation signal is armed here.
   private async runResumeContinuation(batchId: string, note: string): Promise<void> {
     try {
       await this.continueLastTurn({

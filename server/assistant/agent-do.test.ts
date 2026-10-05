@@ -1441,6 +1441,98 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     );
   }, 60_000);
 
+  it("splits a resume continuation into its own assistant message with a boundary marker (LX-124)", async () => {
+    const documentId = "resume-split";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    await persistStep(threadKey, [carrierMessage("w-split", "noop-note-split")]);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
+
+    capturedProviderRequest = null;
+    expect(await (await callResume(threadKey, "noop-note-split")).json()).toEqual({
+      ok: true,
+      executed: false,
+      reason: "settled",
+    });
+
+    // The continuation is split off the proposal message: proposal (unchanged,
+    // carrier intact) + zero-text boundary marker + continuation (appended parts,
+    // no carrier). Three assistant messages, the marker invisible to renderers.
+    const messages = await waitFor<unknown[]>(
+      () => transcriptOf(documentId).then((m) => (m.length === 3 ? m : null)),
+      20_000
+    );
+    expect(messageIds(messages)).toEqual([
+      "w-split",
+      "w-split~boundary~noop-note-split",
+      "w-split~cont~noop-note-split",
+    ]);
+    const [proposal, boundary, continuation] = messages as Array<{ id: string; parts: Array<{ type: string; text?: string; data?: { batchId?: string } }> }>;
+    expect(proposal!.parts.some((p) => p.type === "data-assistant-approval")).toBe(true);
+    expect(proposal!.parts.some((p) => p.type === "text" && p.text === "ok")).toBe(false);
+    expect(boundary!.parts).toEqual([{ type: "data-continuation", data: { batchId: "noop-note-split", ts: expect.any(String) } }]);
+    expect(continuation!.parts.some((p) => p.type === "data-assistant-approval")).toBe(false);
+    expect(JSON.stringify(continuation)).toContain('"ok"');
+
+    // Idempotent replay: the kept claim short-circuits a second resume, so the
+    // boundary is never duplicated and the continuation is never re-appended.
+    expect(await (await callResume(threadKey, "noop-note-split")).json()).toEqual({ ok: true, executed: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const replayed = await transcriptOf(documentId);
+    expect(messageIds(replayed)).toEqual(messageIds(messages));
+    expect(replayed.filter((m) => JSON.stringify(m).includes('"data-continuation"'))).toHaveLength(1);
+    expect(replayed).toHaveLength(3);
+  }, 60_000);
+
+  it("splits a combined persist structurally on a fresh instance with no in-memory resume signal (LX-124)", async () => {
+    const documentId = "resume-structural-split";
+    const threadKey = `chat:${documentId}`;
+    const identity: InternalAuthIdentity = { actorUserId: "user-1", projectId: "proj-1", threadKey };
+    const connection = await dispatchWebSocket(await signedHeaders(identity));
+    expect(connection.status).toBe(101);
+
+    const base = carrierMessage("w-struct", "struct-batch");
+    await persistStep(threadKey, [base]);
+    await waitFor<number>(() => transcriptOf(documentId).then((m) => (m.length === 1 ? 1 : null)), 20_000);
+
+    // Evict: the next persist runs on a fresh instance with no in-memory
+    // continuation signal (the SDK's post-eviction recovery re-drive).
+    await evictThread(threadKey);
+
+    const combined = {
+      ...base,
+      parts: [
+        ...(base.parts as unknown[]),
+        { type: "step-start" },
+        { type: "text", text: "resumed on a cold instance", state: "done" },
+      ],
+    };
+    await persistStep(threadKey, [combined]);
+
+    const messages = await waitFor<unknown[]>(
+      () =>
+        transcriptOf(documentId).then((m) =>
+          m.length === 3 && JSON.stringify(m).includes("resumed on a cold instance") ? m : null
+        ),
+      20_000
+    );
+    expect(messageIds(messages)).toEqual([
+      "w-struct",
+      "w-struct~boundary~struct-batch",
+      "w-struct~cont~struct-batch",
+    ]);
+    const [proposal, boundary, continuation] = messages as Array<{ parts: Array<{ type: string; text?: string }> }>;
+    expect(proposal!.parts.some((p) => p.type === "data-assistant-approval")).toBe(true);
+    expect(proposal!.parts.some((p) => p.type === "text" && p.text === "resumed on a cold instance")).toBe(false);
+    expect(boundary!.parts).toEqual([
+      { type: "data-continuation", data: { batchId: "struct-batch", ts: expect.any(String) } },
+    ]);
+    expect(JSON.stringify(continuation)).toContain("resumed on a cold instance");
+  }, 60_000);
+
   it("walks a noted noop batch, running the continuation before continuing (never silent)", async () => {
     const documentId = "resume-walk-noop-note";
     const threadKey = `chat:${documentId}`;
