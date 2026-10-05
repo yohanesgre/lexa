@@ -405,6 +405,20 @@ describe("board-structure + settings mutations", () => {
     expect((live.tasks[0] as Task).archivedAt).toBe(LANE_ARCHIVED.archivedAt);
   });
 
+  it("useRestoreSwimlane un-archives the tasks the lane archive took down via the restored activity rows", async () => {
+    const archivedAt = "2026-03-01T00:00:00.000Z";
+    const archivedTask: Task = { ...TASK, archivedAt };
+    const restoredEv = { ...EV, type: "restored" as const, taskId: "t1" };
+    routes.set("POST /api/projects/demo/swimlanes/s1/restore", { data: SWIMLANE, activity: [restoredEv] });
+    queryClient.setQueryData(["board", "demo", false], { ...BOARD, tasks: [archivedTask] });
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [{ ...SWIMLANE, archivedAt }]);
+    const { result } = renderHook(() => useRestoreSwimlane("demo"), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ id: "s1" }); });
+    const live = queryClient.getQueryData<Board>(["board", "demo", false])!;
+    expect(live.swimlanes[0]!.archivedAt).toBeNull();
+    expect(live.tasks[0]!.archivedAt).toBeNull();
+  });
+
   it("useCreateApiKey prepends the key (response has no rawKey in the cache)", async () => {
     routes.set("POST /api/settings/api-keys", { key: KEY, rawKey: "lxk_secret" });
     queryClient.setQueryData(["api-keys"], []);
@@ -604,19 +618,46 @@ describe("milestone ⇄ swimlane cache fan-in (LX-21)", () => {
     expect(queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!.archivedAt).toBe(archivedAt);
   });
 
-  it("useRestoreMilestone leaves the milestone's lanes archived in the standalone lane list", async () => {
+  it("useRestoreMilestone restores the milestone's lanes and tasks and syncs the counts", async () => {
     const archivedAt = "2026-03-01T00:00:00.000Z";
-    routes.set("POST /api/projects/demo/milestones/m1/restore", { data: { ...MILESTONE, sprintCount: 1, archivedSprintCount: 1 }, activity: [] });
-    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, { ...SPRINT, archivedAt }]);
-    queryClient.setQueryData(["milestones", "demo"], [{ ...MILESTONE, archivedAt, sprintCount: 1, archivedSprintCount: 1 }]);
+    const archivedSprint: Swimlane = { ...SPRINT, archivedAt, tasksDone: 2, tasksTotal: 2 };
+    const archivedTask: Task = { ...TASK, id: "t2", swimlaneId: "s2", archivedAt };
+    // Individually-archived task (absent from the activity) must stay archived.
+    const otherTask: Task = { ...TASK, id: "t3", swimlaneId: "s2", archivedAt: "2025-01-01T00:00:00.000Z" };
+    const restoredEv = { ...EV, id: 2, type: "restored" as const, taskId: "t2" };
+    routes.set("POST /api/projects/demo/milestones/m1/restore", {
+      data: { ...MILESTONE, sprintCount: 1, archivedSprintCount: 0, tasksDone: 1, tasksTotal: 2 },
+      activity: [restoredEv],
+    });
+    queryClient.setQueryData(["projects", "demo", "swimlanes"], [SWIMLANE, archivedSprint]);
+    queryClient.setQueryData(["milestones", "demo"], [{ ...MILESTONE, archivedAt, sprintCount: 1, archivedSprintCount: 1, tasksDone: 2, tasksTotal: 2 }]);
+    for (const archived of [false, true]) {
+      queryClient.setQueryData(["board", "demo", archived], {
+        ...BOARD,
+        milestones: [{ ...MILESTONE, archivedAt }],
+        swimlanes: [SWIMLANE, archivedSprint],
+        tasks: [archivedTask, otherTask],
+      });
+    }
     const { result } = renderHook(() => useRestoreMilestone("demo"), { wrapper });
     await act(async () => { await result.current.mutateAsync({ id: "m1" }); });
+
     const lanes = queryClient.getQueryData<Swimlane[]>(["projects", "demo", "swimlanes"])!;
-    expect(lanes.find((l) => l.id === "s2")!.archivedAt).toBe(archivedAt);
+    expect(lanes.find((l) => l.id === "s2")!.archivedAt).toBeNull();
+    expect(lanes.find((l) => l.id === "s2")!.tasksDone).toBe(1);
     expect(lanes.find((l) => l.id === "s1")!.archivedAt).toBeNull();
+
+    for (const archived of [false, true]) {
+      const board = queryClient.getQueryData<Board>(["board", "demo", archived])!;
+      expect(board.milestones[0]!.archivedAt).toBeNull();
+      expect(board.swimlanes.find((l) => l.id === "s2")!.archivedAt).toBeNull();
+      expect(board.tasks.find((t) => t.id === "t2")!.archivedAt).toBeNull();
+      expect(board.tasks.find((t) => t.id === "t3")!.archivedAt).toBe("2025-01-01T00:00:00.000Z");
+    }
+
     const m = queryClient.getQueryData<Milestone[]>(["milestones", "demo"])![0]!;
     expect(m.archivedAt).toBeNull();
-    expect(m).toMatchObject({ sprintCount: 1, archivedSprintCount: 1 });
+    expect(m).toMatchObject({ sprintCount: 1, archivedSprintCount: 0, tasksDone: 1, tasksTotal: 2 });
   });
 });
 
