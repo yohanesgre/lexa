@@ -23,8 +23,11 @@ vi.mock("../lib/queries", () => ({
   useSetPassword: () => ({ mutate: h.mutate, isPending: false }),
 }));
 
+import type { ComponentType } from "react";
 import { SetPasswordForm } from "../components/auth/SetPasswordForm";
-import { SetPasswordPage } from "./set-password";
+import { Route } from "./set-password";
+
+const SetPasswordPage = (Route as unknown as { component: ComponentType }).component;
 
 beforeEach(() => {
   h.session.value = null;

@@ -13,7 +13,7 @@ vi.mock("../lib/queries", () => ({
   useTeams: () => ({ data: [] }),
 }));
 
-import { settingsLandingPath } from "./settings";
+import { settingsLandingPath } from "../lib/settings-landing";
 
 describe("settingsLandingPath", () => {
   it("sends a superadmin to workspace settings", () => {

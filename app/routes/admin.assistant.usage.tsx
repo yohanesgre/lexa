@@ -20,7 +20,7 @@ export const Route = createFileRoute("/admin/assistant/usage")({
   component: AssistantUsageRoute,
 });
 
-export function AssistantUsageRoute() {
+function AssistantUsageRoute() {
   const search = Route.useSearch() as { from?: string | undefined; to?: string | undefined };
   const [from, setFrom] = useState(search.from ?? "");
   const [to, setTo] = useState(search.to ?? "");

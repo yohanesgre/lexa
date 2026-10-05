@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Home — a failed create surfaces the error element (acceptance #3: visible
 // error). Mounts the real route component against a failing POST /api/projects.
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -21,7 +21,9 @@ vi.mock("@tanstack/react-router", () => ({
 
 import { ToastProvider } from "../components/ui/Toast";
 import { ProjectSelectionProvider } from "../lib/project-selection";
-import { Home } from "./index";
+import { Route } from "./index";
+
+const Home = (Route as unknown as { component: ComponentType }).component;
 
 const { fetchMock, routes } = createFetchMock();
 

@@ -26,7 +26,10 @@ vi.mock("../lib/queries", () => ({
   useDenyDeviceLogin: () => ({ mutate: vi.fn() }),
 }));
 
-import { DeviceLoginRoute } from "./device-login";
+import type { ComponentType } from "react";
+import { Route } from "./device-login";
+
+const DeviceLoginRoute = (Route as unknown as { component: ComponentType }).component;
 
 beforeEach(() => {
   h.session.value = { user: { id: "u1" } };

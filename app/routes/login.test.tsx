@@ -16,7 +16,7 @@ vi.mock("../lib/api", () => ({
   getSetupStatus: () => Promise.resolve({ configured: true }),
 }));
 
-import { safeRedirect } from "./login";
+import { safeRedirect } from "../lib/safe-redirect";
 
 describe("safeRedirect", () => {
   it("returns an internal path unchanged", () => {
