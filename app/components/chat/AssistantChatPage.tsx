@@ -257,6 +257,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const [acceptedChatId, setAcceptedChatId] = useState("");
   const sendAccepted = !!chatId && acceptedChatId === chatId;
 
+  // The accepted-send exemption exists only for the deferred-flush window: once
+  // the stream takes over, recovery/turn retention are governed by
+  // hasIngress/streaming, so release the sticky marker.
+  useEffect(() => {
+    if (streaming) setAcceptedChatId("");
+  }, [streaming]);
+
   // Starter-chip seed (hero only). Declared before the send handler so an
   // accepted send can clear it synchronously: the landing→dock swap remounts
   // the composer, and a seed still set when the docked composer mounts would
@@ -371,15 +378,15 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   useEffect(() => {
     const meta = { thread, knownChatIds: knownChatIdsRef.current, initialLast: initialLastRef.current };
-    if (!staleThreadNeedsRecovery({ projectId, chatId, transcriptLoading: transcript.isLoading, transcriptError: transcript.error, hasIngress: stream.hasIngress, streaming, listData: listQuery.data, meta })) return;
+    if (!staleThreadNeedsRecovery({ projectId, chatId, transcriptLoading: transcript.isLoading, transcriptError: transcript.error, hasIngress: stream.hasIngress, streaming, sendAccepted, listData: listQuery.data, meta })) return;
     dropUnknownThread({ qc, projectId, chatId, setChatId, clearThreadParam, clearParam: !!thread });
-  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, qc, listQuery.data, setChatId, stream.hasIngress, streaming, clearThreadParam, knownChatIdsRef, initialLastRef]);
+  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, qc, listQuery.data, setChatId, stream.hasIngress, streaming, sendAccepted, clearThreadParam, knownChatIdsRef, initialLastRef]);
 
   useEffect(() => {
     const meta = { thread, knownChatIds: knownChatIdsRef.current, initialLast: initialLastRef.current };
-    if (!orphanThreadNeedsRecovery({ projectId, chatId, transcriptError: transcript.error, hasIngress: stream.hasIngress, streaming, listLoading: listQuery.isLoading, listData: listQuery.data, meta })) return;
+    if (!orphanThreadNeedsRecovery({ projectId, chatId, transcriptError: transcript.error, hasIngress: stream.hasIngress, streaming, sendAccepted, listLoading: listQuery.isLoading, listData: listQuery.data, meta })) return;
     dropUnknownThread({ qc, projectId, chatId, setChatId, clearThreadParam, clearParam: true });
-  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, qc, setChatId, clearThreadParam, knownChatIdsRef, initialLastRef]);
+  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, sendAccepted, transcript.error, qc, setChatId, clearThreadParam, knownChatIdsRef, initialLastRef]);
 
   const { busy409, attachDisabled, suspendedLock, suspendPendingCount } = chatPageFlags({
     settings,

@@ -742,6 +742,98 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     rerenderPage({});
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
+
+  it("keeps the minted chat when the optimistic insert lands in the list snapshot", async () => {
+    // Real-app divergence: `useChatStartStream` optimistically calls
+    // `insertNewThread`, so `knownChatIds` contains the minted id and
+    // `isUntrackedDeepLink` no longer protects it. The mocked list hook reads
+    // fx.lists directly, so mirror the insert and rerender. The transcript still
+    // 404s and the stream is still idle — the exact window the stale-thread
+    // recovery misreads as a dead thread (and evicts the deferred send).
+    fx.lists.p1 = [];
+    let failRead!: (error: unknown) => void;
+    getAssistantChatMock.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failRead = reject;
+      })
+    );
+    const { container, rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    let mintedId = "";
+    await act(async () => {
+      sendFirst(rerenderPage);
+      mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
+      fx.lists.p1 = [
+        {
+          chatId: mintedId,
+          title: "hello",
+          pinned: false,
+          snippet: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      ];
+      rerenderPage({ thread: mintedId });
+      await Promise.resolve();
+      failRead(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    });
+    expect(streamFx.state.current.status).toBe("idle");
+    expect(mintedId).not.toBe("");
+
+    // The accepted send docks the landing and keeps the optimistic turn.
+    expect(container.querySelector(".chat-landing")).toBeNull();
+    expect(shellCapture.turns ?? []).toHaveLength(1);
+    expect((shellCapture.turns as Array<{ role: string; text: string }>)[0]).toMatchObject({ role: "user", text: "hello" });
+
+    // Let the settled 404 reach the recovery effects: the minted id is now in
+    // `knownChatIds` and the stream is idle, so the stale-thread predicates
+    // would evict the chat. The accepted send must suppress that — no hero.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+  });
+
+  it("releases the accepted marker once the stream takes over, so a later idle 404 recovers", async () => {
+    // MED: the accepted-send exemption must live only for the deferred-flush
+    // window. Once the stream flips to streaming the marker is released, so a
+    // subsequent idle 404 for the same chat can recover — the pre-fix sticky
+    // marker suppressed recovery indefinitely.
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container, rerenderPage, queryClient } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+    const mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(mintedId));
+
+    // Mirror the optimistic insert so `isUntrackedDeepLink` no longer protects it.
+    act(() => {
+      fx.lists.p1 = [
+        { chatId: mintedId, title: "hello", pinned: false, snippet: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+      ];
+      rerenderPage({ thread: mintedId });
+    });
+    await waitFor(() => expect(queryClient.getQueryState(["assistant-chat", mintedId])?.error).toBeTruthy());
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // Stream takes over → the accepted marker is released.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // Back to idle with the stale 404: the released marker lets stale-thread
+    // recovery fire and land on the fresh hero.
+    act(() => {
+      streamFx.state.current = streamFx.idle();
+      rerenderPage({});
+    });
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+  });
 });
 
 describe("AssistantChatPage — permissionMode envelope", () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { renderTranscript } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
-import { chipStateFromError, dropUnknownThread, resolveChatId, resolveResendTarget, resumableBatchId } from "./assistant-chat-logic";
+import { chipStateFromError, dropUnknownThread, orphanThreadNeedsRecovery, resolveChatId, resolveResendTarget, resumableBatchId, staleThreadNeedsRecovery } from "./assistant-chat-logic";
 
 const user = (text: string, rawIndex = -1): ChatTurn => ({ role: "user", text, imageCount: 0, rawIndex });
 const assistant = (text: string, rawIndex = -1, error?: { code: string; message: string }): ChatTurn => ({
@@ -249,6 +249,43 @@ describe("dropUnknownThread — fresh landing, never a list head", () => {
     });
     expect(applied).toEqual(["set:"]);
     expect(cleared).toBe(false);
+  });
+});
+
+describe("stale-thread recovery — an accepted send is not a dead thread", () => {
+  const thread = (chatId: string) => ({ chatId, title: chatId, pinned: false, snippet: null, createdAt: "x", updatedAt: "x" });
+  const notFound = Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" });
+
+  it("staleThreadNeedsRecovery keeps a known 404 thread idle while the accepted send is unflushed", () => {
+    const args = {
+      projectId: "p1",
+      chatId: "T",
+      transcriptLoading: false,
+      transcriptError: notFound,
+      hasIngress: false,
+      streaming: false,
+      listData: [thread("A")],
+      meta: { thread: "T", knownChatIds: new Set(["T"]), initialLast: null },
+    };
+    // Stale case preserved: a known thread that 404s with an idle stream is dead.
+    expect(staleThreadNeedsRecovery({ ...args, sendAccepted: false })).toBe(true);
+    // Accepted-but-unflushed send: the deferred fresh-thread write, not a dead thread.
+    expect(staleThreadNeedsRecovery({ ...args, sendAccepted: true })).toBe(false);
+  });
+
+  it("orphanThreadNeedsRecovery keeps a 404 ?thread= idle while the accepted send is unflushed", () => {
+    const args = {
+      projectId: "p1",
+      chatId: "T",
+      transcriptError: notFound,
+      hasIngress: false,
+      streaming: false,
+      listLoading: false,
+      listData: [thread("A")],
+      meta: { thread: "T", knownChatIds: new Set(["T"]), initialLast: null },
+    };
+    expect(orphanThreadNeedsRecovery({ ...args, sendAccepted: false })).toBe(true);
+    expect(orphanThreadNeedsRecovery({ ...args, sendAccepted: true })).toBe(false);
   });
 });
 

@@ -106,6 +106,46 @@ describe("useSettledTurns — fresh thread 404 keeps the optimistic user turn", 
   });
 });
 
+describe("useSettledTurns — accepted send survives a post-mint 404 (run 2)", () => {
+  const optimistic = [{ role: "user", text: "hello", imageCount: 0, rawIndex: -1 }];
+  type Props = { chatId: string; sendAccepted: boolean; transcriptError: unknown };
+
+  function renderSettled(initial: Props) {
+    const stream = makeStream();
+    return renderHook(
+      ({ chatId, sendAccepted, transcriptError }: Props) =>
+        useSettledTurns({ chatId, transcriptData: undefined, transcriptError, streaming: false, stream, sendAccepted }),
+      { initialProps: initial }
+    );
+  }
+
+  it("keeps the optimistic turn when the stale 404 lands after the mint while the stream is idle", () => {
+    const { result, rerender } = renderSettled({ chatId: "", sendAccepted: false, transcriptError: undefined });
+    expect(result.current.turns).toBeNull();
+
+    // send()'s optimistic append while still on the empty landing.
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", [])));
+
+    // The mint lands with the accepted send (chatId "" → "N"): the turn survives.
+    rerender({ chatId: "N", sendAccepted: true, transcriptError: undefined });
+    expect(result.current.turns).toEqual(optimistic);
+
+    // The stale 404 render arrives AFTER the mint (chatChange already spent) and
+    // before the deferred send flushes (stream idle): the accepted send keeps the
+    // turn instead of clearing it.
+    rerender({ chatId: "N", sendAccepted: true, transcriptError: NOT_FOUND });
+    expect(result.current.turns).toEqual(optimistic);
+  });
+
+  it("still clears the submitted thread when no send is accepted (control)", () => {
+    const { result, rerender } = renderSettled({ chatId: "", sendAccepted: false, transcriptError: undefined });
+    act(() => result.current.setTurns((prev) => appendEphemeralUserTurn(prev, "hello", [])));
+
+    rerender({ chatId: "N", sendAccepted: false, transcriptError: NOT_FOUND });
+    expect(result.current.turns).toEqual([]);
+  });
+});
+
 function TerminalHarness({ stream, queryFn }: { stream: Stream; queryFn: () => Promise<unknown> }) {
   const qc = useQueryClient();
   const transcript = useQuery({ queryKey: ["assistant-chat", "N"], queryFn, retry: false, staleTime: Infinity });

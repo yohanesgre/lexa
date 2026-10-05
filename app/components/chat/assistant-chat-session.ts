@@ -541,9 +541,10 @@ export function useSettledTurns(args: {
         // A live turn (connecting/streaming, any ingress, or an accepted send
         // whose flush is still pending) means the fresh thread's write is in
         // flight or landed — the 404 is stale, so the optimistic turns (the
-        // send's ephemeral user turn) must survive. Only a genuinely dead
-        // thread (no stream activity, no ingress) clears.
-        if (stream.hasIngress || streaming || keepAcrossChange) return { turns: prevTurns, raw: prevRaw };
+        // send's ephemeral user turn) must survive until the stream takes over.
+        // Only a genuinely dead thread (no stream activity, no ingress, no
+        // accepted send) clears.
+        if (stream.hasIngress || streaming || sendAccepted) return { turns: prevTurns ?? [], raw: prevRaw };
         return { turns: [], raw: [] };
       }
       if (!transcriptData) return { turns: prevTurns, raw: prevRaw };
