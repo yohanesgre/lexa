@@ -7,8 +7,57 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.8.0] - 2026-10-05
+
+### Migration notes
+
+- **Done-column backfill (migration 0025).** Projects created before the
+  done-flag fix carry `columns.is_done = 0` on their default "Done" column, so
+  milestone and sprint progress read `0 done` permanently. Migration 0025
+  backfills the flag for canonical "Done" columns (case- and
+  space-insensitive, and only for projects with no flagged column yet), so
+  existing boards repair automatically on the next deploy. It is a single
+  guarded, idempotent `UPDATE` — no schema change, no manual step; a renamed
+  done column is fixed via the now-working UI toggle or `lx column update
+  --done true`.
+
+### Added
+
+- **Chat resume progress row (LX-125).** After a decision, a transient
+  activity-strip row shows `Executing approved writes…` (approve all) or
+  `Assistant is working…` (reject), clearing when the continuation lands, with
+  a never-stuck fallback and Retry and a 180 s deadline. (#312, #313)
+- **Continuation as its own assistant bubble (LX-124).** The post-decision
+  reply now renders in a separate bubble below the proposal bubble instead of
+  appending to it, so the continuation is visible without a reload. (#310,
+  #311)
+- **Rejection acknowledgment (LX-122).** A fully-decided batch with no
+  approved chips now produces an assistant follow-up ("nothing was created…")
+  instead of settling silently; expired lines are covered too. (#307)
+- **Teams rename endpoint (LX-111).** `PATCH /api/teams/:teamId` renames a
+  team (manager-only, trimmed 1–80 chars, `INVALID_NAME` / `TEAM_NOT_FOUND`),
+  and the team switcher and settings table update from the response. (#302)
+- **Setup password confirmation.** The first-run setup wizard now asks for the
+  admin password twice and blocks a mismatch. (#273)
+- **Consolidated dev command surface.** `bun run dev` is the day-to-day Bun
+  stack (`:3000` API + vite `:5173`), `dev:workers` runs the local Worker
+  one-instance flow, `dev:remote` proxies the API to a remote server, and
+  `dev:server` serves the built app; the removed `dev:full`/`dev:bun` variants
+  are gone. A staging data-pull script, a staging deploy shortcut, and a
+  documented dev matrix land alongside. (#272, #275, #276, #277)
+
 ### Changed
 
+- **Chat approvals resume through a single owner (P0-6).** The Worker resume
+  path is now a pure Durable Object RPC — one continuation owner, one writer
+  to the transcript — with a DO idempotency guard so a batch resumes once and
+  a discriminator ack (`{ok,executed,reason}`) for the client. (#292, #285)
+- **Assistant settings save the full payload (P0-3).** Saving a project's
+  provider or write-tools no longer nulls the other settings; both surfaces
+  send the current masked settings. (#291)
+- **Cache writes go through `setQueryData` (invariant #6).** Session seeding,
+  chat pin/rename, workspace invite revoke, and set-password paths no longer
+  double-write with `invalidateQueries`. (#286, #298)
 - **Installer credential source** — `scripts/install.sh workers` now resolves a
   stored `wrangler login` via `wrangler auth token` before falling back to
   grepping `~/.config/.wrangler/config/default.toml`. The new lookup
@@ -16,6 +65,65 @@ All notable changes to Lexa are documented here. Format based on
   plaintext token in the TOML); a failed lookup still falls back to the raw
   file. Explicit `--cf-token` / `CF_API_TOKEN` / `.cf-token` values are
   unchanged. (#269)
+- **Wrangler and plugin bumped, `ai` marked remote (LX-129).** `@cloudflare/vite-plugin`
+  ^1.62.5 (hoisted wrangler) + `wrangler` ^4.147.0 clear the observability and
+  stale-version dev warnings; the `ai` binding is `remote: true` while local
+  simulation stays forced. (#318)
+- **Empty `LXK_PUBLIC_URL` treated as unset (LX-128).** Whitespace-only values
+  fall back to the documented default instead of producing an empty Better Auth
+  base URL. (#316)
+- **Route code-splitting (LX-127).** Route files export only the `Route`
+  object; shared components and symbols moved to modules, clearing the TanStack
+  Router named-export warnings. (#317)
+- **Design tokens raised to WCAG contrast, plus a hover token.** Dark/light
+  text, link, and focus tokens now meet ≥4.5:1 / ≥3:1, and a new
+  `--lx-border-input-hover` token gives interactive controls a visible hover
+  border (LX-113); stale invite/set-password claims are swept from the
+  wireframes. (#288, #293, #301, #303, #305)
+- **Frontend-audit polish** — resume-contract docs and tests, WS suspension
+  projection (LX-120), backlog save payload (LX-112), project-pick guard
+  (LX-115), reset-password copy (LX-114), and `PriceEditor` decimal formatting
+  + run-display tests (LX-117). (#298, #301, #304, #305)
+- **Assistant WebSocket handshake carries `projectId`.** (#271)
+
+### Fixed
+
+- **Board: tasks with subtasks render, and the column field moves (P0-1,
+  P0-2).** Subtask parents are no longer skipped from the lane (and are
+  registered for drag), and the task-detail column control routes through the
+  move mutation instead of a no-op update. (#287, #289)
+- **Wiki: autosave fires and page switches don't corrupt (P0-4, P0-5).** The
+  autosave effect no longer tears down every render, and the editor is keyed to
+  `page.slug`, so navigating while editing can't PATCH page B with page A's
+  content. Wiki dialogs also gain focus trap/return, and delete awaits success.
+  (#290, #295)
+- **Milestone and sprint progress counts (LX-131).** `columns.is_done` now
+  flows through create and update (the UI toggle and `lx column update --done`
+  were silent no-ops) and the default Done column is flagged; migration 0025
+  repairs existing boards. (#320)
+- **Restore cascades (LX-132).** Restoring a milestone or sprint now restores
+  the children its archive cascaded to — matched by the archive stamp, so
+  individually archived items stay archived — and the mutations mirror the
+  cascade into the caches. (#321, #322)
+- **Chat stability** — the streaming bubble honors reconciled chip states
+  (LX-121); decided batches settle without a refresh and resume once; the
+  continuation is refetched when the resume settles (LX-123); later approval
+  carriers merge into the live batch view; batch actions appear only with ≥2
+  pending chips (LX-126); a single-chip batch renders as a plain card, not a
+  carousel (LX-130); approval controls stay reachable, and turn loss,
+  draft re-prefill, fresh-chat transitions, DO-transcript persistence, and the
+  agent WS path are fixed. (#278–#285, #300, #306, #308, #309, #314, #315,
+  #319)
+- **Frontend-audit P2 cleanup** — board/task, wiki, shell/auth, and chat polish
+  across a11y semantics, dialog focus, loading/error/denied states, and dead
+  code. (#294, #295, #296)
+
+### Removed
+
+- **Dead code and stale doc/design drift** — the orphaned
+  `scripts/assistant-smoke.sh`, undefined CSS classes and unused tokens, and
+  the pruned `@theme` token lines still documented in `DESIGN_SYSTEM.md` §2.6
+  (LX-118). (#276, #293, #301)
 
 ## [2026.7.0] - 2026-10-03
 
