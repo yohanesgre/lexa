@@ -121,11 +121,11 @@ DELETE FROM tasks WHERE project_id = 'seed-proj-blank';
 DELETE FROM swimlanes WHERE project_id = 'seed-proj-blank';
 DELETE FROM columns WHERE project_id = 'seed-proj-blank';
 
-INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
+INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state, is_done)
 VALUES
-  ('seed-col-bl-0', 'seed-proj-blank', 'Backlog', 0, '#6b7280', NULL, '[]', NULL),
-  ('seed-col-bl-1', 'seed-proj-blank', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open'),
-  ('seed-col-bl-2', 'seed-proj-blank', 'Done', 2, '#10b981', NULL, '[]', 'closed');
+  ('seed-col-bl-0', 'seed-proj-blank', 'Backlog', 0, '#6b7280', NULL, '[]', NULL, 0),
+  ('seed-col-bl-1', 'seed-proj-blank', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open', 0),
+  ('seed-col-bl-2', 'seed-proj-blank', 'Done', 2, '#10b981', NULL, '[]', 'closed', 1);
 
 INSERT INTO swimlanes (id, project_id, name, description, position, kind)
 VALUES
@@ -139,11 +139,11 @@ DELETE FROM tasks WHERE project_id = 'seed-proj-minimal';
 DELETE FROM swimlanes WHERE project_id = 'seed-proj-minimal';
 DELETE FROM columns WHERE project_id = 'seed-proj-minimal';
 
-INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
+INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state, is_done)
 VALUES
-  ('seed-col-min-0', 'seed-proj-minimal', 'Backlog', 0, '#6b7280', NULL, '[]', NULL),
-  ('seed-col-min-1', 'seed-proj-minimal', 'In Progress', 1, '#3b82f6', 2, '["assignee"]', NULL),
-  ('seed-col-min-2', 'seed-proj-minimal', 'Done', 2, '#10b981', NULL, '[]', 'closed');
+  ('seed-col-min-0', 'seed-proj-minimal', 'Backlog', 0, '#6b7280', NULL, '[]', NULL, 0),
+  ('seed-col-min-1', 'seed-proj-minimal', 'In Progress', 1, '#3b82f6', 2, '["assignee"]', NULL, 0),
+  ('seed-col-min-2', 'seed-proj-minimal', 'Done', 2, '#10b981', NULL, '[]', 'closed', 1);
 
 -- tasks.swimlane_id is NOT NULL since migration 0007 — give the project a default swimlane
 INSERT INTO swimlanes (id, project_id, name, description, position, kind)
@@ -172,13 +172,13 @@ DELETE FROM wiki_pages WHERE project_id = 'seed-proj-full';
 DELETE FROM swimlanes WHERE project_id = 'seed-proj-full';
 DELETE FROM columns WHERE project_id = 'seed-proj-full';
 
-INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
+INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state, is_done)
 VALUES
-  ('seed-col-f-0', 'seed-proj-full', 'Todo', 0, '#6b7280', NULL, '[]', NULL),
-  ('seed-col-f-1', 'seed-proj-full', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open'),
-  ('seed-col-f-2', 'seed-proj-full', 'Review', 2, '#f59e0b', 2, '["description","assignee"]', 'open'),
-  ('seed-col-f-3', 'seed-proj-full', 'Done', 3, '#10b981', NULL, '[]', 'closed'),
-  ('seed-col-f-4', 'seed-proj-full', 'Blocked', 4, '#ef4444', NULL, '["description"]', NULL);
+  ('seed-col-f-0', 'seed-proj-full', 'Todo', 0, '#6b7280', NULL, '[]', NULL, 0),
+  ('seed-col-f-1', 'seed-proj-full', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open', 0),
+  ('seed-col-f-2', 'seed-proj-full', 'Review', 2, '#f59e0b', 2, '["description","assignee"]', 'open', 0),
+  ('seed-col-f-3', 'seed-proj-full', 'Done', 3, '#10b981', NULL, '[]', 'closed', 1),
+  ('seed-col-f-4', 'seed-proj-full', 'Blocked', 4, '#ef4444', NULL, '["description"]', NULL, 0);
 
 INSERT INTO swimlanes (id, project_id, name, description, position, kind)
 VALUES

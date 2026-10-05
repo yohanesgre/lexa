@@ -12,10 +12,11 @@ export interface ColumnCreateInput {
   wipLimit?: number | null;
   requiredFields?: string[];
   githubState?: "open" | "closed" | null;
+  isDone?: boolean;
 }
 
-const COLUMN_INSERT_SQL = `INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+const COLUMN_INSERT_SQL = `INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state, is_done)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const columnInsertParams = (input: ColumnCreateInput): unknown[] => [
   input.id,
@@ -26,6 +27,7 @@ const columnInsertParams = (input: ColumnCreateInput): unknown[] => [
   input.wipLimit ?? null,
   JSON.stringify(input.requiredFields ?? []),
   input.githubState ?? null,
+  input.isDone ? 1 : 0,
 ];
 
 export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", {
