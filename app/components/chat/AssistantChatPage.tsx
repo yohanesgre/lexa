@@ -258,11 +258,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const sendAccepted = !!chatId && acceptedChatId === chatId;
 
   // The accepted-send exemption exists only for the deferred-flush window: once
-  // the stream takes over, recovery/turn retention are governed by
-  // hasIngress/streaming, so release the sticky marker.
+  // the send has actually landed (first ingress), recovery/turn retention are
+  // governed by hasIngress/streaming, so release the sticky marker. A transient
+  // connecting flip without ingress must NOT release it — the stale 404 would
+  // then evict the just-minted thread and strand the send.
   useEffect(() => {
-    if (streaming) setAcceptedChatId("");
-  }, [streaming]);
+    if (stream.hasIngress) setAcceptedChatId("");
+  }, [stream.hasIngress]);
 
   // Starter-chip seed (hero only). Declared before the send handler so an
   // accepted send can clear it synchronously: the landing→dock swap remounts

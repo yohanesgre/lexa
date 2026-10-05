@@ -795,11 +795,11 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
 
-  it("releases the accepted marker once the stream takes over, so a later idle 404 recovers", async () => {
-    // MED: the accepted-send exemption must live only for the deferred-flush
-    // window. Once the stream flips to streaming the marker is released, so a
-    // subsequent idle 404 for the same chat can recover — the pre-fix sticky
-    // marker suppressed recovery indefinitely.
+  it("keeps the accepted marker through a transient connecting flip; ingress releases it", async () => {
+    // Run 5 (staging regression): a transient connecting/streaming flip with NO
+    // ingress must not release the marker — the stale 404 would then evict the
+    // just-minted thread and strand the deferred send. Only the first ingress
+    // (the send actually landing) releases it, after which recovery can fire.
     fx.lists.p1 = [];
     getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
     const { container, rerenderPage, queryClient } = renderPage();
@@ -819,15 +819,33 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     await waitFor(() => expect(queryClient.getQueryState(["assistant-chat", mintedId])?.error).toBeTruthy());
     expect(container.querySelector(".chat-landing")).toBeNull();
 
-    // Stream takes over → the accepted marker is released.
+    // Transient connecting flip without ingress: the marker stays and the minted
+    // chat is kept.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
+      rerenderPage({});
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // Back to idle with no ingress at all: still suppressed (marker not released).
+    act(() => {
+      streamFx.state.current = streamFx.idle();
+      rerenderPage({});
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // First ingress releases the marker …
     act(() => {
       streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
       rerenderPage({});
     });
-    expect(container.querySelector(".chat-landing")).toBeNull();
-
-    // Back to idle with the stale 404: the released marker lets stale-thread
-    // recovery fire and land on the fresh hero.
+    // … so a later idle 404 recovers and lands on the fresh hero.
     act(() => {
       streamFx.state.current = streamFx.idle();
       rerenderPage({});
