@@ -10,17 +10,28 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	// Raw-wrangler source bundling ONLY. `main` points at source
+	// (server/workers-entry.ts), so `wrangler deploy` with THIS root config
+	// — the `deploy:workers` script / Deploy Button path — bundles from
+	// source and needs these resolves. Load-bearing: dropping the block makes
+	// that dry-run fail with `Could not resolve "bun:sqlite"` (server/auth.ts).
 	// `bun:sqlite` is a Bun builtin no other runtime can resolve (vitest maps
-	// it to a node:sqlite shim the same way). The worker never constructs it —
-	// see server/workers-shims/bun-sqlite.ts. `lexa-cli deploy --runtime
-	// workers` copies this alias into the generated per-flavor config.
-	// `@tanstack/react-start/server` pulls Vite-virtual modules unresolvable
-	// outside the vite build (see server/workers-shims/start-server.ts): the
-	// vite workers build ignores this alias and links the real Start SSR
-	// handler, while source `wrangler dev` gets stubs and falls back to the
-	// no-SSR page for non-API routes. `node:fs` has no filesystem on Workers
-	// (see server/workers-shims/node-fs.ts) — the R2/D1 drivers serve those
-	// roles, so the stubs never execute on this flavor.
+	// it to a node:sqlite shim the same way); the worker never constructs it —
+	// see server/workers-shims/bun-sqlite.ts. `@tanstack/react-start/server`
+	// pulls Vite-virtual modules unresolvable outside the vite build (see
+	// server/workers-shims/start-server.ts); `better-auth/tanstack-start`
+	// likewise. `node:fs` has no filesystem on Workers (see
+	// server/workers-shims/node-fs.ts) — the R2/D1 drivers serve those roles,
+	// so the stubs never execute on this flavor.
+	//
+	// The vite workers build ignores this block (its own aliases live in
+	// vite.config.ts; hence the dev-boot "alias ... ignored ... using Vite"
+	// warning) and links the real Start SSR handler. Grep-confirmed: the
+	// built-bundle deploys — staging (wrangler.staging.example.jsonc, dist +
+	// no_bundle), install (scripts/lib/cf-deploy.ts), `lexa-cli deploy
+	// --runtime workers` (cli/src/worker.ts) — all rebuild the config from
+	// dist/server/wrangler.json and never read this alias. Kept because
+	// `deploy:workers` still bundles source through this root config.
 	"alias": {
 		"bun:sqlite": "./server/workers-shims/bun-sqlite.ts",
 		"better-auth/tanstack-start": "./server/workers-shims/better-auth-tanstack-start.ts",
@@ -59,8 +70,13 @@
 	// H9: keyless Workers AI inference for `workers_ai` assistant models. The
 	// assistant DO builds `createWorkersAI({ binding: env.AI })`; installed
 	// deployments get this block transcribed by scripts/workers-install.ts.
+	// `remote: true` marks the binding remote for local dev (silences the
+	// "AI bindings always access remote resources" warning). It does not stall
+	// local boot: the vite plugin runs with `remoteBindings: false`, which
+	// forces local simulation regardless of this flag (vite.config.ts).
 	"ai": {
-		"binding": "AI"
+		"binding": "AI",
+		"remote": true
 	},
 	// DO → Worker transport (ADR-0003 §B.2/R7): the assistant Durable Object
 	// reaches its internal routes through this self service binding. `service`
