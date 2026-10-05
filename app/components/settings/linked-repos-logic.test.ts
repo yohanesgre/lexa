@@ -30,7 +30,7 @@ describe("repoSearchState", () => {
     expect(state({ installStatus: "not_installed" })).toBe("no-installation");
   });
 
-  it("not_installed wins over a search 403 (the admin-gated search errors with no installation)", () => {
+  it("not_installed wins over a listing 502 (no installation plus a failed listing)", () => {
     expect(state({ searchStatus: "error", installStatus: "not_installed" })).toBe("no-installation");
   });
 
@@ -42,6 +42,11 @@ describe("repoSearchState", () => {
     expect(state({ resultCount: 0 })).toBe("no-matches");
     expect(state({ resultCount: 0, installStatus: undefined })).toBe("no-matches");
     expect(state({ resultCount: 0, installStatus: "unknown" })).toBe("no-matches");
+  });
+
+  it("settles a trailing-whitespace query instead of wedging in searching", () => {
+    expect(state({ query: "web ", debouncedQuery: "web" })).toBe("no-matches");
+    expect(state({ query: "web ", debouncedQuery: "web", resultCount: 2 })).toBe("results");
   });
 
   it("results once the settled search returns matches", () => {

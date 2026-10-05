@@ -188,6 +188,15 @@ function repoAccount(name: string): string {
   return slash === -1 ? name : name.slice(0, slash);
 }
 
+// Result-row glyph — the wireframe's _github-icon.html, copied verbatim.
+function GithubRepoIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+    </svg>
+  );
+}
+
 export function LinkedReposSection({ slug }: { slug: string }) {
   const { data: repos = [], isLoading } = useProjectRepos(slug);
   const { data: projects = [] } = useProjects();
@@ -201,7 +210,7 @@ export function LinkedReposSection({ slug }: { slug: string }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [removingRepo, setRemovingRepo] = useState<string | null>(null);
   const [removingAll, setRemovingAll] = useState(false);
-  const debouncedQuery = useDebouncedValue(query, 300);
+  const debouncedQuery = useDebouncedValue(query.trim(), 300);
   const search = useGithubRepoSearch(debouncedQuery);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -304,11 +313,7 @@ export function LinkedReposSection({ slug }: { slug: string }) {
               <div className="repo-picker-state">
                 <span className="font-medium text-lx-text-primary">No GitHub App installation found</span>
                 <span className="text-2xs text-lx-text-muted">Install the App on an account before linking repos.</span>
-                {isSuperadmin ? (
-                  <a className="btn btn-primary btn-sm" href={githubAppInstallUrl(settings?.appSlug)} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Install App</a>
-                ) : (
-                  <span className="text-2xs text-lx-text-muted">Superadmin only — members&apos; repo search is denied and shows the error state, so this button never renders for them.</span>
-                )}
+                <a className="btn btn-primary btn-sm" href={githubAppInstallUrl(settings?.appSlug)} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Install App</a>
               </div>
             )}
             {status === "error" && (
@@ -334,10 +339,11 @@ export function LinkedReposSection({ slug }: { slug: string }) {
                         key={name}
                         type="button"
                         className="dropdown-item w-full text-left"
-                        style={name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : undefined}
+                        style={{ gap: 10, ...(name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : {}) }}
                         onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
                         onClick={() => { addRepo(name); }}
                       >
+                        <GithubRepoIcon />
                         <span className="font-mono text-xs" style={{ flex: 1 }}>{name}</span>
                         <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{repoAccount(name)}</span>
                       </button>
@@ -352,10 +358,11 @@ export function LinkedReposSection({ slug }: { slug: string }) {
                         key={name}
                         type="button"
                         className="dropdown-item w-full text-left"
-                        style={name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : undefined}
+                        style={{ gap: 10, ...(name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : {}) }}
                         onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
                         onClick={() => { addRepo(name); }}
                       >
+                        <GithubRepoIcon />
                         <span className="font-mono text-xs" style={{ flex: 1 }}>{name}</span>
                         <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{repoAccount(name)}</span>
                       </button>

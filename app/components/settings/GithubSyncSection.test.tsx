@@ -10,13 +10,14 @@ import type { GithubSettings, GithubInstallations } from "../../lib/api";
 const h = vi.hoisted(() => ({
   settings: { value: undefined as GithubSettings | undefined },
   installations: { value: { status: "installed", accounts: ["acme-corp"] } as GithubInstallations },
+  loading: { value: false },
 }));
 
 vi.mock("../../lib/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/queries")>();
   return {
     ...actual,
-    useGithubSettings: () => ({ data: h.settings.value, isLoading: false, isError: false }),
+    useGithubSettings: () => ({ data: h.settings.value, isLoading: h.loading.value, isError: false }),
     useGithubInstallations: () => ({ data: h.installations.value }),
     useClearGithubSettings: () => ({ mutate: vi.fn(), isPending: false }),
     useCreateGithubManifest: () => ({ mutate: vi.fn(), isPending: false }),
@@ -40,6 +41,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   h.settings.value = NONE;
   h.installations.value = { status: "installed", accounts: ["acme-corp"] };
+  h.loading.value = false;
 });
 
 describe("GithubSyncSection", () => {
@@ -110,6 +112,34 @@ describe("GithubSyncSection", () => {
     h.settings.value = CONNECTED;
     render(<GithubSyncSection githubResult={{ status: "failed", reason: "exchange" }} />);
     expect(manualDetails().open).toBe(true);
+  });
+
+  it("auto-expands the manual disclosure once a first uncached load resolves unconfigured", () => {
+    h.loading.value = true;
+    const { rerender } = render(<GithubSyncSection />);
+    expect(screen.queryByText("Advanced — manual credentials")).not.toBeInTheDocument();
+    h.loading.value = false;
+    rerender(<GithubSyncSection />);
+    expect(manualDetails().open).toBe(true);
+  });
+
+  it("force-opens the manual disclosure when a ?github=failed callback resolves a configured App", () => {
+    h.loading.value = true;
+    h.settings.value = CONNECTED;
+    const result = { status: "failed", reason: "exchange" } as const;
+    const { rerender } = render(<GithubSyncSection githubResult={result} />);
+    h.loading.value = false;
+    rerender(<GithubSyncSection githubResult={result} />);
+    expect(manualDetails().open).toBe(true);
+  });
+
+  it("stays collapsed when a configured App resolves from a first uncached load", () => {
+    h.loading.value = true;
+    h.settings.value = CONNECTED;
+    const { rerender } = render(<GithubSyncSection />);
+    h.loading.value = false;
+    rerender(<GithubSyncSection />);
+    expect(manualDetails().open).toBe(false);
   });
 
   it("keeps the failed card's manual escape hatch and expands the disclosure on click", () => {

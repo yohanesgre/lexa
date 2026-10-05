@@ -1,7 +1,13 @@
 // Pure state machine for the Linked Repos type-ahead
 // (wireframes/src/settings-project-herald.html:57-185). Exactly one state
-// renders live; "no installation" outranks an upstream error because a
-// connected-but-not-installed App returns 403 to the admin-gated search.
+// renders live; "no installation" outranks a listing error so a
+// connected-but-not-installed App reads as a setup step, not a failure.
+// The real case this precedence protects: an installation probe that reports
+// "not_installed" together with a 502 from the repo-listing endpoint (the
+// merged server returns 200 [] for zero installations — that is a match, not
+// an error). A member's 403 is unrelated: it is requireAdmin, and a member
+// never reaches "no-installation" because their settings/install probes are
+// disabled.
 
 export type RepoSearchState = "idle" | "searching" | "no-installation" | "error" | "no-matches" | "results";
 

@@ -21,6 +21,8 @@ const h = vi.hoisted(() => ({
   session: { value: { user: { role: "superadmin" } } as { user?: { role?: string } } | null },
   settings: { value: { appId: "1234567", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" } as GithubSettings | undefined },
   installations: { value: { status: "installed", accounts: ["acme-corp"] } as GithubInstallations | undefined },
+  settingsEnabled: [] as boolean[],
+  repoSearchCalls: [] as string[],
 }));
 
 vi.mock("../../lib/queries", async (importOriginal) => {
@@ -30,10 +32,13 @@ vi.mock("../../lib/queries", async (importOriginal) => {
     useProjectRepos: () => ({ data: h.repos.value, isLoading: false }),
     useProjects: () => ({ data: h.projects.value }),
     useReplaceProjectRepos: () => ({ mutate: vi.fn(), isPending: false }),
-    useGithubRepoSearch: () => h.search.value,
+    useGithubRepoSearch: (q: string) => { h.repoSearchCalls.push(q); return h.search.value; },
     useSession: () => ({ data: h.session.value }),
-    useGithubSettings: () => ({ data: h.settings.value }),
-    useGithubInstallations: () => ({ data: h.installations.value }),
+    useGithubSettings: (enabled = true) => {
+      h.settingsEnabled.push(enabled);
+      return { data: enabled ? h.settings.value : undefined };
+    },
+    useGithubInstallations: (enabled: boolean) => ({ data: enabled ? h.installations.value : undefined }),
   };
 });
 
@@ -55,6 +60,8 @@ beforeEach(() => {
   h.session.value = { user: { role: "superadmin" } };
   h.settings.value = { appId: "1234567", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" };
   h.installations.value = { status: "installed", accounts: ["acme-corp"] };
+  h.settingsEnabled.length = 0;
+  h.repoSearchCalls.length = 0;
 });
 
 afterEach(() => {
@@ -76,14 +83,30 @@ describe("LinkedReposSection type-ahead", () => {
     typeQuery("a");
     expect(screen.getByText("Linked in workspace")).toBeInTheDocument();
     expect(screen.getByText("acme/legacy")).toBeInTheDocument();
+    expect(screen.getByText("acme/legacy").closest("button")?.querySelector("svg")).not.toBeNull();
   });
 
   it("searching — 300ms debounce pending before one request fires", () => {
     render(<LinkedReposSection slug="nimbus" />);
     typeQuery("web");
     expect(screen.getByText("Searching GitHub…")).toBeInTheDocument();
+    // The hook only receives the settled query: at 299ms it still holds the
+    // previous value, and a regression to the raw query would fail this.
+    act(() => { vi.advanceTimersByTime(299); });
+    expect(h.repoSearchCalls.at(-1)).toBe("");
+    settleDebounce();
+    expect(h.repoSearchCalls.at(-1)).toBe("web");
+    expect(screen.queryByText("Searching GitHub…")).not.toBeInTheDocument();
+  });
+
+  it("searching — a trailing-whitespace query still settles (no stuck spinner)", () => {
+    h.search.value = { data: ["acme/web-client"], status: "success", refetch: vi.fn() };
+    render(<LinkedReposSection slug="nimbus" />);
+    typeQuery("web ");
     settleDebounce();
     expect(screen.queryByText("Searching GitHub…")).not.toBeInTheDocument();
+    expect(h.repoSearchCalls.at(-1)).toBe("web");
+    expect(screen.getByText("acme/web-client")).toBeInTheDocument();
   });
 
   it("results — settled search renders the GitHub repos group", () => {
@@ -94,6 +117,8 @@ describe("LinkedReposSection type-ahead", () => {
     expect(screen.getByText("acme/web-client")).toBeInTheDocument();
     expect(screen.getByText("GitHub repos")).toBeInTheDocument();
     expect(screen.getByText("acme")).toBeInTheDocument();
+    expect(screen.getByText("acme/web-client").closest("button")?.querySelector("svg")).not.toBeNull();
+    expect(h.settingsEnabled.at(-1)).toBe(true);
   });
 
   it("no matches — settled 200 with an empty result set", () => {
@@ -111,17 +136,19 @@ describe("LinkedReposSection type-ahead", () => {
     settleDebounce();
     expect(screen.getByText("No GitHub App installation found")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Install App" })).toHaveAttribute("href", "https://github.com/apps/lexa-nimbus/installations/new");
+    expect(h.settingsEnabled.at(-1)).toBe(true);
   });
 
-  it("no installation — members see the state without the Install App button", () => {
+  it("members — settings/install probes are disabled and the gated search shows the error state", () => {
     h.session.value = { user: { role: "member" } };
-    h.installations.value = { status: "not_installed", accounts: [] };
+    h.search.value = { data: [], status: "error", refetch: vi.fn() };
     render(<LinkedReposSection slug="nimbus" />);
     typeQuery("web");
     settleDebounce();
-    expect(screen.getByText("No GitHub App installation found")).toBeInTheDocument();
+    expect(h.settingsEnabled.at(-1)).toBe(false);
+    expect(screen.getByText("Couldn't load repositories")).toBeInTheDocument();
+    expect(screen.queryByText("No GitHub App installation found")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Install App" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Superadmin only — members' repo search is denied and shows the error state/)).toBeInTheDocument();
   });
 
   it("error — an upstream failure never renders as silent emptiness", () => {

@@ -578,12 +578,16 @@ export function GithubSyncSection({ githubResult }: { githubResult?: GithubRetur
 
   // Disclosure state is UI-only and never persisted: collapsed once the App is
   // configured, expanded when it is not, and force-expanded on a connect failure.
+  // `isLoading` is in the deps because the <details> only mounts after the
+  // settings read resolves — without it the first uncached load leaves the
+  // initial (collapsed) state in place, since `configured`/`failed` never
+  // change on that render.
   useEffect(() => {
     if (manualRef.current) manualRef.current.open = !configured;
-  }, [configured]);
+  }, [configured, isLoading]);
   useEffect(() => {
     if (failed && manualRef.current) manualRef.current.open = true;
-  }, [failed]);
+  }, [failed, isLoading]);
 
   // Escape hatch from the failed card: expand the disclosure and scroll to it.
   const openManual = () => {
