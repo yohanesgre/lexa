@@ -10,28 +10,37 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
-	// Raw-wrangler source bundling ONLY. `main` points at source
-	// (server/workers-entry.ts), so `wrangler deploy` with THIS root config
-	// — the `deploy:workers` script / Deploy Button path — bundles from
-	// source and needs these resolves. Load-bearing: dropping the block makes
-	// that dry-run fail with `Could not resolve "bun:sqlite"` (server/auth.ts).
-	// `bun:sqlite` is a Bun builtin no other runtime can resolve (vitest maps
-	// it to a node:sqlite shim the same way); the worker never constructs it —
-	// see server/workers-shims/bun-sqlite.ts. `@tanstack/react-start/server`
+	// Raw from-source bundling. `main` points at source
+	// (server/workers-entry.ts), so a `wrangler deploy` that resolves this
+	// root `main` with no Vite build output bundles from source and needs
+	// these resolves: dropping the block fails that dry-run with
+	// `Could not resolve "bun:sqlite"` (server/auth.ts:8). `bun:sqlite` is a
+	// Bun builtin no other runtime can resolve (vitest maps it to a
+	// node:sqlite shim the same way); the worker never constructs it — see
+	// server/workers-shims/bun-sqlite.ts. `@tanstack/react-start/server`
 	// pulls Vite-virtual modules unresolvable outside the vite build (see
 	// server/workers-shims/start-server.ts); `better-auth/tanstack-start`
 	// likewise. `node:fs` has no filesystem on Workers (see
 	// server/workers-shims/node-fs.ts) — the R2/D1 drivers serve those roles,
 	// so the stubs never execute on this flavor.
 	//
-	// The vite workers build ignores this block (its own aliases live in
-	// vite.config.ts; hence the dev-boot "alias ... ignored ... using Vite"
-	// warning) and links the real Start SSR handler. Grep-confirmed: the
-	// built-bundle deploys — staging (wrangler.staging.example.jsonc, dist +
-	// no_bundle), install (scripts/lib/cf-deploy.ts), `lexa-cli deploy
-	// --runtime workers` (cli/src/worker.ts) — all rebuild the config from
-	// dist/server/wrangler.json and never read this alias. Kept because
-	// `deploy:workers` still bundles source through this root config.
+	// Under `vite build` the `@cloudflare/vite-plugin` reads this block ONLY
+	// to emit its not-applicable warning (hence the dev-boot "alias ...
+	// ignored ... using Vite" warning; the plugin tracks it in
+	// `nonApplicableWorkerConfigs.notRelevant` and then drops it); the vite
+	// build links its own `resolve.alias` from vite.config.ts. After
+	// `build:workers`, a bare `wrangler deploy` honours the build's
+	// `.wrangler/deploy/config.json` redirect to `dist/server/wrangler.json`
+	// (`main: index.js`, `no_bundle: true`) and reads neither this block nor
+	// `server/workers-entry.ts` — so the `deploy:workers` step (which runs
+	// after `build:workers`) does not bundle from source either. Grep-
+	// confirmed: the built-bundle deploys — staging
+	// (wrangler.staging.example.jsonc, dist + no_bundle), install
+	// (scripts/lib/cf-deploy.ts), `lexa-cli deploy --runtime workers`
+	// (cli/src/worker.ts) — likewise rebuild the config from
+	// dist/server/wrangler.json and never read this alias. Kept because a
+	// buildless from-source `wrangler deploy` still resolves this root `main`
+	// and needs the resolves.
 	"alias": {
 		"bun:sqlite": "./server/workers-shims/bun-sqlite.ts",
 		"better-auth/tanstack-start": "./server/workers-shims/better-auth-tanstack-start.ts",

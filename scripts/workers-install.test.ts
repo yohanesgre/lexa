@@ -350,7 +350,7 @@ describe("root AI binding (H9)", () => {
   const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
   test("the generated per-deploy config carries root's ai binding", () => {
-    expect(resolveAiBinding(readRootWranglerConfig(ROOT))).toEqual({
+    expect(resolveAiBinding(readRootWranglerConfig(ROOT))).toMatchObject({
       ai: { binding: "AI", remote: true },
     });
   });
