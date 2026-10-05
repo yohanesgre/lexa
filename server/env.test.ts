@@ -102,6 +102,10 @@ describe("resolvers", () => {
     expect(resolvePublicUrl({ LXK_PUBLIC_URL: "   " })).toBe(DEFAULT_PUBLIC_URL);
   });
 
+  it("trims surrounding whitespace from a set public URL", () => {
+    expect(resolvePublicUrl({ LXK_PUBLIC_URL: " https://x.test " })).toBe("https://x.test");
+  });
+
   it("dev trusted origins add the vite host; prod does not", () => {
     const dev = resolveTrustedOrigins({ LXK_ENV: "dev", LXK_PUBLIC_URL: "https://x.test" });
     expect(dev).toContain("https://x.test");

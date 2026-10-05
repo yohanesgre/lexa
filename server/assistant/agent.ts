@@ -151,7 +151,9 @@ export function buildInternalDepsForRun(
   // proves (the runner uses the same constant — `runner.ts`). Without the
   // binding there is no origin and the caller degrades (logged, not silent).
   const service = env.ASSISTANT_SERVICE;
-  const origin = storedOrigin ?? env.LXK_PUBLIC_URL ?? (service ? "https://assistant.internal" : undefined);
+  // Whitespace-only counts as unset, matching resolvePublicUrl (server/env.ts).
+  const publicUrl = env.LXK_PUBLIC_URL?.trim() || undefined;
+  const origin = storedOrigin ?? publicUrl ?? (service ? "https://assistant.internal" : undefined);
   if (!origin) return null;
   return {
     origin,

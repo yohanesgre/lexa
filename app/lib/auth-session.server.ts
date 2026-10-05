@@ -22,7 +22,8 @@ export async function fetchSessionServer(): Promise<SessionResponse> {
       const request = getRequest();
       const cookie = request?.headers.get("cookie");
       if (cookie) headers.cookie = cookie;
-      const origin = typeof process !== "undefined" ? (process.env.LXK_PUBLIC_URL ?? "http://localhost:3000") : "http://localhost:3000";
+      const envOrigin = typeof process !== "undefined" ? process.env.LXK_PUBLIC_URL?.trim() : undefined;
+      const origin = envOrigin || "http://localhost:3000";
       url = `${origin}${AUTH_BASE}/get-session`;
     } catch {
       // no request context — same-origin fetch below
