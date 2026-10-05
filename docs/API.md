@@ -2235,11 +2235,14 @@ POST   /api/admin/assistant/providers/:id/probe   (superadmin)
 
 POST   /api/assistant/tasks
 body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
-       skillId*, selection?,
+       skillId?, selection?,
        attachments?: [{ storageKey*, mimeType*, name* }] }
   The assistant lane is the only lane; agentId is always the builtin `assistant`
-  agent and skillId must be bound to it via lexa_agent_skills — else
-  SKILL_NOT_FOUND. The task is appended to assistant_tasks as `queued`.
+  agent. When skillId is supplied it must be bound to it via lexa_agent_skills —
+  else SKILL_NOT_FOUND. Omitting skillId means auto mode: the run stores a null
+  skill and the assistant picks from its bound catalog on stream, with the
+  Additional prompt taking precedence over the chosen skill's guidance. The
+  task is appended to assistant_tasks as `queued`.
   attachments are image refs into the project's attachment storage
   (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
   png/jpeg/gif/webp only. Attachments require vision capability:

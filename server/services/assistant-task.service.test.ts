@@ -351,6 +351,27 @@ describe("task enqueue — auto skill selection", () => {
   });
 });
 
+describe("task skill tolerance — deleted skill row", () => {
+  it("a dangling task skill_id degrades to auto mode instead of failing the run", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    queueRun("at1");
+    // Simulate the Bun/FK-OFF runner: a skill deleted after enqueue leaves the
+    // row's skill_id dangling. The service must swallow findSkillById's
+    // RowNotFound and run in auto mode, never surface SkillNotFound.
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare("UPDATE assistant_tasks SET skill_id = 'ghost' WHERE id = 'at1'").run();
+    db.exec("PRAGMA foreign_keys = ON");
+
+    const frames = await drain(await runStream("at1"));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
+    expect(text).not.toContain("Polish the text.");
+  });
+});
+
 describe("task preflight — resume", () => {
   // A decided batch whose tool is unknown to the executor: resume must apply
   // the verdicts and still reach the model, without Jev being consulted.
@@ -373,6 +394,22 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     const text = promptText(providerMock.calls[0]!);
     expect(text).toContain(AUTO_SKILL_INSTRUCTION);
     expect(text).toContain("- Test Polish");
+  });
+
+  it("a stale thread skill_id degrades resumeThreadStream to auto mode", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    // assistant_threads.skill_id has no FK; a skill deleted after the thread was
+    // written leaves the thread pointing at a vanished row. The resume must
+    // swallow RowNotFound and fall back to auto mode, never SkillNotFound.
+    seedDecidedBatch("ghost");
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
+    expect(text).not.toContain("Polish the text.");
   });
 
   it("resumes with zero Jev calls and no advisory block", async () => {

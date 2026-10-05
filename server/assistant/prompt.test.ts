@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompts, AUTO_SKILL_INSTRUCTION, MARKDOWN_STYLE, WRITE_POLICY, type SystemPromptInput } from "./prompt";
+import { buildSystemPrompts, AUTO_SKILL_INSTRUCTION, CHAT_SKILL_INSTRUCTION, MARKDOWN_STYLE, WRITE_POLICY, type SystemPromptInput } from "./prompt";
 
 const base: SystemPromptInput = {
   identity: "IDENTITY",
@@ -67,10 +67,20 @@ describe("buildSystemPrompts skills", () => {
     expect(prompts[1]!.cache_control).toEqual({ type: "ephemeral" });
   });
 
-  it("drops blank skill markdowns; no skills emits the auto-pick instruction", () => {
-    const blank = buildSystemPrompts({ ...base, agentMarkdown: "AGENT", skillMarkdowns: ["  ", ""] });
+  it("drops blank skill markdowns; a document run with no skills emits the auto-pick instruction", () => {
+    const blank = buildSystemPrompts({ ...base, agentMarkdown: "AGENT", skillMarkdowns: ["  ", ""], autoSkill: true });
     expect(blank[1]!.content).toBe(`AGENT\n\n${AUTO_SKILL_INSTRUCTION}`);
-    expect(buildSystemPrompts(base)[1]!.content).toBe(AUTO_SKILL_INSTRUCTION);
+    expect(buildSystemPrompts({ ...base, autoSkill: true })[1]!.content).toBe(AUTO_SKILL_INSTRUCTION);
+  });
+
+  it("a non-document turn with no skills emits the neutral fallback, not the document instruction", () => {
+    // Chat/schedule/delegation carry no "Additional prompt"; default (absent
+    // flag) must not leak the document-only instruction.
+    expect(buildSystemPrompts(base)[1]!.content).toBe(CHAT_SKILL_INSTRUCTION);
+    expect(buildSystemPrompts({ ...base, autoSkill: false })[1]!.content).toBe(CHAT_SKILL_INSTRUCTION);
+    expect(CHAT_SKILL_INSTRUCTION).toBe("No additional behavior rules are active. Use your default judgment.");
+    expect(CHAT_SKILL_INSTRUCTION).not.toContain("Additional prompt");
+    expect(CHAT_SKILL_INSTRUCTION).not.toContain("catalog");
   });
 
   it("auto-pick instruction names the catalog + get_skill and defers to the Additional prompt", () => {

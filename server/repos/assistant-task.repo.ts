@@ -48,7 +48,7 @@ export interface AdminAssistantRunRow {
   documentId: string;
   documentTitle: string;
   agentId: string;
-  skillId: string;
+  skillId: string | null;
   agentName: string;
   skillName: string;
   threadKey: string | null;
@@ -137,7 +137,7 @@ function mapAdminRunRow(row: AdminRunRaw): AdminAssistantRunRow {
     documentId: row.document_id ?? "",
     documentTitle: row.document_title ?? "",
     agentId: row.agent_id ?? "",
-    skillId: row.skill_id ?? "",
+    skillId: row.skill_id,
     agentName: row.agent_name ?? "",
     skillName: row.skill_name ?? "",
     threadKey: row.thread_key,

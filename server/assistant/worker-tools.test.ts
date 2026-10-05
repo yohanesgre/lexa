@@ -272,6 +272,25 @@ describe("resolveWorkerHarnessContext", () => {
     expect(context.skillMarkdowns[0]).toContain("## Skill: Test Skill");
   });
 
+  it("dedupes a run-row skill that is also mentioned as $name (one markdown entry)", async () => {
+    seedSettings();
+    seedBoard();
+    seedBoundSkill();
+    db.exec(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-dup', 'p1', 'task', 't1', 'assistant', 'sk', 'running')`
+    );
+
+    const context = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "task:t1", runId: "run-dup", userText: "please $test-skill this", mode: "turn" }
+    );
+    // The run-row skill and the explicit `$test-skill` mention resolve to the
+    // same skill; it must appear exactly once.
+    expect(context.skillMarkdowns).toHaveLength(1);
+    expect(context.skillMarkdowns[0]).toContain("## Skill: Test Skill");
+  });
+
   it("skips the Jev preflight on mode:resume (and runs it on mode:turn)", async () => {
     seedJev();
     const turn = await resolveWorkerHarnessContext(

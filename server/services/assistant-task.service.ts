@@ -360,9 +360,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const agent = yield* catalogRepo.findAgentById(task.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId })));
         // Auto mode: an omitted skill leaves `task.skillId` null, so no skill
         // markdown is injected and the assistant picks from its catalog.
+        // Tolerant of a dangling `skill_id` (a skill deleted after enqueue):
+        // degrade to auto mode, never fail the run.
         const taskSkillId = task.skillId;
         const skill = taskSkillId !== null
-          ? yield* catalogRepo.findSkillById(taskSkillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: taskSkillId })))
+          ? yield* catalogRepo.findSkillById(taskSkillId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)))
           : null;
         const doc = yield* loadDocContext(task.projectId, task.documentType, task.documentId);
         const repoContent = yield* loadTaskRepoContent(task).pipe(Effect.catchAll(() => Effect.succeed([])));
@@ -391,7 +393,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // instruction has a catalog to reference on the Bun document path too.
         const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, task.agentId));
         const { skillCatalog } = buildSkillPromptParts(instruction, boundSkills);
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, autoSkill: true, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
@@ -420,9 +422,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // (auto mode stores null, and skills are no longer thread-bound).
         if (!thread.agentId) return yield* new AgentNotFound({ id: "" });
         const agent = yield* catalogRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
+        // Same tolerance as the new-run path: a deleted skill degrades the
+        // resume to auto mode instead of aborting it.
         const threadSkillId = thread.skillId;
         const skill = threadSkillId !== null
-          ? yield* catalogRepo.findSkillById(threadSkillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: threadSkillId })))
+          ? yield* catalogRepo.findSkillById(threadSkillId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)))
           : null;
         const doc = yield* loadDocContext(thread.projectId, documentType, documentId);
         const repoContent = yield* loadTaskRepoContent({ projectId: thread.projectId, documentType, documentId } as Parameters<typeof loadTaskRepoContent>[0]).pipe(Effect.catchAll(() => Effect.succeed([])));
@@ -437,7 +441,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // apply here.
         const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, thread.agentId ?? ""));
         const { skillCatalog } = buildSkillPromptParts("", boundSkills);
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, autoSkill: true, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));

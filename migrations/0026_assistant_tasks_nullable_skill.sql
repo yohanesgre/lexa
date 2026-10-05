@@ -17,7 +17,10 @@ CREATE TABLE assistant_tasks_new (
   document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id   TEXT NOT NULL,
   agent_id      TEXT NOT NULL REFERENCES lexa_agents(id),
-  skill_id      TEXT REFERENCES lexa_skills(id),
+  -- Optional skill, NULL = auto-pick. SET NULL (not RESTRICT) so deleting a
+  -- skill that a queued/historical run referenced degrades to auto mode
+  -- instead of blocking the delete or stranding a dangling id.
+  skill_id      TEXT REFERENCES lexa_skills(id) ON DELETE SET NULL,
   extra_prompt  TEXT NOT NULL DEFAULT '',
   selection     TEXT NOT NULL DEFAULT '',
   status        TEXT NOT NULL DEFAULT 'queued'
@@ -28,9 +31,14 @@ CREATE TABLE assistant_tasks_new (
   started_at    TEXT,
   finished_at   TEXT
 );
+-- Copy verbatim, except a dangling `skill_id` (a run whose skill was already
+-- deleted) is nulled so the rebuilt column's FK holds under D1's enforced
+-- keys — the same auto-mode degradation `ON DELETE SET NULL` gives going
+-- forward.
 INSERT INTO assistant_tasks_new (id, project_id, document_type, document_id, agent_id, skill_id,
   extra_prompt, selection, status, result, error, created_at, started_at, finished_at)
-  SELECT id, project_id, document_type, document_id, agent_id, skill_id,
+  SELECT id, project_id, document_type, document_id, agent_id,
+         CASE WHEN skill_id IS NULL OR skill_id IN (SELECT id FROM lexa_skills) THEN skill_id ELSE NULL END,
          extra_prompt, selection, status, result, error, created_at, started_at, finished_at
   FROM assistant_tasks;
 DROP TABLE assistant_tasks;

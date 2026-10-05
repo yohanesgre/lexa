@@ -610,6 +610,9 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         agentMarkdown: harness?.agent?.instructions ?? null,
         skillMarkdowns: harness?.skillMarkdowns ?? [],
         skillCatalog: harness?.skillCatalog ?? null,
+        // Document runs auto-pick from the catalog (Additional prompt exists);
+        // chat gets the neutral fallback.
+        autoSkill: documentType !== "chat",
         repoContent: harness?.repoContent ?? [],
         docContext: harness?.docContext ?? "",
         mentionContext: harness?.mentionContext ?? "",

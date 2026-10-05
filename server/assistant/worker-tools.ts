@@ -405,7 +405,13 @@ export async function resolveWorkerHarnessContext(
       runRow.skill_id
     );
     if (skill && (skill.instructions ?? "").trim() !== "") {
-      parts.skillMarkdowns = [`## Skill: ${skill.name}\n${skill.instructions}`, ...parts.skillMarkdowns].slice(0, 3);
+      // Dedupe by name: an explicit `$name` mention of the same run-row skill
+      // already produced identical markdown — do not prepend it twice.
+      const markdown = `## Skill: ${skill.name}\n${skill.instructions}`;
+      const alreadyMentioned = parts.skillMarkdowns.some((m) => m.startsWith(`## Skill: ${skill.name}\n`));
+      if (!alreadyMentioned) {
+        parts.skillMarkdowns = [markdown, ...parts.skillMarkdowns].slice(0, 3);
+      }
     }
   }
 

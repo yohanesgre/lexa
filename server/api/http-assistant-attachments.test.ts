@@ -145,13 +145,16 @@ describe("POST /api/assistant/tasks attachments", () => {
     ]);
   });
 
-  it("omits skillId → 201 auto mode (no SKILL_NOT_FOUND)", async () => {
+  it("omits skillId → 201 auto mode (no SKILL_NOT_FOUND) and the persisted row carries skill_id NULL", async () => {
     const auto = assistantTaskBody();
     delete (auto as { skillId?: unknown }).skillId;
     const res = await handler(authed("POST", "/api/assistant/tasks", auto));
     expect(res.status).toBe(201);
     const task = await res.json();
     expect(task.skillId).toBeNull();
+    // The DB row, not just the response projection, has no skill.
+    const persisted = db.prepare("SELECT skill_id FROM assistant_tasks WHERE id = ?").get(task.id) as { skill_id: string | null };
+    expect(persisted.skill_id).toBeNull();
   });
 
   it("more than 5 images → 422 INVALID_ARGS cap message", async () => {

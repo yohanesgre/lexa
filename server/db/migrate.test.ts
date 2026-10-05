@@ -1572,4 +1572,58 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     expect(flags(after)).toEqual(before);
     after.close();
   });
+
+  // ── 0026 assistant_tasks.skill_id nullable ──────────────────────────────
+  it("0026 makes skill_id nullable, nulls a dangling id, and SET NULLs on skill delete", () => {
+    const dir = stageThrough("0025");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0026_assistant_tasks_nullable_skill.sql");
+
+    // Pre-0026 shape: skill_id is NOT NULL, so seed a valid id and a dangling
+    // one (the pre-0026 row a deleted skill leaves behind). FK OFF lets the
+    // dangling id in so 0026's copy is what has to null it.
+    const seed = new Database(dbPath);
+    seed.exec("PRAGMA foreign_keys = OFF");
+    seed.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+      INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
+      INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+        VALUES ('t-skill', 'p1', 'task', 'd1', 'assistant', 'sk1', 'queued'),
+               ('t-dangling', 'p1', 'task', 'd1', 'assistant', 'ghost', 'queued');
+    `);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    after.exec("PRAGMA foreign_keys = ON");
+    expect(appliedMigrations(dbPath)).toContain("0026_assistant_tasks_nullable_skill.sql");
+
+    // The dangling id is nulled by the copy; the valid one survives.
+    expect(after.prepare("SELECT id, skill_id FROM assistant_tasks ORDER BY id").all()).toEqual([
+      { id: "t-dangling", skill_id: null },
+      { id: "t-skill", skill_id: "sk1" },
+    ]);
+
+    // The column is nullable now: a fresh auto row stores NULL.
+    after
+      .prepare(
+        "INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status) VALUES ('t-auto', 'p1', 'task', 'd1', 'assistant', NULL, 'queued')"
+      )
+      .run();
+    expect(after.prepare("SELECT skill_id FROM assistant_tasks WHERE id = 't-auto'").get()).toEqual({ skill_id: null });
+
+    // Both task indexes were recreated.
+    const idx = (after.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
+    expect(idx).toEqual(expect.arrayContaining(["idx_assistant_tasks_created", "idx_assistant_tasks_status"]));
+
+    // Going forward, deleting a skill degrades the run to auto (SET NULL).
+    const fks = after.prepare("PRAGMA foreign_key_list(assistant_tasks)").all() as Array<{ from: string; table: string; on_delete: string }>;
+    expect(fks.find((f) => f.from === "skill_id")?.on_delete).toBe("SET NULL");
+    after.prepare("DELETE FROM lexa_skills WHERE id = 'sk1'").run();
+    expect(after.prepare("SELECT skill_id FROM assistant_tasks WHERE id = 't-skill'").get()).toEqual({ skill_id: null });
+    expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
 });

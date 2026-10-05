@@ -69,6 +69,13 @@ export const WRITE_POLICY =
 export const AUTO_SKILL_INSTRUCTION =
   "No skill was pre-selected for this run. Pick the best-matching skill(s) from your bound-skills catalog and follow their instructions; call get_skill for a skill's full details. The user's Additional prompt takes precedence over the chosen skill's guidance.";
 
+// Neutral fallback for a turn that is NOT a document run (chat, schedule,
+// detached delegation) and carries no skill markdown: the original neutral
+// line. Auto-pick is document-only — outside the Generate panel there is no
+// "Additional prompt", so no auto-pick instruction is injected there.
+export const CHAT_SKILL_INSTRUCTION =
+  "No additional behavior rules are active. Use your default judgment.";
+
 export interface SystemPromptInput {
   identity: string;
   memoryBlock: string | null;
@@ -76,6 +83,10 @@ export interface SystemPromptInput {
   // Per-message `$skill` instructions, in mention order. Absent/empty means no
   // skill segment is emitted.
   skillMarkdowns?: string[];
+  // Document-run flag. True only for an editor Generate run (task/wiki), where
+  // an unmentioned skill means auto mode and the Additional prompt exists;
+  // false/absent (chat, schedule, delegation) gets the neutral fallback.
+  autoSkill?: boolean;
   // Bound-skill catalog appended to the cached identity segment, after the
   // write policy. Null/blank omits the segment entirely.
   skillCatalog?: string | null;
@@ -110,11 +121,12 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
 
   const agentRules = [input.agentMarkdown].filter((s): s is string => !!s && s.trim() !== "");
   const skillRules = (input.skillMarkdowns ?? []).filter((s): s is string => !!s && s.trim() !== "");
+  const fallback = input.autoSkill ? AUTO_SKILL_INSTRUCTION : CHAT_SKILL_INSTRUCTION;
   prompts.push({
     content:
       skillRules.length > 0
         ? [...agentRules, ...skillRules].join("\n\n")
-        : [...agentRules, AUTO_SKILL_INSTRUCTION].join("\n\n"),
+        : [...agentRules, fallback].join("\n\n"),
     cache_control: { type: "ephemeral" },
   });
 

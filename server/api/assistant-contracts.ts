@@ -306,7 +306,7 @@ const AssistantRunRowSchema = Schema.Struct({
   documentId: Schema.String,
   documentTitle: Schema.String,
   agentId: Schema.String,
-  skillId: Schema.String,
+  skillId: Schema.NullOr(Schema.String),
   agentName: Schema.String,
   skillName: Schema.String,
   threadKey: Schema.NullOr(Schema.String),

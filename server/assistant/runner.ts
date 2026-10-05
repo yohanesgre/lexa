@@ -178,6 +178,7 @@ export class LexaAssistantRunner extends AIChatAgent<LexaAssistantRunnerEnv> {
         agentMarkdown: harness?.agent?.instructions ?? null,
         skillMarkdowns: harness?.skillMarkdowns ?? [],
         skillCatalog: harness?.skillCatalog ?? null,
+        autoSkill: documentType !== "chat",
         repoContent: harness?.repoContent ?? [],
         docContext: harness?.docContext ?? "",
         mentionContext: harness?.mentionContext ?? "",

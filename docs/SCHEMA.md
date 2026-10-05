@@ -1250,8 +1250,10 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
 - **Task lifecycle:** `queued` → (assistant stream claims) `running` →
   `completed`/`failed`/`cancelled`. Claim is a conditional UPDATE
   (`WHERE id=? AND status='queued'`); a lost race surfaces `ASSISTANT_TASK_ACTIVE`.
-- **Agents + skills:** every task carries `agent_id` + `skill_id` (global rule
-  bundles, M2M bindings). There is exactly one builtin agent (`assistant`); the
+- **Agents + skills:** every task carries `agent_id`; `skill_id` is optional
+  (nullable, FK `ON DELETE SET NULL`) — null means auto mode, where the
+  assistant picks from its bound catalog on stream. There is exactly one
+  builtin agent (`assistant`); the
   per-agent skill availability is the `lexa_agent_skills` junction only. The
   assistant stream loads the agent/skill instructions directly (no claim-carried
   files).
