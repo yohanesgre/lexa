@@ -7,6 +7,17 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.8.3] - 2026-10-06
+
+### Changed
+
+- **Assistant SDK update (`agents` 0.26.0, `@cloudflare/ai-chat` 0.12.1).**
+  Upstream chat-client fixes: the new agent's history loads when the thread
+  address changes, messages sent while disconnected survive reconnects, long
+  streamed answers no longer hit React's update-depth limit, and terminal and
+  replay handling around tool continuations is tightened. No Lexa source
+  changes were required — exact pins and the lockfile only. (#334)
+
 ## [2026.8.2] - 2026-10-06
 
 ### Fixed
