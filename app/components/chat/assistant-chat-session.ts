@@ -323,29 +323,55 @@ export function useStreamFrameFreeze(args: {
 
   // Only a hard transport/RPC failure settles the row to the danger variant; a
   // settled / pending / unavailable ack keeps it running (the continuation
-  // clears it, or the deadline bounds it).
+  // clears it, or the deadline bounds it). Guarded on the armed batch so a
+  // stale result landing after a chat switch neither re-arms nor renders the
+  // fallback in the wrong chat (which would let Retry POST the other chat's
+  // batch); the armed ref is nulled on switch, so a mismatch IS the stale case.
   const settleResume = useCallback((batchId: string, result: ResumeResult) => {
     if (result.ok) return;
-    armedBatchRef.current = batchId;
+    if (armedBatchRef.current !== batchId) return;
     setResumeProgress({ kind: "failed" });
   }, []);
 
-  // Clear the row the moment the continuation mounts: the first resume stream
-  // frame (streaming) or the settle refetch appending a turn after the batch.
+  // Row lifecycle. The armed batch id is the anchor: the row hides the moment
+  // the continuation mounts (the first resume stream frame, `streaming`), and
+  // the transcript moves past the arm snapshot. Runs whenever the row is visible
+  // OR an armed batch is outstanding, so a continuation arriving after a
+  // timeout/failure also retires the fallback. The snapshot length (not "is the
+  // batch last") guards the right-after-arm render: a pre-existing error turn
+  // may trail the batch and must not clear it.
+  //
+  // An error turn appended past the snapshot is the resume's own error frame:
+  // settle to the visible fallback (the wireframe's error form) instead of a
+  // silent clear, keeping the armed ref so Retry can re-fire. The armed ref
+  // survives the streaming hide — if it were dropped there, an error arriving
+  // after a `connecting` tick (before any content frame) would be lost and the
+  // row silently removed, exactly the failure the wireframe forbids.
   useEffect(() => {
-    if (resumeProgress?.kind !== "running") return;
+    const batchId = armedBatchRef.current;
+    if (!batchId) return;
     if (streaming) {
-      armedBatchRef.current = null;
-      setResumeProgress(null);
+      if (resumeProgress !== null) setResumeProgress(null);
       return;
     }
-    const batchId = armedBatchRef.current;
     const list = turns ?? [];
-    const at = list.findIndex((t) => t.batch?.batchId === batchId);
-    if (at < 0 || at < list.length - 1) {
+    if (!list.some((t) => t.batch?.batchId === batchId)) {
       armedBatchRef.current = null;
-      setResumeProgress(null);
+      if (resumeProgress !== null) setResumeProgress(null);
+      return;
     }
+    if (list.length <= armedTurnCountRef.current) return;
+    const tail = list[list.length - 1];
+    if (tail?.error) {
+      setResumeProgress((cur) => (cur?.kind === "failed" ? cur : { kind: "failed" }));
+      return;
+    }
+    // The continuation mounted: it ran server-side, so pin the batch as resumed
+    // (in-memory) before the freeze pass re-runs — otherwise a failure/timeout
+    // that released the guard would re-dispatch and re-arm the row.
+    armedBatchRef.current = null;
+    resumedBatchesRef.current?.add(batchId);
+    if (resumeProgress !== null) setResumeProgress(null);
   }, [streaming, turns, resumeProgress]);
 
   // Never stuck: no first continuation frame within the deadline settles the

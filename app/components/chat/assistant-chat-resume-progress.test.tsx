@@ -51,6 +51,10 @@ function continuationTurn(): ChatTurn {
   return { role: "assistant", text: "continued", imageCount: 0, rawIndex: 1 };
 }
 
+function errorTurn(code = "ASSISTANT_UNAVAILABLE"): ChatTurn {
+  return { role: "assistant", text: "", imageCount: 0, rawIndex: -1, error: { code, message: "Assistant unavailable" } };
+}
+
 function makeResumeStream() {
   const calls: Array<{ url: string; body: unknown; onResult?: ((result: ResumeResult) => void) | undefined }> = [];
   const send = vi.fn((url: string, body: unknown, onResult?: (result: ResumeResult) => void) => {
@@ -59,13 +63,15 @@ function makeResumeStream() {
   return { stream: makeStream({ send }), calls };
 }
 
+type ResumeProps = { stream: Stream; turns: ChatTurn[]; streaming: boolean; chatId: string };
+
 function renderResume(stream: Stream, turns: ChatTurn[], chatId = "C1") {
   const setTurns = vi.fn();
   const ingressInsertedRef = { current: new Set<string>() };
   const utils = renderHook(
-    ({ stream, turns, streaming }: { stream: Stream; turns: ChatTurn[]; streaming: boolean }) =>
-      useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef }),
-    { initialProps: { stream, turns, streaming: false } }
+    (props: ResumeProps) =>
+      useStreamFrameFreeze({ stream: props.stream, setTurns, turns: props.turns, chatId: props.chatId, streaming: props.streaming, ingressInsertedRef }),
+    { initialProps: { stream, turns, streaming: false, chatId } }
   );
   return { ...utils, setTurns, ingressInsertedRef };
 }
@@ -125,7 +131,7 @@ describe("useStreamFrameFreeze — post-decision resume progress", () => {
     const { stream } = makeResumeStream();
     const { result, rerender } = renderResume(stream, [batchTurn("b1", "pending")]);
     expect(result.current.resumeProgress).toBeNull();
-    rerender({ stream, turns: [batchTurn("b1", "rejected")], streaming: false });
+    rerender({ stream, turns: [batchTurn("b1", "rejected")], streaming: false, chatId: "C1" });
     expect(result.current.resumeProgress).toEqual({ kind: "running", mode: "reject" });
   });
 
@@ -133,7 +139,7 @@ describe("useStreamFrameFreeze — post-decision resume progress", () => {
     const { stream } = makeResumeStream();
     const { result, rerender } = renderResume(stream, [batchTurn("b1", "approved")]);
     expect(result.current.resumeProgress).toEqual({ kind: "running", mode: "approve" });
-    rerender({ stream, turns: [batchTurn("b1", "approved"), continuationTurn()], streaming: false });
+    rerender({ stream, turns: [batchTurn("b1", "approved"), continuationTurn()], streaming: false, chatId: "C1" });
     expect(result.current.resumeProgress).toBeNull();
   });
 
@@ -141,7 +147,7 @@ describe("useStreamFrameFreeze — post-decision resume progress", () => {
     const { stream } = makeResumeStream();
     const { result, rerender } = renderResume(stream, [batchTurn("b1", "approved")]);
     expect(result.current.resumeProgress?.kind).toBe("running");
-    rerender({ stream, turns: [batchTurn("b1", "approved")], streaming: true });
+    rerender({ stream, turns: [batchTurn("b1", "approved")], streaming: true, chatId: "C1" });
     expect(result.current.resumeProgress).toBeNull();
   });
 
@@ -166,6 +172,72 @@ describe("useStreamFrameFreeze — post-decision resume progress", () => {
     act(() => vi.advanceTimersByTime(RESUME_DEADLINE_MS));
     expect(result.current.resumeProgress).toEqual({ kind: "timeout" });
   });
+
+  it("clears the fallback after a timeout when the continuation arrives", () => {
+    vi.useFakeTimers();
+    const { stream } = makeResumeStream();
+    const { result, rerender } = renderResume(stream, [batchTurn("b1", "approved")]);
+    act(() => vi.advanceTimersByTime(RESUME_DEADLINE_MS));
+    expect(result.current.resumeProgress).toEqual({ kind: "timeout" });
+    rerender({ stream, turns: [batchTurn("b1", "approved"), continuationTurn()], streaming: false, chatId: "C1" });
+    expect(result.current.resumeProgress).toBeNull();
+  });
+
+  it("clears the fallback after a failure when the continuation arrives", () => {
+    const { stream, calls } = makeResumeStream();
+    const { result, rerender } = renderResume(stream, [batchTurn("b1", "approved")]);
+    act(() => calls[0]!.onResult?.({ ok: false }));
+    expect(result.current.resumeProgress).toEqual({ kind: "failed" });
+    rerender({ stream, turns: [batchTurn("b1", "approved"), continuationTurn()], streaming: false, chatId: "C1" });
+    expect(result.current.resumeProgress).toBeNull();
+  });
+
+  it("ignores a failure result that lands after a chat switch", () => {
+    const { stream, calls } = makeResumeStream();
+    const { result, rerender } = renderResume(stream, [batchTurn("bA", "approved")], "A");
+    expect(calls).toHaveLength(1);
+    rerender({ stream, turns: [], streaming: false, chatId: "B" });
+    expect(result.current.resumeProgress).toBeNull();
+    act(() => calls[0]!.onResult?.({ ok: false }));
+    expect(result.current.resumeProgress).toBeNull();
+    act(() => result.current.retryResume());
+    expect(calls).toHaveLength(1);
+  });
+
+  it("settles to the failed fallback when the resume error frame appends an error turn", () => {
+    const { stream } = makeResumeStream();
+    const { result, rerender } = renderResume(stream, [batchTurn("b1", "approved")]);
+    expect(result.current.resumeProgress?.kind).toBe("running");
+    rerender({ stream, turns: [batchTurn("b1", "approved"), errorTurn()], streaming: false, chatId: "C1" });
+    expect(result.current.resumeProgress).toEqual({ kind: "failed" });
+  });
+
+  it("settles to failed when the resume errors after a connecting tick hid the row", () => {
+    const { stream } = makeResumeStream();
+    const { result, rerender } = renderResume(stream, [batchTurn("b1", "approved")]);
+    expect(result.current.resumeProgress?.kind).toBe("running");
+    // The resumed segment flips to connecting/streaming before any content —
+    // the row hides but the armed batch must survive.
+    rerender({ stream, turns: [batchTurn("b1", "approved")], streaming: true, chatId: "C1" });
+    expect(result.current.resumeProgress).toBeNull();
+    rerender({ stream, turns: [batchTurn("b1", "approved"), errorTurn()], streaming: false, chatId: "C1" });
+    expect(result.current.resumeProgress).toEqual({ kind: "failed" });
+  });
+
+  it("clears the resume deadline timer on unmount and on chat switch", () => {
+    vi.useFakeTimers();
+    const first = makeResumeStream();
+    const { unmount } = renderResume(first.stream, [batchTurn("b1", "approved")], "A");
+    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    const second = makeResumeStream();
+    const utils = renderResume(second.stream, [batchTurn("b2", "approved")], "A");
+    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1);
+    utils.rerender({ stream: second.stream, turns: [], streaming: false, chatId: "B" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe("resume progress CSS port", () => {
@@ -175,5 +247,15 @@ describe("resume progress CSS port", () => {
     expect(css).toContain(".resume-progress .assistant-activity");
     expect(css).toContain(".resume-progress-fallback {");
     expect(css).toContain(".resume-progress-fallback .btn");
+  });
+
+  it("ports the fallback's tool-line offset and tokens", () => {
+    const css = readFileSync(new URL("app/styles/phosphor.css", `file://${process.cwd()}/`), "utf8");
+    const start = css.indexOf(".resume-progress-fallback {");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = css.slice(start, css.indexOf("}", start));
+    expect(block).toContain("padding-left: 17px");
+    expect(block).toContain("font-family: var(--lx-font-micro)");
+    expect(block).toContain("color: var(--lx-text-warning)");
   });
 });

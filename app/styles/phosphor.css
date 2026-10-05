@@ -6696,6 +6696,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  padding-left: 17px;
   font-family: var(--lx-font-micro);
   font-size: 10px;
   text-transform: uppercase;
