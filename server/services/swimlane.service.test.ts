@@ -372,7 +372,7 @@ describe("SwimlaneService archive", () => {
 });
 
 describe("SwimlaneService restore", () => {
-  it("restores the lane and is idempotent; tasks stay archived", async () => {
+  it("restores the lane and its cascaded tasks, with per-task activity, and is idempotent", async () => {
     seed(db);
     const svc = makeService(db);
     await Effect.runPromise(
@@ -380,13 +380,31 @@ describe("SwimlaneService restore", () => {
         yield* svc.archive(maria, "m1");
         const { lane, activity } = yield* svc.restore(maria, "m1");
         expect(lane.archivedAt).toBeNull();
-        expect(activity).toEqual([]);
+        expect(activity).toHaveLength(2);
+        expect(activity.map((a) => a.type)).toEqual(["restored", "restored"]);
+        expect(activity[0]!.message).toBe("Maria restored this task");
         const second = yield* svc.restore(maria, "m1");
         expect(second.lane.archivedAt).toBeNull();
         expect(second.activity).toEqual([]);
-        // Restore only clears the lane — archived tasks stay archived.
+        // Restore cascades to the tasks the archive took down.
         const tasks = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE swimlane_id = 'm1' AND archived_at IS NOT NULL").get() as { n: number };
-        expect(tasks.n).toBe(2);
+        expect(tasks.n).toBe(0);
+      })
+    );
+  });
+
+  it("restore leaves individually-archived tasks (older stamps) archived", async () => {
+    seed(db);
+    const svc = makeService(db);
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at)
+                VALUES ('t-old','p1','c1','m1','Old','a2','2026-01-01 10:00:00')`).run();
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* svc.archive(maria, "m1");
+        const { activity } = yield* svc.restore(maria, "m1");
+        expect(activity).toHaveLength(2);
+        const old = db.prepare("SELECT archived_at FROM tasks WHERE id = 't-old'").get() as { archived_at: string | null };
+        expect(old.archived_at).toBe("2026-01-01 10:00:00");
       })
     );
   });

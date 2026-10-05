@@ -6,7 +6,7 @@ import { ActivityService } from "./activity.service";
 import { queryAll, DbError, ConstraintViolation, batchResults, Db } from "../db/db";
 import { ProjectNotFound, SwimlaneNotFound, HasChildren, BacklogProtected, DeadlineAfterLane, TaskNotFound, MilestoneNotFound, InvalidArgs } from "../api/errors";
 import * as msg from "../activity-messages";
-import { buildSwimlaneArchiveBatch, activityFromBatchResults } from "../repos/cascade-batch";
+import { buildSwimlaneArchiveBatch, buildSwimlaneRestoreBatch, activityFromBatchResults } from "../repos/cascade-batch";
 import type { Swimlane, Actor, ActivityEvent } from "../../shared/types";
 
 export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/SwimlaneService", {
@@ -141,16 +141,31 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
         }),
 
       restore: (actor: Actor, id: string): Effect.Effect<{ lane: Swimlane; activity: ActivityEvent[] },
-        SwimlaneNotFound | DbError> =>
+        SwimlaneNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const lane = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
           if (!lane.archivedAt) return { lane, activity: [] };   // idempotent
-          // Single statement — already atomic; no withTx needed.
-          const r = yield* repo.setArchived(id, null).pipe(
-            Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id }))
+          // One set-based atomic batch: `restored` activity rows for every task
+          // the lane archive took down, then the task + lane restores. Scoped to
+          // the lane's archive stamp so individually-archived tasks (older
+          // stamps) stay archived. Constant statement count.
+          const results = yield* batchResults(db, buildSwimlaneRestoreBatch({
+            swimlaneId: id,
+            swimlaneArchivedAt: lane.archivedAt,
+            actor: {
+              actorKind: actor.kind,
+              actorLabel: actor.label,
+              actorUserId: actor.userId ?? null,
+              message: msg.restored(actor.label),
+              viaAssistant: false,
+            },
+          }));
+          const activity = activityFromBatchResults(results[0]?.results ?? []);
+          const updated = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
           );
-          yield* Effect.logInfo(`[Swimlane] Restored ${r.id}`);
-          return { lane: r, activity: [] as ActivityEvent[] };
+          yield* Effect.logInfo(`[Swimlane] Restored ${updated.id} with ${activity.length} tasks`);
+          return { lane: updated, activity };
         }),
     };
   }),

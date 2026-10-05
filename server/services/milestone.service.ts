@@ -7,7 +7,7 @@ import { ActivityService } from "./activity.service";
 import { DbError, ConstraintViolation, batchResults, Db } from "../db/db";
 import { ProjectNotFound, MilestoneNotFound, HasChildren, TaskNotFound } from "../api/errors";
 import * as msg from "../activity-messages";
-import { buildMilestoneArchiveBatch, activityFromBatchResults } from "../repos/cascade-batch";
+import { buildMilestoneArchiveBatch, buildMilestoneRestoreBatch, activityFromBatchResults } from "../repos/cascade-batch";
 import type { Milestone, Actor, ActivityEvent } from "../../shared/types";
 
 export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/MilestoneService", {
@@ -71,8 +71,9 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
           if (milestone.archivedAt) return { milestone, activity: [] };   // idempotent
           const archivedAt = new Date().toISOString();
           // One set-based atomic batch: activity rows for every live task in
-          // every sprint of the milestone, then the task + sprint + milestone
-          // archive updates. Constant statement count.
+          // the milestone's sprints, then the task + live-sprint + milestone
+          // archive updates. An individually-archived sprint is not adopted —
+          // it keeps its own older stamp. Constant statement count.
           const results = yield* batchResults(db, buildMilestoneArchiveBatch({
             milestoneId: id,
             archivedAt,
@@ -93,16 +94,32 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
         }),
 
       restore: (actor: Actor, id: string): Effect.Effect<{ milestone: Milestone; activity: ActivityEvent[] },
-        MilestoneNotFound | DbError> =>
+        MilestoneNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const milestone = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id })));
           if (!milestone.archivedAt) return { milestone, activity: [] };   // idempotent
-          // Single statement — already atomic; no withTx needed.
-          const r = yield* repo.setArchived(id, null).pipe(
-            Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id }))
+          // One set-based atomic batch: `restored` activity rows for every task
+          // the milestone archive took down, then the task + sprint + milestone
+          // restores. Scoped to the milestone's archive stamp so individually-
+          // archived children (older stamps) stay archived. Constant statement
+          // count.
+          const results = yield* batchResults(db, buildMilestoneRestoreBatch({
+            milestoneId: id,
+            milestoneArchivedAt: milestone.archivedAt,
+            actor: {
+              actorKind: actor.kind,
+              actorLabel: actor.label,
+              actorUserId: actor.userId ?? null,
+              message: msg.restored(actor.label),
+              viaAssistant: false,
+            },
+          }));
+          const activity = activityFromBatchResults(results[0]?.results ?? []);
+          const updated = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", (e) => new DbError({ message: "Database error", cause: e }))
           );
-          yield* Effect.logInfo(`[Milestone] Restored ${r.id}`);
-          return { milestone: r, activity: [] as ActivityEvent[] };
+          yield* Effect.logInfo(`[Milestone] Restored ${updated.id} (${activity.length} activity rows)`);
+          return { milestone: updated, activity };
         }),
     };
   }),
