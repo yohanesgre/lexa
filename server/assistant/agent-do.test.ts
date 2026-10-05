@@ -84,6 +84,28 @@ LexaAssistantAgent.prototype.__testStorageKeys = async function () {
   return Array.from(entries.keys());
 };
 
+// Test-only seam: seed the document-run cursor so the abort paths can be
+// asserted without racing a live turn.
+LexaAssistantAgent.prototype.__testSetRunId = async function (id) {
+  await this.ctx.storage.put("assistantRunId", id);
+};
+
+// Test-only seam: arm a one-shot throw from saveMessages (the enqueue catch
+// path that must still land 'failed' and clear the cursor).
+LexaAssistantAgent.prototype.__testArmSaveThrow = async function (message) {
+  await this.ctx.storage.put("__testSaveThrow", message);
+};
+
+const __realSaveMessages = LexaAssistantAgent.prototype.saveMessages;
+LexaAssistantAgent.prototype.saveMessages = async function (messages, options) {
+  const armed = await this.ctx.storage.get("__testSaveThrow");
+  if (typeof armed === "string") {
+    await this.ctx.storage.delete("__testSaveThrow");
+    throw new Error(armed);
+  }
+  return __realSaveMessages.call(this, messages, options);
+};
+
 const INTERNAL = "/api/internal/assistant/";
 // Captured run-update bodies (the DO posts here from onRunFinished / dispatch).
 const RUN_UPDATES = [];
@@ -91,6 +113,13 @@ const RUN_UPDATES = [];
 const RESUME_EXECUTES = [];
 // The one schedule run the inline run-get route answers for.
 const SCHEDULE_RUN_ID = "schedule-run-1";
+
+// TEST-ONLY status-model knob (driven by the __test/status-model route). When
+// armed to "second_claim_conflict" a "running" run-status claim for a run
+// already claimed once answers 409 — modelling a competing dispatcher that won
+// the race — so the DO must surface a lost queued -> running claim.
+let STATUS_MODEL = "normal";
+const CLAIM_COUNTS = new Map();
 
 async function handleInternal(request, env) {
   const url = new URL(request.url);
@@ -144,6 +173,18 @@ async function handleInternal(request, env) {
   }
   if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "provider-config")) {
     return Response.json({ configs: [{ kind: "openai_compatible", baseUrl: "https://provider.test", apiKey: "sk-test", model: "test-model", providerId: "prov-1" }] });
+  }
+  if (request.method === "POST" && url.pathname === INTERNAL + "run-status") {
+    // Document-run lifecycle: the DO claims running then lands terminal. The
+    // inline route records the body so the enqueue/turn assertions can read it.
+    const body = await request.json();
+    RUN_UPDATES.push(body);
+    if (STATUS_MODEL === "second_claim_conflict" && body.status === "running") {
+      const n = (CLAIM_COUNTS.get(body.runId) ?? 0) + 1;
+      CLAIM_COUNTS.set(body.runId, n);
+      if (n >= 2) return Response.json({ error: { code: "RUN_ALREADY_CLAIMED" } }, { status: 409 });
+    }
+    return Response.json({ ok: true, emitted: true });
   }
   if (request.method === "POST" && url.pathname === INTERNAL + "run-update") {
     RUN_UPDATES.push(await request.json());
@@ -256,6 +297,32 @@ export default {
       await stub.onRunFinished(body.run, body.result);
       return Response.json({ ok: true });
     }
+    if (url.pathname === "/__test/status-model") {
+      const body = await request.json();
+      STATUS_MODEL = typeof body.mode === "string" ? body.mode : "normal";
+      CLAIM_COUNTS.clear();
+      return Response.json({ ok: true, mode: STATUS_MODEL });
+    }
+    if (url.pathname === "/__test/set-run-id") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      await stub.__testSetRunId(body.runId);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__test/save-throw") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      await stub.__testArmSaveThrow(body.message);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__test/abort") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.abortRun(body.taskId));
+    }
     const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
     const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
     return stub.fetch(request);
@@ -356,6 +423,15 @@ async function transcriptOf(documentId: string): Promise<unknown[]> {
   return Array.isArray(body.messages) ? body.messages : [];
 }
 
+// Canonical read for a non-chat (`task:`/`wiki:`) thread.
+async function transcriptByKey(threadKey: string): Promise<unknown[]> {
+  const res = await mf!.dispatchFetch(
+    `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+  );
+  const body = (await res.json()) as { messages?: unknown[] };
+  return Array.isArray(body.messages) ? body.messages : [];
+}
+
 async function d1Messages(documentId: string): Promise<string | null> {
   const row = await d1
     .prepare("SELECT messages FROM assistant_threads WHERE document_id = ?")
@@ -402,6 +478,41 @@ async function enqueueRun(threadKey: string, input: unknown) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  });
+}
+
+// Arm the wrapper's TEST-ONLY status model (see ENTRY above).
+async function setStatusModel(mode: string) {
+  return mf!.dispatchFetch("http://assistant-smoke/__test/status-model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+// Seed the DO's document-run cursor (test-only seam) without a live turn.
+async function setRunId(threadKey: string, runId: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/set-run-id?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId }),
+  });
+}
+
+// Arm a one-shot saveMessages throw (test-only seam).
+async function armSaveThrow(threadKey: string, message: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/save-throw?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+}
+
+async function callAbort(threadKey: string, taskId: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/abort?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskId }),
   });
 }
 
@@ -1190,19 +1301,187 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     );
   }, 60_000);
 
-  it("pins the document run cursor only for a document enqueue", async () => {
-    const threadKey = "chat:doc-run";
+  it("claims a document run running on a task thread, then lands the terminal status", async () => {
+    const threadKey = "task:doc-run";
     const res = await enqueueRun(threadKey, {
       projectId: "proj-1",
       runId: "doc-run-1",
       actorUserId: "user-1",
+      selection: "hello world",
+      extraPrompt: "polish this",
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
 
+    // The `queued → running` claim is synchronous, before the turn runs.
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "doc-run-1", status: "running" })
+    );
+
+    // The turn's terminal status lands once the stubbed provider stream ends;
+    // `completed` proves the pinned run-id cursor reached the engine's `onEnd`.
+    const terminal = await waitFor<Record<string, unknown>>(
+      () =>
+        capturedRunUpdates().then(
+          (updates) =>
+            updates.find((u) => u.runId === "doc-run-1" && (u.status === "completed" || u.status === "failed")) ??
+            null
+        ),
+      20_000
+    );
+    expect(terminal.status).toBe("completed");
+  }, 60_000);
+
+  it("dispatches a document run with no prior WebSocket connect (meta pinned at enqueue)", async () => {
+    const threadKey = "task:doc-noconnect";
+    const res = await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "doc-run-noconnect",
+      actorUserId: "user-1",
+      selection: "draft",
+      extraPrompt: "write it",
+    });
+    expect(res.status).toBe(200);
+
+    // Nothing connected this DO: without the enqueue-time meta pin,
+    // `onChatMessage` would 502 AFTER the running claim and the run would stick
+    // `running`. A `completed` terminal proves the thread meta resolved.
+    const terminal = await waitFor<Record<string, unknown>>(
+      () =>
+        capturedRunUpdates().then(
+          (updates) =>
+            updates.find(
+              (u) => u.runId === "doc-run-noconnect" && (u.status === "completed" || u.status === "failed")
+            ) ?? null
+        ),
+      20_000
+    );
+    expect(terminal.status).toBe("completed");
+
+    // The turn ran end to end: the instruction and the assistant reply persisted.
+    const messages = await waitFor<unknown[]>(
+      () => transcriptByKey(threadKey).then((m) => (m.length >= 2 ? m : null)),
+      20_000
+    );
+    // Exactly the user instruction + the assistant reply.
+    expect(messages).toHaveLength(2);
+    const userMessage = messages.find((m) => (m as { role?: string }).role === "user") as
+      | { metadata?: { runId?: string }; parts?: Array<{ type?: string; text?: string }> }
+      | undefined;
+    // The instruction carries the pinned run id and the exact selection/prompt.
+    expect(userMessage?.metadata).toEqual({ runId: "doc-run-noconnect" });
+    expect(userMessage?.parts?.[0]?.text).toBe('Selected text:\n"""\ndraft\n"""\n\nwrite it');
+  }, 60_000);
+
+  it("maps a lost queued→running claim to { ok: false, reason: 'claim_lost' }", async () => {
+    const threadKey = "task:doc-claim-lost";
+    const runId = "doc-claim-lost-1";
+    await setStatusModel("second_claim_conflict");
+    try {
+      // First dispatch wins the claim.
+      const first = await enqueueRun(threadKey, {
+        projectId: "proj-1",
+        runId,
+        actorUserId: "user-1",
+        selection: "draft",
+        extraPrompt: "write it",
+      });
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({ ok: true });
+
+      // Second dispatch for the same run: the status model answers 409 (a
+      // competing dispatcher won the race), so the DO must not ack a run it
+      // never took ownership of.
+      const second = await enqueueRun(threadKey, {
+        projectId: "proj-1",
+        runId,
+        actorUserId: "user-1",
+        selection: "draft",
+        extraPrompt: "write it",
+      });
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual({ ok: false, reason: "claim_lost" });
+    } finally {
+      await setStatusModel("normal");
+    }
+  }, 60_000);
+
+  it("lands a failed terminal and clears the cursor when saveMessages throws", async () => {
+    const threadKey = "task:save-throw";
+    const runId = "doc-save-throw-1";
+    await armSaveThrow(threadKey, "boom from saveMessages");
+
+    const res = await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId,
+      actorUserId: "user-1",
+      selection: "draft",
+      extraPrompt: "write it",
+    });
+    expect(res.status).toBe(200);
+    // The dispatch itself acks (the claim landed); the throw is handled inside
+    // the scheduled turn.
+    expect(await res.json()).toEqual({ ok: true });
+
+    // The throw must land exactly one terminal `failed` and emit no card.
+    const failed = await waitFor<Array<Record<string, unknown>>>(
+      () =>
+        capturedRunUpdates().then((updates) =>
+          updates.some((u) => u.runId === runId && u.status === "failed") ? updates : null
+        ),
+      20_000
+    );
+    expect(failed.filter((u) => u.runId === runId && u.status === "failed")).toHaveLength(1);
+
+    // No dead cursor survives the failed run: a later turn on this thread must
+    // not take the document branch (fixed ask mode, doc stopWhen).
+    expect(await storageKeys(threadKey)).not.toContain("assistantRunId");
+  }, 60_000);
+
+  it("still cancels a delegated registry run when a foreign document cursor is pinned", async () => {
+    const threadKey = "task:abort-foreign";
+    // Seed internal origin/identity so abortRun can reach the Worker routes (a
+    // schedule dispatch persists them without touching the run cursor).
+    await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "schedule-run-1",
+      actorUserId: "user-abort",
+      kind: "schedule",
+    });
+    await setRunId(threadKey, "doc-run-foreign");
+
+    const res = await callAbort(threadKey, "registry-run-foreign");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    // The registry cancel ran despite the foreign document pin (the pinned
+    // document turn is not this abort's to kill, but the requested delegated
+    // run still needs its registry cancel).
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "registry-run-foreign", status: "cancelled" })
+    );
+    // The foreign cursor names a still-live document run: never cleared.
     expect(await storageKeys(threadKey)).toContain("assistantRunId");
-    // The document path never dispatches a facet run.
-    expect((await capturedRunUpdates()).some((u) => u.runId === "doc-run-1")).toBe(false);
+  }, 60_000);
+
+  it("clears the document cursor when the aborted id is this thread's pinned run", async () => {
+    const threadKey = "task:abort-own";
+    await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "schedule-run-1",
+      actorUserId: "user-abort",
+      kind: "schedule",
+    });
+    await setRunId(threadKey, "doc-run-own");
+
+    const res = await callAbort(threadKey, "doc-run-own");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "doc-run-own", status: "cancelled" })
+    );
+    expect(await storageKeys(threadKey)).not.toContain("assistantRunId");
   }, 60_000);
 
   it("backfills the derived title from the first user turn on the first mirror", async () => {

@@ -17,7 +17,7 @@ const buildUpdateTaskStatusStmt = (id: string, status: AssistantTask["status"], 
     params.push(error === null ? null : error.slice(0, 2000));
   }
   const from =
-    status === "cancelled" ? "status IN ('queued', 'running')" : "status = 'running'";
+    status === "completed" ? "status = 'running'" : "status IN ('queued', 'running')";
   params.push(id);
   return { sql: `UPDATE assistant_tasks SET ${sets.join(", ")} WHERE id = ? AND ${from} RETURNING id`, params };
 };
@@ -205,9 +205,10 @@ export class AssistantTaskRepo extends Effect.Service<AssistantTaskRepo>()("Lexa
           );
         }),
 
-      // Terminal status writes. Cancel wins over a late complete/fail: complete
-      // and fail only transition from 'running', cancel from 'queued' or
-      // 'running'. A no-op (0 rows changed) returns the row unchanged.
+      // Terminal status writes. Complete only transitions from 'running'; fail
+      // and cancel also lower a 'queued' run (the DO claims then fails before
+      // the turn starts, LX-134). A no-op (0 rows changed) returns the row
+      // unchanged.
       updateTaskStatusStmt: buildUpdateTaskStatusStmt,
 
       updateTaskStatus: (id: string, status: AssistantTask["status"], result?: string | null, error?: string | null): Effect.Effect<AssistantTask, RowNotFound | ConstraintViolation | DbError> =>

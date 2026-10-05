@@ -112,9 +112,9 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id }))
         );
         const transitionable =
-          status === "cancelled"
-            ? task.status === "queued" || task.status === "running"
-            : task.status === "running";
+          status === "completed"
+            ? task.status === "running"
+            : task.status === "queued" || task.status === "running";
         if (!transitionable) return task;
         const name = yield* agentName(task.agentId);
         const stmts: BatchStmt[] = [queueRepo.updateTaskStatusStmt(id, status, result, error)];

@@ -20,6 +20,7 @@ import {
   AssistantScheduleNotFound,
   AssistantTaskActive,
   AssistantThreadNotFound,
+  AssistantUnavailable,
   HasChildren,
   InvalidArgs,
   NoUserContext,
@@ -107,14 +108,17 @@ const threadRpcCall = <A>(f: (rpc: AssistantThreadRpcShape) => Promise<A>): Effe
 // failure semantics instead of silently degrading. On Bun `available` is false
 // (no DO — the in-process engine owns the task); on Workers a rejected call is
 // `available: true, ok: false`.
-const threadRpcControl = <A extends { ok: true }>(
+const threadRpcControl = <A extends { ok: boolean }>(
   f: (rpc: AssistantThreadRpcShape) => Promise<A | null>
 ): Effect.Effect<{ available: boolean; ok: boolean; ack: A | null }, never, AssistantThreadRpc> =>
   Effect.gen(function* () {
     const rpc = yield* AssistantThreadRpc;
     if (!rpc.available) return { available: false, ok: false, ack: null as A | null };
     return yield* Effect.tryPromise(() => f(rpc)).pipe(
-      Effect.map((result) => ({ available: true, ok: result !== null, ack: result })),
+      // A discriminated soft failure (`{ ok: false, reason }`, e.g. a lost
+      // `queued → running` claim) is not an ack: `ok` must reflect the ack's own
+      // verdict so the create route takes its 502 branch.
+      Effect.map((result) => ({ available: true, ok: result !== null && result.ok, ack: result })),
       Effect.catchAll((e) =>
         Effect.sync(() => {
           console.warn("[assistant] DO thread control RPC failed:", e instanceof Error ? e.message : String(e));
@@ -245,6 +249,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
         const service = yield* AssistantService;
+        const taskService = yield* AssistantTaskService;
         const identity = yield* AuthIdentity;
         const task = yield* service.enqueue({
           projectId: project.id,
@@ -261,17 +266,17 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
             projectId: project.id,
             runId: task.id,
             actorUserId: identity.userId ?? "",
+            selection: task.selection,
+            extraPrompt: task.extraPrompt,
           })
         );
         // ADR-0003 §B.4: `enqueueRun` RPC failure → task marked `failed` + 502
-        // ASSISTANT_UNAVAILABLE. TODO(P3): the DO `enqueueRun` is still a P2
-        // stub returning `{ok:true}` and cannot fail, so there is no failure
-        // branch to take yet; when the P3 engine can report a failed start,
-        // branch on `enqueue` here (mark the task failed, fail the request).
+        // ASSISTANT_UNAVAILABLE. `available` is false on Bun (no DO — the
+        // in-process engine owns the task), so only the Workers flavor takes
+        // this branch.
         if (enqueue.available && !enqueue.ok) {
-          yield* Effect.logWarning(
-            `[assistant] enqueueRun RPC not acked for task ${task.id}; task left queued until the P3 failure path`
-          );
+          yield* taskService.fail(task.id, "ASSISTANT_UNAVAILABLE");
+          return yield* new AssistantUnavailable({ message: "Assistant unavailable" });
         }
         return task;
       }))

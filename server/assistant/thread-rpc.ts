@@ -30,6 +30,17 @@ export interface ResumeBatchAck {
   reason?: string | undefined;
 }
 
+/**
+ * The DO's dispatch acknowledgement for `enqueueRun`. A soft failure — the DO
+ * could not rebuild its internal deps (missing master key / origin), lost the
+ * `queued → running` claim, found the thread bound to another project, or could
+ * not reach a stable turn — is a discriminated `{ ok: false, reason }` so the
+ * REST create route fails the task and answers 502 `ASSISTANT_UNAVAILABLE`
+ * instead of 201 + a task stuck `running`. `reason` names the cause
+ * (`deps_unavailable` | `claim_lost` | `thread_mismatch` | `not_started`).
+ */
+export type EnqueueRunAck = { ok: true } | { ok: false; reason: string };
+
 export interface AssistantThreadRpcShape {
   /**
    * Whether a Durable Object backs this shape. `false` = Bun/no-op flavor, so
@@ -68,8 +79,17 @@ export interface AssistantThreadRpcShape {
    */
   enqueueRun(
     threadKey: string,
-    input: { projectId: string; runId: string; actorUserId: string; kind?: "document" | "schedule" }
-  ): Promise<{ ok: true } | null>;
+    input: {
+      projectId: string;
+      runId: string;
+      actorUserId: string;
+      kind?: "document" | "schedule";
+      // Document-run prompt inputs (LX-134): the editor selection + the run's
+      // extra prompt (the `assistant_tasks` row's `selection`/`extra_prompt`).
+      selection?: string;
+      extraPrompt?: string;
+    }
+  ): Promise<EnqueueRunAck | null>;
   /** Abort an in-flight document run. */
   abortRun(threadKey: string, taskId: string): Promise<{ ok: true } | null>;
 }

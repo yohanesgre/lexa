@@ -29,6 +29,11 @@ import { deriveChatTitle, resolveAssistantToolPermissionMode, resolveThreadToolP
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
 import { firstUserText, lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
+import {
+  buildDocumentRunInstruction,
+  buildDocumentRunStopWhen,
+  resolveDocumentRunPermissionMode,
+} from "./doc-run";
 import { withApprovalCarriers, withContinuationBoundary } from "./approval-carrier";
 import { pendingBatchIdsNewestFirst } from "./build-stream";
 import { summaryWindow, summarizeTranscript } from "./summarize";
@@ -37,6 +42,7 @@ import { LexaAssistantRunner } from "./runner";
 import { abortDelegatedRun, dispatchRegisteredRun, isTerminalAgentToolStatus, runStatusForTerminal, spawnDelegatedRun, DEFAULT_RUN_BUDGET_MS, PROJECT_RUN_LIMIT, THREAD_RUN_LIMIT, type AgentToolTerminalStatus, type DelegationDeps, type RunDispatcher } from "./delegation";
 import type { AssistantCallLogInput } from "../../shared/assistant";
 import { attachWorkersAiBinding } from "./model-factory";
+import type { EnqueueRunAck } from "./thread-rpc";
 
 // Read tools available without per-project settings resolution (project data +
 // attachments). The optional tools (web_search / get_skill / analyze_image /
@@ -105,6 +111,12 @@ const RESUME_CLAIMS_DDL = `CREATE TABLE IF NOT EXISTS resume_claims (
 const INTERNAL_ORIGIN_KEY = "internalOrigin";
 const INTERNAL_IDENTITY_KEY = "internalIdentity";
 const RUN_ID_KEY = "assistantRunId";
+
+// Bounded wait before a document run dispatches (LX-134): `saveMessages` waits
+// for any active turn anyway, but the RPC must not hang indefinitely on a
+// wedged thread. A timeout lands the run `failed` rather than leaving it
+// claimed forever.
+const DOCUMENT_RUN_STABLE_TIMEOUT_MS = 30_000;
 
 // Recovery budgets from ADR-0003 §B.5 (maxAttempts 10, noProgressTimeoutMs
 // 300_000, maxRecoveryWork 1000, maxOomRetries 3, keep recovering). Assigned as
@@ -181,6 +193,19 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       return (await this.ctx.storage.get<string>(RUN_ID_KEY)) ?? null;
     } catch {
       return null;
+    }
+  }
+
+  // Clear the pinned document-run cursor. A stranded cursor turns every later
+  // turn on the thread into a document run against a dead run (fixed `ask` mode,
+  // document `stopWhen`, dead-run skill sourcing), so every terminal outcome —
+  // soft failure, failed terminal POST, abort — clears it. Best-effort: a
+  // storage error must never break the caller.
+  private async clearRunId(): Promise<void> {
+    try {
+      await this.ctx.storage.delete(RUN_ID_KEY);
+    } catch (e) {
+      console.warn("[Assistant] failed to clear run id:", e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -473,17 +498,19 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // stays "ask" even if a crafted envelope carries a mode.
     const sessionId = threadKey.slice(threadKey.indexOf(":") + 1);
     const documentType = documentTypeOf(threadKey);
-    const permissionMode: AssistantToolPermissionMode = resolveThreadToolPermissionMode(
-      documentType,
-      options?.body?.permissionMode,
-      meta.permission_mode
-    );
+    // `runId` loads before the mode resolution: a document run is identified by
+    // the pinned cursor on a non-chat thread, and its write mode is fixed `ask`
+    // (D5 — the picker is chat-only). The chat path is unchanged.
+    const runId = await this.loadRunId();
+    const isDocumentRun = runId !== null && documentType !== "chat";
+    const permissionMode: AssistantToolPermissionMode = isDocumentRun
+      ? resolveDocumentRunPermissionMode()
+      : resolveThreadToolPermissionMode(documentType, options?.body?.permissionMode, meta.permission_mode);
     try {
       this.ctx.storage.sql.exec("UPDATE thread_meta SET permission_mode = ? WHERE thread_key = ?", permissionMode, threadKey);
     } catch (e) {
       console.warn("[Assistant] failed to persist permission mode:", e instanceof Error ? e.message : String(e));
     }
-    const runId = await this.loadRunId();
     const turnDeps: AssistantTurnDeps = {
       resolveProviderConfigs: async (projectId) =>
         attachWorkersAiBinding(await resolveProviderConfigs(deps, projectId), this.env.AI),
@@ -494,17 +521,12 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         await recordProviderHealthRemote(deps, { providerId, ok });
       },
       transitionRun: async (input) => {
-        const ok = await transitionRun(deps, input);
-        // Terminal transition landed: clear the run cursor so later turns on
-        // this thread do not re-fire the same transition (which would be a
-        // no-op anyway, but keeping the id around invites repeat attempts).
-        if (ok) {
-          try {
-            await this.ctx.storage.delete(RUN_ID_KEY);
-          } catch (e) {
-            console.warn("[Assistant] failed to clear run id:", e instanceof Error ? e.message : String(e));
-          }
-        }
+        await transitionRun(deps, input);
+        // Terminal transition attempted: clear the run cursor whether or not the
+        // POST landed. A false result means the Worker was unreachable after
+        // retry; leaving the cursor pinned would turn every later turn on this
+        // thread into a document run against the dead run.
+        await this.clearRunId();
       },
     };
 
@@ -588,13 +610,18 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       Object.assign(tools, this.buildDelegationTools(deps, meta.project_id, threadKey, permissionMode));
     }
     const toolRoundCap = documentType === "chat" ? MAX_CHAT_TOOL_ROUNDS : MAX_TOOL_ROUNDS;
-    const stopWhen: StopCondition<ToolSet>[] = [stepCountIs(toolRoundCap)];
+    // A document run shares the chat branch's stop conditions through the pure
+    // `doc-run` helper; the chat path keeps its inline construction so it stays
+    // byte-identical.
+    const stopWhen: StopCondition<ToolSet>[] = isDocumentRun
+      ? buildDocumentRunStopWhen({ toolRoundCap, permissionMode, enabledWrite })
+      : [stepCountIs(toolRoundCap)];
     // Suspend only in ask mode on a SUCCESSFUL write proposal
     // (`proposed === true`). Auto results carry no `proposed`; deny refuses
     // locally — neither may stop the turn (D3/D4). A failed proposal is a
     // recoverable tool error the model may retry; stopping on mere tool-call
     // presence would end the turn on that failure (reviewer MED).
-    if (enabledWrite.length > 0) {
+    if (!isDocumentRun && enabledWrite.length > 0) {
       stopWhen.push(({ steps }) =>
         shouldSuspendOnProposal(
           permissionMode,
@@ -1003,7 +1030,13 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
      * misroute a schedule run into a document run.
      */
     kind?: "document" | "schedule";
-  }): Promise<{ ok: true }> {
+    /**
+     * Document-run prompt inputs (LX-134): the `assistant_tasks` row's
+     * `selection`/`extra_prompt`. Ignored by the schedule branch.
+     */
+    selection?: string;
+    extraPrompt?: string;
+  }): Promise<EnqueueRunAck> {
     // Identity-object entry point (ADR-0004 §4): a cron tick hands over the
     // run coordinates; the DO derives its own thread key from the instance name.
     const threadKey = this.ctx.id.name ?? "";
@@ -1052,10 +1085,123 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     } catch (e) {
       console.warn("[Assistant] failed to persist run id:", e instanceof Error ? e.message : String(e));
     }
+    if (!deps) {
+      console.warn(
+        `[Assistant] document run ${input.runId} could not dispatch: internal deps unavailable (missing master key or origin)`
+      );
+      // Discriminated soft failure (ADR-0003 §B.4): the create route fails the
+      // task and answers 502 ASSISTANT_UNAVAILABLE instead of 201 + a task stuck
+      // `queued`. `{ ok: true }` here would suppress that branch.
+      await this.clearRunId();
+      return { ok: false, reason: "deps_unavailable" };
+    }
+    // Claim `queued → running` before the turn (LX-134): the task row is the
+    // source of truth and this transition is the idempotency gate for a retried
+    // dispatch. An unclaimed run is left for reconciliation rather than run.
+    const claimed = await transitionRun(deps, { runId: input.runId, status: "running" });
+    if (!claimed) {
+      console.warn(`[Assistant] document run ${input.runId} could not be claimed; left for reconciliation`);
+      // Soft failure: the run was not this dispatch's to drive (already claimed
+      // or terminal). The route fails the task + 502 rather than acking a run
+      // it never took ownership of.
+      await this.clearRunId();
+      return { ok: false, reason: "claim_lost" };
+    }
+    // Persist origin/identity so the turn's `onChatMessage` (and its harness
+    // fetch) can rebuild internal deps after a cold wake — a document run may
+    // be dispatched before any WebSocket connect.
+    await this.persistInternalContext(deps.origin, identity);
+    // Pin the thread meta from the enqueue input. Without it a never-connected
+    // thread 502s in `onChatMessage` AFTER the running claim, stranding the run
+    // `running`. Task/wiki threads are project-scoped (owner null), matching the
+    // connect gate in `verifyConnection`. A false return is a mismatch (the
+    // thread is already pinned to another project/owner): running the turn would
+    // execute against the wrong project, so land the terminal `failed` instead.
+    try {
+      this.ensureThreadMetaTable();
+      if (
+        !this.pinThreadMeta(threadKey, input.projectId, documentTypeOf(threadKey) === "chat" ? input.actorUserId : null)
+      ) {
+        console.warn(
+          `[Assistant] document run ${input.runId} thread-meta mismatch for ${threadKey}; failing the run`
+        );
+        await transitionRun(deps, {
+          runId: input.runId,
+          status: "failed",
+          error: "Assistant thread is bound to another project",
+        });
+        await this.clearRunId();
+        return { ok: false, reason: "thread_mismatch" };
+      }
+    } catch (e) {
+      console.warn("[Assistant] failed to pin thread meta:", e instanceof Error ? e.message : String(e));
+    }
+    // `saveMessages` waits for any active turn; bound that wait so a wedged
+    // thread lands `failed` instead of leaving the claim hanging.
+    const stable = await this.waitUntilStable({ timeout: DOCUMENT_RUN_STABLE_TIMEOUT_MS });
+    if (!stable) {
+      await transitionRun(deps, { runId: input.runId, status: "failed", error: "Assistant could not start the run" });
+      await this.clearRunId();
+      return { ok: false, reason: "not_started" };
+    }
+    const instruction = buildDocumentRunInstruction(input.selection, input.extraPrompt);
+    const message: UIMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      parts: [{ type: "text", text: instruction }],
+      metadata: { runId: input.runId },
+    };
+    // One terminal `failed` transition per dispatch, mirroring the engine's
+    // `terminalSent` latch. The `"error"` result and a thrown `saveMessages`
+    // both mean the turn did not settle itself; land exactly one. A throw after
+    // a successful turn cannot downgrade `completed` — the Worker's transition
+    // guard refuses `completed → failed` — so the latch only avoids a redundant
+    // retry POST.
+    let terminalSent = false;
+    const landTurnFailed = async (error: string): Promise<void> => {
+      if (terminalSent) return;
+      terminalSent = true;
+      await transitionRun(deps, { runId: input.runId, status: "failed", error });
+      // Terminal outcome: clear the cursor even when this POST was the only
+      // terminal write (a `saveMessages` throw bypasses the engine's
+      // `turnDeps.transitionRun`), so no dead cursor survives the failed run.
+      await this.clearRunId();
+    };
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          const result = await this.saveMessages((messages) => [...messages, message]);
+          if (result.status === "error") {
+            await landTurnFailed(result.error ?? "Assistant generation failed");
+          }
+        } catch (e) {
+          console.warn("[Assistant] document run turn failed:", e instanceof Error ? e.message : String(e));
+          await landTurnFailed(e instanceof Error ? e.message : "Assistant generation failed");
+        }
+      })()
+    );
     return { ok: true };
   }
 
   async abortRun(taskId: string): Promise<{ ok: true }> {
+    // Scope the thread's in-flight abort: `abortAllRequests` is the protected
+    // registry-wide cancel (the private `abortActiveTurn` would skip the
+    // queued-continuation invalidation), so it must only fire when the requested
+    // run is the one this thread is currently driving. A pinned document-run
+    // cursor that names a DIFFERENT run means an `abortAllRequests` would kill
+    // the unrelated in-flight document turn. The requested id may still be a
+    // delegated registry run carrying this thread's key (`buildDelegationTools`
+    // → `spawn_run` → `createRunRemote({ threadKey })`), so its
+    // `cancelAgentTool`/`updateRunRemote` cancel must still run.
+    const pinned = await this.loadRunId();
+    const foreignDocumentPin = pinned !== null && pinned !== taskId;
+    if (foreignDocumentPin) {
+      console.warn(
+        `[Assistant] abortRun ${taskId} scoped: thread is driving document run ${pinned}`
+      );
+    } else {
+      this.abortAllRequests("assistant run aborted");
+    }
     const deps = await this.loadInternalDeps();
     if (deps) {
       try {
@@ -1064,6 +1210,15 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         console.warn("[Assistant] cancelAgentTool failed:", e instanceof Error ? e.message : String(e));
       }
       await updateRunRemote(deps, { runId: taskId, status: "cancelled" });
+      // Document task runs have no registry row; the assistant_tasks terminal
+      // transition is a no-op 404 for a delegated registry id.
+      const transitioned = await transitionRun(deps, { runId: taskId, status: "cancelled" });
+      // Terminal landed: clear the run-id cursor, mirroring `turnDeps`. Only
+      // when the requested id IS this thread's cursor — a foreign pin belongs
+      // to a still-live document run and must not be cleared.
+      if (transitioned && !foreignDocumentPin) {
+        await this.clearRunId();
+      }
     }
     return { ok: true };
   }

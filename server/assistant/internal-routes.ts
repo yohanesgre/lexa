@@ -270,7 +270,10 @@ export type AssistantRunTerminalStatus = "completed" | "failed" | "cancelled";
 
 export interface AssistantRunStatusInput {
   runId: string;
-  status: AssistantRunTerminalStatus;
+  // `"running"` is the document-run claim (`queued → running`, D1 of LX-134);
+  // terminal targets lower the run once the DO's turn settles. The claim sets
+  // `started_at` and emits NO activity.
+  status: AssistantRunTerminalStatus | "running";
   result?: string | null | undefined;
   error?: string | null | undefined;
 }
@@ -290,11 +293,14 @@ function terminalActivity(status: AssistantRunTerminalStatus, agentName: string)
   return { type: "assistant_cancelled", message: assistantCancelled() };
 }
 
-// The statuses a run may transition FROM for a given terminal target. Mirrors
-// the `WHERE` clause below; used by the pre-read idempotency gate.
-function isTransitionable(status: string, target: AssistantRunTerminalStatus): boolean {
-  if (target === "cancelled") return status === "queued" || status === "running";
-  return status === "running";
+// The statuses a run may transition FROM for a given target. Mirrors the
+// `WHERE` clause below; used by the pre-read idempotency gate. A `"running"`
+// claim is `queued → running` only; a terminal `failed` may also lower a queued
+// run (the DO claims then fails before the turn starts).
+function isTransitionable(status: string, target: AssistantRunStatusInput["status"]): boolean {
+  if (target === "running") return status === "queued";
+  if (target === "completed") return status === "running";
+  return status === "queued" || status === "running";
 }
 
 export function transitionAssistantRun(
@@ -319,7 +325,13 @@ export function transitionAssistantRun(
       return { ok: true as const, emitted: false };
     }
 
-    const sets = ["status = ?", "finished_at = datetime('now')"];
+    const terminalStatus: AssistantRunTerminalStatus | null = input.status === "running" ? null : input.status;
+    const isClaim = terminalStatus === null;
+    const sets = ["status = ?", isClaim ? "started_at = datetime('now')" : "finished_at = datetime('now')"];
+    // Self-cleaning claim: a re-run of a previously terminal row must not carry
+    // the stale `result`/`error` into the new attempt. A `running` transition
+    // never sets them (they are terminal-only), so NULLing is safe.
+    if (isClaim) sets.push("result = NULL", "error = NULL");
     const params: SqlParam[] = [input.status];
     if (input.result !== undefined) {
       sets.push("result = ?");
@@ -329,17 +341,26 @@ export function transitionAssistantRun(
       sets.push("error = ?");
       params.push(input.error === null ? null : input.error.slice(0, 2000));
     }
-    const from = input.status === "cancelled" ? "status IN ('queued', 'running')" : "status = 'running'";
+    const from = isClaim
+      ? "status = 'queued'"
+      : input.status === "completed"
+        ? "status = 'running'"
+        : "status IN ('queued', 'running')";
 
-    const emitted = row.document_type === "task";
+    // Only a run that actually started a turn emits activity. The machine also
+    // allows `queued → failed` (the DO claims then aborts before the turn), and
+    // that never-started failure is visible on the task status alone — emitting
+    // a timeline "assistant failed" row for a run the user never saw start is
+    // noise. `completed` can only come from `running` (see `isTransitionable`).
+    const emitted = row.document_type === "task" && terminalStatus !== null && row.status === "running";
     const stmts: BatchStmt[] = [
       {
         sql: `UPDATE assistant_tasks SET ${sets.join(", ")} WHERE id = ? AND ${from}`,
         params: [...params, input.runId],
       },
     ];
-    if (emitted) {
-      const activity = terminalActivity(input.status, row.agent_name);
+    if (emitted && terminalStatus !== null) {
+      const activity = terminalActivity(terminalStatus, row.agent_name);
       // Invariant #12 on BOTH drivers: the status UPDATE and the activity INSERT
       // ride one atomic batch. On bun-sqlite `driver.batch` wraps the pair in
       // BEGIN/COMMIT; on D1 the binding's `batch()` is atomic. The INSERT is
@@ -992,7 +1013,10 @@ export async function handleInternalAssistantRequest(input: {
     const payload = (input.body ?? {}) as Record<string, unknown>;
     const runId = typeof payload.runId === "string" ? payload.runId : "";
     const status = typeof payload.status === "string" ? payload.status : "";
-    if (runId.length === 0 || (status !== "completed" && status !== "failed" && status !== "cancelled")) {
+    if (
+      runId.length === 0 ||
+      (status !== "completed" && status !== "failed" && status !== "cancelled" && status !== "running")
+    ) {
       return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "Invalid run-status payload" } } };
     }
     // `Effect.runPromise` wraps a typed failure in a `FiberFailure`, so the

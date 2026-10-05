@@ -1221,6 +1221,75 @@ describe("terminal run status (POST /api/internal/assistant/run-status)", () => 
     expect(activity.via_assistant).toBe(0);
   });
 
+  it("claims a queued run running (started_at set, no activity), then completes it", async () => {
+    seedTask();
+    db.exec("INSERT OR IGNORE INTO lexa_agents (id, name, instructions, is_builtin) VALUES ('asst', 'Assistant', '', 1)");
+    db.exec("INSERT OR IGNORE INTO lexa_skills (id, name, instructions, is_builtin) VALUES ('sk', 'Skill', '', 1)");
+    db.prepare(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-claim', 'p1', 'task', 't1', 'asst', 'sk', 'queued')`
+    ).run();
+
+    const claim = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-status",
+      body: { runId: "run-claim", status: "running" },
+      driver: driverOf(),
+    });
+    expect(claim).toEqual({ status: 200, body: { ok: true, emitted: false } });
+    const claimed = db
+      .prepare("SELECT status, started_at, finished_at FROM assistant_tasks WHERE id = 'run-claim'")
+      .get() as { status: string; started_at: string | null; finished_at: string | null };
+    expect(claimed.status).toBe("running");
+    expect(claimed.started_at).not.toBeNull();
+    expect(claimed.finished_at).toBeNull();
+    const noActivity = db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1'").get() as { n: number };
+    expect(noActivity.n).toBe(0);
+
+    // A claimed run can then settle terminal.
+    const done = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-status",
+      body: { runId: "run-claim", status: "completed", result: "ok" },
+      driver: driverOf(),
+    });
+    expect(done).toEqual({ status: 200, body: { ok: true, emitted: true } });
+    const finished = db
+      .prepare("SELECT status, finished_at FROM assistant_tasks WHERE id = 'run-claim'")
+      .get() as { status: string; finished_at: string | null };
+    expect(finished.status).toBe("completed");
+    expect(finished.finished_at).not.toBeNull();
+  });
+
+  it("lowers a never-started queued run to failed with NO activity row", async () => {
+    seedTask();
+    db.exec("INSERT OR IGNORE INTO lexa_agents (id, name, instructions, is_builtin) VALUES ('asst', 'Assistant', '', 1)");
+    db.exec("INSERT OR IGNORE INTO lexa_skills (id, name, instructions, is_builtin) VALUES ('sk', 'Skill', '', 1)");
+    db.prepare(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-never-started', 'p1', 'task', 't1', 'asst', 'sk', 'queued')`
+    ).run();
+
+    // The DO claims then aborts before the turn: a queued run may be lowered to
+    // failed, but it never started a turn, so it must not emit a timeline row.
+    const failed = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-status",
+      body: { runId: "run-never-started", status: "failed", error: "boom" },
+      driver: driverOf(),
+    });
+    expect(failed).toEqual({ status: 200, body: { ok: true, emitted: false } });
+    const run = db
+      .prepare("SELECT status, error, started_at, finished_at FROM assistant_tasks WHERE id = 'run-never-started'")
+      .get() as { status: string; error: string | null; started_at: string | null; finished_at: string | null };
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("boom");
+    expect(run.started_at).toBeNull();
+    expect(run.finished_at).not.toBeNull();
+    const count = db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1'").get() as { n: number };
+    expect(count.n).toBe(0);
+  });
+
   it("a second transition to the same terminal status is a no-op (no duplicate activity)", async () => {
     seedTask();
     seedRun("task");
