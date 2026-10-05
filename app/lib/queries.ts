@@ -1021,17 +1021,26 @@ export function useRestoreSwimlane(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.restoreSwimlane(slug, id),
-    onSuccess: ({ data: lane }) => {
-      // Restore brings the lane back only — tasks stay archived.
+    onSuccess: ({ data: lane, activity }) => {
+      // The restore cascade brings back every task the lane archive took down —
+      // mirror the `restored` activity rows onto the cached tasks so the board
+      // drops their archived styling; individually-archived tasks (absent from
+      // the activity) stay archived.
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
           if (!old) return old;
-          return { ...old, swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === lane.id ? lane : l)) };
+          return {
+            ...old,
+            swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === lane.id ? lane : l)),
+            tasks: old.tasks.map((t: Task) =>
+              activity.some((a) => a.taskId === t.id && a.type === "restored") ? { ...t, archivedAt: null } : t
+            ),
+          };
         });
       }
       qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => old?.map((l) => (l.id === lane.id ? lane : l)));
       syncMilestoneSprintCounts(qc, slug);
-      toast.push("success", "Swimlane restored");
+      toast.push("success", activity.length > 0 ? `Swimlane restored (${activity.length} tasks)` : "Swimlane restored");
     },
     onError: (err) => {
       toast.push("error", "Failed to restore swimlane", toastMessage(err));
@@ -1205,8 +1214,25 @@ export function useRestoreMilestone(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.restoreMilestone(slug, id),
-    onSuccess: ({ data: milestone }) => {
-      // Milestone only — its sprints stay archived (restore individually).
+    onSuccess: ({ data: milestone, activity }) => {
+      // The cascade restores the tasks the milestone archive took down plus the
+      // lanes the milestone archive stamped. Individually-archived lanes kept
+      // their own older stamp, so only lanes carrying the pre-restore milestone
+      // stamp come back. Capture that stamp before any cache write; a null
+      // stamp means the milestone was not archived in cache (idempotent server
+      // no-op), so no lane is cleared. Restoring a task flips it back from done
+      // (archived counts as done) unless its column is a done column; collect
+      // lane deltas before mutating the caches. The milestone's own counts come
+      // straight from the authoritative response.
+      const prevStamp =
+        qc.getQueryData<Milestone[]>(["milestones", slug])?.find((m) => m.id === milestone.id)?.archivedAt ?? null;
+      const laneDeltas: ProgressDelta[] = [];
+      for (const a of activity) {
+        if (a.type !== "restored") continue;
+        const t = findCachedTask(qc, slug, a.taskId);
+        if (!t || t.archivedAt === null || columnIsDone(qc, slug, t.columnId)) continue;
+        laneDeltas.push({ swimlaneId: t.swimlaneId, doneDelta: -1, totalDelta: 0 });
+      }
       qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
         if (!old) return old;
         return old.map((m) => (m.id === milestone.id ? milestone : m));
@@ -1214,9 +1240,33 @@ export function useRestoreMilestone(slug: string) {
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
           if (!old) return old;
-          return { ...old, milestones: old.milestones.map((m: Milestone) => (m.id === milestone.id ? milestone : m)) };
+          return {
+            ...old,
+            milestones: old.milestones.map((m: Milestone) => (m.id === milestone.id ? milestone : m)),
+            swimlanes: old.swimlanes.map((l: Swimlane) =>
+              prevStamp !== null && l.milestoneId === milestone.id && l.archivedAt === prevStamp
+                ? { ...l, archivedAt: null }
+                : l
+            ),
+            tasks: old.tasks.map((t: Task) =>
+              activity.some((a) => a.taskId === t.id && a.type === "restored")
+                ? { ...t, archivedAt: null }
+                : t
+            ),
+          };
         });
       }
+      // The restore cascade clears the lanes the milestone archive stamped —
+      // mirror it into the standalone lane list too, stamp-scoped so
+      // individually-archived lanes keep their own older stamp.
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) =>
+        prevStamp !== null
+          ? old?.map((l) =>
+              l.milestoneId === milestone.id && l.archivedAt === prevStamp ? { ...l, archivedAt: null } : l
+            )
+          : old
+      );
+      applyProgressDeltas(qc, slug, laneDeltas, false);
       toast.push("success", "Milestone restored");
     },
     onError: (err) => {
