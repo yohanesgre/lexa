@@ -6,6 +6,8 @@ import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
 import { AssistantBubble } from "./AssistantBubble";
+import { AssistantResumeProgress } from "./AssistantResumeProgress";
+import type { ResumeProgress } from "./assistant-chat-session";
 import { AssistantChatComposer, type ChatUploadRequest } from "./AssistantChatComposer";
 import { EffortPicker, DeckRailSummary } from "./EffortPicker";
 import { WritesPicker, WritesModeSummary, WritesEmptyHint } from "./WritesModePicker";
@@ -273,6 +275,8 @@ export function ChatTranscriptArea({
   onJump,
   attachmentIndex,
   renderRunCard,
+  resumeProgress = null,
+  onRetryResume,
 }: {
   turns: ChatTurn[];
   // Thread id: folds into every row key so per-row local state cannot leak
@@ -303,6 +307,10 @@ export function ChatTranscriptArea({
   onJump: () => void;
   attachmentIndex?: Map<string, ChatAttachment> | undefined;
   renderRunCard?: ((ref: SpawnedRunRef) => ReactNode) | undefined;
+  // Post-decision resume progress row (State 3c) — rendered between the
+  // proposal bubble and the continuation bubble's slot.
+  resumeProgress?: ResumeProgress | null | undefined;
+  onRetryResume?: (() => void) | undefined;
 }) {
   const lastAssistantPos = turns.findLastIndex((turn) => turn.role === "assistant");
   return (
@@ -350,6 +358,7 @@ export function ChatTranscriptArea({
             )
           )}
 
+          {resumeProgress && <AssistantResumeProgress progress={resumeProgress} onRetry={onRetryResume ?? (() => {})} />}
           {streaming && <StreamingBubble stream={stream} renderText={renderText} />}
         </div>
       </div>

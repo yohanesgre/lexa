@@ -597,7 +597,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     if (projectId) void qc.invalidateQueries({ queryKey: ["assistant-chats", projectId] });
   }, [qc, chatId, projectId]);
 
-  useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef, onResumeSettled });
+  const { resumeProgress, retryResume } = useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef, onResumeSettled });
 
   const { scrollRef, atBottom, handleTranscriptScroll, scrollToBottom } = useChatAutoScroll({ turns, stream, chatId });
 
@@ -695,6 +695,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             onJump={() => scrollToBottom(true)}
             attachmentIndex={attachmentIndex}
             renderRunCard={renderRunCard}
+            resumeProgress={resumeProgress}
+            onRetryResume={retryResume}
           />
 
           <ChatComposerArea
