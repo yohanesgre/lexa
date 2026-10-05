@@ -10,7 +10,7 @@
 -- COLUMN` are unsupported by D1), so the table is rebuilt
 -- create/copy/drop/rename following 0023. No inbound FK targets
 -- `assistant_tasks`, so the rebuild is FK-safe under D1's enforced keys.
--- Every row is copied verbatim; both task indexes are recreated.
+-- Rows are copied; a dangling `skill_id` is nulled. Both task indexes are recreated.
 CREATE TABLE assistant_tasks_new (
   id            TEXT PRIMARY KEY,
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
