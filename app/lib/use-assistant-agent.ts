@@ -47,6 +47,16 @@ export function threadKeyOf(key: string | null): string | null {
   return null;
 }
 
+// `:id` path segment for the WS route. Wiki slugs are unvalidated user strings,
+// so an id carrying `?`, `#`, or `/` must be percent-encoded: raw, `wiki:a?b`
+// subscribes to `wiki:a` (query split) and a `/` 404s the gate. The surface
+// prefix is a fixed literal and stays raw.
+function encodeThreadKeyPath(key: string): string {
+  const sep = key.indexOf(":");
+  if (sep < 0) return encodeURIComponent(key);
+  return `${key.slice(0, sep)}:${encodeURIComponent(key.slice(sep + 1))}`;
+}
+
 // Cross-render bridge for a just-minted thread: `useChatStartStream` mints the
 // id in the same tick and cannot send through the hook bound to the previous
 // (empty) key. The pending body is flushed once the new thread's socket is
@@ -136,7 +146,7 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   // No leading slash: PartySocket builds `${protocol}://${host}/${basePath}...`,
   // so a leading slash yields a double-slash path that workers.dev does not
   // normalize (the SPA fallback swallows the upgrade). Keep it slash-free.
-  const basePath = threadKey ? `api/assistant/agent/${threadKey}` : `api/assistant/agent/__idle__`;
+  const basePath = threadKey ? `api/assistant/agent/${encodeThreadKeyPath(threadKey)}` : `api/assistant/agent/__idle__`;
 
   // `?projectId=` rides the WS handshake for a fresh chat thread. Keep the
   // object referentially stable across renders: PartySocket memoizes its socket

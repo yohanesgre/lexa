@@ -75,6 +75,21 @@ describe("useAssistantAgent query wiring", () => {
     expect(lastArgs().query).toBeUndefined();
   });
 
+  it("resolves a task document surface key to the canonical document thread", () => {
+    renderHook(() => useAssistantAgent("assistant-task:doc1"));
+    expect(lastArgs().basePath).toBe("api/assistant/agent/task:doc1");
+  });
+
+  it("resolves a wiki document surface key to the canonical document thread", () => {
+    renderHook(() => useAssistantAgent("assistant-wiki:page-slug"));
+    expect(lastArgs().basePath).toBe("api/assistant/agent/wiki:page-slug");
+  });
+
+  it("percent-encodes the thread id so a wiki slug with ? or / cannot split the path", () => {
+    renderHook(() => useAssistantAgent("assistant-wiki:a?b/c"));
+    expect(lastArgs().basePath).toBe("api/assistant/agent/wiki:a%3Fb%2Fc");
+  });
+
   it("keeps the query object referentially stable across renders", () => {
     const { rerender } = renderHook(
       ({ projectId }: { projectId: string }) => useAssistantAgent("assistant-chat:c1", { projectId }),

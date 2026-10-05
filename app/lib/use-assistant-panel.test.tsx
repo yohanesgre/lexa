@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 import { useAssistantPanel } from "./use-assistant-panel";
+import { AssistantPanel } from "../components/assistant/panel/AssistantPanel";
 import {
   getAssistantPanelSession,
   patchAssistantPanelSession,
@@ -19,20 +20,42 @@ const h = vi.hoisted(() => ({
   mutate: vi.fn(),
   settings: { model: "gpt", baseUrl: undefined, kind: "openai_compatible" },
   refetch: vi.fn(),
-  task: undefined as { status: string; result?: string; error?: string } | undefined,
+  task: undefined as
+    | { status: string; result?: string; error?: string; documentType?: "task" | "wiki"; documentId?: string }
+    | undefined,
+  keys: [] as (string | null)[],
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: (props: { children?: React.ReactNode }) => <a href="#settings">{props.children}</a>,
 }));
 
 vi.mock("./use-assistant-agent", () => ({
-  useAssistantAgent: () => ({
-    ...h.snapshot,
-    send: h.send,
-    abort: vi.fn(),
-    reset: vi.fn(),
-    subscribe: vi.fn(),
-    getSnapshot: () => h.snapshot,
-    reconnecting: false,
-    resumed: false,
-  }),
+  useAssistantAgent: (key: string | null) => {
+    h.keys.push(key);
+    return {
+      frames: [],
+      text: "",
+      tools: [],
+      items: [],
+      reasoningText: "",
+      reasoningActive: false,
+      reasoningMs: null,
+      pending: [],
+      suspendedBatchId: null,
+      error: null,
+      usage: null,
+      hasIngress: false,
+      ...h.snapshot,
+      send: h.send,
+      abort: vi.fn(),
+      reset: vi.fn(),
+      subscribe: vi.fn(),
+      getSnapshot: () => h.snapshot,
+      reconnecting: false,
+      resumed: false,
+    };
+  },
 }));
 
 vi.mock("./queries", () => ({
@@ -93,6 +116,7 @@ beforeEach(() => {
   resetAssistantPanelSessions();
   h.snapshot = { status: "idle", text: "" };
   h.task = undefined;
+  h.keys.length = 0;
   h.send.mockClear();
   h.mutate.mockReset();
 });
@@ -138,6 +162,33 @@ describe("useAssistantPanel", () => {
     expect(screen.getByTestId("text")).toHaveTextContent("final markdown");
   });
 
+  it("prefers connecting over the previous run's terminal state on a same-document rerun", () => {
+    h.snapshot = { status: "done", text: "first result" };
+    h.task = { status: "completed", result: "first result", documentType: "task", documentId: "doc1" };
+    patchAssistantPanelSession("demo", "task", "doc1", { taskId: "t1" });
+    h.mutate.mockImplementation((_input: unknown, opts?: { onSuccess?: (task: { id: string }) => void }) => {
+      opts?.onSuccess?.({ id: "t2" });
+    });
+    const { editor } = makeEditor();
+    render(<Harness editor={editor} documentId="doc1" />);
+    expect(screen.getByTestId("status")).toHaveTextContent("done");
+
+    // Second Generate on the SAME document: the reused thread still carries the
+    // previous turn's ingress (live reports done), but the new task row is
+    // queued — the stale terminal state must not render as Done until the new
+    // run's first frame.
+    h.task = { status: "queued", documentType: "task", documentId: "doc1" };
+    fireEvent.click(screen.getByRole("button", { name: "generate" }));
+    expect(screen.getByTestId("task")).toHaveTextContent("t2");
+    expect(screen.getByTestId("status")).toHaveTextContent("connecting");
+
+    // Once the new run streams, the live state wins again.
+    h.snapshot = { status: "streaming", text: "second delta" };
+    fireEvent.click(screen.getByRole("button", { name: "type" }));
+    expect(screen.getByTestId("status")).toHaveTextContent("streaming");
+    expect(screen.getByTestId("text")).toHaveTextContent("second delta");
+  });
+
   it("tracks the editor selection for the label", () => {
     const { editor, selection, emit } = makeEditor();
     render(<Harness editor={editor} documentId="t3" />);
@@ -171,5 +222,45 @@ describe("useAssistantPanel", () => {
     expect(getAssistantPanelSession("beta", "wiki", "shared").prompt).toBe("");
     // The other project's bucket is untouched.
     expect(getAssistantPanelSession("alpha", "wiki", "shared").prompt).toBe("alpha draft");
+  });
+
+  it("subscribes a task run to the document thread, not the task id", () => {
+    h.task = { status: "running", documentType: "task", documentId: "doc1" };
+    patchAssistantPanelSession("demo", "task", "doc1", { taskId: "t9" });
+    const { editor } = makeEditor();
+    render(<Harness editor={editor} documentId="doc1" />);
+    expect(h.keys).toContain("assistant-task:doc1");
+    expect(h.keys).not.toContain("assistant-task:t9");
+  });
+
+  it("subscribes a wiki run to the wiki document thread", () => {
+    h.task = { status: "running", documentType: "wiki", documentId: "page-slug" };
+    patchAssistantPanelSession("demo", "wiki", "page-slug", { taskId: "t10" });
+    const { editor } = makeEditor();
+    render(<Harness editor={editor} documentType="wiki" documentId="page-slug" />);
+    expect(h.keys).toContain("assistant-wiki:page-slug");
+  });
+
+  it("renders streamed deltas on the document thread and lands on the Done view", () => {
+    h.task = { status: "running", documentType: "task", documentId: "doc1" };
+    h.snapshot = { status: "streaming", text: "delta one " };
+    patchAssistantPanelSession("demo", "task", "doc1", { taskId: "t9" });
+    const { editor } = makeEditor();
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <AssistantPanel editor={editor} slug="demo" documentType="task" documentId="doc1" onClose={onClose} />
+    );
+    expect(h.keys.at(-1)).toBe("assistant-task:doc1");
+    expect(screen.getByText(/delta one/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Stop/ })).toBeInTheDocument();
+
+    // The run lands on the terminal Done view (task row authoritative for the
+    // background-completed result).
+    h.snapshot = { status: "done", text: "final result" };
+    h.task = { status: "completed", result: "final result", documentType: "task", documentId: "doc1" };
+    rerender(
+      <AssistantPanel editor={editor} slug="demo" documentType="task" documentId="doc1" onClose={onClose} />
+    );
+    expect(screen.getByRole("button", { name: /Review in editor/ })).toBeInTheDocument();
   });
 });
