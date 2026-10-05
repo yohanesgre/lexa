@@ -132,9 +132,10 @@ describe("ProjectService.create", () => {
   it("seeds 5 default columns, one Backlog swimlane, and 4+4 field options", async () => {
     const svc = makeService(db);
     const created = await Effect.runPromise(svc.create({ name: "Acme" }));
-    const columns = db.prepare("SELECT name, position FROM columns WHERE project_id = ? ORDER BY position").all(created.id) as { name: string; position: number }[];
+    const columns = db.prepare("SELECT name, position, is_done FROM columns WHERE project_id = ? ORDER BY position").all(created.id) as { name: string; position: number; is_done: number }[];
     expect(columns.map((c) => c.name)).toEqual(["Todo", "In Progress", "Review", "Done", "Blocked"]);
     expect(columns.map((c) => c.position)).toEqual([1, 2, 3, 4, 5]);
+    expect(columns.map((c) => c.is_done)).toEqual([0, 0, 0, 1, 0]);
     const lanes = db.prepare("SELECT name, kind, position FROM swimlanes WHERE project_id = ?").all(created.id) as { name: string; kind: string; position: number }[];
     expect(lanes).toEqual([{ name: "Backlog", kind: "backlog", position: 0 }]);
     const prios = db.prepare("SELECT label FROM priority_options WHERE project_id = ? ORDER BY position").all(created.id) as { label: string }[];

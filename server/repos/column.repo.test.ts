@@ -53,13 +53,22 @@ describe("ColumnRepo", () => {
   it("create round-trips defaults and findByProject orders by position", async () => {
     const repo = makeRepo(db);
     await Effect.runPromise(repo.create({ id: "c-b", projectId: "p1", name: "B", position: 2 }));
-    await Effect.runPromise(repo.create({ id: "c-a", projectId: "p1", name: "A", position: 0, color: "#111111", wipLimit: 3, requiredFields: ["priority"], githubState: "open" }));
+    await Effect.runPromise(repo.create({ id: "c-a", projectId: "p1", name: "A", position: 0, color: "#111111", wipLimit: 3, requiredFields: ["priority"], githubState: "open", isDone: true }));
     await Effect.runPromise(repo.create({ id: "c-c", projectId: "p1", name: "C", position: 1 }));
 
     const listed = await Effect.runPromise(repo.findByProject("p1"));
     expect(listed.map((c) => c.id)).toEqual(["c-a", "c-c", "c-b"]);
-    expect(listed[0]).toMatchObject({ name: "A", color: "#111111", wipLimit: 3, requiredFields: ["priority"], githubState: "open", isDone: false });
+    expect(listed[0]).toMatchObject({ name: "A", color: "#111111", wipLimit: 3, requiredFields: ["priority"], githubState: "open", isDone: true });
     expect(listed[2]).toMatchObject({ name: "B", color: "#6b7280", wipLimit: null, requiredFields: [], githubState: null, isDone: false });
+  });
+
+  it("createStmt writes is_done for both flags", () => {
+    const repo = makeRepo(db);
+    const done = repo.createStmt({ id: "c-done", projectId: "p1", name: "Done", position: 0, isDone: true });
+    expect(done.sql).toMatch(/is_done/);
+    expect(done.params[done.params.length - 1]).toBe(1);
+    const todo = repo.createStmt({ id: "c-todo", projectId: "p1", name: "Todo", position: 1 });
+    expect(todo.params[todo.params.length - 1]).toBe(0);
   });
 
   it("findById returns the row and RowNotFound for an unknown id", async () => {

@@ -9,11 +9,11 @@ import { ProjectNotFound, SlugTaken } from "../api/errors";
 import { generateTaskKey } from "../task-key";
 import type { DomainProject, ProjectRepo as ProjectRepoType } from "../../shared/types";
 
-const DEFAULT_COLUMNS = [
+const DEFAULT_COLUMNS: { name: string; color: string; position: number; isDone?: boolean }[] = [
   { name: "Todo", color: "#6b7280", position: 1 },
   { name: "In Progress", color: "#3b82f6", position: 2 },
   { name: "Review", color: "#f59e0b", position: 3 },
-  { name: "Done", color: "#10b981", position: 4 },
+  { name: "Done", color: "#10b981", position: 4, isDone: true },
   { name: "Blocked", color: "#ef4444", position: 5 },
 ];
 
@@ -50,6 +50,7 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
                 name: col.name,
                 position: col.position,
                 color: col.color,
+                isDone: col.isDone ?? false,
               })
             ),
             swimlaneRepo.createStmt({
