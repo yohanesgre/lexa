@@ -196,15 +196,29 @@ export function continuationBoundaryBatchIds(messages: readonly unknown[]): stri
 
 // The SDK's `continuation: true` clone of the last assistant message appends the
 // resume parts AFTER every pre-existing part, and `withApprovalCarriers` always
-// appends its carrier last — so the end of the last carrier part is the
-// proposal/continuation seam.
-function continuationSeam(parts: readonly unknown[]): number {
-  let seam = 0;
+// appends its carrier(s) last — so a message carrying an approval carrier with
+// parts after that carrier is a continuation clone. This is the STRUCTURAL seam:
+// no in-memory resume signal is needed, so an unrelated persist cannot consume
+// or move it and a fresh DO instance (post-eviction SDK recovery) still splits.
+//
+// Multiple carriers are kept together in the proposal bubble (the seam is after
+// the last carrier) and the boundary names the last carrier's batch. A
+// continuation that re-proposes writes has no carrier yet at split time — the
+// transform runs before `withApprovalCarriers` — so its new proposal stays in
+// the continuation bubble and receives its own carrier afterwards.
+function continuationSeam(parts: readonly unknown[]): { seam: number; batchId: string } | null {
+  let lastCarrier = -1;
+  let batchId: string | undefined;
   for (let i = 0; i < parts.length; i++) {
-    const part = parts[i] as { type?: unknown } | null;
-    if (isRecord(part) && part.type === ASSISTANT_APPROVAL_DATA_PART) seam = i + 1;
+    const part = parts[i] as { type?: unknown; data?: unknown } | null;
+    if (!isRecord(part) || part.type !== ASSISTANT_APPROVAL_DATA_PART) continue;
+    const id = isRecord(part.data) ? readString(part.data, "batchId") : undefined;
+    if (!id) continue;
+    lastCarrier = i;
+    batchId = id;
   }
-  return seam;
+  if (lastCarrier < 0 || lastCarrier >= parts.length - 1 || !batchId) return null;
+  return { seam: lastCarrier + 1, batchId };
 }
 
 /**
@@ -214,35 +228,47 @@ function continuationSeam(parts: readonly unknown[]): number {
  * for the continuation, so without a split the follow-up renders inside the
  * proposal bubble; this preserves the proposal bubble (id unchanged, carrier
  * intact) and persists the appended parts as a NEW assistant message, with the
- * boundary immediately before it. Idempotent: a batch already carrying a
- * boundary is skipped, so a replayed resume never duplicates the marker.
+ * boundary immediately before it.
+ *
+ * Structural: a message that carries a carrier AND has parts after it splits,
+ * whether or not the DO holds an in-memory resume signal — so a repaired or
+ * `onRunFinished` persist with no post-seam parts is left untouched, and a
+ * combined persist re-driven on a fresh instance still splits. Idempotent: a
+ * batch already carrying a `data-continuation` boundary is skipped, so a
+ * replayed resume never duplicates the marker. Runs on the incoming array
+ * BEFORE `withApprovalCarriers`, so a newly-derived carrier cannot move the
+ * seam to the end of the message.
  */
-export function withContinuationBoundary(messages: UIMessage[], resumedBatchIds: readonly string[]): UIMessage[] {
-  if (resumedBatchIds.length === 0) return messages;
+export function withContinuationBoundary(messages: UIMessage[]): UIMessage[] {
   const marked = new Set(continuationBoundaryBatchIds(messages));
-  let out = messages;
+  const out: UIMessage[] = [];
   let touched = false;
-  for (const batchId of resumedBatchIds) {
-    if (batchId.length === 0 || marked.has(batchId)) continue;
-    const index = out.findIndex((message) => messageCarriesBatch(message, batchId));
-    if (index < 0) continue;
-    const target = out[index]!;
-    const parts = Array.isArray(target.parts) ? target.parts : [];
-    const seam = continuationSeam(parts);
+  for (const message of messages) {
+    if (message.role !== "assistant" || !Array.isArray(message.parts)) {
+      out.push(message);
+      continue;
+    }
+    const seam = continuationSeam(message.parts);
+    if (!seam || marked.has(seam.batchId)) {
+      out.push(message);
+      continue;
+    }
     const boundary: UIMessage = {
-      id: `${target.id}~boundary~${batchId}`,
+      id: `${message.id}~boundary~${seam.batchId}`,
       role: "assistant",
       parts: [
         {
           type: ASSISTANT_CONTINUATION_DATA_PART,
-          data: { batchId, ts: new Date().toISOString() } satisfies AssistantContinuationBoundary,
+          data: { batchId: seam.batchId, ts: new Date().toISOString() } satisfies AssistantContinuationBoundary,
         } as unknown as UIMessage["parts"][number],
       ],
     };
-    const proposal: UIMessage = { ...target, parts: parts.slice(0, seam) };
-    const continuation: UIMessage = { ...target, id: `${target.id}~cont~${batchId}`, parts: parts.slice(seam) };
-    out = [...out.slice(0, index), proposal, boundary, continuation, ...out.slice(index + 1)];
-    marked.add(batchId);
+    out.push(
+      { ...message, parts: message.parts.slice(0, seam.seam) },
+      boundary,
+      { ...message, id: `${message.id}~cont~${seam.batchId}`, parts: message.parts.slice(seam.seam) }
+    );
+    marked.add(seam.batchId);
     touched = true;
   }
   return touched ? out : messages;

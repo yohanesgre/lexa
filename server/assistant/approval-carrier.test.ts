@@ -118,7 +118,7 @@ describe("withContinuationBoundary — LX-124 continuation split", () => {
   }
 
   it("splits the continuation into its own message and marks the seam", () => {
-    const split = withContinuationBoundary([combinedTurn()], ["b1"]);
+    const split = withContinuationBoundary([combinedTurn()]);
 
     expect(split).toHaveLength(3);
     const [proposalTurn, boundary, continuation] = split;
@@ -140,22 +140,92 @@ describe("withContinuationBoundary — LX-124 continuation split", () => {
   });
 
   it("is idempotent — a batch already carrying a boundary is returned untouched", () => {
-    const split = withContinuationBoundary([combinedTurn()], ["b1"]);
-    const again = withContinuationBoundary(split, ["b1"]);
+    const split = withContinuationBoundary([combinedTurn()]);
+    const again = withContinuationBoundary(split);
 
     expect(again).toBe(split);
     expect(again.filter((m) => JSON.stringify(m).includes('"data-continuation"'))).toHaveLength(1);
   });
 
-  it("returns the transcript untouched when no message carries the batch", () => {
-    const input = [combinedTurn()];
-    expect(withContinuationBoundary(input, ["other"])).toBe(input);
-    expect(withContinuationBoundary(input, [])).toBe(input);
+  it("leaves a carrier-only message untouched — an unrelated persist neither splits nor consumes", () => {
+    const [carrierOnly] = withApprovalCarriers([assistantTurn(proposal())]);
+    const input = [carrierOnly!];
+
+    expect(withContinuationBoundary(input)).toBe(input);
   });
 
-  it("does not split a message whose carrier belongs to another batch", () => {
-    const input = [combinedTurn()];
-    expect(withContinuationBoundary(input, ["b2"])).toBe(input);
+  it("leaves a no-carrier message untouched — no stray empty continuation", () => {
+    const legacy = {
+      id: "legacy",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I can do that." },
+        { type: "tool-create_task", toolCallId: "call_1", state: "output-available", input: {}, output: proposal() },
+        { type: "step-start" },
+        { type: "text", text: "continued", state: "done" },
+      ],
+    } as unknown as UIMessage;
+
+    const input = [legacy];
+    const split = withContinuationBoundary(input);
+    expect(split).toBe(input);
+    expect(split).toHaveLength(1);
+    // persistMessages derives carriers AFTER the split: still one message, no boundary.
+    const prepared = withApprovalCarriers(split);
+    expect(prepared).toHaveLength(1);
+    expect(JSON.stringify(prepared)).not.toContain('"data-continuation"');
+    expect((prepared[0]!.parts.at(-1) as { type?: string }).type).toBe(ASSISTANT_APPROVAL_DATA_PART);
+  });
+
+  it("keeps every pre-existing carrier in the proposal and splits after the last (multi-carrier)", () => {
+    const [proposalTurn] = withApprovalCarriers([assistantTurn(proposal())]);
+    const multi = {
+      ...proposalTurn!,
+      parts: [
+        ...proposalTurn!.parts,
+        { type: ASSISTANT_APPROVAL_DATA_PART, data: { batchId: "b2", approvals: [] } },
+        { type: "step-start" },
+        { type: "text", text: "follow-up", state: "done" },
+      ],
+    } as unknown as UIMessage;
+
+    const split = withContinuationBoundary([multi]);
+    expect(split).toHaveLength(3);
+    const [proposalBubble, boundary, continuation] = split;
+    expect(approvalCarriersOf(proposalBubble).map((c) => c.batchId)).toEqual(["b1", "b2"]);
+    expect(JSON.stringify(proposalBubble)).not.toContain("follow-up");
+    expect(boundary!.parts).toEqual([
+      { type: "data-continuation", data: { batchId: "b2", ts: expect.any(String) } },
+    ]);
+    expect(continuation!.parts).toEqual([
+      { type: "step-start" },
+      { type: "text", text: "follow-up", state: "done" },
+    ]);
+  });
+
+  it("keeps a re-proposed write in the continuation bubble (carrier derived after the split)", () => {
+    const [proposalTurn] = withApprovalCarriers([assistantTurn(proposal())]);
+    const combined = {
+      ...proposalTurn!,
+      parts: [
+        ...proposalTurn!.parts,
+        { type: "step-start" },
+        {
+          type: "tool-create_task",
+          toolCallId: "call_2",
+          state: "output-available",
+          input: {},
+          output: proposal({ approvalId: "w2", batchId: "b2" }),
+        },
+      ],
+    } as unknown as UIMessage;
+
+    const withCarriers = withApprovalCarriers(withContinuationBoundary([combined]));
+    expect(withCarriers).toHaveLength(3);
+    const [proposalBubble, , continuation] = withCarriers;
+    expect(approvalCarriersOf(proposalBubble).map((c) => c.batchId)).toEqual(["b1"]);
+    expect(JSON.stringify(proposalBubble)).not.toContain("call_2");
+    expect(approvalCarriersOf(continuation).map((c) => c.batchId)).toEqual(["b2"]);
   });
 });
 
