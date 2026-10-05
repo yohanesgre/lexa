@@ -6,12 +6,13 @@ import { AssistantPanelIdle } from "./AssistantPanelIdle";
 import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
 
 // Assistant tier panel inside the Runtime popover — transcribed from
-// wireframes/src/herald-popover.html (States 1–7). No agent picker: the
-// persona is the project's configured Assistant Agent (Project Settings →
-// Assistant); only the skill is picked here. Streaming sessions live in the
-// module-level stream store: closing the popover does NOT stop the run;
-// reopening reattaches to the live/final state. Session logic lives in
-// useAssistantPanel; markup in the AssistantPanel* view files.
+// wireframes/src/herald-popover.html (States 1–7). No agent or skill picker:
+// the persona is the project's configured Assistant Agent (Project Settings →
+// Assistant) and the assistant picks suitable skill(s) itself (auto skill
+// selection). Streaming sessions live in the module-level stream store:
+// closing the popover does NOT stop the run; reopening reattaches to the
+// live/final state. Session logic lives in useAssistantPanel; markup in the
+// AssistantPanel* view files.
 export function AssistantPanel({ editor, slug, documentType, documentId, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId }: {
   editor: Editor;
   slug: string;
@@ -56,9 +57,6 @@ export function AssistantPanel({ editor, slug, documentType, documentId, onClose
         reconnecting={panel.stream.reconnecting}
       >
         <AssistantPanelIdle
-          agentSkills={panel.agentSkills}
-          skillId={panel.effectiveSkillId}
-          onSkillChange={panel.setSkillId}
           prompt={panel.prompt}
           onPromptChange={panel.setPrompt}
           docImages={panel.docImages}

@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import {
   useProjects,
-  useAgents,
-  useSkills,
   useAssistantSettings,
   useCreateAssistantTask,
   useCancelAssistantTask,
@@ -16,7 +14,6 @@ import type { Attachment } from "../../shared/types";
 import {
   attachmentQueryId,
   pickAttachmentRows,
-  pickAssistantSkill,
   toDocImages,
   buildRunRequest,
   resolveRunSelection,
@@ -28,7 +25,7 @@ import {
 } from "../components/assistant/panel/assistant-panel-store";
 
 // Assistant panel session logic (herald-popover.html). Split from the panel
-// component: data/skill selection here, run lifecycle here, markup in the
+// component: document data here, run lifecycle here, markup in the
 // AssistantPanel* view files.
 
 type PanelArgs = {
@@ -43,17 +40,6 @@ function useAssistantPanelData({ editor, slug, documentType, documentId }: Panel
   // null after load = PROVIDER_NOT_CONFIGURED → empty state + disabled Generate.
   const projectId = projects.find((p) => p.slug === slug)?.id;
   const { data: settings, isLoading: settingsLoading, isError: settingsError, refetch: refetchSettings } = useAssistantSettings(projectId);
-  const { data: agents = [] } = useAgents();
-  const { data: skills = [] } = useSkills();
-  const [skillId, setSkillIdState] = useState(() => getAssistantPanelSession(slug, documentType, documentId).skillId);
-
-  const setSkillId = useCallback(
-    (id: string) => {
-      setSkillIdState(id);
-      patchAssistantPanelSession(slug, documentType, documentId, { skillId: id });
-    },
-    [slug, documentType, documentId]
-  );
 
   // Images ride from the document, never manual attach: ids embedded in the
   // open doc mapped to attachment rows (taskId / wiki pageSlug per type).
@@ -74,18 +60,12 @@ function useAssistantPanelData({ editor, slug, documentType, documentId }: Panel
     [editor, documentType, taskRows, wikiRows, docEpoch]
   );
 
-  const picked = pickAssistantSkill(agents, skills, skillId);
-
   return {
     projectId,
     settings,
     settingsLoading,
     settingsError,
     refetchSettings,
-    agentSkills: picked.agentSkills,
-    effectiveSkillId: picked.effectiveSkillId,
-    skillName: picked.skillName,
-    setSkillId,
     docImages,
     taskRows,
     wikiRows,
@@ -94,13 +74,12 @@ function useAssistantPanelData({ editor, slug, documentType, documentId }: Panel
 
 type RunArgs = PanelArgs & {
   prompt: string;
-  effectiveSkillId: string;
   taskRows: Attachment[] | undefined;
   wikiRows: Attachment[] | undefined;
 };
 
 function useAssistantRun(args: RunArgs) {
-  const { editor, slug, documentType, documentId, prompt, effectiveSkillId, taskRows, wikiRows } = args;
+  const { editor, slug, documentType, documentId, prompt, taskRows, wikiRows } = args;
   const createTask = useCreateAssistantTask();
   const cancelTask = useCancelAssistantTask();
   // Rehydrate the last run for this document: closing the popover keeps the
@@ -159,12 +138,11 @@ function useAssistantRun(args: RunArgs) {
   const failed = stream.status === "error";
 
   const generate = useCallback(() => {
-    if (!effectiveSkillId) return;
     const selection = getSelection(editor);
-    const selectionMarkdown = resolveRunSelection(editor, effectiveSkillId, selection);
+    const selectionMarkdown = resolveRunSelection(selection);
     const images = toDocImages(pickAttachmentRows(documentType, taskRows, wikiRows), editor);
     createTask.mutate(
-      buildRunRequest({ slug, documentType, documentId, prompt, skillId: effectiveSkillId, selection: selectionMarkdown, docImages: images }),
+      buildRunRequest({ slug, documentType, documentId, prompt, selection: selectionMarkdown, docImages: images }),
       {
         onSuccess: (task) => {
           setTaskId(task.id);
@@ -172,7 +150,7 @@ function useAssistantRun(args: RunArgs) {
         },
       }
     );
-  }, [editor, effectiveSkillId, createTask, slug, documentType, documentId, prompt, taskRows, wikiRows]);
+  }, [editor, createTask, slug, documentType, documentId, prompt, taskRows, wikiRows]);
 
   const stop = useCallback(() => {
     if (!taskId) return;
@@ -192,6 +170,10 @@ function useAssistantRun(args: RunArgs) {
     failed,
     taskId,
     documentTitle: assistantTaskData?.documentTitle,
+    // Review identity (not the Done card — it shows the document title only):
+    // the server resolves the skill in auto mode, so the task row is the
+    // authority for the name.
+    skillName: assistantTaskData?.skillName ?? "",
     selectionText,
     generate,
     stop,
@@ -204,7 +186,7 @@ function useAssistantRun(args: RunArgs) {
 // panel props, not the session hook.
 export function useAssistantPanel(args: PanelArgs) {
   const { slug, documentType, documentId } = args;
-  // Draft + skill choice survive close/reopen per project + document.
+  // Draft survives close/reopen per project + document.
   const [prompt, setPromptState] = useState(() => getAssistantPanelSession(slug, documentType, documentId).prompt);
   const setPrompt = useCallback(
     (value: string) => {
@@ -217,7 +199,6 @@ export function useAssistantPanel(args: PanelArgs) {
   const run = useAssistantRun({
     ...args,
     prompt,
-    effectiveSkillId: data.effectiveSkillId,
     taskRows: data.taskRows,
     wikiRows: data.wikiRows,
   });

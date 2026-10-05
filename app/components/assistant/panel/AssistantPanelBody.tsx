@@ -153,7 +153,7 @@ export function AssistantPanelBody({
           </div>
           <span className="text-xs" style={{ lineHeight: "16px" }}>{stream.error?.message}</span>
         </div>
-        {/* Retry re-enqueues with the same prompt/agent/skill and returns
+        {/* Retry re-enqueues with the same prompt/agent and returns
             the panel to streaming; Dismiss clears back to idle — the
             thread keeps prior turns. */}
         <div className="flex items-center justify-end gap-2 mt-3">

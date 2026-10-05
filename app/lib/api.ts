@@ -1039,7 +1039,8 @@ export function createAssistantTask(input: {
   documentId: string;
   prompt: string;
   agentId: string;
-  skillId: string;
+  // Auto mode omits the key: the assistant picks suitable skill(s) itself.
+  skillId?: string | undefined;
   selection?: string | undefined;
   attachments?: { storageKey: string; mimeType: string; name: string }[];
 }): Promise<AssistantTask> {

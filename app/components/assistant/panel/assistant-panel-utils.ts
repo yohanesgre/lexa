@@ -1,6 +1,6 @@
 import type { Editor } from "@tiptap/core";
 import { markdownToDoc, docToMarkdown } from "../../../../shared/markdown";
-import type { Attachment, LexaAgent, LexaSkill, TipTapDoc } from "../../../../shared/types";
+import type { Attachment, TipTapDoc } from "../../../../shared/types";
 import { ASSISTANT_AGENT_ID } from "../../../lib/assistant-agent";
 
 // Embedded /api/attachments/<uuid> image nodes in the open document are the
@@ -41,26 +41,11 @@ export function attachmentQueryId(documentType: "task" | "wiki", wanted: "task" 
   return documentType === wanted ? documentId : "";
 }
 
-// The persona is the project's configured Assistant Agent — its junction rows
-// are the only skills the panel offers. An unpicked/out-of-junction id
-// falls back to the agent's first skill.
-export function pickAssistantSkill(
-  agents: LexaAgent[],
-  skills: LexaSkill[],
-  skillId: string
-): { agentSkills: LexaSkill[]; effectiveSkillId: string; skillName: string } {
-  const assistantSkillIds = new Set(agents.find((a) => a.id === ASSISTANT_AGENT_ID)?.skillIds ?? []);
-  const agentSkills = skills.filter((s) => assistantSkillIds.has(s.id));
-  const effectiveSkillId = assistantSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
-  return { agentSkills, effectiveSkillId, skillName: agentSkills.find((s) => s.id === effectiveSkillId)?.name ?? "Assistant" };
-}
-
 export function buildRunRequest(args: {
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
   prompt: string;
-  skillId: string;
   selection: string;
   docImages: Attachment[];
 }) {
@@ -70,7 +55,8 @@ export function buildRunRequest(args: {
     documentId: args.documentId,
     prompt: args.prompt.trim(),
     agentId: ASSISTANT_AGENT_ID,
-    skillId: args.skillId,
+    // Auto mode: no skillId — the assistant picks suitable skill(s) itself
+    // from its bound catalog (herald-popover.html).
     ...(args.selection.trim() ? { selection: args.selection } : {}),
     // Attachment rows expose sha256 but not storage_key; Lexa/Storage keys
     // are deterministic (storageKeyFor → blobs/<sha256>) so the ref is
@@ -113,26 +99,11 @@ export function getSelection(editor: Editor): { text: string; markdown: string }
   return { text, markdown: text ? selectionToMarkdown(editor) : "" };
 }
 
-// Polish with no selection falls back to the whole document (markdown first,
-// then plain text) so the skill still has material to work on.
-export function resolveRunSelection(
-  editor: Editor,
-  skillId: string,
-  selection: { text: string; markdown: string }
-): string {
-  let effectiveSelection = selection.markdown;
-  if (skillId === "polish" && !effectiveSelection.trim()) {
-    try {
-      const full = docToMarkdown(editor.state.doc.toJSON() as unknown as TipTapDoc);
-      if (full.trim()) effectiveSelection = full;
-      else if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
-      else if (selection.text.trim()) effectiveSelection = selection.text;
-    } catch {
-      if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
-      else if (selection.text.trim()) effectiveSelection = selection.text;
-    }
-  }
-  return effectiveSelection;
+// No selection → no Selected-text instruction: the run sends selection only
+// when the user actually selected text (herald-popover.html State 1). The
+// former polish-only whole-document fallback is retired with the picker.
+export function resolveRunSelection(selection: { markdown: string }): string {
+  return selection.markdown;
 }
 
 export function insertMarkdown(editor: Editor, text: string): void {
