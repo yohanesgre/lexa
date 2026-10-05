@@ -1221,6 +1221,46 @@ describe("terminal run status (POST /api/internal/assistant/run-status)", () => 
     expect(activity.via_assistant).toBe(0);
   });
 
+  it("claims a queued run running (started_at set, no activity), then completes it", async () => {
+    seedTask();
+    db.exec("INSERT OR IGNORE INTO lexa_agents (id, name, instructions, is_builtin) VALUES ('asst', 'Assistant', '', 1)");
+    db.exec("INSERT OR IGNORE INTO lexa_skills (id, name, instructions, is_builtin) VALUES ('sk', 'Skill', '', 1)");
+    db.prepare(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-claim', 'p1', 'task', 't1', 'asst', 'sk', 'queued')`
+    ).run();
+
+    const claim = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-status",
+      body: { runId: "run-claim", status: "running" },
+      driver: driverOf(),
+    });
+    expect(claim).toEqual({ status: 200, body: { ok: true, emitted: false } });
+    const claimed = db
+      .prepare("SELECT status, started_at, finished_at FROM assistant_tasks WHERE id = 'run-claim'")
+      .get() as { status: string; started_at: string | null; finished_at: string | null };
+    expect(claimed.status).toBe("running");
+    expect(claimed.started_at).not.toBeNull();
+    expect(claimed.finished_at).toBeNull();
+    const noActivity = db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1'").get() as { n: number };
+    expect(noActivity.n).toBe(0);
+
+    // A claimed run can then settle terminal.
+    const done = await handleInternalAssistantRequest({
+      method: "POST",
+      path: "/api/internal/assistant/run-status",
+      body: { runId: "run-claim", status: "completed", result: "ok" },
+      driver: driverOf(),
+    });
+    expect(done).toEqual({ status: 200, body: { ok: true, emitted: true } });
+    const finished = db
+      .prepare("SELECT status, finished_at FROM assistant_tasks WHERE id = 'run-claim'")
+      .get() as { status: string; finished_at: string | null };
+    expect(finished.status).toBe("completed");
+    expect(finished.finished_at).not.toBeNull();
+  });
+
   it("a second transition to the same terminal status is a no-op (no duplicate activity)", async () => {
     seedTask();
     seedRun("task");

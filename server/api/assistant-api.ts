@@ -20,6 +20,7 @@ import {
   AssistantScheduleNotFound,
   AssistantTaskActive,
   AssistantThreadNotFound,
+  AssistantUnavailable,
   HasChildren,
   InvalidArgs,
   NoUserContext,
@@ -245,6 +246,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
         const service = yield* AssistantService;
+        const taskService = yield* AssistantTaskService;
         const identity = yield* AuthIdentity;
         const task = yield* service.enqueue({
           projectId: project.id,
@@ -261,17 +263,17 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
             projectId: project.id,
             runId: task.id,
             actorUserId: identity.userId ?? "",
+            selection: task.selection,
+            extraPrompt: task.extraPrompt,
           })
         );
         // ADR-0003 §B.4: `enqueueRun` RPC failure → task marked `failed` + 502
-        // ASSISTANT_UNAVAILABLE. TODO(P3): the DO `enqueueRun` is still a P2
-        // stub returning `{ok:true}` and cannot fail, so there is no failure
-        // branch to take yet; when the P3 engine can report a failed start,
-        // branch on `enqueue` here (mark the task failed, fail the request).
+        // ASSISTANT_UNAVAILABLE. `available` is false on Bun (no DO — the
+        // in-process engine owns the task), so only the Workers flavor takes
+        // this branch.
         if (enqueue.available && !enqueue.ok) {
-          yield* Effect.logWarning(
-            `[assistant] enqueueRun RPC not acked for task ${task.id}; task left queued until the P3 failure path`
-          );
+          yield* taskService.fail(task.id, "ASSISTANT_UNAVAILABLE");
+          return yield* new AssistantUnavailable({ message: "Assistant unavailable" });
         }
         return task;
       }))

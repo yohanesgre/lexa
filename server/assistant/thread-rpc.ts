@@ -68,7 +68,16 @@ export interface AssistantThreadRpcShape {
    */
   enqueueRun(
     threadKey: string,
-    input: { projectId: string; runId: string; actorUserId: string; kind?: "document" | "schedule" }
+    input: {
+      projectId: string;
+      runId: string;
+      actorUserId: string;
+      kind?: "document" | "schedule";
+      // Document-run prompt inputs (LX-134): the editor selection + the run's
+      // extra prompt (the `assistant_tasks` row's `selection`/`extra_prompt`).
+      selection?: string;
+      extraPrompt?: string;
+    }
   ): Promise<{ ok: true } | null>;
   /** Abort an in-flight document run. */
   abortRun(threadKey: string, taskId: string): Promise<{ ok: true } | null>;

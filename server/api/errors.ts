@@ -114,6 +114,9 @@ export class AssistantGenerationFailed extends Data.TaggedError("AssistantGenera
   attempts?: unknown;
   errorTag?: string | null;
 }> {}
+// Workers-only: the DO could not accept a dispatch (unreachable / RPC failed /
+// legacy import failed after retry / an internal route failed). 502.
+export class AssistantUnavailable extends Data.TaggedError("AssistantUnavailable")<{ message?: string }> {}
 export class AssistantToolBudgetExceeded extends Data.TaggedError("AssistantToolBudgetExceeded")<{ rounds: number }> {}
 // Delegation run registry (ADR-0004 §3; H3).
 export class AssistantRunNotFound extends Data.TaggedError("AssistantRunNotFound")<{ id: string }> {}
@@ -220,6 +223,7 @@ export const errorCodeMap: Record<string, string> = {
   ProviderAuthFailed: "PROVIDER_AUTH_FAILED",
   ProviderUnreachable: "PROVIDER_UNREACHABLE",
   AssistantGenerationFailed: "ASSISTANT_GENERATION_FAILED",
+  AssistantUnavailable: "ASSISTANT_UNAVAILABLE",
   AssistantToolBudgetExceeded: "ASSISTANT_TOOL_BUDGET_EXCEEDED",
   AssistantRunNotFound: "ASSISTANT_RUN_NOT_FOUND",
   AssistantRunBudgetExceeded: "ASSISTANT_RUN_BUDGET_EXCEEDED",
@@ -371,6 +375,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "AssistantGenerationFailed":
     case "AssistantToolBudgetExceeded":
     case "AssistantRunBudgetExceeded":
+    case "AssistantUnavailable":
     case "McpConnectFailed":
     case "McpToolCallFailed":
     case "JevAuthFailed":
@@ -522,6 +527,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return typeof error.message === "string" && error.message ? error.message : "The AI provider could not be reached";
     case "AssistantGenerationFailed":
       return String(error.message ?? "Assistant generation failed");
+    case "AssistantUnavailable":
+      return typeof error.message === "string" && error.message ? error.message : "Assistant unavailable";
     case "AssistantToolBudgetExceeded":
       return `Assistant exceeded its tool budget (${error.rounds} rounds)`;
     case "AssistantTaskActive":

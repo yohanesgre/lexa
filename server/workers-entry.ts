@@ -118,6 +118,8 @@ function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadR
       runId: string;
       actorUserId: string;
       kind?: "document" | "schedule";
+      selection?: string;
+      extraPrompt?: string;
     }): Promise<{ ok: true }>;
     abortRun(taskId: string): Promise<{ ok: true }>;
   }
@@ -631,6 +633,8 @@ async function runScheduled(env: WorkersEnv): Promise<void> {
             runId: string;
             actorUserId: string;
             kind?: "document" | "schedule";
+            selection?: string;
+            extraPrompt?: string;
           }): Promise<{ ok: true }>;
         };
         await agent.enqueueRun({

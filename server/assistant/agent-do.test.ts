@@ -145,6 +145,12 @@ async function handleInternal(request, env) {
   if (request.method === "GET" && url.pathname.startsWith(INTERNAL + "provider-config")) {
     return Response.json({ configs: [{ kind: "openai_compatible", baseUrl: "https://provider.test", apiKey: "sk-test", model: "test-model", providerId: "prov-1" }] });
   }
+  if (request.method === "POST" && url.pathname === INTERNAL + "run-status") {
+    // Document-run lifecycle: the DO claims running then lands terminal. The
+    // inline route records the body so the enqueue/turn assertions can read it.
+    RUN_UPDATES.push(await request.json());
+    return Response.json({ ok: true, emitted: true });
+  }
   if (request.method === "POST" && url.pathname === INTERNAL + "run-update") {
     RUN_UPDATES.push(await request.json());
     return Response.json({ ok: true });
@@ -352,6 +358,15 @@ function signedHeaders(identity: InternalAuthIdentity): Promise<Record<string, s
 
 async function transcriptOf(documentId: string): Promise<unknown[]> {
   const res = await mf!.dispatchFetch(`http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(`chat:${documentId}`)}`);
+  const body = (await res.json()) as { messages?: unknown[] };
+  return Array.isArray(body.messages) ? body.messages : [];
+}
+
+// Canonical read for a non-chat (`task:`/`wiki:`) thread.
+async function transcriptByKey(threadKey: string): Promise<unknown[]> {
+  const res = await mf!.dispatchFetch(
+    `http://assistant-smoke/__test/transcript?threadKey=${encodeURIComponent(threadKey)}`
+  );
   const body = (await res.json()) as { messages?: unknown[] };
   return Array.isArray(body.messages) ? body.messages : [];
 }
@@ -1190,19 +1205,69 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     );
   }, 60_000);
 
-  it("pins the document run cursor only for a document enqueue", async () => {
-    const threadKey = "chat:doc-run";
+  it("claims a document run running on a task thread, then lands the terminal status", async () => {
+    const threadKey = "task:doc-run";
     const res = await enqueueRun(threadKey, {
       projectId: "proj-1",
       runId: "doc-run-1",
       actorUserId: "user-1",
+      selection: "hello world",
+      extraPrompt: "polish this",
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
 
-    expect(await storageKeys(threadKey)).toContain("assistantRunId");
-    // The document path never dispatches a facet run.
-    expect((await capturedRunUpdates()).some((u) => u.runId === "doc-run-1")).toBe(false);
+    // The `queued → running` claim is synchronous, before the turn runs.
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "doc-run-1", status: "running" })
+    );
+
+    // The turn's terminal status lands once the stubbed provider stream ends;
+    // `completed` proves the pinned run-id cursor reached the engine's `onEnd`.
+    const terminal = await waitFor<Record<string, unknown>>(
+      () =>
+        capturedRunUpdates().then(
+          (updates) =>
+            updates.find((u) => u.runId === "doc-run-1" && (u.status === "completed" || u.status === "failed")) ??
+            null
+        ),
+      20_000
+    );
+    expect(terminal.status).toBe("completed");
+  }, 60_000);
+
+  it("dispatches a document run with no prior WebSocket connect (meta pinned at enqueue)", async () => {
+    const threadKey = "task:doc-noconnect";
+    const res = await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "doc-run-noconnect",
+      actorUserId: "user-1",
+      selection: "draft",
+      extraPrompt: "write it",
+    });
+    expect(res.status).toBe(200);
+
+    // Nothing connected this DO: without the enqueue-time meta pin,
+    // `onChatMessage` would 502 AFTER the running claim and the run would stick
+    // `running`. A `completed` terminal proves the thread meta resolved.
+    const terminal = await waitFor<Record<string, unknown>>(
+      () =>
+        capturedRunUpdates().then(
+          (updates) =>
+            updates.find(
+              (u) => u.runId === "doc-run-noconnect" && (u.status === "completed" || u.status === "failed")
+            ) ?? null
+        ),
+      20_000
+    );
+    expect(terminal.status).toBe("completed");
+
+    // The turn ran end to end: the instruction and the assistant reply persisted.
+    const messages = await waitFor<unknown[]>(
+      () => transcriptByKey(threadKey).then((m) => (m.length >= 2 ? m : null)),
+      20_000
+    );
+    expect(JSON.stringify(messages)).toContain("Selected text:");
   }, 60_000);
 
   it("backfills the derived title from the first user turn on the first mirror", async () => {
