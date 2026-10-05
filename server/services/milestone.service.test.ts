@@ -153,19 +153,43 @@ describe("MilestoneService archive/restore", () => {
     expect(arch.archivedAt).toBe("2026-01-01 10:00:00");
   });
 
-  it("restore brings the milestone back only; sprints stay archived", async () => {
+  it("restore cascades to sprints and tasks, with per-task activity rows", async () => {
     seed(db);
     const svc = makeService(db);
     const swimlaneRepo = makeRepo<SwimlaneRepo>(db, SwimlaneRepo);
+    const taskRepo = makeRepo<TaskRepo>(db, TaskRepo);
     const m = await Effect.runPromise(svc.create({ projectId: "p1", name: "v1" }));
     db.prepare(`INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id)
                 VALUES ('sp1','p1','Sprint 1',0,'sprint','${m.id}')`).run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position)
+                VALUES ('t1','p1','c1','sp1','T1','a0')`).run();
     await Effect.runPromise(svc.archive(maria, m.id));
     const restored = await Effect.runPromise(svc.restore(maria, m.id));
     expect(restored.milestone.archivedAt).toBeNull();
-    expect(restored.activity).toEqual([]);
+    expect(restored.activity).toHaveLength(1);
+    expect(restored.activity[0]!).toMatchObject({ type: "restored", taskId: "t1", actorLabel: "Maria", message: "Maria restored this task" });
     const lane = await Effect.runPromise(swimlaneRepo.findById("sp1"));
-    expect(lane.archivedAt).not.toBeNull();
+    expect(lane.archivedAt).toBeNull();
+    const task = await Effect.runPromise(taskRepo.findById("t1"));
+    expect(task.archivedAt).toBeNull();
+  });
+
+  it("restore leaves individually-archived children (older stamps) archived", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const taskRepo = makeRepo<TaskRepo>(db, TaskRepo);
+    const m = await Effect.runPromise(svc.create({ projectId: "p1", name: "v1" }));
+    db.prepare(`INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id)
+                VALUES ('sp1','p1','Sprint 1',0,'sprint','${m.id}')`).run();
+    // Individually archived BEFORE the cascade → older stamp, not selected by
+    // the milestone restore (which matches the milestone's own archive stamp).
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at)
+                VALUES ('t-old','p1','c1','sp1','Old','a0','2026-01-01 10:00:00')`).run();
+    await Effect.runPromise(svc.archive(maria, m.id));
+    const restored = await Effect.runPromise(svc.restore(maria, m.id));
+    expect(restored.activity).toEqual([]);
+    const old = await Effect.runPromise(taskRepo.findById("t-old"));
+    expect(old.archivedAt).toBe("2026-01-01 10:00:00");
   });
 
   it("restore is idempotent", async () => {

@@ -100,6 +100,76 @@ export function buildMilestoneArchiveBatch(input: {
   ];
 }
 
+/** Restore one swimlane and every task the archive cascade took down with it
+ *  (tasks whose `archived_at` equals the lane's stamp), with one `restored`
+ *  activity row per task. Individually-archived tasks (older stamps) stay
+ *  archived. Same statement shape as `buildSwimlaneArchiveBatch`. */
+export function buildSwimlaneRestoreBatch(input: {
+  swimlaneId: string;
+  swimlaneArchivedAt: string;
+  actor: CascadeActor;
+}): BatchStmt[] {
+  const a = input.actor;
+  return [
+    {
+      sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+            SELECT id, ?, ?, ?, 'restored', ?, ?
+              FROM tasks
+             WHERE swimlane_id = ? AND archived_at = ?
+             ORDER BY position, id
+            RETURNING ${ACTIVITY_RETURNING}`,
+      params: [a.actorKind, a.actorLabel, a.actorUserId, a.message, a.viaAssistant ? 1 : 0, input.swimlaneId, input.swimlaneArchivedAt],
+    },
+    {
+      sql: `UPDATE tasks SET archived_at = NULL, updated_at = datetime('now')
+             WHERE swimlane_id = ? AND archived_at = ?`,
+      params: [input.swimlaneId, input.swimlaneArchivedAt],
+    },
+    {
+      sql: `UPDATE swimlanes SET archived_at = NULL WHERE id = ? AND archived_at = ?`,
+      params: [input.swimlaneId, input.swimlaneArchivedAt],
+    },
+  ];
+}
+
+/** Restore one milestone, all its sprints, and every task the archive cascade
+ *  took down with it (matching the milestone's `archived_at` stamp), with one
+ *  `restored` activity row per task. Individually-archived children (sprints
+ *  or tasks with older stamps) stay archived. Same statement shape as
+ *  `buildMilestoneArchiveBatch`. */
+export function buildMilestoneRestoreBatch(input: {
+  milestoneId: string;
+  milestoneArchivedAt: string;
+  actor: CascadeActor;
+}): BatchStmt[] {
+  const a = input.actor;
+  const sprintScope = `swimlane_id IN (SELECT id FROM swimlanes WHERE milestone_id = ?)`;
+  return [
+    {
+      sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
+            SELECT id, ?, ?, ?, 'restored', ?, ?
+              FROM tasks
+             WHERE archived_at = ? AND ${sprintScope}
+             ORDER BY position, id
+            RETURNING ${ACTIVITY_RETURNING}`,
+      params: [a.actorKind, a.actorLabel, a.actorUserId, a.message, a.viaAssistant ? 1 : 0, input.milestoneArchivedAt, input.milestoneId],
+    },
+    {
+      sql: `UPDATE tasks SET archived_at = NULL, updated_at = datetime('now')
+             WHERE archived_at = ? AND ${sprintScope}`,
+      params: [input.milestoneArchivedAt, input.milestoneId],
+    },
+    {
+      sql: `UPDATE swimlanes SET archived_at = NULL WHERE milestone_id = ? AND archived_at = ?`,
+      params: [input.milestoneId, input.milestoneArchivedAt],
+    },
+    {
+      sql: `UPDATE milestones SET archived_at = NULL, updated_at = datetime('now') WHERE id = ? AND archived_at = ?`,
+      params: [input.milestoneId, input.milestoneArchivedAt],
+    },
+  ];
+}
+
 /** Map the positional activity `INSERT ... SELECT ... RETURNING` result (from
  *  statement 0 of a cascade batch) to events in deterministic order: sort by
  *  the autoincrement `id`, which follows the insert (SELECT) order. */
