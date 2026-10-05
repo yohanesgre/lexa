@@ -203,7 +203,8 @@ export const DEFAULT_DATABASE_PATH = "/app/data/lexa.db";
 export const DEFAULT_PUBLIC_URL = "http://localhost:5173";
 
 export function resolvePublicUrl(env: RuntimeEnv): string {
-  return env.LXK_PUBLIC_URL ?? DEFAULT_PUBLIC_URL;
+  const value = env.LXK_PUBLIC_URL?.trim();
+  return value ? value : DEFAULT_PUBLIC_URL;
 }
 
 export function resolveDatabasePath(env: RuntimeEnv): string {
