@@ -565,6 +565,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         : null;
     const harness = await resolveHarnessContext(deps, {
       threadKey,
+      // Document runs carry their `assistant_tasks` run id so the Worker sources
+      // the pre-selected skill from the run row, never the (possibly stale)
+      // thread binding. Chat turns and schedule runs carry none.
+      ...(runId !== null ? { runId } : {}),
       userText: lastUserText(this.messages),
       mode: turnMode,
     });

@@ -350,23 +350,25 @@ export async function resolveWorkerHarnessContext(
 
   const threadRow = await dbFirst<{
     agent_id: string | null;
-    skill_id: string | null;
     summary: string | null;
     summarized_count: number;
     title: string | null;
   }>(
-    `SELECT agent_id, skill_id, summary, summarized_count, title
+    `SELECT agent_id, summary, summarized_count, title
      FROM assistant_threads WHERE document_type = ? AND document_id = ?`,
     documentType,
     documentId
   );
 
   // Agent: run row (document runs) wins over the thread row; fall back to the
-  // builtin `assistant` row and finally a synthetic blank agent.
+  // builtin `assistant` row and finally a synthetic blank agent. The run row is
+  // also the skill source (below): `assistant_tasks` is the document run's
+  // source of truth, so `runRow` is kept in scope.
   let agentId = threadRow?.agent_id ?? null;
+  let runRow: { agent_id: string; skill_id: string | null } | null = null;
   if (input.runId) {
-    const runRow = await dbFirst<{ agent_id: string }>(
-      `SELECT agent_id FROM assistant_tasks WHERE id = ? AND project_id = ?`,
+    runRow = await dbFirst<{ agent_id: string; skill_id: string | null }>(
+      `SELECT agent_id, skill_id FROM assistant_tasks WHERE id = ? AND project_id = ?`,
       input.runId,
       input.projectId
     );
@@ -390,13 +392,17 @@ export async function resolveWorkerHarnessContext(
       : { id: "assistant", name: "Assistant Agent", instructions: "" };
 
   // Skills: ≤3 `$tokens` against the resolved agent's bound skills (catalog
-  // ≤20). Task/wiki use the thread's bound skillId as the first markdown.
+  // ≤20). A document run's pre-selected skill comes from the RUN row
+  // (`assistant_tasks.skill_id`), never the thread: auto mode stores a null run
+  // skill, so a stale thread-bound skill must not leak in. Chat turns, and
+  // delegated runners with no task row, carry no run skill. Explicit `$name`
+  // tokens keep resolving from `buildSkillPromptParts` regardless.
   const boundSkills = await resolveWorkerBoundSkills(deps.driver, agent.id);
   const parts = buildSkillPromptParts(input.userText, boundSkills);
-  if (documentType !== "chat" && threadRow?.skill_id) {
+  if (documentType !== "chat" && runRow?.skill_id) {
     const skill = await dbFirst<{ name: string; instructions: string | null }>(
       `SELECT name, instructions FROM lexa_skills WHERE id = ?`,
-      threadRow.skill_id
+      runRow.skill_id
     );
     if (skill && (skill.instructions ?? "").trim() !== "") {
       parts.skillMarkdowns = [`## Skill: ${skill.name}\n${skill.instructions}`, ...parts.skillMarkdowns].slice(0, 3);

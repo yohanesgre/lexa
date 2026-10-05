@@ -160,7 +160,7 @@ export class AssistantTaskRepo extends Effect.Service<AssistantTaskRepo>()("Lexa
         documentType: "task" | "wiki";
         documentId: string;
         agentId: string;
-        skillId: string;
+        skillId: string | null;
         extraPrompt: string;
         selection: string;
       }): Effect.Effect<AssistantTask, ConstraintViolation | DbError | RowNotFound> =>

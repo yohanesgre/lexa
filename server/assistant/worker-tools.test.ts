@@ -76,6 +76,8 @@ beforeEach(() => {
   db.exec("DELETE FROM assistant_jev_projects");
   db.exec("DELETE FROM assistant_settings");
   db.exec("DELETE FROM settings WHERE key = 'assistant_delegation_enabled'");
+  // Document runs now reference lexa_agents/lexa_skills, so clear them first.
+  db.exec("DELETE FROM assistant_tasks");
   db.exec("DELETE FROM lexa_agent_skills");
   db.exec("DELETE FROM lexa_skills");
   db.exec("DELETE FROM lexa_agents");
@@ -202,13 +204,17 @@ describe("resolveWorkerHarnessContext", () => {
     expect(on.delegation).toEqual({ enabled: true, maxConcurrentRuns: 3 });
   });
 
-  it("assembles a task bundle: doc context + bound-skill markdown", async () => {
+  it("assembles a task bundle: doc context + the RUN row's skill markdown", async () => {
     seedSettings();
     seedBoard();
     seedBoundSkill();
     db.exec(
       `INSERT INTO assistant_threads (document_type, document_id, project_id, agent_id, skill_id, messages)
-       VALUES ('task', 't1', 'p1', 'assistant', 'sk', '[]')`
+       VALUES ('task', 't1', 'p1', 'assistant', NULL, '[]')`
+    );
+    db.exec(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-1', 'p1', 'task', 't1', 'assistant', 'sk', 'running')`
     );
     db.prepare("UPDATE tasks SET description = ? WHERE id = 't1'").run(
       JSON.stringify({
@@ -219,7 +225,7 @@ describe("resolveWorkerHarnessContext", () => {
 
     const context = await resolveWorkerHarnessContext(
       { driver: driver(), base: base() },
-      { projectId: "p1", threadKey: "task:t1", userText: "help with this", mode: "turn" }
+      { projectId: "p1", threadKey: "task:t1", runId: "run-1", userText: "help with this", mode: "turn" }
     );
     expect(context.documentType).toBe("task");
     expect(context.agent?.id).toBe("assistant");
@@ -228,6 +234,42 @@ describe("resolveWorkerHarnessContext", () => {
     expect(context.skillMarkdowns[0]).toContain("## Skill: Test Skill");
     // Chat-only blocks stay empty on a document thread.
     expect(context.mentionContext).toBeNull();
+  });
+
+  it("ignores a stale thread skill when the run carries no skill (auto mode)", async () => {
+    seedSettings();
+    seedBoard();
+    seedBoundSkill();
+    db.exec(
+      `INSERT INTO assistant_threads (document_type, document_id, project_id, agent_id, skill_id, messages)
+       VALUES ('task', 't1', 'p1', 'assistant', 'sk', '[]')`
+    );
+    db.exec(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-auto', 'p1', 'task', 't1', 'assistant', NULL, 'running')`
+    );
+
+    const context = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "task:t1", runId: "run-auto", userText: "help with this", mode: "turn" }
+    );
+    expect(context.skillMarkdowns).toEqual([]);
+  });
+
+  it("keeps explicit $name tokens working on a document run with no run skill", async () => {
+    seedSettings();
+    seedBoard();
+    seedBoundSkill();
+    db.exec(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status)
+       VALUES ('run-auto', 'p1', 'task', 't1', 'assistant', NULL, 'running')`
+    );
+
+    const context = await resolveWorkerHarnessContext(
+      { driver: driver(), base: base() },
+      { projectId: "p1", threadKey: "task:t1", runId: "run-auto", userText: "please $test-skill this", mode: "turn" }
+    );
+    expect(context.skillMarkdowns[0]).toContain("## Skill: Test Skill");
   });
 
   it("skips the Jev preflight on mode:resume (and runs it on mode:turn)", async () => {

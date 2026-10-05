@@ -145,6 +145,15 @@ describe("POST /api/assistant/tasks attachments", () => {
     ]);
   });
 
+  it("omits skillId → 201 auto mode (no SKILL_NOT_FOUND)", async () => {
+    const auto = assistantTaskBody();
+    delete (auto as { skillId?: unknown }).skillId;
+    const res = await handler(authed("POST", "/api/assistant/tasks", auto));
+    expect(res.status).toBe(201);
+    const task = await res.json();
+    expect(task.skillId).toBeNull();
+  });
+
   it("more than 5 images → 422 INVALID_ARGS cap message", async () => {
     const scoped = db.prepare("SELECT storage_key FROM attachments LIMIT 1").get() as { storage_key: string };
     const six = Array.from({ length: 6 }, () => ({

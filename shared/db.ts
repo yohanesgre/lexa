@@ -403,7 +403,7 @@ export interface AssistantTaskRow {
   document_title?: string | null;
   key?: string | null;
   agent_id: string;
-  skill_id: string;
+  skill_id: string | null;
   agent_name?: string | null;
   skill_name?: string | null;
   extra_prompt: string;
@@ -417,7 +417,7 @@ export interface AssistantTaskRow {
 }
 
 export function rowToAssistantTask(row: AssistantTaskRow): {
-  id: string; key: string; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+  id: string; key: string; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string | null; agentName: string; skillName: string; extraPrompt: string; selection: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
     id: row.id,

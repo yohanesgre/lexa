@@ -674,7 +674,7 @@ CREATE TABLE assistant_tasks (
   document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id   TEXT NOT NULL,
   agent_id      TEXT NOT NULL REFERENCES lexa_agents(id),
-  skill_id      TEXT NOT NULL REFERENCES lexa_skills(id),
+  skill_id      TEXT REFERENCES lexa_skills(id),
   extra_prompt  TEXT NOT NULL DEFAULT '',
   selection     TEXT NOT NULL DEFAULT '',
   status        TEXT NOT NULL DEFAULT 'queued'

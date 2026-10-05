@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompts, MARKDOWN_STYLE, WRITE_POLICY, type SystemPromptInput } from "./prompt";
+import { buildSystemPrompts, AUTO_SKILL_INSTRUCTION, MARKDOWN_STYLE, WRITE_POLICY, type SystemPromptInput } from "./prompt";
 
 const base: SystemPromptInput = {
   identity: "IDENTITY",
@@ -67,12 +67,16 @@ describe("buildSystemPrompts skills", () => {
     expect(prompts[1]!.cache_control).toEqual({ type: "ephemeral" });
   });
 
-  it("drops blank skill markdowns; absent skills keep the default rules copy", () => {
+  it("drops blank skill markdowns; no skills emits the auto-pick instruction", () => {
     const blank = buildSystemPrompts({ ...base, agentMarkdown: "AGENT", skillMarkdowns: ["  ", ""] });
-    expect(blank[1]!.content).toBe("AGENT");
-    expect(buildSystemPrompts(base)[1]!.content).toBe(
-      "No additional behavior rules are active. Use your default judgment."
-    );
+    expect(blank[1]!.content).toBe(`AGENT\n\n${AUTO_SKILL_INSTRUCTION}`);
+    expect(buildSystemPrompts(base)[1]!.content).toBe(AUTO_SKILL_INSTRUCTION);
+  });
+
+  it("auto-pick instruction names the catalog + get_skill and defers to the Additional prompt", () => {
+    expect(AUTO_SKILL_INSTRUCTION).toContain("bound-skills catalog");
+    expect(AUTO_SKILL_INSTRUCTION).toContain("get_skill");
+    expect(AUTO_SKILL_INSTRUCTION).toContain("Additional prompt takes precedence");
   });
 
   it("rides the catalog in the cached identity segment, after the write policy", () => {

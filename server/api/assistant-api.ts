@@ -252,7 +252,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           documentId: req.payload.documentId,
           prompt: req.payload.prompt,
           agentId: req.payload.agentId,
-          skillId: req.payload.skillId,
+          ...(req.payload.skillId !== undefined ? { skillId: req.payload.skillId } : {}),
           ...(req.payload.selection !== undefined ? { selection: req.payload.selection } : {}),
           ...(req.payload.attachments !== undefined ? { attachments: [...req.payload.attachments] } : {}),
         });

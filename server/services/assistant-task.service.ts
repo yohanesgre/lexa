@@ -5,6 +5,7 @@ import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assi
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, IDENTITY, buildUserMessage } from "../assistant/prompt";
+import { buildSkillPromptParts } from "../assistant/context";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
 import { AssistantPendingWritesRepo } from "../repos/assistant-pending-writes.repo";
@@ -305,11 +306,17 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
 
       cancel: (id: string) => cancelTask(id),
 
-      enqueue: (input: { projectId: string; documentType: "task" | "wiki"; documentId: string; prompt: string; agentId: string; skillId: string; selection?: string; attachments?: Array<{ storageKey: string; mimeType: string; name: string }> }) => Effect.gen(function* () {
+      enqueue: (input: { projectId: string; documentType: "task" | "wiki"; documentId: string; prompt: string; agentId: string; skillId?: string; selection?: string; attachments?: Array<{ storageKey: string; mimeType: string; name: string }> }) => Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(input.projectId);
         yield* catalogRepo.findAgentById(input.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId })));
-        yield* catalogRepo.findSkillById(input.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId })));
-        if (!(yield* Effect.promise(() => skillJunctionBound(input.agentId, input.skillId)))) return yield* new SkillNotFound({ id: input.skillId });
+        // Auto skill selection: an absent/blank skillId means the assistant picks
+        // from its bound catalog itself. An explicit id is still validated
+        // against the catalog AND the agent's junction binding.
+        const skillId = input.skillId !== undefined && input.skillId.trim() !== "" ? input.skillId : null;
+        if (skillId !== null) {
+          yield* catalogRepo.findSkillById(skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: skillId })));
+          if (!(yield* Effect.promise(() => skillJunctionBound(input.agentId, skillId)))) return yield* new SkillNotFound({ id: skillId });
+        }
         if (input.documentType === "task") yield* taskRepo.findById(input.documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId })));
         else yield* wikiRepo.findBySlug(input.projectId, input.documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId })));
         const attachments = input.attachments ?? [];
@@ -318,9 +325,9 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           if (resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null }) === "none") return yield* new VisionNotConfigured();
           const existing = yield* threadRepo.loadThread(input.documentType, input.documentId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
           const verdict = resolveAssistantThread(existing, input.agentId);
-          yield* threadRepo.saveThread(input.documentType, input.documentId, { projectId: input.projectId, agentId: input.agentId, skillId: input.skillId, messages: [...verdict.messages, { role: "user", content: attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType })) }], summary: verdict.summary, summarizedCount: verdict.summarizedCount });
+          yield* threadRepo.saveThread(input.documentType, input.documentId, { projectId: input.projectId, agentId: input.agentId, skillId, messages: [...verdict.messages, { role: "user", content: attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType })) }], summary: verdict.summary, summarizedCount: verdict.summarizedCount });
         }
-        return yield* queueRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId: input.skillId, extraPrompt: input.prompt, selection: input.selection ?? "" });
+        return yield* queueRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId, extraPrompt: input.prompt, selection: input.selection ?? "" });
       }),
       resetThread: (projectId: string, documentType: "task" | "wiki", documentId: string) => Effect.gen(function* () {
         const tasks = yield* queueRepo.listTasksForDocument(projectId, documentType, documentId);
@@ -351,7 +358,12 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           }).pipe(Effect.catchAll(() => Effect.succeed(0)));
         }
         const agent = yield* catalogRepo.findAgentById(task.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId })));
-        const skill = yield* catalogRepo.findSkillById(task.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: task.skillId })));
+        // Auto mode: an omitted skill leaves `task.skillId` null, so no skill
+        // markdown is injected and the assistant picks from its catalog.
+        const taskSkillId = task.skillId;
+        const skill = taskSkillId !== null
+          ? yield* catalogRepo.findSkillById(taskSkillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: taskSkillId })))
+          : null;
         const doc = yield* loadDocContext(task.projectId, task.documentType, task.documentId);
         const repoContent = yield* loadTaskRepoContent(task).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
@@ -362,8 +374,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // The selection/instruction is resolved before the prompt build because
         // it is the preflight's "latest user message": the judgment must see the
         // same text the model will.
-        let effectiveSelection = task.selection ?? "";
-        if (skill.id === "polish" && !effectiveSelection.trim()) { const fallback = doc.context?.trim() ? doc.context : ""; if (fallback) effectiveSelection = fallback; }
+        const effectiveSelection = task.selection ?? "";
         const instruction = [effectiveSelection.trim() ? `Selected text:\n"""\n${effectiveSelection}\n"""` : null, task.extraPrompt].filter((s): s is string => !!s && s.trim() !== "").join("\n\n");
         // Preflight runs once per NEW run, never on resume; only inputs this run
         // already loaded are serialized (no history, no attachments, no keys).
@@ -376,10 +387,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           taskWikiContext: doc.context,
           memoryHits,
         });
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: [skill.instructions], repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
+        // Bound-skill catalog: the same source `context.ts` uses, so the auto-pick
+        // instruction has a catalog to reference on the Bun document path too.
+        const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, task.agentId));
+        const { skillCatalog } = buildSkillPromptParts(instruction, boundSkills);
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, task.agentId));
         const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
@@ -402,9 +416,14 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         const { messages: history, results: approvalResults, resumeResultsNote } = yield* prepareResume(thread);
-        if (!thread.agentId || !thread.skillId) return yield* new AgentNotFound({ id: "" });
+        // Document-keyed thread: the agent is required; the skill is optional
+        // (auto mode stores null, and skills are no longer thread-bound).
+        if (!thread.agentId) return yield* new AgentNotFound({ id: "" });
         const agent = yield* catalogRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
-        const skill = yield* catalogRepo.findSkillById(thread.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" })));
+        const threadSkillId = thread.skillId;
+        const skill = threadSkillId !== null
+          ? yield* catalogRepo.findSkillById(threadSkillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: threadSkillId })))
+          : null;
         const doc = yield* loadDocContext(thread.projectId, documentType, documentId);
         const repoContent = yield* loadTaskRepoContent({ projectId: thread.projectId, documentType, documentId } as Parameters<typeof loadTaskRepoContent>[0]).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
@@ -413,10 +432,14 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // request. The tool is still offered — its budget is per stream. The
         // config is resolved once here too, so a resume gets the same gate.
         const jevConfig = yield* jevService.resolveForProject(thread.projectId);
-        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: [skill.instructions], repoContent, docContext: doc.context, writeTools: enabledWriteTools });
+        // Bound-skill catalog for the auto-pick instruction, same source as the
+        // new-run path. A resume carries no new user text, so `$tokens` do not
+        // apply here.
+        const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, thread.agentId ?? ""));
+        const { skillCatalog } = buildSkillPromptParts("", boundSkills);
+        const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const boundSkills = yield* Effect.promise(() => dbAll<BoundSkill>(BOUND_SKILLS_SQL, thread.agentId ?? ""));
         const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
