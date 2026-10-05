@@ -7,6 +7,45 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.8.1] - 2026-10-06
+
+### Migration notes
+
+- **Assistant runs may carry no skill (migration 0026).** `assistant_tasks.skill_id`
+  is now nullable with `ON DELETE SET NULL`: a document run can be enqueued with
+  no skill (the assistant auto-picks one), and deleting a skill a run referenced
+  degrades that run to auto mode instead of blocking the delete or stranding a
+  dangling id. The table rebuild copies existing rows and nulls any dangling id —
+  no user action.
+
+### Changed
+
+- **The assistant doc panel drops the skill picker (LX-133).** Generate no longer
+  asks the user to choose a skill: the agent picks suitable skill(s) itself from
+  its bound catalog (`get_skill`, plus the `$name` opt-in), and the Additional
+  prompt is respected and wins. `skillId` is optional end-to-end (blank → null);
+  the worker sources the skill from the run/task row so a stale thread skill can
+  no longer inject; `AUTO_SKILL_INSTRUCTION` applies to document runs only while
+  chat keeps the neutral fallback. (#324, #326, #325)
+
+### Fixed
+
+- **Done-column toggle restored (LX-131 recovery).** `isDone` now flows through
+  the HTTP create/update handlers, and the setup wizard's default seed flags its
+  Done column, so the UI "Done column" toggle and `lx column update --done true`
+  work again — completing the v2026.8.0 LX-131 fix. Existing boards' progress
+  counts were already repaired by migration 0025; this restores the toggle for
+  columns the name heuristic did not catch. (#327)
+- **Editor assistant document runs actually execute (LX-134).** Generate used to
+  enqueue an `assistant_tasks` row that nothing started — the document-run
+  dispatch was never implemented. The Durable Object now dispatches document runs
+  through the per-turn engine with a `queued→running` claim, terminal guarantees
+  on every failure path, a 30-minute stale-run sweep in the scheduled tick, and a
+  reachable 502 (`ASSISTANT_UNAVAILABLE`) when dispatch fails; the panel observes
+  the document thread and keeps a fresh run from showing the previous Done. (#330,
+  #329)
+- **Migration 0026 header corrected** to state the dangling-id nulling. (#328)
+
 ## [2026.8.0] - 2026-10-05
 
 ### Migration notes
