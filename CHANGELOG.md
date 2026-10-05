@@ -7,6 +7,27 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.8.2] - 2026-10-06
+
+### Fixed
+
+- **Fresh-chat first send is no longer dropped.** Sending the first prompt from a
+  new chat could mint the thread and then lose it: the deferred write made the
+  stream look idle, the transcript's expected 404 read as a dead thread, and
+  stale-thread recovery evicted the just-minted chat and tore down its
+  still-connecting socket — the prompt vanished and the page landed fresh.
+  Recovery and turn retention now treat an accepted-but-unflushed send as live
+  until the first ingress, so the send survives and the reply streams. (#332)
+- **The assistant placeholder shows as soon as a prompt is sent.** The pending
+  caret bubble now renders from send acceptance instead of only once the stream
+  starts, so the docked view no longer shows a lone user bubble (which read as a
+  failed prompt) while the transport attaches. (#332)
+- **Assistant WebSocket console noise removed.** The idle landing no longer
+  probes a closed socket (`send() was called after close()`), a resume probe
+  aimed at a discarded socket is dropped instead of buffered, and the expected
+  per-thread identity change on a thread switch no longer logs the SDK advisory.
+  (#332)
+
 ## [2026.8.1] - 2026-10-06
 
 ### Migration notes
