@@ -152,6 +152,23 @@ describe("columns routes", () => {
     const del = await handler(json("DELETE", `/api/projects/p1/columns/${id}`));
     expect(del.status).toBe(204);
   });
+
+  it("POST /api/projects/:slug/columns forwards isDone (creates a flagged column)", async () => {
+    const res = await handler(json("POST", "/api/projects/p1/columns", { name: "Shipped", isDone: true }));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ name: "Shipped", isDone: true });
+  });
+
+  it("PATCH /api/projects/:slug/columns/:id flips isDone off and back", async () => {
+    const created = await handler(json("POST", "/api/projects/p1/columns", { name: "Flagged", isDone: true }));
+    const { id } = await created.json();
+    const off = await handler(json("PATCH", `/api/projects/p1/columns/${id}`, { isDone: false }));
+    expect(off.status).toBe(200);
+    expect((await off.json()).isDone).toBe(false);
+    const on = await handler(json("PATCH", `/api/projects/p1/columns/${id}`, { isDone: true }));
+    expect(on.status).toBe(200);
+    expect((await on.json()).isDone).toBe(true);
+  });
 });
 
 describe("swimlane routes", () => {
