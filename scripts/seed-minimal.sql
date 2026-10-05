@@ -32,11 +32,11 @@ INSERT INTO type_options (id, project_id, label, color, position) VALUES
   ('seed-type-gs-2', 'seed-proj-start', 'Task', '#22D3EE', 2),
   ('seed-type-gs-3', 'seed-proj-start', 'Asset', '#F472B6', 3);
 
-INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
+INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state, is_done)
 VALUES
-  ('seed-col-gs-0', 'seed-proj-start', 'Backlog', 0, '#6b7280', NULL, '[]', NULL),
-  ('seed-col-gs-1', 'seed-proj-start', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open'),
-  ('seed-col-gs-2', 'seed-proj-start', 'Done', 2, '#10b981', NULL, '[]', 'closed');
+  ('seed-col-gs-0', 'seed-proj-start', 'Backlog', 0, '#6b7280', NULL, '[]', NULL, 0),
+  ('seed-col-gs-1', 'seed-proj-start', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open', 0),
+  ('seed-col-gs-2', 'seed-proj-start', 'Done', 2, '#10b981', NULL, '[]', 'closed', 1);
 
 -- tasks.swimlane_id is NOT NULL — the Backlog swimlane is the default.
 INSERT INTO swimlanes (id, project_id, name, description, position, kind)

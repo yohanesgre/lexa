@@ -244,12 +244,16 @@ describe("minimal seed flavor", () => {
     const tasks = db.query("SELECT COUNT(*) c FROM tasks WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started')").get() as { c: number };
     const wiki = db.query("SELECT COUNT(*) c FROM wiki_pages WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started')").get() as { c: number };
     const first = db.query("SELECT key FROM tasks WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started') AND number = 1").get() as { key: string };
+    const doneCol = db.query("SELECT is_done FROM columns WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started') AND name = 'Done'").get() as { is_done: number };
+    const backlogCol = db.query("SELECT is_done FROM columns WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started') AND name = 'Backlog'").get() as { is_done: number };
     db.close();
     expect(project.key).toBe("GS");
     expect(project.next_task_number).toBe(5);
     expect(tasks.c).toBe(5);
     expect(wiki.c).toBe(1);
     expect(first.key).toBe("GS-1");
+    expect(doneCol.is_done).toBe(1);
+    expect(backlogCol.is_done).toBe(0);
     const complete = await handler3(new Request("http://localhost:3000/api/setup/complete", { method: "POST" }));
     expect(complete.status).toBe(200);
   });

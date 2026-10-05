@@ -287,6 +287,7 @@ const ColumnPayload = Schema.Struct({
   wipLimit: Schema.optional(Schema.NullOr(Schema.Number)),
   requiredFields: Schema.optional(Schema.Array(Schema.String)),
   githubState: Schema.optional(Schema.NullOr(Schema.Literal("open", "closed"))),
+  isDone: Schema.optional(Schema.Boolean),
 });
 
 const ColumnUpdatePayload = Schema.Struct({
@@ -1807,6 +1808,7 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
           ...(req.payload.wipLimit !== undefined ? { wipLimit: req.payload.wipLimit } : {}),
           ...(req.payload.requiredFields !== undefined ? { requiredFields: req.payload.requiredFields as string[] } : {}),
           ...(req.payload.githubState !== undefined ? { githubState: req.payload.githubState } : {}),
+          ...(req.payload.isDone !== undefined ? { isDone: req.payload.isDone } : {}),
         });
         return formatColumn(column);
       }))
@@ -1822,6 +1824,7 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
           ...(req.payload.wipLimit !== undefined ? { wipLimit: req.payload.wipLimit } : {}),
           ...(req.payload.requiredFields !== undefined ? { requiredFields: req.payload.requiredFields as string[] } : {}),
           ...(req.payload.githubState !== undefined ? { githubState: req.payload.githubState } : {}),
+          ...(req.payload.isDone !== undefined ? { isDone: req.payload.isDone } : {}),
         });
         return formatColumn(column);
       }))

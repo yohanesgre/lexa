@@ -19,6 +19,7 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
         requiredFields?: string[];
         color?: string;
         githubState?: "open" | "closed" | null;
+        isDone?: boolean;
       }): Effect.Effect<Column, ProjectNotFound | DbError | ConstraintViolation | RowNotFound> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
@@ -35,6 +36,7 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
             ...(input.requiredFields !== undefined ? { requiredFields: input.requiredFields } : {}),
             ...(input.color !== undefined ? { color: input.color } : {}),
             ...(input.githubState !== undefined ? { githubState: input.githubState } : {}),
+            ...(input.isDone !== undefined ? { isDone: input.isDone } : {}),
           });
           yield* Effect.logInfo(`[Column] Created ${col.id} in project ${col.projectId}`);
           return col;
