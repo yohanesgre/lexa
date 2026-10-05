@@ -5,12 +5,14 @@ import { ApprovalChipRow } from "./AssistantApprovalChipRow";
 import { carouselOffsets, carouselTarget, nearestIndex } from "./assistant-approval-carousel";
 
 // Approval batch for Assistant write proposals — transcribed from
-// wireframes/src/herald-write-approvals.html. Chips render in seq order under
-// ONE batch header as a horizontal scroll-snapped carousel: one active card,
-// the neighbour peeking, prev/next controls + an N / M counter (the per-chip
-// seq badge folds into the counter). Native scroll-snap does the paging; this
-// layer adds ArrowLeft / ArrowRight paging, clamped ends, and the focused-card
-// follow. Chip internals live in AssistantApprovalChipRow / AssistantDiffBody.
+// wireframes/src/herald-write-approvals.html. A batch of >= 2 chips renders in
+// seq order under ONE batch header as a horizontal scroll-snapped carousel: one
+// active card, the neighbour peeking, prev/next controls + an N / M counter
+// (the per-chip seq badge folds into the counter). Native scroll-snap does the
+// paging; this layer adds ArrowLeft / ArrowRight paging, clamped ends, and the
+// focused-card follow. A single-chip batch (State 1b) drops the carousel chrome:
+// the chip renders as a plain full-width card directly under the header. Chip
+// internals live in AssistantApprovalChipRow / AssistantDiffBody.
 
 export type ApprovalChipState = "pending" | "approved" | "rejected" | "expired" | "failed";
 
@@ -309,7 +311,9 @@ export function AssistantApprovalBatch({
         )}
       </div>
 
-      {total > 0 && (
+      {total === 1 && <ApprovalChipRow chip={ordered[0]!} disabled={locked} onDecide={handleCardDecide} />}
+
+      {total >= 2 && (
         <div className="approval-carousel" onKeyDown={handleKeyDown}>
           <div
             ref={trackRef}
