@@ -200,6 +200,12 @@ describe("searchRepos", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/search/repositories"))).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/app/installations/7/access_tokens"))).toBe(true);
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/app/installations/8/access_tokens"))).toBe(true);
+    // Token attribution: each listing call carries the token minted for its own
+    // installation, in order.
+    const listingAuth = fetchMock.mock.calls
+      .filter(([url]) => String(url).includes("/installation/repositories"))
+      .map(([, init]) => ((init as RequestInit | undefined)?.headers as Record<string, string> | undefined)?.Authorization);
+    expect(listingAuth).toEqual(["Bearer inst-token-7", "Bearer inst-token-8"]);
   });
 
   it("paginates bounded", async () => {
@@ -246,6 +252,26 @@ describe("searchRepos", () => {
     let callIndex = 0;
     routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", () => results[callIndex++]);
     await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual(["acme/widget"]);
+  });
+
+  it("a thrown listing call is tolerated when another installation returns names", async () => {
+    setupInstallationList([7, 8]);
+    let callIndex = 0;
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", () => {
+      if (callIndex++ === 0) throw new Error("network down");
+      return { repositories: [{ full_name: "acme/widget" }] };
+    });
+    await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual(["acme/widget"]);
+  });
+
+  it("all listing calls throw → GithubApiError, never []", async () => {
+    setupInstallationList([7]);
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", () => {
+      throw new Error("network down");
+    });
+    await expect(call((c) => c.searchRepos("wid"))).rejects.toMatchObject({
+      message: expect.stringContaining("GitHub installed-repo list failed"),
+    });
   });
 });
 

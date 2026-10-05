@@ -219,29 +219,37 @@ async function fetchInstallations(config: GitHubConfig["Type"]): Promise<AppInst
 async function installedRepoNames(
   config: GitHubConfig["Type"],
   installations: AppInstallation[]
-): Promise<{ names: string[]; failures: number; firstStatus: number | null }> {
+): Promise<{ names: string[]; failures: number; firstStatus: number | string | null }> {
   const names: string[] = [];
   let failures = 0;
-  let firstStatus: number | null = null;
+  let firstStatus: number | string | null = null;
   for (const installation of installations) {
-    const token = await installationTokenForId(config, installation.id);
-    for (let page = 1; page <= 5; page++) {
-      const res = await githubFetch(config, `/installation/repositories?per_page=100&page=${page}`, {
-        method: "GET",
-        headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        failures++;
-        firstStatus ??= res.status;
-        break;
+    // One installation's failure (network rejection, timeout, token mint for a
+    // stale installation) must not abort the whole listing — tolerate it, count
+    // it, and keep the names already collected from the others.
+    try {
+      const token = await installationTokenForId(config, installation.id);
+      for (let page = 1; page <= 5; page++) {
+        const res = await githubFetch(config, `/installation/repositories?per_page=100&page=${page}`, {
+          method: "GET",
+          headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          failures++;
+          firstStatus ??= res.status;
+          break;
+        }
+        const body = (await res.json()) as { repositories?: { full_name?: string }[] };
+        const pageNames = (body.repositories ?? [])
+          .map((r) => r.full_name)
+          .filter((n): n is string => typeof n === "string");
+        names.push(...pageNames);
+        const hasNext = /rel="next"/.test(res.headers.get("link") ?? "");
+        if (!hasNext || pageNames.length === 0) break;
       }
-      const body = (await res.json()) as { repositories?: { full_name?: string }[] };
-      const pageNames = (body.repositories ?? [])
-        .map((r) => r.full_name)
-        .filter((n): n is string => typeof n === "string");
-      names.push(...pageNames);
-      const hasNext = /rel="next"/.test(res.headers.get("link") ?? "");
-      if (!hasNext || pageNames.length === 0) break;
+    } catch (e) {
+      failures++;
+      firstStatus ??= e instanceof Error && e.message ? e.message : "unknown";
     }
   }
   return { names: [...new Set(names)], failures, firstStatus };
