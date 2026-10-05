@@ -608,7 +608,7 @@ GET    /api/projects/:slug/columns
 → 200 { data: Column[] }         (ordered by position; not paginated — bounded by nature)
 
 POST   /api/projects/:slug/columns      (admin)
-body { name*, position?, color?, wipLimit?, requiredFields?, githubState? }
+body { name*, position?, color?, wipLimit?, requiredFields?, githubState?, isDone? }
 → 201 Column | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
   position omitted → appended to end
 
