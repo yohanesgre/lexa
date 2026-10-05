@@ -51,7 +51,10 @@ The manifest sets:
 **Install scope note:** **"All repositories" is recommended** — the Settings
 type-ahead (Linked Repos) and the task-detail issue autocomplete only see repos
 the App is INSTALLED on. "Only select repositories" silently limits both
-pickers, and every new repo link requires editing the install in GitHub.
+pickers, and every new repo link requires editing the install in GitHub. The
+connected card and the type-ahead list only repos the App's installation(s) can
+access (no global search), show the install status, and link to the App's
+Install page when it is not installed yet.
 
 **Account note (v1):** the manifest creates the App under the signed-in admin's
 **personal account**. Org-owned App creation (GitHub's

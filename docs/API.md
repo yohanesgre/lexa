@@ -1325,11 +1325,23 @@ body { code?: string, state*: string }
   ⚠ Reconnect: this path REPLACES an existing App's credentials; the previous
   webhook secret is dropped, so the old App's deliveries stop verifying.
 
+GET    /api/settings/github/installations  (admin)
+→ 200 { status: "installed" | "not_installed" | "unknown", accounts: string[] }
+  Live install probe for the configured App: "installed" with the installing
+  account logins, "not_installed" when the App has zero installations (or no
+  App is configured), "unknown" when GitHub can't be reached — upstream
+  failure degrades, never a 5xx. Cached 60s server-side, invalidated by any
+  GitHub settings save. Secrets are never returned.
+
 GET    /api/settings/github/search-repos?q=  (admin)
 → 200 { data: ["owner/repo", ...] } | 403 FORBIDDEN | 502 GITHUB_API_ERROR
-  Linked Repos type-ahead: repos the GitHub App is INSTALLED on, filtered by q
-  (owner or repo name substring). Only sees installed repos — "Only select
-  repositories" installs silently shrink the results.
+  Linked Repos type-ahead. Lists the repos the App's installation(s) can
+  access — GET /installation/repositories per installation (bounded: ≤5 pages
+  of 100), aggregated, deduped, then filtered locally and case-insensitively
+  on q (owner or repo name substring), capped at 8. No global GitHub search
+  is used. Zero installations → 200 []. A 200-empty otherwise means no match —
+  GET /api/settings/github/installations disambiguates. 502 when no listing
+  call returned names and at least one failed (never a silent empty list).
 ```
 
 ### Admin (users & project roles)

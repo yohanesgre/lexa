@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Effect } from "effect";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,13 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { createApiHandler } from "./http";
 import { syncGitHubConfigFromDbAsync } from "../github/client";
 import { resolveGithubAppSecrets } from "../github/config-store";
+
+// The stored TEST_PEM is intentionally not a usable key; the probe test needs
+// to reach the stubbed fetch, so the app JWT signing is stubbed.
+vi.mock("../github/crypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../github/crypto")>();
+  return { ...actual, createAppJwt: vi.fn(async () => "fake-jwt") };
+});
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -192,5 +199,84 @@ describe("settings github endpoints", () => {
   it("rejects without a key → 401", async () => {
     const res = await handler(new Request("http://lexa.test/api/settings/github"));
     expect(res.status).toBe(401);
+  });
+});
+
+describe("settings github installations probe", () => {
+  it("member-bound key → 403 FORBIDDEN", async () => {
+    const res = await handler(json("GET", "/api/settings/github/installations", undefined, MEMBER_KEY));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+
+  it("no App configured → not_installed", async () => {
+    db.exec("DELETE FROM settings WHERE key LIKE 'github_%'");
+    db.exec("DELETE FROM github_app_secrets");
+    await Effect.runPromise(syncGitHubConfigFromDbAsync(createBunSqliteDriver(db)));
+    const res = await handler(json("GET", "/api/settings/github/installations"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "not_installed", accounts: [] });
+  });
+
+  it("upstream failure → unknown (never a 5xx)", async () => {
+    await handler(json("PUT", "/api/settings/github", {
+      appId: "1234567",
+      privateKey: TEST_PEM,
+      webhookSecret: TEST_SECRET,
+    }));
+    const fetchMock = vi.fn(() => Promise.reject(new Error("network down")));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await handler(json("GET", "/api/settings/github/installations"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "unknown", accounts: [] });
+    // Pin the failure path: the probe must have reached the stubbed fetch, not
+    // short-circuited on an (unmocked) JWT failure.
+    expect(fetchMock).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  const installationsResponse = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+
+  it("installed App → installed with account logins", async () => {
+    await handler(json("PUT", "/api/settings/github", {
+      appId: "1234567",
+      privateKey: TEST_PEM,
+      webhookSecret: TEST_SECRET,
+    }));
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        installationsResponse([
+          { id: 1, account: { login: "acme" } },
+          { id: 2, account: { login: "beta" } },
+        ])
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await handler(json("GET", "/api/settings/github/installations"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "installed", accounts: ["acme", "beta"] });
+    expect(fetchMock).toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("missing account login is filtered from the probe", async () => {
+    await handler(json("PUT", "/api/settings/github", {
+      appId: "1234567",
+      privateKey: TEST_PEM,
+      webhookSecret: TEST_SECRET,
+    }));
+    vi.stubGlobal("fetch", vi.fn(() =>
+      Promise.resolve(
+        installationsResponse([
+          { id: 1, account: { login: "acme" } },
+          { id: 2 },
+        ])
+      )
+    ));
+    const res = await handler(json("GET", "/api/settings/github/installations"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "installed", accounts: ["acme"] });
+    vi.unstubAllGlobals();
   });
 });
