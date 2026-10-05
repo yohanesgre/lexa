@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createAssistantApiHandler } from "./assistant-api";
+import type { AssistantThreadRpcShape } from "../assistant/thread-rpc";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -22,6 +23,7 @@ async function sha256(text: string): Promise<string> {
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 20]);
 
 let dir: string;
+let dbPath: string;
 let handler: (req: Request) => Promise<Response>;
 let db: Database;
 
@@ -59,7 +61,7 @@ function assistantTaskBody(overrides: Record<string, unknown> = {}) {
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-assistant-attachments-api-"));
-  const dbPath = join(dir, "test.db");
+  dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   const adminHash = await sha256(ADMIN_KEY);
   db = new Database(dbPath);
@@ -169,5 +171,37 @@ describe("POST /api/assistant/tasks attachments", () => {
     const body = await res.json();
     expect(body.error.code).toBe("INVALID_ARGS");
     expect(body.error.message).toContain("at most 5 images");
+  });
+});
+
+describe("POST /api/assistant/tasks — DO enqueue failure", () => {
+  it("enqueueRun soft failure → 502 ASSISTANT_UNAVAILABLE and the task row lands failed/ASSISTANT_UNAVAILABLE", async () => {
+    let attemptedRunId: string | null = null;
+    const threadRpc: AssistantThreadRpcShape = {
+      available: true,
+      getTranscript: async () => null,
+      resumeBatch: async () => null,
+      destroyThread: async () => null,
+      resetThread: async () => null,
+      enqueueRun: async (_threadKey, input) => {
+        attemptedRunId = input.runId;
+        return { ok: false, reason: "deps_unavailable" };
+      },
+      abortRun: async () => null,
+    };
+    const doHandler = createAssistantApiHandler(dbPath, undefined, { threadRpc });
+
+    const res = await doHandler(authed("POST", "/api/assistant/tasks", assistantTaskBody()));
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error.code).toBe("ASSISTANT_UNAVAILABLE");
+
+    // The RPC named the run the handler failed; the durable row is failed.
+    expect(attemptedRunId).toBeTruthy();
+    const persisted = db
+      .prepare("SELECT status, error FROM assistant_tasks WHERE id = ?")
+      .get(attemptedRunId) as { status: string; error: string | null };
+    expect(persisted.status).toBe("failed");
+    expect(persisted.error).toBe("ASSISTANT_UNAVAILABLE");
   });
 });

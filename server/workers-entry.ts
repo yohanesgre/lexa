@@ -85,8 +85,8 @@ import {
 import { handleInternalAssistantRequest } from "./assistant/internal-routes";
 import { buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerHarnessContext } from "./assistant/worker-tools";
 import { dispatchDueSchedules } from "./scheduled/schedules";
-import { reconcileStaleRuns } from "./assistant/run-registry";
-import type { AssistantThreadRpcShape, ResumeBatchAck } from "./assistant/thread-rpc";
+import { reconcileStaleRuns, reconcileStaleDocumentRuns } from "./assistant/run-registry";
+import type { AssistantThreadRpcShape, EnqueueRunAck, ResumeBatchAck } from "./assistant/thread-rpc";
 import type {
   AssistantRunRow,
   AssistantScheduleRow,
@@ -120,7 +120,7 @@ function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadR
       kind?: "document" | "schedule";
       selection?: string;
       extraPrompt?: string;
-    }): Promise<{ ok: true }>;
+    }): Promise<EnqueueRunAck>;
     abortRun(taskId: string): Promise<{ ok: true }>;
   }
   const stubFor = async (threadKey: string): Promise<Stub> =>
@@ -679,6 +679,16 @@ export async function runScheduledCore(
     if (reconciled.failed > 0) console.log(`[Workers] assistant stale runs failed: ${reconciled.failed}`);
   } catch (e) {
     console.error("[Workers] assistant run reconciliation failed:", e instanceof Error ? e.message : String(e));
+  }
+  // Document-run reconciliation (LX-134): a crash/evict after the
+  // `queued → running` claim leaves an `assistant_tasks` row `running` forever;
+  // the registry sweep above only covers `assistant_runs`. Direct UPDATE, no
+  // activity. Fail-open: a reconciliation error must never break the tick.
+  try {
+    const reconciledDocs = await Effect.runPromise(reconcileStaleDocumentRuns(driver));
+    if (reconciledDocs.failed > 0) console.log(`[Workers] assistant stale document runs failed: ${reconciledDocs.failed}`);
+  } catch (e) {
+    console.error("[Workers] assistant document-run reconciliation failed:", e instanceof Error ? e.message : String(e));
   }
   // Scheduled assistant runs (ADR-0004 §4; H7): fire due schedules, each of
   // which creates a `kind='schedule'` run row and advances its next fire in one

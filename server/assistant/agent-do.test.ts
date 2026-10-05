@@ -92,6 +92,13 @@ const RESUME_EXECUTES = [];
 // The one schedule run the inline run-get route answers for.
 const SCHEDULE_RUN_ID = "schedule-run-1";
 
+// TEST-ONLY status-model knob (driven by the __test/status-model route). When
+// armed to "second_claim_conflict" a "running" run-status claim for a run
+// already claimed once answers 409 — modelling a competing dispatcher that won
+// the race — so the DO must surface a lost queued -> running claim.
+let STATUS_MODEL = "normal";
+const CLAIM_COUNTS = new Map();
+
 async function handleInternal(request, env) {
   const url = new URL(request.url);
   if (request.method === "POST" && url.pathname === INTERNAL + "resume-execute") {
@@ -148,7 +155,13 @@ async function handleInternal(request, env) {
   if (request.method === "POST" && url.pathname === INTERNAL + "run-status") {
     // Document-run lifecycle: the DO claims running then lands terminal. The
     // inline route records the body so the enqueue/turn assertions can read it.
-    RUN_UPDATES.push(await request.json());
+    const body = await request.json();
+    RUN_UPDATES.push(body);
+    if (STATUS_MODEL === "second_claim_conflict" && body.status === "running") {
+      const n = (CLAIM_COUNTS.get(body.runId) ?? 0) + 1;
+      CLAIM_COUNTS.set(body.runId, n);
+      if (n >= 2) return Response.json({ error: { code: "RUN_ALREADY_CLAIMED" } }, { status: 409 });
+    }
     return Response.json({ ok: true, emitted: true });
   }
   if (request.method === "POST" && url.pathname === INTERNAL + "run-update") {
@@ -261,6 +274,12 @@ export default {
       const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
       await stub.onRunFinished(body.run, body.result);
       return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__test/status-model") {
+      const body = await request.json();
+      STATUS_MODEL = typeof body.mode === "string" ? body.mode : "normal";
+      CLAIM_COUNTS.clear();
+      return Response.json({ ok: true, mode: STATUS_MODEL });
     }
     const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
     const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
@@ -417,6 +436,15 @@ async function enqueueRun(threadKey: string, input: unknown) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  });
+}
+
+// Arm the wrapper's TEST-ONLY status model (see ENTRY above).
+async function setStatusModel(mode: string) {
+  return mf!.dispatchFetch("http://assistant-smoke/__test/status-model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
   });
 }
 
@@ -1267,7 +1295,47 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
       () => transcriptByKey(threadKey).then((m) => (m.length >= 2 ? m : null)),
       20_000
     );
-    expect(JSON.stringify(messages)).toContain("Selected text:");
+    // Exactly the user instruction + the assistant reply.
+    expect(messages).toHaveLength(2);
+    const userMessage = messages.find((m) => (m as { role?: string }).role === "user") as
+      | { metadata?: { runId?: string }; parts?: Array<{ type?: string; text?: string }> }
+      | undefined;
+    // The instruction carries the pinned run id and the exact selection/prompt.
+    expect(userMessage?.metadata).toEqual({ runId: "doc-run-noconnect" });
+    expect(userMessage?.parts?.[0]?.text).toBe('Selected text:\n"""\ndraft\n"""\n\nwrite it');
+  }, 60_000);
+
+  it("maps a lost queued→running claim to { ok: false, reason: 'claim_lost' }", async () => {
+    const threadKey = "task:doc-claim-lost";
+    const runId = "doc-claim-lost-1";
+    await setStatusModel("second_claim_conflict");
+    try {
+      // First dispatch wins the claim.
+      const first = await enqueueRun(threadKey, {
+        projectId: "proj-1",
+        runId,
+        actorUserId: "user-1",
+        selection: "draft",
+        extraPrompt: "write it",
+      });
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({ ok: true });
+
+      // Second dispatch for the same run: the status model answers 409 (a
+      // competing dispatcher won the race), so the DO must not ack a run it
+      // never took ownership of.
+      const second = await enqueueRun(threadKey, {
+        projectId: "proj-1",
+        runId,
+        actorUserId: "user-1",
+        selection: "draft",
+        extraPrompt: "write it",
+      });
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual({ ok: false, reason: "claim_lost" });
+    } finally {
+      await setStatusModel("normal");
+    }
   }, 60_000);
 
   it("backfills the derived title from the first user turn on the first mirror", async () => {

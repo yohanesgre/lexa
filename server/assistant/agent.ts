@@ -42,6 +42,7 @@ import { LexaAssistantRunner } from "./runner";
 import { abortDelegatedRun, dispatchRegisteredRun, isTerminalAgentToolStatus, runStatusForTerminal, spawnDelegatedRun, DEFAULT_RUN_BUDGET_MS, PROJECT_RUN_LIMIT, THREAD_RUN_LIMIT, type AgentToolTerminalStatus, type DelegationDeps, type RunDispatcher } from "./delegation";
 import type { AssistantCallLogInput } from "../../shared/assistant";
 import { attachWorkersAiBinding } from "./model-factory";
+import type { EnqueueRunAck } from "./thread-rpc";
 
 // Read tools available without per-project settings resolution (project data +
 // attachments). The optional tools (web_search / get_skill / analyze_image /
@@ -1027,7 +1028,7 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
      */
     selection?: string;
     extraPrompt?: string;
-  }): Promise<{ ok: true }> {
+  }): Promise<EnqueueRunAck> {
     // Identity-object entry point (ADR-0004 §4): a cron tick hands over the
     // run coordinates; the DO derives its own thread key from the instance name.
     const threadKey = this.ctx.id.name ?? "";
@@ -1080,7 +1081,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       console.warn(
         `[Assistant] document run ${input.runId} could not dispatch: internal deps unavailable (missing master key or origin)`
       );
-      return { ok: true };
+      // Discriminated soft failure (ADR-0003 §B.4): the create route fails the
+      // task and answers 502 ASSISTANT_UNAVAILABLE instead of 201 + a task stuck
+      // `queued`. `{ ok: true }` here would suppress that branch.
+      return { ok: false, reason: "deps_unavailable" };
     }
     // Claim `queued → running` before the turn (LX-134): the task row is the
     // source of truth and this transition is the idempotency gate for a retried
@@ -1088,7 +1092,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     const claimed = await transitionRun(deps, { runId: input.runId, status: "running" });
     if (!claimed) {
       console.warn(`[Assistant] document run ${input.runId} could not be claimed; left for reconciliation`);
-      return { ok: true };
+      // Soft failure: the run was not this dispatch's to drive (already claimed
+      // or terminal). The route fails the task + 502 rather than acking a run
+      // it never took ownership of.
+      return { ok: false, reason: "claim_lost" };
     }
     // Persist origin/identity so the turn's `onChatMessage` (and its harness
     // fetch) can rebuild internal deps after a cold wake — a document run may
@@ -1097,10 +1104,24 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // Pin the thread meta from the enqueue input. Without it a never-connected
     // thread 502s in `onChatMessage` AFTER the running claim, stranding the run
     // `running`. Task/wiki threads are project-scoped (owner null), matching the
-    // connect gate in `verifyConnection`.
+    // connect gate in `verifyConnection`. A false return is a mismatch (the
+    // thread is already pinned to another project/owner): running the turn would
+    // execute against the wrong project, so land the terminal `failed` instead.
     try {
       this.ensureThreadMetaTable();
-      this.pinThreadMeta(threadKey, input.projectId, documentTypeOf(threadKey) === "chat" ? input.actorUserId : null);
+      if (
+        !this.pinThreadMeta(threadKey, input.projectId, documentTypeOf(threadKey) === "chat" ? input.actorUserId : null)
+      ) {
+        console.warn(
+          `[Assistant] document run ${input.runId} thread-meta mismatch for ${threadKey}; failing the run`
+        );
+        await transitionRun(deps, {
+          runId: input.runId,
+          status: "failed",
+          error: "Assistant thread is bound to another project",
+        });
+        return { ok: true };
+      }
     } catch (e) {
       console.warn("[Assistant] failed to pin thread meta:", e instanceof Error ? e.message : String(e));
     }
@@ -1118,23 +1139,28 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       parts: [{ type: "text", text: instruction }],
       metadata: { runId: input.runId },
     };
-    // Functional form: the next message list is derived from the latest
-    // persisted transcript when the queued turn actually starts. The turn runs
-    // detached so this RPC acks now; an `"error"` outcome lands the terminal
-    // `failed` transition the engine cannot make for a 502.
+    // One terminal `failed` transition per dispatch, mirroring the engine's
+    // `terminalSent` latch. The `"error"` result and a thrown `saveMessages`
+    // both mean the turn did not settle itself; land exactly one. A throw after
+    // a successful turn cannot downgrade `completed` — the Worker's transition
+    // guard refuses `completed → failed` — so the latch only avoids a redundant
+    // retry POST.
+    let terminalSent = false;
+    const landTurnFailed = async (error: string): Promise<void> => {
+      if (terminalSent) return;
+      terminalSent = true;
+      await transitionRun(deps, { runId: input.runId, status: "failed", error });
+    };
     this.ctx.waitUntil(
       (async () => {
         try {
           const result = await this.saveMessages((messages) => [...messages, message]);
           if (result.status === "error") {
-            await transitionRun(deps, {
-              runId: input.runId,
-              status: "failed",
-              error: result.error ?? "Assistant generation failed",
-            });
+            await landTurnFailed(result.error ?? "Assistant generation failed");
           }
         } catch (e) {
           console.warn("[Assistant] document run turn failed:", e instanceof Error ? e.message : String(e));
+          await landTurnFailed(e instanceof Error ? e.message : "Assistant generation failed");
         }
       })()
     );
@@ -1142,10 +1168,19 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   }
 
   async abortRun(taskId: string): Promise<{ ok: true }> {
-    // Abort the thread's in-flight turn (a document run is driven on this DO)
-    // before landing the terminal status. `abortAllRequests` is the protected
-    // registry-wide cancel; the private `abortActiveTurn` would skip the
-    // queued-continuation invalidation.
+    // Scope the thread's in-flight abort: `abortAllRequests` is the protected
+    // registry-wide cancel (the private `abortActiveTurn` would skip the
+    // queued-continuation invalidation), so it must only fire when the requested
+    // run is the one this thread is currently driving. A pinned document-run
+    // cursor that names a DIFFERENT run means this cancel is stale/foreign —
+    // aborting would kill the unrelated in-flight document turn.
+    const pinned = await this.loadRunId();
+    if (pinned !== null && pinned !== taskId) {
+      console.warn(
+        `[Assistant] abortRun ${taskId} ignored: thread is driving document run ${pinned}`
+      );
+      return { ok: true };
+    }
     this.abortAllRequests("assistant run aborted");
     const deps = await this.loadInternalDeps();
     if (deps) {
@@ -1157,7 +1192,18 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       await updateRunRemote(deps, { runId: taskId, status: "cancelled" });
       // Document task runs have no registry row; the assistant_tasks terminal
       // transition is a no-op 404 for a delegated registry id.
-      await transitionRun(deps, { runId: taskId, status: "cancelled" });
+      const transitioned = await transitionRun(deps, { runId: taskId, status: "cancelled" });
+      // Terminal landed: clear the run-id cursor, mirroring `turnDeps`' clear on
+      // a terminal transition. A stranded cursor would turn every later turn on
+      // this thread into a document run against the dead run (fixed `ask` mode,
+      // document stopWhen, dead-run skill sourcing).
+      if (transitioned) {
+        try {
+          await this.ctx.storage.delete(RUN_ID_KEY);
+        } catch (e) {
+          console.warn("[Assistant] failed to clear run id on abort:", e instanceof Error ? e.message : String(e));
+        }
+      }
     }
     return { ok: true };
   }

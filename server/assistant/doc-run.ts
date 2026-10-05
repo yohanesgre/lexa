@@ -15,6 +15,9 @@ import { shouldSuspendOnProposal } from "./tools-ai";
  * present) followed by the run's extra prompt, blank-line separated. Mirrors
  * `AssistantTaskService.runStream`'s `userContent` so the DO run and the legacy
  * SSE path present the model the same text.
+ *
+ * Byte-identical to the legacy build at `assistant-task.service.ts:380`
+ * (`task.extraPrompt` is NOT NULL, so the `?? null` here is a no-op).
  */
 export function buildDocumentRunInstruction(
   selection: string | null | undefined,

@@ -108,14 +108,17 @@ const threadRpcCall = <A>(f: (rpc: AssistantThreadRpcShape) => Promise<A>): Effe
 // failure semantics instead of silently degrading. On Bun `available` is false
 // (no DO — the in-process engine owns the task); on Workers a rejected call is
 // `available: true, ok: false`.
-const threadRpcControl = <A extends { ok: true }>(
+const threadRpcControl = <A extends { ok: boolean }>(
   f: (rpc: AssistantThreadRpcShape) => Promise<A | null>
 ): Effect.Effect<{ available: boolean; ok: boolean; ack: A | null }, never, AssistantThreadRpc> =>
   Effect.gen(function* () {
     const rpc = yield* AssistantThreadRpc;
     if (!rpc.available) return { available: false, ok: false, ack: null as A | null };
     return yield* Effect.tryPromise(() => f(rpc)).pipe(
-      Effect.map((result) => ({ available: true, ok: result !== null, ack: result })),
+      // A discriminated soft failure (`{ ok: false, reason }`, e.g. a lost
+      // `queued → running` claim) is not an ack: `ok` must reflect the ack's own
+      // verdict so the create route takes its 502 branch.
+      Effect.map((result) => ({ available: true, ok: result !== null && result.ok, ack: result })),
       Effect.catchAll((e) =>
         Effect.sync(() => {
           console.warn("[assistant] DO thread control RPC failed:", e instanceof Error ? e.message : String(e));

@@ -328,6 +328,10 @@ export function transitionAssistantRun(
     const terminalStatus: AssistantRunTerminalStatus | null = input.status === "running" ? null : input.status;
     const isClaim = terminalStatus === null;
     const sets = ["status = ?", isClaim ? "started_at = datetime('now')" : "finished_at = datetime('now')"];
+    // Self-cleaning claim: a re-run of a previously terminal row must not carry
+    // the stale `result`/`error` into the new attempt. A `running` transition
+    // never sets them (they are terminal-only), so NULLing is safe.
+    if (isClaim) sets.push("result = NULL", "error = NULL");
     const params: SqlParam[] = [input.status];
     if (input.result !== undefined) {
       sets.push("result = ?");
@@ -343,7 +347,12 @@ export function transitionAssistantRun(
         ? "status = 'running'"
         : "status IN ('queued', 'running')";
 
-    const emitted = row.document_type === "task" && terminalStatus !== null;
+    // Only a run that actually started a turn emits activity. The machine also
+    // allows `queued → failed` (the DO claims then aborts before the turn), and
+    // that never-started failure is visible on the task status alone — emitting
+    // a timeline "assistant failed" row for a run the user never saw start is
+    // noise. `completed` can only come from `running` (see `isTransitionable`).
+    const emitted = row.document_type === "task" && terminalStatus !== null && row.status === "running";
     const stmts: BatchStmt[] = [
       {
         sql: `UPDATE assistant_tasks SET ${sets.join(", ")} WHERE id = ? AND ${from}`,

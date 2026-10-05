@@ -30,6 +30,16 @@ export interface ResumeBatchAck {
   reason?: string | undefined;
 }
 
+/**
+ * The DO's dispatch acknowledgement for `enqueueRun`. A soft failure — the DO
+ * could not rebuild its internal deps (missing master key / origin) or lost the
+ * `queued → running` claim — is a discriminated `{ ok: false, reason }` so the
+ * REST create route can fail the task and answer 502 `ASSISTANT_UNAVAILABLE`
+ * instead of 201 + a task stuck `running`. `reason` names the cause
+ * (`deps_unavailable` | `claim_lost` | `thread_mismatch`).
+ */
+export type EnqueueRunAck = { ok: true } | { ok: false; reason: string };
+
 export interface AssistantThreadRpcShape {
   /**
    * Whether a Durable Object backs this shape. `false` = Bun/no-op flavor, so
@@ -78,7 +88,7 @@ export interface AssistantThreadRpcShape {
       selection?: string;
       extraPrompt?: string;
     }
-  ): Promise<{ ok: true } | null>;
+  ): Promise<EnqueueRunAck | null>;
   /** Abort an in-flight document run. */
   abortRun(threadKey: string, taskId: string): Promise<{ ok: true } | null>;
 }
