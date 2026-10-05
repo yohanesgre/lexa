@@ -291,7 +291,7 @@ export function AssistantApprovalBatch({
             </div>
           )}
         </div>
-        {pendingCount > 1 && (
+        {pendingCount >= 2 && (
           <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
             <button type="button" className="btn btn-danger btn-sm" disabled={locked} onClick={() => { armRef.current = null; onRejectAll(); }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
