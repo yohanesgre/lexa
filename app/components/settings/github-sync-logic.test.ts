@@ -4,6 +4,8 @@ import {
   isGithubConfigured,
   hasGithubAppSlug,
   githubAppSettingsUrl,
+  githubAppInstallUrl,
+  installStatusPresentation,
   manifestFormFields,
   submitManifestForm,
   githubCallbackOutcome,
@@ -48,6 +50,41 @@ describe("githubAppSettingsUrl", () => {
   it("falls back to the Apps index with no slug", () => {
     expect(githubAppSettingsUrl(undefined)).toBe("https://github.com/settings/apps");
     expect(githubAppSettingsUrl("")).toBe("https://github.com/settings/apps");
+  });
+});
+
+describe("githubAppInstallUrl", () => {
+  it("points at the App's install page and encodes the slug", () => {
+    expect(githubAppInstallUrl("lexa-nimbus")).toBe("https://github.com/apps/lexa-nimbus/installations/new");
+    expect(githubAppInstallUrl("a b/c")).toBe("https://github.com/apps/a%20b%2Fc/installations/new");
+  });
+
+  it("falls back to GitHub's installations list with no slug", () => {
+    expect(githubAppInstallUrl(undefined)).toBe("https://github.com/settings/installations");
+    expect(githubAppInstallUrl("")).toBe("https://github.com/settings/installations");
+  });
+});
+
+describe("installStatusPresentation", () => {
+  it("installed — repo-scope hint linking to the installation manager", () => {
+    expect(installStatusPresentation({ status: "installed", accounts: ["acme-corp"] }, "lexa-nimbus")).toEqual({
+      text: "Repo lists are limited to what these installations grant.",
+      href: "https://github.com/settings/installations",
+    });
+  });
+
+  it("not installed — the App's install page (slug-derived)", () => {
+    expect(installStatusPresentation({ status: "not_installed", accounts: [] }, "lexa-nimbus")).toEqual({
+      text: "The App isn't installed on any account yet.",
+      href: "https://github.com/apps/lexa-nimbus/installations/new",
+    });
+  });
+
+  it("unknown — the degrade path carries no link", () => {
+    expect(installStatusPresentation({ status: "unknown", accounts: [] }, "lexa-nimbus")).toEqual({
+      text: "Couldn't check whether the App is installed right now.",
+      href: "",
+    });
   });
 });
 

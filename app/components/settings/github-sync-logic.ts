@@ -17,6 +17,35 @@ export function githubAppSettingsUrl(slug: string | undefined): string {
   return slug ? `https://github.com/settings/apps/${encodeURIComponent(slug)}` : "https://github.com/settings/apps";
 }
 
+// Install App CTA target — the App's install page, falling back to GitHub's
+// installations list when the contract omits the slug.
+export function githubAppInstallUrl(slug: string | undefined): string {
+  return slug ? `https://github.com/apps/${encodeURIComponent(slug)}/installations/new` : "https://github.com/settings/installations";
+}
+
+export interface GithubInstallPresentation {
+  text: string;
+  href: string;
+}
+
+// Install-status copy + link for the connected card and the repo type-ahead
+// (wireframes/src/settings-workspace.html:370-407). Installed links to the
+// installation manager; not installed links to the App's Install page; unknown
+// carries no link.
+export function installStatusPresentation(
+  probe: { status: "installed" | "not_installed" | "unknown"; accounts: string[] },
+  slug: string | undefined
+): GithubInstallPresentation {
+  switch (probe.status) {
+    case "installed":
+      return { text: "Repo lists are limited to what these installations grant.", href: "https://github.com/settings/installations" };
+    case "not_installed":
+      return { text: "The App isn't installed on any account yet.", href: githubAppInstallUrl(slug) };
+    default:
+      return { text: "Couldn't check whether the App is installed right now.", href: "" };
+  }
+}
+
 // The manifest flow is a form POST: GitHub's create-App form reads the
 // `manifest` field from the request body. Pure so it is unit-testable; the
 // DOM submission lives in submitManifestForm.
