@@ -46,4 +46,19 @@ describe("AssistantPanelIdle", () => {
     fireEvent.keyDown(screen.getByLabelText("Additional prompt"), { key: "Enter", metaKey: true });
     expect(onGenerate).toHaveBeenCalledTimes(1);
   });
+
+  it("triggers Generate on Ctrl+Enter too", () => {
+    const { onGenerate } = renderIdle();
+    fireEvent.keyDown(screen.getByLabelText("Additional prompt"), { key: "Enter", ctrlKey: true });
+    expect(onGenerate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Generate disabled and Cmd/Ctrl+Enter a no-op while a create is pending", () => {
+    const { onGenerate } = renderIdle({ createPending: true });
+    expect(screen.getByRole("button", { name: /Starting/ })).toBeDisabled();
+    const prompt = screen.getByLabelText("Additional prompt");
+    fireEvent.keyDown(prompt, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(prompt, { key: "Enter", ctrlKey: true });
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
 });

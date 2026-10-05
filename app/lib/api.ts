@@ -937,7 +937,7 @@ export interface AssistantRunRow {
   documentId: string;
   documentTitle: string;
   agentId: string;
-  skillId: string;
+  skillId: string | null;
   agentName: string;
   skillName: string;
   threadKey: string | null;

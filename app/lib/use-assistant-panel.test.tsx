@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Assistant panel session hook: rehydrates the last run per document without
-// re-POSTing a terminal stream, and keeps the prompt draft + skill choice in
-// the module store across mounts.
+// re-POSTing a terminal stream, and keeps the prompt draft in the module store
+// across mounts.
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
