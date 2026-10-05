@@ -69,6 +69,65 @@ export function persistResumedBatch(chatId: string, batchId: string): void {
   } catch {}
 }
 
+// Post-decision resume progress (herald-write-approvals.html State 3c) — the
+// transient row between the proposal bubble and the continuation bubble's slot.
+// Client-synthesized chrome from the settled decisions: never a stream frame
+// and never a third bubble. `running` carries the copy variant (approve path
+// when at least one chip approved, reject path otherwise).
+export type ResumeProgress =
+  | { kind: "running"; mode: "approve" | "reject" }
+  | { kind: "failed" }
+  | { kind: "timeout" };
+
+// React-lane deadline for the never-stuck fallback: no first continuation frame
+// within this window settles the running row to the timeout warning with Retry.
+export const RESUME_DEADLINE_MS = 180_000;
+
+// The copy variant for a resuming batch: the approve path runs whenever any
+// chip was approved (its writes execute); an all-rejected/expired batch runs
+// the model continuation only.
+function resumeMode(turns: ChatTurn[] | null, batchId: string): "approve" | "reject" {
+  for (const t of turns ?? []) {
+    const b = t.batch;
+    if (b?.batchId === batchId) return b.chips.some((c) => c.state === "approved") ? "approve" : "reject";
+  }
+  return "reject";
+}
+
+// Fire the resume POST for one batch and report its discriminated outcome. The
+// in-flight key dedupes a re-issued POST while one is still outstanding; the
+// persisted set only gains a batch on a settled outcome (a failure releases it
+// so Retry can re-fire).
+function dispatchResume(args: {
+  stream: ResumeCapableStream;
+  chatId: string;
+  batchId: string;
+  resumedBatchesRef: React.RefObject<Set<string>>;
+  inFlightResumeRef: React.RefObject<Set<string>>;
+  ingressInsertedRef: React.RefObject<Set<string>>;
+  onResumeSettled?: (() => void) | undefined;
+  onResumeResult?: ((batchId: string, result: ResumeResult) => void) | undefined;
+}): void {
+  const { stream, chatId, batchId, resumedBatchesRef, inFlightResumeRef, ingressInsertedRef, onResumeSettled, onResumeResult } = args;
+  const flightKey = `${chatId}:${batchId}`;
+  if (inFlightResumeRef.current?.has(flightKey)) return;
+  inFlightResumeRef.current?.add(flightKey);
+  resumedBatchesRef.current?.add(batchId);
+  ingressInsertedRef.current?.delete(chatId);
+  stream.send(`/api/assistant/chat/${chatId}/resume`, { batchId }, (result) => {
+    inFlightResumeRef.current?.delete(flightKey);
+    if (shouldPersistResume(result)) {
+      persistResumedBatch(chatId, batchId);
+      // The continuation ran and its reply is persisted by the time the result
+      // arrives — refetch so the resumed assistant entry renders live.
+      onResumeSettled?.();
+    } else {
+      resumedBatchesRef.current?.delete(batchId);
+    }
+    onResumeResult?.(batchId, result);
+  });
+}
+
 // Settling pass (plain function so the effect stays a single decision): see
 // useStreamFrameFreeze for the freeze/resume contract.
 function settleStreamFrame(args: {
@@ -90,6 +149,12 @@ function settleStreamFrame(args: {
   // and back while the POST is still in flight would re-issue it (LX-83).
   inFlightResumeRef: React.RefObject<Set<string>>;
   ingressInsertedRef: React.RefObject<Set<string>>;
+  // Fired the instant a resume is dispatched (the same trigger point) so the
+  // caller can mount the post-decision progress row with the right copy variant.
+  onResumeArmed?: ((batchId: string, mode: "approve" | "reject") => void) | undefined;
+  // Fired with the resume POST's discriminated outcome (after the persistence
+  // side-effects) so the caller can settle the progress row to its fallback.
+  onResumeResult?: ((batchId: string, result: ResumeResult) => void) | undefined;
   // Fired when the resume POST settles into a terminal outcome (executed /
   // settled / indeterminate) — a terminal outcome means any continuation reply
   // is persisted on the DO path (the continuation is awaited before the ack),
@@ -100,7 +165,7 @@ function settleStreamFrame(args: {
   // for pending/unavailable/failure (retryable — no persisted reply yet).
   onResumeSettled?: (() => void) | undefined;
 }): void {
-  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef, onResumeSettled } = args;
+  const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef, onResumeArmed, onResumeResult, onResumeSettled } = args;
   if (stream.status === "suspended") {
     const batchId = stream.suspendedBatchId ?? "";
     const chips = batchId ? pendingChipsOf(stream.pending, batchId) : [];
@@ -140,26 +205,14 @@ function settleStreamFrame(args: {
   if (batchId === null) return;
   const flightKey = `${chatId}:${batchId}`;
   if (inFlightResumeRef.current?.has(flightKey)) return;
+  onResumeArmed?.(batchId, resumeMode(turns, batchId));
   // In-flight + in-memory add first: dedupes an in-flight POST if the effect
   // re-runs, and the keyed map survives a chat-switch re-seed. Persist only on
   // a settled outcome (executed / settled / indeterminate); `pending` /
   // `unavailable` and an RPC failure un-guard the batch (in-flight + in-memory,
   // no persisted id) so a later pass can retry. The client names the exact
   // batch so the DO executes that batch, never a newer walk.
-  inFlightResumeRef.current?.add(flightKey);
-  resumedBatchesRef.current?.add(batchId);
-  ingressInsertedRef.current?.delete(chatId);
-  stream.send(`/api/assistant/chat/${chatId}/resume`, { batchId }, (result) => {
-    inFlightResumeRef.current?.delete(flightKey);
-    if (shouldPersistResume(result)) {
-      persistResumedBatch(chatId, batchId);
-      // The continuation ran and its reply is persisted by the time the result
-      // arrives — refetch so the resumed assistant entry renders live.
-      onResumeSettled?.();
-    } else {
-      resumedBatchesRef.current?.delete(batchId);
-    }
-  });
+  dispatchResume({ stream, chatId, batchId, resumedBatchesRef, inFlightResumeRef, ingressInsertedRef, onResumeSettled, onResumeResult });
 }
 
 
@@ -236,7 +289,12 @@ export function useStreamFrameFreeze(args: {
   // The resume POST's terminal outcome — the page refetches the transcript so
   // the server-persisted continuation reply renders live.
   onResumeSettled?: (() => void) | undefined;
-}) {
+}): {
+  // Post-decision progress row state (null = no row). Running while the resume
+  // executes; failed/timeout are the bounded terminal fallbacks with Retry.
+  resumeProgress: ResumeProgress | null;
+  retryResume: () => void;
+} {
   const { stream, setTurns, turns, chatId, streaming, ingressInsertedRef, onResumeSettled } = args;
   const frozeBatchRef = useRef<string | null>(null);
   const frozeErrorRef = useRef<string | null>(null);
@@ -246,6 +304,71 @@ export function useStreamFrameFreeze(args: {
   // re-seeded on selection, but an in-flight resume POST must not be re-issued.
   const inFlightResumeRef = useRef<Set<string>>(new Set());
   const chatRef = useRef("");
+  const [resumeProgress, setResumeProgress] = useState<ResumeProgress | null>(null);
+  const armedBatchRef = useRef<string | null>(null);
+  const armedModeRef = useRef<"approve" | "reject">("approve");
+  const armedTurnCountRef = useRef(0);
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
+
+  // Arm the row the instant a resume is dispatched (last chip leaves pending).
+  const armResume = useCallback((batchId: string, mode: "approve" | "reject") => {
+    armedBatchRef.current = batchId;
+    armedModeRef.current = mode;
+    armedTurnCountRef.current = turnsRef.current?.length ?? 0;
+    setResumeProgress({ kind: "running", mode });
+  }, []);
+
+  // Only a hard transport/RPC failure settles the row to the danger variant; a
+  // settled / pending / unavailable ack keeps it running (the continuation
+  // clears it, or the deadline bounds it).
+  const settleResume = useCallback((batchId: string, result: ResumeResult) => {
+    if (result.ok) return;
+    armedBatchRef.current = batchId;
+    setResumeProgress({ kind: "failed" });
+  }, []);
+
+  // Clear the row the moment the continuation mounts: the first resume stream
+  // frame (streaming) or the settle refetch appending a turn after the batch.
+  useEffect(() => {
+    if (resumeProgress?.kind !== "running") return;
+    if (streaming) {
+      armedBatchRef.current = null;
+      setResumeProgress(null);
+      return;
+    }
+    const batchId = armedBatchRef.current;
+    const list = turns ?? [];
+    const at = list.findIndex((t) => t.batch?.batchId === batchId);
+    if (at < 0 || at < list.length - 1) {
+      armedBatchRef.current = null;
+      setResumeProgress(null);
+    }
+  }, [streaming, turns, resumeProgress]);
+
+  // Never stuck: no first continuation frame within the deadline settles the
+  // running row to the warning fallback (caret stops, Retry offered).
+  useEffect(() => {
+    if (resumeProgress?.kind !== "running") return;
+    const timer = window.setTimeout(() => {
+      setResumeProgress((cur) => (cur?.kind === "running" ? { kind: "timeout" } : cur));
+    }, RESUME_DEADLINE_MS);
+    return () => window.clearTimeout(timer);
+  }, [resumeProgress]);
+
+  // Retry re-attempts the resume for the armed batch: release the in-flight and
+  // persisted guards so the POST can re-fire, re-arm the running row, dispatch.
+  const retryResume = useCallback(() => {
+    const batchId = armedBatchRef.current;
+    const cid = chatIdRef.current;
+    if (!batchId || !cid) return;
+    resumedBatchesRef.current?.delete(batchId);
+    inFlightResumeRef.current?.delete(`${cid}:${batchId}`);
+    setResumeProgress({ kind: "running", mode: armedModeRef.current });
+    dispatchResume({ stream, chatId: cid, batchId, resumedBatchesRef, inFlightResumeRef, ingressInsertedRef, onResumeSettled, onResumeResult: settleResume });
+  }, [stream, ingressInsertedRef, onResumeSettled, settleResume]);
 
   // One settling effect (not a chain): freezes the terminal stream frame
   // (suspension or error) into the transcript view, then re-opens any frozen
@@ -261,6 +384,8 @@ export function useStreamFrameFreeze(args: {
       // Seed with this chat's persisted resumes so a reload's transcript-driven
       // auto-resume skips batches that already succeeded.
       resumedBatchesRef.current = new Set(readResumedBatches(chatId));
+      armedBatchRef.current = null;
+      setResumeProgress(null);
     }
     settleStreamFrame({
       stream,
@@ -274,14 +399,18 @@ export function useStreamFrameFreeze(args: {
       observedPendingRef,
       inFlightResumeRef,
       ingressInsertedRef,
+      onResumeArmed: armResume,
+      onResumeResult: settleResume,
       onResumeSettled,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per terminal frame; snapshot fields are read at flip time
-  }, [stream.status, stream.suspendedBatchId, stream.pending, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText, stream.hasIngress, turns, chatId, streaming]);
+  }, [stream.status, stream.suspendedBatchId, stream.pending, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText, stream.hasIngress, turns, chatId, streaming, armResume, settleResume]);
 
   useEffect(() => {
     if (stream.status === "connecting" || stream.status === "streaming") frozeErrorRef.current = null;
   }, [stream.status]);
+
+  return { resumeProgress, retryResume };
 }
 
 // Start a stream for the current (or a brand-new) thread; new threads mint a

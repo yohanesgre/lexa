@@ -6679,6 +6679,31 @@
   text-overflow: ellipsis;
 }
 
+/* ---- Assistant Chat — post-decision resume progress ----
+   Transient row between the proposal bubble and the continuation bubble's slot
+   (herald-write-approvals.html State 3c). Chrome only — not a bubble and not
+   part of the decision record; it reuses the shared activity-strip running-line
+   language. `.resume-progress` / `.resume-progress-fallback` ported from the
+   wireframe (`herald-activity` → the app's `assistant-activity`). Tokens only. */
+.resume-progress {
+  align-self: flex-start;
+  padding-left: 14px;
+  margin-top: -6px;
+  max-width: 100%;
+}
+.resume-progress .assistant-activity { margin-bottom: 0; }
+.resume-progress-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-warning);
+}
+.resume-progress-fallback .btn { text-transform: none; letter-spacing: normal; }
+
 /* ---- Assistant Chat — assistant bubble markdown ----
    Assistant turns render markdown client-side (no raw HTML injection).
    Scoped to .bubble-md so user bubbles stay plain text. Element styles
