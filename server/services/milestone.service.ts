@@ -71,8 +71,9 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
           if (milestone.archivedAt) return { milestone, activity: [] };   // idempotent
           const archivedAt = new Date().toISOString();
           // One set-based atomic batch: activity rows for every live task in
-          // every sprint of the milestone, then the task + sprint + milestone
-          // archive updates. Constant statement count.
+          // the milestone's sprints, then the task + live-sprint + milestone
+          // archive updates. An individually-archived sprint is not adopted —
+          // it keeps its own older stamp. Constant statement count.
           const results = yield* batchResults(db, buildMilestoneArchiveBatch({
             milestoneId: id,
             archivedAt,

@@ -65,8 +65,11 @@ export function buildSwimlaneArchiveBatch(input: {
   ];
 }
 
-/** Archive one milestone, all its sprints, and every live task in those
- *  sprints, with one `archived` activity row per task. */
+/** Archive one milestone and every LIVE sprint under it, plus every live task
+ *  in those sprints, with one `archived` activity row per task. An
+ *  individually-archived sprint (`archived_at IS NOT NULL`) is NOT adopted —
+ *  it keeps its own older stamp, so a later milestone restore leaves it alone
+ *  and its own restore still cascades the tasks it took down. */
 export function buildMilestoneArchiveBatch(input: {
   milestoneId: string;
   archivedAt: string;
@@ -90,7 +93,7 @@ export function buildMilestoneArchiveBatch(input: {
       params: [input.archivedAt, input.milestoneId],
     },
     {
-      sql: `UPDATE swimlanes SET archived_at = ? WHERE milestone_id = ?`,
+      sql: `UPDATE swimlanes SET archived_at = ? WHERE milestone_id = ? AND archived_at IS NULL`,
       params: [input.archivedAt, input.milestoneId],
     },
     {

@@ -196,9 +196,23 @@ describe("MilestoneService archive/restore", () => {
     seed(db);
     const svc = makeService(db);
     const m = await Effect.runPromise(svc.create({ projectId: "p1", name: "v1" }));
-    const res = await Effect.runPromise(svc.restore(maria, m.id));
-    expect(res.milestone.archivedAt).toBeNull();
-    expect(res.activity).toEqual([]);
+    db.prepare(`INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id)
+                VALUES ('sp1','p1','Sprint 1',0,'sprint','${m.id}')`).run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position)
+                VALUES ('t1','p1','c1','sp1','T1','a0')`).run();
+    // restore before any archive: pre-read early return, nothing changes
+    const neverArchived = await Effect.runPromise(svc.restore(maria, m.id));
+    expect(neverArchived.milestone.archivedAt).toBeNull();
+    expect(neverArchived.activity).toEqual([]);
+    // real archive + cascade, then two restores: the second is a no-op
+    await Effect.runPromise(svc.archive(maria, m.id));
+    const first = await Effect.runPromise(svc.restore(maria, m.id));
+    expect(first.milestone.archivedAt).toBeNull();
+    expect(first.activity).toHaveLength(1);
+    expect(first.activity[0]!).toMatchObject({ type: "restored", taskId: "t1" });
+    const second = await Effect.runPromise(svc.restore(maria, m.id));
+    expect(second.milestone.archivedAt).toBeNull();
+    expect(second.activity).toEqual([]);
   });
 
   it("a failure mid-cascade rolls back the whole batch (no partial sprint/task archive, no activity)", async () => {
