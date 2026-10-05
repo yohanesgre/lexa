@@ -85,15 +85,23 @@ function useAssistantRun(args: RunArgs) {
   // Rehydrate the last run for this document: closing the popover keeps the
   // module stream session alive, so reopening lands on its live/final state.
   const [taskId, setTaskId] = useState<string | null>(() => getAssistantPanelSession(slug, documentType, documentId).taskId);
-
-  // Enqueue → attach to the run's WebSocket thread (`task:<id>`). The server
-  // enqueued the turn via `enqueueRun` when POST /api/assistant/tasks landed;
-  // the client never POSTs to start it, and a dropped socket does not cancel
-  // it (ADR-0003 D5, background-capable). The WS replays an IN-FLIGHT turn on
-  // connect; anything already finished is reconstructed from the task row.
-  const streamKey = taskId ? `assistant-task:${taskId}` : null;
-  const live = useAssistantAgent(streamKey);
   const { data: assistantTaskData } = useAssistantTask(taskId, !!taskId);
+
+  // Enqueue → attach to the run's WebSocket thread: the DOCUMENT thread
+  // (`task:<documentId>` / `wiki:<documentId>`) the DO dispatches a document
+  // run on (agent-gate.ts:32) — never `task:<taskId>`, which is not a thread.
+  // The task row carries the run's document identity; fall back to this panel's
+  // own document before the row loads. The server enqueued the turn via
+  // `enqueueRun` when POST /api/assistant/tasks landed; the client never POSTs
+  // to start it, and a dropped socket does not cancel it (ADR-0003 D5,
+  // background-capable). The WS replays an IN-FLIGHT turn on connect; anything
+  // already finished is reconstructed from the task row.
+  const runDocumentType = assistantTaskData?.documentType ?? documentType;
+  const runDocumentId = assistantTaskData?.documentId ?? documentId;
+  const streamKey = taskId
+    ? `${runDocumentType === "wiki" ? "assistant-wiki" : "assistant-task"}:${runDocumentId}`
+    : null;
+  const live = useAssistantAgent(streamKey);
 
   // A background run that completed (or is still queued/running) while this
   // client was disconnected has no in-flight WS buffer to replay, so the
