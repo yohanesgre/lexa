@@ -320,7 +320,7 @@ export function AssistantApprovalBatch({
             className="approval-carousel-track"
             role="group"
             aria-roledescription="carousel"
-            aria-label={`Assistant proposes ${total} change${total === 1 ? "" : "s"}`}
+            aria-label={`Assistant proposes ${total} changes`}
             onScroll={handleScroll}
           >
             {ordered.map((chip, i) => (

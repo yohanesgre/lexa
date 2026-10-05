@@ -534,6 +534,14 @@ describe("AssistantApprovalBatch — single-chip batch", () => {
     expect(card.querySelectorAll("button")).toHaveLength(0);
   });
 
+  it("wires the single chip's own decision buttons", () => {
+    const { onDecide } = renderBatch([chip({ approvalId: "a1", seq: 0 })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+
+    expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ approvalId: "a1" }), "approve");
+  });
+
   it("does not render a carousel at the two-chip boundary", () => {
     const { container, counter } = renderBatch([chip({ approvalId: "a1", seq: 0 }), chip({ approvalId: "a2", seq: 1, name: "move_task" })]);
 
