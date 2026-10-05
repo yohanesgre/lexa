@@ -300,7 +300,7 @@ describe("reconcileStaleDocumentRuns", () => {
       .run(id, status, createdAt, startedAt);
   }
 
-  it("fails a stale claimed running row to failed, leaves fresh runs, and emits no activity", async () => {
+  it("fails a stale queued/running row to failed, leaves fresh runs, and emits no activity", async () => {
     const now = new Date("2026-01-01T12:00:00Z");
     // Claimed (started_at) 60m ago with the default 30m bound → stale.
     insertTask("stale-started", "running", "2026-01-01 09:00:00", "2026-01-01 11:00:00");
@@ -308,22 +308,25 @@ describe("reconcileStaleDocumentRuns", () => {
     insertTask("stale-never-started", "running", "2026-01-01 11:15:00", null);
     // Old created_at but a fresh started_at: the COALESCE must win on started_at.
     insertTask("fresh-started", "running", "2026-01-01 08:00:00", "2026-01-01 11:45:00");
-    // Only `running` rows are swept; a stale queued row is left for the claim.
+    // A crash between the route INSERT and the DO claim strands a queued row;
+    // the sweep now covers `queued` too (COALESCE falls back to created_at).
     insertTask("queued-stale", "queued", "2026-01-01 11:00:00", null);
+    // A queued row that was just inserted is left for the claim.
+    insertTask("queued-fresh", "queued", "2026-01-01 11:50:00", null);
 
     const result = await Effect.runPromise(reconcileStaleDocumentRuns(ctx.driver, { now }));
-    expect(result.failed).toBe(2);
+    expect(result.failed).toBe(3);
 
     const failed = ctx.db
       .prepare("SELECT id, status, error, finished_at FROM assistant_tasks WHERE status = 'failed' ORDER BY id")
       .all() as Array<{ id: string; status: string; error: string; finished_at: string | null }>;
-    expect(failed.map((r) => r.id)).toEqual(["stale-never-started", "stale-started"]);
+    expect(failed.map((r) => r.id)).toEqual(["queued-stale", "stale-never-started", "stale-started"]);
     for (const r of failed) {
       expect(r.error).toBe("run abandoned");
       expect(r.finished_at).not.toBeNull();
     }
     expect(ctx.db.prepare("SELECT status FROM assistant_tasks WHERE id = 'fresh-started'").get()).toMatchObject({ status: "running" });
-    expect(ctx.db.prepare("SELECT status FROM assistant_tasks WHERE id = 'queued-stale'").get()).toMatchObject({ status: "queued" });
+    expect(ctx.db.prepare("SELECT status FROM assistant_tasks WHERE id = 'queued-fresh'").get()).toMatchObject({ status: "queued" });
 
     // Direct UPDATE, not `transitionAssistantRun`: an abandoned run that never
     // produced a turn leaves no timeline row (invariant #12).

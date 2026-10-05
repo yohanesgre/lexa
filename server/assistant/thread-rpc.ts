@@ -32,11 +32,12 @@ export interface ResumeBatchAck {
 
 /**
  * The DO's dispatch acknowledgement for `enqueueRun`. A soft failure — the DO
- * could not rebuild its internal deps (missing master key / origin) or lost the
- * `queued → running` claim — is a discriminated `{ ok: false, reason }` so the
- * REST create route can fail the task and answer 502 `ASSISTANT_UNAVAILABLE`
+ * could not rebuild its internal deps (missing master key / origin), lost the
+ * `queued → running` claim, found the thread bound to another project, or could
+ * not reach a stable turn — is a discriminated `{ ok: false, reason }` so the
+ * REST create route fails the task and answers 502 `ASSISTANT_UNAVAILABLE`
  * instead of 201 + a task stuck `running`. `reason` names the cause
- * (`deps_unavailable` | `claim_lost` | `thread_mismatch`).
+ * (`deps_unavailable` | `claim_lost` | `thread_mismatch` | `not_started`).
  */
 export type EnqueueRunAck = { ok: true } | { ok: false; reason: string };
 

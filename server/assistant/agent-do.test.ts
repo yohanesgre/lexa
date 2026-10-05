@@ -84,6 +84,28 @@ LexaAssistantAgent.prototype.__testStorageKeys = async function () {
   return Array.from(entries.keys());
 };
 
+// Test-only seam: seed the document-run cursor so the abort paths can be
+// asserted without racing a live turn.
+LexaAssistantAgent.prototype.__testSetRunId = async function (id) {
+  await this.ctx.storage.put("assistantRunId", id);
+};
+
+// Test-only seam: arm a one-shot throw from saveMessages (the enqueue catch
+// path that must still land 'failed' and clear the cursor).
+LexaAssistantAgent.prototype.__testArmSaveThrow = async function (message) {
+  await this.ctx.storage.put("__testSaveThrow", message);
+};
+
+const __realSaveMessages = LexaAssistantAgent.prototype.saveMessages;
+LexaAssistantAgent.prototype.saveMessages = async function (messages, options) {
+  const armed = await this.ctx.storage.get("__testSaveThrow");
+  if (typeof armed === "string") {
+    await this.ctx.storage.delete("__testSaveThrow");
+    throw new Error(armed);
+  }
+  return __realSaveMessages.call(this, messages, options);
+};
+
 const INTERNAL = "/api/internal/assistant/";
 // Captured run-update bodies (the DO posts here from onRunFinished / dispatch).
 const RUN_UPDATES = [];
@@ -281,6 +303,26 @@ export default {
       CLAIM_COUNTS.clear();
       return Response.json({ ok: true, mode: STATUS_MODEL });
     }
+    if (url.pathname === "/__test/set-run-id") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      await stub.__testSetRunId(body.runId);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__test/save-throw") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      await stub.__testArmSaveThrow(body.message);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/__test/abort") {
+      const key = url.searchParams.get("threadKey") || ${JSON.stringify(THREAD_KEY)};
+      const body = await request.json();
+      const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(key));
+      return Response.json(await stub.abortRun(body.taskId));
+    }
     const threadKey = request.headers.get("X-Lexa-Thread-Key") || ${JSON.stringify(THREAD_KEY)};
     const stub = env.ASSISTANT_AGENT.get(env.ASSISTANT_AGENT.idFromName(threadKey));
     return stub.fetch(request);
@@ -445,6 +487,32 @@ async function setStatusModel(mode: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mode }),
+  });
+}
+
+// Seed the DO's document-run cursor (test-only seam) without a live turn.
+async function setRunId(threadKey: string, runId: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/set-run-id?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ runId }),
+  });
+}
+
+// Arm a one-shot saveMessages throw (test-only seam).
+async function armSaveThrow(threadKey: string, message: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/save-throw?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+}
+
+async function callAbort(threadKey: string, taskId: string) {
+  return mf!.dispatchFetch(`http://assistant-smoke/__test/abort?threadKey=${encodeURIComponent(threadKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskId }),
   });
 }
 
@@ -1336,6 +1404,84 @@ describe("LexaAssistantAgent Durable Object smoke", () => {
     } finally {
       await setStatusModel("normal");
     }
+  }, 60_000);
+
+  it("lands a failed terminal and clears the cursor when saveMessages throws", async () => {
+    const threadKey = "task:save-throw";
+    const runId = "doc-save-throw-1";
+    await armSaveThrow(threadKey, "boom from saveMessages");
+
+    const res = await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId,
+      actorUserId: "user-1",
+      selection: "draft",
+      extraPrompt: "write it",
+    });
+    expect(res.status).toBe(200);
+    // The dispatch itself acks (the claim landed); the throw is handled inside
+    // the scheduled turn.
+    expect(await res.json()).toEqual({ ok: true });
+
+    // The throw must land exactly one terminal `failed` and emit no card.
+    const failed = await waitFor<Array<Record<string, unknown>>>(
+      () =>
+        capturedRunUpdates().then((updates) =>
+          updates.some((u) => u.runId === runId && u.status === "failed") ? updates : null
+        ),
+      20_000
+    );
+    expect(failed.filter((u) => u.runId === runId && u.status === "failed")).toHaveLength(1);
+
+    // No dead cursor survives the failed run: a later turn on this thread must
+    // not take the document branch (fixed ask mode, doc stopWhen).
+    expect(await storageKeys(threadKey)).not.toContain("assistantRunId");
+  }, 60_000);
+
+  it("still cancels a delegated registry run when a foreign document cursor is pinned", async () => {
+    const threadKey = "task:abort-foreign";
+    // Seed internal origin/identity so abortRun can reach the Worker routes (a
+    // schedule dispatch persists them without touching the run cursor).
+    await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "schedule-run-1",
+      actorUserId: "user-abort",
+      kind: "schedule",
+    });
+    await setRunId(threadKey, "doc-run-foreign");
+
+    const res = await callAbort(threadKey, "registry-run-foreign");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    // The registry cancel ran despite the foreign document pin (the pinned
+    // document turn is not this abort's to kill, but the requested delegated
+    // run still needs its registry cancel).
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "registry-run-foreign", status: "cancelled" })
+    );
+    // The foreign cursor names a still-live document run: never cleared.
+    expect(await storageKeys(threadKey)).toContain("assistantRunId");
+  }, 60_000);
+
+  it("clears the document cursor when the aborted id is this thread's pinned run", async () => {
+    const threadKey = "task:abort-own";
+    await enqueueRun(threadKey, {
+      projectId: "proj-1",
+      runId: "schedule-run-1",
+      actorUserId: "user-abort",
+      kind: "schedule",
+    });
+    await setRunId(threadKey, "doc-run-own");
+
+    const res = await callAbort(threadKey, "doc-run-own");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    expect(await capturedRunUpdates()).toContainEqual(
+      expect.objectContaining({ runId: "doc-run-own", status: "cancelled" })
+    );
+    expect(await storageKeys(threadKey)).not.toContain("assistantRunId");
   }, 60_000);
 
   it("backfills the derived title from the first user turn on the first mirror", async () => {
