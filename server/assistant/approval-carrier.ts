@@ -14,8 +14,10 @@
 import type { UIMessage } from "ai";
 import {
   ASSISTANT_APPROVAL_DATA_PART,
+  ASSISTANT_CONTINUATION_DATA_PART,
   type AssistantApprovalCarrier,
   type AssistantApprovalCarrierApproval,
+  type AssistantContinuationBoundary,
   type AssistantWriteDiff,
 } from "../../shared/assistant";
 
@@ -171,6 +173,79 @@ export function carrierBatchIds(messages: readonly unknown[]): string[] {
     }
   }
   return out;
+}
+
+/** True when the message carries the `data-assistant-approval` carrier for `batchId`. */
+export function messageCarriesBatch(message: unknown, batchId: string): boolean {
+  return approvalCarriersOf(message).some((carrier) => carrier.batchId === batchId);
+}
+
+/** Every resumed batchId already carrying a continuation boundary, deduped. */
+export function continuationBoundaryBatchIds(messages: readonly unknown[]): string[] {
+  const out: string[] = [];
+  for (const message of messages) {
+    if (!isRecord(message) || !Array.isArray(message.parts)) continue;
+    for (const raw of message.parts) {
+      if (!isRecord(raw) || raw.type !== ASSISTANT_CONTINUATION_DATA_PART) continue;
+      const batchId = isRecord(raw.data) ? readString(raw.data, "batchId") : undefined;
+      if (batchId && !out.includes(batchId)) out.push(batchId);
+    }
+  }
+  return out;
+}
+
+// The SDK's `continuation: true` clone of the last assistant message appends the
+// resume parts AFTER every pre-existing part, and `withApprovalCarriers` always
+// appends its carrier last — so the end of the last carrier part is the
+// proposal/continuation seam.
+function continuationSeam(parts: readonly unknown[]): number {
+  let seam = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] as { type?: unknown } | null;
+    if (isRecord(part) && part.type === ASSISTANT_APPROVAL_DATA_PART) seam = i + 1;
+  }
+  return seam;
+}
+
+/**
+ * LX-124 persist-time transform: split a resume continuation off the proposal
+ * message the SDK clones it onto, and mark the seam with a zero-text
+ * `data-continuation` boundary message. The SDK reuses the proposal message's id
+ * for the continuation, so without a split the follow-up renders inside the
+ * proposal bubble; this preserves the proposal bubble (id unchanged, carrier
+ * intact) and persists the appended parts as a NEW assistant message, with the
+ * boundary immediately before it. Idempotent: a batch already carrying a
+ * boundary is skipped, so a replayed resume never duplicates the marker.
+ */
+export function withContinuationBoundary(messages: UIMessage[], resumedBatchIds: readonly string[]): UIMessage[] {
+  if (resumedBatchIds.length === 0) return messages;
+  const marked = new Set(continuationBoundaryBatchIds(messages));
+  let out = messages;
+  let touched = false;
+  for (const batchId of resumedBatchIds) {
+    if (batchId.length === 0 || marked.has(batchId)) continue;
+    const index = out.findIndex((message) => messageCarriesBatch(message, batchId));
+    if (index < 0) continue;
+    const target = out[index]!;
+    const parts = Array.isArray(target.parts) ? target.parts : [];
+    const seam = continuationSeam(parts);
+    const boundary: UIMessage = {
+      id: `${target.id}~boundary~${batchId}`,
+      role: "assistant",
+      parts: [
+        {
+          type: ASSISTANT_CONTINUATION_DATA_PART,
+          data: { batchId, ts: new Date().toISOString() } satisfies AssistantContinuationBoundary,
+        } as unknown as UIMessage["parts"][number],
+      ],
+    };
+    const proposal: UIMessage = { ...target, parts: parts.slice(0, seam) };
+    const continuation: UIMessage = { ...target, id: `${target.id}~cont~${batchId}`, parts: parts.slice(seam) };
+    out = [...out.slice(0, index), proposal, boundary, continuation, ...out.slice(index + 1)];
+    marked.add(batchId);
+    touched = true;
+  }
+  return touched ? out : messages;
 }
 
 /** One decision row as read from `assistant_pending_writes`. */

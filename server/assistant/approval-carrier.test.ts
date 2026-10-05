@@ -4,8 +4,10 @@ import { ASSISTANT_APPROVAL_DATA_PART, type AssistantWriteDiff } from "../../sha
 import {
   approvalCarriersOf,
   carrierBatchIds,
+  messageCarriesBatch,
   reconcileApprovalCarriers,
   withApprovalCarriers,
+  withContinuationBoundary,
 } from "./approval-carrier";
 
 const DIFF: AssistantWriteDiff = { type: "task_create", title: "Write docs", fields: { priority: "high" } };
@@ -96,6 +98,64 @@ describe("approval carrier round-trip", () => {
     const [second] = withApprovalCarriers([assistantTurn(proposal({ approvalId: "w3", batchId: "b2" }))]);
 
     expect(carrierBatchIds([first!, second!])).toEqual(["b1", "b2"]);
+  });
+});
+
+describe("withContinuationBoundary — LX-124 continuation split", () => {
+  // The SDK's continuation clone appends its parts to the proposal message; the
+  // transform must keep the proposal bubble (id + carrier intact) and persist the
+  // appended parts as the continuation's own message, with the boundary between.
+  function combinedTurn(): UIMessage {
+    const [proposalTurn] = withApprovalCarriers([assistantTurn(proposal())]);
+    return {
+      ...proposalTurn!,
+      parts: [
+        ...proposalTurn!.parts,
+        { type: "step-start" },
+        { type: "text", text: "Approved — done.", state: "done" },
+      ],
+    } as unknown as UIMessage;
+  }
+
+  it("splits the continuation into its own message and marks the seam", () => {
+    const split = withContinuationBoundary([combinedTurn()], ["b1"]);
+
+    expect(split).toHaveLength(3);
+    const [proposalTurn, boundary, continuation] = split;
+    // Proposal bubble unchanged: same id, carrier still last.
+    expect(proposalTurn!.id).toBe("a1");
+    expect((proposalTurn!.parts.at(-1) as { type?: string }).type).toBe(ASSISTANT_APPROVAL_DATA_PART);
+    expect(JSON.stringify(proposalTurn)).not.toContain("Approved — done.");
+    // Boundary: zero-text, only the data-continuation part, names the batch.
+    expect(boundary!.parts).toEqual([
+      { type: "data-continuation", data: { batchId: "b1", ts: expect.any(String) } },
+    ]);
+    // Continuation: fresh id, only the appended parts, no carrier.
+    expect(continuation!.id).not.toBe("a1");
+    expect(continuation!.parts).toEqual([
+      { type: "step-start" },
+      { type: "text", text: "Approved — done.", state: "done" },
+    ]);
+    expect(messageCarriesBatch(continuation, "b1")).toBe(false);
+  });
+
+  it("is idempotent — a batch already carrying a boundary is returned untouched", () => {
+    const split = withContinuationBoundary([combinedTurn()], ["b1"]);
+    const again = withContinuationBoundary(split, ["b1"]);
+
+    expect(again).toBe(split);
+    expect(again.filter((m) => JSON.stringify(m).includes('"data-continuation"'))).toHaveLength(1);
+  });
+
+  it("returns the transcript untouched when no message carries the batch", () => {
+    const input = [combinedTurn()];
+    expect(withContinuationBoundary(input, ["other"])).toBe(input);
+    expect(withContinuationBoundary(input, [])).toBe(input);
+  });
+
+  it("does not split a message whose carrier belongs to another batch", () => {
+    const input = [combinedTurn()];
+    expect(withContinuationBoundary(input, ["b2"])).toBe(input);
   });
 });
 

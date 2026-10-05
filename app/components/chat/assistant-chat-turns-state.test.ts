@@ -329,6 +329,39 @@ describe("settleTurns — decided batch survives a transcript rebuild", () => {
   });
 });
 
+// LX-124: the persisted split adds a continuation assistant message after the
+// proposal. A settled read that holds both must project them as two turns; the
+// decision carried on the proposal must stay terminal.
+describe("settleTurns — LX-124 continuation split", () => {
+  it("adopts the split read as two assistant turns with the proposal decision preserved", () => {
+    const prev: ChatTurn[] = [
+      { role: "user", text: "go", imageCount: 0, rawIndex: 0 },
+      {
+        role: "assistant",
+        text: "proposed",
+        imageCount: 0,
+        rawIndex: 1,
+        batch: { batchId: "b1", chips: [chip({ approvalId: "a1", state: "approved" })] },
+      },
+    ];
+    const messages = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        content: "proposed",
+        pendingBatch: {
+          batchId: "b1",
+          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
+        },
+      },
+      { role: "assistant", content: "Done — nothing ran." },
+    ];
+    const out = settleTurns({ prev, messages, streaming: false, streamStatus: "done", hasIngress: false });
+    expect(out?.map((t) => t.text)).toEqual(["go", "proposed", "Done — nothing ran."]);
+    expect(out!.find((t) => t.batch)!.batch!.chips[0]!.state).toBe("approved");
+  });
+});
+
 // A8: at a terminal frame the server transcript read can be transiently
 // run-scoped (a DO read that holds only the current turn). Replacing the
 // settled local view with it erases earlier turns; settleTurns must reconcile

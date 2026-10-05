@@ -66,6 +66,33 @@ describe("renderTranscript — persisted pendingBatch approvals", () => {
   });
 });
 
+describe("renderTranscript — LX-124 continuation boundary", () => {
+  it("renders the proposal and continuation as two assistant turns, marker invisible", () => {
+    const turns = renderTranscript([
+      { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "proposed" },
+          { type: "data-assistant-approval", data: { batchId: "b1", approvals: [{ approvalId: "a1", seq: 0, name: "delete_task", diff: DIFF }] } },
+        ],
+      },
+      { id: "a1~boundary~b1", role: "assistant", parts: [{ type: "data-continuation", data: { batchId: "b1", ts: "2026-01-01T00:00:00Z" } }] },
+      { id: "a1~cont~b1", role: "assistant", parts: [{ type: "text", text: "Done — nothing ran." }] },
+    ]);
+
+    expect(turns.map((t) => t.role)).toEqual(["user", "assistant", "assistant"]);
+    // The empty marker turn is skipped: raw indices are the two real turns.
+    expect(turns.map((t) => t.rawIndex)).toEqual([0, 1, 3]);
+    // Proposal bubble keeps its chips; the continuation bubble has text only.
+    expect(turns[1]!.batch?.batchId).toBe("b1");
+    expect(turns[2]!.text).toBe("Done — nothing ran.");
+    expect(turns[2]!.batch).toBeUndefined();
+    expect(turns[2]!.suspendedBatchId).toBeUndefined();
+  });
+});
+
 describe("resolveChatId", () => {
   const base = {
     projectId: "p1",

@@ -29,7 +29,7 @@ import { deriveChatTitle, resolveAssistantToolPermissionMode, resolveThreadToolP
 import { buildSystemPrompts, CHAT_IDENTITY, IDENTITY, systemPromptText } from "./prompt";
 import { firstUserText, lastUserText } from "./context";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
-import { withApprovalCarriers } from "./approval-carrier";
+import { messageCarriesBatch, withApprovalCarriers, withContinuationBoundary } from "./approval-carrier";
 import { pendingBatchIdsNewestFirst } from "./build-stream";
 import { summaryWindow, summarizeTranscript } from "./summarize";
 import { assistantTraceParams, tracedAI } from "./tracing";
@@ -173,6 +173,13 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // Durable chat recovery (ADR-0003 §B.5). The base class declares this field;
   // assigning it here (not in `onStart`) makes the budgets effective on wake.
   override chatRecovery = ASSISTANT_CHAT_RECOVERY;
+
+  // LX-124 one-shot: the batch whose resume continuation is in flight, armed by
+  // `runResumeContinuation` BEFORE `continueLastTurn` and consumed by
+  // `persistMessages` when the batch's carrier lands in the incoming array
+  // (mirrors the SDK's `#pendingCutover` idiom — an unrelated persist that does
+  // not carry the batch must not apply or clear it).
+  private resumedBatchIdForBoundary: string | null = null;
 
   private async loadRunId(): Promise<string | null> {
     try {
@@ -402,6 +409,18 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // message holding successful write proposals, so the DO canonical store and
     // the D1 mirror both carry the approvals marker (idempotent).
     const withCarriers = withApprovalCarriers(messages);
+    // LX-124: a resume continuation clones the proposal message (same id) and
+    // appends its parts, which would render the follow-up inside the proposal
+    // bubble. When the in-flight resume's batch is present in this persist, split
+    // the continuation into its own message and mark the seam (idempotent). The
+    // one-shot clears only on a persist that actually carries the batch, so an
+    // unrelated persist cannot consume or re-apply it.
+    let prepared = withCarriers;
+    const resumedBatchId = this.resumedBatchIdForBoundary;
+    if (resumedBatchId !== null && withCarriers.some((message) => messageCarriesBatch(message, resumedBatchId))) {
+      prepared = withContinuationBoundary(withCarriers, [resumedBatchId]);
+      this.resumedBatchIdForBoundary = null;
+    }
     // Do NOT hand-patch `this.messages` from the argument: the SDK persists an
     // incoming array that can be run-scoped (only the current run's messages,
     // e.g. the programmatic `saveMessages` write and the client chat-request
@@ -411,7 +430,7 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
     // to the current run and made the terminal REST refetch erase earlier turns
     // (A9). The change feed is the sole writer of the in-memory cache; the
     // stored transcript was already correct, so delete/reset stays authoritative.
-    await super.persistMessages(withCarriers, excludeBroadcastIds, options);
+    await super.persistMessages(prepared, excludeBroadcastIds, options);
     // Compact first, then mirror the freshened summary/count to D1.
     await this.maybeSummarize();
     await this.mirrorCurrent();
@@ -961,6 +980,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
   // results note so the model does not re-propose the writes. A continuation
   // failure must not fail the resume (the writes already applied).
   private async runResumeContinuation(batchId: string, note: string): Promise<void> {
+    // Arm the LX-124 boundary one-shot for exactly this continuation. Cleared in
+    // `finally` so a continuation that never persists (or throws) leaves no
+    // stale batch armed for a later unrelated persist.
+    this.resumedBatchIdForBoundary = batchId;
     try {
       await this.continueLastTurn({
         resumeBatchId: batchId,
@@ -968,6 +991,8 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       });
     } catch (e) {
       console.warn("[Assistant] resumeBatch continuation failed:", e instanceof Error ? e.message : String(e));
+    } finally {
+      this.resumedBatchIdForBoundary = null;
     }
   }
 
