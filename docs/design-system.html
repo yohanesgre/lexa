@@ -6107,6 +6107,11 @@ button.history-item {
    .dropdown-label. */
 .repo-picker-menu { position:absolute; top:100%; left:0; right:0; margin-top:4px; z-index:30; max-height:320px; overflow-y:auto; }
 
+/* Repo-name cell — .dropdown-item is nowrap, so a long owner/repo string must
+   ellipsize instead of widening the menu. Scoped to the picker; the trailing
+   account span stays intact. */
+.repo-picker-menu .dropdown-item .font-mono { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+
 /* Repo type-ahead state block — idle / searching / no-match / no-installation /
    error. Replaces the option list; never rendered alongside results. */
 .repo-picker-state { display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px 14px; text-align:center; font-size:12px; line-height:16px; color:var(--lx-text-secondary); }
