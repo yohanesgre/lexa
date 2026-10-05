@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1510,6 +1510,66 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     after.prepare("DELETE FROM assistant_providers WHERE id = 'prov1'").run();
     expect(after.prepare("SELECT COUNT(*) AS n FROM assistant_call_logs WHERE provider_id IS NULL").get()).toEqual({ n: 6 });
     expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
+
+  // ── 0025 columns.is_done backfill ────────────────────────────────────────
+  // p1: pre-fix project — the canonical "Done" column is unflagged and must be
+  //     repaired. p2: already flagged its own done column ("Shipped") — its
+  //     "Done"-named column must stay untouched. p3: no "Done"-named column —
+  //     nothing to flag. p4: canonical name with case/space noise must match.
+  const SEED_PRE_0025 = `
+    INSERT INTO projects (id, name, slug) VALUES
+      ('p1', 'P1', 'p1'),
+      ('p2', 'P2', 'p2'),
+      ('p3', 'P3', 'p3'),
+      ('p4', 'P4', 'p4');
+    INSERT INTO columns (id, project_id, name, position, is_done) VALUES
+      ('p1-todo',  'p1', 'Todo',        0, 0),
+      ('p1-done',  'p1', 'Done',        4, 0),
+      ('p2-ship',  'p2', 'Shipped',     4, 1),
+      ('p2-done',  'p2', 'Done',        5, 0),
+      ('p3-todo',  'p3', 'Todo',        0, 0),
+      ('p3-ship',  'p3', 'Shipped',     4, 0),
+      ('p4-todo',  'p4', 'Todo',        0, 0),
+      ('p4-done',  'p4', '  DONE  ',    4, 0);
+  `;
+
+  function flags(db: Database): Array<{ id: string; is_done: number }> {
+    return db
+      .prepare("SELECT id, is_done FROM columns WHERE id LIKE 'p%' ORDER BY id")
+      .all() as Array<{ id: string; is_done: number }>;
+  }
+
+  it("0025 backfills only projects with no flagged column; idempotent, case/space-insensitive", () => {
+    const dir = stageThrough("0024");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0025_columns_done_flag_backfill.sql");
+
+    const seed = new Database(dbPath);
+    seed.exec(SEED_PRE_0025);
+    seed.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    expect(appliedMigrations(dbPath)).toContain("0025_columns_done_flag_backfill.sql");
+    expect(flags(after)).toEqual([
+      { id: "p1-done", is_done: 1 }, // repaired: no flagged column before
+      { id: "p1-todo", is_done: 0 },
+      { id: "p2-done", is_done: 0 }, // untouched: project already flagged "Shipped"
+      { id: "p2-ship", is_done: 1 },
+      { id: "p3-ship", is_done: 0 }, // untouched: no "Done"-named column
+      { id: "p3-todo", is_done: 0 },
+      { id: "p4-done", is_done: 1 }, // repaired: case/space-insensitive match
+      { id: "p4-todo", is_done: 0 },
+    ]);
+
+    // Idempotent: a second apply matches nothing and changes no row.
+    const before = flags(after);
+    after.exec(readFileSync(join(MIGRATIONS, "0025_columns_done_flag_backfill.sql"), "utf-8"));
+    expect(flags(after)).toEqual(before);
     after.close();
   });
 });
