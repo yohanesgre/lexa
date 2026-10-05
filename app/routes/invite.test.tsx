@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 type PeekData =
   | { valid: true; email: string }
@@ -42,7 +42,9 @@ vi.mock("../lib/queries", () => ({
   useSignIn: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-import { InvitePage } from "./invite";
+import { Route } from "./invite";
+
+const InvitePage = (Route as unknown as { component: ComponentType }).component;
 
 function setPeek(state: { data: PeekData; isLoading?: boolean; isError?: boolean }) {
   h.peek.value = {

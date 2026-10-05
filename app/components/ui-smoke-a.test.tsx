@@ -98,8 +98,8 @@ import { ApiKeyRevealModal, RateLimitSection } from "./settings/SettingsSections
 import { UsageByModelTable } from "./assistant/UsageByModelTable";
 import { UsageKpiCards } from "./assistant/UsageKpiCards";
 import { WikiEditSplit } from "./wiki/WikiEditSplit";
-import { AssistantShell } from "../routes/admin.assistant";
-import { AssistantProvidersTab } from "../routes/admin.assistant.providers";
+import { AssistantShell } from "./assistant/AssistantShell";
+import { AssistantProvidersTab } from "./assistant/AssistantProvidersTab";
 import { AssistantBindingsTable } from "./assistant/admin/AssistantBindingsTable";
 import { TasksPage } from "./tasks/TasksPage";
 

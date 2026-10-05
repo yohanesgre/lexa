@@ -14,7 +14,7 @@ export const Route = createFileRoute("/device-login")({
 
 // Route components render with no props — `useSearch()` is the only way to
 // read the verifyUrl's request id + token (same pattern as set-password.tsx).
-export function DeviceLoginRoute() {
+function DeviceLoginRoute() {
   const { request, token } = Route.useSearch();
   return <DeviceLoginPage request={request} token={token} />;
 }

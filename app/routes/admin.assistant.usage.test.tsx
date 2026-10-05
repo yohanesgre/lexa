@@ -21,7 +21,10 @@ vi.mock("../components/assistant/UsageByModelTable", () => ({ UsageByModelTable:
 vi.mock("../components/assistant/PriceEditor", () => ({ PriceEditor: () => null }));
 vi.mock("../components/assistant/admin/AssistantCallsTable", () => ({ AssistantCallsTable: () => <div data-testid="calls-table" /> }));
 
-import { AssistantUsageRoute } from "./admin.assistant.usage";
+import type { ComponentType } from "react";
+import { Route } from "./admin.assistant.usage";
+
+const AssistantUsageRoute = (Route as unknown as { component: ComponentType }).component;
 
 describe("admin.assistant.usage body", () => {
   it("renders the usage body and the calls table without page chrome", () => {

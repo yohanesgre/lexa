@@ -11,7 +11,7 @@ export const Route = createFileRoute("/set-password")({
   component: SetPasswordPage,
 });
 
-export function SetPasswordPage() {
+function SetPasswordPage() {
   const { token } = Route.useSearch();
   const { data: session, isLoading } = useSession();
   const [completed, setCompleted] = useState(false);

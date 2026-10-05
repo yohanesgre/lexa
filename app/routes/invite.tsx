@@ -19,7 +19,7 @@ export const Route = createFileRoute("/invite")({
   component: InvitePage,
 });
 
-export function InvitePage() {
+function InvitePage() {
   const { token } = Route.useSearch();
   const { data: session, isLoading } = useSession();
   const peek = useInvitePeek(token);

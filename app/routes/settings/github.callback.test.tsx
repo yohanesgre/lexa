@@ -30,7 +30,7 @@ vi.mock("../../lib/queries", () => ({
   useCompleteGithubSetup: () => h.complete,
 }));
 
-import { GithubCallbackPage } from "./github.callback";
+import { GithubCallbackPage } from "../../components/settings/GithubCallbackPage";
 
 function renderPage(props: { code?: string; state?: string; error?: string }) {
   return render(<GithubCallbackPage {...props} />);
