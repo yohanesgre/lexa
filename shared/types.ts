@@ -322,7 +322,7 @@ export interface AssistantTask {
   key: string;
   documentTitle: string;
   agentId: ID;
-  skillId: ID;
+  skillId: ID | null;
   agentName: string;
   skillName: string;
   extraPrompt: string;

@@ -12,6 +12,7 @@ import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig } from "../storage/config";
 import { RuntimeEnvLive, RuntimeEnvTag } from "../runtime-env";
 import { AssistantTaskService } from "./assistant-task.service";
+import { AUTO_SKILL_INSTRUCTION } from "../assistant/prompt";
 import { encryptSecret, parseMasterKey } from "../assistant/secrets";
 // `loadTaskRepoContent` is best-effort but its requirements are resolved from
 // the ambient context (a missing one is a defect, not a typed failure), so the
@@ -296,17 +297,120 @@ describe("task preflight — new run", () => {
   });
 });
 
+describe("task enqueue — auto skill selection", () => {
+  it("enqueues without a skillId and streams with no skill markdown", async () => {
+    setup();
+    const task = await run(service.enqueue({
+      projectId: "p1",
+      documentType: "task",
+      documentId: "t1",
+      prompt: "improve this doc",
+      agentId: "a1",
+    }));
+    expect(task.status).toBe("queued");
+    expect(task.skillId).toBeNull();
+
+    stubFetch(() => Promise.resolve(jevResponse()));
+    const frames = await drain(await run(service.runStream(task.id, { userId: "u1" })));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
+    // Bun parity with the Worker DO: the auto-pick instruction is backed by the
+    // bound-skill catalog (same `buildSkillPromptParts` source `context.ts` uses).
+    expect(text).toContain("Available skills");
+    expect(text).toContain("- Test Polish");
+    expect(text).not.toContain("Polish the text.");
+  });
+
+  it("still rejects a skillId that is not bound to the agent", async () => {
+    setup();
+    db.exec("INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk2', 'Other', '', 'x', 0)");
+    const result = await run(Effect.either(service.enqueue({
+      projectId: "p1",
+      documentType: "task",
+      documentId: "t1",
+      prompt: "",
+      agentId: "a1",
+      skillId: "sk2",
+    })));
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") expect(result.left._tag).toBe("SkillNotFound");
+  });
+
+  it("keeps an explicitly bound skillId", async () => {
+    setup();
+    const task = await run(service.enqueue({
+      projectId: "p1",
+      documentType: "task",
+      documentId: "t1",
+      prompt: "",
+      agentId: "a1",
+      skillId: "sk1",
+    }));
+    expect(task.skillId).toBe("sk1");
+  });
+});
+
+describe("task skill tolerance — deleted skill row", () => {
+  it("a dangling task skill_id degrades to auto mode instead of failing the run", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    queueRun("at1");
+    // Simulate the Bun/FK-OFF runner: a skill deleted after enqueue leaves the
+    // row's skill_id dangling. The service must swallow findSkillById's
+    // RowNotFound and run in auto mode, never surface SkillNotFound.
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare("UPDATE assistant_tasks SET skill_id = 'ghost' WHERE id = 'at1'").run();
+    db.exec("PRAGMA foreign_keys = ON");
+
+    const frames = await drain(await runStream("at1"));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
+    expect(text).not.toContain("Polish the text.");
+  });
+});
+
 describe("task preflight — resume", () => {
   // A decided batch whose tool is unknown to the executor: resume must apply
   // the verdicts and still reach the model, without Jev being consulted.
-  const seedDecidedBatch = (): void => {
+  const seedDecidedBatch = (skillId: string | null = "sk1"): void => {
     db.exec(`
 INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
-  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":"b1"}]');
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', ${skillId === null ? "NULL" : `'${skillId}'`}, '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":"b1"}]');
 INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
   VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'no_such_write_tool', '{}', '{}', 'approved', '2099-01-01 00:00:00');
 `);
   };
+
+  it("resumes a document thread with no bound skill (auto mode)", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seedDecidedBatch(null);
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
+    expect(text).toContain("- Test Polish");
+  });
+
+  it("a stale thread skill_id degrades resumeThreadStream to auto mode", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    // assistant_threads.skill_id has no FK; a skill deleted after the thread was
+    // written leaves the thread pointing at a vanished row. The resume must
+    // swallow RowNotFound and fall back to auto mode, never SkillNotFound.
+    seedDecidedBatch("ghost");
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    const text = promptText(providerMock.calls[0]!);
+    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
+    expect(text).not.toContain("Polish the text.");
+  });
 
   it("resumes with zero Jev calls and no advisory block", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));

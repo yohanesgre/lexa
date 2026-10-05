@@ -61,6 +61,21 @@ function threadSummaryBlock(summary: { summary: string; summarizedCount: number 
 export const WRITE_POLICY =
   "You have write tools gated by approval. Never claim created/updated/archived before tool returns proposed:true and user approves. If user asks to create/update, call tool immediately with required args; do not ask for confirmation unless missing required field. Never hallucinate success.";
 
+// Emitted in the cached rules slot when the turn carries no skill markdown:
+// auto skill selection. The assistant picks from its bound-skills catalog
+// itself and reads a skill's full instructions with get_skill; the user's
+// Additional prompt wins over the chosen skill's guidance. Shared by the Bun
+// document lane and the Workers harness (both route through this builder).
+export const AUTO_SKILL_INSTRUCTION =
+  "No skill was pre-selected for this run. Pick the best-matching skill(s) from your bound-skills catalog and follow their instructions; call get_skill for a skill's full details. The user's Additional prompt takes precedence over the chosen skill's guidance.";
+
+// Neutral fallback for a turn that is NOT a document run (chat, schedule,
+// detached delegation) and carries no skill markdown: the original neutral
+// line. Auto-pick is document-only — outside the Generate panel there is no
+// "Additional prompt", so no auto-pick instruction is injected there.
+export const CHAT_SKILL_INSTRUCTION =
+  "No additional behavior rules are active. Use your default judgment.";
+
 export interface SystemPromptInput {
   identity: string;
   memoryBlock: string | null;
@@ -68,6 +83,10 @@ export interface SystemPromptInput {
   // Per-message `$skill` instructions, in mention order. Absent/empty means no
   // skill segment is emitted.
   skillMarkdowns?: string[];
+  // Document-run flag. True only for an editor Generate run (task/wiki), where
+  // an unmentioned skill means auto mode and the Additional prompt exists;
+  // false/absent (chat, schedule, delegation) gets the neutral fallback.
+  autoSkill?: boolean;
   // Bound-skill catalog appended to the cached identity segment, after the
   // write policy. Null/blank omits the segment entirely.
   skillCatalog?: string | null;
@@ -100,12 +119,14 @@ export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] 
     { content: segments.join("\n\n"), cache_control: { type: "ephemeral" } },
   ];
 
-  const rules = [input.agentMarkdown, ...(input.skillMarkdowns ?? [])].filter((s): s is string => !!s && s.trim() !== "");
+  const agentRules = [input.agentMarkdown].filter((s): s is string => !!s && s.trim() !== "");
+  const skillRules = (input.skillMarkdowns ?? []).filter((s): s is string => !!s && s.trim() !== "");
+  const fallback = input.autoSkill ? AUTO_SKILL_INSTRUCTION : CHAT_SKILL_INSTRUCTION;
   prompts.push({
     content:
-      rules.length > 0
-        ? rules.join("\n\n")
-        : "No additional behavior rules are active. Use your default judgment.",
+      skillRules.length > 0
+        ? [...agentRules, ...skillRules].join("\n\n")
+        : [...agentRules, fallback].join("\n\n"),
     cache_control: { type: "ephemeral" },
   });
 

@@ -80,6 +80,19 @@ describe("GET /api/admin/assistant/runs", () => {
     expect("selection" in first).toBe(false);
   });
 
+  it("serves skillId null (not an empty string) for an auto document run", async () => {
+    db.prepare(
+      "INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, created_at) VALUES ('auto1', 'p1', 'task', 't1', 'a1', NULL, 'queued', '2026-01-01 10:00:00')"
+    ).run();
+    const res = await handler(authed("/api/admin/assistant/runs"));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: Array<Record<string, unknown>> };
+    const row = body.data.find((r) => r.id === "auto1")!;
+    expect(row.skillId).toBeNull();
+    expect(row.skillId).not.toBe("");
+    expect(row.agentId).toBe("a1");
+  });
+
   it("unions registry runs (kind chat_run/schedule) with nullable document fields", async () => {
     insertTask("t1", "completed", "p1", "2026-01-01 10:00:00");
     insertRun("r1", "chat_run", "running", "p1", "2026-01-02 10:00:00", "chat:c9");
