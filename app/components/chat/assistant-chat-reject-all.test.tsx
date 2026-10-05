@@ -114,7 +114,7 @@ describe("AssistantApprovalBatch — reject all button", () => {
   it("disables both batch actions while the batch is locked", () => {
     render(
       <AssistantApprovalBatch
-        chips={[chip({ approvalId: "a1", seq: 0 })]}
+        chips={[chip({ approvalId: "a1", seq: 0 }), chip({ approvalId: "a2", seq: 1 })]}
         locked
         onDecide={() => {}}
         onApproveAll={() => {}}
@@ -137,5 +137,47 @@ describe("AssistantApprovalBatch — reject all button", () => {
     );
     expect(screen.queryByText("Reject all")).not.toBeInTheDocument();
     expect(screen.queryByText("Approve all")).not.toBeInTheDocument();
+  });
+});
+
+// Wireframe herald-write-approvals.html → BATCH ACTION VISIBILITY: the header
+// batch actions render ONLY when pendingCount >= 2; a single pending chip (a
+// single-chip batch, or an all-but-one-decided batch) keeps per-card only.
+describe("AssistantApprovalBatch — batch action visibility", () => {
+  function renderChips(chips: ApprovalChip[]) {
+    return render(
+      <AssistantApprovalBatch chips={chips} locked={false} onDecide={() => {}} onApproveAll={() => {}} onRejectAll={() => {}} />
+    );
+  }
+
+  it("renders NO batch actions for a single-chip batch and keeps the per-card buttons", () => {
+    renderChips([chip({ approvalId: "a1", seq: 0 })]);
+    expect(screen.queryByRole("button", { name: "Approve all" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject all" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve create_task new" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject create_task new" })).toBeInTheDocument();
+  });
+
+  it("renders both batch actions at the two-pending boundary", () => {
+    renderChips([chip({ approvalId: "a1", seq: 0 }), chip({ approvalId: "a2", seq: 1, name: "move_task" })]);
+    expect(screen.getByRole("button", { name: "Approve all" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject all" })).toBeInTheDocument();
+  });
+
+  it("renders NO batch actions with one pending left in a three-chip batch (per-card only)", () => {
+    renderChips([
+      chip({ approvalId: "a1", seq: 0, state: "approved" }),
+      chip({ approvalId: "a2", seq: 1, name: "move_task", state: "rejected" }),
+      chip({ approvalId: "a3", seq: 2, name: "add_comment" }),
+    ]);
+    expect(screen.queryByRole("button", { name: "Approve all" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject all" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve add_comment new" })).toBeInTheDocument();
+  });
+
+  it("renders both batch actions when two or more chips are pending", () => {
+    renderChips([chip({ approvalId: "a1", seq: 0 }), chip({ approvalId: "a2", seq: 1, name: "move_task" }), chip({ approvalId: "a3", seq: 2, name: "add_comment" })]);
+    expect(screen.getByRole("button", { name: "Approve all" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject all" })).toBeInTheDocument();
   });
 });
