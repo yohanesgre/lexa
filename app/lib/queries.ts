@@ -1445,11 +1445,24 @@ export function useUpdateRateLimit() {
 
 // ── GitHub sync settings (app scope — admin only) ──
 
-export function useGithubSettings() {
+export function useGithubSettings(enabled = true) {
   return useQuery({
     queryKey: ["github-settings"],
     queryFn: () => api.getGithubSettings(),
     staleTime: 60_000,
+    enabled,
+  });
+}
+
+// Live install probe (Settings → GitHub Sync card + Linked Repos type-ahead
+// gate). Admin-gated server-side; disabled callers read undefined.
+export function useGithubInstallations(enabled: boolean) {
+  return useQuery({
+    queryKey: ["github-installations"],
+    queryFn: () => api.getGithubInstallations(),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
   });
 }
 

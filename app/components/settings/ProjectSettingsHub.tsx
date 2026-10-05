@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Trash2, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
+import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useGithubSettings, useGithubInstallations, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
 import * as api from "../../lib/api";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { InlineDropdown } from "./SettingsSections";
+import { githubAppInstallUrl } from "./github-sync-logic";
+import { repoSearchState } from "./linked-repos-logic";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { TextArea } from "../ui/TextArea";
@@ -180,16 +183,35 @@ function ProjectBasicSection({ project }: { project: Project }) {
 // shows repos already linked elsewhere in the workspace (from useProjects —
 // every project payload carries its repos[]) plus GitHub App search results.
 // Selecting a suggestion links the repo to this project immediately.
-function LinkedReposSection({ slug }: { slug: string }) {
+function repoAccount(name: string): string {
+  const slash = name.indexOf("/");
+  return slash === -1 ? name : name.slice(0, slash);
+}
+
+// Result-row glyph — the wireframe's _github-icon.html, copied verbatim.
+function GithubRepoIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+    </svg>
+  );
+}
+
+export function LinkedReposSection({ slug }: { slug: string }) {
   const { data: repos = [], isLoading } = useProjectRepos(slug);
   const { data: projects = [] } = useProjects();
   const replaceRepos = useReplaceProjectRepos();
+  const { data: session } = useSession();
+  const isSuperadmin = session?.user?.role === "superadmin";
+  const { data: settings } = useGithubSettings(isSuperadmin);
+  const install = useGithubInstallations(settings?.source === "settings");
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [removingRepo, setRemovingRepo] = useState<string | null>(null);
   const [removingAll, setRemovingAll] = useState(false);
-  const search = useGithubRepoSearch(query);
+  const debouncedQuery = useDebouncedValue(query.trim(), 300);
+  const search = useGithubRepoSearch(debouncedQuery);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Repos already linked to ANY project in the workspace (deduped, excluding
@@ -215,6 +237,14 @@ function LinkedReposSection({ slug }: { slug: string }) {
 
   const suggestionSet = useMemo(() => new Set(workspaceSuggestions), [workspaceSuggestions]);
   const suggestions = [...workspaceSuggestions, ...githubResults.filter((n) => !suggestionSet.has(n))];
+
+  const status = repoSearchState({
+    query,
+    debouncedQuery,
+    searchStatus: search.status,
+    resultCount: suggestions.length,
+    installStatus: install.data?.status,
+  });
 
   // Reset the dropdown highlight when the suggestion list length changes —
   // adjusted during render (React docs pattern), not in an effect.
@@ -247,17 +277,18 @@ function LinkedReposSection({ slug }: { slug: string }) {
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Linked Repos</h2>
-        <span className="text-xs text-lx-text-muted">Per project</span>
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Linked repos</h2>
+        <span className="text-xs text-lx-text-muted">Project scope · superadmin-only writes</span>
       </div>
-      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Repos this project can read (source — AI agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead shows repos already linked in the workspace plus GitHub App search results.
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
+        GitHub repositories this project syncs with. Search covers only the repos your GitHub App installation can access — Lexa never searches your whole GitHub account.
       </p>
 
-      <div style={{ position: "relative", maxWidth: 420, marginBottom: 16 }} ref={dropdownRef}>
+      <label className="field-label" style={{ marginBottom: 0 }}>Add a repository</label>
+      <div style={{ position: "relative", maxWidth: 480, marginBottom: 16 }} ref={dropdownRef}>
         <input
-          className="prop-input"
-          placeholder="Type a repo name…"
+          className="prop-input w-full font-mono"
+          placeholder="Search repositories…"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true); }}
           onFocus={() => setDropdownOpen(true)}
@@ -270,45 +301,80 @@ function LinkedReposSection({ slug }: { slug: string }) {
           style={{ width: "100%" }}
           aria-label="Search GitHub repos"
         />
-        {dropdownOpen && (suggestions.length > 0 || workspaceSuggestions.length > 0) && (
-          <div className="dropdown-menu" style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 10, width: "100%" }}>
-            {workspaceSuggestions.length > 0 && (
-              <>
-                <div className="dropdown-label">Linked in workspace</div>
-                {workspaceSuggestions.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className="dropdown-item w-full text-left"
-                    style={name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : undefined}
-                    onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
-                    onClick={() => { addRepo(name); }}
-                  >
-                    <span className="font-mono text-xs">{name}</span>
-                  </button>
-                ))}
-              </>
+        {dropdownOpen && (status !== "idle" || workspaceSuggestions.length > 0 || suggestions.length > 0) && (
+          <div className="dropdown-menu repo-picker-menu">
+            {status === "searching" && (
+              <div className="repo-picker-state" style={{ flexDirection: "row", justifyContent: "center" }}>
+                <span className="spinner" />
+                <span>Searching GitHub…</span>
+              </div>
             )}
-            {githubResults.length > 0 && (
+            {status === "no-installation" && (
+              <div className="repo-picker-state">
+                <span className="font-medium text-lx-text-primary">No GitHub App installation found</span>
+                <span className="text-2xs text-lx-text-muted">Install the App on an account before linking repos.</span>
+                <a className="btn btn-primary btn-sm" href={githubAppInstallUrl(settings?.appSlug)} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Install App</a>
+              </div>
+            )}
+            {status === "error" && (
+              <div className="repo-picker-state">
+                <span className="font-medium text-lx-text-primary">Couldn&apos;t load repositories</span>
+                <span className="text-2xs text-lx-text-muted">Something went wrong loading repositories. Try again in a moment.</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => search.refetch()}>Retry</button>
+              </div>
+            )}
+            {status === "no-matches" && (
+              <div className="repo-picker-state">
+                <span className="font-medium text-lx-text-primary">No repositories match &ldquo;{query.trim()}&rdquo;</span>
+                <span className="text-2xs text-lx-text-muted">Only repos this App&apos;s installation can access are searchable.</span>
+              </div>
+            )}
+            {(status === "results" || status === "idle") && (
               <>
-                <div className="dropdown-label">GitHub repos</div>
-                {githubResults.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className="dropdown-item w-full text-left"
-                    style={name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : undefined}
-                    onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
-                    onClick={() => { addRepo(name); }}
-                  >
-                    <span className="font-mono text-xs">{name}</span>
-                  </button>
-                ))}
+                {workspaceSuggestions.length > 0 && (
+                  <>
+                    <div className="dropdown-label">Linked in workspace</div>
+                    {workspaceSuggestions.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className="dropdown-item w-full text-left"
+                        style={{ gap: 10, ...(name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : {}) }}
+                        onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
+                        onClick={() => { addRepo(name); }}
+                      >
+                        <GithubRepoIcon />
+                        <span className="font-mono text-xs" style={{ flex: 1 }}>{name}</span>
+                        <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{repoAccount(name)}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+                {githubResults.length > 0 && (
+                  <>
+                    <div className="dropdown-label">GitHub repos</div>
+                    {githubResults.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className="dropdown-item w-full text-left"
+                        style={{ gap: 10, ...(name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : {}) }}
+                        onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
+                        onClick={() => { addRepo(name); }}
+                      >
+                        <GithubRepoIcon />
+                        <span className="font-mono text-xs" style={{ flex: 1 }}>{name}</span>
+                        <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>{repoAccount(name)}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
               </>
             )}
           </div>
         )}
       </div>
+      <div className="field-hint">The account on the right is the App installation granting that repo. Picking a row links it to this project.</div>
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>

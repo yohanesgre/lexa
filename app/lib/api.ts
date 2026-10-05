@@ -461,6 +461,15 @@ export function completeGithubSetup(input: { code?: string | undefined; state: s
   return request(`${BASE}/settings/github/setup`, { method: "POST", body: JSON.stringify(input) });
 }
 
+export interface GithubInstallations {
+  status: "installed" | "not_installed" | "unknown";
+  accounts: string[];
+}
+
+export function getGithubInstallations(): Promise<GithubInstallations> {
+  return request(`${BASE}/settings/github/installations`);
+}
+
 // ---- teams (Better Auth organizations) ----
 
 export function listTeams(): Promise<{ data: Team[] }> {
