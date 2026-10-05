@@ -503,3 +503,49 @@ describe("AssistantApprovalBatch — carousel", () => {
     expect(counter()).toBe("2 / 3");
   });
 });
+
+// Wireframe herald-write-approvals.html State 1b: a single-chip batch drops the
+// carousel chrome — the chip is a plain full-width card directly under the
+// header, with no track, prev/next controls, or N / M counter.
+describe("AssistantApprovalBatch — single-chip batch", () => {
+  it("renders the chip as a plain card with no carousel chrome", () => {
+    const { container } = renderBatch([chip({ approvalId: "a1", seq: 0 })]);
+
+    expect(container.querySelector(".approval-carousel")).toBeNull();
+    expect(container.querySelector(".approval-carousel-track")).toBeNull();
+    expect(container.querySelector(".approval-carousel-count")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Previous change" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next change" })).toBeNull();
+
+    const batch = container.querySelector(".approval-batch")!;
+    const card = batch.querySelector(".approval-chip");
+    expect(card).not.toBeNull();
+    expect(card!.parentElement).toBe(batch);
+    expect(screen.getByRole("button", { name: "Approve create_task new" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject create_task new" })).toBeInTheDocument();
+  });
+
+  it("renders a decided single chip's state badge without paging", () => {
+    const { container } = renderBatch([chip({ approvalId: "a1", seq: 0, state: "approved" })]);
+
+    expect(container.querySelector(".approval-carousel")).toBeNull();
+    const card = container.querySelector(".approval-chip")!;
+    expect(card.textContent).toContain("Approved");
+    expect(card.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("wires the single chip's own decision buttons", () => {
+    const { onDecide } = renderBatch([chip({ approvalId: "a1", seq: 0 })]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve create_task new" }));
+
+    expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ approvalId: "a1" }), "approve");
+  });
+
+  it("does not render a carousel at the two-chip boundary", () => {
+    const { container, counter } = renderBatch([chip({ approvalId: "a1", seq: 0 }), chip({ approvalId: "a2", seq: 1, name: "move_task" })]);
+
+    expect(container.querySelector(".approval-carousel")).not.toBeNull();
+    expect(counter()).toBe("1 / 2");
+  });
+});
