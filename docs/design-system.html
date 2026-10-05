@@ -6084,6 +6084,39 @@ button.history-item {
 .health-details-kv dd { margin:0; color:var(--lx-text-secondary); word-break:break-all; }
 @media (max-width:640px){ .health-details-kv { grid-template-columns:1fr; gap:0; } .health-details-kv dt { margin-top:6px; } }
 
+/* =========================================================
+   GitHub Sync — install status + repo type-ahead
+   Workspace Settings → GitHub Sync install row; Project
+   Settings → Linked repos search. Reuses the PHOSPHOR
+   disclosure mechanics + the .dropdown-menu primitive.
+   ========================================================= */
+
+/* Card-level disclosure — the manual-credentials fallback card.
+   Same box geometry as .card-panel--elevated (16px padding, 12px
+   radius, default border); the trigger reuses .health-details. */
+.health-details-body--card { padding:16px; border-radius:12px; border-color:var(--lx-border-default); }
+
+/* Install-status block — the connected card's installation probe result. */
+.gh-install { display:flex; flex-direction:column; gap:6px; padding:10px 12px; background:var(--lx-surface-input); border:1px solid var(--lx-border-subtle); border-radius:8px; }
+
+/* One GitHub account the App is installed on. */
+.gh-install-account { display:inline-flex; align-items:center; font-family:var(--lx-font-mono); font-size:11px; line-height:14px; color:var(--lx-text-secondary); background:var(--lx-surface-elevated); border:1px solid var(--lx-border-default); border-radius:9999px; padding:2px 8px; }
+
+/* Repo type-ahead dropdown — anchored under the search input, scrolls past
+   the result cap. Body rows reuse .dropdown-item; group labels reuse
+   .dropdown-label. */
+.repo-picker-menu { position:absolute; top:100%; left:0; right:0; margin-top:4px; z-index:30; max-height:320px; overflow-y:auto; }
+
+/* Repo-name cell — .dropdown-item is nowrap, so a long owner/repo string must
+   ellipsize instead of widening the menu. Scoped to the picker; the trailing
+   account span stays intact. */
+.repo-picker-menu .dropdown-item .font-mono { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+
+/* Repo type-ahead state block — idle / searching / no-match / no-installation /
+   error. Replaces the option list; never rendered alongside results. */
+.repo-picker-state { display:flex; flex-direction:column; align-items:center; gap:8px; padding:16px 14px; text-align:center; font-size:12px; line-height:16px; color:var(--lx-text-secondary); }
+.repo-picker-state svg { width:20px; height:20px; stroke:currentColor; stroke-width:1.5; fill:none; color:var(--lx-text-muted); }
+
 </style>
   <style>
     /* Page-scoped layout only — no design tokens defined here */
