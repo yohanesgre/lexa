@@ -1138,6 +1138,13 @@ const GithubSettingsInput = Schema.Struct({
   webhookSecret: Schema.optional(Schema.String),
 });
 
+// Live install probe (settings GitHub Sync card + repo type-ahead gate).
+// "unknown" is the degrade when GitHub can't be reached — never a 5xx.
+const GithubInstallationsSchema = Schema.Struct({
+  status: Schema.Literal("installed", "not_installed", "unknown"),
+  accounts: Schema.Array(Schema.String),
+});
+
 // Manifest-connect contract: `manifest` is posted to `url` as a form field by
 // the client; `state` is the single-use CSRF value the callback echoes back.
 const GithubManifestSchema = Schema.Struct({
@@ -1177,7 +1184,9 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
     .setPayload(GithubSetupInput)
     .addSuccess(GithubSettingsSchema))
   .add(HttpApiEndpoint.get("searchGithubRepos", "/settings/github/search-repos")
-    .addSuccess(Schema.Struct({ data: Schema.Array(Schema.String) })));
+    .addSuccess(Schema.Struct({ data: Schema.Array(Schema.String) })))
+  .add(HttpApiEndpoint.get("getGithubInstallations", "/settings/github/installations")
+    .addSuccess(GithubInstallationsSchema));
 
 // ── Device login (CLI pairing) — key-exempt create/poll per docs/API.md ──
 const DeviceLoginRequestInfoSchema = Schema.Struct({
@@ -3129,6 +3138,16 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
         const client = yield* GitHubClient;
         const repos = yield* client.searchRepos(q);
         return { data: repos };
+      }))
+    )
+    .handle("getGithubInstallations", () =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const client = yield* GitHubClient;
+        return yield* client.listAppInstallations().pipe(
+          Effect.tapError((e) => Effect.logWarning("github installations probe failed", e)),
+          Effect.catchAll(() => Effect.succeed({ status: "unknown" as const, accounts: [] as string[] }))
+        );
       }))
     )
 );

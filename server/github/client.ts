@@ -68,6 +68,7 @@ export function syncGitHubConfigFromDbAsync(
 export function resetGithubCaches(): void {
   tokenCache.clear();
   installationCache.clear();
+  installationsCache = null;
 }
 
 // ── JWT (RS256 via Web Crypto) — see ./crypto ──
@@ -85,6 +86,10 @@ interface CachedToken {
 
 const tokenCache = new Map<string, CachedToken>();
 const installationCache = new Map<string, string>(); // repo "owner/name" → installation id
+
+interface AppInstallation { id: string; account: string; }
+const INSTALLATIONS_TTL_MS = 60_000;
+let installationsCache: { value: AppInstallation[]; at: number } | null = null;
 
 const API_BASE = "https://api.github.com";
 const API_HEADERS = {
@@ -184,9 +189,11 @@ async function installationTokenFor(config: GitHubConfig["Type"], repo: string):
   return installationTokenForId(config, await installationIdFor(config, repo));
 }
 
-// App-token listing of this App's installations (the repo-search type-ahead
-// has no repo to resolve one from).
-async function listInstallations(config: GitHubConfig["Type"]): Promise<string[]> {
+// App-token listing of this App's installations, shared by the settings install
+// probe and the repo-search type-ahead; 60s TTL (the settings save path calls
+// resetGithubCaches()).
+async function fetchInstallations(config: GitHubConfig["Type"]): Promise<AppInstallation[]> {
+  if (installationsCache && Date.now() - installationsCache.at < INSTALLATIONS_TTL_MS) return installationsCache.value;
   requireConfig(config);
   const jwt = await createAppJwt(config.appId, config.privateKey);
   const res = await githubFetch(config, "/app/installations?per_page=100", {
@@ -198,26 +205,46 @@ async function listInstallations(config: GitHubConfig["Type"]): Promise<string[]
       message: `GitHub installation list failed: ${res.status} ${await res.text().catch(() => "")}`,
     });
   }
-  const body = (await res.json()) as { id?: number }[];
-  return body.filter((i): i is { id: number } => typeof i.id === "number").map((i) => String(i.id));
+  const body = (await res.json()) as { id?: number; account?: { login?: string } }[];
+  const value = body
+    .filter((i): i is { id: number; account?: { login?: string } } => typeof i.id === "number")
+    .map((i) => ({ id: String(i.id), account: i.account?.login ?? "" }));
+  installationsCache = { value, at: Date.now() };
+  return value;
 }
 
-// Fallback for the repo search: every repo the App can see, filtered locally.
-async function installedRepoNames(config: GitHubConfig["Type"], installationIds: string[]): Promise<string[]> {
+// Repos visible to the App's installation(s) — the ONLY source for the repo
+// type-ahead. No global search API: results must never include repos the
+// App cannot access. Bounded pagination: ≤5 pages × 100 per installation.
+async function installedRepoNames(
+  config: GitHubConfig["Type"],
+  installations: AppInstallation[]
+): Promise<{ names: string[]; failures: number; firstStatus: number | null }> {
   const names: string[] = [];
-  for (const id of installationIds) {
-    const token = await installationTokenForId(config, id);
-    const res = await githubFetch(config, "/installation/repositories?per_page=100", {
-      method: "GET",
-      headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) continue;
-    const body = (await res.json()) as { repositories?: { full_name?: string }[] };
-    for (const repo of body.repositories ?? []) {
-      if (typeof repo.full_name === "string") names.push(repo.full_name);
+  let failures = 0;
+  let firstStatus: number | null = null;
+  for (const installation of installations) {
+    const token = await installationTokenForId(config, installation.id);
+    for (let page = 1; page <= 5; page++) {
+      const res = await githubFetch(config, `/installation/repositories?per_page=100&page=${page}`, {
+        method: "GET",
+        headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        failures++;
+        firstStatus ??= res.status;
+        break;
+      }
+      const body = (await res.json()) as { repositories?: { full_name?: string }[] };
+      const pageNames = (body.repositories ?? [])
+        .map((r) => r.full_name)
+        .filter((n): n is string => typeof n === "string");
+      names.push(...pageNames);
+      const hasNext = /rel="next"/.test(res.headers.get("link") ?? "");
+      if (!hasNext || pageNames.length === 0) break;
     }
   }
-  return names;
+  return { names: [...new Set(names)], failures, firstStatus };
 }
 
 // ── Client service ──
@@ -326,31 +353,40 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),
 
-      // Type-ahead repo search for the Settings Linked Repos add-row. Search
-      // API (30 req/min authed) — debounced client-side; only repos the App
-      // is installed on appear (the App never sees beyond its install scope).
+      // Type-ahead repo search for the Settings Linked Repos add-row. Lists repos
+      // per installation (installedRepoNames) and filters locally — no global
+      // GitHub search. All-listings-failed → GithubApiError (502), never [].
       searchRepos: (query: string): Effect.Effect<string[], GithubApiError> =>
         Effect.tryPromise({
           try: async () => {
-            const installations = await listInstallations(config);
-            const first = installations[0];
-            if (first !== undefined) {
-              const token = await installationTokenForId(config, first);
-              const res = await githubFetch(config, `/search/repositories?q=${encodeURIComponent(query)}&per_page=8&sort=stars`, {
-                method: "GET",
-                headers: { ...API_HEADERS, Authorization: `Bearer ${token}` },
-              });
-              if (res.ok) {
-                const body = (await res.json()) as { items?: { full_name: string }[] };
-                return (body.items ?? []).map((i) => i.full_name);
-              }
+            const installations = await fetchInstallations(config);
+            if (installations.length === 0) return [];
+            const { names, failures, firstStatus } = await installedRepoNames(config, installations);
+            if (names.length === 0 && failures > 0) {
+              throw new GithubApiError({ message: `GitHub installed-repo list failed: ${firstStatus}` });
             }
-            // Installation tokens may not be able to query the search API (or
-            // no installation exists yet): fall back to the App's installed
-            // repositories, filtered locally.
-            const all = await installedRepoNames(config, installations);
             const q = query.trim().toLowerCase();
-            return all.filter((name) => name.toLowerCase().includes(q)).slice(0, 8);
+            return names.filter((name) => name.toLowerCase().includes(q)).slice(0, 8);
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      // Install probe for Settings → GitHub Sync (connected card + repo type-ahead
+      // gate). Uses the same 60s-cached fetchInstallations as searchRepos; no App
+      // configured reads as not_installed. The HTTP handler maps upstream failures
+      // to "unknown" instead of a 5xx.
+      listAppInstallations: (): Effect.Effect<
+        { status: "installed" | "not_installed"; accounts: string[] },
+        GithubApiError
+      > =>
+        Effect.tryPromise({
+          try: async () => {
+            if (!config.appId || !config.privateKey) return { status: "not_installed" as const, accounts: [] };
+            const installations = await fetchInstallations(config);
+            return {
+              status: installations.length > 0 ? ("installed" as const) : ("not_installed" as const),
+              accounts: installations.map((i) => i.account).filter((a) => a !== ""),
+            };
           },
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),

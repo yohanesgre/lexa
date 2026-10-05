@@ -170,35 +170,82 @@ describe("getRepoFileContent", () => {
 });
 
 describe("searchRepos", () => {
-  function setupInstallationList() {
-    routes.set("GET https://api.github.com/app/installations?per_page=100", [{ id: 7 }]);
-    routes.set("POST https://api.github.com/app/installations/7/access_tokens", {
-      token: "inst-token",
-      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+  function setupInstallationList(ids: number[]) {
+    routes.set("GET https://api.github.com/app/installations?per_page=100", ids.map((id) => ({ id })));
+    for (const id of ids) {
+      routes.set(`POST https://api.github.com/app/installations/${id}/access_tokens`, {
+        token: `inst-token-${id}`,
+        expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+      });
+    }
+  }
+
+  function jsonWithLink(data: unknown, link?: string): Response {
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...(link ? { link } : {}) },
     });
   }
 
-  function authHeaderFor(segment: string): string | undefined {
-    const callArgs = fetchMock.mock.calls.find(([url]) => String(url).includes(segment));
-    const headers = (callArgs?.[1] as RequestInit | undefined)?.headers as Record<string, string> | undefined;
-    return headers?.Authorization;
-  }
+  it("lists repos across installations, dedupes, and never calls the search API", async () => {
+    setupInstallationList([7, 8]);
+    const page1 = [
+      { repositories: [{ full_name: "acme/widget" }, { full_name: "acme/shared" }] },
+      { repositories: [{ full_name: "acme/shared" }, { full_name: "acme/other" }] },
+    ];
+    let callIndex = 0;
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", () => page1[callIndex++]);
 
-  it("authenticates the search request with an installation token", async () => {
-    setupInstallationList();
-    routes.set("GET https://api.github.com/search/repositories?q=wid&per_page=8&sort=stars", { items: [{ full_name: "acme/widget" }] });
     await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual(["acme/widget"]);
-    expect(authHeaderFor("/search/repositories")).toBe("Bearer inst-token");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/search/repositories"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/app/installations/7/access_tokens"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/app/installations/8/access_tokens"))).toBe(true);
   });
 
-  it("falls back to /installation/repositories and filters locally when search is unusable", async () => {
-    setupInstallationList();
-    routes.set("GET https://api.github.com/search/repositories?q=wid&per_page=8&sort=stars", json({ message: "Forbidden" }, 403));
-    routes.set("GET https://api.github.com/installation/repositories?per_page=100", {
-      repositories: [{ full_name: "acme/widget" }, { full_name: "acme/other" }],
+  it("paginates bounded", async () => {
+    setupInstallationList([7]);
+    for (let page = 1; page <= 5; page++) {
+      routes.set(
+        `GET https://api.github.com/installation/repositories?per_page=100&page=${page}`,
+        jsonWithLink(
+          { repositories: [{ full_name: `acme/repo${page}` }] },
+          `<https://api.github.com/installation/repositories?per_page=100&page=${page + 1}>; rel="next"`
+        )
+      );
+    }
+
+    await call((c) => c.searchRepos("repo"));
+    const pageCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/installation/repositories"));
+    expect(pageCalls.some(([url]) => String(url).includes("page=2"))).toBe(true);
+    expect(pageCalls).toHaveLength(5);
+  });
+
+  it("local filter + cap 8", async () => {
+    setupInstallationList([7]);
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", {
+      repositories: Array.from({ length: 10 }, (_, i) => ({ full_name: `acme/repo${i}` })),
     });
+    await expect(call((c) => c.searchRepos("repo"))).resolves.toHaveLength(8);
+  });
+
+  it("zero installations → [] and no listing call", async () => {
+    setupInstallationList([]);
+    await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual([]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/installation/repositories"))).toBe(false);
+  });
+
+  it("all listing calls fail → GithubApiError", async () => {
+    setupInstallationList([7]);
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", json({ message: "Forbidden" }, 403));
+    await expect(call((c) => c.searchRepos("wid"))).rejects.toMatchObject({ message: expect.stringContaining("403") });
+  });
+
+  it("partial failure with names → matches", async () => {
+    setupInstallationList([7, 8]);
+    const results = [json({ message: "Forbidden" }, 403), { repositories: [{ full_name: "acme/widget" }] }];
+    let callIndex = 0;
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100&page=1", () => results[callIndex++]);
     await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual(["acme/widget"]);
-    expect(authHeaderFor("/installation/repositories")).toBe("Bearer inst-token");
   });
 });
 
