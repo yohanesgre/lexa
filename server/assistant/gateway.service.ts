@@ -521,7 +521,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                     ...filteredMessages.map((m) => typeof (m as { content?: unknown }).content === "string" ? String((m as { content: string }).content) : Array.isArray((m as { content?: unknown }).content) ? JSON.stringify((m as { content: unknown }).content) : JSON.stringify((m as { content?: unknown }).content ?? "")),
                     generatedText,
                   ].join("\n");
-                  const est = estimateTokens(inputText);
+                  const est = await estimateTokens(inputText);
                   if (est > 0) {
                     usageIn = est;
                     estimated = true;

@@ -1,8 +1,22 @@
-import { getEncoding } from "js-tiktoken";
+import type { Tiktoken } from "js-tiktoken/lite";
 
-const enc = getEncoding("cl100k_base");
+let encoderPromise: Promise<Tiktoken> | null = null;
 
-export function estimateTokens(text: string): number {
+function loadEncoder(): Promise<Tiktoken> {
+  encoderPromise ??= (async () => {
+    const { Tiktoken } = await import("js-tiktoken/lite");
+    const { default: cl100kBaseRanks } = await import("js-tiktoken/ranks/cl100k_base");
+    return new Tiktoken(cl100kBaseRanks);
+  })();
+  return encoderPromise;
+}
+
+export async function estimateTokens(text: string): Promise<number> {
   if (!text) return 0;
-  return enc.encode(text).length;
+  try {
+    const enc = await loadEncoder();
+    return enc.encode(text).length;
+  } catch {
+    return 0; // caller falls back to chars/4 (gateway.service.ts:528-531)
+  }
 }
