@@ -9,8 +9,9 @@ import type { ChatAttachmentRef } from "../../lib/assistant-image";
 const navigateMock = vi.hoisted(() => vi.fn());
 const getAssistantChatMock = vi.hoisted(() => vi.fn());
 // Captured turns handed to ChatTranscriptArea — the settle/reconciliation result
-// the shell would render as approval chips.
-const shellCapture = vi.hoisted(() => ({ turns: null as unknown }));
+// the shell would render as approval chips. `pendingReply` is the send-accepted
+// placeholder gate the page derives.
+const shellCapture = vi.hoisted(() => ({ turns: null as unknown, pendingReply: null as unknown }));
 // Captured composer props — landing tests read the seed the page hands down.
 const composerCapture = vi.hoisted(() => ({
   seed: null as { text: string; nonce: number } | null,
@@ -155,8 +156,9 @@ vi.mock("./AssistantChatShell", () => ({
         Delete thread
       </button>
     ),
-  ChatTranscriptArea: (props: { turns: unknown }) => {
+  ChatTranscriptArea: (props: { turns: unknown; pendingReply?: boolean | undefined }) => {
     shellCapture.turns = props.turns;
+    shellCapture.pendingReply = props.pendingReply;
     return null;
   },
   ChatComposerArea: (props: {
@@ -269,6 +271,7 @@ beforeEach(() => {
   getAssistantChatMock.mockReset();
   navigateMock.mockReset();
   shellCapture.turns = null;
+  shellCapture.pendingReply = null;
   composerCapture.seed = null;
   composerCapture.onSend = null;
   transportCapture.sendForKey.mockReset();
@@ -851,6 +854,51 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
       rerenderPage({});
     });
     await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+  });
+
+  it("gates the pending assistant bubble on send acceptance, not streaming", async () => {
+    // The deferred fresh-thread write leaves the stream idle for the whole
+    // socket-attach window; the placeholder must render from acceptance so the
+    // lone user bubble never reads as a failed prompt.
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+    expect(streamFx.state.current.status).toBe("idle");
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(true));
+
+    // Transport takes over: `streaming` covers the caret, so the pending gate
+    // releases.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(false));
+
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(false));
+  });
+
+  it("drops the pending caret on a terminal pre-ingress error", async () => {
+    // A failed send must not leave a stuck caret — the error surface wins.
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(true));
+
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "error", error: { code: "BOOM", message: "boom" } };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(false));
   });
 });
 

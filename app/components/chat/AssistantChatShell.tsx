@@ -252,6 +252,7 @@ export function ChatTranscriptArea({
   chatId,
   slug,
   streaming,
+  pendingReply,
   renderText,
   projectId,
   streamActivity,
@@ -284,6 +285,10 @@ export function ChatTranscriptArea({
   chatId: string;
   slug: string;
   streaming: boolean;
+  // Send accepted but the transport has not taken over yet (deferred fresh-
+  // thread write). Renders the same pre-first-token caret as `streaming` so a
+  // lone user bubble never reads as a failed prompt.
+  pendingReply?: boolean | undefined;
   renderText: (text: string) => ReactNode;
   projectId?: string | undefined;
   streamActivity: ActivityView | undefined;
@@ -317,7 +322,7 @@ export function ChatTranscriptArea({
     <div className="chat-transcript">
       <div className="chat-header-scrim" aria-hidden="true" />
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
-        <div className="chat-column" role="log" aria-live={streaming ? "off" : "polite"} aria-busy={streaming}>
+        <div className="chat-column" role="log" aria-live={streaming ? "off" : "polite"} aria-busy={streaming || pendingReply}>
           {turns.map((turn, pos) =>
             turn.role === "user" ? (
               <UserTurnBubble
@@ -359,7 +364,7 @@ export function ChatTranscriptArea({
           )}
 
           {resumeProgress && <AssistantResumeProgress progress={resumeProgress} onRetry={onRetryResume ?? (() => {})} />}
-          {streaming && <StreamingBubble stream={stream} renderText={renderText} />}
+          {(streaming || pendingReply) && <StreamingBubble stream={stream} renderText={renderText} />}
         </div>
       </div>
       <ChatJumpButton atBottom={atBottom} onClick={onJump} />

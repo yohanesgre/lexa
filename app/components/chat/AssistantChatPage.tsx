@@ -35,6 +35,7 @@ import {
   noWriteToolsAllowed,
   staleThreadNeedsRecovery,
   isThreadNotFound,
+  isTerminalStreamStatus,
   threadFromSearch,
 } from "./assistant-chat-logic";
 import {
@@ -265,6 +266,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   useEffect(() => {
     if (stream.hasIngress) setAcceptedChatId("");
   }, [stream.hasIngress]);
+
+  // The assistant placeholder must render from send acceptance: the deferred
+  // fresh-thread write can take seconds to attach, and a lone user bubble reads
+  // as a failed prompt. `sendAccepted` is released on first ingress, and terminal
+  // statuses are excluded so a failed pre-ingress send never leaves a stuck caret
+  // (the error surface wins).
+  const pendingAssistant = sendAccepted && !streaming && !isTerminalStreamStatus(stream.status);
 
   // Starter-chip seed (hero only). Declared before the send handler so an
   // accepted send can clear it synchronously: the landing→dock swap remounts
@@ -681,6 +689,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             chatId={chatId}
             slug={slug}
             streaming={streaming}
+            pendingReply={pendingAssistant}
             renderText={renderText}
             projectId={projectId}
             streamActivity={streamActivity}
