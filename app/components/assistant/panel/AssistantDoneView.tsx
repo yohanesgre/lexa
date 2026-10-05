@@ -73,7 +73,7 @@ export function AssistantDoneView({
           <span className="text-xs font-medium text-lx-text-primary truncate flex-1 min-w-0" style={{ fontFamily: "var(--lx-font-body)" }}>{documentTitle || "Document"}</span>
         </div>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-          {resolvedSkillName} — ready to review
+          Ready to review
         </span>
       </div>
       <div className="flex items-center justify-end gap-2 mt-3">

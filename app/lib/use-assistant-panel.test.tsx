@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Assistant panel session hook: rehydrates the last run per document without
-// re-POSTing a terminal stream, and keeps the prompt draft + skill choice in
-// the module store across mounts.
+// re-POSTing a terminal stream, and keeps the prompt draft in the module store
+// across mounts.
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent } from "@testing-library/react";
@@ -37,8 +37,6 @@ vi.mock("./use-assistant-agent", () => ({
 
 vi.mock("./queries", () => ({
   useProjects: () => ({ data: [{ id: "p1", slug: "demo" }] }),
-  useAgents: () => ({ data: [{ id: "assistant", skillIds: ["s1", "s2"] }] }),
-  useSkills: () => ({ data: [{ id: "s1", name: "Polish" }, { id: "s2", name: "Review" }] }),
   useAssistantSettings: () => ({ data: h.settings, isLoading: false, isError: false, refetch: h.refetch }),
   useCreateAssistantTask: () => ({ mutate: h.mutate, isPending: false }),
   useCancelAssistantTask: () => ({ mutate: vi.fn() }),
@@ -85,7 +83,6 @@ function Harness({ editor, documentId, slug = "demo", documentType = "task" }: {
       <span data-testid="text">{panel.stream.text}</span>
       <span data-testid="selection">{panel.selectionText}</span>
       <span data-testid="prompt">{panel.prompt}</span>
-      <span data-testid="skill">{panel.effectiveSkillId}</span>
       <button type="button" onClick={panel.generate}>generate</button>
       <button type="button" onClick={() => panel.setPrompt("typed")}>type</button>
     </div>
@@ -124,6 +121,8 @@ describe("useAssistantPanel", () => {
     // the WS thread and the pending task row drives the connecting state. No
     // client-side POST to /stream exists anymore.
     expect(h.mutate).toHaveBeenCalledTimes(1);
+    // Auto skill selection: the payload carries no skillId.
+    expect(h.mutate.mock.calls[0]?.[0]).not.toHaveProperty("skillId");
     expect(h.send).not.toHaveBeenCalled();
     expect(screen.getByTestId("task")).toHaveTextContent("t9");
     expect(screen.getByTestId("status")).toHaveTextContent("connecting");
@@ -164,12 +163,11 @@ describe("useAssistantPanel", () => {
   });
 
   it("does not share wiki session state across projects with the same slug", () => {
-    patchAssistantPanelSession("alpha", "wiki", "shared", { prompt: "alpha draft", skillId: "s2", taskId: "tA" });
+    patchAssistantPanelSession("alpha", "wiki", "shared", { prompt: "alpha draft", taskId: "tA" });
     const { editor } = makeEditor();
     render(<Harness editor={editor} slug="beta" documentType="wiki" documentId="shared" />);
     expect(screen.getByTestId("prompt")).toHaveTextContent("");
     expect(screen.getByTestId("task")).toHaveTextContent("none");
-    expect(screen.getByTestId("skill")).toHaveTextContent("s1");
     expect(getAssistantPanelSession("beta", "wiki", "shared").prompt).toBe("");
     // The other project's bucket is untouched.
     expect(getAssistantPanelSession("alpha", "wiki", "shared").prompt).toBe("alpha draft");
