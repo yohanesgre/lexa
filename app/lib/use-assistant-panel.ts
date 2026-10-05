@@ -89,7 +89,8 @@ function useAssistantRun(args: RunArgs) {
 
   // Enqueue → attach to the run's WebSocket thread: the DOCUMENT thread
   // (`task:<documentId>` / `wiki:<documentId>`) the DO dispatches a document
-  // run on (agent-gate.ts:32) — never `task:<taskId>`, which is not a thread.
+  // run on (server/api/assistant-api.ts:260 `rpc.enqueueRun(...)`) — never
+  // `task:<taskId>`, which is not a thread.
   // The task row carries the run's document identity; fall back to this panel's
   // own document before the row loads. The server enqueued the turn via
   // `enqueueRun` when POST /api/assistant/tasks landed; the client never POSTs
@@ -109,7 +110,20 @@ function useAssistantRun(args: RunArgs) {
   // terminal/pending states (herald-popover.html "background run finished
   // while disconnected lands on Done on reconnect"). A live WS turn always wins.
   const stream = useMemo<AssistantAgentStream>(() => {
-    if (live.status !== "idle" || !assistantTaskData) return live;
+    if (!assistantTaskData) return live;
+    // A document thread is reused across runs on the same document, so its
+    // retained turn maps ready+hasIngress → done — the PREVIOUS run's result.
+    // While the current task row is still queued/running that stale terminal
+    // state must not win: render connecting (no Stop) until the new run's first
+    // frame. A live `streaming` state is the new run already in flight and
+    // still outranks the task row.
+    if (
+      (assistantTaskData.status === "queued" || assistantTaskData.status === "running") &&
+      live.status !== "streaming"
+    ) {
+      return { ...live, status: "connecting" };
+    }
+    if (live.status !== "idle") return live;
     switch (assistantTaskData.status) {
       case "completed":
         return { ...live, status: "done", text: live.text || (assistantTaskData.result ?? ""), hasIngress: true };
@@ -119,9 +133,6 @@ function useAssistantRun(args: RunArgs) {
           status: "error",
           error: { code: "ASSISTANT_GENERATION_FAILED", message: assistantTaskData.error ?? "Assistant generation failed" },
         };
-      case "queued":
-      case "running":
-        return { ...live, status: "connecting" };
       default:
         return live;
     }

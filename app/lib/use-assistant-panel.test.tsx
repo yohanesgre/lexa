@@ -162,6 +162,33 @@ describe("useAssistantPanel", () => {
     expect(screen.getByTestId("text")).toHaveTextContent("final markdown");
   });
 
+  it("prefers connecting over the previous run's terminal state on a same-document rerun", () => {
+    h.snapshot = { status: "done", text: "first result" };
+    h.task = { status: "completed", result: "first result", documentType: "task", documentId: "doc1" };
+    patchAssistantPanelSession("demo", "task", "doc1", { taskId: "t1" });
+    h.mutate.mockImplementation((_input: unknown, opts?: { onSuccess?: (task: { id: string }) => void }) => {
+      opts?.onSuccess?.({ id: "t2" });
+    });
+    const { editor } = makeEditor();
+    render(<Harness editor={editor} documentId="doc1" />);
+    expect(screen.getByTestId("status")).toHaveTextContent("done");
+
+    // Second Generate on the SAME document: the reused thread still carries the
+    // previous turn's ingress (live reports done), but the new task row is
+    // queued — the stale terminal state must not render as Done until the new
+    // run's first frame.
+    h.task = { status: "queued", documentType: "task", documentId: "doc1" };
+    fireEvent.click(screen.getByRole("button", { name: "generate" }));
+    expect(screen.getByTestId("task")).toHaveTextContent("t2");
+    expect(screen.getByTestId("status")).toHaveTextContent("connecting");
+
+    // Once the new run streams, the live state wins again.
+    h.snapshot = { status: "streaming", text: "second delta" };
+    fireEvent.click(screen.getByRole("button", { name: "type" }));
+    expect(screen.getByTestId("status")).toHaveTextContent("streaming");
+    expect(screen.getByTestId("text")).toHaveTextContent("second delta");
+  });
+
   it("tracks the editor selection for the label", () => {
     const { editor, selection, emit } = makeEditor();
     render(<Harness editor={editor} documentId="t3" />);
