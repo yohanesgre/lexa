@@ -8,6 +8,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   useAgent: vi.fn(),
+  useAgentChat: vi.fn(),
 }));
 
 // Mutable chat state for the `useAgentChat` mock, so tests can drive the
@@ -30,13 +31,7 @@ vi.mock("agents/react", () => ({
 }));
 
 vi.mock("@cloudflare/ai-chat/react", () => ({
-  useAgentChat: () => ({
-    ...chatFx.state.current,
-    sendMessage: vi.fn(),
-    stop: vi.fn(),
-    setMessages: vi.fn(),
-    clearError: vi.fn(),
-  }),
+  useAgentChat: (options: unknown) => h.useAgentChat(options),
 }));
 
 import { useAssistantAgent } from "./use-assistant-agent";
@@ -45,15 +40,31 @@ import type { KnownApprovalDecisions } from "./assistant-agent-adapter";
 type UseAgentArgs = {
   basePath?: string;
   query?: { projectId?: string } | undefined;
+  onIdentityChange?: (oldName: string, newName: string, oldAgent: string, newAgent: string) => void;
 };
 
 function lastArgs(): UseAgentArgs {
   return h.useAgent.mock.calls[h.useAgent.mock.calls.length - 1]![0] as UseAgentArgs;
 }
 
+type ChatAgent = { send: (data: unknown) => boolean };
+type UseAgentChatArgs = { agent: ChatAgent; resume?: boolean };
+
+function lastChatArgs(): UseAgentChatArgs {
+  return h.useAgentChat.mock.calls[h.useAgentChat.mock.calls.length - 1]![0] as UseAgentChatArgs;
+}
+
 beforeEach(() => {
   h.useAgent.mockReset();
   h.useAgent.mockReturnValue({ identified: false, connectionError: null });
+  h.useAgentChat.mockReset();
+  h.useAgentChat.mockImplementation(() => ({
+    ...chatFx.state.current,
+    sendMessage: vi.fn(),
+    stop: vi.fn(),
+    setMessages: vi.fn(),
+    clearError: vi.fn(),
+  }));
   chatFx.state.current = chatFx.idle();
 });
 
@@ -98,6 +109,13 @@ describe("useAssistantAgent query wiring", () => {
     const first = lastArgs().query;
     rerender({ projectId: "p1" });
     expect(lastArgs().query).toBe(first);
+  });
+
+  it("acknowledges thread identity changes via onIdentityChange (no SDK advisory)", () => {
+    renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    const onIdentityChange = lastArgs().onIdentityChange;
+    expect(typeof onIdentityChange).toBe("function");
+    expect(() => onIdentityChange!("chat:old", "chat:new", "LexaAssistantAgent", "LexaAssistantAgent")).not.toThrow();
   });
 });
 
@@ -272,5 +290,59 @@ describe("useAssistantAgent — resume outcome callback", () => {
     act(() => result.current.send("/api/assistant/chat/stream", { message: "hi" }, onResult));
     expect(onResult).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useAssistantAgent — resume option", () => {
+  it("disables resume with no thread (the idle landing never probes a closed socket)", () => {
+    renderHook(() => useAssistantAgent(null));
+    expect(lastChatArgs().resume).toBe(false);
+  });
+
+  it("keeps resume on a real thread", () => {
+    renderHook(() => useAssistantAgent("assistant-chat:c1"));
+    expect(lastChatArgs().resume).toBe(true);
+  });
+});
+
+describe("useAssistantAgent — resume-probe send guard", () => {
+  const PROBE = JSON.stringify({ type: "cf_agent_stream_resume_request" });
+
+  function renderWithSocket(socket: { readyState: number; shouldReconnect: boolean }) {
+    const send = vi.fn(() => true);
+    h.useAgent.mockReturnValue({ identified: false, connectionError: null, send, ...socket });
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    return { result, send, chatAgent: lastChatArgs().agent };
+  }
+
+  it("drops the probe on a discarded socket (CLOSED + not reconnecting)", () => {
+    const { send, chatAgent } = renderWithSocket({ readyState: 3, shouldReconnect: false });
+    expect(chatAgent.send(PROBE)).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("forwards the probe on a CLOSED socket that will reconnect", () => {
+    const { send, chatAgent } = renderWithSocket({ readyState: 3, shouldReconnect: true });
+    expect(chatAgent.send(PROBE)).toBe(true);
+    expect(send).toHaveBeenCalledWith(PROBE);
+  });
+
+  it("forwards the probe on an OPEN socket", () => {
+    const { send, chatAgent } = renderWithSocket({ readyState: 1, shouldReconnect: false });
+    expect(chatAgent.send(PROBE)).toBe(true);
+    expect(send).toHaveBeenCalledWith(PROBE);
+  });
+
+  it("always forwards a non-probe frame", () => {
+    const { send, chatAgent } = renderWithSocket({ readyState: 3, shouldReconnect: false });
+    expect(chatAgent.send("hello")).toBe(true);
+    expect(send).toHaveBeenCalledWith("hello");
+  });
+
+  it("keeps the raw agent on the returned stream", () => {
+    const raw = { identified: false, connectionError: null, readyState: 3, shouldReconnect: false, send: vi.fn(() => true) };
+    h.useAgent.mockReturnValue(raw);
+    const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(result.current.agent).toBe(raw);
   });
 });

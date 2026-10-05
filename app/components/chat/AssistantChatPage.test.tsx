@@ -9,8 +9,9 @@ import type { ChatAttachmentRef } from "../../lib/assistant-image";
 const navigateMock = vi.hoisted(() => vi.fn());
 const getAssistantChatMock = vi.hoisted(() => vi.fn());
 // Captured turns handed to ChatTranscriptArea — the settle/reconciliation result
-// the shell would render as approval chips.
-const shellCapture = vi.hoisted(() => ({ turns: null as unknown }));
+// the shell would render as approval chips. `pendingReply` is the send-accepted
+// placeholder gate the page derives.
+const shellCapture = vi.hoisted(() => ({ turns: null as unknown, pendingReply: null as unknown }));
 // Captured composer props — landing tests read the seed the page hands down.
 const composerCapture = vi.hoisted(() => ({
   seed: null as { text: string; nonce: number } | null,
@@ -155,8 +156,9 @@ vi.mock("./AssistantChatShell", () => ({
         Delete thread
       </button>
     ),
-  ChatTranscriptArea: (props: { turns: unknown }) => {
+  ChatTranscriptArea: (props: { turns: unknown; pendingReply?: boolean | undefined }) => {
     shellCapture.turns = props.turns;
+    shellCapture.pendingReply = props.pendingReply;
     return null;
   },
   ChatComposerArea: (props: {
@@ -269,6 +271,7 @@ beforeEach(() => {
   getAssistantChatMock.mockReset();
   navigateMock.mockReset();
   shellCapture.turns = null;
+  shellCapture.pendingReply = null;
   composerCapture.seed = null;
   composerCapture.onSend = null;
   transportCapture.sendForKey.mockReset();
@@ -741,6 +744,161 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     streamFx.state.current = { ...streamFx.idle(), status: "done", hasIngress: true };
     rerenderPage({});
     expect(container.querySelector(".chat-landing")).toBeNull();
+  });
+
+  it("keeps the minted chat when the optimistic insert lands in the list snapshot", async () => {
+    // Real-app divergence: `useChatStartStream` optimistically calls
+    // `insertNewThread`, so `knownChatIds` contains the minted id and
+    // `isUntrackedDeepLink` no longer protects it. The mocked list hook reads
+    // fx.lists directly, so mirror the insert and rerender. The transcript still
+    // 404s and the stream is still idle — the exact window the stale-thread
+    // recovery misreads as a dead thread (and evicts the deferred send).
+    fx.lists.p1 = [];
+    let failRead!: (error: unknown) => void;
+    getAssistantChatMock.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        failRead = reject;
+      })
+    );
+    const { container, rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    let mintedId = "";
+    await act(async () => {
+      sendFirst(rerenderPage);
+      mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
+      fx.lists.p1 = [
+        {
+          chatId: mintedId,
+          title: "hello",
+          pinned: false,
+          snippet: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+      ];
+      rerenderPage({ thread: mintedId });
+      await Promise.resolve();
+      failRead(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    });
+    expect(streamFx.state.current.status).toBe("idle");
+    expect(mintedId).not.toBe("");
+
+    // The accepted send docks the landing and keeps the optimistic turn.
+    expect(container.querySelector(".chat-landing")).toBeNull();
+    expect(shellCapture.turns ?? []).toHaveLength(1);
+    expect((shellCapture.turns as Array<{ role: string; text: string }>)[0]).toMatchObject({ role: "user", text: "hello" });
+
+    // Let the settled 404 reach the recovery effects: the minted id is now in
+    // `knownChatIds` and the stream is idle, so the stale-thread predicates
+    // would evict the chat. The accepted send must suppress that — no hero.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+  });
+
+  it("keeps the accepted marker through a transient connecting flip; ingress releases it", async () => {
+    // Run 5 (staging regression): a transient connecting/streaming flip with NO
+    // ingress must not release the marker — the stale 404 would then evict the
+    // just-minted thread and strand the deferred send. Only the first ingress
+    // (the send actually landing) releases it, after which recovery can fire.
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container, rerenderPage, queryClient } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+    const mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(mintedId));
+
+    // Mirror the optimistic insert so `isUntrackedDeepLink` no longer protects it.
+    act(() => {
+      fx.lists.p1 = [
+        { chatId: mintedId, title: "hello", pinned: false, snippet: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+      ];
+      rerenderPage({ thread: mintedId });
+    });
+    await waitFor(() => expect(queryClient.getQueryState(["assistant-chat", mintedId])?.error).toBeTruthy());
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // Transient connecting flip without ingress: the marker stays and the minted
+    // chat is kept.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
+      rerenderPage({});
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // Back to idle with no ingress at all: still suppressed (marker not released).
+    act(() => {
+      streamFx.state.current = streamFx.idle();
+      rerenderPage({});
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // First ingress releases the marker …
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
+    });
+    // … so a later idle 404 recovers and lands on the fresh hero.
+    act(() => {
+      streamFx.state.current = streamFx.idle();
+      rerenderPage({});
+    });
+    await waitFor(() => expect(container.querySelector(".chat-landing")).toBeTruthy());
+  });
+
+  it("gates the pending assistant bubble on send acceptance, not streaming", async () => {
+    // The deferred fresh-thread write leaves the stream idle for the whole
+    // socket-attach window; the placeholder must render from acceptance so the
+    // lone user bubble never reads as a failed prompt.
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+    expect(streamFx.state.current.status).toBe("idle");
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(true));
+
+    // Transport takes over: `streaming` covers the caret, so the pending gate
+    // releases.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(false));
+
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(false));
+  });
+
+  it("drops the pending caret on a terminal pre-ingress error", async () => {
+    // A failed send must not leave a stuck caret — the error surface wins.
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    sendFirst(rerenderPage);
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(true));
+
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "error", error: { code: "BOOM", message: "boom" } };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(shellCapture.pendingReply).toBe(false));
   });
 });
 

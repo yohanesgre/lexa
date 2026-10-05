@@ -443,15 +443,18 @@ export function staleThreadNeedsRecovery(args: {
   transcriptError: unknown;
   hasIngress: boolean;
   streaming: boolean;
+  sendAccepted: boolean;
   listData: AssistantChatThreadSummary[] | undefined;
   meta: ThreadMeta;
 }): boolean {
-  const { projectId, chatId, transcriptLoading, transcriptError, hasIngress, streaming, listData, meta } = args;
+  const { projectId, chatId, transcriptLoading, transcriptError, hasIngress, streaming, sendAccepted, listData, meta } = args;
   if (!projectId || !chatId) return false;
   if (transcriptLoading) return false;
   if (!transcriptError) return false;
   if (!isThreadNotFound(transcriptError)) return false;
   if (hasIngress || streaming) return false;
+  // An accepted-but-unflushed send is the deferred fresh-thread write, not a dead thread.
+  if (sendAccepted) return false;
   if (!listData) return false;
   if (isUntrackedDeepLink(chatId, meta)) return false;
   return true;
@@ -466,12 +469,15 @@ export function orphanThreadNeedsRecovery(args: {
   transcriptError: unknown;
   hasIngress: boolean;
   streaming: boolean;
+  sendAccepted: boolean;
   listLoading: boolean;
   listData: AssistantChatThreadSummary[] | undefined;
   meta: ThreadMeta;
 }): boolean {
-  const { projectId, chatId, transcriptError, hasIngress, streaming, listLoading, listData, meta } = args;
+  const { projectId, chatId, transcriptError, hasIngress, streaming, sendAccepted, listLoading, listData, meta } = args;
   if (!projectId || !chatId || !listData || listLoading) return false;
+  // An accepted-but-unflushed send is the deferred fresh-thread write, not a dead thread.
+  if (sendAccepted) return false;
   if (isUntrackedDeepLink(chatId, meta)) return false;
   if (!isThreadNotFound(transcriptError)) return false;
   return !!meta.thread && listData.length > 0 && !listData.some((t) => t.chatId === chatId) && !hasIngress && !streaming;

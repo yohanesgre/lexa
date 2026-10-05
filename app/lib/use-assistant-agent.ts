@@ -86,6 +86,42 @@ export interface AssistantAgentOptions {
 // SSE `AssistantStream`; the chat page only reads the snapshot fields.
 const noopSubscribe = (): (() => void) => () => {};
 
+// The agent object returned by `useAgent` IS the thread's PartySocket. On a key
+// change the SDK issues a stream-resume probe through this socket in the commit
+// that swaps the transport, while it still points at the previous socket —
+// which partysocket has already `close()`d on a discarded address. The frame can
+// never be delivered, so `send()` warns "send() was called after close()" and
+// buffers a frame that is dropped on the next socket replacement. Drop exactly
+// that probe, and only on a socket that can never deliver it: CLOSED
+// (readyState 3) and not reconnecting (shouldReconnect false). A CLOSED socket
+// that WILL reconnect keeps the SDK's buffered retry path intact, and every
+// other payload passes through untouched. The dropped probe is otherwise
+// answered by the server's proactive `cf_agent_stream_resuming` on the
+// replacement socket, or times out harmlessly.
+function guardResumeProbe<T extends object>(agent: T): T {
+  return new Proxy(agent, {
+    get(target, prop) {
+      if (prop === "send") {
+        return (data: unknown): boolean => {
+          const socket = target as { readyState?: number; shouldReconnect?: boolean };
+          if (
+            typeof data === "string" &&
+            data.includes("cf_agent_stream_resume_request") &&
+            socket.readyState === 3 &&
+            socket.shouldReconnect === false
+          ) {
+            return false;
+          }
+          const real = Reflect.get(target, "send", target) as ((data: unknown) => boolean) | undefined;
+          return real ? real.call(target, data) : false;
+        };
+      }
+      const value = Reflect.get(target, prop, target) as unknown;
+      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
 // LX-79/LX-84: the resume route answers with a discriminated JSON ack. A JSON
 // `{ok:true}` with no discriminated fields is still success (legacy
 // undiscriminated ack); a non-JSON 2xx is the legacy SSE path (no Durable
@@ -165,16 +201,28 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
     // No thread yet (fresh landing): keep the socket closed instead of
     // connecting to a bogus key the gate would 404.
     enabled: threadKey !== null,
+    // Each chat/task/wiki thread is its own DO instance, so switching threads
+    // legitimately changes the identity; acknowledge it via the documented
+    // callback instead of the SDK advisory.
+    onIdentityChange: () => {},
   });
 
   const bodyRef = useRef<Record<string, unknown>>({});
+  // `useAgentChat` owns the transport, so it must talk to the guarded socket;
+  // the raw `agent` stays what the returned stream exposes for
+  // `useAssistantRunEvents` (the delegated-run hook taps the real connection).
+  const guardedAgent = useMemo(() => guardResumeProbe(agent), [agent]);
   const chat = useAgentChat({
-    agent,
+    agent: guardedAgent,
     // The DO is canonical and the REST transcript is the settled read; the
     // client message list is a projection, never synced back.
     getInitialMessages: null,
     syncMessagesToServer: false,
-    resume: true,
+    // Without a thread there is no stream to resume: the idle landing socket is
+    // closed (`enabled: false`) and probing it produces the
+    // "send() was called after close()" warning + a buffered frame that is
+    // discarded on the next socket replacement.
+    resume: threadKey !== null,
     throttle: options?.throttle ?? 50,
     body: () => bodyRef.current,
   });
