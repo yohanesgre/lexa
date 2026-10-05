@@ -97,6 +97,11 @@ describe("resolvers", () => {
     expect(resolveDatabasePath({ DATABASE_PATH: "/tmp/y.db" })).toBe("/tmp/y.db");
   });
 
+  it("treats an empty or whitespace-only public URL as unset", () => {
+    expect(resolvePublicUrl({ LXK_PUBLIC_URL: "" })).toBe(DEFAULT_PUBLIC_URL);
+    expect(resolvePublicUrl({ LXK_PUBLIC_URL: "   " })).toBe(DEFAULT_PUBLIC_URL);
+  });
+
   it("dev trusted origins add the vite host; prod does not", () => {
     const dev = resolveTrustedOrigins({ LXK_ENV: "dev", LXK_PUBLIC_URL: "https://x.test" });
     expect(dev).toContain("https://x.test");
