@@ -65,6 +65,29 @@ describe("bun-sqlite driver statement cache", () => {
     }
   });
 
+  it("cached placeholder statement throws on param-count mismatch instead of reusing prior bindings", async () => {
+    const db = makeDb();
+    try {
+      const driver = createBunSqliteDriver(db);
+      await driver.prepare("INSERT INTO t (id, v) VALUES (?, ?)").run("a", 1);
+      const sql = "SELECT id, v FROM t WHERE id = ? AND v = ?";
+      await driver.prepare(sql).first("a", 1);
+      expect(() => driver.prepare(sql).first()).toThrow("bun-sqlite driver: param count mismatch");
+      expect(() => driver.prepare(sql).first("a")).toThrow("bun-sqlite driver: param count mismatch");
+      expect(() => driver.prepare(sql).all("a", 1, 2)).toThrow("bun-sqlite driver: param count mismatch");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("close() clears the statement cache (no stale wrappers after native finalization)", () => {
+    const db = makeDb();
+    const driver = createBunSqliteDriver(db);
+    driver.prepare("SELECT id, v FROM t WHERE id = ?");
+    driver.close();
+    expect(() => driver.prepare("SELECT id, v FROM t WHERE id = ?")).toThrow();
+  });
+
   it("batch() reuses cached statements and preserves positional results across calls", async () => {
     const db = makeDb();
     try {

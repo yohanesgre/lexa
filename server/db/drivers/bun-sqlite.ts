@@ -8,6 +8,12 @@
 // On the Bun host this driver is a thin shim — every method's promise
 // resolves on the next microtask, so behavior is byte-identical to the
 // synchronous `Database` it wraps.
+//
+// Prepared statements are cached per connection (`getStmt`). A cached
+// statement survives schema changes — SQLite auto-reprepares it and it reads
+// new data — but the EXPOSED ROW SHAPE is frozen at prepare time, so a cached
+// `SELECT *` does NOT gain columns added later. Only live window: an operator
+// running `bun run setup` (migrations) against an already-running server.
 
 import type { Database, Statement } from "bun:sqlite";
 import type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver";
@@ -17,13 +23,24 @@ class BunSqliteStmt implements DbStmt {
   get columnNames(): string[] {
     return this.raw.columnNames;
   }
+  // A cached statement keeps its bindings across calls; bun:sqlite silently
+  // reuses them when called with zero args, so a wrong arity would read (or
+  // write) the previous call's row. Reject any mismatch up front.
+  private assertArity(params: SqlParam[]): void {
+    if (params.length !== this.raw.paramsCount) {
+      throw new Error("bun-sqlite driver: param count mismatch");
+    }
+  }
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]> {
+    this.assertArity(params);
     return Promise.resolve(this.raw.all(...params) as T[]);
   }
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null> {
+    this.assertArity(params);
     return Promise.resolve((this.raw.get(...params) ?? null) as T | null);
   }
   run(...params: SqlParam[]): Promise<StmtResult> {
+    this.assertArity(params);
     const r = this.raw.run(...params);
     return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid });
   }
@@ -118,6 +135,7 @@ export function createBunSqliteDriver(db: Database): DbDriver {
       }
     },
     close(): void {
+      stmtCache.clear();
       db.close();
     },
   };
