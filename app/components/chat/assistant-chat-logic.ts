@@ -64,6 +64,38 @@ export function insertNewThread(qc: QueryClient, projectId: string, threadId: st
   });
 }
 
+// Bump the active thread's `updatedAt` in every cached list variant from the
+// client-known clock. Existing titles/snippets are preserved and rows are never
+// seeded (the ingress path owns seeding), so this is a derivable-field cache
+// write with no network (invariant 6).
+export function touchThreadUpdatedAt(qc: QueryClient, projectId: string, chatId: string, now: string): void {
+  const queries = qc.getQueriesData<AssistantChatThreadSummary[]>({ queryKey: ["assistant-chats", projectId] });
+  for (const [key] of queries) {
+    qc.setQueryData<AssistantChatThreadSummary[]>(key, (old) => {
+      if (!old?.some((t) => t.chatId === chatId)) return old;
+      return sortThreads(old.map((t) => (t.chatId === chatId ? { ...t, updatedAt: now } : t)));
+    });
+  }
+}
+
+// Terminal / settled-resume cache settle (invariant 6). The persisted
+// transcript is server-authoritative — GET /assistant/chat/:chatId reconciles
+// approval markers and carries out-of-band continuation frames the client never
+// received — so it cannot be written from stream state. Targeted refetch of the
+// exact key is the documented fallback (not stale-marking: invalidate would
+// refetch every observer). The thread list IS derivable, so it is written from
+// client-known fields.
+export function settleThreadCache(args: {
+  qc: QueryClient;
+  chatId: string;
+  projectId: string | undefined;
+  now?: string;
+}): void {
+  const { qc, chatId, projectId, now = new Date().toISOString() } = args;
+  void qc.refetchQueries({ queryKey: ["assistant-chat", chatId], exact: true, type: "active" });
+  if (projectId) touchThreadUpdatedAt(qc, projectId, chatId, now);
+}
+
 // ── Stream send ──
 
 export function chatStreamBody(args: {

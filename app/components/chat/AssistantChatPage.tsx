@@ -37,6 +37,7 @@ import {
   isThreadNotFound,
   isTerminalStreamStatus,
   threadFromSearch,
+  settleThreadCache,
 } from "./assistant-chat-logic";
 import {
   useApprovalDecisions,
@@ -606,12 +607,11 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   // The resume continuation persists its assistant reply server-side; the DO
   // does broadcast the resumed frames, but the SDK continuation has no client
-  // entry to attach out-of-band frames, so a settled resume refetches the
-  // transcript + thread list (same pair as the terminal-refetch branch) to
-  // render the reply live instead of only after reload.
+  // entry to attach out-of-band frames, so a settled resume settles the same
+  // cache pair as the terminal-refetch branch: a targeted transcript refetch
+  // (server-authoritative) plus a derivable list touch — invariant 6.
   const onResumeSettled = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ["assistant-chat", chatId] });
-    if (projectId) void qc.invalidateQueries({ queryKey: ["assistant-chats", projectId] });
+    settleThreadCache({ qc, chatId, projectId });
   }, [qc, chatId, projectId]);
 
   const { resumeProgress, retryResume } = useStreamFrameFreeze({ stream, setTurns, turns, chatId, streaming, ingressInsertedRef, onResumeSettled });

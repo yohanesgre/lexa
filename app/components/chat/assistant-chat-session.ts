@@ -30,6 +30,8 @@ import {
   suspendTurnFrame,
   terminalTranscriptAction,
   touchThreadEntry,
+  touchThreadUpdatedAt,
+  settleThreadCache,
   truncateTurns,
   threadEntry,
 } from "./assistant-chat-logic";
@@ -567,8 +569,10 @@ export function useSettledTurns(args: {
   return { turns: settled.turns, setTurns, raw: settled.raw };
 }
 
-// Terminal stream frame → refetch the transcript (except 404s, which would
-// re-create the dead thread query); the sidebar list always refreshes.
+// Terminal stream frame → settle the transcript cache (except 404s, which
+// would re-create the dead thread query) and touch the sidebar list. The
+// transcript is server-authoritative (targeted refetch of the exact key); the
+// list is written from client-known fields — invariant 6, no invalidate.
 export function useTerminalRefetch(args: {
   stream: Stream;
   chatId: string;
@@ -610,18 +614,18 @@ export function useTerminalRefetch(args: {
     if (terminalTranscriptAction(code, stream.hasIngress) === "drop") {
       qc.cancelQueries({ queryKey: ["assistant-chat", chatId] });
       qc.removeQueries({ queryKey: ["assistant-chat", chatId] });
+      if (projectId) touchThreadUpdatedAt(qc, projectId, chatId, new Date().toISOString());
     } else if (isThreadNotFoundCode(code)) {
       // 404 + ingress: the pre-ingress 404 is stale — the thread now exists, so
       // refetch the persisted turns (clearing the 404) instead of dropping the
       // query that would strand the user turn until reload.
       if (refetchedRef.current !== chatId) {
         refetchedRef.current = chatId;
-        void qc.invalidateQueries({ queryKey: ["assistant-chat", chatId] });
+        settleThreadCache({ qc, chatId, projectId });
       }
     } else {
-      void qc.invalidateQueries({ queryKey: ["assistant-chat", chatId] });
+      settleThreadCache({ qc, chatId, projectId });
     }
-    if (projectId) void qc.invalidateQueries({ queryKey: ["assistant-chats", projectId] });
   }, [stream.status, stream.hasIngress, chatId, projectId, qc, transcriptError]);
 }
 

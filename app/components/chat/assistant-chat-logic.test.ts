@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { renderTranscript } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
-import { chipStateFromError, dropUnknownThread, orphanThreadNeedsRecovery, resolveChatId, resolveResendTarget, resumableBatchId, staleThreadNeedsRecovery } from "./assistant-chat-logic";
+import { chipStateFromError, dropUnknownThread, orphanThreadNeedsRecovery, resolveChatId, resolveResendTarget, resumableBatchId, settleThreadCache, staleThreadNeedsRecovery } from "./assistant-chat-logic";
 
 const user = (text: string, rawIndex = -1): ChatTurn => ({ role: "user", text, imageCount: 0, rawIndex });
 const assistant = (text: string, rawIndex = -1, error?: { code: string; message: string }): ChatTurn => ({
@@ -371,5 +371,37 @@ describe("resumableBatchId — resume guards (LX-81/82/83)", () => {
   it("requires chips for the in-session path (a marker-only batch never resumes)", () => {
     const marker: ChatTurn = { role: "assistant", text: "", imageCount: 0, rawIndex: -1, suspendedBatchId: "b1" };
     expect(resumableBatchId([marker], new Set(), new Set(["b1"]))).toBeNull();
+  });
+});
+
+describe("settleThreadCache — terminal/resume cache settle (invariant 6)", () => {
+  const row = (chatId: string, updatedAt: string) => ({ chatId, title: chatId, pinned: false, snippet: null, createdAt: "2020-01-01T00:00:00Z", updatedAt });
+
+  it("refetches the exact transcript key and bumps the row in every cached list variant", () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["assistant-chats", "p1", null], [row("A", "2020-01-01T00:00:00Z"), row("B", "2020-01-01T00:00:00Z")]);
+    qc.setQueryData(["assistant-chats", "p1", "runbook"], [row("A", "2020-01-01T00:00:00Z")]);
+    qc.setQueryData(["assistant-chat", "A"], { messages: [] });
+    const refetch = vi.spyOn(qc, "refetchQueries");
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    settleThreadCache({ qc, chatId: "A", projectId: "p1", now: "2026-10-06T00:00:00Z" });
+
+    expect(refetch).toHaveBeenCalledWith({ queryKey: ["assistant-chat", "A"], exact: true, type: "active" });
+    const list = qc.getQueryData<Array<{ chatId: string; updatedAt: string }>>(["assistant-chats", "p1", null]) ?? [];
+    expect(list.map((t) => [t.chatId, t.updatedAt])).toEqual([
+      ["A", "2026-10-06T00:00:00Z"],
+      ["B", "2020-01-01T00:00:00Z"],
+    ]);
+    const filtered = qc.getQueryData<Array<{ chatId: string; updatedAt: string }>>(["assistant-chats", "p1", "runbook"]) ?? [];
+    expect(filtered[0]!.updatedAt).toBe("2026-10-06T00:00:00Z");
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("never seeds a missing row (the ingress path owns seeding)", () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["assistant-chats", "p1", "runbook"], [row("B", "2020-01-01T00:00:00Z")]);
+    settleThreadCache({ qc, chatId: "A", projectId: "p1", now: "2026-10-06T00:00:00Z" });
+    expect((qc.getQueryData<Array<{ chatId: string }>>(["assistant-chats", "p1", "runbook"]) ?? []).map((t) => t.chatId)).toEqual(["B"]);
   });
 });

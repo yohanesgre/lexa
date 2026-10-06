@@ -320,8 +320,13 @@ describe("useSettledTurns — accepted send is scoped to the mint transition", (
 describe("useTerminalRefetch — once per terminal status (A2)", () => {
   function renderTerminalSpy() {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    qc.setQueryData(["assistant-chats", "p1"], [
+      { chatId: "N", title: "Thread N", pinned: false, snippet: null, createdAt: "2020-01-01T00:00:00Z", updatedAt: "2020-01-01T00:00:00Z" },
+    ]);
+    const refetch = vi.spyOn(qc, "refetchQueries");
+    const setData = vi.spyOn(qc, "setQueryData");
     const remove = vi.spyOn(qc, "removeQueries");
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
     const queryFn = vi.fn().mockResolvedValue({ messages: [{ role: "user", content: "hi" }] });
     const utils = render(
       <QueryClientProvider client={qc}>
@@ -334,18 +339,18 @@ describe("useTerminalRefetch — once per terminal status (A2)", () => {
           <TerminalHarness stream={stream} queryFn={queryFn} />
         </QueryClientProvider>
       );
-    const listCalls = () =>
-      invalidate.mock.calls.filter(([f]) => Array.isArray(f?.queryKey) && f.queryKey[0] === "assistant-chats").length;
+    const listCalls = () => setData.mock.calls.filter(([k]) => Array.isArray(k) && k[0] === "assistant-chats").length;
     const transcriptCalls = () =>
-      invalidate.mock.calls.filter(([f]) => Array.isArray(f?.queryKey) && f.queryKey[0] === "assistant-chat").length;
-    return { qc, invalidate, remove, rerender, listCalls, transcriptCalls };
+      refetch.mock.calls.filter(([f]) => Array.isArray(f?.queryKey) && f.queryKey[0] === "assistant-chat").length;
+    const listRow = () => (qc.getQueryData<Array<{ chatId: string; updatedAt: string }>>(["assistant-chats", "p1"]) ?? [])[0];
+    return { qc, refetch, setData, remove, invalidate, rerender, listCalls, transcriptCalls, listRow };
   }
 
-  it("invalidates transcript + list once across a terminal oscillation (no streaming edge)", async () => {
-    const { invalidate, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
+  it("settles the transcript + list row once across a terminal oscillation (no streaming edge)", async () => {
+    const { refetch, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
 
     rerender(makeStream({ status: "done", hasIngress: true }));
-    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
     expect(listCalls()).toBe(1);
     expect(transcriptCalls()).toBe(1);
 
@@ -357,11 +362,23 @@ describe("useTerminalRefetch — once per terminal status (A2)", () => {
     expect(transcriptCalls()).toBe(1);
   });
 
-  it("re-arms across the streaming edge so a second turn's done fires again", async () => {
-    const { invalidate, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
+  it("writes the list row from client-known fields and refetches the exact transcript key — no invalidate", async () => {
+    const { refetch, invalidate, rerender, listRow } = renderTerminalSpy();
 
     rerender(makeStream({ status: "done", hasIngress: true }));
-    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
+    // Invariant 6: transcript = targeted refetch of the exact key (server-
+    // authoritative persisted turns); list = derivable cache write.
+    expect(refetch).toHaveBeenCalledWith({ queryKey: ["assistant-chat", "N"], exact: true, type: "active" });
+    expect(listRow()?.updatedAt).not.toBe("2020-01-01T00:00:00Z");
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("re-arms across the streaming edge so a second turn's done fires again", async () => {
+    const { refetch, rerender, listCalls, transcriptCalls } = renderTerminalSpy();
+
+    rerender(makeStream({ status: "done", hasIngress: true }));
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
     expect(listCalls()).toBe(1);
     expect(transcriptCalls()).toBe(1);
 
@@ -401,10 +418,10 @@ describe("useTerminalRefetch — once per terminal status (A2)", () => {
   });
 
   it("fires once per distinct terminal status", async () => {
-    const { invalidate, rerender, listCalls } = renderTerminalSpy();
+    const { refetch, rerender, listCalls } = renderTerminalSpy();
 
     rerender(makeStream({ status: "done", hasIngress: true }));
-    await waitFor(() => expect(invalidate).toHaveBeenCalled());
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
     expect(listCalls()).toBe(1);
 
     // A different terminal status is a new terminal frame: it fires again.
