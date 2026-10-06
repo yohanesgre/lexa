@@ -1,6 +1,8 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { Database } from "bun:sqlite";
+import workersEntry from "./workers-entry";
 import { createBunSqliteDriver } from "./db/drivers/bun-sqlite";
 import { batch } from "./db/db";
 import { getEnvFromWorkers } from "./env";
@@ -16,6 +18,29 @@ import {
 } from "./workers-entry";
 import { LexaAssistantRunner as RunnerFromModule } from "./assistant/runner";
 import { LexaAssistantRunner as RunnerFromEntry } from "./workers-entry";
+
+// ManagedRuntime.make in the webhook handler returns an object literal whose
+// `dispose` is an own property (not on a prototype), so a prototype spy can't
+// see it. Wrap `make` to count dispose calls while delegating to the original.
+const runtimeSpies = vi.hoisted(() => ({ disposed: 0 }));
+vi.mock("effect", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("effect")>();
+  const make = actual.ManagedRuntime.make;
+  const ManagedRuntime = {
+    ...actual.ManagedRuntime,
+    make: (...args: Parameters<typeof make>) => {
+      const runtime = make(...args);
+      const dispose = runtime.dispose.bind(runtime);
+      return Object.assign(runtime, {
+        dispose: () => {
+          runtimeSpies.disposed += 1;
+          return dispose();
+        },
+      });
+    },
+  };
+  return { ...actual, ManagedRuntime } as unknown as typeof import("effect");
+});
 
 function memDriver(): ReturnType<typeof createBunSqliteDriver> {
   const db = new Database(":memory:");
@@ -338,6 +363,53 @@ function fakeD1(): Record<string, unknown> {
   };
 }
 
+// SQL-routing D1 stub for the handler-level tests: records every prepared
+// statement and lets a test serve rows per query.
+function d1Stub(handlers: {
+  all?: (sql: string, params: unknown[]) => Array<Record<string, unknown>>;
+  first?: (sql: string, params: unknown[]) => Record<string, unknown> | null;
+  queries?: string[];
+}): Record<string, unknown> {
+  const prepared = (sql: string) => {
+    let params: unknown[] = [];
+    const stmt = {
+      bind: (...p: unknown[]) => {
+        params = p;
+        return stmt;
+      },
+      all: async () => ({ results: handlers.all?.(sql, params) ?? [] }),
+      first: async () => (handlers.first ? handlers.first(sql, params) : null),
+      run: async () => ({ success: true, meta: { changes: 0 } }),
+    };
+    return stmt;
+  };
+  return {
+    prepare: (sql: string) => {
+      handlers.queries?.push(sql);
+      return prepared(sql);
+    },
+    exec: async () => ({ count: 0, duration: 0 }),
+    batch: async (stmts: unknown[]) => stmts.map(() => ({ success: true, results: [], meta: {} })),
+  };
+}
+
+function workerEnv(db: Record<string, unknown>): WorkersEnv {
+  return { DB: db as never, LXK_ENV: "dev", LXK_PUBLIC_URL: "http://localhost:5173" };
+}
+
+function execCtx(): { tasks: Promise<unknown>[]; ctx: never } {
+  const tasks: Promise<unknown>[] = [];
+  return {
+    tasks,
+    ctx: {
+      waitUntil: (p: Promise<unknown>) => {
+        tasks.push(p);
+      },
+      passThroughOnException: () => {},
+    } as never,
+  };
+}
+
 describe("per-isolate caches", () => {
   const env = (): WorkersEnv => ({
     DB: fakeD1() as never,
@@ -387,5 +459,117 @@ describe("delegation facet export", () => {
     expect(typeof RunnerFromEntry).toBe("function");
     const proto = RunnerFromEntry.prototype as unknown as { onChatMessage?: unknown };
     expect(typeof proto.onChatMessage).toBe("function");
+  });
+});
+
+describe("/api/health pre-boot", () => {
+  it("answers without running the boot sync chain", async () => {
+    resetRequestLayersCache();
+    const queries: string[] = [];
+    const env = workerEnv(d1Stub({ first: (sql) => (sql.includes("SELECT 1") ? { one: 1 } : null), queries }));
+
+    const res = await workersEntry.fetch!(
+      new Request("http://localhost/api/health") as never,
+      env as never,
+      execCtx().ctx
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    // Only the deep check ran: any boot sync (settings mirror / rate-limit /
+    // GitHub config / key backfill) would have prepared additional SQL.
+    expect(queries).toEqual(["SELECT 1 AS one"]);
+  });
+
+  it("returns 503 {ok:false} when the driver query rejects", async () => {
+    resetRequestLayersCache();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const res = await workersEntry.fetch!(
+        new Request("http://localhost/api/health") as never,
+        workerEnv(d1Stub({ first: () => { throw new Error("d1 down"); } })) as never,
+        execCtx().ctx
+      );
+
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toEqual({ ok: false });
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
+describe("webhook runtime lifecycle", () => {
+  const SECRET = "webhook-test-secret";
+  const configDb = (queries?: string[]): Record<string, unknown> =>
+    d1Stub({
+      all: (sql, params) =>
+        sql.includes("FROM settings") && params[0] === "github_webhook_secret" ? [{ value: SECRET }] : [],
+      ...(queries ? { queries } : {}),
+    });
+
+  function webhookRequest(headers: Record<string, string>, body: string): never {
+    return new Request("http://localhost/api/webhooks/github", { method: "POST", headers, body }) as never;
+  }
+
+  it("rejects an invalid signature with 401 and disposes the runtime once", async () => {
+    resetRequestLayersCache();
+    runtimeSpies.disposed = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { tasks, ctx } = execCtx();
+    try {
+      const res = await workersEntry.fetch!(
+        webhookRequest(
+          { "x-hub-signature-256": "sha256=deadbeef", "x-github-delivery": "d-invalid", "x-github-event": "issues" },
+          JSON.stringify({ action: "closed", issue: { node_id: "n1" } })
+        ),
+        workerEnv(configDb()) as never,
+        ctx
+      );
+
+      expect(res.status).toBe(401);
+      expect(tasks).toHaveLength(0);
+      expect(runtimeSpies.disposed).toBe(1);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it("accepts a valid delivery, processes it, and disposes the runtime once", async () => {
+    resetRequestLayersCache();
+    runtimeSpies.disposed = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { tasks, ctx } = execCtx();
+    const queries: string[] = [];
+    const body = JSON.stringify({ action: "closed", issue: { node_id: "n1" } });
+    const signature = `sha256=${createHmac("sha256", SECRET).update(Buffer.from(body)).digest("hex")}`;
+    try {
+      const res = await workersEntry.fetch!(
+        webhookRequest(
+          {
+            "content-type": "application/json",
+            "x-hub-signature-256": signature,
+            "x-github-delivery": "d-valid",
+            "x-github-event": "issues",
+          },
+          body
+        ),
+        workerEnv(configDb(queries)) as never,
+        ctx
+      );
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ ok: true });
+      await Promise.all(tasks);
+      // Delivery recorded only after processing succeeded (invariant #2).
+      expect(queries.some((sql) => sql.includes("INSERT OR IGNORE INTO webhook_events"))).toBe(true);
+      expect(runtimeSpies.disposed).toBe(1);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 });
