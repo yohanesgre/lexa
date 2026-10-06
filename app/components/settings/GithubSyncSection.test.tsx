@@ -34,7 +34,7 @@ const NONE: GithubSettings = { appId: "", appSlug: "", privateKeySet: false, web
 const CONNECTED: GithubSettings = { appId: "1234567", appSlug: "lexa-nimbus", privateKeySet: true, webhookSecretSet: true, source: "settings" };
 
 function manualDetails(): HTMLDetailsElement {
-  return screen.getByText("Advanced — manual credentials").closest("details") as HTMLDetailsElement;
+  return screen.getByText("Advanced: manual credentials").closest("details") as HTMLDetailsElement;
 }
 
 beforeEach(() => {
@@ -117,7 +117,7 @@ describe("GithubSyncSection", () => {
   it("auto-expands the manual disclosure once a first uncached load resolves unconfigured", () => {
     h.loading.value = true;
     const { rerender } = render(<GithubSyncSection />);
-    expect(screen.queryByText("Advanced — manual credentials")).not.toBeInTheDocument();
+    expect(screen.queryByText("Advanced: manual credentials")).not.toBeInTheDocument();
     h.loading.value = false;
     rerender(<GithubSyncSection />);
     expect(manualDetails().open).toBe(true);
