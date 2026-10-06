@@ -154,7 +154,7 @@ export interface Board {
   milestones: Milestone[];
   fieldConfig: FieldConfig;
   links: TaskLink[];
-  tasks: Task[];
+  tasks: BoardTask[];
 }
 
 export interface FieldOption {
@@ -203,6 +203,15 @@ export interface Task {
   archivedAt: ISODate | null;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// Board list rows omit the TipTap `description` payload; the detail query
+// carries it. Hydrate the empty doc when a board row must render before the
+// detail response resolves.
+export type BoardTask = Omit<Task, "description">;
+
+export function boardTaskToTask(task: BoardTask): Task {
+  return { ...task, description: { type: "doc", content: [] } };
 }
 
 export interface WikiPageMeta {

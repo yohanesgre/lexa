@@ -1,4 +1,4 @@
-import type { Task } from "../../shared/types";
+import type { BoardTask } from "../../shared/types";
 
 export interface LaneNeighbors {
   beforeTaskId?: string;
@@ -9,9 +9,9 @@ export interface LaneNeighbors {
 // new position from the supplied neighbors, so pass the task's current
 // same-column neighbors to keep its relative order (the server appends to the
 // end when they are absent).
-export function laneNeighbors(tasks: Task[], task: Task): LaneNeighbors {
-  let before: Task | undefined;
-  let after: Task | undefined;
+export function laneNeighbors(tasks: BoardTask[], task: BoardTask): LaneNeighbors {
+  let before: BoardTask | undefined;
+  let after: BoardTask | undefined;
   for (const candidate of tasks) {
     if (candidate.id === task.id || candidate.columnId !== task.columnId) continue;
     if (candidate.position < task.position) {

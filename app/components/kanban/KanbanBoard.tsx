@@ -8,7 +8,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import type { Board, Task } from "../../../shared/types";
+import type { Board, BoardTask } from "../../../shared/types";
 import { BoardToolbar } from "./BoardToolbar";
 import { MilestoneSelector } from "./MilestoneSelector";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
@@ -31,7 +31,7 @@ interface KanbanBoardProps {
   showArchived?: boolean | undefined;
   onToggleArchived?: (show: boolean) => void;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
-  onSelectTask?: (task: Task) => void;
+  onSelectTask?: (task: BoardTask) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
   onDelete?: (id: string) => void;
   selectedTaskId?: string | null | undefined;
@@ -166,12 +166,12 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   );
 
   const cardDimmed = useCallback(
-    (task: Task) => filters.columns.size > 0 && !filters.columns.has(task.columnId),
+    (task: BoardTask) => filters.columns.size > 0 && !filters.columns.has(task.columnId),
     [filters.columns]
   );
 
   const cardHidden = useCallback(
-    (task: Task) => {
+    (task: BoardTask) => {
       if (filters.priorities.size > 0 && !filters.priorities.has(task.priority)) return true;
       if (filters.types.size > 0 && !filters.types.has(task.type)) return true;
       if (filters.assignees.size > 0 && !task.assignees.some((a) => filters.assignees.has(a))) return true;

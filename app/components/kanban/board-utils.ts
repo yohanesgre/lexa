@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import type { Board, Task } from "../../../shared/types";
+import type { Board, BoardTask } from "../../../shared/types";
 
 // Shared pure helpers/reducers for the board surface — no components here.
 
-export const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
+export const byPosition = (a: BoardTask, b: BoardTask) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
 
-export function buildCellMap(tasks: Task[]): Map<string, Task[]> {
-  const m = new Map<string, Task[]>();
+export function buildCellMap(tasks: BoardTask[]): Map<string, BoardTask[]> {
+  const m = new Map<string, BoardTask[]>();
   for (const t of tasks) {
     const key = `${t.columnId}:${t.swimlaneId}`;
     const arr = m.get(key);
@@ -19,7 +19,7 @@ export function buildCellMap(tasks: Task[]): Map<string, Task[]> {
 
 export const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
 
-export function cardProps(task: Task, board: Board) {
+export function cardProps(task: BoardTask, board: Board) {
   return {
     id: task.id,
     taskKey: task.key,
@@ -34,7 +34,7 @@ export function cardProps(task: Task, board: Board) {
   };
 }
 
-export function tasksReducer(state: Task[], action: { type: "set"; tasks: Task[] } | { type: "move"; taskId: string; columnId: string; swimlaneId: string; position: string }): Task[] {
+export function tasksReducer(state: BoardTask[], action: { type: "set"; tasks: BoardTask[] } | { type: "move"; taskId: string; columnId: string; swimlaneId: string; position: string }): BoardTask[] {
   if (action.type === "set") return action.tasks;
   return state.map((t) => (t.id === action.taskId ? { ...t, columnId: action.columnId, swimlaneId: action.swimlaneId, position: action.position } : t));
 }

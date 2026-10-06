@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { formatDueLabel, parseDateOnly } from "../../lib/dates";
-import type { Board, Task } from "../../../shared/types";
+import type { Board, BoardTask } from "../../../shared/types";
 import type { MoveTarget } from "./KanbanBoard";
 
 export interface PendingMove {
-  task: Task;
+  task: BoardTask;
   target: MoveTarget;
 }
 

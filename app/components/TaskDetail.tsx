@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import type { Board, Task, TipTapDoc, GithubIssue, Milestone, Swimlane } from "../../shared/types";
+import type { Board, BoardTask, Task, TipTapDoc, GithubIssue, Milestone, Swimlane } from "../../shared/types";
 import { isEmptyDoc } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
 import { GithubMark, TrashIcon, ArchiveIcon, LinkIcon } from "./icons";
@@ -43,7 +43,7 @@ interface TaskDetailProps {
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
   swimlanes?: Swimlane[];
   milestones?: Milestone[];
-  boardTasks?: Task[];
+  boardTasks?: BoardTask[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
   taskTitles?: Map<string, string>;    // taskId → title, for link display

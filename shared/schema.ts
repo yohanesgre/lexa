@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import type { Board, Column, FieldConfig, FieldOption, GithubIssue, Milestone, Project, ProjectRepo, Swimlane, Task, TaskLink, TipTapDoc, TipTapMark, TipTapNode } from "./types";
+import type { Board, BoardTask, Column, FieldConfig, FieldOption, GithubIssue, Milestone, Project, ProjectRepo, Swimlane, Task, TaskLink, TipTapDoc, TipTapMark, TipTapNode } from "./types";
 
 export const TipTapMarkSchema = Schema.Struct({
   type: Schema.String,
@@ -142,6 +142,8 @@ export const TaskSchema = Schema.Struct({
   updatedAt: Schema.String,
 }) as unknown as Schema.Schema<Task>;
 
+export const BoardTaskSchema = TaskSchema.pipe(Schema.omit("description")) as unknown as Schema.Schema<BoardTask>;
+
 export const BoardSchema = Schema.Struct({
   project: ProjectSchema,
   columns: Schema.Array(ColumnSchema),
@@ -149,7 +151,7 @@ export const BoardSchema = Schema.Struct({
   milestones: Schema.Array(MilestoneSchema),
   fieldConfig: FieldConfigSchema,
   links: Schema.Array(TaskLinkSchema),
-  tasks: Schema.Array(TaskSchema),
+  tasks: Schema.Array(BoardTaskSchema),
 }) as unknown as Schema.Schema<Board>;
 
 export const decodeBoard = Schema.decodeUnknownSync(BoardSchema);

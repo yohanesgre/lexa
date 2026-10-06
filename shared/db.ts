@@ -1,7 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject } from "./types";
+import type { TipTapDoc, ISODate, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject, Task, BoardTask } from "./types";
 import { parseTipTapDoc } from "./types";
 
 export interface PriorityOptionRow {
@@ -287,18 +287,19 @@ export interface TaskRow {
   github_issues_raw?: string | null;
 }
 
-export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
-} {
-  return taskFromRow(row, columnGithubState, parseTipTapDoc(row.description));
+export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): Task {
+  return { ...taskBaseFromRow(row, columnGithubState), description: parseTipTapDoc(row.description) };
 }
 
 // Slim rows (board/list paths select no description) map to an empty doc —
 // the key stays in the response shape, the blob never ships.
-export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): {
-  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
-} {
-  return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
+export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): Task {
+  return { ...taskBaseFromRow(row as TaskRow, columnGithubState), description: { type: "doc", content: [] } };
+}
+
+// Board rows carry no `description` key at all (not even an empty doc).
+export function rowToBoardTask(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): BoardTask {
+  return taskBaseFromRow(row as TaskRow, columnGithubState);
 }
 
 interface ParsedGithubIssue {
@@ -360,9 +361,7 @@ function parseGithubIssues(raw: string): ParsedGithubIssue[] {
   return out;
 }
 
-function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
-  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
-} {
+function taskBaseFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined): Omit<Task, "description"> {
   const colState = columnGithubState ?? row.column_github_state ?? null;
   const githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[] = [];
   if (row.github_issues_raw) {
@@ -382,7 +381,6 @@ function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null |
     columnId: row.column_id,
     swimlaneId: row.swimlane_id,
     title: row.title,
-    description,
     priority: row.priority,
     type: row.type,
     assignees: row.assignees ? row.assignees.split("||").filter(Boolean) : [],

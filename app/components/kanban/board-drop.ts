@@ -1,5 +1,5 @@
 import type { DragEndEvent } from "@dnd-kit/core";
-import type { Task } from "../../../shared/types";
+import type { BoardTask } from "../../../shared/types";
 import { keyAfter, keyBetween } from "../../../shared/positions";
 import { byPosition } from "./board-utils";
 
@@ -15,10 +15,10 @@ export interface MoveTarget {
 }
 
 export function computeDropTarget(
-  task: Task,
+  task: BoardTask,
   over: DragEndEvent["over"],
-  tasksInCell: (columnId: string, laneId: string) => Task[],
-  allTasks: Task[]
+  tasksInCell: (columnId: string, laneId: string) => BoardTask[],
+  allTasks: BoardTask[]
 ): MoveTarget | null {
   if (!over) return null;
   const overData = over.data.current as
@@ -52,7 +52,7 @@ export function computeDropTarget(
     : { columnId: overTask.columnId, swimlaneId: overTask.swimlaneId, afterTaskId: overTask.id, beforeTaskId: items[idx - 1]?.id };
 }
 
-export function computeDropPosition(task: Task, target: MoveTarget, allTasks: Task[]): string {
+export function computeDropPosition(task: BoardTask, target: MoveTarget, allTasks: BoardTask[]): string {
   const anchorBefore = target.beforeTaskId ? allTasks.find((t) => t.id === target.beforeTaskId) : undefined;
   const anchorAfter = target.afterTaskId ? allTasks.find((t) => t.id === target.afterTaskId) : undefined;
   if (target.beforeTaskId || target.afterTaskId) {

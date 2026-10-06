@@ -69,6 +69,18 @@ describe("tasks routes", () => {
     expect(body.nextCursor).toBeNull();
   });
 
+  it("GET /api/projects/:slug/board omits the task description payload", async () => {
+    db.prepare("UPDATE tasks SET description = ? WHERE id = 't1'").run(
+      JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "secret" }] }] })
+    );
+    const res = await handler(json("GET", "/api/projects/p1/board"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const task = body.tasks.find((t: { id: string }) => t.id === "t1");
+    expect(task).toBeDefined();
+    expect("description" in task).toBe(false);
+  });
+
   it("POST /api/projects/:slug/tasks creates a task with defaults (201)", async () => {
     const res = await handler(json("POST", "/api/projects/p1/tasks", { columnId: "c1", title: "New" }));
     expect(res.status).toBe(201);

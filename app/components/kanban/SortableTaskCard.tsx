@@ -1,13 +1,13 @@
 import { memo, useMemo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Board, Task } from "../../../shared/types";
+import type { Board, BoardTask } from "../../../shared/types";
 import { cn } from "../ui/cn";
 import { TaskCard } from "./TaskCard";
 import { MoreHorizontal, Archive, Trash2 } from "lucide-react";
 import { Menu } from "../ui/Menu";
 
-function cardProps(task: Task, board: Board) {
+function cardProps(task: BoardTask, board: Board) {
   return {
     id: task.id,
     taskKey: task.key,
@@ -97,9 +97,9 @@ export function SortableTaskCard({
   onToggleSubtasks,
   subtasksCollapsed = false,
 }: {
-  task: Task;
+  task: BoardTask;
   board: Board;
-  onSelect?: (t: Task) => void;
+  onSelect?: (t: BoardTask) => void;
   dimmed: boolean;
   isNew?: boolean | undefined;
   isShaking?: boolean | undefined;

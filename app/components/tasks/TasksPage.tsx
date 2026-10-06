@@ -26,7 +26,8 @@ import { DatePicker } from "../ui/DatePicker";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../ui/cn";
 import type { MoveTarget } from "../kanban/KanbanBoard";
-import type { Task, TipTapDoc, FieldConfig, Column, Swimlane } from "../../../shared/types";
+import type { BoardTask, Task, TipTapDoc, FieldConfig, Column, Swimlane } from "../../../shared/types";
+import { boardTaskToTask } from "../../../shared/types";
 
 type SortKey = "board" | "priority" | "created";
 
@@ -107,11 +108,12 @@ function findLinkedIssue(task: { githubs: { repo: string; issueNumber: number }[
 
 function resolveSelectedTask(
   full: Task | undefined,
-  boardTasks: Task[] | undefined,
+  boardTasks: BoardTask[] | undefined,
   selectedTaskId: string | null,
 ) {
   if (!selectedTaskId) return null;
-  return full ?? boardTasks?.find((t) => t.id === selectedTaskId) ?? null;
+  const boardTask = boardTasks?.find((t) => t.id === selectedTaskId);
+  return full ?? (boardTask ? boardTaskToTask(boardTask) : null);
 }
 
 function TasksErrorState({ onRetry }: { onRetry: () => void }) {

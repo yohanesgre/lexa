@@ -37,7 +37,7 @@ import {
   buildWipMoveStmt,
   type ActivityInput,
 } from "../repos/task-batch";
-import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType, FieldOption } from "../../shared/types";
+import type { Task, BoardTask, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType, FieldOption } from "../../shared/types";
 
 // Re-exported for callers that historically imported it from this module; the
 // single implementation lives in shared (invariant 10 parity).
@@ -560,7 +560,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       findAllByProject: (
         projectId: string,
         filters?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: string; includeArchived?: boolean }
-      ): Effect.Effect<Task[], ProjectNotFound | DbError> =>
+      ): Effect.Effect<BoardTask[], ProjectNotFound | DbError> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: projectId }))
