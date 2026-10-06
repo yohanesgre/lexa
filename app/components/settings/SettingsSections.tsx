@@ -638,7 +638,7 @@ export function GithubSyncSection({ githubResult }: { githubResult?: GithubRetur
           <details className="health-details mt-4" id="github-manual-credentials" ref={manualRef}>
             <summary>
               <svg className="health-details-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-              Advanced — manual credentials
+              Advanced: manual credentials
             </summary>
             <div className="health-details-body health-details-body--card">
               <GithubSyncCredentialsCard onRemove={() => setRemoving(true)} />

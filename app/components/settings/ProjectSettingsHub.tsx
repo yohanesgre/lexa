@@ -281,7 +281,7 @@ export function LinkedReposSection({ slug }: { slug: string }) {
         <span className="text-xs text-lx-text-muted">Project scope · superadmin-only writes</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        GitHub repositories this project syncs with. Search covers only the repos your GitHub App installation can access — Lexa never searches your whole GitHub account.
+        GitHub repositories this project syncs with. Search covers only the repos your GitHub App installation can access. Lexa never searches your whole GitHub account.
       </p>
 
       <label className="field-label" style={{ marginBottom: 0 }}>Add a repository</label>
