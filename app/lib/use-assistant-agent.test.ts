@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { guardResumeProbe, resumeOutcome, shouldPersistResume } from "./use-assistant-agent";
+import { guardResumeProbe, resumeOutcome, shouldPersistResume, socketSettled } from "./use-assistant-agent";
 
 // LX-84 / LX-79: the resume route answers with a discriminated JSON ack. A
 // non-JSON 2xx is the legacy SSE path and falls back to r.ok; a JSON body
@@ -95,6 +95,28 @@ function socket(readyState: number, shouldReconnect: boolean) {
   };
   return { guarded: guardResumeProbe(agent), sent };
 }
+
+describe("socketSettled — only a CONNECTING socket blocks an identity change", () => {
+  it("is unsettled only while CONNECTING (readyState 0)", () => {
+    expect(socketSettled({ readyState: 0 })).toBe(false);
+    expect(socketSettled({ readyState: 1 })).toBe(true);
+    expect(socketSettled({ readyState: 2 })).toBe(true);
+    expect(socketSettled({ readyState: 3 })).toBe(true);
+  });
+
+  it("treats connectionError as settled (runtime sets it only after the socket has left CONNECTING)", () => {
+    expect(socketSettled({ readyState: 3, connectionError: new Error("gate 404") })).toBe(true);
+    // Defense-in-depth: even the impossible CONNECTING + connectionError combo
+    // settles, so a dead socket can never pin a pending identity change.
+    expect(socketSettled({ readyState: 0, connectionError: new Error("gate 404") })).toBe(true);
+  });
+
+  it("treats a missing readyState (test double / not-yet-created socket) as settled", () => {
+    expect(socketSettled({})).toBe(true);
+    expect(socketSettled(undefined)).toBe(true);
+    expect(socketSettled(null)).toBe(true);
+  });
+});
 
 describe("guardResumeProbe — drop the undeliverable stream-resume probe", () => {
   it("drops the probe on a CLOSED socket that will not reconnect", () => {

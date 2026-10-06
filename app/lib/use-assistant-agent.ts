@@ -59,13 +59,18 @@ function encodeThreadKeyPath(key: string): string {
 
 // Cross-render bridge for a just-minted thread: `useChatStartStream` mints the
 // id in the same tick and cannot send through the hook bound to the previous
-// (empty) key. The pending body is flushed once the new thread's socket is
-// identified. Mirrors the SSE `assistantSendForKey` surface.
-const pendingSends = new Map<string, AgentSendBody>();
+// (empty) key. The pending bodies are flushed in FIFO order once the new
+// thread's socket is identified. Mirrors the SSE `assistantSendForKey` surface.
+// Per-key queue (not a single slot): the settle gate can hold several sends for
+// one target, and a later send must never replace an earlier accepted one.
+const pendingSends = new Map<string, AgentSendBody[]>();
 
 export function assistantSendForKey(key: string, body: unknown): void {
   if (!key) return;
-  pendingSends.set(key, (body ?? {}) as AgentSendBody);
+  const payload = (body ?? {}) as AgentSendBody;
+  const queue = pendingSends.get(key);
+  if (queue) queue.push(payload);
+  else pendingSends.set(key, [payload]);
 }
 
 export interface AssistantAgentOptions {
@@ -177,8 +182,39 @@ export interface AssistantAgentStream extends AssistantStream {
   agent: AssistantRunAgent;
 }
 
+// A PartySocket reports `readyState === 0` while CONNECTING. partysocket closes
+// the outgoing socket on any memo-key change, and closing a CONNECTING socket is
+// exactly what the browser warns about ("WebSocket is closed before the
+// connection is established"). An OPEN/CLOSED/errored socket closes cleanly, so
+// an identity change is safe once the socket has settled. `connectionError` is
+// belt-and-braces: at runtime the SDK sets it only on a final close, by which
+// point `readyState` has already left CONNECTING (CLOSING/CLOSED), so this
+// branch is unreachable with `readyState === 0` — it exists only so a dead
+// socket can never pin a pending change. `readyState` is absent on test doubles
+// → settled.
+export function socketSettled(agent: unknown): boolean {
+  const socket = agent as { readyState?: number; connectionError?: unknown } | null | undefined;
+  if (!socket) return true;
+  if (socket.connectionError) return true;
+  return typeof socket.readyState !== "number" || socket.readyState !== 0;
+}
+
 export function useAssistantAgent(key: string | null, options?: AssistantAgentOptions): AssistantAgentStream {
-  const threadKey = threadKeyOf(key);
+  const projectId = options?.projectId;
+
+  // The identity currently handed to `useAgent` — (surface key, projectId) → the
+  // name/basePath/query/enabled set. It is held back while the outgoing socket
+  // is still CONNECTING (`socketSettled`), so no identity change — stale-restore
+  // / orphan-deep-link eviction, fast thread switch, or project switch — can
+  // close a dial that has not finished handshaking. The first dial for a thread
+  // identity is then final for that identity.
+  const [committed, setCommitted] = useState<{ key: string | null; projectId: string | undefined }>(() => ({
+    key,
+    projectId,
+  }));
+  const committedKey = committed.key;
+
+  const threadKey = threadKeyOf(committedKey);
   // No leading slash: PartySocket builds `${protocol}://${host}/${basePath}...`,
   // so a leading slash yields a double-slash path that workers.dev does not
   // normalize (the SPA fallback swallows the upgrade). Keep it slash-free.
@@ -188,8 +224,7 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   // object referentially stable across renders: PartySocket memoizes its socket
   // on JSON.stringify(query), but a fresh literal would still churn the option
   // memo upstream. `null` (not undefined) so the memo dep stays a single value.
-  const projectId = options?.projectId;
-  const query = useMemo(() => (projectId ? { projectId } : null), [projectId]);
+  const query = useMemo(() => (committed.projectId ? { projectId: committed.projectId } : null), [committed.projectId]);
 
   const agent = useAgent({
     agent: "LexaAssistantAgent",
@@ -211,6 +246,42 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
     // defers to the identified socket).
     transferEnqueuedMessages: true,
   });
+
+  // Advance the committed identity only once the outgoing socket has settled.
+  // `readyState` mutates in place without a React state update, so while a
+  // change is pending poll for the transition (every socket leaves CONNECTING
+  // through open, close, or a terminal connection error).
+  const target = useMemo(() => ({ key, projectId }), [key, projectId]);
+  useEffect(() => {
+    if (committed.key === target.key && committed.projectId === target.projectId) return;
+    if (socketSettled(agent)) {
+      setCommitted(target);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (socketSettled(agent)) setCommitted(target);
+    }, 25);
+    return () => window.clearInterval(timer);
+  }, [committed, target, agent]);
+
+  // Bounded retention (drop-on-abandon): the gate only ever commits the LATEST
+  // target, so a target replaced before it commits never dials and its queued
+  // sends could never drain. Drop exactly this hook's previously-targeted
+  // surface queue when the target moves on — scoped by the surface prefix so
+  // another surface's keys (task / wiki) are never touched.
+  const prevTargetKeyRef = useRef<string | null>(key);
+  useEffect(() => {
+    const prev = prevTargetKeyRef.current;
+    if (prev === target.key) return;
+    prevTargetKeyRef.current = target.key;
+    const surface = prev?.slice(0, prev.indexOf(":"));
+    if (!surface) return;
+    for (const pendingKey of pendingSends.keys()) {
+      if (pendingKey !== target.key && pendingKey.slice(0, pendingKey.indexOf(":")) === surface) {
+        pendingSends.delete(pendingKey);
+      }
+    }
+  }, [target.key]);
 
   const bodyRef = useRef<Record<string, unknown>>({});
   // `useAgentChat` owns the transport, so it must talk to the guarded socket;
@@ -271,8 +342,8 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
   // handshake is not a reconnect. `resumed` is the transient (~2s) marker the
   // wireframe shows after a drop is recovered.
   const identifiedKeyRef = useRef<string | null>(null);
-  if (agent.identified && key) identifiedKeyRef.current = key;
-  const reconnecting = !!key && identifiedKeyRef.current === key && !agent.identified && !agent.connectionError;
+  if (agent.identified && committedKey) identifiedKeyRef.current = committedKey;
+  const reconnecting = !!committedKey && identifiedKeyRef.current === committedKey && !agent.identified && !agent.connectionError;
 
   const [resumed, setResumed] = useState(false);
   const prevReconnectingRef = useRef(false);
@@ -292,21 +363,29 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
     setResumed(false);
     prevReconnectingRef.current = false;
     identifiedKeyRef.current = null;
-  }, [key]);
+  }, [committedKey]);
 
   // Flush a pending send for a just-minted thread once its socket is up.
   useEffect(() => {
-    if (!key || !agent.identified) return;
-    const pending = pendingSends.get(key);
-    if (!pending) return;
-    pendingSends.delete(key);
-    bodyRef.current = agentSendMetadata(pending);
-    const parts = agentSendParts(pending);
-    if (parts.length > 0) chat.sendMessage({ parts });
+    if (!committedKey || !agent.identified) return;
+    // The replacement socket is created one commit after the identity commit, so
+    // `agent` can still be addressed to the previous identity for a render: never
+    // flush a deferred send through the wrong thread's socket.
+    const socketBasePath = (agent as { partySocketOptions?: { basePath?: string } }).partySocketOptions?.basePath;
+    if (socketBasePath !== undefined && socketBasePath !== basePath) return;
+    const queue = pendingSends.get(committedKey);
+    if (!queue || queue.length === 0) return;
+    // Drain the whole FIFO in order, then drop the key — no slot to overwrite.
+    pendingSends.delete(committedKey);
+    for (const pending of queue) {
+      bodyRef.current = agentSendMetadata(pending);
+      const parts = agentSendParts(pending);
+      if (parts.length > 0) chat.sendMessage({ parts });
+    }
     // chat.sendMessage identity is stable for the connection; keyed on the
     // identified flip so a fresh thread flushes exactly once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, agent.identified]);
+  }, [committedKey, agent.identified, basePath]);
 
   const send = useCallback(
     (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => {
@@ -323,11 +402,20 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
           .catch(() => onResult?.({ ok: false }));
         return;
       }
+      // The page can send while the settle gate is still holding the identity
+      // swap (select A → select B → send before A settles). The live socket is
+      // still addressed to A, so `chat.sendMessage` would write to A's DO.
+      // Defer the payload on the surface key instead; the basePath-guarded flush
+      // delivers it once B's socket has committed and identified.
+      if (committed.key !== key || committed.projectId !== projectId) {
+        if (key) assistantSendForKey(key, payload);
+        return;
+      }
       bodyRef.current = agentSendMetadata(payload);
       const parts = agentSendParts(payload);
       if (parts.length > 0) void chat.sendMessage({ parts });
     },
-    [chat]
+    [chat, committed, key, projectId]
   );
 
   const abort = useCallback(() => {
