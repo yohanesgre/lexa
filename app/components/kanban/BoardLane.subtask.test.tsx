@@ -6,7 +6,7 @@ import { DndContext } from "@dnd-kit/core";
 import type { ReactNode } from "react";
 import type { Board, Column, Swimlane, Task } from "../../../shared/types";
 import { makeBoard } from "../../test-utils";
-import { BoardLane } from "./BoardLane";
+import { BoardLane, buildCellMap } from "./BoardLane";
 import { useLinkMaps } from "./board-utils";
 
 vi.mock("../../lib/queries", () => ({
@@ -100,6 +100,7 @@ function renderLane(boardTask: Board = BOARD, cardHidden: (t: Task) => boolean =
         columns={[COLUMN]}
         board={boardTask}
         localTasks={boardTask.tasks}
+        cellMap={buildCellMap(boardTask.tasks)}
         childrenByParent={childrenByParent}
         parentOf={parentOf}
         blockedBy={blockedBy}

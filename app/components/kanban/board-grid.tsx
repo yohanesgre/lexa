@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Board, Swimlane, Task } from "../../../shared/types";
 import { cn } from "../ui/cn";
 import { BoardLane } from "./BoardLane";
@@ -14,6 +15,7 @@ export interface BoardGridProps {
   archivedLanes: Swimlane[];
   showArchived: boolean;
   localTasks: Task[];
+  cellMap: Map<string, Task[]>;
   childrenByParent: Map<string, string[]>;
   parentOf: Map<string, string>;
   blockedBy: Map<string, string[]>;
@@ -38,9 +40,9 @@ export interface BoardGridProps {
   onAddColumn: () => void;
 }
 
-export function BoardGrid(props: BoardGridProps) {
+export const BoardGrid = memo(function BoardGrid(props: BoardGridProps) {
   const {
-    slug, board, columns, rows, archivedLanes, showArchived, localTasks,
+    slug, board, columns, rows, archivedLanes, showArchived, localTasks, cellMap,
     childrenByParent, parentOf, blockedBy, cardHidden, cardDimmed, columnTotalCount, columnDimmed,
     cellDropId, flashColumnId, collapsed, toggleLane, onOpenCreateTask, onSelectTask,
     onDelete, selectedTaskId, newTaskIds, shakeTaskId, archiveTask, restoreTask,
@@ -80,6 +82,7 @@ export function BoardGrid(props: BoardGridProps) {
             columns={columns}
             board={board}
             localTasks={localTasks}
+            cellMap={cellMap}
             childrenByParent={childrenByParent}
             parentOf={parentOf}
             blockedBy={blockedBy}
@@ -118,4 +121,4 @@ export function BoardGrid(props: BoardGridProps) {
       )}
     </div>
   );
-}
+});

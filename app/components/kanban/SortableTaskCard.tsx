@@ -115,9 +115,13 @@ export function SortableTaskCard({
 }) {
   const archived = task.archivedAt != null;
   const cardPropsMemo = useMemo(() => cardProps(task, board), [task, board]);
+  const sortableData = useMemo(
+    () => ({ type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId }),
+    [task.columnId, task.swimlaneId]
+  );
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
-    data: { type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId },
+    data: sortableData,
     disabled: archived,
   });
   const { role: _dndRole, tabIndex: _dndTabIndex, ...sortableA11y } = attributes;

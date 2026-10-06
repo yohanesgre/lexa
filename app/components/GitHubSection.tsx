@@ -4,6 +4,7 @@ import { cn } from "./ui/cn";
 import { X } from "lucide-react";
 import { GithubMark, LinkIcon } from "./icons";
 import { useProjectRepos, useGithubIssueSearch, useLinkExistingIssue } from "../lib/queries";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { GitHubCreateConfirmDialog } from "./github/GitHubCreateConfirmDialog";
 import { GitHubUnlinkDialog } from "./github/GitHubUnlinkDialog";
 import { GitHubEmptyState } from "./github/GitHubEmptyState";
@@ -246,7 +247,8 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
     }
   }
 
-  const issueSearch = useGithubIssueSearch(slug, selectedRepo, query);
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const issueSearch = useGithubIssueSearch(slug, selectedRepo, debouncedQuery);
   const linkExisting = useLinkExistingIssue(slug);
 
   const linkedKeys = useMemo(() => new Set(githubs.map((g) => `${g.repo}#${g.issueNumber}`)), [githubs]);

@@ -16,6 +16,8 @@ export function getRouter() {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
+        staleTime: 30_000,
+        refetchOnWindowFocus: false,
         retry: (failureCount, error) => {
           const code = (error as Error & { code?: string | undefined })?.code;
           if (code === "UNAUTHORIZED") return false;
