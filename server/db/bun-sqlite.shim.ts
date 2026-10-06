@@ -8,8 +8,87 @@ import BetterDatabase from "better-sqlite3";
 type NativeDb = BetterDatabase.Database;
 type NativeStmt = BetterDatabase.Statement;
 
+// bun:sqlite exposes `Statement.paramsCount`; better-sqlite3 has no accessor
+// for it, so derive the SQLite bind-parameter count from the statement source.
+// Server SQL uses positional `?` only, but handle `?NNN` and named params too.
+function countParams(sql: string): number {
+  let max = 0;
+  const named = new Map<string, number>();
+  let i = 0;
+  const n = sql.length;
+  while (i < n) {
+    const c = sql[i]!;
+    if (c === "'" || c === '"' || c === "`") {
+      i++;
+      while (i < n) {
+        if (sql[i] === c) {
+          if (sql[i + 1] === c) {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (c === "[") {
+      const end = sql.indexOf("]", i + 1);
+      i = end === -1 ? n : end + 1;
+      continue;
+    }
+    if (c === "-" && sql[i + 1] === "-") {
+      const end = sql.indexOf("\n", i + 2);
+      i = end === -1 ? n : end + 1;
+      continue;
+    }
+    if (c === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      i = end === -1 ? n : end + 2;
+      continue;
+    }
+    if (c === "?") {
+      let j = i + 1;
+      let num = "";
+      while (j < n && sql[j]! >= "0" && sql[j]! <= "9") {
+        num += sql[j];
+        j++;
+      }
+      if (num.length > 0) {
+        const idx = Number(num);
+        if (idx > max) max = idx;
+      } else {
+        max++;
+      }
+      i = j;
+      continue;
+    }
+    if ((c === ":" || c === "@" || c === "$") && /[A-Za-z_]/.test(sql[i + 1] ?? "")) {
+      let j = i + 1;
+      let name = "";
+      while (j < n && /[A-Za-z0-9_]/.test(sql[j]!)) {
+        name += sql[j];
+        j++;
+      }
+      if (!named.has(name)) named.set(name, ++max);
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  return max;
+}
+
 class Statement {
   constructor(private stmt: NativeStmt) {}
+
+  // bun:sqlite exposes the bind-parameter count; the driver's arity guard
+  // reads it. better-sqlite3 enforces arity natively, but without this getter
+  // the guard would compare against `undefined`.
+  get paramsCount(): number {
+    return countParams(this.stmt.source);
+  }
 
   // bun:sqlite exposes the result column names — better-auth's bun:sqlite
   // dialect checks it to decide read-vs-write statements. better-sqlite3

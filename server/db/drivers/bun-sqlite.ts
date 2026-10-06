@@ -8,23 +8,42 @@
 // On the Bun host this driver is a thin shim — every method's promise
 // resolves on the next microtask, so behavior is byte-identical to the
 // synchronous `Database` it wraps.
+//
+// Prepared statements are cached per connection (`getStmt`). A cached
+// statement survives schema changes — SQLite auto-reprepares it and it reads
+// new data — but the EXPOSED ROW SHAPE is frozen at prepare time, so a cached
+// `SELECT *` does NOT gain columns added later. Only live window: an operator
+// running `bun run setup` (migrations) against an already-running server.
 
 import type { Database, Statement } from "bun:sqlite";
 import type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver";
 
+// A cached statement keeps its bindings across calls; bun:sqlite silently
+// reuses them when called with zero args, so a wrong arity would read (or
+// write) the previous call's row. Reject any mismatch up front — the guard
+// covers the wrapper methods and the batch path, which touches `raw` directly.
+function assertArity(stmt: BunSqliteStmt, params: SqlParam[]): void {
+  if (params.length !== stmt.raw.paramsCount) {
+    throw new Error("bun-sqlite driver: param count mismatch");
+  }
+}
+
 class BunSqliteStmt implements DbStmt {
-  constructor(private readonly stmt: Statement) {}
+  constructor(readonly raw: Statement) {}
   get columnNames(): string[] {
-    return this.stmt.columnNames;
+    return this.raw.columnNames;
   }
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]> {
-    return Promise.resolve(this.stmt.all(...params) as T[]);
+    assertArity(this, params);
+    return Promise.resolve(this.raw.all(...params) as T[]);
   }
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null> {
-    return Promise.resolve((this.stmt.get(...params) ?? null) as T | null);
+    assertArity(this, params);
+    return Promise.resolve((this.raw.get(...params) ?? null) as T | null);
   }
   run(...params: SqlParam[]): Promise<StmtResult> {
-    const r = this.stmt.run(...params);
+    assertArity(this, params);
+    const r = this.raw.run(...params);
     return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid });
   }
 }
@@ -35,15 +54,19 @@ class BunSqliteStmt implements DbStmt {
  *  everything else with `run()`. Divergence from D1: for a row-returning
  *  statement `changes = rows.length` (D1 reports 0 for a SELECT) — no
  *  consumer reads `changes` from a SELECT. */
-function collectBatch(db: Database, stmts: { sql: string; params: SqlParam[] }[]): BatchStmtResult[] {
+function collectBatch(
+  stmts: { sql: string; params: SqlParam[] }[],
+  getStmt: (sql: string) => BunSqliteStmt
+): BatchStmtResult[] {
   const out: BatchStmtResult[] = [];
   for (const s of stmts) {
-    const stmt = db.prepare(s.sql);
+    const stmt = getStmt(s.sql);
+    assertArity(stmt, s.params);
     if (stmt.columnNames.length > 0) {
-      const rows = stmt.all(...s.params) as LexaRow[];
+      const rows = stmt.raw.all(...s.params) as LexaRow[];
       out.push({ results: rows, changes: rows.length });
     } else {
-      const r = stmt.run(...s.params);
+      const r = stmt.raw.run(...s.params);
       out.push({ results: [], changes: r.changes, lastInsertRowid: r.lastInsertRowid });
     }
   }
@@ -74,14 +97,23 @@ export function createBunSqliteDriver(db: Database): DbDriver {
   db.exec("PRAGMA foreign_keys = ON");
   let txDepth = 0;
 
+  const stmtCache = new Map<string, BunSqliteStmt>();
+  const getStmt = (sql: string): BunSqliteStmt => {
+    const cached = stmtCache.get(sql);
+    if (cached !== undefined) return cached;
+    const stmt = new BunSqliteStmt(db.prepare(sql));
+    stmtCache.set(sql, stmt);
+    return stmt;
+  };
+
   const driver: DbDriver = {
     supportsInteractiveTx: true,
     prepare(sql: string): DbStmt {
-      return new BunSqliteStmt(db.prepare(sql));
+      return getStmt(sql);
     },
     async batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<BatchStmtResult[]> {
-      if (txDepth > 0) return collectBatch(db, stmts);
-      return db.transaction(() => collectBatch(db, stmts))();
+      if (txDepth > 0) return collectBatch(stmts, getStmt);
+      return db.transaction(() => collectBatch(stmts, getStmt))();
     },
     async transaction<T>(fn: (tx: DbDriver) => Promise<T>): Promise<T> {
       if (txDepth > 0) return fn(driver);
@@ -106,6 +138,7 @@ export function createBunSqliteDriver(db: Database): DbDriver {
       }
     },
     close(): void {
+      stmtCache.clear();
       db.close();
     },
   };
