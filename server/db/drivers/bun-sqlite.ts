@@ -13,18 +13,18 @@ import type { Database, Statement } from "bun:sqlite";
 import type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver";
 
 class BunSqliteStmt implements DbStmt {
-  constructor(private readonly stmt: Statement) {}
+  constructor(readonly raw: Statement) {}
   get columnNames(): string[] {
-    return this.stmt.columnNames;
+    return this.raw.columnNames;
   }
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]> {
-    return Promise.resolve(this.stmt.all(...params) as T[]);
+    return Promise.resolve(this.raw.all(...params) as T[]);
   }
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null> {
-    return Promise.resolve((this.stmt.get(...params) ?? null) as T | null);
+    return Promise.resolve((this.raw.get(...params) ?? null) as T | null);
   }
   run(...params: SqlParam[]): Promise<StmtResult> {
-    const r = this.stmt.run(...params);
+    const r = this.raw.run(...params);
     return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid });
   }
 }
@@ -35,15 +35,18 @@ class BunSqliteStmt implements DbStmt {
  *  everything else with `run()`. Divergence from D1: for a row-returning
  *  statement `changes = rows.length` (D1 reports 0 for a SELECT) — no
  *  consumer reads `changes` from a SELECT. */
-function collectBatch(db: Database, stmts: { sql: string; params: SqlParam[] }[]): BatchStmtResult[] {
+function collectBatch(
+  stmts: { sql: string; params: SqlParam[] }[],
+  getStmt: (sql: string) => BunSqliteStmt
+): BatchStmtResult[] {
   const out: BatchStmtResult[] = [];
   for (const s of stmts) {
-    const stmt = db.prepare(s.sql);
+    const stmt = getStmt(s.sql);
     if (stmt.columnNames.length > 0) {
-      const rows = stmt.all(...s.params) as LexaRow[];
+      const rows = stmt.raw.all(...s.params) as LexaRow[];
       out.push({ results: rows, changes: rows.length });
     } else {
-      const r = stmt.run(...s.params);
+      const r = stmt.raw.run(...s.params);
       out.push({ results: [], changes: r.changes, lastInsertRowid: r.lastInsertRowid });
     }
   }
@@ -74,14 +77,23 @@ export function createBunSqliteDriver(db: Database): DbDriver {
   db.exec("PRAGMA foreign_keys = ON");
   let txDepth = 0;
 
+  const stmtCache = new Map<string, BunSqliteStmt>();
+  const getStmt = (sql: string): BunSqliteStmt => {
+    const cached = stmtCache.get(sql);
+    if (cached !== undefined) return cached;
+    const stmt = new BunSqliteStmt(db.prepare(sql));
+    stmtCache.set(sql, stmt);
+    return stmt;
+  };
+
   const driver: DbDriver = {
     supportsInteractiveTx: true,
     prepare(sql: string): DbStmt {
-      return new BunSqliteStmt(db.prepare(sql));
+      return getStmt(sql);
     },
     async batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<BatchStmtResult[]> {
-      if (txDepth > 0) return collectBatch(db, stmts);
-      return db.transaction(() => collectBatch(db, stmts))();
+      if (txDepth > 0) return collectBatch(stmts, getStmt);
+      return db.transaction(() => collectBatch(stmts, getStmt))();
     },
     async transaction<T>(fn: (tx: DbDriver) => Promise<T>): Promise<T> {
       if (txDepth > 0) return fn(driver);
