@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -1624,6 +1624,32 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     after.prepare("DELETE FROM lexa_skills WHERE id = 'sk1'").run();
     expect(after.prepare("SELECT skill_id FROM assistant_tasks WHERE id = 't-skill'").get()).toEqual({ skill_id: null });
     expect(after.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    after.close();
+  });
+
+  // ── 0027 drop idx_wiki_project ──────────────────────────────────────────
+  it("0027 drops the redundant idx_wiki_project, leaving UNIQUE(project_id, slug) as the wiki prefix", () => {
+    const dir = stageThrough("0026");
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    expect(appliedMigrations(dbPath)).not.toContain("0027_drop_idx_wiki_project.sql");
+
+    const wikiIndexes = (db: Database) =>
+      (db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='wiki_pages'").all() as { name: string }[]).map((r) => r.name);
+
+    const before = new Database(dbPath);
+    expect(wikiIndexes(before)).toContain("idx_wiki_project");
+    before.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const after = new Database(dbPath);
+    expect(appliedMigrations(dbPath)).toContain("0027_drop_idx_wiki_project.sql");
+    expect(wikiIndexes(after)).not.toContain("idx_wiki_project");
+    // The UNIQUE constraint's auto-index still covers project_id as its prefix.
+    expect(
+      after.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='wiki_pages' AND name LIKE 'sqlite_autoindex_wiki_pages_%'").get()
+    ).not.toBeNull();
     after.close();
   });
 });

@@ -642,7 +642,6 @@ CREATE UNIQUE INDEX idx_task_github_issues_issue ON task_github_issues(issue_id)
 CREATE INDEX idx_columns_project ON columns(project_id, position);
 CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
 CREATE INDEX idx_swimlanes_milestone ON swimlanes(project_id, milestone_id, position);
-CREATE INDEX idx_wiki_project    ON wiki_pages(project_id);
 CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT NULL;
 CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
@@ -1193,6 +1192,9 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- 0024_assistant_call_log_cached_write_in.sql adds `cached_write_in` (cache-write
 -- tokens) so a DO-computed cost can be reproduced from the row; additive
 -- ALTER (no CHECK change, so no rebuild).
+-- 0027_drop_idx_wiki_project.sql drops the redundant `idx_wiki_project`
+-- (project_id): UNIQUE(project_id, slug) already carries project_id as its
+-- leading column and serves every project_id-only wiki read.
 ```
 
 ## Design Notes
