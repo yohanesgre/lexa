@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { WikiPage } from "../../../shared/types";
 
 const editorState = vi.hoisted(() => ({ editing: false }));
@@ -110,10 +111,11 @@ describe("WikiPageViewer sidebar exclusivity", () => {
     expect(document.querySelector(".wiki-read-area")).toHaveClass("wiki-read-area--outline");
   });
 
-  it("mounts only the Page settings trigger in edit mode", () => {
-    editorState.editing = true;
+  it("mounts only the Page settings trigger in edit mode", async () => {
+    const user = userEvent.setup();
     render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
-    expect(screen.getByRole("button", { name: "Page settings" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(await screen.findByRole("button", { name: "Page settings" })).toBeInTheDocument();
     expect(document.querySelector(".wiki-outline-dock")).toBeNull();
   });
 });

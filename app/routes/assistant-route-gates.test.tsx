@@ -53,9 +53,9 @@ beforeEach(() => {
 });
 
 describe("/$slug/chat capability gate", () => {
-  it("renders the chat page when the assistant is enabled", () => {
+  it("renders the chat page when the assistant is enabled", async () => {
     render(<ChatRoute />);
-    expect(screen.getByTestId("assistant-chat-page")).toBeInTheDocument();
+    expect(await screen.findByTestId("assistant-chat-page")).toBeInTheDocument();
     expect(screen.queryByText("The Assistant runs on the Cloudflare Workers deployment")).not.toBeInTheDocument();
   });
 

@@ -73,24 +73,24 @@ const CACHED_ROW = {
 } as unknown as BoardTask;
 
 describe("BoardPage cached-description fallback", () => {
-  it("surfaces the cached board doc while the detail query is pending", () => {
+  it("surfaces the cached board doc while the detail query is pending", async () => {
     state.task = undefined;
     state.board = makeBoard({ tasks: [CACHED_ROW] });
     render(<BoardPage slug="demo" search={{ task: "t1" }} />);
-    expect(screen.getByTestId("task-detail")).toHaveTextContent("Cached body");
+    expect(await screen.findByTestId("task-detail")).toHaveTextContent("Cached body");
   });
 
-  it("falls back to the empty doc for a board row without a description", () => {
+  it("falls back to the empty doc for a board row without a description", async () => {
     state.task = undefined;
     state.board = makeBoard({ tasks: [{ ...CACHED_ROW, description: undefined } as unknown as BoardTask] });
     render(<BoardPage slug="demo" search={{ task: "t1" }} />);
-    expect(screen.getByTestId("task-detail")).toBeEmptyDOMElement();
+    expect(await screen.findByTestId("task-detail")).toBeEmptyDOMElement();
   });
 
-  it("prefers the resolved detail task over the cached board row", () => {
+  it("prefers the resolved detail task over the cached board row", async () => {
     state.task = { ...(CACHED_ROW as unknown as Task), description: DETAIL_DOC };
     state.board = makeBoard({ tasks: [CACHED_ROW] });
     render(<BoardPage slug="demo" search={{ task: "t1" }} />);
-    expect(screen.getByTestId("task-detail")).toHaveTextContent("Detail body");
+    expect(await screen.findByTestId("task-detail")).toHaveTextContent("Detail body");
   });
 });

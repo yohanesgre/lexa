@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { readBoardMilestone, writeBoardMilestone } from "../../lib/board-milestone-store";
 import { useBoard, useSwimlanes, useTask, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import { useToast } from "../ui/Toast";
 import { KanbanBoard } from "./KanbanBoard";
 import type { MoveTarget } from "./KanbanBoard";
-import { TaskDetail } from "../TaskDetail";
 import type { BoardTask, Task, TipTapDoc } from "../../../shared/types";
 import { boardTaskToTask } from "../../../shared/types";
+
+// Deferred until a card opens: TaskDetail pulls the TipTap editor + activity
+// (assistant review) stack, which the board list itself never renders.
+const TaskDetail = lazy(() => import("../TaskDetail").then((m) => ({ default: m.TaskDetail })));
 
 // ?milestone=none is the explicit "No milestone" choice — without it the
 // selection falls back to the first non-archived milestone, so an active
@@ -219,32 +222,34 @@ export function BoardPage({ slug, search }: BoardPageProps) {
         onMilestoneChange={handleMilestoneChange}
       />
       {(selectedTaskId !== null || isCreating) && (
-        <TaskDetail
-          mode={isCreating ? "create" : "view"}
-          from="board"
-          task={selectedTask ?? undefined}
-          defaultColumnId={createTarget?.columnId}
-          columns={board.columns}
-          swimlanes={board.swimlanes}
-          milestones={board.milestones}
-          columnRequiredFields={board.columns.map((column) => ({
-            columnId: column.id,
-            fields: column.requiredFields,
-          }))}
-          availableAssignees={[...new Set(board.tasks.flatMap((t) => t.assignees))] as string[]}
-          taskTitles={new Map(board.tasks.map((t) => [t.id, t.title]))}
-          taskKeys={new Map(board.tasks.map((t) => [t.id, t.key]))}
-          fieldConfig={board.fieldConfig}
-          onClose={handleClose}
-          onUpdate={handleUpdate}
-          onMove={handleMove}
-          onDelete={handleDelete}
-          onArchive={handleArchive}
-          onRestore={handleRestore}
-          onLinkGithub={handleLinkGithub}
-          onUnlinkGithub={handleUnlinkGithub}
-          onCreate={handleCreate}
-        />
+        <Suspense fallback={null}>
+          <TaskDetail
+            mode={isCreating ? "create" : "view"}
+            from="board"
+            task={selectedTask ?? undefined}
+            defaultColumnId={createTarget?.columnId}
+            columns={board.columns}
+            swimlanes={board.swimlanes}
+            milestones={board.milestones}
+            columnRequiredFields={board.columns.map((column) => ({
+              columnId: column.id,
+              fields: column.requiredFields,
+            }))}
+            availableAssignees={[...new Set(board.tasks.flatMap((t) => t.assignees))] as string[]}
+            taskTitles={new Map(board.tasks.map((t) => [t.id, t.title]))}
+            taskKeys={new Map(board.tasks.map((t) => [t.id, t.key]))}
+            fieldConfig={board.fieldConfig}
+            onClose={handleClose}
+            onUpdate={handleUpdate}
+            onMove={handleMove}
+            onDelete={handleDelete}
+            onArchive={handleArchive}
+            onRestore={handleRestore}
+            onLinkGithub={handleLinkGithub}
+            onUnlinkGithub={handleUnlinkGithub}
+            onCreate={handleCreate}
+          />
+        </Suspense>
       )}
     </div>
   );
