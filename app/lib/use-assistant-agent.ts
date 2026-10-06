@@ -205,6 +205,11 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
     // legitimately changes the identity; acknowledge it via the documented
     // callback instead of the SDK advisory.
     onIdentityChange: () => {},
+    // Identity swap enqueues the SDK's stream-resume probe on the outgoing
+    // socket — transferring it delivers the probe to its own (new) DO instead
+    // of discarding; user payloads never buffer here (assistantSendForKey
+    // defers to the identified socket).
+    transferEnqueuedMessages: true,
   });
 
   const bodyRef = useRef<Record<string, unknown>>({});
