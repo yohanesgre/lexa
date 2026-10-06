@@ -23,7 +23,7 @@ export async function estimateTokens(text: string): Promise<number> {
   } catch (err) {
     if (!loadWarned) {
       loadWarned = true;
-      console.warn("[tiktoken] encoder load failed; cost estimates fall back to chars/4", err);
+      console.warn("[tiktoken] token estimate failed; cost estimates fall back to chars/4", err);
     }
     return 0; // 0 = unknown; the caller estimates from text length
   }
