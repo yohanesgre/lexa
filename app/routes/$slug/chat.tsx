@@ -1,14 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
 import { AssistantUnavailableNotice } from "../../components/assistant/AssistantUnavailableNotice";
+import { AssistantChatPage } from "../../components/chat/AssistantChatPage";
 import { useAssistantEnabled } from "../../lib/assistant-enabled";
 import { getProject } from "../../lib/api";
-
-// The assistant client stack (AI SDK transport, PartySocket, chat state) is a
-// leaf: it loads only once the enabled chat surface is actually mounted.
-const AssistantChatPage = lazy(() =>
-  import("../../components/chat/AssistantChatPage").then((m) => ({ default: m.AssistantChatPage }))
-);
 
 export const Route = createFileRoute("/$slug/chat")({
   validateSearch: (search: Record<string, unknown>): { thread?: string | undefined } => ({
@@ -42,9 +36,5 @@ function ChatRoute() {
       </main>
     );
   }
-  return (
-    <Suspense fallback={null}>
-      <AssistantChatPage slug={slug!} thread={thread} />
-    </Suspense>
-  );
+  return <AssistantChatPage slug={slug!} thread={thread} />;
 }
