@@ -133,7 +133,7 @@ export async function summarizeTranscript(
   const generate = options.generateTextImpl ?? generateText;
   try {
     const result = await generate({
-      model: buildLanguageModel(config),
+      model: await buildLanguageModel(config),
       system: SUMMARY_SYSTEM_PROMPT,
       prompt,
       maxRetries: 0,

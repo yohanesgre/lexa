@@ -13,9 +13,24 @@ import { Db, batchResults, requireRow, DbError, ConstraintViolation, RowNotFound
 import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { PUBLIC_URL } from "../auth";
 import { extractText } from "../../shared/tiptap-text";
-import { docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "../../shared/markdown";
 import * as msg from "../activity-messages";
 import type { Actor, ActivityEvent } from "../../shared/types";
+
+// `shared/markdown` pulls the `marked` parser at module scope. It is imported
+// lazily at the call sites so github.service no longer pulls `marked` at module
+// scope. Promise-memo per module, reset on rejection so a failed import can
+// retry (same pattern as tiktoken.ts).
+type MarkdownModule = typeof import("../../shared/markdown");
+
+let markdownModule: Promise<MarkdownModule> | null = null;
+
+function loadMarkdown(): Promise<MarkdownModule> {
+  markdownModule ??= import("../../shared/markdown").catch((e: unknown) => {
+    markdownModule = null;
+    throw e;
+  });
+  return markdownModule;
+}
 
 // Short-lived per-repo cache for the autocomplete listing (core API is cheap,
 // but a keystroke-per-request against GitHub is wasteful). A brand-new issue
@@ -65,6 +80,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
       // failure only flags push_failed so the next save retries naturally.
       syncContentFromLexa: (taskId: string) =>
         Effect.gen(function* () {
+          const { docToMarkdown, normalizeMarkdownForEcho } = yield* Effect.promise(() => loadMarkdown());
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
@@ -140,6 +156,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             // Content sync, GitHub → Lexa (title + body), echo-suppressed.
             // The edited payload carries the new TITLE but not the body — the
             // body always comes from an API fetch.
+            const { markdownToDoc, normalizeMarkdownForEcho } = yield* Effect.promise(() => loadMarkdown());
             const title = payload.issue?.title;
             if (!title) {
               yield* webhookEvents.recordDelivery(deliveryId);
@@ -353,6 +370,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
       // ANY task is rejected (UNIQUE(issue_id)).
       createTaskFromIssue: (actor: Actor, slug: string, repo: string, issueNumber: number): Effect.Effect<{ taskId: string; activity: ActivityEvent[] }, ProjectNotFound | GithubApiError | GithubIssueAlreadyLinked | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
+          const { markdownToDoc } = yield* Effect.promise(() => loadMarkdown());
           const project = yield* projectService.findBySlug(slug);
           const repos = yield* reposRepo.listByProject(project.id);
           if (!repos.some((r) => r.repo === repo && r.workspaceRole)) {

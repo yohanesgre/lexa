@@ -11,12 +11,45 @@
 // provider id then the model id. `provider.test.ts` keeps the two derivations
 // in lockstep.
 
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
 import { createWorkersAI } from "workers-ai-provider";
 import type { Ai } from "@cloudflare/workers-types";
 import type { LanguageModel } from "ai";
+
+// The three provider SDKs load lazily on first use so they stay off the
+// per-request static import graph (workers-entry → agent → model-factory).
+// Promise-memo per module, reset on rejection so a failed import can retry
+// (same pattern as tiktoken.ts).
+type OpenAICompatibleModule = typeof import("@ai-sdk/openai-compatible");
+type AnthropicModule = typeof import("@ai-sdk/anthropic");
+type OpenAIModule = typeof import("@ai-sdk/openai");
+
+let openAICompatibleModule: Promise<OpenAICompatibleModule> | null = null;
+let anthropicModule: Promise<AnthropicModule> | null = null;
+let openAIModule: Promise<OpenAIModule> | null = null;
+
+function importOpenAICompatible(): Promise<OpenAICompatibleModule> {
+  openAICompatibleModule ??= import("@ai-sdk/openai-compatible").catch((e: unknown) => {
+    openAICompatibleModule = null;
+    throw e;
+  });
+  return openAICompatibleModule;
+}
+
+function importAnthropic(): Promise<AnthropicModule> {
+  anthropicModule ??= import("@ai-sdk/anthropic").catch((e: unknown) => {
+    anthropicModule = null;
+    throw e;
+  });
+  return anthropicModule;
+}
+
+function importOpenAI(): Promise<OpenAIModule> {
+  openAIModule ??= import("@ai-sdk/openai").catch((e: unknown) => {
+    openAIModule = null;
+    throw e;
+  });
+  return openAIModule;
+}
 
 export type ModelFactoryKind = "openai_compatible" | "anthropic_compatible" | "openai_responses" | "workers_ai";
 
@@ -111,7 +144,7 @@ function fetchSetting(config: RegistryModelConfig): { fetch?: typeof fetch } {
 }
 
 /** Build the AI SDK language model for one registry binding. */
-export function buildLanguageModel(config: RegistryModelConfig): LanguageModel {
+export async function buildLanguageModel(config: RegistryModelConfig): Promise<LanguageModel> {
   const kind = normalizeProviderKind(config.kind);
   // H9: `workers_ai` runs keyless through the Cloudflare AI binding — no base
   // URL, no headers, no gateway. The binding is attached by the DO, never
@@ -126,17 +159,20 @@ export function buildLanguageModel(config: RegistryModelConfig): LanguageModel {
   const headers = sessionHeaders(config);
   const fetch = fetchSetting(config);
   if (kind === "openai_compatible") {
+    const { createOpenAICompatible } = await importOpenAICompatible();
     return createOpenAICompatible({ name: "lexa-openai-compatible", baseURL, apiKey: config.apiKey, headers, ...fetch }).chatModel(config.model);
   }
   if (kind === "openai_responses") {
+    const { createOpenAI } = await importOpenAI();
     return createOpenAI({ name: "lexa-openai-responses", baseURL, apiKey: config.apiKey, headers, ...fetch }).responses(config.model);
   }
+  const { createAnthropic } = await importAnthropic();
   return createAnthropic({ name: "lexa-anthropic-compatible", baseURL, apiKey: config.apiKey, headers, ...fetch }).languageModel(config.model);
 }
 
 /** Primary first, then ≤2 fallbacks — the AI SDK side of `fallback_model_ids`. */
-export function buildModelChain(configs: readonly RegistryModelConfig[]): LanguageModel[] {
-  return configs.slice(0, 3).map((config) => buildLanguageModel(config));
+export async function buildModelChain(configs: readonly RegistryModelConfig[]): Promise<LanguageModel[]> {
+  return Promise.all(configs.slice(0, 3).map((config) => buildLanguageModel(config)));
 }
 
 /**
@@ -273,7 +309,7 @@ export async function runWithModelFallback<T>(
   for (let i = 0; i < chain.length; i++) {
     const config = chain[i]!;
     try {
-      const value = await attempt(config, buildLanguageModel(config));
+      const value = await attempt(config, await buildLanguageModel(config));
       return { value, configIndex: i };
     } catch (e) {
       lastError = e;

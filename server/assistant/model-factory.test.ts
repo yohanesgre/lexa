@@ -98,57 +98,57 @@ describe("x-opencode-session derivation (parity with provider.ts)", () => {
 });
 
 describe("buildLanguageModel", () => {
-  it("maps openai_compatible and attaches the session header", () => {
-    const model = buildLanguageModel(baseConfig);
+  it("maps openai_compatible and attaches the session header", async () => {
+    const model = await buildLanguageModel(baseConfig);
     expect(providerOf(model)).toContain("openai-compatible");
     expect(modelIdOf(model)).toBe("deepseek-v4-flash");
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-chat-123");
   });
 
-  it("maps anthropic_compatible", () => {
-    const model = buildLanguageModel({ ...baseConfig, kind: "anthropic_compatible", model: "claude-x" });
+  it("maps anthropic_compatible", async () => {
+    const model = await buildLanguageModel({ ...baseConfig, kind: "anthropic_compatible", model: "claude-x" });
     expect(providerOf(model)).toContain("anthropic");
     expect(modelIdOf(model)).toBe("claude-x");
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-chat-123");
   });
 
-  it("maps openai_responses", () => {
-    const model = buildLanguageModel({ ...baseConfig, kind: "openai_responses", model: "gpt-5" });
+  it("maps openai_responses", async () => {
+    const model = await buildLanguageModel({ ...baseConfig, kind: "openai_responses", model: "gpt-5" });
     expect(providerOf(model)).toContain("openai");
     expect(modelIdOf(model)).toBe("gpt-5");
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-chat-123");
   });
 
-  it("maps workers_ai through the injected AI binding (H9)", () => {
+  it("maps workers_ai through the injected AI binding (H9)", async () => {
     const binding = { run: async () => ({ response: "ok" }) } as unknown as Ai;
-    const model = buildLanguageModel({ ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama-3.2-1b-instruct", workersAiBinding: binding });
+    const model = await buildLanguageModel({ ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama-3.2-1b-instruct", workersAiBinding: binding });
     expect(providerOf(model)).toContain("workersai");
     expect(modelIdOf(model)).toBe("@cf/meta/llama-3.2-1b-instruct");
   });
 
-  it("rejects a workers_ai model with no AI binding", () => {
-    expect(() => buildLanguageModel({ ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama-3.2-1b-instruct" })).toThrow(/AI binding/);
+  it("rejects a workers_ai model with no AI binding", async () => {
+    await expect(buildLanguageModel({ ...baseConfig, kind: "workers_ai", model: "@cf/meta/llama-3.2-1b-instruct" })).rejects.toThrow(/AI binding/);
   });
 
-  it("falls back to providerId for the session header when the conversation id is absent", () => {
-    const model = buildLanguageModel({ ...baseConfig, sessionId: undefined });
+  it("falls back to providerId for the session header when the conversation id is absent", async () => {
+    const model = await buildLanguageModel({ ...baseConfig, sessionId: undefined });
     expect(headersOf(model)?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-prov-1");
   });
 
-  it("sends cf-aig-collect-log-payload: false by default on every gateway kind (D7)", () => {
+  it("sends cf-aig-collect-log-payload: false by default on every gateway kind (D7)", async () => {
     for (const kind of ["openai_compatible", "anthropic_compatible", "openai_responses"] as const) {
-      expect(headersOf(buildLanguageModel({ ...baseConfig, kind }))?.[CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]).toBe("false");
+      expect(headersOf(await buildLanguageModel({ ...baseConfig, kind }))?.[CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]).toBe("false");
     }
     expect(
-      headersOf(buildLanguageModel({ ...baseConfig, collectLogPayload: true }))?.[CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]
+      headersOf(await buildLanguageModel({ ...baseConfig, collectLogPayload: true }))?.[CF_AIG_COLLECT_LOG_PAYLOAD_HEADER]
     ).toBe("true");
   });
 });
 
 describe("buildModelChain", () => {
-  it("caps the chain at three configs", () => {
+  it("caps the chain at three configs", async () => {
     const configs: RegistryModelConfig[] = [0, 1, 2, 3, 4].map((i) => ({ ...baseConfig, model: `m-${i}` }));
-    expect(buildModelChain(configs)).toHaveLength(3);
+    expect(await buildModelChain(configs)).toHaveLength(3);
   });
 });
 

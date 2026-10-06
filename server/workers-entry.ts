@@ -43,7 +43,6 @@ import type {
   ScheduledController,
 } from "@cloudflare/workers-types";
 import { getAgentByName } from "agents";
-import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";
 import { getEnvFromWorkers, legacyGithubEnvVars, type RuntimeEnv } from "./env";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
 import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
@@ -446,6 +445,23 @@ async function handleApi(
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
+// TanStack Start's server handler is needed only for /share/* SSR (and the
+// non-share shell fallback). Lazy-loaded so `@tanstack/react-start/server`
+// stays off the per-request static import graph; promise-memo per module,
+// reset on rejection so a failed import can retry (same pattern as
+// tiktoken.ts).
+type StartServerModule = typeof import("@tanstack/react-start/server");
+
+let startServerModule: Promise<StartServerModule> | null = null;
+
+function importStartServer(): Promise<StartServerModule> {
+  startServerModule ??= import("@tanstack/react-start/server").catch((e: unknown) => {
+    startServerModule = null;
+    throw e;
+  });
+  return startServerModule;
+}
+
 // Non-share HTML: the prerendered SPA shell. Fetched once per isolate from the
 // static-assets binding when present (asset hit — assets are served before the
 // worker, so this does not recurse), then patched per response. When the
@@ -500,7 +516,10 @@ async function handleNonShare(req: WorkersRequest, env: WorkersEnv): Promise<Res
 
 async function handleSsr(req: WorkersRequest): Promise<Response> {
   try {
-    ssrFetch ??= createStartHandler(defaultStreamHandler) as unknown as (req: Request) => Promise<Response>;
+    if (ssrFetch === null) {
+      const { createStartHandler, defaultStreamHandler } = await importStartServer();
+      ssrFetch = createStartHandler(defaultStreamHandler) as unknown as (req: Request) => Promise<Response>;
+    }
     const res = await ssrFetch(req as unknown as Request);
     const ct = res.headers.get("content-type") ?? "";
     if (!ct.includes("text/html")) return res;
