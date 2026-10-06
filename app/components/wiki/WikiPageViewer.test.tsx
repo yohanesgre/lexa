@@ -115,7 +115,7 @@ describe("WikiPageViewer sidebar exclusivity", () => {
     const user = userEvent.setup();
     render(<WikiPageViewer slug="demo" page={PAGE} pages={[PAGE]} />);
     await user.click(screen.getByRole("button", { name: "Edit" }));
-    expect(await screen.findByRole("button", { name: "Page settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Page settings" })).toBeInTheDocument();
     expect(document.querySelector(".wiki-outline-dock")).toBeNull();
   });
 });

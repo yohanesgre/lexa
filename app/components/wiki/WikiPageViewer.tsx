@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pencil, Share2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
@@ -6,12 +6,7 @@ import { OutlinePill } from "./OutlinePill";
 import { SourcesSection } from "../document/SourcesSection";
 import { formatRelative } from "./wiki-format";
 import { ShareDialog } from "./ShareDialog";
-
-// The editor (TipTap + mention suggestions + assistant review) is only needed
-// after the reader clicks Edit — defer the whole module until then.
-const WikiEditWorkspace = lazy(() =>
-  import("./WikiEditWorkspace").then((m) => ({ default: m.WikiEditWorkspace }))
-);
+import { WikiEditWorkspace } from "./WikiEditWorkspace";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
@@ -130,17 +125,12 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     );
   }
 
-  // The lazy workspace chunk + deferred TipTap editor can take a beat to load;
-  // keep the read view as the Suspense fallback so the content area never
-  // blanks between clicking Edit and the editor mounting.
   return (
-    <Suspense fallback={readView}>
-      <WikiEditWorkspace
-        slug={slug}
-        page={page}
-        breadcrumb={breadcrumb}
-        onDone={() => setIsEditing(false)}
-      />
-    </Suspense>
+    <WikiEditWorkspace
+      slug={slug}
+      page={page}
+      breadcrumb={breadcrumb}
+      onDone={() => setIsEditing(false)}
+    />
   );
 }
