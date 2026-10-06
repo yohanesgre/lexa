@@ -132,6 +132,23 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           key
         ).pipe(Effect.map((r) => rowToTask(r))),
 
+      // Bulk prefetch — one query for every requested id, scoped to the
+      // project (an id from another project is simply absent, so the service
+      // reports TASK_NOT_FOUND per task with no extra read). Full TASK_SELECT
+      // so the bulk update diff has description/assignees without re-reads.
+      findByIdsForProject: (projectId: string, ids: string[]): Effect.Effect<Task[], DbError> => {
+        if (ids.length === 0) return Effect.succeed([]);
+        const placeholders = ids.map(() => "?").join(",");
+        return queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+          db,
+          `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
+           WHERE t.project_id = ? AND t.id IN (${placeholders})
+           GROUP BY t.id`,
+          projectId,
+          ...ids
+        ).pipe(Effect.map((rows) => rows.map((r) => rowToTask(r))));
+      },
+
       listByProject: (projectId: string): Effect.Effect<Task[], DbError> =>
         queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
           db,

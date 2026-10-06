@@ -193,6 +193,22 @@ describe("TaskRepo GitHub link setters — strict RowNotFound", () => {
   });
 });
 
+describe("TaskRepo.findByIdsForProject", () => {
+  it("returns every requested row of the project and skips foreign/absent ids", async () => {
+    seed(db);
+    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c2','p2','Todo',0)").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2','p2','Backlog',0,'backlog')").run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, description)
+                VALUES ('t-other','p2','c2','s2','Other','a0','2026-01-04 10:00:00','{"type":"doc","content":[]}')`).run();
+    const repo = makeRepo(db);
+    const rows = await Effect.runPromise(repo.findByIdsForProject("p1", ["t-live", "t-arch", "t-other", "nope"]));
+    expect(rows.map((r) => r.id).sort()).toEqual(["t-arch", "t-live"]);
+    // Full projection (description included) so the bulk update diff needs no re-read.
+    expect(rows.find((r) => r.id === "t-live")!.description).toEqual({ type: "doc", content: [] });
+  });
+});
+
 describe("TaskRepo.searchByTitle", () => {
   it("returns one hit per task with per-task assignees, not merged across tasks", async () => {
     seed(db);
