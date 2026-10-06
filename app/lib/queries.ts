@@ -413,6 +413,7 @@ export function useCreateTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: [...old.tasks, task] };
       });
+      qc.setQueryData(["tasks", slug, task.id], task);
       applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, undefined, task));
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task created");

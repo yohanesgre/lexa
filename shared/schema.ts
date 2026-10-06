@@ -142,6 +142,7 @@ export const TaskSchema = Schema.Struct({
   updatedAt: Schema.String,
 }) as unknown as Schema.Schema<Task>;
 
+// derived from local TaskSchema; counterpart in server/api/http.ts — bases intentionally diverge on swimlaneId nullability.
 export const BoardTaskSchema = TaskSchema.pipe(Schema.omit("description")) as unknown as Schema.Schema<BoardTask>;
 
 export const BoardSchema = Schema.Struct({

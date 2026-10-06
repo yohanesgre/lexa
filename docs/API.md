@@ -802,7 +802,7 @@ body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueA
 
 GET    /api/projects/:slug/board?includeArchived=true
 → 200 Board          (unpaginated full snapshot — the kanban's single fetch)
-  list-row tasks omit `description` (the TipTap doc) — fetch a single task via
+  board tasks omit `description` (the TipTap doc) — fetch a single task via
   GET /api/projects/:slug/tasks/:id for the full document; task detail keeps it
   includeArchived omitted/false → archived tasks AND archived lanes excluded; true → both included
   (rendered dimmed in the UI, non-draggable, still in their original column/lane)

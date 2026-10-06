@@ -221,8 +221,10 @@ describe("task mutations — board cache from the authoritative response", () =>
     const live = queryClient.getQueryData<Board>(["board", "demo", false])!;
     expect(live.tasks.map((t) => t.id)).toEqual(["t1", "t9"]);
     expect((queryClient.getQueryData<Board>(["board", "demo", true])!.tasks.at(-1) as Task).id).toBe("t9");
-    // The task detail cache is NOT refetched (it was never set) and the board
-    // URL was not called again.
+    // The detail cache is seeded from the authoritative response (create-then-
+    // open renders the cached doc while the detail query is pending) and the
+    // board URL was not called again.
+    expect(queryClient.getQueryData<Task>(["tasks", "demo", "t9"])).toEqual({ ...TASK, id: "t9", title: "New" });
     expect(boardCalls()).toBe(before);
     // Activity prepended into the timeline cache.
     const actCache = queryClient.getQueryData(["task-activity", "demo", "t9"]);

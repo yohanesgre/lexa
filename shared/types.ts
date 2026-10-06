@@ -211,7 +211,12 @@ export interface Task {
 export type BoardTask = Omit<Task, "description">;
 
 export function boardTaskToTask(task: BoardTask): Task {
-  return { ...task, description: { type: "doc", content: [] } };
+  // Board rows normally omit the doc, but mutation responses pushed straight
+  // into the board cache (create/update) are full Tasks — keep their
+  // authoritative doc instead of discarding it. The cast is safe: the runtime
+  // row may carry `description` even though BoardTask omits it by type.
+  const description = (task as Partial<Pick<Task, "description">>).description;
+  return { ...task, description: description ?? { type: "doc", content: [] } };
 }
 
 export interface WikiPageMeta {
