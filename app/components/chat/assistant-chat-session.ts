@@ -30,7 +30,6 @@ import {
   suspendTurnFrame,
   terminalTranscriptAction,
   touchThreadEntry,
-  touchThreadUpdatedAt,
   settleThreadCache,
   truncateTurns,
   threadEntry,
@@ -614,7 +613,11 @@ export function useTerminalRefetch(args: {
     if (terminalTranscriptAction(code, stream.hasIngress) === "drop") {
       qc.cancelQueries({ queryKey: ["assistant-chat", chatId] });
       qc.removeQueries({ queryKey: ["assistant-chat", chatId] });
-      if (projectId) touchThreadUpdatedAt(qc, projectId, chatId, new Date().toISOString());
+      // Evict the dead row from every list variant — touching it would retain
+      // and re-rank it. Safe: useThreadListIngress re-seeds on first ingress.
+      qc.setQueriesData<AssistantChatThreadSummary[]>({ queryKey: ["assistant-chats", projectId] }, (old) =>
+        old ? old.filter((t) => t.chatId !== chatId) : old
+      );
     } else if (isThreadNotFoundCode(code)) {
       // 404 + ingress: the pre-ingress 404 is stale — the thread now exists, so
       // refetch the persisted turns (clearing the 404) instead of dropping the

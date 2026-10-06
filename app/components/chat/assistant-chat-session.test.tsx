@@ -448,6 +448,82 @@ describe("terminalTranscriptAction — not-found vs ingress", () => {
   });
 });
 
+describe("useTerminalRefetch — drop branch evicts the dead thread row", () => {
+  const row = (chatId: string) => ({ chatId, title: chatId, pinned: false, snippet: null, createdAt: "x", updatedAt: "x" });
+
+  function renderDrop() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryFn = vi.fn().mockRejectedValue(Object.assign(new Error("missing"), NOT_FOUND));
+    const utils = render(
+      <QueryClientProvider client={qc}>
+        <TerminalHarness stream={makeStream()} queryFn={queryFn} />
+      </QueryClientProvider>
+    );
+    const rerender = (stream: Stream) =>
+      utils.rerender(
+        <QueryClientProvider client={qc}>
+          <TerminalHarness stream={stream} queryFn={queryFn} />
+        </QueryClientProvider>
+      );
+    return { qc, rerender };
+  }
+
+  it("removes the row from every cached list variant on drop", async () => {
+    const { qc, rerender } = renderDrop();
+    qc.setQueryData(["assistant-chats", "p1", null], [row("N"), row("other")]);
+    qc.setQueryData(["assistant-chats", "p1", "q"], [row("N"), row("third")]);
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])?.status).toBe("error"));
+
+    rerender(makeStream({ status: "done", hasIngress: false }));
+
+    await waitFor(() =>
+      expect((qc.getQueryData<Array<{ chatId: string }>>(["assistant-chats", "p1", null]) ?? []).map((t) => t.chatId)).toEqual(["other"])
+    );
+    expect((qc.getQueryData<Array<{ chatId: string }>>(["assistant-chats", "p1", "q"]) ?? []).map((t) => t.chatId)).toEqual(["third"]);
+  });
+
+  it("is a no-op when the dead row is absent from the list", async () => {
+    const { qc, rerender } = renderDrop();
+    qc.setQueryData(["assistant-chats", "p1", null], [row("other")]);
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])?.status).toBe("error"));
+
+    rerender(makeStream({ status: "done", hasIngress: false }));
+
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])).toBeUndefined());
+    expect(qc.getQueryData(["assistant-chats", "p1", null])).toEqual([row("other")]);
+  });
+});
+
+describe("useTerminalRefetch — drop branch composition (cancel → remove → evict)", () => {
+  it("cancels the transcript, removes it, and evicts the list row — one assertion per call", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(["assistant-chats", "p1", null], [
+      { chatId: "N", title: "Thread N", pinned: false, snippet: null, createdAt: "x", updatedAt: "x" },
+    ]);
+    const cancel = vi.spyOn(qc, "cancelQueries");
+    const remove = vi.spyOn(qc, "removeQueries");
+    const setData = vi.spyOn(qc, "setQueryData");
+    const queryFn = vi.fn().mockRejectedValue(Object.assign(new Error("missing"), NOT_FOUND));
+    const utils = render(
+      <QueryClientProvider client={qc}>
+        <TerminalHarness stream={makeStream()} queryFn={queryFn} />
+      </QueryClientProvider>
+    );
+    await waitFor(() => expect(qc.getQueryState(["assistant-chat", "N"])?.status).toBe("error"));
+
+    utils.rerender(
+      <QueryClientProvider client={qc}>
+        <TerminalHarness stream={makeStream({ status: "done", hasIngress: false })} queryFn={queryFn} />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith({ queryKey: ["assistant-chat", "N"] }));
+    expect(cancel).toHaveBeenCalledWith({ queryKey: ["assistant-chat", "N"] });
+    expect(setData.mock.calls.some(([key]) => Array.isArray(key) && key[0] === "assistant-chats")).toBe(true);
+    expect(qc.getQueryData<Array<{ chatId: string }>>(["assistant-chats", "p1", null])).toEqual([]);
+  });
+});
+
 describe("useSettledTurns — reconciled turns stay resend-resolvable (M1)", () => {
   it("exposes a merged raw snapshot so an edit on a kept earlier turn resolves", () => {
     const full = [

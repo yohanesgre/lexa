@@ -82,9 +82,10 @@ export function touchThreadUpdatedAt(qc: QueryClient, projectId: string, chatId:
 // transcript is server-authoritative — GET /assistant/chat/:chatId reconciles
 // approval markers and carries out-of-band continuation frames the client never
 // received — so it cannot be written from stream state. Targeted refetch of the
-// exact key is the documented fallback (not stale-marking: invalidate would
-// refetch every observer). The thread list IS derivable, so it is written from
-// client-known fields.
+// exact key is the documented fallback: it scopes to the one key and skips the
+// stale-marking invalidate would add (the reconcile-on-activation read re-reads
+// regardless of staleness, so the extra cost is the marking, not observers). The
+// thread list IS derivable, so it is written from client-known fields.
 export function settleThreadCache(args: {
   qc: QueryClient;
   chatId: string;
