@@ -23,7 +23,7 @@ const chatFx = vi.hoisted(() => {
     isRecovering: false,
   });
   const state = { current: idle() };
-  return { idle, state };
+  return { idle, state, sendMessage: vi.fn() };
 });
 
 vi.mock("agents/react", () => ({
@@ -58,9 +58,10 @@ beforeEach(() => {
   h.useAgent.mockReset();
   h.useAgent.mockReturnValue({ identified: false, connectionError: null });
   h.useAgentChat.mockReset();
+  chatFx.sendMessage.mockReset();
   h.useAgentChat.mockImplementation(() => ({
     ...chatFx.state.current,
-    sendMessage: vi.fn(),
+    sendMessage: chatFx.sendMessage,
     stop: vi.fn(),
     setMessages: vi.fn(),
     clearError: vi.fn(),
@@ -344,5 +345,193 @@ describe("useAssistantAgent — resume-probe send guard", () => {
     h.useAgent.mockReturnValue(raw);
     const { result } = renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
     expect(result.current.agent).toBe(raw);
+  });
+});
+
+// partysocket closes the outgoing socket whenever its memo key changes, and the
+// browser warns "WebSocket is closed before the connection is established" when
+// that socket is still CONNECTING. The hook must therefore hold every identity
+// change until the outgoing socket has settled — covering the three automated
+// sequences the chat surface produces: stale-restore eviction, orphan-deep-link
+// eviction, and a fast thread switch.
+describe("useAssistantAgent — identity settle gate (no churn while CONNECTING)", () => {
+  const CONNECTING = { identified: false, connectionError: null, readyState: 0, shouldReconnect: false };
+  const OPEN = { identified: true, connectionError: null, readyState: 1, shouldReconnect: true };
+
+  type Props = { key: string | null; projectId?: string };
+
+  it("does not swap identity while the outgoing socket is CONNECTING, then swaps once it settles", () => {
+    h.useAgent.mockReturnValue(CONNECTING);
+    const { rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:a", projectId: "p1" } }
+    );
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:a");
+
+    // Fast thread switch: identity flips while the first socket is CONNECTING.
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:a");
+
+    // The first dial settles → the deferred identity commits.
+    h.useAgent.mockReturnValue(OPEN);
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:b");
+  });
+
+  it("defers a stale-restore eviction (thread → idle) until the socket settles", () => {
+    h.useAgent.mockReturnValue(CONNECTING);
+    const { rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:stale", projectId: "p1" } }
+    );
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:stale");
+
+    // dropUnknownThread clears chatId while the restored thread is CONNECTING.
+    rerender({ key: null, projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:stale");
+
+    h.useAgent.mockReturnValue(OPEN);
+    rerender({ key: null, projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/__idle__");
+    expect(lastArgs().enabled).toBe(false);
+  });
+
+  it("defers an orphan-deep-link eviction (thread → idle) until the socket settles", () => {
+    // Landing (idle, settled) → orphan deep link dials immediately.
+    h.useAgent.mockReturnValue({ identified: false, connectionError: null, readyState: 3 });
+    const { rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: null, projectId: "p1" } }
+    );
+    rerender({ key: "assistant-chat:orphan", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:orphan");
+
+    // The orphan dial is now in flight.
+    h.useAgent.mockReturnValue(CONNECTING);
+
+    // orphanThreadNeedsRecovery lands fresh while the orphan socket is CONNECTING.
+    rerender({ key: null, projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:orphan");
+
+    h.useAgent.mockReturnValue(OPEN);
+    rerender({ key: null, projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/__idle__");
+  });
+
+  it("defers a project switch (query churn) until the socket settles", () => {
+    h.useAgent.mockReturnValue(CONNECTING);
+    const { rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:a", projectId: "p1" } }
+    );
+    expect(lastArgs().query).toEqual({ projectId: "p1" });
+
+    rerender({ key: "assistant-chat:a", projectId: "p2" });
+    expect(lastArgs().query).toEqual({ projectId: "p1" });
+
+    h.useAgent.mockReturnValue(OPEN);
+    rerender({ key: "assistant-chat:a", projectId: "p2" });
+    expect(lastArgs().query).toEqual({ projectId: "p2" });
+  });
+
+  it("settles a socket closed by a final connection error so a change is never pinned", () => {
+    h.useAgent.mockReturnValue(CONNECTING);
+    const { rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:a", projectId: "p1" } }
+    );
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:a");
+
+    // Final close: the SDK sets connectionError only once readyState is CLOSED.
+    h.useAgent.mockReturnValue({ identified: false, connectionError: new Error("gate 404"), readyState: 3 });
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:b");
+  });
+
+  it("commits the deferred identity when readyState flips in place (25ms interval path, no rerender)", async () => {
+    const sock = { identified: false, connectionError: null, readyState: 0, shouldReconnect: false };
+    h.useAgent.mockReturnValue(sock);
+    const { rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:a", projectId: "p1" } }
+    );
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:a");
+
+    // readyState mutates on the socket object without any React update; the
+    // poll (not a render) must apply the deferred identity.
+    sock.readyState = 1;
+    await waitFor(() => expect(lastArgs().basePath).toBe("api/assistant/agent/chat:b"));
+  });
+
+  it("defers a send made before the held identity settles (never writes to the old thread's socket)", async () => {
+    const sock = { identified: false, connectionError: null, readyState: 0, shouldReconnect: false };
+    h.useAgent.mockReturnValue(sock);
+    const { result, rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:a", projectId: "p1" } }
+    );
+    // Select B while A is still CONNECTING: the gate holds the swap.
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:a");
+
+    act(() => result.current.send("/api/assistant/chat/stream", { message: "hi" }));
+    // Must not write through A's socket — it would land in A's DO.
+    expect(chatFx.sendMessage).not.toHaveBeenCalled();
+
+    // A settles → B commits; B identifies → the deferred payload flushes to B.
+    sock.readyState = 1;
+    await waitFor(() => expect(lastArgs().basePath).toBe("api/assistant/agent/chat:b"));
+    sock.identified = true;
+    rerender({ key: "assistant-chat:b", projectId: "p1" });
+    expect(chatFx.sendMessage).toHaveBeenCalledWith({ parts: [{ type: "text", text: "hi" }] });
+  });
+
+  it("delivers two sends made inside one hold window, in order (per-key FIFO)", async () => {
+    const sock = { identified: false, connectionError: null, readyState: 0, shouldReconnect: false };
+    h.useAgent.mockReturnValue(sock);
+    const { result, rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:f1", projectId: "p1" } }
+    );
+    rerender({ key: "assistant-chat:f2", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:f1");
+
+    act(() => result.current.send("/api/assistant/chat/stream", { message: "first" }));
+    act(() => result.current.send("/api/assistant/chat/stream", { message: "second" }));
+    expect(chatFx.sendMessage).not.toHaveBeenCalled();
+
+    sock.readyState = 1;
+    await waitFor(() => expect(lastArgs().basePath).toBe("api/assistant/agent/chat:f2"));
+    sock.identified = true;
+    rerender({ key: "assistant-chat:f2", projectId: "p1" });
+
+    const texts = chatFx.sendMessage.mock.calls.map(
+      (call) => (call[0] as { parts: Array<{ text?: string }> }).parts[0]?.text
+    );
+    expect(texts).toEqual(["first", "second"]);
+  });
+
+  it("drops a deferred send when its target is abandoned (drop-on-abandon, bounded retention)", async () => {
+    const sock = { identified: false, connectionError: null, readyState: 0, shouldReconnect: false };
+    h.useAgent.mockReturnValue(sock);
+    const { result, rerender } = renderHook(
+      ({ key, projectId }: Props) => useAssistantAgent(key, { projectId }),
+      { initialProps: { key: "assistant-chat:d1", projectId: "p1" } }
+    );
+    rerender({ key: "assistant-chat:d2", projectId: "p1" });
+    act(() => result.current.send("/api/assistant/chat/stream", { message: "abandoned" }));
+    // d1 is still CONNECTING: select a third thread, so d2 never commits.
+    rerender({ key: "assistant-chat:d3", projectId: "p1" });
+    expect(lastArgs().basePath).toBe("api/assistant/agent/chat:d1");
+
+    sock.readyState = 1;
+    await waitFor(() => expect(lastArgs().basePath).toBe("api/assistant/agent/chat:d3"));
+    sock.identified = true;
+    rerender({ key: "assistant-chat:d3", projectId: "p1" });
+
+    // d2's queue was dropped on abandon — nothing is delivered to d3.
+    expect(chatFx.sendMessage).not.toHaveBeenCalled();
   });
 });
