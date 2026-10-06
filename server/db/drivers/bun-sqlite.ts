@@ -51,6 +51,14 @@ function collectBatch(db: Database, stmts: { sql: string; params: SqlParam[] }[]
 }
 
 export function createBunSqliteDriver(db: Database): DbDriver {
+  // Prod self-host opens its SQLite connection straight from `new Database`
+  // (server/entry.ts) with no PRAGMAs; apply the connection-level settings
+  // here, once, or the self-host path runs un-WAL'd with no busy_timeout.
+  // A failure throws at boot rather than degrading silently.
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA foreign_keys = ON");
   let txDepth = 0;
 
   const driver: DbDriver = {

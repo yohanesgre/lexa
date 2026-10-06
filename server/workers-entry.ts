@@ -529,10 +529,16 @@ async function handleWebhook(
     return json({ error: { code: "BODY_TOO_LARGE", message: "Request body too large" } }, 413);
   }
   const signature = headers.get("x-hub-signature-256");
-  const verifier = ManagedRuntime.make(Layer.provide(GitHubClient.Default, base));
+  // One ManagedRuntime per delivery: verify and process share a single Layer
+  // build, disposed once in the waitUntil's finally. Never cached across
+  // deliveries — the webhook config holder is mutable so a Settings save
+  // applies without a rebuild.
+  const runtime = ManagedRuntime.make(
+    Layer.provide(Layer.merge(GitHubClient.Default, GitHubService.Default), base)
+  );
   let valid = false;
   try {
-    valid = await verifier.runPromise(
+    valid = await runtime.runPromise(
       Effect.gen(function* () {
         const client = yield* GitHubClient;
         return yield* client.verifyWebhookSignature(rawBody, signature);
@@ -540,10 +546,9 @@ async function handleWebhook(
     );
   } catch (e) {
     console.error("[Webhook] verifier failed:", e instanceof Error ? e.message : String(e));
-  } finally {
-    await verifier.dispose();
   }
   if (!valid) {
+    await runtime.dispose();
     console.warn(
       `[Webhook] signature rejected delivery=${headers.get("x-github-delivery") ?? "unknown"} event=${headers.get("x-github-event") ?? "unknown"}`
     );
@@ -552,7 +557,6 @@ async function handleWebhook(
   const deliveryId = headers.get("x-github-delivery") ?? "";
   const event = headers.get("x-github-event") ?? "";
   const text = new TextDecoder().decode(rawBody);
-  const runtime = ManagedRuntime.make(Layer.provide(GitHubService.Default, base));
   ctx.waitUntil(
     runtime
       .runPromise(
@@ -718,21 +722,27 @@ const handler: ExportedHandler<WorkersEnv> = {
         ) as unknown as WorkersResponse;
       }
 
-      await ensureBoot(env);
-      const { runtimeEnv, driver, base } = requestLayers(env);
-
+      // Health probes are served BEFORE boot: requestLayers is memoized per
+      // env fingerprint and independent of bootPromise, and /api/health's D1
+      // deep check needs no boot state — a probe must not queue behind the
+      // four sequential first-request D1 syncs in ensureBoot.
       if (path === "/health") {
         return json({ ok: true, flavor: "workers" }) as unknown as WorkersResponse;
       }
       if (path === "/api/health") {
+        const { driver } = requestLayers(env);
         try {
           await Effect.runPromise(queryFirst<{ one: 1 }>(driver, "SELECT 1 AS one"));
         } catch (e) {
           console.error("[Workers] D1 health check failed:", String(e));
-          return json({ ok: false }, 500) as unknown as WorkersResponse;
+          return json({ ok: false }, 503) as unknown as WorkersResponse;
         }
         return json({ ok: true }) as unknown as WorkersResponse;
       }
+
+      await ensureBoot(env);
+      const { runtimeEnv, driver, base } = requestLayers(env);
+
       if (path === "/api/webhooks/github") {
         return (await handleWebhook(req, ctx, base)) as unknown as WorkersResponse;
       }
