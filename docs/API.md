@@ -764,9 +764,10 @@ POST   /api/projects/:slug/tasks/:id/restore
 POST   /api/projects/:slug/tasks/bulk
 body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueAt? }
   action = "move" | "update" | "archive" | "restore"
-  Per-item atomic (invariant #12 parity): every applied task runs the SAME
-  service path as its single-task endpoint, so activity rows, required_fields
-  and WIP guards match exactly. Position-only reorders emit nothing. Each item
+  Per-item atomic (invariant #12 parity): every applied task runs the same
+  shared move/update cores as its single-task endpoint (prefetched row, no
+  per-item read-back), so activity rows, required_fields and WIP guards match
+  exactly. Position-only reorders emit nothing. Each item
   is one atomic batch; there is NO request-level transaction, so a later
   item's infrastructure failure does not roll back earlier applied items.
   - ids accept the ticket key (PREFIX-N) alias like every other task-id

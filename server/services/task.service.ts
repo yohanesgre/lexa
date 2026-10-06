@@ -4,7 +4,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound, Db, withTx, run, batch } from "../db/db";
+import { ConstraintViolation, DbError, RowNotFound, Db, withTx, run, batch, type BatchStmt } from "../db/db";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
 import { isEmptyDoc } from "../../shared/tiptap-text";
@@ -37,7 +37,7 @@ import {
   buildWipMoveStmt,
   type ActivityInput,
 } from "../repos/task-batch";
-import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType } from "../../shared/types";
+import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType, FieldOption } from "../../shared/types";
 
 // Re-exported for callers that historically imported it from this module; the
 // single implementation lives in shared (invariant 10 parity).
@@ -74,6 +74,17 @@ function asInput(actor: Actor, type: string, message: string, viaAssistant: bool
     message,
     viaAssistant,
   };
+}
+
+// Per-request lookups shared by the single-task methods (empty caches) and the
+// bulk loop (project columns/lanes prefetched once, option lists memoized).
+// Repos stay thin — the batching logic lives in the service.
+interface TaskCtx {
+  task: Task;
+  columns: Map<string, Column> | undefined;
+  lanes: Map<string, Swimlane> | undefined;
+  priorities: () => Effect.Effect<FieldOption[], DbError>;
+  types: () => Effect.Effect<FieldOption[], DbError>;
 }
 
 export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService", {
@@ -115,6 +126,307 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         if (!options.some((o) => o.id === value)) {
           return yield* new InvalidOption({ optionId: value, message: `unknown ${kind} option for this project` });
         }
+      });
+
+    const memoOptions = (
+      fetch: () => Effect.Effect<FieldOption[], DbError>
+    ): (() => Effect.Effect<FieldOption[], DbError>) => {
+      let cached: FieldOption[] | null = null;
+      return () => {
+        if (cached !== null) return Effect.succeed(cached);
+        return fetch().pipe(Effect.map((rows) => { cached = rows; return rows; }));
+      };
+    };
+
+    const ctxColumn = (ctx: TaskCtx, id: string): Effect.Effect<Column, RowNotFound | DbError> => {
+      const cached = ctx.columns?.get(id);
+      return cached !== undefined ? Effect.succeed(cached) : columnRepo.findById(id);
+    };
+
+    const ctxLane = (ctx: TaskCtx, id: string): Effect.Effect<Swimlane, RowNotFound | DbError> => {
+      const cached = ctx.lanes?.get(id);
+      return cached !== undefined ? Effect.succeed(cached) : swimlaneRepo.findById(id);
+    };
+
+    const singleCtx = (task: Task): TaskCtx => ({
+      task,
+      columns: undefined,
+      lanes: undefined,
+      priorities: () => fieldConfigRepo.findPrioritiesByProject(task.projectId),
+      types: () => fieldConfigRepo.findTypesByProject(task.projectId),
+    });
+
+    // Update plan: validations + the diff-derived activity rows + the write
+    // statements. Shared verbatim by the single-task update (empty cache,
+    // read-back after) and the bulk loop (prefetched task/lookups, no read-back).
+    const planUpdate = (
+      ctx: TaskCtx,
+      actor: Actor,
+      input: {
+        title?: string;
+        description?: TipTapDoc;
+        priority?: string;
+        type?: string;
+        assignees?: string[];
+        dueAt?: string | null;
+      },
+      viaAssistant: boolean
+    ): Effect.Effect<
+      { stmts: BatchStmt[]; activityCount: number },
+      ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | DbError | RowNotFound
+    > =>
+      Effect.gen(function* () {
+        const task = ctx.task;
+        const column = yield* ctxColumn(ctx, task.columnId).pipe(
+          Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: task.columnId }))
+        );
+        if (input.dueAt !== undefined && input.dueAt !== null) {
+          const lane = yield* ctxLane(ctx, task.swimlaneId).pipe(
+            Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: task.swimlaneId }))
+          );
+          if (lane.dueAt && input.dueAt > lane.dueAt)
+            return yield* new DeadlineAfterLane({ date: lane.dueAt });
+        }
+        const priority = input.priority !== undefined ? input.priority : task.priority;
+        const type = input.type !== undefined ? input.type : task.type;
+        if (input.priority !== undefined) {
+          const options = yield* ctx.priorities();
+          if (!options.some((o) => o.id === input.priority)) {
+            return yield* new InvalidOption({ optionId: input.priority, message: `unknown priority option for this project` });
+          }
+        }
+        if (input.type !== undefined) {
+          const options = yield* ctx.types();
+          if (!options.some((o) => o.id === input.type)) {
+            return yield* new InvalidOption({ optionId: input.type, message: `unknown type option for this project` });
+          }
+        }
+        const merged = {
+          title: input.title ?? task.title,
+          description: input.description ?? task.description,
+          priority,
+          type,
+          assignees: input.assignees !== undefined ? input.assignees : task.assignees,
+        };
+        yield* validateRequiredFields(merged as Record<string, unknown>, column);
+
+        // Diff against the pre-update row — only real changes emit rows
+        // (messages are frozen at write time with option LABELS, not ids).
+        const rows: ActivityInput[] = [];
+        if (input.title !== undefined && input.title !== task.title) {
+          rows.push(asInput(actor, "field_changed", msg.titleChanged(actor.label), viaAssistant));
+        }
+        if (input.description !== undefined && JSON.stringify(input.description) !== JSON.stringify(task.description)) {
+          rows.push(asInput(actor, "field_changed", msg.descriptionUpdated(actor.label), viaAssistant));
+        }
+        if (input.priority !== undefined && input.priority !== task.priority) {
+          const opts = yield* ctx.priorities();
+          const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
+          rows.push(asInput(actor, "field_changed", msg.priorityChanged(label(task.priority), label(input.priority)), viaAssistant));
+        }
+        if (input.type !== undefined && input.type !== task.type) {
+          const opts = yield* ctx.types();
+          const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
+          rows.push(asInput(actor, "field_changed", msg.typeChanged(label(task.type), label(input.type)), viaAssistant));
+        }
+        if (input.assignees !== undefined && input.assignees.toSorted().join("\u0000") !== task.assignees.toSorted().join("\u0000")) {
+          rows.push(asInput(actor, "field_changed", msg.assigneesUpdated(actor.label), viaAssistant));
+        }
+        if (input.dueAt !== undefined && input.dueAt !== task.dueAt) {
+          rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null), viaAssistant));
+        }
+        const stmts: BatchStmt[] = buildTaskUpdateBatch({
+          id: task.id,
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.description !== undefined ? { description: JSON.stringify(input.description) } : {}),
+          ...(input.priority !== undefined ? { priority: input.priority } : {}),
+          ...(input.type !== undefined ? { type: input.type } : {}),
+          ...(input.assignees !== undefined ? { replaceAssignees: input.assignees } : {}),
+          ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
+          activity: rows,
+        });
+        return { stmts, activityCount: rows.length };
+      });
+
+    // Same-cell, anchorless move → nothing to do. Shared by the cores so the
+    // single/bulk skip and the in-core short-circuit can never diverge.
+    const isMoveNoop = (task: Task, target: MoveTarget): boolean =>
+      task.columnId === target.columnId &&
+      (target.swimlaneId === undefined || target.swimlaneId === task.swimlaneId) &&
+      !target.beforeTaskId &&
+      !target.afterTaskId &&
+      !target.clearDueAt;
+
+    // Resolve + validate the move target (reads only) and decide the noop.
+    // Extracted so the pre-transaction no-op short-circuit performs the exact
+    // same validation, in the same order, as the in-transaction core.
+    const resolveMoveTarget = (
+      ctx: TaskCtx,
+      task: Task,
+      target: MoveTarget
+    ): Effect.Effect<
+      { column: Column; noop: boolean },
+      ColumnNotFound | SwimlaneNotFound | DeadlineAfterLane | DbError | RowNotFound
+    > =>
+      Effect.gen(function* () {
+        const column = yield* ctxColumn(ctx, target.columnId).pipe(
+          Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: target.columnId }))
+        );
+        if (column.projectId !== task.projectId)
+          return yield* new ColumnNotFound({ id: target.columnId });
+        if (target.swimlaneId) {
+          const lane = yield* ctxLane(ctx, target.swimlaneId).pipe(
+            Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: target.swimlaneId! }))
+          );
+          if (lane.projectId !== task.projectId)
+            return yield* new SwimlaneNotFound({ id: target.swimlaneId! });
+          if (lane.archivedAt)
+            return yield* new SwimlaneNotFound({ id: target.swimlaneId!, availableSwimlanes: [] });
+          if (task.dueAt && lane.dueAt && task.dueAt > lane.dueAt && !target.clearDueAt)
+            return yield* new DeadlineAfterLane({ date: lane.dueAt });
+        }
+        return { column, noop: isMoveNoop(task, target) };
+      });
+
+    // Move core: all the writes for one task (WIP conditional UPDATE, subtask
+    // cascade, emission rows) with the retry-once-on-position-conflict
+    // semantics (invariant #4) — but NO response read-back. The single-task
+    // move wraps it in withTx + read-back + activity read; the bulk loop wraps
+    // it in a per-item withTx only. `ctx` supplies the task row and the
+    // prefetched column/lane lookups so neither path re-reads per id.
+    const runMoveCore = (
+      ctx: TaskCtx,
+      actor: Actor,
+      target: MoveTarget,
+      opts?: { bypassGuards?: boolean; viaAssistant?: boolean }
+    ): Effect.Effect<
+      { activityCount: number; noop: boolean },
+      ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound
+    > =>
+      Effect.gen(function* () {
+        const task = ctx.task;
+        const taskId = task.id;
+        const { column, noop } = yield* resolveMoveTarget(ctx, task, target);
+        if (noop)
+          return { activityCount: 0, noop: true };
+
+        if (!opts?.bypassGuards) {
+          const taskLike = {
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            type: task.type,
+            assignees: task.assignees,
+          };
+          yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
+        }
+
+        const computePosition = Effect.gen(function* () {
+          if (target.beforeTaskId || target.afterTaskId) {
+            const [before, after] = yield* Effect.all([
+              target.beforeTaskId ? taskRepo.findById(target.beforeTaskId) : Effect.succeed(null),
+              target.afterTaskId ? taskRepo.findById(target.afterTaskId) : Effect.succeed(null),
+            ]);
+            for (const n of [before, after])
+              if (n && n.columnId !== target.columnId)
+                return yield* new NeighborNotInColumn({ taskId: n.id });
+            return keyBetween(before?.position ?? null, after?.position ?? null);
+          }
+          const last = yield* taskRepo.findLastInColumn(task.projectId, target.columnId).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+          );
+          return keyAfter(last?.position ?? null);
+        });
+
+        const bypassWip = opts?.bypassGuards ?? false;
+
+        // Old/new names for the moved message — captured before the move
+        // (frozen at write time). Served from the prefetched maps in bulk.
+        const oldCol = yield* ctxColumn(ctx, task.columnId).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.succeed({ name: task.columnId } as Column))
+        );
+        const oldLane = task.swimlaneId
+          ? yield* ctxLane(ctx, task.swimlaneId).pipe(
+              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+            )
+          : null;
+        const resolvedSwimlane = target.swimlaneId !== undefined ? target.swimlaneId : task.swimlaneId;
+        const newLane = resolvedSwimlane === task.swimlaneId
+          ? oldLane
+          : yield* ctxLane(ctx, resolvedSwimlane).pipe(
+              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+            );
+
+        const movedActivity = () => asInput(actor, "moved", msg.moved(
+          actor.label, oldCol.name, column.name, oldLane?.name ?? null, newLane?.name ?? null
+        ), opts?.viaAssistant === true);
+
+        const doMoveWithCascade = Effect.gen(function* () {
+          const position = yield* computePosition;
+          const moveStmt = bypassWip
+            ? buildPlainMoveStmts([{
+                taskId,
+                columnId: target.columnId,
+                swimlaneId: resolvedSwimlane,
+                position,
+                clearDueAt: target.clearDueAt ?? false,
+              }])[0]!
+            : buildWipMoveStmt({
+                taskId,
+                projectId: task.projectId,
+                columnId: target.columnId,
+                swimlaneId: resolvedSwimlane,
+                position,
+                clearDueAt: target.clearDueAt ?? false,
+              });
+          const changes = yield* run(db, moveStmt.sql, ...moveStmt.params);
+          if (changes === 0) {
+            const count = yield* taskRepo.countByColumn(task.projectId, target.columnId);
+            return yield* new WipLimitExceeded({ columnName: column.name, limit: column.wipLimit ?? 0, current: count });
+          }
+          // Cascade: when a parent moves, its subtasks follow (same column,
+          // appended after the parent's new position). Child positions are
+          // chained in JS — no reads — so they join the same batch.
+          const columnChanged = target.columnId !== task.columnId;
+          const laneChanged = resolvedSwimlane !== task.swimlaneId;
+          const childMoves: { taskId: string; columnId: string; swimlaneId: string; position: string }[] = [];
+          if (columnChanged || laneChanged) {
+            const children = yield* taskRepo.findSubtasks(taskId);
+            let childPos = position;
+            for (const child of children) {
+              childPos = keyAfter(childPos);
+              childMoves.push({
+                taskId: child.id,
+                columnId: target.columnId,
+                swimlaneId: resolvedSwimlane,
+                position: childPos,
+              });
+            }
+          }
+          // Column OR lane change emits; position-only reorders don't. A
+          // clearDueAt that actually clears a due date also emits.
+          const emitMoved = columnChanged || laneChanged;
+          const dueCleared = (target.clearDueAt ?? false) && task.dueAt !== null;
+          const rows: ActivityInput[] = [];
+          if (emitMoved) rows.push(movedActivity());
+          if (dueCleared) rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt, null), opts?.viaAssistant === true));
+          const rest = [
+            ...buildPlainMoveStmts(childMoves),
+            ...buildActivityStmts(taskId, rows),
+          ];
+          if (rest.length > 0) yield* batch(db, rest);
+          return { activityCount: rows.length, noop: false };
+        });
+
+        // One retry closure for the WHOLE move — anchors and child list are
+        // re-read inside it, so a position conflict retries the parent AND
+        // its children (invariant #4).
+        return yield* doMoveWithCascade.pipe(
+          Effect.catchIf(
+            (e) => e instanceof ConstraintViolation && e.isPositionConflict,
+            () => doMoveWithCascade
+          )
+        );
       });
 
     const service = {
@@ -273,76 +585,14 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
-          const column = yield* columnRepo.findById(task.columnId).pipe(
-            Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: task.columnId }))
+          const plan = yield* planUpdate(singleCtx(task), actor, input, opts?.viaAssistant === true);
+          if (plan.stmts.length > 0) yield* batch(db, plan.stmts);
+          const updated = yield* taskRepo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
-          if (input.dueAt !== undefined && input.dueAt !== null) {
-            const lane = yield* swimlaneRepo.findById(task.swimlaneId).pipe(
-              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: task.swimlaneId }))
-            );
-            if (lane.dueAt && input.dueAt > lane.dueAt)
-              return yield* new DeadlineAfterLane({ date: lane.dueAt });
-          }
-          const priority = input.priority !== undefined ? input.priority : task.priority;
-          const type = input.type !== undefined ? input.type : task.type;
-          if (input.priority !== undefined) yield* validateOption(task.projectId, "priority", input.priority);
-          if (input.type !== undefined) yield* validateOption(task.projectId, "type", input.type);
-          const merged = {
-            title: input.title ?? task.title,
-            description: input.description ?? task.description,
-            priority,
-            type,
-            assignees: input.assignees !== undefined ? input.assignees : task.assignees,
-          };
-          yield* validateRequiredFields(merged as Record<string, unknown>, column);
-
-          // Diff against the pre-update row — only real changes emit rows
-          // (messages are frozen at write time with option LABELS, not ids).
-          const viaAssistant = opts?.viaAssistant === true;
-          const rows: ActivityInput[] = [];
-          if (input.title !== undefined && input.title !== task.title) {
-            rows.push(asInput(actor, "field_changed", msg.titleChanged(actor.label), viaAssistant));
-          }
-          if (input.description !== undefined && JSON.stringify(input.description) !== JSON.stringify(task.description)) {
-            rows.push(asInput(actor, "field_changed", msg.descriptionUpdated(actor.label), viaAssistant));
-          }
-          if (input.priority !== undefined && input.priority !== task.priority) {
-            const opts = yield* fieldConfigRepo.findPrioritiesByProject(task.projectId);
-            const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
-            rows.push(asInput(actor, "field_changed", msg.priorityChanged(label(task.priority), label(input.priority)), viaAssistant));
-          }
-          if (input.type !== undefined && input.type !== task.type) {
-            const opts = yield* fieldConfigRepo.findTypesByProject(task.projectId);
-            const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
-            rows.push(asInput(actor, "field_changed", msg.typeChanged(label(task.type), label(input.type)), viaAssistant));
-          }
-          if (input.assignees !== undefined && input.assignees.toSorted().join("\u0000") !== task.assignees.toSorted().join("\u0000")) {
-            rows.push(asInput(actor, "field_changed", msg.assigneesUpdated(actor.label), viaAssistant));
-          }
-          if (input.dueAt !== undefined && input.dueAt !== task.dueAt) {
-            rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null), viaAssistant));
-          }
-
-          const updated = yield* Effect.gen(function* () {
-            const stmts = buildTaskUpdateBatch({
-              id,
-              ...(input.title !== undefined ? { title: input.title } : {}),
-              ...(input.description !== undefined ? { description: JSON.stringify(input.description) } : {}),
-              ...(input.priority !== undefined ? { priority: input.priority } : {}),
-              ...(input.type !== undefined ? { type: input.type } : {}),
-              ...(input.assignees !== undefined ? { replaceAssignees: input.assignees } : {}),
-              ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
-              activity: rows,
-            });
-            if (stmts.length > 0) yield* batch(db, stmts);
-            const u = yield* taskRepo.findById(id).pipe(
-              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
-            );
-            const activity = rows.length === 0 ? [] : yield* activityService.listLatest(id, rows.length);
-            return { task: u, activity };
-          });
-          yield* Effect.logInfo(`[Task] Updated ${updated.task.id}`);
-          return updated;
+          const activity = plan.activityCount === 0 ? [] : yield* activityService.listLatest(id, plan.activityCount);
+          yield* Effect.logInfo(`[Task] Updated ${updated.id}`);
+          return { task: updated, activity };
         }),
 
       move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean; viaAssistant?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound> =>
@@ -350,160 +600,24 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
-          const column = yield* columnRepo.findById(target.columnId).pipe(
-            Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: target.columnId }))
-          );
-          if (column.projectId !== task.projectId)
-            return yield* new ColumnNotFound({ id: target.columnId });
-          if (target.swimlaneId) {
-            const lane = yield* swimlaneRepo.findById(target.swimlaneId).pipe(
-              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: target.swimlaneId! }))
-            );
-            if (lane.projectId !== task.projectId)
-              return yield* new SwimlaneNotFound({ id: target.swimlaneId! });
-            if (lane.archivedAt)
-              return yield* new SwimlaneNotFound({ id: target.swimlaneId!, availableSwimlanes: [] });
-            if (task.dueAt && lane.dueAt && task.dueAt > lane.dueAt && !target.clearDueAt)
-              return yield* new DeadlineAfterLane({ date: lane.dueAt });
+          // Same-cell, anchorless move is a no-op → run only the read-only
+          // target validation, then skip the write transaction (and its write
+          // lock) entirely; outcome is identical (activity []).
+          const { noop } = yield* resolveMoveTarget(singleCtx(task), task, target);
+          if (noop) {
+            yield* Effect.logInfo(`[Task] Moved ${task.id} column=${task.columnId} swimlane=${task.swimlaneId} pos=${task.position}`);
+            return { task, activity: [] as ActivityEvent[] };
           }
-
-          if (
-            task.columnId === target.columnId &&
-            (target.swimlaneId === undefined || target.swimlaneId === task.swimlaneId) &&
-            !target.beforeTaskId &&
-            !target.afterTaskId &&
-            !target.clearDueAt
-          )
-            return { task, activity: [] };
-
-          if (!opts?.bypassGuards) {
-            const taskLike = {
-              title: task.title,
-              description: task.description,
-              priority: task.priority,
-              type: task.type,
-              assignees: task.assignees,
-            };
-            yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
-          }
-
-          const computePosition = Effect.gen(function* () {
-            if (target.beforeTaskId || target.afterTaskId) {
-              const [before, after] = yield* Effect.all([
-                target.beforeTaskId ? taskRepo.findById(target.beforeTaskId) : Effect.succeed(null),
-                target.afterTaskId ? taskRepo.findById(target.afterTaskId) : Effect.succeed(null),
-              ]);
-              for (const n of [before, after])
-                if (n && n.columnId !== target.columnId)
-                  return yield* new NeighborNotInColumn({ taskId: n.id });
-              return keyBetween(before?.position ?? null, after?.position ?? null);
-            }
-            const last = yield* taskRepo.findLastInColumn(task.projectId, target.columnId).pipe(
-              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-            );
-            return keyAfter(last?.position ?? null);
-          });
-
-          // WIP enforcement stays a SINGLE conditional UPDATE (invariant
-          // #5): its rowsChanged gates the pre-computed batch below. The
-          // bypassWip path (webhook/internal) skips the count clause.
-          const bypassWip = opts?.bypassGuards ?? false;
-          const doMoveWithCascade = Effect.gen(function* () {
-            const position = yield* computePosition;
-            const resolvedSwimlane = target.swimlaneId !== undefined ? target.swimlaneId : task.swimlaneId;
-            const moveStmt = bypassWip
-              ? buildPlainMoveStmts([{
-                  taskId,
-                  columnId: target.columnId,
-                  swimlaneId: resolvedSwimlane,
-                  position,
-                  clearDueAt: target.clearDueAt ?? false,
-                }])[0]!
-              : buildWipMoveStmt({
-                  taskId,
-                  projectId: task.projectId,
-                  columnId: target.columnId,
-                  swimlaneId: resolvedSwimlane,
-                  position,
-                  clearDueAt: target.clearDueAt ?? false,
-                });
-            const changes = yield* run(db, moveStmt.sql, ...moveStmt.params);
-            if (changes === 0) {
-              const count = yield* taskRepo.countByColumn(task.projectId, target.columnId);
-              return yield* new WipLimitExceeded({ columnName: column.name, limit: column.wipLimit ?? 0, current: count });
-            }
-            // Cascade: when a parent moves, its subtasks follow (same column,
-            // appended after the parent's new position). Child positions are
-            // chained in JS — no reads — so they join the same batch.
-            const columnChanged = target.columnId !== task.columnId;
-            const laneChanged = resolvedSwimlane !== task.swimlaneId;
-            const childMoves: { taskId: string; columnId: string; swimlaneId: string; position: string }[] = [];
-            if (columnChanged || laneChanged) {
-              const children = yield* taskRepo.findSubtasks(taskId);
-              let childPos = position;
-              for (const child of children) {
-                childPos = keyAfter(childPos);
-                childMoves.push({
-                  taskId: child.id,
-                  columnId: target.columnId,
-                  swimlaneId: resolvedSwimlane,
-                  position: childPos,
-                });
-              }
-            }
-            // Column OR lane change emits; position-only reorders don't. A
-            // clearDueAt that actually clears a due date also emits.
-            const emitMoved = columnChanged || laneChanged;
-            const dueCleared = (target.clearDueAt ?? false) && task.dueAt !== null;
-            const rows: ActivityInput[] = [];
-            if (emitMoved) rows.push(movedActivity());
-            if (dueCleared) rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt, null), opts?.viaAssistant === true));
-            const rest = [
-              ...buildPlainMoveStmts(childMoves),
-              ...buildActivityStmts(taskId, rows),
-            ];
-            if (rest.length > 0) yield* batch(db, rest);
-            const m = yield* taskRepo.findById(taskId).pipe(
-              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
-            );
-            return { task: m, activityCount: rows.length };
-          });
-
-          // Old/new names for the moved message — captured before the move
-          // (frozen at write time).
-          const oldCol = yield* columnRepo.findById(task.columnId).pipe(
-            Effect.catchTag("RowNotFound", () => Effect.succeed({ name: task.columnId } as Column))
-          );
-          const oldLane = task.swimlaneId
-            ? yield* swimlaneRepo.findById(task.swimlaneId).pipe(
-                Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-              )
-            : null;
-          const resolvedSwimlane = target.swimlaneId !== undefined ? target.swimlaneId : task.swimlaneId;
-          const newLane = resolvedSwimlane === task.swimlaneId
-            ? oldLane
-            : yield* swimlaneRepo.findById(resolvedSwimlane).pipe(
-                Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-              );
-
-          const movedActivity = () => asInput(actor, "moved", msg.moved(
-            actor.label, oldCol.name, column.name, oldLane?.name ?? null, newLane?.name ?? null
-          ), opts?.viaAssistant === true);
-
           const moved = yield* withTx(
             db,
             Effect.gen(function* () {
-              // One retry closure for the WHOLE move — anchors and child
-              // list are re-read inside it, so a position conflict retries
-              // the parent AND its children.
-              const r = yield* doMoveWithCascade.pipe(
-                Effect.catchIf(
-                  (e) => e instanceof ConstraintViolation && e.isPositionConflict,
-                  () => doMoveWithCascade
-                )
+              const r = yield* runMoveCore(singleCtx(task), actor, target, opts);
+              if (r.noop) return { task, activity: [] as ActivityEvent[] };
+              const m = yield* taskRepo.findById(taskId).pipe(
+                Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
               );
               const activity = r.activityCount > 0 ? yield* activityService.listLatest(taskId, r.activityCount) : [] as ActivityEvent[];
-              return { task: r.task, activity };
+              return { task: m, activity };
             })
           );
 
@@ -633,54 +747,71 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
     };
 
     // ── Bulk actions (POST /projects/:slug/tasks/bulk) ───────────────────
-    // Same per-task semantics as the single-task methods. Each item's writes
-    // are one atomic `batch()` (mutation + activity), but there is NO
-    // request-level transaction on D1 (`withTx` is a no-op there): a later
-    // item's failure does not roll back earlier items. Domain rejections (WIP
-    // limit, required_fields, not-found, invalid option, deadline) are
-    // collected per task while permitted tasks still apply; DbError /
-    // ConstraintViolation are infrastructure errors and propagate.
+    // Same per-task semantics as the single-task methods, but the task rows
+    // are prefetched in ONE query and the per-request lookups (project
+    // columns/lanes, field options) are resolved once, so the loop issues no
+    // per-id task re-reads. Each item's writes are still ONE atomic `batch()`
+    // (mutation + activity): the API contract (docs/API.md) has NO
+    // request-level transaction, so a later item's infrastructure failure
+    // must not roll back earlier items (regression-tested in
+    // http-tasks-bulk.test.ts). WIP stays a per-id conditional UPDATE
+    // (invariant #5); emission rows stay in the item's batch (invariant #12).
     const bulkFail = (id: string, e: { _tag: string }): BulkTaskFailure => ({
       id,
       code: errorCodeMap[e._tag] ?? "INTERNAL",
       message: errorMessage(e as unknown as { _tag: string } & Record<string, unknown>),
     });
 
-    const applyOne = (
+    const applyOneBulk = (
+      ctx: TaskCtx,
       actor: Actor,
-      projectId: string,
-      id: string,
       input: BulkTaskInput,
-      opts?: { viaAssistant?: boolean }
+      viaAssistant: boolean
     ): Effect.Effect<
       void,
       TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound
     > =>
       Effect.gen(function* () {
-        const task = yield* taskRepo.findById(id).pipe(
-          Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
-        );
-        if (task.projectId !== projectId) return yield* new TaskNotFound({ id });
+        const task = ctx.task;
         switch (input.action) {
-          case "move":
-            yield* service.move(actor, id, {
+          case "move": {
+            const target = {
               columnId: input.columnId ?? task.columnId,
               swimlaneId: input.swimlaneId ?? task.swimlaneId,
-            }, opts);
+            };
+            // Same-cell no-op → validated but no writes; skip the per-item
+            // transaction. ctx carries prefetched maps, so the pre-check costs
+            // no extra reads.
+            const { noop } = yield* resolveMoveTarget(ctx, task, target);
+            if (noop) return;
+            yield* withTx(db, runMoveCore(ctx, actor, target, { viaAssistant }));
             return;
-          case "update":
-            yield* service.update(actor, id, {
+          }
+          case "update": {
+            const plan = yield* planUpdate(ctx, actor, {
               ...(input.priority !== undefined ? { priority: input.priority } : {}),
               ...(input.type !== undefined ? { type: input.type } : {}),
               ...(input.assignees !== undefined ? { assignees: input.assignees } : {}),
               ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
-            }, opts);
+            }, viaAssistant);
+            if (plan.stmts.length > 0) yield* batch(db, plan.stmts);
             return;
+          }
           case "archive":
-            yield* service.archive(actor, id, opts);
+            if (task.archivedAt) return;
+            yield* batch(db, buildTaskArchiveBatch({
+              taskId: task.id,
+              archivedAt: new Date().toISOString(),
+              activity: asInput(actor, "archived", msg.archived(actor.label), viaAssistant),
+            }));
             return;
           case "restore":
-            yield* service.restore(actor, id, opts);
+            if (!task.archivedAt) return;
+            yield* batch(db, buildTaskArchiveBatch({
+              taskId: task.id,
+              archivedAt: null,
+              activity: asInput(actor, "restored", msg.restored(actor.label), viaAssistant),
+            }));
             return;
         }
       });
@@ -702,23 +833,36 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         if (ids.length > BULK_TASK_ID_CAP) {
           return yield* new InvalidArgs({ reason: `bulk accepts at most ${BULK_TASK_ID_CAP} ids` });
         }
-        // Per-item atomicity: each `applyOne` runs its writes as one
-        // `batch()` (task mutation + activity in the same transaction). There
-        // is NO request-level transaction on D1 — `withTx` is a no-op there —
-        // so a later item's failure does NOT roll back earlier items; they
-        // stay in `applied`. Per-item domain rejections are reported in
-        // `failed`; DbError / ConstraintViolation are infrastructure errors
-        // and propagate (aborting the request, not rolling it back).
+        const viaAssistant = opts?.viaAssistant === true;
+        // Prefetch every requested row in ONE project-scoped query; a missing
+        // id (or one from another project) is absent → TASK_NOT_FOUND per task.
+        const rows = yield* taskRepo.findByIdsForProject(projectId, ids);
+        const byId = new Map(rows.map((t) => [t.id, t] as const));
+        // Column/lane lookups are needed only when the loop reads a task's
+        // current placement (update) or a move target (move).
+        let columns: Map<string, Column> | undefined;
+        let lanes: Map<string, Swimlane> | undefined;
+        if (input.action === "update" || input.action === "move") {
+          columns = new Map((yield* columnRepo.findByProject(projectId)).map((c) => [c.id, c] as const));
+          lanes = new Map((yield* swimlaneRepo.findByProject(projectId)).map((l) => [l.id, l] as const));
+        }
+        const priorities = memoOptions(() => fieldConfigRepo.findPrioritiesByProject(projectId));
+        const types = memoOptions(() => fieldConfigRepo.findTypesByProject(projectId));
         const applied: string[] = [];
         const failed: BulkTaskFailure[] = [];
         for (const id of ids) {
+          const task = byId.get(id);
+          if (!task) {
+            failed.push(bulkFail(id, new TaskNotFound({ id })));
+            continue;
+          }
           // Every domain error caught below is raised BEFORE that task's
           // first write (existence/ownership, option ids, required_fields,
           // lane deadline, column/lane ownership all run ahead of the batch;
           // the WIP guard is a conditional UPDATE that changes 0 rows when it
           // rejects), and the item's writes are one atomic `batch()`. So a
           // `failed` entry never leaves a partial write behind.
-          const outcome = yield* applyOne(actor, projectId, id, input, opts).pipe(
+          const outcome = yield* applyOneBulk({ task, columns, lanes, priorities, types }, actor, input, viaAssistant).pipe(
             Effect.as({ ok: true as const }),
             Effect.catchTags({
               TaskNotFound: (e) => Effect.succeed({ ok: false as const, failure: bulkFail(id, e) }),

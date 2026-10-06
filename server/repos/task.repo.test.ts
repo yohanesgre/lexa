@@ -193,6 +193,38 @@ describe("TaskRepo GitHub link setters — strict RowNotFound", () => {
   });
 });
 
+describe("TaskRepo.findByIdsForProject", () => {
+  it("returns every requested row of the project and skips foreign/absent ids", async () => {
+    seed(db);
+    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c2','p2','Todo',0)").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2','p2','Backlog',0,'backlog')").run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, description)
+                VALUES ('t-other','p2','c2','s2','Other','a0','2026-01-04 10:00:00','{"type":"doc","content":[]}')`).run();
+    const repo = makeRepo(db);
+    const rows = await Effect.runPromise(repo.findByIdsForProject("p1", ["t-live", "t-arch", "t-other", "nope"]));
+    expect(rows.map((r) => r.id).sort()).toEqual(["t-arch", "t-live"]);
+    // Full projection (description included) so the bulk update diff needs no re-read.
+    expect(rows.find((r) => r.id === "t-live")!.description).toEqual({ type: "doc", content: [] });
+  });
+
+  it("chunks the id list (D1 caps bound params at 100) and returns every row once", async () => {
+    seed(db);
+    const insert = db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at)
+                               VALUES (?, 'p1', 'c1', 's1', ?, '{"type":"doc","content":[]}', 'prio-1', 'type-1', ?, '2026-01-01 10:00:00')`);
+    const ids = Array.from({ length: 120 }, (_, i) => `chunk-${i}`);
+    for (let i = 0; i < ids.length; i++) insert.run(ids[i], `Chunk ${i}`, `k${String(i).padStart(3, "0")}`);
+    const repo = makeRepo(db);
+    // 120 ids span two chunks (90 + 30) — every id must come back exactly once.
+    const rows = await Effect.runPromise(repo.findByIdsForProject("p1", ids));
+    expect(rows).toHaveLength(120);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(120);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get("chunk-0")!.description).toEqual({ type: "doc", content: [] });
+    expect(byId.get("chunk-119")!.title).toBe("Chunk 119");
+  });
+});
+
 describe("TaskRepo.searchByTitle", () => {
   it("returns one hit per task with per-task assignees, not merged across tasks", async () => {
     seed(db);

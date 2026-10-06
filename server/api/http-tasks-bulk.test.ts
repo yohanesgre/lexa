@@ -329,6 +329,40 @@ describe("bulk task actions — rejections write nothing", () => {
   });
 });
 
+describe("bulk task actions — prefetch miss", () => {
+  it("reports TASK_NOT_FOUND per missing id while present ids apply", async () => {
+    const a = addTask("c1");
+    const res = await handler(bulk({ ids: ["ghost-1", a, "ghost-2"], action: "update", priority: "prio-2" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.applied).toEqual([a]);
+    expect(body.failed).toEqual([
+      { id: "ghost-1", code: "TASK_NOT_FOUND", message: "Task not found" },
+      { id: "ghost-2", code: "TASK_NOT_FOUND", message: "Task not found" },
+    ]);
+    expect((db.prepare("SELECT priority FROM tasks WHERE id = ?").get(a) as { priority: string }).priority).toBe("prio-2");
+    expect(activityCount(a, "field_changed")).toBe(1);
+  });
+});
+
+describe("bulk task actions — WIP mid-bulk", () => {
+  it("preserves per-id WIP outcomes once the target column fills mid-loop", async () => {
+    db.prepare("INSERT INTO columns (id, project_id, name, position, wip_limit) VALUES ('c-wip3', 'p1', 'Wip3', 9, 2)").run();
+    addTask("c-wip3", { title: "Filler3" });
+    const a = addTask("c1");
+    const b = addTask("c1");
+    const c = addTask("c1");
+    const res = await handler(bulk({ ids: [a, b, c], action: "move", columnId: "c-wip3" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.applied).toEqual([a]);
+    expect(body.failed.map((f: { id: string; code: string }) => [f.id, f.code])).toEqual([[b, "WIP_LIMIT"], [c, "WIP_LIMIT"]]);
+    expect((db.prepare("SELECT column_id FROM tasks WHERE id = ?").get(a) as { column_id: string }).column_id).toBe("c-wip3");
+    expect((db.prepare("SELECT column_id FROM tasks WHERE id = ?").get(b) as { column_id: string }).column_id).toBe("c1");
+    expect(activityCount(a, "moved")).toBe(1);
+  });
+});
+
 describe("bulk task actions — infrastructure failure mid-loop", () => {
   it("propagates a DbError while items already committed stay applied", async () => {
     const a = addTask("c1");
