@@ -138,15 +138,28 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       // so the bulk update diff has description/assignees without re-reads.
       findByIdsForProject: (projectId: string, ids: string[]): Effect.Effect<Task[], DbError> => {
         if (ids.length === 0) return Effect.succeed([]);
-        const placeholders = ids.map(() => "?").join(",");
-        return queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
-          db,
-          `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
-           WHERE t.project_id = ? AND t.id IN (${placeholders})
-           GROUP BY t.id`,
-          projectId,
-          ...ids
-        ).pipe(Effect.map((rows) => rows.map((r) => rowToTask(r))));
+        return Effect.gen(function* () {
+          const out: Task[] = [];
+          // D1 caps bound parameters at 100 per query (Bun/SQLite allows 32766,
+          // so local tests do not catch this); 1 project + 90 ids leaves
+          // headroom. GROUP BY t.id + GROUP_CONCAT are per-task, so concatenating
+          // the per-chunk rows preserves single-query semantics.
+          const CHUNK = 90;
+          for (let i = 0; i < ids.length; i += CHUNK) {
+            const chunk = ids.slice(i, i + CHUNK);
+            const placeholders = chunk.map(() => "?").join(",");
+            const rows = yield* queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+              db,
+              `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
+               WHERE t.project_id = ? AND t.id IN (${placeholders})
+               GROUP BY t.id`,
+              projectId,
+              ...chunk
+            );
+            out.push(...rows.map((r) => rowToTask(r)));
+          }
+          return out;
+        });
       },
 
       listByProject: (projectId: string): Effect.Effect<Task[], DbError> =>

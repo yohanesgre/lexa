@@ -248,6 +248,46 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         return { stmts, activityCount: rows.length };
       });
 
+    // Same-cell, anchorless move → nothing to do. Shared by the cores so the
+    // single/bulk skip and the in-core short-circuit can never diverge.
+    const isMoveNoop = (task: Task, target: MoveTarget): boolean =>
+      task.columnId === target.columnId &&
+      (target.swimlaneId === undefined || target.swimlaneId === task.swimlaneId) &&
+      !target.beforeTaskId &&
+      !target.afterTaskId &&
+      !target.clearDueAt;
+
+    // Resolve + validate the move target (reads only) and decide the noop.
+    // Extracted so the pre-transaction no-op short-circuit performs the exact
+    // same validation, in the same order, as the in-transaction core.
+    const resolveMoveTarget = (
+      ctx: TaskCtx,
+      task: Task,
+      target: MoveTarget
+    ): Effect.Effect<
+      { column: Column; noop: boolean },
+      ColumnNotFound | SwimlaneNotFound | DeadlineAfterLane | DbError | RowNotFound
+    > =>
+      Effect.gen(function* () {
+        const column = yield* ctxColumn(ctx, target.columnId).pipe(
+          Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: target.columnId }))
+        );
+        if (column.projectId !== task.projectId)
+          return yield* new ColumnNotFound({ id: target.columnId });
+        if (target.swimlaneId) {
+          const lane = yield* ctxLane(ctx, target.swimlaneId).pipe(
+            Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: target.swimlaneId! }))
+          );
+          if (lane.projectId !== task.projectId)
+            return yield* new SwimlaneNotFound({ id: target.swimlaneId! });
+          if (lane.archivedAt)
+            return yield* new SwimlaneNotFound({ id: target.swimlaneId!, availableSwimlanes: [] });
+          if (task.dueAt && lane.dueAt && task.dueAt > lane.dueAt && !target.clearDueAt)
+            return yield* new DeadlineAfterLane({ date: lane.dueAt });
+        }
+        return { column, noop: isMoveNoop(task, target) };
+      });
+
     // Move core: all the writes for one task (WIP conditional UPDATE, subtask
     // cascade, emission rows) with the retry-once-on-position-conflict
     // semantics (invariant #4) — but NO response read-back. The single-task
@@ -266,30 +306,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       Effect.gen(function* () {
         const task = ctx.task;
         const taskId = task.id;
-        const column = yield* ctxColumn(ctx, target.columnId).pipe(
-          Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: target.columnId }))
-        );
-        if (column.projectId !== task.projectId)
-          return yield* new ColumnNotFound({ id: target.columnId });
-        if (target.swimlaneId) {
-          const lane = yield* ctxLane(ctx, target.swimlaneId).pipe(
-            Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: target.swimlaneId! }))
-          );
-          if (lane.projectId !== task.projectId)
-            return yield* new SwimlaneNotFound({ id: target.swimlaneId! });
-          if (lane.archivedAt)
-            return yield* new SwimlaneNotFound({ id: target.swimlaneId!, availableSwimlanes: [] });
-          if (task.dueAt && lane.dueAt && task.dueAt > lane.dueAt && !target.clearDueAt)
-            return yield* new DeadlineAfterLane({ date: lane.dueAt });
-        }
-
-        if (
-          task.columnId === target.columnId &&
-          (target.swimlaneId === undefined || target.swimlaneId === task.swimlaneId) &&
-          !target.beforeTaskId &&
-          !target.afterTaskId &&
-          !target.clearDueAt
-        )
+        const { column, noop } = yield* resolveMoveTarget(ctx, task, target);
+        if (noop)
           return { activityCount: 0, noop: true };
 
         if (!opts?.bypassGuards) {
@@ -582,6 +600,14 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
+          // Same-cell, anchorless move is a no-op → run only the read-only
+          // target validation, then skip the write transaction (and its write
+          // lock) entirely; outcome is identical (activity []).
+          const { noop } = yield* resolveMoveTarget(singleCtx(task), task, target);
+          if (noop) {
+            yield* Effect.logInfo(`[Task] Moved ${task.id} column=${task.columnId} swimlane=${task.swimlaneId} pos=${task.position}`);
+            return { task, activity: [] as ActivityEvent[] };
+          }
           const moved = yield* withTx(
             db,
             Effect.gen(function* () {
@@ -748,12 +774,19 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       Effect.gen(function* () {
         const task = ctx.task;
         switch (input.action) {
-          case "move":
-            yield* withTx(db, runMoveCore(ctx, actor, {
+          case "move": {
+            const target = {
               columnId: input.columnId ?? task.columnId,
               swimlaneId: input.swimlaneId ?? task.swimlaneId,
-            }, { viaAssistant }));
+            };
+            // Same-cell no-op → validated but no writes; skip the per-item
+            // transaction. ctx carries prefetched maps, so the pre-check costs
+            // no extra reads.
+            const { noop } = yield* resolveMoveTarget(ctx, task, target);
+            if (noop) return;
+            yield* withTx(db, runMoveCore(ctx, actor, target, { viaAssistant }));
             return;
+          }
           case "update": {
             const plan = yield* planUpdate(ctx, actor, {
               ...(input.priority !== undefined ? { priority: input.priority } : {}),
