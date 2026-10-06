@@ -368,9 +368,9 @@ describe("TasksPage create trigger", () => {
     fx.caps = { assistant: false, flavor: "bun", tasksBulk: true };
   });
 
-  it("opens the create slideover at ?new=1", () => {
+  it("opens the create slideover at ?new=1", async () => {
     render(<TasksPage slug="demo" search={{ new: true }} />);
-    expect(screen.getByTestId("task-detail")).toHaveAttribute("data-mode", "create");
+    expect(await screen.findByTestId("task-detail")).toHaveAttribute("data-mode", "create");
   });
 
   it("navigates to ?new=1 from the header New task control", () => {

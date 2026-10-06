@@ -13,6 +13,22 @@ export default defineConfig(async ({ command }) => {
       srcDirectory: "app",
       router: {
         routeFileIgnorePattern: "\\.test\\.",
+        // Route code splitting is framework-native and on by default. It also
+        // splits pendingComponent into its own lazy chunk — without this the
+        // route shell eagerly imports whatever module exports the pending
+        // skeleton, which dragged the whole TipTap editor graph into the
+        // boot bundle (tasks_.$taskId's pending skeleton lives next to
+        // TaskDetail). Loaders stay in the shell so prefetching still runs
+        // before navigation.
+        autoCodeSplitting: true,
+        codeSplittingOptions: {
+          defaultBehavior: [
+            ["component"],
+            ["pendingComponent"],
+            ["errorComponent"],
+            ["notFoundComponent"],
+          ],
+        },
       },
       // SPA shell for ssr:false routes must be prerendered at build —
       // without this the build skips /_shell and those routes serve a
@@ -69,6 +85,64 @@ export default defineConfig(async ({ command }) => {
 
   return {
     plugins,
+    build: {
+      rollupOptions: {
+        output: {
+          // Vendor groups split by concern so a route that does not mount the
+          // editor/assistant never downloads their chunks, and framework code
+          // stays in cache-stable files across app deploys. The app/route code
+          // itself is split by TanStack's autoCodeSplitting (above); unmatched
+          // node_modules keep Rolldown's default shared-chunk behavior.
+          //
+          // Native Rolldown groups (not Rollup-compat `manualChunks`): the
+          // manualChunks shim runs one group with includeDependenciesRecursively
+          // defaulting true, so @tiptap/react's deps (react-dom base,
+          // use-sync-external-store) were swallowed into vendor-editor — and
+          // since the entry chunk needs react-dom, the whole editor graph was
+          // modulepreloaded on boot. Explicit groups + priority let the react
+          // group claim its modules first, so vendor-editor stays tiptap-only.
+          codeSplitting: {
+            groups: [
+              {
+                name: "vendor-react",
+                test: /node_modules[\\/](react|react-dom|scheduler|use-sync-external-store)[\\/]/,
+                priority: 20,
+              },
+              {
+                name: "vendor-editor",
+                test: /node_modules[\\/](@tiptap|prosemirror|orderedmap|rope-sequence|w3c-keyname|linkifyjs|@floating-ui)[\\/]/,
+                priority: 10,
+              },
+              {
+                name: "vendor-assistant",
+                test: /node_modules[\\/](partysocket|@ai-sdk|@cloudflare[\\/]ai-chat|@tanstack[\\/]ai|ai)[\\/]/,
+                priority: 12,
+              },
+              {
+                name: "vendor-markdown",
+                test: /node_modules[\\/](marked|highlight\.js)[\\/]/,
+                priority: 10,
+              },
+              {
+                name: "vendor-icons",
+                test: /node_modules[\\/](lucide-react|@phosphor-icons)[\\/]/,
+                priority: 10,
+              },
+              {
+                name: "vendor-tanstack",
+                test: /node_modules[\\/]@tanstack[\\/]/,
+                priority: 10,
+              },
+              {
+                name: "vendor-effect",
+                test: /node_modules[\\/](effect|@effect)[\\/]/,
+                priority: 10,
+              },
+            ],
+          },
+        },
+      },
+    },
     resolve: {
       // Workers flavor only: neutralize host-only modules the workerd
       // runtime cannot provide. Mirrors the wrangler.jsonc `alias` (which
