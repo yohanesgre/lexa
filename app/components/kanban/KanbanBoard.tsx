@@ -16,8 +16,9 @@ import { MoveConfirmDialog } from "./MoveConfirmDialog";
 import { ColumnForm } from "./ColumnForm";
 import { TaskCard } from "./TaskCard";
 import { BoardGrid } from "./board-grid";
+import { buildCellMap } from "./board-utils";
 import { computeDropTarget, computeDropPosition, type MoveTarget } from "./board-drop";
-import { byPosition, cardProps, cellDropId, tasksReducer, useLinkMaps } from "./board-utils";
+import { cardProps, cellDropId, tasksReducer, useLinkMaps } from "./board-utils";
 import { emptyFilters, type FilterState } from "../../lib/filters";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
 import { useMoveGuard } from "../../lib/useMoveGuard";
@@ -141,12 +142,11 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     return visibleLiveLanes.map((lane) => ({ lane }));
   }, [hasLanes, visibleLiveLanes]);
 
+  const cellMap = useMemo(() => buildCellMap(localTasks), [localTasks]);
+
   const tasksInCell = useCallback(
-    (columnId: string, laneId: string) =>
-      localTasks
-        .filter((t) => t.columnId === columnId && t.swimlaneId === laneId)
-        .sort(byPosition),
-    [localTasks]
+    (columnId: string, laneId: string) => cellMap.get(`${columnId}:${laneId}`) ?? [],
+    [cellMap]
   );
 
   const columnCounts = useMemo(() => {
@@ -181,13 +181,19 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     [filters.priorities, filters.types, filters.assignees, filters.swimlanes]
   );
 
-  const toggleLane = (laneId: string) =>
+  const toggleLane = useCallback((laneId: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(laneId)) next.delete(laneId);
       else next.add(laneId);
       return next;
     });
+  }, []);
+
+  const openColumnCreate = useCallback(() => setIsColumnCreateOpen(true), []);
+
+  const archiveTaskHandle = useMemo(() => ({ mutate: archiveTask.mutate }), [archiveTask.mutate]);
+  const restoreTaskHandle = useMemo(() => ({ mutate: restoreTask.mutate }), [restoreTask.mutate]);
 
   const activeTask = activeId ? localTasks.find((t) => t.id === activeId) : undefined;
 
@@ -264,6 +270,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           archivedLanes={archivedLanes}
           showArchived={!!showArchived}
           localTasks={localTasks}
+          cellMap={cellMap}
           childrenByParent={childrenByParent}
           parentOf={parentOf}
           blockedBy={blockedBy}
@@ -281,11 +288,11 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           selectedTaskId={selectedTaskId}
           newTaskIds={newTaskIds}
           shakeTaskId={shakeTaskId}
-          archiveTask={archiveTask}
-          restoreTask={restoreTask}
+          archiveTask={archiveTaskHandle}
+          restoreTask={restoreTaskHandle}
           collapsedParents={collapsedParents as Set<string>}
           setCollapsedParents={setCollapsedParents}
-          onAddColumn={() => setIsColumnCreateOpen(true)}
+          onAddColumn={openColumnCreate}
         />
       </div>
       <DragOverlay dropAnimation={{ duration: 150, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }}>

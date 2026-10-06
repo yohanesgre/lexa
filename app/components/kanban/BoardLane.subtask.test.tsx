@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import type { Board, Column, Swimlane, Task } from "../../../shared/types";
 import { makeBoard } from "../../test-utils";
 import { BoardLane } from "./BoardLane";
-import { useLinkMaps } from "./board-utils";
+import { buildCellMap, useLinkMaps } from "./board-utils";
 
 vi.mock("../../lib/queries", () => ({
   useBoard: () => ({ data: undefined }),
@@ -100,6 +100,7 @@ function renderLane(boardTask: Board = BOARD, cardHidden: (t: Task) => boolean =
         columns={[COLUMN]}
         board={boardTask}
         localTasks={boardTask.tasks}
+        cellMap={buildCellMap(boardTask.tasks)}
         childrenByParent={childrenByParent}
         parentOf={parentOf}
         blockedBy={blockedBy}

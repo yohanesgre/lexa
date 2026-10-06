@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import type { Board, Swimlane, Task } from "../../../shared/types";
 import { Column } from "./Column";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -6,7 +6,7 @@ import { cn } from "../ui/cn";
 import { SwimlaneHeader } from "./SwimlaneHeader";
 import { ColumnHeader } from "./ColumnHeader";
 import { SortableTaskCard } from "./SortableTaskCard";
-const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
+import { byPosition } from "./board-utils";
 
 export interface BoardLaneProps {
   slug: string;
@@ -14,6 +14,7 @@ export interface BoardLaneProps {
   columns: Array<import("../../../shared/types").Column>;
   board: Board;
   localTasks: Task[];
+  cellMap: Map<string, Task[]>;
   childrenByParent: Map<string, string[]>;
   parentOf: Map<string, string>;
   blockedBy: Map<string, string[]>;
@@ -37,8 +38,8 @@ export interface BoardLaneProps {
   setCollapsedParents: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
 }
 
-export function BoardLane({
-  slug, lane, columns, board, localTasks, childrenByParent, parentOf, blockedBy,
+export const BoardLane = memo(function BoardLane({
+  slug, lane, columns, board, localTasks, cellMap, childrenByParent, parentOf, blockedBy,
   cardHidden, cardDimmed, columnTotalCount, columnDimmed, cellDropId,
   flashColumnId, collapsed, toggleLane, onOpenCreateTask, onSelectTask,
   onDelete, selectedTaskId, newTaskIds, shakeTaskId, archiveTask, restoreTask,
@@ -50,18 +51,17 @@ export function BoardLane({
     [localTasks, laneId]
   );
   const isCollapsed = collapsed.has(laneId);
-  const cellMap = useMemo(() => {
-    const m = new Map<string, Task[]>();
-    for (const t of localTasks) {
-      const key = `${t.columnId}:${t.swimlaneId}`;
-      const arr = m.get(key);
-      if (arr) arr.push(t);
-      else m.set(key, [t]);
-    }
-    for (const arr of m.values()) arr.sort(byPosition);
-    return m;
-  }, [localTasks]);
   const tasksInCell = (columnId: string, lId: string) => cellMap.get(`${columnId}:${lId}`) ?? [];
+  const handleArchive = useCallback((id: string) => { archiveTask.mutate({ id }); }, [archiveTask.mutate]);
+  const handleRestore = useCallback((id: string) => { restoreTask.mutate({ id }); }, [restoreTask.mutate]);
+  const handleToggleSubtasks = useCallback((taskId: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  }, [setCollapsedParents]);
   // Parent ids that actually render as a parent in each cell: same-cell,
   // visible, top-level (a card that is itself a child renders nested, so its
   // own children fall back to top-level). A child is nested only when its
@@ -151,20 +151,13 @@ export function BoardLane({
                             dimmed={cardDimmed(task)}
                             isNew={newTaskIds.has(task.id)}
                             isShaking={shakeTaskId === task.id}
-                            onArchive={(id) => archiveTask.mutate({ id })}
-                            onRestore={(id) => restoreTask.mutate({ id })}
+                            onArchive={handleArchive}
+                            onRestore={handleRestore}
                             onDelete={onDelete}
                             selected={task.id === selectedTaskId}
                             blockedBy={blockedBy.get(task.id) ?? []}
                             subtaskCount={kids.length}
-                            onToggleSubtasks={() =>
-                              setCollapsedParents((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(task.id)) next.delete(task.id);
-                                else next.add(task.id);
-                                return next;
-                              })
-                            }
+                            onToggleSubtasks={() => handleToggleSubtasks(task.id)}
                             subtasksCollapsed={isCollapsed}
                           />
                           {!isCollapsed &&
@@ -177,8 +170,8 @@ export function BoardLane({
                                 dimmed={cardDimmed(kid)}
                                 isNew={newTaskIds.has(kid.id)}
                                 isShaking={shakeTaskId === kid.id}
-                                onArchive={(id) => archiveTask.mutate({ id })}
-                                onRestore={(id) => restoreTask.mutate({ id })}
+                                onArchive={handleArchive}
+                                onRestore={handleRestore}
                                 onDelete={onDelete}
                                 selected={kid.id === selectedTaskId}
                                 isSubtask
@@ -198,4 +191,4 @@ export function BoardLane({
       )}
     </div>
   );
-}
+});
