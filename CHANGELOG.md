@@ -7,6 +7,63 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.9.0] - 2026-10-07
+
+### Added
+
+- **GitHub repository sync.** Settings gains a GitHub sync section: an
+  install-status card (installed accounts, or not-installed with an Install
+  App action), a manual-credential disclosure, and a scoped repository picker
+  with type-ahead. Repo search is installation-scoped — it never lists global
+  GitHub repos — and tolerates per-installation listing failures (network,
+  timeout, stale token) instead of failing the whole search. Wireframe UX
+  states for the sync flows ship alongside. (#337, #338, #339)
+
+### Fixed
+
+- **Assistant WebSocket probe and identity handling.** A resumed probe is
+  dropped whenever its socket is replaced (including the connecting window),
+  an enqueued probe transfers on thread swap, and identity (memo-key) changes
+  settle before the outgoing socket closes instead of closing a still
+  CONNECTING socket, which logged "WebSocket is closed before the connection
+  is established". Sends during the settle window queue per thread in order.
+  (#358, #359, #360, #361)
+- **SSR hydration on lazy routes.** Manual `lazy` boundaries that broke
+  hydration are dropped, and the TanStack hydration fixes land
+  (`@tanstack/react-router` 1.170.19, `@tanstack/react-start` 1.168.36,
+  `@tanstack/react-start-server` 1.167.24, `@tanstack/router-core` 1.171.16)
+  for the `ssr:false` + loader route case (TanStack/router#7947). (#354, #355)
+- **Assistant tiktoken encoder no longer wrecks cold starts.** The encoder
+  used to load at module scope on the Workers startup graph (5.3 MB
+  js-tiktoken main entry, ~84 MB heap), pushing the isolate over 128 MB so
+  the runtime retired it after every request (~2 s cold starts). It now
+  lazy-loads via `js-tiktoken/lite` + the cl100k_base ranks chunk, memoizes
+  the promise, clears the memo on rejection so the next call retries, warns
+  once on first failure, and falls back to the chars/4 estimate. Warm TTFB
+  ~1.9 s → ~115 ms. (#336, #341)
+- **Settings copy.** The disclosure summary uses a colon and the Linked repos
+  description a period (owner-approved copy fixes). (#342)
+
+### Performance
+
+- **API boot and request path.** `/health` and `/api/health` serve before
+  `ensureBoot` (no more queuing behind the first-request D1 syncs; `/api/health`
+  keeps its D1 deep check), webhook verify + process share one ManagedRuntime
+  per delivery instead of two Layer builds, and the AI SDK provider chain,
+  `marked`, and `@tanstack/react-start/server` load lazily off the Workers
+  entry's static import graph. (#343, #350)
+- **Frontend payload and queries.** Route and vendor code splitting; the wiki
+  editor lazy-loads with the read view kept under Suspense; global query
+  defaults (`staleTime` 30 s, `refetchOnWindowFocus` off); board grid/lane
+  memoization; GitHub issue search debounced 300 ms with an autocomplete
+  guard. (#344, #351)
+- **Database and board reads.** Per-connection prepared-statement cache with
+  arity guard (cleared on close, batch path guarded too); the board list
+  omits tiptap documents (detail cache seeds on create); bulk task ops run
+  single-pass batched with per-id transactions, chunked under the D1 param
+  limit; chat mutations write caches directly instead of invalidating.
+  (#346, #347, #348, #353)
+
 ## [2026.8.3] - 2026-10-06
 
 ### Changed
