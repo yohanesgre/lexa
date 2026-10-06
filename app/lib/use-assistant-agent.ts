@@ -93,12 +93,13 @@ const noopSubscribe = (): (() => void) => () => {};
 // never be delivered, so `send()` warns "send() was called after close()" and
 // buffers a frame that is dropped on the next socket replacement. Drop exactly
 // that probe, and only on a socket that can never deliver it: CLOSED
-// (readyState 3) and not reconnecting (shouldReconnect false). A CLOSED socket
-// that WILL reconnect keeps the SDK's buffered retry path intact, and every
-// other payload passes through untouched. The dropped probe is otherwise
-// answered by the server's proactive `cf_agent_stream_resuming` on the
-// replacement socket, or times out harmlessly.
-function guardResumeProbe<T extends object>(agent: T): T {
+// (readyState 3) or CONNECTING (readyState 0) and not reconnecting
+// (shouldReconnect false). A socket that WILL reconnect keeps the SDK's
+// buffered retry path intact, and every other payload passes through
+// untouched. The dropped probe is otherwise answered by the server's proactive
+// `cf_agent_stream_resuming` on the replacement socket, or times out
+// harmlessly.
+export function guardResumeProbe<T extends object>(agent: T): T {
   return new Proxy(agent, {
     get(target, prop) {
       if (prop === "send") {
@@ -107,7 +108,7 @@ function guardResumeProbe<T extends object>(agent: T): T {
           if (
             typeof data === "string" &&
             data.includes("cf_agent_stream_resume_request") &&
-            socket.readyState === 3 &&
+            (socket.readyState === 3 || socket.readyState === 0) &&
             socket.shouldReconnect === false
           ) {
             return false;

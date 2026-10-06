@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { resumeOutcome, shouldPersistResume } from "./use-assistant-agent";
+import { guardResumeProbe, resumeOutcome, shouldPersistResume } from "./use-assistant-agent";
 
 // LX-84 / LX-79: the resume route answers with a discriminated JSON ack. A
 // non-JSON 2xx is the legacy SSE path and falls back to r.ok; a JSON body
@@ -78,5 +78,51 @@ describe("shouldPersistResume — the client persist matrix", () => {
     expect(shouldPersistResume({ ok: true, executed: false, reason: "pending" })).toBe(false);
     expect(shouldPersistResume({ ok: true, executed: false, reason: "unavailable" })).toBe(false);
     expect(shouldPersistResume({ ok: false })).toBe(false);
+  });
+});
+
+const PROBE = JSON.stringify({ type: "cf_agent_stream_resume_request" });
+
+function socket(readyState: number, shouldReconnect: boolean) {
+  const sent: unknown[] = [];
+  const agent = {
+    readyState,
+    shouldReconnect,
+    send: (data: unknown) => {
+      sent.push(data);
+      return true;
+    },
+  };
+  return { guarded: guardResumeProbe(agent), sent };
+}
+
+describe("guardResumeProbe — drop the undeliverable stream-resume probe", () => {
+  it("drops the probe on a CLOSED socket that will not reconnect", () => {
+    const { guarded, sent } = socket(3, false);
+    expect(guarded.send(PROBE)).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  it("drops the probe on a CONNECTING socket that will not reconnect", () => {
+    const { guarded, sent } = socket(0, false);
+    expect(guarded.send(PROBE)).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  it("keeps the probe when the socket will reconnect (buffered retry path)", () => {
+    const connecting = socket(0, true);
+    expect(connecting.guarded.send(PROBE)).toBe(true);
+    expect(connecting.sent).toEqual([PROBE]);
+
+    const closed = socket(3, true);
+    expect(closed.guarded.send(PROBE)).toBe(true);
+    expect(closed.sent).toEqual([PROBE]);
+  });
+
+  it("passes every non-probe payload through untouched", () => {
+    const { guarded, sent } = socket(0, false);
+    expect(guarded.send("hello")).toBe(true);
+    expect(guarded.send(JSON.stringify({ type: "cf_agent_other" }))).toBe(true);
+    expect(sent).toHaveLength(2);
   });
 });
