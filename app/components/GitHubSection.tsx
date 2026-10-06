@@ -310,7 +310,9 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
       setActiveIndex((i) => (i - 1 + results.length) % results.length);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      void handlePick(results[activeIndex]!);
+      const item = results[activeIndex] ?? results[0];
+      if (!item) return;
+      void handlePick(item);
     } else if (e.key === "Escape") {
       e.stopPropagation();
       if (query) {

@@ -6,8 +6,8 @@ import { DndContext } from "@dnd-kit/core";
 import type { ReactNode } from "react";
 import type { Board, Column, Swimlane, Task } from "../../../shared/types";
 import { makeBoard } from "../../test-utils";
-import { BoardLane, buildCellMap } from "./BoardLane";
-import { useLinkMaps } from "./board-utils";
+import { BoardLane } from "./BoardLane";
+import { buildCellMap, useLinkMaps } from "./board-utils";
 
 vi.mock("../../lib/queries", () => ({
   useBoard: () => ({ data: undefined }),

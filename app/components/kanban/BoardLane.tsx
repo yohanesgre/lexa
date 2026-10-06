@@ -6,19 +6,7 @@ import { cn } from "../ui/cn";
 import { SwimlaneHeader } from "./SwimlaneHeader";
 import { ColumnHeader } from "./ColumnHeader";
 import { SortableTaskCard } from "./SortableTaskCard";
-const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
-
-export function buildCellMap(tasks: Task[]): Map<string, Task[]> {
-  const m = new Map<string, Task[]>();
-  for (const t of tasks) {
-    const key = `${t.columnId}:${t.swimlaneId}`;
-    const arr = m.get(key);
-    if (arr) arr.push(t);
-    else m.set(key, [t]);
-  }
-  for (const arr of m.values()) arr.sort(byPosition);
-  return m;
-}
+import { byPosition } from "./board-utils";
 
 export interface BoardLaneProps {
   slug: string;

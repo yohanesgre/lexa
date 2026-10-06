@@ -16,7 +16,7 @@ import { MoveConfirmDialog } from "./MoveConfirmDialog";
 import { ColumnForm } from "./ColumnForm";
 import { TaskCard } from "./TaskCard";
 import { BoardGrid } from "./board-grid";
-import { buildCellMap } from "./BoardLane";
+import { buildCellMap } from "./board-utils";
 import { computeDropTarget, computeDropPosition, type MoveTarget } from "./board-drop";
 import { cardProps, cellDropId, tasksReducer, useLinkMaps } from "./board-utils";
 import { emptyFilters, type FilterState } from "../../lib/filters";

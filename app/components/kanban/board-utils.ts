@@ -5,6 +5,18 @@ import type { Board, Task } from "../../../shared/types";
 
 export const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
 
+export function buildCellMap(tasks: Task[]): Map<string, Task[]> {
+  const m = new Map<string, Task[]>();
+  for (const t of tasks) {
+    const key = `${t.columnId}:${t.swimlaneId}`;
+    const arr = m.get(key);
+    if (arr) arr.push(t);
+    else m.set(key, [t]);
+  }
+  for (const arr of m.values()) arr.sort(byPosition);
+  return m;
+}
+
 export const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
 
 export function cardProps(task: Task, board: Board) {
