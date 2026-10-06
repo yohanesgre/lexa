@@ -17,7 +17,6 @@ const validBoard: Board = {
       columnId: "c1",
       swimlaneId: "s1",
       title: "Hello",
-      description: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] },
       priority: "prio-1",
       type: "type-1",
       assignees: [],
@@ -31,7 +30,10 @@ const validBoard: Board = {
   ],
 };
 
-const validTask: Task = validBoard.tasks[0]!;
+const validTask: Task = {
+  ...validBoard.tasks[0]!,
+  description: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] },
+};
 
 describe("decodeBoard", () => {
   it("passes for valid board", () => {
@@ -42,8 +44,8 @@ describe("decodeBoard", () => {
   it("throws for invalid board (missing project)", () => {
     expect(() => decodeBoard({ ...validBoard, project: null as unknown as Board["project"] })).toThrow();
   });
-  it("throws for invalid task inside board (bad description type)", () => {
-    const bad = { ...validBoard, tasks: [{ ...validTask, description: { type: "doc", content: "bad" as unknown as [] } }] };
+  it("throws for invalid task inside board (bad title type)", () => {
+    const bad = { ...validBoard, tasks: [{ ...validBoard.tasks[0]!, title: 123 as unknown as string }] };
     expect(() => decodeBoard(bad)).toThrow();
   });
 });
@@ -54,6 +56,9 @@ describe("decodeTask", () => {
   });
   it("throws for invalid task", () => {
     expect(() => decodeTask({ ...validTask, title: 123 as unknown as string })).toThrow();
+  });
+  it("throws for invalid task description", () => {
+    expect(() => decodeTask({ ...validTask, description: { type: "doc", content: "bad" as unknown as [] } })).toThrow();
   });
 });
 

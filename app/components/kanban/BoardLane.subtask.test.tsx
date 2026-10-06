@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, renderHook, screen } from "@testing-library/react";
 import { DndContext } from "@dnd-kit/core";
 import type { ReactNode } from "react";
-import type { Board, Column, Swimlane, Task } from "../../../shared/types";
+import type { Board, BoardTask, Column, Swimlane, Task } from "../../../shared/types";
 import { makeBoard } from "../../test-utils";
 import { BoardLane } from "./BoardLane";
 import { buildCellMap, useLinkMaps } from "./board-utils";
@@ -89,7 +89,7 @@ const BOARD: Board = makeBoard({
   tasks: [PARENT, CHILD],
 });
 
-function renderLane(boardTask: Board = BOARD, cardHidden: (t: Task) => boolean = () => false) {
+function renderLane(boardTask: Board = BOARD, cardHidden: (t: BoardTask) => boolean = () => false) {
   const { result } = renderHook(() => useLinkMaps(boardTask));
   const { childrenByParent, parentOf, blockedBy } = result.current;
   render(

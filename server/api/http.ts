@@ -828,6 +828,9 @@ const TaskMutationResponse = Schema.Struct({
   activity: Schema.Array(ActivityEventSchema),
 });
 
+// derived from local TaskSchema; counterpart in shared/schema.ts — bases intentionally diverge on swimlaneId nullability.
+const BoardTaskSchema = TaskSchema.pipe(Schema.omit("description"));
+
 const CreateTaskPayload = Schema.Struct({
   columnId: Schema.String,
   swimlaneId: Schema.optional(Schema.String),
@@ -907,7 +910,7 @@ const BoardSchema = Schema.Struct({
   milestones: Schema.Array(MilestoneSchema),
   fieldConfig: FieldConfigSchema,
   links: Schema.Array(TaskLinkSchema),
-  tasks: Schema.Array(TaskSchema),
+  tasks: Schema.Array(BoardTaskSchema),
 });
 
 const tasksGroup = HttpApiGroup.make("tasks")

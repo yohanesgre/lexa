@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { Board, Swimlane, Task } from "../../../shared/types";
+import type { Board, BoardTask, Swimlane } from "../../../shared/types";
 import { cn } from "../ui/cn";
 import { BoardLane } from "./BoardLane";
 import { SwimlaneHeader } from "./SwimlaneHeader";
@@ -14,13 +14,13 @@ export interface BoardGridProps {
   rows: { lane: Swimlane }[];
   archivedLanes: Swimlane[];
   showArchived: boolean;
-  localTasks: Task[];
-  cellMap: Map<string, Task[]>;
+  localTasks: BoardTask[];
+  cellMap: Map<string, BoardTask[]>;
   childrenByParent: Map<string, string[]>;
   parentOf: Map<string, string>;
   blockedBy: Map<string, string[]>;
-  cardHidden: (task: Task) => boolean;
-  cardDimmed: (task: Task) => boolean;
+  cardHidden: (task: BoardTask) => boolean;
+  cardDimmed: (task: BoardTask) => boolean;
   columnTotalCount: (columnId: string) => number;
   columnDimmed: (columnId: string) => boolean;
   cellDropId: (columnId: string, laneId: string) => string;
@@ -28,7 +28,7 @@ export interface BoardGridProps {
   collapsed: ReadonlySet<string>;
   toggleLane: (laneId: string) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
-  onSelectTask: (task: Task) => void;
+  onSelectTask: (task: BoardTask) => void;
   onDelete?: ((id: string) => void) | undefined;
   selectedTaskId: string | null;
   newTaskIds: Set<string>;

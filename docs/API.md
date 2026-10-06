@@ -426,6 +426,8 @@ interface Attachment {
 // row goes. Serving: inline ONLY for image/* + application/pdf — everything
 // else downloads via Content-Disposition: attachment (+ nosniff always).
 
+interface BoardTask extends Omit<Task, "description"> {}  // board list row — no TipTap doc (fetch the task for content)
+
 interface Board {                 // GET /board — full snapshot, unpaginated
   project: Project;
   columns: Column[];              // ordered by position
@@ -433,7 +435,7 @@ interface Board {                 // GET /board — full snapshot, unpaginated
   milestones: Milestone[];        // ordered by position (incl. archived when includeArchived=true)
   fieldConfig: FieldConfig;       // priority + type option lists (labels/colors)
   links: TaskLink[];              // all task links in the project
-  tasks: Task[];                  // ALL tasks, ordered by (columnId, position)
+  tasks: BoardTask[];             // ALL tasks, ordered by (columnId, position)
 }
 
 interface ProjectHealth {
@@ -695,7 +697,7 @@ GET    /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor
   type = a type_options ID from field-config
 → 200 { data: Task[], nextCursor }
   List rows carry `description` as an empty doc (slim select) — fetch the
-  task for content. Board responses behave the same.
+  task for content.
 
 POST   /api/projects/:slug/tasks
 body { columnId*, swimlaneId?, title*, description?, priority?, type?, parentId?, assignees?, dueAt? }
@@ -800,6 +802,8 @@ body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueA
 
 GET    /api/projects/:slug/board?includeArchived=true
 → 200 Board          (unpaginated full snapshot — the kanban's single fetch)
+  board tasks omit `description` (the TipTap doc) — fetch a single task via
+  GET /api/projects/:slug/tasks/:id for the full document; task detail keeps it
   includeArchived omitted/false → archived tasks AND archived lanes excluded; true → both included
   (rendered dimmed in the UI, non-draggable, still in their original column/lane)
   fieldConfig included — tasks' priority/type are option IDs resolved via it

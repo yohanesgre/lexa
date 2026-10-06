@@ -154,7 +154,7 @@ export interface Board {
   milestones: Milestone[];
   fieldConfig: FieldConfig;
   links: TaskLink[];
-  tasks: Task[];
+  tasks: BoardTask[];
 }
 
 export interface FieldOption {
@@ -203,6 +203,20 @@ export interface Task {
   archivedAt: ISODate | null;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// Board list rows omit the TipTap `description` payload; the detail query
+// carries it. Hydrate the empty doc when a board row must render before the
+// detail response resolves.
+export type BoardTask = Omit<Task, "description">;
+
+export function boardTaskToTask(task: BoardTask): Task {
+  // Board rows normally omit the doc, but mutation responses pushed straight
+  // into the board cache (create/update) are full Tasks — keep their
+  // authoritative doc instead of discarding it. The cast is safe: the runtime
+  // row may carry `description` even though BoardTask omits it by type.
+  const description = (task as Partial<Pick<Task, "description">>).description;
+  return { ...task, description: description ?? { type: "doc", content: [] } };
 }
 
 export interface WikiPageMeta {

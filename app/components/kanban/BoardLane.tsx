@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo } from "react";
-import type { Board, Swimlane, Task } from "../../../shared/types";
+import type { Board, BoardTask, Swimlane } from "../../../shared/types";
 import { Column } from "./Column";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { cn } from "../ui/cn";
@@ -13,13 +13,13 @@ export interface BoardLaneProps {
   lane: Swimlane;
   columns: Array<import("../../../shared/types").Column>;
   board: Board;
-  localTasks: Task[];
-  cellMap: Map<string, Task[]>;
+  localTasks: BoardTask[];
+  cellMap: Map<string, BoardTask[]>;
   childrenByParent: Map<string, string[]>;
   parentOf: Map<string, string>;
   blockedBy: Map<string, string[]>;
-  cardHidden: (t: Task) => boolean;
-  cardDimmed: (t: Task) => boolean;
+  cardHidden: (t: BoardTask) => boolean;
+  cardDimmed: (t: BoardTask) => boolean;
   columnTotalCount: (columnId: string) => number;
   columnDimmed: (columnId: string) => boolean;
   cellDropId: (columnId: string, laneId: string) => string;
@@ -27,7 +27,7 @@ export interface BoardLaneProps {
   collapsed: ReadonlySet<string>;
   toggleLane: (laneId: string) => void;
   onOpenCreateTask?: ((columnId: string, laneId?: string | undefined) => void) | undefined;
-  onSelectTask: (t: Task) => void;
+  onSelectTask: (t: BoardTask) => void;
   onDelete?: ((id: string) => void) | undefined;
   selectedTaskId: string | null;
   newTaskIds: Set<string>;
@@ -78,17 +78,17 @@ export const BoardLane = memo(function BoardLane({
     }
     return m;
   }, [localTasks, parentOf, cardHidden]);
-  const nestedUnder = (task: Task): boolean => {
+  const nestedUnder = (task: BoardTask): boolean => {
     const parentId = parentOf.get(task.id);
     return !!parentId && parentIdsByCell.get(`${task.columnId}:${task.swimlaneId}`)?.has(parentId) === true;
   };
   // Rendered children of a parent card, in position order, hidden/off-cell
   // ones dropped. Only the canonical parent renders a shared child, so a task
   // linked to two subtask_of parents renders once.
-  const visibleKidsFor = (task: Task) =>
+  const visibleKidsFor = (task: BoardTask) =>
     (childrenByParent.get(task.id) ?? [])
       .map((id) => localTasks.find((t) => t.id === id))
-      .filter((t): t is Task => !!t)
+      .filter((t): t is BoardTask => !!t)
       .filter((t) => !cardHidden(t))
       .filter((t) => t.columnId === task.columnId && t.swimlaneId === task.swimlaneId)
       .filter((t) => parentOf.get(t.id) === task.id)

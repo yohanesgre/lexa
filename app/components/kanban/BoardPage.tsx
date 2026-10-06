@@ -6,7 +6,8 @@ import { useToast } from "../ui/Toast";
 import { KanbanBoard } from "./KanbanBoard";
 import type { MoveTarget } from "./KanbanBoard";
 import { TaskDetail } from "../TaskDetail";
-import type { Task, TipTapDoc } from "../../../shared/types";
+import type { BoardTask, Task, TipTapDoc } from "../../../shared/types";
+import { boardTaskToTask } from "../../../shared/types";
 
 // ?milestone=none is the explicit "No milestone" choice — without it the
 // selection falls back to the first non-archived milestone, so an active
@@ -112,7 +113,8 @@ export function BoardPage({ slug, search }: BoardPageProps) {
 
   const selectedTaskId = search.task ?? null;
   const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
-  const selectedTask = selectedTaskFull ?? (selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null);
+  const boardSelectedTask = selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null;
+  const selectedTask = selectedTaskFull ?? (boardSelectedTask ? boardTaskToTask(boardSelectedTask) : null);
   const isCreating = createTarget !== null;
 
   const handleMove = async (taskId: string, target: MoveTarget) => {
@@ -186,7 +188,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
     await unlinkGithubIssue.mutateAsync({ id, issueId });
   };
 
-  const handleSelectTask = (task: Task) => {
+  const handleSelectTask = (task: BoardTask) => {
     navigate({ search: { task: task.id }, replace: true } as never);
   };
 

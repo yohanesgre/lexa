@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, AssistantTask, TaskLink, LexaAgent, LexaSkill, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
+import type { Task, BoardTask, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, AssistantTask, TaskLink, LexaAgent, LexaSkill, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
 import type { AssistantSettingsMasked, AssistantSettingsInput } from "../../shared/assistant";
 import type { AssistantMemoryEntry } from "./api";
 import * as api from "./api";
@@ -310,7 +310,7 @@ function cachedBoard(qc: QueryClient, slug: string): Board | undefined {
   return qc.getQueryData<Board>(["board", slug, true]) ?? qc.getQueryData<Board>(["board", slug, false]);
 }
 
-function findCachedTask(qc: QueryClient, slug: string, taskId: string): Task | undefined {
+function findCachedTask(qc: QueryClient, slug: string, taskId: string): BoardTask | undefined {
   const live = qc.getQueryData<Board>(["board", slug, false])?.tasks;
   const all = qc.getQueryData<Board>(["board", slug, true])?.tasks;
   return all?.find((t) => t.id === taskId) ?? live?.find((t) => t.id === taskId) ?? qc.getQueryData<Task>(["tasks", slug, taskId]);
@@ -320,13 +320,13 @@ function columnIsDone(qc: QueryClient, slug: string, columnId: string): boolean 
   return cachedBoard(qc, slug)?.columns.find((c) => c.id === columnId)?.isDone ?? false;
 }
 
-function isTaskDone(qc: QueryClient, slug: string, task: Task): boolean {
+function isTaskDone(qc: QueryClient, slug: string, task: BoardTask): boolean {
   return task.archivedAt !== null || columnIsDone(qc, slug, task.columnId);
 }
 
 // Deltas for one task transitioning between cache states: create (old
 // undefined), delete (new undefined), move/archive/restore (both).
-function taskTransitionDeltas(qc: QueryClient, slug: string, oldTask: Task | undefined, newTask: Task | undefined): ProgressDelta[] {
+function taskTransitionDeltas(qc: QueryClient, slug: string, oldTask: BoardTask | undefined, newTask: BoardTask | undefined): ProgressDelta[] {
   const oldLane = oldTask?.swimlaneId;
   const newLane = newTask?.swimlaneId;
   const oldDone = oldTask ? isTaskDone(qc, slug, oldTask) : false;
@@ -385,11 +385,11 @@ export function useUpdateTask(slug: string) {
       qc.setQueryData(["tasks", slug, task.id], task);
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
       });
       qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
       });
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
     },
@@ -413,6 +413,7 @@ export function useCreateTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: [...old.tasks, task] };
       });
+      qc.setQueryData(["tasks", slug, task.id], task);
       applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, undefined, task));
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task created");
@@ -435,7 +436,7 @@ export function useMoveTask(slug: string) {
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
           if (!old) return old;
-          return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+          return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
         });
       }
       qc.setQueryData(["tasks", slug, task.id], task);
@@ -459,11 +460,11 @@ export function useDeleteTask(slug: string) {
       const prev = findCachedTask(qc, slug, id);
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
+        return { ...old, tasks: old.tasks.filter((t: BoardTask) => t.id !== id) };
       });
       qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
+        return { ...old, tasks: old.tasks.filter((t: BoardTask) => t.id !== id) };
       });
       // Unknown row (never cached): the server drops total and done, but the
       // lane is unidentifiable — leave counts stale rather than synthesize an
@@ -479,7 +480,7 @@ export function useDeleteTask(slug: string) {
   });
 }
 
-const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
+const byPosition = (a: BoardTask, b: BoardTask) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
 
 export function useArchiveTask(slug: string) {
   const qc = useQueryClient();
@@ -491,11 +492,11 @@ export function useArchiveTask(slug: string) {
       // Live board: remove the card. Archived board: update in place.
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== task.id) };
+        return { ...old, tasks: old.tasks.filter((t: BoardTask) => t.id !== task.id) };
       });
       qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
       });
       qc.setQueryData(["tasks", slug, task.id], task);
       applyProgressDeltas(qc, slug, taskTransitionDeltas(qc, slug, prev, task));
@@ -518,12 +519,12 @@ export function useRestoreTask(slug: string) {
       // Archived board: update in place. Live board: re-insert at its column/position.
       qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
         if (!old) return old;
-        return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
       });
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
-        if (old.tasks.some((t: Task) => t.id === task.id)) {
-          return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        if (old.tasks.some((t: BoardTask) => t.id === task.id)) {
+          return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
         }
         return { ...old, tasks: [...old.tasks, task].sort(byPosition) };
       });
@@ -544,7 +545,7 @@ export function useRestoreTask(slug: string) {
   });
 }
 
-function patchBulkFields(task: Task, input: BulkTaskActionInput): Task {
+function patchBulkFields(task: BoardTask, input: BulkTaskActionInput): BoardTask {
   switch (input.action) {
     case "move":
       return {
@@ -632,7 +633,7 @@ function useGithubLinkMutation(slug: string, apiFn: (slug: string, id: string, k
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
           if (!old) return old;
-          return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+          return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
         });
       }
       qc.setQueryData(["tasks", slug, task.id], task);
@@ -1000,7 +1001,7 @@ export function useArchiveSwimlane(slug: string) {
           return {
             ...old,
             swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === lane.id ? lane : l)),
-            tasks: old.tasks.map((t: Task) =>
+            tasks: old.tasks.map((t: BoardTask) =>
               activity.some((a) => a.taskId === t.id && a.type === "archived") ? { ...t, archivedAt: lane.archivedAt } : t
             ),
           };
@@ -1032,7 +1033,7 @@ export function useRestoreSwimlane(slug: string) {
           return {
             ...old,
             swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === lane.id ? lane : l)),
-            tasks: old.tasks.map((t: Task) =>
+            tasks: old.tasks.map((t: BoardTask) =>
               activity.some((a) => a.taskId === t.id && a.type === "restored") ? { ...t, archivedAt: null } : t
             ),
           };
@@ -1187,7 +1188,7 @@ export function useArchiveMilestone(slug: string) {
             swimlanes: old.swimlanes.map((l: Swimlane) =>
               l.milestoneId === milestone.id ? { ...l, archivedAt: milestone.archivedAt } : l
             ),
-            tasks: old.tasks.map((t: Task) =>
+            tasks: old.tasks.map((t: BoardTask) =>
               activity.some((a) => a.taskId === t.id && a.type === "archived")
                 ? { ...t, archivedAt: milestone.archivedAt }
                 : t
@@ -1248,7 +1249,7 @@ export function useRestoreMilestone(slug: string) {
                 ? { ...l, archivedAt: null }
                 : l
             ),
-            tasks: old.tasks.map((t: Task) =>
+            tasks: old.tasks.map((t: BoardTask) =>
               activity.some((a) => a.taskId === t.id && a.type === "restored")
                 ? { ...t, archivedAt: null }
                 : t

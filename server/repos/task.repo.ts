@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { Db, queryAll, queryFirst, run, batch, type BatchStmt, DbError, RowNotFound, ConstraintViolation } from "../db/db";
-import { TaskRow, rowToTask, rowToTaskSlim } from "../../shared/db";
-import type { Task } from "../../shared/types";
+import { TaskRow, rowToTask, rowToTaskSlim, rowToBoardTask } from "../../shared/db";
+import type { Task, BoardTask } from "../../shared/types";
 
 export interface TaskFilters {
   columnId?: string;
@@ -282,7 +282,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       findAllByProject: (
         projectId: string,
         filters?: TaskFilters
-      ): Effect.Effect<Task[], DbError> => {
+      ): Effect.Effect<BoardTask[], DbError> => {
         const conditions: string[] = ["t.project_id = ?"];
         const params: unknown[] = [projectId];
 
@@ -310,7 +310,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         const sql = `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE ${whereClause} GROUP BY t.id ORDER BY t.column_id, t.position`;
 
         return queryAll<SlimTaskRow>(db, sql, ...params).pipe(
-          Effect.map((rows) => rows.map((r) => rowToTaskSlim(r, r.column_github_state)))
+          Effect.map((rows) => rows.map((r) => rowToBoardTask(r, r.column_github_state)))
         );
       },
 
