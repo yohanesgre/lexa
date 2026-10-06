@@ -109,6 +109,12 @@ describe("guardResumeProbe — drop the undeliverable stream-resume probe", () =
     expect(sent).toEqual([]);
   });
 
+  it("drops the probe on a mid-live socket that will not reconnect — readyState is window dressing", () => {
+    const { guarded, sent } = socket(1, false);
+    expect(guarded.send(PROBE)).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
   it("keeps the probe when the socket will reconnect (buffered retry path)", () => {
     const connecting = socket(0, true);
     expect(connecting.guarded.send(PROBE)).toBe(true);

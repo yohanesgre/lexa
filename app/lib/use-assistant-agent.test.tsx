@@ -327,10 +327,10 @@ describe("useAssistantAgent — resume-probe send guard", () => {
     expect(send).toHaveBeenCalledWith(PROBE);
   });
 
-  it("forwards the probe on an OPEN socket", () => {
+  it("drops the probe on an OPEN socket that will not reconnect (readyState is window dressing)", () => {
     const { send, chatAgent } = renderWithSocket({ readyState: 1, shouldReconnect: false });
-    expect(chatAgent.send(PROBE)).toBe(true);
-    expect(send).toHaveBeenCalledWith(PROBE);
+    expect(chatAgent.send(PROBE)).toBe(false);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("always forwards a non-probe frame", () => {
