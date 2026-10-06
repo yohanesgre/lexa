@@ -90,10 +90,10 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
   const sawEditingRef = useRef(false);
 
   useEffect(() => {
-    if (startedRef.current) return;
+    if (startedRef.current || !editor) return;
     startedRef.current = true;
     handleStartEditing();
-  });
+  }, [editor]);
 
   // The hook leaves edit mode on save/cancel; hand control back to the reader.
   useEffect(() => {

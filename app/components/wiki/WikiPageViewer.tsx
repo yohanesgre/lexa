@@ -106,28 +106,35 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     ];
   }, [page.content, page.title]);
 
+  const readView = (
+    <WikiReadView
+      breadcrumb={breadcrumb}
+      title={page.title}
+      content={page.content}
+      updatedAt={page.updatedAt}
+      updatedByName={page.updatedByName}
+      headings={headings}
+      onEdit={() => setIsEditing(true)}
+      onShare={() => setShareOpen(true)}
+      slug={slug}
+      pageSlug={page.slug}
+    />
+  );
+
   if (!isEditing) {
     return (
       <>
-        <WikiReadView
-          breadcrumb={breadcrumb}
-          title={page.title}
-          content={page.content}
-          updatedAt={page.updatedAt}
-          updatedByName={page.updatedByName}
-          headings={headings}
-          onEdit={() => setIsEditing(true)}
-          onShare={() => setShareOpen(true)}
-          slug={slug}
-          pageSlug={page.slug}
-        />
+        {readView}
         <ShareDialog slug={slug} pageSlug={page.slug} isOpen={shareOpen} onClose={() => setShareOpen(false)} />
       </>
     );
   }
 
+  // The lazy workspace chunk + deferred TipTap editor can take a beat to load;
+  // keep the read view as the Suspense fallback so the content area never
+  // blanks between clicking Edit and the editor mounting.
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={readView}>
       <WikiEditWorkspace
         slug={slug}
         page={page}
