@@ -107,4 +107,26 @@ describe("bun-sqlite driver statement cache", () => {
       db.close();
     }
   });
+
+  it("batch() applies the arity guard to raw statements and keeps correct-arity batches working", async () => {
+    const db = makeDb();
+    try {
+      const driver = createBunSqliteDriver(db);
+      await expect(
+        driver.batch([{ sql: "INSERT INTO t (id, v) VALUES (?, ?)", params: ["a"] }])
+      ).rejects.toThrow("bun-sqlite driver: param count mismatch");
+
+      const sql = "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v";
+      const results = await driver.batch([
+        { sql, params: ["a", 1] },
+        { sql, params: ["b", 2] },
+      ]);
+      expect(results).toEqual([
+        { results: [{ id: "a", v: 1 }], changes: 1 },
+        { results: [{ id: "b", v: 2 }], changes: 1 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -18,29 +18,31 @@
 import type { Database, Statement } from "bun:sqlite";
 import type { BatchStmtResult, DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver";
 
+// A cached statement keeps its bindings across calls; bun:sqlite silently
+// reuses them when called with zero args, so a wrong arity would read (or
+// write) the previous call's row. Reject any mismatch up front — the guard
+// covers the wrapper methods and the batch path, which touches `raw` directly.
+function assertArity(stmt: BunSqliteStmt, params: SqlParam[]): void {
+  if (params.length !== stmt.raw.paramsCount) {
+    throw new Error("bun-sqlite driver: param count mismatch");
+  }
+}
+
 class BunSqliteStmt implements DbStmt {
   constructor(readonly raw: Statement) {}
   get columnNames(): string[] {
     return this.raw.columnNames;
   }
-  // A cached statement keeps its bindings across calls; bun:sqlite silently
-  // reuses them when called with zero args, so a wrong arity would read (or
-  // write) the previous call's row. Reject any mismatch up front.
-  private assertArity(params: SqlParam[]): void {
-    if (params.length !== this.raw.paramsCount) {
-      throw new Error("bun-sqlite driver: param count mismatch");
-    }
-  }
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]> {
-    this.assertArity(params);
+    assertArity(this, params);
     return Promise.resolve(this.raw.all(...params) as T[]);
   }
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null> {
-    this.assertArity(params);
+    assertArity(this, params);
     return Promise.resolve((this.raw.get(...params) ?? null) as T | null);
   }
   run(...params: SqlParam[]): Promise<StmtResult> {
-    this.assertArity(params);
+    assertArity(this, params);
     const r = this.raw.run(...params);
     return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid });
   }
@@ -59,6 +61,7 @@ function collectBatch(
   const out: BatchStmtResult[] = [];
   for (const s of stmts) {
     const stmt = getStmt(s.sql);
+    assertArity(stmt, s.params);
     if (stmt.columnNames.length > 0) {
       const rows = stmt.raw.all(...s.params) as LexaRow[];
       out.push({ results: rows, changes: rows.length });
