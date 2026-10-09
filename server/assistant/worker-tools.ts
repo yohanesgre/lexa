@@ -43,7 +43,9 @@ import { parseThreadKey } from "./agent-gate";
 import { buildPreflightState, runJevPreflight, type JevPreflightResult } from "./jev";
 import { parseWriteTools } from "./write-tools";
 import { buildAssistantTools, type AssistantToolDeps, type BoundSkill } from "./tools";
-import { resolveVisionMode } from "./vision";
+import { buildAnalyzeImageTool, resolveVisionMode } from "./vision";
+import type { ProviderConfig } from "./provider";
+import { AssistantProvidersService } from "../services/assistant-providers.service";
 import type { JevRuntimeConfig } from "./jev";
 import type { ApprovalPartial } from "../../shared/assistant";
 import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
@@ -74,6 +76,10 @@ export interface WorkerTurnSettings {
   urlAllowlist: string | null;
   writeTools: string[];
   primarySupportsImages: boolean;
+  /** Primary provider binding — the vision agent resolves against it. */
+  providerId: string | null;
+  /** Configured vision agent model id, or null when unset (the default). */
+  visionModel: string | null;
 }
 
 export interface WorkerTurnContext {
@@ -81,6 +87,8 @@ export interface WorkerTurnContext {
   readTools: string[];
   writeTools: string[];
   primarySupportsImages: boolean;
+  /** The configured vision agent model id, or null when unset. */
+  visionModel: string | null;
   /** Boolean capability flags — never the Exa key / URL allowlist values. */
   hasSearchKey: boolean;
   jevConfigured: boolean;
@@ -91,6 +99,8 @@ interface SettingsRow {
   url_allowlist: string | null;
   write_tools: string;
   primary_supports_images: number;
+  provider_id: string | null;
+  vision_model: string | null;
 }
 
 export async function resolveWorkerSettings(driver: DbDriver, projectId: string): Promise<WorkerTurnSettings> {
@@ -99,7 +109,7 @@ export async function resolveWorkerSettings(driver: DbDriver, projectId: string)
     row = await Effect.runPromise(
       queryFirst<SettingsRow>(
         driver,
-        `SELECT search_api_key, url_allowlist, write_tools, primary_supports_images
+        `SELECT search_api_key, url_allowlist, write_tools, primary_supports_images, provider_id, vision_model
          FROM assistant_settings WHERE project_id = ?`,
         projectId
       )
@@ -112,6 +122,8 @@ export async function resolveWorkerSettings(driver: DbDriver, projectId: string)
     urlAllowlist: row?.url_allowlist ?? null,
     writeTools: parseWriteTools(row?.write_tools),
     primarySupportsImages: row?.primary_supports_images === 1,
+    providerId: row?.provider_id ?? null,
+    visionModel: row?.vision_model && row.vision_model !== "" ? row.vision_model : null,
   };
 }
 
@@ -181,20 +193,19 @@ export async function resolveWorkerTurnContext(
   if (settings.searchApiKey === null) available.delete("web_search");
   if (boundSkills.length === 0) available.delete("get_skill");
   if (jevConfig === null) available.delete("jev_assess");
-  // Vision (docs/SCHEMA.md §Runtime): `primary_supports_images=1` → inline image
-  // parts; the legacy `vision_model` column was dropped, so the delegate mode is
-  // unreachable and `analyze_image` is never offered. The tool definition is
-  // retained for parity (`tools-ai.ts` / `vision.ts`) — this is the documented
-  // doc conflict reported to the maintainer; do not expand or delete it.
+  // Vision (docs/SCHEMA.md §Runtime): a configured `vision_model` → delegate, so
+  // `analyze_image` is offered; no vision model (with a text-only primary) → the
+  // tool is dropped. CURRENT PHASE: delegate wins whenever a vision model is set.
   const visionMode = resolveVisionMode({
     primary_supports_images: settings.primarySupportsImages,
-    vision_model: null,
+    vision_model: settings.visionModel,
   });
   if (visionMode !== "delegate") available.delete("analyze_image");
   return {
     readTools: [...available],
     writeTools: settings.writeTools,
     primarySupportsImages: settings.primarySupportsImages,
+    visionModel: settings.visionModel,
     hasSearchKey: settings.searchApiKey !== null,
     jevConfigured: jevConfig !== null,
   };
@@ -498,6 +509,7 @@ export async function resolveWorkerHarnessContext(
     mcpTools,
     writeTools: gating.writeTools,
     primarySupportsImages: gating.primarySupportsImages,
+    visionModel: gating.visionModel,
     hasSearchKey: gating.hasSearchKey,
     jevConfigured: gating.jevConfigured,
     delegation: { enabled: delegationEnabled, maxConcurrentRuns: PROJECT_RUN_LIMIT },
@@ -655,6 +667,59 @@ async function readWorkerRepoFile(
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "repo read failed" };
+  }
+}
+
+// ── Vision agent (analyze_image) ───────────────────────────────────────────
+// The DO's `analyze_image` read tool executes HERE: the Worker owns the provider
+// key (decrypted per call) and blob storage, so the model's image question is
+// answered by the project's configured vision model through the same
+// `analyzeImage` wire formats the Bun path used. Returns null when vision is
+// unconfigured or the provider key cannot be resolved — the tool is then simply
+// absent (the DO only offers `analyze_image` when the Worker reports it).
+async function resolveWorkerVisionTool(
+  deps: WorkerReadToolExecutorDeps,
+  settings: WorkerTurnSettings,
+  loadImageBase64: (key: string) => Promise<string | null>,
+  resolveMimeType: (key: string) => Promise<string>
+): Promise<ReturnType<typeof buildAnalyzeImageTool> | null> {
+  const visionModel = settings.visionModel;
+  const providerId = settings.providerId;
+  if (visionModel === null || providerId === null) return null;
+  try {
+    const [modelRow, providerRow] = await Promise.all([
+      Effect.runPromise(
+        queryFirst<{ kind: ProviderConfig["kind"] }>(
+          deps.driver,
+          `SELECT kind FROM assistant_models WHERE provider_id = ? AND model_id = ? AND enabled = 1 LIMIT 1`,
+          providerId,
+          visionModel
+        )
+      ).catch(() => null),
+      Effect.runPromise(
+        queryFirst<{ base_url: string }>(deps.driver, `SELECT base_url FROM assistant_providers WHERE id = ?`, providerId)
+      ).catch(() => null),
+    ]);
+    if (!modelRow || !providerRow) return null;
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(Layer.provide(AssistantProvidersService.Default, deps.base), deps.base)
+    );
+    let apiKey = "";
+    try {
+      apiKey = await runtime.runPromise(Effect.flatMap(AssistantProvidersService, (s) => s.resolveApiKey(providerId)));
+    } catch {
+      return null;
+    } finally {
+      await runtime.dispose();
+    }
+    return buildAnalyzeImageTool({
+      config: { kind: modelRow.kind, baseUrl: providerRow.base_url, apiKey, model: visionModel },
+      loadImageBase64,
+      resolveMimeType,
+      fetchImpl: fetch,
+    });
+  } catch {
+    return null;
   }
 }
 
@@ -844,6 +909,49 @@ export function buildWorkerReadToolExecutor(
         name: string;
         execute?: (args: Record<string, unknown>) => Promise<unknown>;
       }>;
+      // Vision agent: `analyze_image` is built on demand (never a per-turn cost)
+      // from the project's configured vision model; unconfigured → the tool is
+      // absent and the call falls through to the unknown-tool error.
+      if (input.name === "analyze_image") {
+        // Ownership gate (ADR-0003 §C): the vision agent must never read a
+        // foreign project's blob by key. Both attachment tables share one blob
+        // store, so a key counts as owned when either lists it for this project
+        // (mirrors `buildWorkerAttachmentLoader`).
+        const ownsStorageKey = async (key: string): Promise<boolean> =>
+          (await dbFirst(
+            `SELECT 1 FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+            input.projectId,
+            key
+          )) !== null ||
+          (await dbFirst(
+            `SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+            input.projectId,
+            key
+          )) !== null;
+        const loadImageBase64 = async (key: string): Promise<string | null> => {
+          if (!(await ownsStorageKey(key))) return null;
+          return runData(Effect.flatMap(Storage, (s) => s.get(key)))
+            .then((bytes) => bytesToBase64(bytes))
+            .catch(() => null);
+        };
+        const resolveMimeType = async (key: string): Promise<string> =>
+          (await dbFirst<{ mime_type: string }>(
+            `SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+            input.projectId,
+            key
+          ))?.mime_type ??
+          (await dbFirst<{ mime_type: string }>(
+            `SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+            input.projectId,
+            key
+          ))?.mime_type ??
+          "image/png";
+        const visionTool = await resolveWorkerVisionTool(deps, settings, loadImageBase64, resolveMimeType);
+        // Unresolvable (providerId null / model row missing) → a typed tool
+        // error the model can read, never the generic unknown-tool fallthrough.
+        if (!visionTool) return { ok: false, error: "VISION_NOT_CONFIGURED: no resolvable vision model for this project" };
+        tools.push(visionTool as unknown as (typeof tools)[number]);
+      }
       const tool = tools.find((t) => t.name === input.name);
       if (!tool?.execute) {
         return { ok: false, error: `unknown read tool: ${input.name}` };

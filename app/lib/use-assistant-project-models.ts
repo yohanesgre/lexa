@@ -7,7 +7,7 @@ import type { ProviderLike } from "../components/settings/assistant-project-logi
 // state→effect rounds (defaults need the hydrated values, so they settle on
 // the pass after hydration lands).
 export function useAssistantProjectModels(args: {
-  settings: { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[] } | null | undefined;
+  settings: { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[]; visionModel?: string | null | undefined } | null | undefined;
   legacySettings: unknown;
   settingsLoading: boolean;
   providersLoading: boolean;
@@ -17,6 +17,7 @@ export function useAssistantProjectModels(args: {
   const [providerId, setProviderId] = useState("");
   const [modelId, setModelId] = useState("");
   const [fallbacks, setFallbacks] = useState<string[]>([]);
+  const [visionModel, setVisionModel] = useState("");
   const hydratedRef = useRef(false);
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export function useAssistantProjectModels(args: {
       setProviderId(step.patch.providerId);
       setModelId(step.patch.modelId);
       setFallbacks(step.patch.fallbacks);
+      setVisionModel(step.patch.visionModel);
     }
     if (step.settled) hydratedRef.current = true;
   }, [settings, legacySettings, settingsLoading]);
@@ -42,5 +44,5 @@ export function useAssistantProjectModels(args: {
     }
   }, [settings, legacySettings, settingsLoading, providersLoading, providers, providerId, modelId, fallbacks.length]);
 
-  return { providerId, setProviderId, modelId, setModelId, fallbacks, setFallbacks };
+  return { providerId, setProviderId, modelId, setModelId, fallbacks, setFallbacks, visionModel, setVisionModel };
 }

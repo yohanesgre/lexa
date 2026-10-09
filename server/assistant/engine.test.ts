@@ -333,6 +333,39 @@ describe("runAssistantTurn attachment hydration", () => {
     expect(providerBody).toContain("[attached document: spec.md]");
     expect(providerBody).toContain("DOC BODY");
   });
+
+  it("delegate image mode emits a placeholder carrying the storageKey", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    let providerBody = "";
+    const fetchImpl = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      providerBody = typeof init?.body === "string" ? init.body : "";
+      return sseResponse([
+        chunk({ role: "assistant", content: "" }, null),
+        chunk({ content: "ok" }, null),
+        chunk({}, "stop", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+      ]);
+    };
+    const messages: UIMessage[] = [
+      {
+        id: "m1",
+        role: "user",
+        parts: [
+          { type: "text", text: "what is this?" },
+          { type: "data-attachment", data: { storageKey: "blob-img-9", mimeType: "image/png", name: "shot.png" } },
+        ],
+      },
+    ];
+    const response = await runAssistantTurn(deps([config({ fetchImpl })], recorded), {
+      projectId: "p1",
+      threadKey: "chat:c1",
+      sessionId: "c1",
+      messages,
+      imageMode: "delegate",
+    });
+    await drain(response);
+
+    expect(providerBody).toContain("(storageKey: blob-img-9)");
+  });
 });
 
 function toolCallFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {

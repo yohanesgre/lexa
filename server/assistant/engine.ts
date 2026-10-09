@@ -86,8 +86,9 @@ export interface AssistantTraceParams {
 /**
  * Vision handling for image attachments, mirroring `vision.ts`'s `VisionMode`
  * without importing that module (which pulls `@tanstack/ai` into the DO bundle).
- * The DO resolves it from the harness `primarySupportsImages` flag; the legacy
- * `vision_model` column is retired, so `"delegate"` is unreachable there.
+ * The DO resolves it from the harness `visionModel` field: set → `"delegate"`
+ * (images become placeholder text parts; the model calls `analyze_image`);
+ * unset → `"none"`. The inline branch is the later target.
  */
 export type ImageMode = "inline" | "delegate" | "none";
 
@@ -117,9 +118,11 @@ export interface AssistantTurnInput {
   callLogPurpose?: AssistantCallLogPurpose | undefined;
   /**
    * How image attachments are hydrated (mirrors the legacy `StreamRunContext`).
-   * `"inline"` embeds base64 image parts; `"none"` refuses an image attachment
-   * with VISION_NOT_CONFIGURED. Absent = `"none"` (the safe default when the
-   * harness flag is unknown).
+   * `"delegate"` replaces each image with a placeholder text part (the model
+   * calls the internal `analyze_image` delegation); `"inline"` embeds base64
+   * image parts (later target); `"none"` refuses an image attachment with
+   * VISION_NOT_CONFIGURED. Absent = `"none"` (the safe default when the harness
+   * value is unknown).
    */
   imageMode?: ImageMode | undefined;
   abortSignal?: AbortSignal | undefined;
@@ -471,10 +474,14 @@ async function hydrateAttachmentParts(
                 if (base64 === null || base64 === "") return null;
                 return { type: "file" as const, mediaType: attachment.mimeType, url: `data:${attachment.mimeType};base64,${base64}` };
               }
-              // "delegate" is unreachable on the DO (the vision_model column is
-              // retired) — a placeholder is the honest fallback when no inline
-              // loader is wired.
-              return { type: "text" as const, text: `[attached image: ${attachment.name || attachment.storageKey}]` };
+              // "delegate": the image is not sent to the primary. A placeholder
+              // text part carries the storageKey so the model can call the
+              // internal `analyze_image` tool (offered only when a vision model
+              // is set; its inputSchema requires `storageKey`).
+              return {
+                type: "text" as const,
+                text: `[attached image: ${attachment.name || attachment.storageKey} (storageKey: ${attachment.storageKey})]`,
+              };
             }
             if (!deps.loadDocumentText) return null;
             const text = await deps.loadDocumentText(attachment.storageKey).catch(() => null);

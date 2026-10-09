@@ -28,6 +28,7 @@ import {
   ProviderAuthFailed,
   ProviderNotConfigured,
   ProviderUnreachable,
+  VisionNotConfigured,
 } from "./errors";
 import { respond } from "./http-helpers";
 import { AuthIdentity } from "./auth";
@@ -158,10 +159,33 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const repo = yield* AssistantSettingsRepo;
+        const modelsRepo = yield* AssistantModelsRepo;
         const payload = {
           ...req.payload,
           ...(req.payload.writeTools !== undefined ? { writeTools: [...req.payload.writeTools] } : {}),
         };
+        // A submitted vision agent must resolve to an enabled model of the
+        // effective primary provider, so `analyze_image` is never offered against
+        // an unresolvable binding (which would answer a bare "unknown read tool").
+        const visionModel = (req.payload as { visionModel?: string | null }).visionModel;
+        if (typeof visionModel === "string" && visionModel !== "") {
+          const existing = yield* repo
+            .getByProject(req.path.projectId)
+            .pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
+          const payloadProviderId = (req.payload as { providerId?: string | null }).providerId;
+          // An explicit null clears the binding — only an omitted field falls back
+          // to the stored provider (a `??` would skip the explicit null).
+          const providerId =
+            payloadProviderId !== undefined
+              ? payloadProviderId
+              : (existing as { provider_id?: string | null } | null)?.provider_id ?? null;
+          const model = providerId === null
+            ? null
+            : yield* modelsRepo
+                .findByProviderAndModelId(providerId, visionModel)
+                .pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
+          if (model === null || !model.enabled) return yield* new VisionNotConfigured();
+        }
         yield* repo.upsert(req.path.projectId, payload);
         return yield* repo.maskedView(req.path.projectId);
       }))

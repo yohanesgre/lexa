@@ -9,6 +9,7 @@ export interface AssistantSettingsRow {
   search_api_key: string | null;
   url_allowlist: string | null;
   primary_supports_images: number;
+  vision_model: string | null;
   reasoning_effort: AssistantReasoningEffort | null;
   write_tools: string;
   fallback_model_ids: string;
@@ -78,6 +79,7 @@ export class AssistantSettingsRepo extends Effect.Service<AssistantSettingsRepo>
       hasSearchKey: row.search_api_key !== null && row.search_api_key !== "",
       urlAllowlist: row.url_allowlist,
       primarySupportsImages: row.primary_supports_images === 1,
+      visionModel: row.vision_model,
       reasoningEffort: row.reasoning_effort,
       writeTools: parseWriteTools(row.write_tools),
       providerId: (row as unknown as { provider_id?: string | null }).provider_id ?? null,
@@ -94,16 +96,18 @@ export class AssistantSettingsRepo extends Effect.Service<AssistantSettingsRepo>
           const fallbackIds = input.fallbackModelIds !== undefined ? JSON.stringify(input.fallbackModelIds.slice(0, 3)) : existing?.fallback_model_ids ?? "[]";
           const providerId = input.providerId !== undefined ? (input.providerId ?? null) : (existing as unknown as { provider_id?: string | null } | null)?.provider_id ?? null;
           const primaryModelId = input.modelId !== undefined ? (input.modelId ?? null) : (existing as unknown as { primary_model_id?: string | null } | null)?.primary_model_id ?? null;
+          const visionModel = input.visionModel !== undefined ? (input.visionModel ?? null) : existing?.vision_model ?? null;
           yield* run(
             db,
             `INSERT INTO assistant_settings (project_id, search_provider, search_api_key, url_allowlist,
-               primary_supports_images, reasoning_effort, write_tools, fallback_model_ids, provider_id, primary_model_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               primary_supports_images, vision_model, reasoning_effort, write_tools, fallback_model_ids, provider_id, primary_model_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(project_id) DO UPDATE SET
                search_provider = excluded.search_provider,
                url_allowlist = excluded.url_allowlist,
                search_api_key = excluded.search_api_key,
                primary_supports_images = excluded.primary_supports_images,
+               vision_model = excluded.vision_model,
                reasoning_effort = excluded.reasoning_effort,
                write_tools = excluded.write_tools,
                fallback_model_ids = excluded.fallback_model_ids,
@@ -115,6 +119,7 @@ export class AssistantSettingsRepo extends Effect.Service<AssistantSettingsRepo>
             input.searchApiKey ?? existing?.search_api_key ?? null,
             input.urlAllowlist ?? null,
             input.primarySupportsImages === true ? 1 : 0,
+            visionModel,
             input.reasoningEffort ?? null,
             (input.writeTools ?? []).join(","),
             fallbackIds,

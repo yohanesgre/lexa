@@ -135,12 +135,13 @@ describe("resolveWorkerTurnContext gating", () => {
     expect(context.readTools).toContain("web_search");
     expect(context.readTools).toContain("get_skill");
     expect(context.readTools).toContain("get_board_structure");
-    // Jev is not enabled and the legacy `vision_model` column is gone, so the
-    // delegate mode is unreachable — `analyze_image` is never offered.
+    // Jev is not enabled and no vision model is configured (the default), so
+    // `analyze_image` is not offered even though the primary reports images.
     expect(context.readTools).not.toContain("jev_assess");
     expect(context.readTools).not.toContain("analyze_image");
     expect(context.writeTools).toEqual(["create_task", "archive_task"]);
     expect(context.primarySupportsImages).toBe(true);
+    expect(context.visionModel).toBeNull();
     expect(context.jevConfigured).toBe(false);
   });
 

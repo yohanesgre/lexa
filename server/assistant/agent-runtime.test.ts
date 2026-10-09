@@ -300,6 +300,7 @@ const CONTEXT: HarnessTurnContext = {
   mcpTools: [],
   writeTools: [],
   primarySupportsImages: false,
+  visionModel: null,
   hasSearchKey: false,
   jevConfigured: false,
   delegation: { enabled: false, maxConcurrentRuns: 0 },

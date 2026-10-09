@@ -28,17 +28,19 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
   const save = useSaveAssistantProjectSettings(project.id);
 
   const modelState = useAssistantProjectModels({ settings: projectSettings, legacySettings, settingsLoading, providersLoading, providers });
-  const { providerId, setProviderId, modelId, setModelId, fallbacks, setFallbacks } = modelState;
+  const { providerId, setProviderId, modelId, setModelId, fallbacks, setFallbacks, visionModel, setVisionModel } = modelState;
 
   const [addFallbackId, setAddFallbackId] = useState<string>("");
 
   const persistedProviderId = projectSettings?.providerId ?? "";
   const persistedModelId = projectSettings?.modelId ?? "";
   const persistedFallbacks = projectSettings?.fallbackModelIds ?? [];
+  const persistedVisionModel = projectSettings?.visionModel ?? "";
   const isDirty =
     providerId !== persistedProviderId ||
     modelId !== persistedModelId ||
-    JSON.stringify(fallbacks) !== JSON.stringify(persistedFallbacks);
+    JSON.stringify(fallbacks) !== JSON.stringify(persistedFallbacks) ||
+    visionModel !== persistedVisionModel;
 
   const selectedProvider = providers.find((p) => p.id === providerId);
   const enabledModels = enabledModelsOf(selectedProvider);
@@ -52,6 +54,11 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
     const next = onProviderChange(providers, pid, modelId, fallbacks);
     setModelId(next.modelId);
     setFallbacks(next.fallbacks);
+    // The vision agent is scoped to the primary provider's enabled models —
+    // drop a selection the new provider cannot offer.
+    if (visionModel && !enabledModelsOf(providers.find((p) => p.id === pid)).some((m) => m.modelId === visionModel)) {
+      setVisionModel("");
+    }
   };
 
   const handleModelChange = (next: string) => {
@@ -71,7 +78,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
 
   const handleSave = () => {
     if (!isDirty) return;
-    save.mutate(savePayload(projectSettings, providerId, modelId, fallbacks));
+    save.mutate(savePayload(projectSettings, providerId, modelId, fallbacks, visionModel));
   };
 
   if (providersLoading || settingsLoading) {
@@ -152,6 +159,27 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
             modelId={modelId}
           />
           <div className="field-hint">Ordered fallback chain — tried in priority order after the primary model fails (auth/rate-limit/unreachable). Cross-kind allowed: OpenAI and Anthropic models can interleave.</div>
+        </div>
+
+        <div className="field">
+          <label className="field-label" htmlFor="assistant-vision-model">Vision agent model <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>images · superadmin</span></label>
+          <select
+            id="assistant-vision-model"
+            className="prop-input w-full font-mono"
+            style={{ maxWidth: 480 }}
+            value={visionModel}
+            onChange={(e) => setVisionModel(e.target.value)}
+            aria-label="Vision agent model"
+            disabled={!selectedProvider}
+          >
+            <option value="">— None (vision agent unset) —</option>
+            {/* Only chat-completions / Anthropic wires are vision-capable here: exclude
+                workers_ai (unsupported) and openai_responses (Responses API wire). */}
+            {enabledModels.filter((m) => m.kind !== "workers_ai" && m.kind !== "openai_responses").map((m) => (
+              <option key={m.modelId} value={m.modelId}>{m.modelId} — {m.kind} · vision</option>
+            ))}
+          </select>
+          <div className="field-hint">The vision model Assistant calls to analyze an attached image. Empty by default — nothing is preconfigured. While unset, image attach stays disabled for this project.</div>
         </div>
 
         <div className="field">

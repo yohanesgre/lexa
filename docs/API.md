@@ -87,7 +87,7 @@ All non-2xx responses share one shape:
 | 429 | `PROVIDER_RATE_LIMITED` | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
 | 409 | `ASSISTANT_TASK_ACTIVE` | Enqueue race on an `assistant_tasks` row, or thread reset while a run is claimed. A second chat client on a live thread no longer gets this — the DO serializes and queues (see Assistant) |
 | 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row, or the WS gate refusing a thread that is missing / not owned / not project-readable (no existence oracle) |
-| 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
+| 409 | `VISION_NOT_CONFIGURED` | Image attachments submitted while no vision model is configured for the project (`vision_model` unset and `primary_supports_images=0`). A configured `vision_model` enables image attach and routes images through the vision agent |
 | 400 | `SECRET_KEY_UNAVAILABLE` | A managed provider key or Jev key was submitted but `LXK_SECRETS_MASTER_KEY` is unset or malformed (an MCP token save is refused as `MCP_INVALID_TRANSPORT_CONFIG` instead) |
 | 400 | `JEV_INVALID_CONFIG` | Jev registry payload refused: `clearSecret` + `secret`, invalid base URL, or model length (details: `{ reason }`) |
 | 502 | `JEV_AUTH_FAILED` | Jev rejected the stored API key (upstream 401/403) |
@@ -1703,19 +1703,23 @@ GET    /api/assistant/settings/:projectId
         urlAllowlist: string|null,
         reasoningEffort: "minimal"|"low"|"medium"|"high"|null,
         primarySupportsImages: boolean,
+        visionModel: string|null,
         writeTools: string[],
         providerId: string|null, modelId: string|null,
         fallbackModelIds: string[] }
   Masked view — no provider api_key/search_api_key ever serialized. Provider
   binding (providerId/modelId/fallbackModelIds) comes from the global gateway
   registry (GET /api/admin/assistant/providers). Legacy per-project provider
-  columns (kind/base_url/api_key/model/vision_model) were dropped in the squashed baseline.
+  columns (kind/base_url/api_key/model) were dropped in the squashed baseline;
+  `visionModel` (revived by migration 0028) is the vision agent model id, null
+  when unset.
   | 404 PROJECT_NOT_FOUND | 404 ASSISTANT_THREAD_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
 
 PUT    /api/assistant/settings/:projectId   (superadmin — requireSuperadmin, 403 FORBIDDEN otherwise)
 body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: string[],
        searchProvider?: "exa"|null, searchApiKey?: string|null,
        urlAllowlist?: string|null,
+       visionModel?: string|null,
        reasoningEffort?: "minimal"|"low"|"medium"|"high"|null,
        writeTools?: string[] }
   Payload is the project-level Assistant binding + search/writeTools.
@@ -1723,8 +1727,12 @@ body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: strin
   providerId/modelId = primary model (must be an enabled assistant_models row);
   fallbackModelIds = ordered cross-kind fallback list (≤3, deduped, provider
   registry supplies kind per model). Omitted searchApiKey keeps the stored value.
-  After the squashed baseline kind/base_url/api_key/model/vision_model are gone from
-  assistant_settings — provider credentials live in assistant_providers only.
+  visionModel = the project's vision agent model id (an enabled assistant_models
+  row of the primary provider); null/omitted clears/keeps it. While unset, image
+  attach stays disabled (VISION_NOT_CONFIGURED 409); when set, images always route
+  through the vision agent (current phase).
+  kind/base_url/api_key/model are gone from assistant_settings — provider
+  credentials live in assistant_providers only.
   writeTools: unknown names dropped, duplicates collapse, stored comma-separated.
 → 200 masked view (same shape as GET) | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
 
@@ -2262,13 +2270,15 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
   task is appended to assistant_tasks as `queued`.
   attachments are image refs into the project's attachment storage
   (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
-  png/jpeg/gif/webp only. Attachments require vision capability:
-  primary_supports_images=1 → inline parts; else 409
-  VISION_NOT_CONFIGURED (`vision_model` delegation removed in the squashed baseline).
+  png/jpeg/gif/webp only. Attachments require vision capability: a configured
+  `vision_model` → images route through the vision agent (delegate; current
+  phase, always wins). **Today** no vision model → 409 VISION_NOT_CONFIGURED
+  (the `primary_supports_images=1` → inline-parts branch is the later target,
+  not yet the current gate).
 → 201 AssistantTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
-  | 409 VISION_NOT_CONFIGURED            (attachments, no vision chain — vision_model removed in the squashed baseline)
+  | 409 VISION_NOT_CONFIGURED            (image attachments, no vision model configured)
   | 422 INVALID_ARGS                     (attachment scope/caps)
 
 GET    /api/assistant/tasks/:id
@@ -2337,8 +2347,11 @@ body { projectId*, chatId*, message*, agentId?,
   clients (intentional behavior change; `ASSISTANT_TASK_ACTIVE` remains only for
   enqueue races on `assistant_tasks`).
   attachments are chat-attachment refs (uploads above; cross-project keys →
-  422). Images feed the vision path (inline parts; 409 VISION_NOT_CONFIGURED
-  when `primary_supports_images=0`) and persist as `image-ref` parts; documents
+  422). Images feed the vision path: a configured `vision_model` routes them
+  through the vision agent (delegate; current phase, always wins). **Today** no
+  vision model → 409 VISION_NOT_CONFIGURED (inline parts when
+  `primary_supports_images=1` is the later target, not yet the current gate);
+  they persist as `image-ref` parts. Documents
   (PDF/Markdown/plain text) are extracted server-side (PDF via `unpdf`) and
   persist as `document-ref` parts, becoming model-visible text. Caps shared
   across images + documents: ≤3 per message, ≤5 MB each, ≤10 MB per message;

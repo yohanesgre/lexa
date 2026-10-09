@@ -5,13 +5,16 @@ import { normalizeBaseUrl, OPENCODE_SESSION_HEADER, resolveOpencodeSessionId } f
 
 export type VisionMode = "inline" | "delegate" | "none";
 
-// Vision resolution chain (docs/SCHEMA.md — Runtime): primary supports images
-// → inline parts; else a vision model is configured → internal analyze_image
-// delegation on the PRIMARY provider (same kind/api_key/base_url, only the
-// model differs); else attachments are rejected up front.
+// Vision resolution chain (docs/SCHEMA.md — Runtime). CURRENT PHASE: a configured
+// vision model ALWAYS wins — images route through the internal `analyze_image`
+// delegation even when the primary model is multimodal. The inline branch is the
+// LATER target (inline vision parts when the primary is multimodal, the agent
+// only as a fallback); it stays wired but is unreachable while a vision model is
+// set. No vision model + a multimodal primary → inline; neither → none
+// (attachments are rejected up front with VISION_NOT_CONFIGURED).
 export function resolveVisionMode(row: { primary_supports_images: number | boolean; vision_model: string | null }): VisionMode {
-  if (row.primary_supports_images === 1 || row.primary_supports_images === true) return "inline";
   if (row.vision_model !== null && row.vision_model !== "") return "delegate";
+  if (row.primary_supports_images === 1 || row.primary_supports_images === true) return "inline";
   return "none";
 }
 
@@ -96,12 +99,34 @@ async function analyzeAnthropicCompatible(deps: AnalyzeDeps, prompt: string, mim
   return text;
 }
 
+// Provider-kind → wire mapping. Only two wires exist here: the OpenAI
+// chat-completions shape (`openai_compatible` and `openai_responses`, which
+// share the host) and the Anthropic messages shape. `workers_ai` is not a
+// vision-capable wire for this path — a typed error, never a mis-sent request.
+export function visionWireForKind(kind: ProviderConfig["kind"]): "openai" | "anthropic" | "unsupported" {
+  switch (kind) {
+    case "anthropic_compatible":
+      return "anthropic";
+    case "openai_compatible":
+    case "openai_responses":
+      return "openai";
+    case "workers_ai":
+    default:
+      return "unsupported";
+  }
+}
+
 export async function analyzeImage(deps: AnalyzeDeps, storageKey: string, prompt: string): Promise<string> {
   const [base64, mimeType] = await Promise.all([deps.loadImageBase64(storageKey), deps.resolveMimeType(storageKey)]);
   if (base64 === null) throw new Error(`attachment '${storageKey}' could not be loaded`);
-  return deps.config.kind === "openai_compatible"
-    ? analyzeOpenAiCompatible(deps, prompt, mimeType, base64)
-    : analyzeAnthropicCompatible(deps, prompt, mimeType, base64);
+  switch (visionWireForKind(deps.config.kind)) {
+    case "anthropic":
+      return analyzeAnthropicCompatible(deps, prompt, mimeType, base64);
+    case "openai":
+      return analyzeOpenAiCompatible(deps, prompt, mimeType, base64);
+    case "unsupported":
+      throw new Error(`vision is not supported for provider kind '${deps.config.kind}'`);
+  }
 }
 
 // Internal plumbing — the analyze_image tool frame is SUPPRESSED from the
