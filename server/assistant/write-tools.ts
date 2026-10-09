@@ -2,7 +2,7 @@ import { toolDefinition } from "@tanstack/ai";
 import { z } from "zod";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
-import type { AssistantWriteDiff } from "../../shared/assistant";
+import type { ApprovalPartial, AssistantWriteDiff } from "../../shared/assistant";
 
 const DIFF_TEXT_CAP = 2000;
 const COMMENT_BODYTEXT_CAP = 2000;
@@ -206,6 +206,23 @@ export interface RecordedProposal {
   seq: number;
 }
 
+// Model-facing output of a write tool. `ask` returns the proposal shape (a
+// pending row was recorded); `auto` returns the applied shape (the write ran
+// in-loop, no pending row); a failure/refusal returns the error shape. The
+// union is what lets one tool definition serve all three permission modes.
+export type AssistantWriteToolOutput =
+  | { ok: true; applied: true; result?: unknown; partial?: ApprovalPartial }
+  | { ok: false; applied: false; error: string; partial?: ApprovalPartial };
+
+// What a mode's `record` hands back: the pending-row identity (ask), a direct
+// tool output (auto), or a recoverable error string (any mode).
+export type WriteRecordResult = RecordedProposal | { output: AssistantWriteToolOutput };
+
+// Deny-mode local refusal (ADR-0005 §Port P1). Mirrors the DO-side
+// `tools-ai.ts` copy verbatim; the model reads it and may suggest a mode switch.
+export const WRITE_TOOLS_DENIED_ERROR =
+  "Write tools are blocked for this thread (composer mode: Blocked). Reads still work — the user can switch to Ask or Auto.";
+
 // Side-channel entry pairing a persisted pending-write row with its stream
 // toolCallId. The queue drains sequentially in the TOOL_CALL_RESULT handler
 // (locked-in pairing decision) and feeds the transcript's pendingBatch meta.
@@ -297,9 +314,12 @@ export interface AssistantWriteToolDeps {
   // milestone_archive diff's sprintsAffected field.
   countSprints: (milestoneId: string) => Promise<number>;
   findSwimlane: (id: string) => Promise<WriteSwimlaneSnapshot | null>;
-  // Persist the pending row + register it on the turn's side-channel.
-  // Budget enforcement lives here; over-budget calls yield an error result.
-  record: (proposal: { name: AssistantWriteToolName; args: unknown; diff: AssistantWriteDiff; detail?: string }) => Promise<RecordedProposal | { error: string }>;
+  // Hand the resolved proposal to the mode's executor. `ask` persists a pending
+  // row + registers it on the turn's side-channel and returns its identity;
+  // `auto` applies the write in-loop and returns a direct output; `deny`
+  // returns a refusal error. Budget enforcement lives in the executor;
+  // over-budget calls yield an error result.
+  record: (proposal: { name: AssistantWriteToolName; args: unknown; diff: AssistantWriteDiff; detail?: string }) => Promise<WriteRecordResult | { error: string }>;
 }
 
 const err = (error: string): { proposed: false; error: string } => ({ proposed: false, error });
@@ -311,10 +331,39 @@ async function resolveOrError<T>(p: Promise<T | null>, message: string): Promise
   return v === null ? { ok: false, error: message } : { ok: true, value: v };
 }
 
-async function record(deps: AssistantWriteToolDeps, proposal: { name: AssistantWriteToolName; args: unknown; diff: AssistantWriteDiff; detail?: string }): Promise<Step<RecordedProposal>> {
+async function record(deps: AssistantWriteToolDeps, proposal: { name: AssistantWriteToolName; args: unknown; diff: AssistantWriteDiff; detail?: string }): Promise<Step<WriteRecordResult>> {
   const r = await deps.record(proposal);
   if ("error" in r) return { ok: false, error: r.error };
   return { ok: true, value: r };
+}
+
+// Auto-mode executor (ADR-0005 §Port P1): applies the resolved write in-loop via
+// the injected `apply` (the service's `applyAssistantWrite` wrapper), no pending
+// row, no suspend. A per-turn budget (port of the DO-side
+// `createAssistantWriteBudget`) caps executions; one bulk tool call is one slot.
+// A refused call returns the same recoverable tool error the constant-copy
+// budget produced on the DO path.
+export interface AutoWriteRecordDeps {
+  apply: (toolName: AssistantWriteToolName, args: Record<string, unknown>) => Promise<{ ok: true; result?: unknown } | { ok: false; error: string }>;
+  limit?: number;
+}
+
+export function buildAutoWriteRecord(deps: AutoWriteRecordDeps): AssistantWriteToolDeps["record"] {
+  const limit = deps.limit ?? MAX_WRITES_PER_TURN;
+  let used = 0;
+  return async (proposal) => {
+    if (used >= limit) return { error: `write budget exceeded — at most ${limit} writes per turn` };
+    used += 1;
+    const outcome = await deps.apply(proposal.name, proposal.args as Record<string, unknown>);
+    if (!outcome.ok) return { error: outcome.error };
+    return { output: { ok: true, applied: true, ...(outcome.result !== undefined ? { result: outcome.result } : {}) } };
+  };
+}
+
+// Deny-mode executor (ADR-0005 §Port P1): never reaches the data layer; every
+// write tool returns the same model-readable refusal. Reads are unaffected.
+export function buildDenyWriteRecord(): AssistantWriteToolDeps["record"] {
+  return async () => ({ error: WRITE_TOOLS_DENIED_ERROR });
 }
 
 const tipTapDoc = z
@@ -367,6 +416,20 @@ const taskRefListOf = (args: TaskRefArgs): string[] => {
   return out;
 };
 
+// One output schema for every write tool: the union of the ask shape
+// (`proposed`/`approvalId`/`error`), the auto shape (`ok`/`applied`/`result`),
+// and the failure/refusal shape. TanStack validates tool output against it; the
+// fields are optional so a single schema serves all permission modes.
+const writeToolOutputSchema = z.object({
+  proposed: z.boolean().optional(),
+  approvalId: z.string().optional(),
+  error: z.string().optional(),
+  ok: z.boolean().optional(),
+  applied: z.boolean().optional(),
+  result: z.unknown().optional(),
+  partial: z.unknown().optional(),
+});
+
 export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
   const tools = [];
 
@@ -404,7 +467,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         milestoneId: z.string().optional(),
         sprintId: z.string().optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       let parentTitle: string | null = null;
       if (args.parentId) {
@@ -428,6 +491,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         detail: `Create task "${cap(args.title, 60)}"`,
       });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -446,7 +510,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         dueAt: z.string().nullable().optional(),
         assigneeIds: z.array(z.string()).optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
       if (!task.ok) return { proposed: false, error: task.error };
@@ -466,6 +530,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         detail: `Update ${task.value.key} "${cap(task.value.title, 40)}"`,
       });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -482,7 +547,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         beforeTaskId: z.string().optional(),
         afterTaskId: z.string().optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
       if (!task.ok) return { proposed: false, error: task.error };
@@ -511,6 +576,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         detail: `Move ${task.value.key} → ${column.value.name}`,
       });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -521,7 +587,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         name,
         description: `Propose ${verb.toLowerCase()}ing a task. Pass \`refs\` to act on many tasks in one call (max ${MAX_BULK_TASK_REFS}) — prefer this over repeated calls. Requires user approval.`,
         inputSchema: taskRefsSchema,
-        outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+        outputSchema: writeToolOutputSchema,
       }).server(async (args: TaskRefArgs) => {
         const resolved = await resolveTaskRefs(args);
         if (!resolved.ok) return { proposed: false, error: resolved.error };
@@ -543,6 +609,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         const detail = single !== null ? `${verb} ${single.key}` : `${verb} ${tasks.length} tasks`;
         const r = await record(deps, { name, args, diff, detail });
         if (!r.ok) return { proposed: false, error: r.error };
+        if ("output" in r.value) return r.value.output;
         return { proposed: true, approvalId: r.value.approvalId };
       })
     );
@@ -556,7 +623,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         ref: z.string().min(1).describe("Task id or PREFIX-n key"),
         body: tipTapDoc,
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
       if (!task.ok) return { proposed: false, error: task.error };
@@ -576,6 +643,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         detail: `Comment on ${task.value.key}`,
       });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -590,7 +658,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         content: tipTapDoc,
         parentId: z.string().optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const existing = await deps.findWikiPageBySlug(args.slug).catch(() => null);
       if (existing) return { proposed: false, error: `slug '${args.slug}' is already taken` };
@@ -602,6 +670,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       };
       const r = await record(deps, { name: "create_wiki_page", args, diff, detail: `Create page "${cap(args.title, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -615,13 +684,14 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         title: z.string().min(1).max(300).optional(),
         content: tipTapDoc,
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const page = await resolveOrError(deps.findWikiPageBySlug(args.slug), `wiki page '${args.slug}' not found`);
       if (!page.ok) return { proposed: false, error: page.error };
       const diff = buildWikiEditDiff(page.value, { title: args.title, content: args.content });
       const r = await record(deps, { name: "edit_wiki_page", args, diff, detail: `Edit page "${cap(diff.title, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -631,11 +701,12 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "create_milestone",
       description: "Propose creating a milestone. Omit optional dueAt if not provided; never send \"None\" string. Requires user approval.",
       inputSchema: z.object({ name: z.string().min(1).max(200), dueAt: z.string().optional().nullable() }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const diff = buildMilestoneCreateDiff(args);
       const r = await record(deps, { name: "create_milestone", args, diff, detail: `Create milestone "${cap(args.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -649,7 +720,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         name: z.string().min(1).max(200).optional(),
         dueAt: z.string().nullable().optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
       if (!m.ok) return { proposed: false, error: m.error };
@@ -660,6 +731,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const diff: AssistantWriteDiff = { type: "milestone_update", name: args.name ?? m.value.name, changes };
       const r = await record(deps, { name: "update_milestone", args, diff, detail: `Update milestone "${cap(m.value.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -669,7 +741,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "archive_milestone",
       description: "Propose archiving a milestone (its sprints archive with it). Requires user approval.",
       inputSchema: z.object({ milestoneId: z.string().min(1) }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
       if (!m.ok) return { proposed: false, error: m.error };
@@ -677,6 +749,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const diff = buildMilestoneArchiveDiff({ name: m.value.name, ...(sprintsAffected !== undefined ? { sprintsAffected } : {}) });
       const r = await record(deps, { name: "archive_milestone", args, diff, detail: `Archive milestone "${cap(m.value.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -691,7 +764,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         startAt: z.string().optional(),
         dueAt: z.string().optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       if (args.milestoneId) {
         const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
@@ -700,6 +773,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const diff = buildSprintCreateDiff({ name: args.name, ...(args.startAt !== undefined ? { startAt: args.startAt } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt } : {}) });
       const r = await record(deps, { name: "create_sprint", args, diff, detail: `Create sprint "${cap(args.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -714,7 +788,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         startAt: z.string().nullable().optional(),
         dueAt: z.string().nullable().optional(),
       }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `sprint '${args.swimlaneId}' not found`);
       if (!lane.ok) return { proposed: false, error: lane.error };
@@ -727,6 +801,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const diff: AssistantWriteDiff = { type: "sprint_update", name: args.name ?? lane.value.name, changes };
       const r = await record(deps, { name: "update_sprint", args, diff, detail: `Update sprint "${cap(lane.value.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -736,7 +811,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "delete_task",
       description: `Propose deleting a task (hard delete — fails if it has subtasks). Pass \`refs\` to act on many tasks in one call (max ${MAX_BULK_TASK_REFS}) — prefer this over repeated calls. Requires user approval.`,
       inputSchema: taskRefsSchema,
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args: TaskRefArgs) => {
       const resolved = await resolveTaskRefs(args);
       if (!resolved.ok) return { proposed: false, error: resolved.error };
@@ -749,6 +824,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const detail = single !== null ? `Delete ${single.key} "${cap(single.title, 40)}"` : `Delete ${tasks.length} tasks`;
       const r = await record(deps, { name: "delete_task", args, diff, detail });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -758,13 +834,14 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "delete_wiki_page",
       description: "Propose deleting a wiki page (fails if it has children). Requires user approval.",
       inputSchema: z.object({ slug: z.string().min(1) }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const page = await resolveOrError(deps.findWikiPageBySlug(args.slug), `wiki page '${args.slug}' not found`);
       if (!page.ok) return { proposed: false, error: page.error };
       const diff = buildWikiDeleteDiff(page.value);
       const r = await record(deps, { name: "delete_wiki_page", args, diff, detail: `Delete page "${cap(page.value.title, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -774,13 +851,14 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "delete_milestone",
       description: "Propose deleting a milestone (fails if it has sprints). Requires user approval.",
       inputSchema: z.object({ milestoneId: z.string().min(1) }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
       if (!m.ok) return { proposed: false, error: m.error };
       const diff = buildMilestoneDeleteDiff({ name: m.value.name });
       const r = await record(deps, { name: "delete_milestone", args, diff, detail: `Delete milestone "${cap(m.value.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -790,7 +868,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "archive_sprint",
       description: "Propose archiving a sprint lane (its live tasks archive with it; Backlog cannot be archived). Requires user approval.",
       inputSchema: z.object({ swimlaneId: z.string().min(1) }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `sprint '${args.swimlaneId}' not found`);
       if (!lane.ok) return { proposed: false, error: lane.error };
@@ -798,6 +876,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const diff = buildSprintArchiveDiff({ name: lane.value.name });
       const r = await record(deps, { name: "archive_sprint", args, diff, detail: `Archive sprint "${cap(lane.value.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -807,7 +886,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "delete_sprint",
       description: "Propose deleting a sprint lane (fails if it has tasks; Backlog cannot be deleted). Requires user approval.",
       inputSchema: z.object({ swimlaneId: z.string().min(1) }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `sprint '${args.swimlaneId}' not found`);
       if (!lane.ok) return { proposed: false, error: lane.error };
@@ -815,6 +894,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const diff = buildSprintDeleteDiff({ name: lane.value.name });
       const r = await record(deps, { name: "delete_sprint", args, diff, detail: `Delete sprint "${cap(lane.value.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );
@@ -824,7 +904,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       name: "move_swimlane",
       description: "Propose moving a swimlane (sprint) to another milestone, or to Backlog/unassigned when milestoneId is null. Requires user approval.",
       inputSchema: z.object({ swimlaneId: z.string().min(1), milestoneId: z.string().nullable() }),
-      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+      outputSchema: writeToolOutputSchema,
     }).server(async (args) => {
       const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `swimlane '${args.swimlaneId}' not found`);
       if (!lane.ok) return { proposed: false, error: lane.error };
@@ -845,6 +925,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       const detail = `Move swimlane "${cap(lane.value.name, 60)}" → ${toMilestone ? `"${cap(toMilestone, 60)}"` : "Backlog"}`;
       const r = await record(deps, { name: "move_swimlane", args, diff, detail });
       if (!r.ok) return { proposed: false, error: r.error };
+      if ("output" in r.value) return r.value.output;
       return { proposed: true, approvalId: r.value.approvalId };
     })
   );

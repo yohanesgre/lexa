@@ -2328,7 +2328,15 @@ DELETE /api/assistant/threads/:documentType/:documentId
 POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
-       fromIndex?: number }
+       fromIndex?: number,
+       permissionMode?: "ask" | "auto" | "deny" }
+  `permissionMode` is the composer's per-thread WRITE-tool permission (ADR-0005
+  §Port P1). Sent only when the page has an authoritative value; omitted → the
+  thread's sticky `assistant_threads.permission_mode` (absent → `ask`). Captured
+  at TURN START, held for the whole turn, persisted back as the new sticky value,
+  and chat-only (a task/wiki run stays `ask`). `auto` executes write tools
+  in-loop (no pending row, no approval suspend, per-turn budget); `deny` refuses
+  writes locally; `ask` suspends for per-chip approval.
   > **Retained legacy — Workers only.** Still mounted on Workers (the app now
   > sends over the `GET /api/assistant/agent/chat:<chatId>` WebSocket);
   > **404 on the Bun flavor** (the assistant groups are not mounted). Not removed on
@@ -2411,8 +2419,10 @@ GET    /api/assistant/chat/:chatId
         summarizedCount, permissionMode, createdAt, updatedAt }
   | 404 ASSISTANT_THREAD_NOT_FOUND
   Transcript for reload/scrollback. `permissionMode` is the sticky per-thread
-  WRITE permission (`"ask" | "auto" | "deny"`, DO canonical, `"ask"` fallback) —
-  the composer picker hydrates from it on load (D2/D5). Persisted entries carry
+  WRITE permission (`"ask" | "auto" | "deny"`; the D1 `assistant_threads.
+  permission_mode` column is canonical in the in-process tier, with the DO value
+  preferred while a DO is present; absent → `"ask"`) — the composer picker
+  hydrates from it on load (D2/D5). Persisted entries carry
   optional meta:
   user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
   failure an `error` {code,message} block or a `stopped:true` marker (client

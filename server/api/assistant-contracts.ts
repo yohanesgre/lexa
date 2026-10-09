@@ -118,6 +118,8 @@ const AssistantChatStreamInput = Schema.Struct({
   attachments: Schema.optional(Schema.Array(AssistantAttachmentRef)),
   fromIndex: Schema.optional(Schema.Number),
   reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
+  // Turn-start WRITE permission (D2/D5/D6). Absent → the thread's sticky value.
+  permissionMode: Schema.optional(AssistantToolPermissionModeSchema),
 });
 
 const AssistantChatPath = Schema.Struct({ chatId: Schema.String });

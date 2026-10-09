@@ -25,6 +25,8 @@ import {
   buildSprintArchiveDiff,
   buildSprintDeleteDiff,
   buildAssistantWriteTools,
+  buildAutoWriteRecord,
+  buildDenyWriteRecord,
   createWriteRecorder,
   type AssistantWriteToolDeps,
   type WriteRecorderInsertRow,
@@ -541,5 +543,56 @@ describe("executeAssistantWrite — bulk refs", () => {
     const out = (await Effect.runPromise(executeAssistantWrite(rowFor("archive_task", { ref: "NIM-1" }), ctx))) as { ok: boolean };
     expect(out.ok).toBe(true);
     expect(calls).toEqual(["t1"]);
+  });
+});
+
+// ADR-0005 §Port P1: auto applies the resolved write in-loop and returns the
+// applied output (no pending row, no proposal); deny refuses locally without
+// touching the data layer. Ask (the existing path) returns the proposal shape.
+describe("write-tools auto/deny records (permission modes)", () => {
+  interface ModeTool {
+    name: string;
+    execute: (args: unknown) => Promise<Record<string, unknown>>;
+  }
+  const depsWith = (record: AssistantWriteToolDeps["record"]): AssistantWriteToolDeps => ({
+    projectId: "p1",
+    findTaskByRef: async (ref) => (ref === "NIM-1" ? snapshot : null),
+    findColumn: async () => null,
+    findWikiPageBySlug: async () => null,
+    findMilestone: async () => null,
+    countSprints: async () => 0,
+    findSwimlane: async () => null,
+    record,
+  });
+  const tool = (record: AssistantWriteToolDeps["record"], name: string): ModeTool =>
+    (buildAssistantWriteTools(depsWith(record)) as unknown as ModeTool[]).find((t) => t.name === name)!;
+
+  it("auto applies in-loop and returns the applied output (no proposal)", async () => {
+    const applied: Array<{ name: string; args: unknown }> = [];
+    const record = buildAutoWriteRecord({
+      apply: async (name, args) => { applied.push({ name, args }); return { ok: true, result: { id: "t9" } }; },
+    });
+    const out = await tool(record, "archive_task").execute({ ref: "NIM-1" });
+    expect(out).toEqual({ ok: true, applied: true, result: { id: "t9" } });
+    expect(applied).toEqual([{ name: "archive_task", args: { ref: "NIM-1" } }]);
+  });
+
+  it("auto surfaces an apply failure as a recoverable error", async () => {
+    const record = buildAutoWriteRecord({ apply: async () => ({ ok: false, error: "FORBIDDEN: nope" }) });
+    const out = await tool(record, "archive_task").execute({ ref: "NIM-1" });
+    expect(out).toEqual({ proposed: false, error: "FORBIDDEN: nope" });
+  });
+
+  it("auto enforces the per-turn budget", async () => {
+    const record = buildAutoWriteRecord({ limit: 1, apply: async () => ({ ok: true }) });
+    const t = tool(record, "archive_task");
+    expect(await t.execute({ ref: "NIM-1" })).toMatchObject({ ok: true, applied: true });
+    const over = await t.execute({ ref: "NIM-1" });
+    expect(over).toMatchObject({ proposed: false, error: expect.stringContaining("write budget exceeded") });
+  });
+
+  it("deny refuses locally without applying", async () => {
+    const out = await tool(buildDenyWriteRecord(), "archive_task").execute({ ref: "NIM-1" });
+    expect(out).toMatchObject({ proposed: false, error: expect.stringContaining("blocked") });
   });
 });

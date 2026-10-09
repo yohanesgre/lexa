@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import { Db, queryFirst, queryAll, run, runReturning, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ID, ISODate } from "../../shared/types";
-import type { AssistantThreadType } from "../../shared/assistant";
+import type { AssistantThreadType, AssistantToolPermissionMode } from "../../shared/assistant";
+import { resolveAssistantToolPermissionMode } from "../../shared/assistant";
 
 export interface AssistantThread {
   documentType: AssistantThreadType;
@@ -12,6 +13,7 @@ export interface AssistantThread {
   pinned: boolean;
   agentId: string | null;
   skillId: string | null;
+  permissionMode: AssistantToolPermissionMode;
   messages: unknown[];
   summary: string | null;
   summarizedCount: number;
@@ -28,6 +30,7 @@ interface AssistantThreadRow {
   pinned: number;
   agent_id: string | null;
   skill_id: string | null;
+  permission_mode: string | null;
   messages: string;
   summary: string | null;
   summarized_count: number;
@@ -52,6 +55,7 @@ function rowToThread(row: AssistantThreadRow): AssistantThread {
     pinned: row.pinned === 1,
     agentId: row.agent_id,
     skillId: row.skill_id,
+    permissionMode: resolveAssistantToolPermissionMode(undefined, row.permission_mode),
     messages,
     summary: row.summary,
     summarizedCount: row.summarized_count,
@@ -122,6 +126,12 @@ export class AssistantThreadRepo extends Effect.Service<AssistantThreadRepo>()("
           );
           return rowToThread(rows[0]!);
         }),
+
+      // Sticky WRITE-mode write (0029, ADR-0005 §Port P1). A plain UPDATE: the
+      // row exists by the time this runs (runChatStream upserts it before the
+      // first frame). Never written for task/wiki threads (D5).
+      setPermissionMode: (documentType: AssistantThreadType, documentId: string, mode: AssistantToolPermissionMode): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE assistant_threads SET permission_mode = ?, updated_at = datetime('now') WHERE document_type = ? AND document_id = ?`, mode, documentType, documentId).pipe(Effect.asVoid),
 
       resetThread: (documentType: AssistantThreadType, documentId: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
         run(db, `DELETE FROM assistant_threads WHERE document_type = ? AND document_id = ?`, documentType, documentId).pipe(

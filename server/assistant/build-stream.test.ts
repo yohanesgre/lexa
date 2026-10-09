@@ -641,3 +641,87 @@ describe("write-intent no-tool-call guard", () => {
     expect((frames.at(-1) as { text?: string }).text).toBe(reply);
   });
 });
+
+// ADR-0005 §Reliability.3: a killed turn keeps its partial output. A slow turn
+// with a shortened throttle window must write at least one `partial: true`
+// entry, and the terminal persist must replace it (drop the flag) with the full
+// text.
+describe("incremental partial persistence", () => {
+  it("writes ≥1 partial mid-turn and the terminal persist replaces it", async () => {
+    const persisted: Array<{ messages: unknown[]; summary: string | null; count: number }> = [];
+    const slow = () =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "Hel" } as unknown as StreamChunk;
+        await new Promise((r) => setTimeout(r, 25));
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "lo" } as unknown as StreamChunk;
+        await new Promise((r) => setTimeout(r, 25));
+        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+      })();
+    const c = ctx(slow);
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages, summary, count) => { persisted.push({ messages, summary, count }); };
+
+    const frames = await drain(buildStream(c));
+    expect(frames.at(-1)?.type).toBe("done");
+
+    const partials = persisted.filter((p) => (p.messages.at(-1) as { partial?: unknown } | undefined)?.partial === true);
+    expect(partials.length).toBeGreaterThanOrEqual(1);
+    // A partial never carries a pendingBatch (only the suspend path does).
+    expect(partials.every((p) => (p.messages.at(-1) as { pendingBatch?: unknown }).pendingBatch === undefined)).toBe(true);
+
+    const terminal = persisted.at(-1)!;
+    const last = terminal.messages.at(-1) as { partial?: unknown; content?: string };
+    expect(last.partial).toBeUndefined();
+    expect(last.content).toBe("Hello");
+  });
+});
+
+// ADR-0005 §Port P1: only `ask` suspends on drained proposals. `auto` applies
+// in-loop (its toolset carries no drain) and `deny` refuses locally — neither
+// may suspend.
+describe("write-mode branch", () => {
+  const proposal: QueuedProposal = {
+    approvalId: "a1",
+    batchId: "b1",
+    seq: 0,
+    name: "delete_task",
+    detail: "Delete LX-1",
+    diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" },
+    args: { ref: "LX-1" },
+  };
+  const writeCallStream = () =>
+    (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "delete_task" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: JSON.stringify({ ref: "LX-1" }) } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+      yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+    })();
+
+  it("ask suspends on a drained proposal", async () => {
+    const c = ctx(writeCallStream);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "ask";
+    c.writeDrain = () => [proposal];
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(true);
+  });
+
+  it("auto does not suspend (writes applied in-loop, no drain)", async () => {
+    const c = ctx(writeCallStream);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "auto";
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(false);
+    expect(frames.at(-1)?.type).toBe("done");
+  });
+
+  it("deny does not suspend", async () => {
+    const c = ctx(writeCallStream);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "deny";
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(false);
+    expect(frames.at(-1)?.type).toBe("done");
+  });
+});

@@ -3,10 +3,11 @@ import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail } from "./tools";
 import { isAssistantWriteTool, type QueuedProposal } from "./write-tools";
 import { approvalCarriersOf } from "./approval-carrier";
 import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/errors";
-import type { AssistantReasoningEffort, StreamFrame, ApprovalPartial } from "../../shared/assistant";
+import type { AssistantReasoningEffort, AssistantToolPermissionMode, StreamFrame, ApprovalPartial } from "../../shared/assistant";
 import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../shared/assistant";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
-import { hydrateImageParts, hydrateDocumentParts, replaceImageRefsWithPlaceholders, needsSummary, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
+import { hydrateImageParts, hydrateDocumentParts, replaceImageRefsWithPlaceholders, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
+import { summaryWindow, SUMMARY_WINDOW } from "./summarize";
 
 // get_skill is deliberately absent: it takes a `name` argument, so empty args
 // are an argument error there (see the empty-args guard below).
@@ -353,6 +354,13 @@ export interface StreamRunContext {
   resumeResultsNote?: string | undefined;
   writeDrain?: (() => QueuedProposal[]) | undefined;
   writeTools?: string[] | undefined;
+  // Turn-start WRITE permission mode (ADR-0005 §Port P1). Only `ask` may drain
+  // proposals and suspend; `auto` applies in-loop (its tools carry no drain) and
+  // `deny` refuses locally — neither suspends. Absent → "ask".
+  writeMode?: AssistantToolPermissionMode | undefined;
+  // Trailing-throttle window for incremental partial persistence (ADR-0005
+  // §Reliability.3). Default 2000 ms; tests shorten it.
+  partialPersistIntervalMs?: number | undefined;
   modelOptions?: Record<string, unknown> | undefined;
   gatewayStream?: ((input: unknown) => AsyncIterable<StreamChunk>) | undefined;
   onDispose?: (() => Promise<void>) | undefined;
@@ -449,20 +457,72 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         const toolLog: Array<{ name: string; detail?: string }> = [];
         const writeToolCallIds: string[] = [];
         let writeQueueDrained = false;
+        const writeMode: AssistantToolPermissionMode = ctx.writeMode ?? "ask";
         const drainWrites = (): QueuedProposal[] => {
-          if (writeQueueDrained || !ctx.writeDrain) return [];
+          // Only `ask` suspends on proposals: auto applies in-loop and deny
+          // refuses locally, so neither carries a drain.
+          if (writeMode !== "ask" || writeQueueDrained || !ctx.writeDrain) return [];
           writeQueueDrained = true;
           return ctx.writeDrain();
         };
+        // ── Incremental partial persistence (ADR-0005 §Reliability.3) ──
+        // A killed turn must keep its partial output. Every thread-row write
+        // (partial or terminal) is serialized through ONE promise chain so a
+        // slow partial can never land after the terminal persist that replaces
+        // it; a generation counter drops any partial queued behind a terminal.
+        const PARTIAL_INTERVAL_MS = ctx.partialPersistIntervalMs ?? 2000;
+        let persistChain: Promise<void> = Promise.resolve();
+        let partialGeneration = 0;
+        let partialTimer: ReturnType<typeof setTimeout> | undefined;
+        let terminalReached = false;
+        const enqueuePersist = (fn: () => Promise<void>): Promise<void> => {
+          const next = persistChain.then(fn, fn);
+          persistChain = next.catch(() => {});
+          return next;
+        };
+        // Terminal/suspend/abort: stop the timer and invalidate queued partials.
+        const stopPartial = (): void => {
+          terminalReached = true;
+          partialGeneration += 1;
+          if (partialTimer !== undefined) { clearTimeout(partialTimer); partialTimer = undefined; }
+        };
+        // The in-progress assistant turn. `partial: true` marks it replaceable;
+        // `pendingBatch` is NEVER written here (only the suspend path writes it).
+        const partialEntry = (): Record<string, unknown> => {
+          const citations = ctx.getCitations();
+          return { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), partial: true };
+        };
+        const schedulePartial = (): void => {
+          if (terminalReached || partialTimer !== undefined) return;
+          partialTimer = setTimeout(() => {
+            partialTimer = undefined;
+            if (terminalReached) return;
+            // Nothing worth persisting yet — re-arm for a later delta.
+            if (stripToolCallXml(text) === "" && toolLog.length === 0) { schedulePartial(); return; }
+            const generation = partialGeneration;
+            const messages = [...ctx.history, ...userEntries, partialEntry()];
+            void enqueuePersist(async () => {
+              if (generation !== partialGeneration) return;
+              await ctx.persist(messages, ctx.historySummary(), ctx.historySummarizedCount()).catch(() => {});
+            });
+            schedulePartial();
+          }, PARTIAL_INTERVAL_MS);
+        };
         const persistTerminalTurn = async (extra: Record<string, unknown>) => {
-          await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...extra }], ctx.historySummary(), ctx.historySummarizedCount());
+          stopPartial();
+          await enqueuePersist(async () => {
+            await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...extra }], ctx.historySummary(), ctx.historySummarizedCount());
+          });
         };
         const suspendTurn = async (drained: QueuedProposal[]) => {
           for (const p of drained) {
             push({ type: "tool_pending", approvalId: p.approvalId, batchId: p.batchId, seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff });
           }
           const citations = ctx.getCitations();
-          await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
+          stopPartial();
+          await enqueuePersist(async () => {
+            await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
+          });
           push({ type: "suspended", batchId: drained[0]!.batchId });
         };
         try {
@@ -494,6 +554,9 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               } finally { clearTimeout(stallTimer); }
               if (result.done) break;
               const chunk = result.value;
+              // Start/keep the trailing partial-persist timer alive while the
+              // turn produces anything worth persisting (text or tool log).
+              schedulePartial();
               if (chunk.type === "TEXT_MESSAGE_CONTENT") {
                 let delta: string = chunk.delta;
                 if ((text + delta).search(/<tool_call>/i) !== -1 || delta.search(/<\/tool_call>/i) !== -1) {
@@ -751,15 +814,21 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           let summary = ctx.historySummary();
           let summarizedCount = ctx.historySummarizedCount();
           let kept = finalMessages;
-          if (needsSummary(finalMessages) && findPendingBatch(finalMessages) === null) {
-            const olderCandidates = finalMessages.slice(0, finalMessages.length - 8);
-            const older = olderCandidates.filter((m) => pendingBatchIdOf((m as { pendingBatch?: unknown } | null)?.pendingBatch) === null);
-            if (older.length > 0 && older.length === olderCandidates.length) {
-              const condensed = await summarizeOlder(ctx.config, older, ctx.threadId).catch(() => null);
-              if (condensed !== null) { summarizedCount += older.length; summary = condensed; kept = finalMessages.slice(-8); }
+          // Cumulative compaction (ADR-0005 §Port P2): `summaryWindow` returns
+          // only the not-yet-summarized prefix `[summarizedCount, len - window)`
+          // so a repeated persist is idempotent and the provider never re-reads
+          // the whole history. The summary call stays on the in-process
+          // `completeText`; the window/threshold rules are the shared pure
+          // helpers (40 msgs / 64 KiB, window 8).
+          if (findPendingBatch(finalMessages) === null) {
+            const window = summaryWindow(finalMessages, summarizedCount);
+            if (window !== null) {
+              const condensed = await summarizeOlder(ctx.config, window.older, ctx.threadId).catch(() => null);
+              if (condensed !== null) { summarizedCount = window.summarizedCount; summary = condensed; kept = finalMessages.slice(-SUMMARY_WINDOW); }
             }
           }
-          await ctx.persist(kept, summary, summarizedCount);
+          stopPartial();
+          await enqueuePersist(() => ctx.persist(kept, summary, summarizedCount));
           await ctx.onDone(text);
           push({ type: "done", [ctx.idField]: ctx.keyId, text, usage: { in: usageIn, out: usageOut } } as StreamFrame);
         } catch (e) {
@@ -791,6 +860,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             push({ type: "error", code, message: clientMessage });
           }
         } finally {
+          stopPartial();
           if (ctx.registry.get(ctx.keyId) === abort) ctx.registry.delete(ctx.keyId);
           closed = true;
           try { controller.close(); } catch {}

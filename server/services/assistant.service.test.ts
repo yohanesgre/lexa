@@ -96,6 +96,7 @@ function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
     pinned: false,
     agentId: "a1",
     skillId: "s1",
+    permissionMode: "ask",
     messages: [{ role: "user", content: "hello" }],
     summary: "prior summary",
     summarizedCount: 4,
