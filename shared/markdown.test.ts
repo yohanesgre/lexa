@@ -398,6 +398,12 @@ describe("docToMarkdown", () => {
 });
 
 describe("round-trip", () => {
+  it("bold", () => expect(rd("**bold**")).toBe("**bold**"));
+  it("bullet list", () => expect(rd("- a\n- b\n- c")).toBe("- a\n- b\n- c"));
+  it("ordered list", () => expect(rd("1. a\n2. b")).toBe("1. a\n1. b"));
+  it("code block", () => expect(rd("```ts\nconst x = 1;\n```")).toBe("```ts\nconst x = 1;\n```"));
+  it("blockquote", () => expect(rd("> quote")).toBe("> quote"));
+
   it("task list round-trip preserves checked state", () => {
     const result = rd("- [ ] todo\n- [x] done");
     expect(result).toBe("- [ ] todo\n- [x] done");

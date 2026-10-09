@@ -133,6 +133,13 @@ describe("ColumnsSettingsSection", () => {
     expect(screen.getByText("Green")).toBeInTheDocument();
     expect(screen.getByText("010")).toBeInTheDocument();
   });
+
+  it("renders Columns as an h2", () => {
+    render(
+      <ColumnsSettingsSection columns={[]} sensors={[]} onDragEnd={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onAdd={vi.fn()} />
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Columns" })).toBeInTheDocument();
+  });
 });
 
 describe("OptionSettingsSection in-use guard", () => {
@@ -177,6 +184,23 @@ describe("OptionSettingsSection in-use guard", () => {
       />
     );
     expect(screen.getByRole("button", { name: /delete priority/i })).toBeEnabled();
+  });
+
+  it("renders Priorities as an h2", () => {
+    render(
+      <OptionSettingsSection
+        kind="priority"
+        title="Priorities"
+        description="desc"
+        options={[]}
+        sensors={[]}
+        onDragEnd={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onAdd={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Priorities" })).toBeInTheDocument();
   });
 });
 
