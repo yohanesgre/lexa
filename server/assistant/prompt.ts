@@ -55,7 +55,10 @@ function docContextBlock(docContext: string): string | null {
 
 function threadSummaryBlock(summary: { summary: string; summarizedCount: number } | null | undefined): string | null {
   if (!summary || summary.summary.trim() === "") return null;
-  return `[Conversation summary — the ${summary.summarizedCount} earlier turns were condensed]\n${summary.summary.trim()}\n[end of summary]`;
+  // The in-process tier stores the count RELATIVE to its truncated base, so a
+  // post-summary row carries 0; omit the number rather than print "0 turns".
+  const lead = summary.summarizedCount > 0 ? `the ${summary.summarizedCount} earlier turns were condensed` : "earlier turns were condensed";
+  return `[Conversation summary — ${lead}]\n${summary.summary.trim()}\n[end of summary]`;
 }
 
 export const WRITE_POLICY =
@@ -163,7 +166,9 @@ export const DEFAULT_ASSISTANT_PROMPT = "Generate based on document context.";
 export function buildUserMessage(input: UserMessageInput): string {
   const instruction = input.instruction.trim() !== "" ? input.instruction : DEFAULT_ASSISTANT_PROMPT;
   if (input.summary && input.summary.trim() !== "") {
-    const segment = `[Conversation summary — the ${input.summarizedCount ?? 0} earlier turns below were condensed]\n${input.summary.trim()}\n[end of summary]`;
+    const count = input.summarizedCount ?? 0;
+    const lead = count > 0 ? `the ${count} earlier turns below were condensed` : "earlier turns below were condensed";
+    const segment = `[Conversation summary — ${lead}]\n${input.summary.trim()}\n[end of summary]`;
     return `${segment}\n\n${instruction}`;
   }
   return instruction;

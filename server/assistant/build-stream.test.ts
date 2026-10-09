@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
 import { buildStream, buildResumeResultsNote, findNewestPendingBatch, pendingBatchIdsNewestFirst, isWriteIntentClaim, normalizeProviderMessages, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
@@ -642,26 +642,31 @@ describe("write-intent no-tool-call guard", () => {
   });
 });
 
-// ADR-0005 §Reliability.3: a killed turn keeps its partial output. A slow turn
-// with a shortened throttle window must write at least one `partial: true`
-// entry, and the terminal persist must replace it (drop the flag) with the full
-// text.
+// ADR-0005 §Reliability.3: a killed turn keeps its partial output. The throttle
+// window is injected, so these pins drive a fake clock deterministically (no
+// real-time sleeps).
 describe("incremental partial persistence", () => {
-  it("writes ≥1 partial mid-turn and the terminal persist replaces it", async () => {
-    const persisted: Array<{ messages: unknown[]; summary: string | null; count: number }> = [];
-    const slow = () =>
-      (async function* () {
-        yield { type: "TEXT_MESSAGE_CONTENT", delta: "Hel" } as unknown as StreamChunk;
-        await new Promise((r) => setTimeout(r, 25));
-        yield { type: "TEXT_MESSAGE_CONTENT", delta: "lo" } as unknown as StreamChunk;
-        await new Promise((r) => setTimeout(r, 25));
-        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
-      })();
-    const c = ctx(slow);
-    c.partialPersistIntervalMs = 5;
-    c.persist = async (messages, summary, count) => { persisted.push({ messages, summary, count }); };
+  afterEach(() => vi.useRealTimers());
 
-    const frames = await drain(buildStream(c));
+  const slowStream = (ms: number) =>
+    (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "Hel" } as unknown as StreamChunk;
+      await new Promise((r) => setTimeout(r, ms));
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "lo" } as unknown as StreamChunk;
+      await new Promise((r) => setTimeout(r, ms));
+      yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+    })();
+
+  it("writes ≥1 partial mid-turn and the terminal persist replaces it", async () => {
+    vi.useFakeTimers();
+    const persisted: Array<{ messages: unknown[] }> = [];
+    const c = ctx(() => slowStream(20));
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages) => { persisted.push({ messages }); };
+
+    const draining = drain(buildStream(c));
+    await vi.advanceTimersByTimeAsync(60);
+    const frames = await draining;
     expect(frames.at(-1)?.type).toBe("done");
 
     const partials = persisted.filter((p) => (p.messages.at(-1) as { partial?: unknown } | undefined)?.partial === true);
@@ -673,6 +678,92 @@ describe("incremental partial persistence", () => {
     const last = terminal.messages.at(-1) as { partial?: unknown; content?: string };
     expect(last.partial).toBeUndefined();
     expect(last.content).toBe("Hello");
+  });
+
+  it("a failed partial write does not kill the turn", async () => {
+    vi.useFakeTimers();
+    let terminal: unknown[] | null = null;
+    const c = ctx(() => slowStream(20));
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages) => {
+      if ((messages.at(-1) as { partial?: unknown }).partial === true) throw new Error("partial write failed");
+      terminal = messages;
+    };
+
+    const draining = drain(buildStream(c));
+    await vi.advanceTimersByTimeAsync(60);
+    const frames = await draining;
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(terminal).not.toBeNull();
+  });
+
+  it("a partial queued behind a blocked persist is dropped after terminal (generation guard)", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let blocked = false;
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "x" } as unknown as StreamChunk;
+        await new Promise((r) => setTimeout(r, 30));
+        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+      })()
+    );
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages) => {
+      const isPartial = (messages.at(-1) as { partial?: unknown }).partial === true;
+      calls.push(isPartial ? "partial" : "terminal");
+      // Block only the FIRST partial; later partials queue behind it and are
+      // superseded by the terminal persist (generation bumped in stopPartial).
+      if (isPartial && !blocked) { blocked = true; await gate; }
+    };
+
+    const draining = drain(buildStream(c));
+    await vi.advanceTimersByTimeAsync(60);
+    release();
+    const frames = await draining;
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(calls.filter((x) => x === "partial")).toHaveLength(1);
+    expect(calls.at(-1)).toBe("terminal");
+  });
+});
+
+// SEV: `TOOL_CALL_RESULT` aborted the turn for ANY write tool. In `auto` the
+// tool executed in-loop, so the abort killed the in-flight provider stream.
+// Only `ask` (drain → suspend) may abort.
+describe("write-tool result does not abort in auto", () => {
+  const writeResultThenText = () =>
+    (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "a" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "delete_task" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: JSON.stringify({ ref: "LX-1" }) } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_RESULT", toolCallId: "call_1" } as unknown as StreamChunk;
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "b" } as unknown as StreamChunk;
+      yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+    })();
+
+  it("auto completes the turn and never aborts", async () => {
+    const controller = new AbortController();
+    const c = ctx(writeResultThenText);
+    c.registry.set("c1", controller);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "auto";
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect((frames.at(-1) as { text?: string }).text).toBe("ab");
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it("ask aborts on the write-tool result", async () => {
+    const controller = new AbortController();
+    const c = ctx(writeResultThenText);
+    c.registry.set("c1", controller);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "ask";
+    await drain(buildStream(c));
+    expect(controller.signal.aborted).toBe(true);
   });
 });
 

@@ -841,39 +841,74 @@ INSERT INTO assistant_threads (document_type, document_id, project_id, owner_use
 // ADR-0005 §Port P3 (LX-80): one execution per approval batch. A claim row
 // makes a duplicate resume idempotent.
 describe("chat resume — claim idempotency", () => {
-  const seedDecided = (): void => {
+  const claimCount = (): number =>
+    (db.prepare("SELECT COUNT(*) AS c FROM assistant_resume_claims WHERE batch_id = 'b1'").get() as { c: number }).c;
+  const newTaskCount = (): number =>
+    (db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE project_id = 'p1' AND title = 'New task'").get() as { c: number }).c;
+
+  const seed = (status: "approved" | "pending", tool = "create_task", args = '{"title":"New task"}', diff = '{"type":"task_create","title":"New task","fields":{}}'): void => {
     db.exec(`
 INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
 INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
 INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"create it"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
+  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"create it"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"${tool}","diff":${diff}}]}}]');
 INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'approved', '2099-01-01 00:00:00');
+  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, '${tool}', '${args}', '${diff}', '${status}', '2099-01-01 00:00:00');
 `);
   };
 
   it("claims the batch on the first resume and executes once", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
-    seedDecided();
+    seed("approved");
     const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
     expect(frames.some((f) => f.type === "done")).toBe(true);
-    const claim = db.prepare("SELECT COUNT(*) AS c FROM assistant_resume_claims WHERE batch_id = 'b1'").get() as { c: number };
-    expect(claim.c).toBe(1);
-    const created = db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE project_id = 'p1' AND title = 'New task'").get() as { c: number };
-    expect(created.c).toBe(1);
+    expect(claimCount()).toBe(1);
+    expect(newTaskCount()).toBe(1);
   });
 
   it("a pre-claimed batch resumes as a no-op without executing", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
-    seedDecided();
+    seed("approved");
     db.exec(`INSERT INTO assistant_resume_claims (batch_id) VALUES ('b1')`);
     const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
     expect(frames).toEqual([]);
     expect(providerMock.calls).toHaveLength(0);
-    const created = db.prepare("SELECT COUNT(*) AS c FROM tasks WHERE project_id = 'p1' AND title = 'New task'").get() as { c: number };
-    expect(created.c).toBe(0);
+    expect(newTaskCount()).toBe(0);
+  });
+
+  it("releases the claim while the batch is pending, so a later resume succeeds", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seed("pending");
+    const first = await run(Effect.either(service.resumeChatStream("c1", "u1")));
+    expect(first._tag).toBe("Left");
+    expect(claimCount()).toBe(0); // released: still pending
+    await run(service.decideApproval("ap1", "u1", "approve"));
+    const second = await drain(await run(service.resumeChatStream("c1", "u1")));
+    expect(second.some((f) => f.type === "done")).toBe(true);
+    expect(newTaskCount()).toBe(1);
+  });
+
+  it("keeps the claim when the batch executed even with a failed write", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seed("approved", "update_task", '{"ref":"EG-999","title":"t"}', "{}");
+    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
+    const statuses = frames.filter((f) => f.type === "approval_result").map((f) => (f as { status: string }).status);
+    expect(statuses).toContain("failed");
+    expect(claimCount()).toBe(1); // executed (attempted) → claim kept
+  });
+
+  it("a marker with no rows settles without a provider turn and releases the claim", async () => {
+    setup();
+    db.exec(`INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+      VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[]}}]');`);
+    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
+    expect(frames).toEqual([]);
+    expect(providerMock.calls).toHaveLength(0);
+    expect(claimCount()).toBe(0);
   });
 });
 

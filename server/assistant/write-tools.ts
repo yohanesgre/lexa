@@ -3,6 +3,7 @@ import { z } from "zod";
 import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { ApprovalPartial, AssistantWriteDiff } from "../../shared/assistant";
+import { ASSISTANT_WRITE_DENIED_ERROR } from "../../shared/assistant";
 
 const DIFF_TEXT_CAP = 2000;
 const COMMENT_BODYTEXT_CAP = 2000;
@@ -218,11 +219,6 @@ export type AssistantWriteToolOutput =
 // tool output (auto), or a recoverable error string (any mode).
 export type WriteRecordResult = RecordedProposal | { output: AssistantWriteToolOutput };
 
-// Deny-mode local refusal (ADR-0005 §Port P1). Mirrors the DO-side
-// `tools-ai.ts` copy verbatim; the model reads it and may suggest a mode switch.
-export const WRITE_TOOLS_DENIED_ERROR =
-  "Write tools are blocked for this thread (composer mode: Blocked). Reads still work — the user can switch to Ask or Auto.";
-
 // Side-channel entry pairing a persisted pending-write row with its stream
 // toolCallId. The queue drains sequentially in the TOOL_CALL_RESULT handler
 // (locked-in pairing decision) and feeds the transcript's pendingBatch meta.
@@ -363,7 +359,7 @@ export function buildAutoWriteRecord(deps: AutoWriteRecordDeps): AssistantWriteT
 // Deny-mode executor (ADR-0005 §Port P1): never reaches the data layer; every
 // write tool returns the same model-readable refusal. Reads are unaffected.
 export function buildDenyWriteRecord(): AssistantWriteToolDeps["record"] {
-  return async () => ({ error: WRITE_TOOLS_DENIED_ERROR });
+  return async () => ({ error: ASSISTANT_WRITE_DENIED_ERROR });
 }
 
 const tipTapDoc = z

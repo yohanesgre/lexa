@@ -12,7 +12,7 @@ import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
-import { Db, DbError, RowNotFound, ConstraintViolation, queryFirst, run, type SqlParam } from "../db/db";
+import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { AssistantJevService } from "./assistant-jev.service";
 import { ProviderNotConfigured, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired, ChatAttachmentsDisabled, AttachmentExtractionFailed, errorCodeMap } from "../api/errors";
@@ -32,6 +32,7 @@ import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest, AssistantToolPermissionMode, StreamFrame } from "../../shared/assistant";
 import { resolveAssistantToolPermissionMode } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, findNewestPendingBatch, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
+import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim";
 import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
 import { collectResumeResults } from "../assistant/resume-results";
 import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
@@ -56,14 +57,6 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       db.prepare(sql).first(...params).then((row) => row as unknown as T | null);
     const dbAll = <T>(sql: string, ...params: SqlParam[]): Promise<T[]> =>
       db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
-    // Resume-claim idempotency (ADR-0005 §Port P3; LX-80). `INSERT OR IGNORE`
-    // on the batch id is the atomic claim; a duplicate request finds the row
-    // present and no-ops. Released when the batch is not executable; kept once
-    // it has been executed (or the outcome is indeterminate).
-    const claimResumeBatch = (batchId: string): Effect.Effect<boolean, ConstraintViolation | DbError> =>
-      run(db, "INSERT OR IGNORE INTO assistant_resume_claims (batch_id) VALUES (?)", batchId).pipe(Effect.map((changes) => changes > 0));
-    const releaseResumeBatch = (batchId: string): Effect.Effect<number, ConstraintViolation | DbError> =>
-      run(db, "DELETE FROM assistant_resume_claims WHERE batch_id = ?", batchId);
     // A duplicate resume must not re-execute the batch and has nothing to say;
     // an empty SSE stream closes immediately (the first resume carries frames).
     const emptyFrameStream = (): ReadableStream<StreamFrame> =>
@@ -477,19 +470,24 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const batchId = findNewestPendingBatch(thread.messages);
         if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
         // Claim BEFORE any work so a retry / second tab cannot re-execute the
-        // same approved writes. A DB failure (missing table) degrades to
-        // "proceed" rather than blocking resume.
-        const claimed = yield* claimResumeBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed(true)));
-        if (!claimed) return emptyFrameStream();
+        // same approved writes. `duplicate` (a prior claim or a non-missing-
+        // table DB error) no-ops; only a missing claim table proceeds without a
+        // claim (`unclaimed`).
+        const claim = yield* claimResumeBatch(db, batchId);
+        if (claim === "duplicate") return emptyFrameStream();
         const rows = yield* pendingWritesRepo.listByBatch(batchId);
         const remaining = rows.filter((r) => r.status === "pending").length;
         if (remaining > 0) {
-          yield* releaseResumeBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed(0)));
+          yield* releaseResumeBatch(db, batchId);
           return yield* new ApprovalsPending({ batchId, remaining });
         }
-        // Marker with no rows: nothing to execute — release so a later attempt
-        // can retry, then settle the turn (mirrors the DO's `missing` outcome).
-        if (rows.length === 0) yield* releaseResumeBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed(0)));
+        // Marker with no rows: nothing to execute — release and settle WITHOUT
+        // a provider turn (mirrors agent.ts:955-963; the continuation runs only
+        // when there is a results note to deliver).
+        if (rows.length === 0) {
+          yield* releaseResumeBatch(db, batchId);
+          return emptyFrameStream();
+        }
         const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };
         const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row, ctx as unknown as never));
         const resumeResultsNote = buildResumeResultsNote(noteLines);

@@ -38,6 +38,7 @@ import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import { AssistantProvidersService } from "./assistant-providers.service";
 import { buildStream, findPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
 import type { StreamFrame } from "../../shared/assistant";
+import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim";
 import { collectResumeResults } from "../assistant/resume-results";
 import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import type { ProviderConfig } from "../assistant/provider";
@@ -62,12 +63,6 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       db.prepare(sql).first(...params).then((row) => row as unknown as T | null);
     const dbAll = <T>(sql: string, ...params: SqlParam[]): Promise<T[]> =>
       db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
-    // Resume-claim idempotency (ADR-0005 §Port P3; LX-80), shared table with the
-    // chat path. See assistant-chat.service for the release/keep contract.
-    const claimResumeBatch = (batchId: string): Effect.Effect<boolean, ConstraintViolation | DbError> =>
-      run(db, "INSERT OR IGNORE INTO assistant_resume_claims (batch_id) VALUES (?)", batchId).pipe(Effect.map((changes) => changes > 0));
-    const releaseResumeBatch = (batchId: string): Effect.Effect<number, ConstraintViolation | DbError> =>
-      run(db, "DELETE FROM assistant_resume_claims WHERE batch_id = ?", batchId);
     const emptyFrameStream = (): ReadableStream<StreamFrame> =>
       new ReadableStream<StreamFrame>({ start(controller) { controller.close(); } });
     const taskService = yield* TaskService;
@@ -451,16 +446,24 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         // Claim BEFORE any work so a retry / second tab cannot re-execute the
-        // same approved writes. A DB failure degrades to "proceed".
+        // same approved writes. `duplicate` no-ops; only a missing claim table
+        // proceeds without a claim (`unclaimed`).
         const batchId = findPendingBatch(thread.messages);
         if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
-        const claimed = yield* claimResumeBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed(true)));
-        if (!claimed) return emptyFrameStream();
+        const claim = yield* claimResumeBatch(db, batchId);
+        if (claim === "duplicate") return emptyFrameStream();
+        // Marker with no rows: nothing to execute — release and settle WITHOUT
+        // a provider turn (parity with the chat resume path).
+        const rows = yield* pendingWritesRepo.listByBatch(batchId);
+        if (rows.length === 0) {
+          yield* releaseResumeBatch(db, batchId);
+          return emptyFrameStream();
+        }
         const prepared = yield* Effect.either(prepareResume(thread));
         if (prepared._tag === "Left") {
           // Not executable (still pending / no marker): release so a later
           // attempt can resume it, then surface the same error as before.
-          yield* releaseResumeBatch(batchId).pipe(Effect.catchAll(() => Effect.succeed(0)));
+          yield* releaseResumeBatch(db, batchId);
           return yield* Effect.fail(prepared.left);
         }
         const { messages: history, results: approvalResults, resumeResultsNote } = prepared.right;

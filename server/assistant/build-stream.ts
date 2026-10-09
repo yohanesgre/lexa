@@ -411,11 +411,15 @@ export function normalizeRunUsage(raw: unknown, fallback: NormalizedRunUsage): N
   return fallback;
 }
 
-async function summarizeOlder(config: import("./provider").ProviderConfig, older: unknown[], sessionId: string): Promise<string> {
+async function summarizeOlder(config: import("./provider").ProviderConfig, older: unknown[], priorSummary: string | null, sessionId: string): Promise<string> {
   const { completeText } = await import("./provider");
+  // Thread the prior summary through (mirrors the DO's `summarizeTranscript`):
+  // re-compaction condenses only the newly-unfolded slice, so the accumulated
+  // summary must be carried in or earlier content is lost on every re-summary.
+  const prior = priorSummary && priorSummary.trim() !== "" ? `\n\nExisting summary so far:\n${priorSummary.trim()}` : "";
   return completeText(config, {
     systemPrompts: [{ content: "You condense working conversations. Reply with a terse bullet summary of decisions, constraints and open threads only." }],
-    messages: [{ role: "user", content: `Summarize these earlier conversation turns for continuity:\n\n${JSON.stringify(older).slice(0, 60000)}` }],
+    messages: [{ role: "user", content: `Summarize these earlier conversation turns for continuity. Reply with bullets only.${prior}\n\n${JSON.stringify(older).slice(0, 60000)}` }],
   }, { sessionId });
 }
 
@@ -693,7 +697,11 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               } else if (chunk.type === "TOOL_CALL_RESULT") {
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const toolName = pendingCalls.get(id)?.name ?? toolNamesById.get(id) ?? (chunk as unknown as { toolCallName?: string; toolName?: string }).toolCallName ?? (chunk as unknown as { toolCallName?: string; toolName?: string }).toolName ?? "";
-                if (isAssistantWriteTool(toolName)) { writeToolCallIds.push(id); if (!abort.signal.aborted) abort.abort(); }
+                // Only `ask` aborts on a write-tool result: the drain then
+                // suspends the turn. In `auto` the tool EXECUTED in-loop and the
+                // provider stream must run to completion — aborting here killed
+                // the in-flight turn (done:0, cancelled:1, lost tail).
+                if (writeMode === "ask" && isAssistantWriteTool(toolName)) { writeToolCallIds.push(id); if (!abort.signal.aborted) abort.abort(); }
               } else if (chunk.type === "RUN_FINISHED") {
                 didFinish = true;
                 const u = normalizeRunUsage((chunk as { usage?: unknown }).usage, { input: usageIn, output: usageOut, cached: 0, cacheWrite: 0 });
@@ -823,8 +831,21 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           if (findPendingBatch(finalMessages) === null) {
             const window = summaryWindow(finalMessages, summarizedCount);
             if (window !== null) {
-              const condensed = await summarizeOlder(ctx.config, window.older, ctx.threadId).catch(() => null);
-              if (condensed !== null) { summarizedCount = window.summarizedCount; summary = condensed; kept = finalMessages.slice(-SUMMARY_WINDOW); }
+              // `summary` is the PRIOR summary; `summarizeOlder` threads it into
+              // the prompt so re-compaction accumulates (mirrors the DO's
+              // `summarizeTranscript(older, priorSummary, …)`).
+              const condensed = await summarizeOlder(ctx.config, window.older, summary, ctx.threadId).catch(() => null);
+              if (condensed !== null) {
+                // Base consistency: the stored transcript is truncated to the
+                // window, so `summarizedCount` is stored RELATIVE to that
+                // truncated base — everything in `kept` is still unfolded, so
+                // the count is 0 (the accumulated `summary` carries the rest).
+                // Mixing an absolute count with a truncated base made the window
+                // fold almost nothing after the first summary (count > base).
+                kept = finalMessages.slice(-SUMMARY_WINDOW);
+                summarizedCount = 0;
+                summary = condensed;
+              }
             }
           }
           stopPartial();
