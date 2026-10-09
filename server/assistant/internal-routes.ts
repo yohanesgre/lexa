@@ -646,6 +646,19 @@ export interface HarnessTurnContext {
 }
 
 /**
+ * Provider-visible attachment content (ADR-0003 §C attachment hydration).
+ * Exactly one of `base64` (image attachments) or `text` (document attachments)
+ * is set, chosen Worker-side from the stored mime type.
+ */
+export interface AttachmentContent {
+  mimeType: string;
+  /** Base64 of the blob — present for image attachments. */
+  base64?: string | undefined;
+  /** Extracted text — present for document attachments. */
+  text?: string | undefined;
+}
+
+/**
  * Worker-side capabilities the DO calls back into (ADR-0003 §B.2/§C). Injected
  * from `server/workers-entry.ts` so this dispatcher stays IO-free and testable
  * with a plain object.
@@ -657,6 +670,14 @@ export interface InternalAssistantDeps {
    * binding (→ 409 PROVIDER_NOT_CONFIGURED).
    */
   resolveProviderConfigs?: ((projectId: string) => Promise<RegistryModelConfig[] | null>) | undefined;
+  /**
+   * Load one attachment's provider-visible content for a turn's `data-attachment`
+   * parts. Ownership is enforced Worker-side against the project identity.
+   * `null` when the blob/row is missing or not owned. Unwired → 502.
+   */
+  loadAttachment?:
+    | ((input: { projectId: string; storageKey: string }) => Promise<AttachmentContent | null>)
+    | undefined;
   /**
    * Resolve the project's per-turn harness context bundle (ADR-0004 §1). The
    * Worker assembles agent/skill/memory/doc/mention/repo/Jev/summary + tool
@@ -719,6 +740,29 @@ export async function handleInternalAssistantRequest(input: {
       return { status: 409, body: { error: { code: "PROVIDER_NOT_CONFIGURED", message: "No provider binding for this project" } } };
     }
     return { status: 200, body: { configs } };
+  }
+
+  // Attachment content for a turn's `data-attachment` parts (ADR-0003 §C). The
+  // DO cannot read blob storage; the Worker owns ownership + extraction. The
+  // signed project identity is authoritative — the body carries only the key.
+  if (method === "POST" && path === "/api/internal/assistant/attachment") {
+    const identity = input.identity;
+    if (!identity || identity.projectId.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "missing internal project identity" } } };
+    }
+    const payload = (input.body ?? {}) as Record<string, unknown>;
+    const storageKey = typeof payload.storageKey === "string" ? payload.storageKey : "";
+    if (storageKey.length === 0) {
+      return { status: 400, body: { error: { code: "INVALID_PAYLOAD", message: "storageKey is required" } } };
+    }
+    if (!input.deps?.loadAttachment) {
+      return { status: 502, body: { error: { code: "ASSISTANT_UNAVAILABLE", message: "Attachment loading not wired" } } };
+    }
+    const attachment = await input.deps.loadAttachment({ projectId: identity.projectId, storageKey });
+    if (!attachment) {
+      return { status: 404, body: { error: { code: "ATTACHMENT_NOT_FOUND", message: "Attachment not found" } } };
+    }
+    return { status: 200, body: { attachment } };
   }
 
   // Per-turn harness context bundle (ADR-0004 §1; H1). The DO POSTs its

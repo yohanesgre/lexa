@@ -299,6 +299,42 @@ describe("turnErrorFor", () => {
   });
 });
 
+describe("runAssistantTurn attachment hydration", () => {
+  it("injects a document attachment as text context in the provider request", async () => {
+    const recorded: Recorded = { logs: [], runs: [] };
+    let providerBody = "";
+    const fetchImpl = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      providerBody = typeof init?.body === "string" ? init.body : "";
+      return sseResponse([
+        chunk({ role: "assistant", content: "" }, null),
+        chunk({ content: "ok" }, null),
+        chunk({}, "stop", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+      ]);
+    };
+    const messages: UIMessage[] = [
+      {
+        id: "m1",
+        role: "user",
+        parts: [
+          { type: "text", text: "summarize" },
+          { type: "data-attachment", data: { storageKey: "blob-1", mimeType: "text/markdown", name: "spec.md" } },
+        ],
+      },
+    ];
+    const response = await runAssistantTurn(
+      {
+        ...deps([config({ fetchImpl })], recorded),
+        loadDocumentText: async (key) => (key === "blob-1" ? "DOC BODY" : null),
+      },
+      { projectId: "p1", threadKey: "chat:c1", sessionId: "c1", messages }
+    );
+    await drain(response);
+
+    expect(providerBody).toContain("[attached document: spec.md]");
+    expect(providerBody).toContain("DOC BODY");
+  });
+});
+
 function toolCallFetch(): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
   return async () =>
     sseResponse([

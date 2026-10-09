@@ -20,6 +20,7 @@ import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { GitHubClient } from "../github/client";
 import { Storage, StorageConfig } from "../storage/storage";
+import { isChatImageMime } from "../storage/mime";
 import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "../storage/config";
 import { AssistantJevService } from "../services/assistant-jev.service";
 import { TaskService } from "../services/task.service";
@@ -32,7 +33,7 @@ import { loadTaskRepoContent, type RepoContentEntry } from "../services/assistan
 import { errorCodeMap } from "../api/errors";
 import { applyAssistantWrite, type AssistantWriteApplyCtx } from "./write-execution";
 import type { AssistantWriteToolName } from "./write-tool-names";
-import { BOUND_SKILLS_SQL, matchBoundSkillByName } from "../services/assistant-helpers";
+import { BOUND_SKILLS_SQL, bytesToBase64, extractDocumentText, matchBoundSkillByName } from "../services/assistant-helpers";
 import { buildSkillPromptParts, resolveMentionContext, type MentionResolverDeps } from "./context";
 import { discoverMcpDescriptors, executeMcpTool } from "./mcp-descriptors";
 import { docToMarkdown } from "../../shared/markdown";
@@ -46,7 +47,7 @@ import { resolveVisionMode } from "./vision";
 import type { JevRuntimeConfig } from "./jev";
 import type { ApprovalPartial } from "../../shared/assistant";
 import type { ReadToolResponse, WriteExecuteResponse } from "./tools-ai";
-import type { HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
+import type { AttachmentContent, HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
 import type { TipTapDoc } from "../../shared/types";
 
 type BaseLayer = Layer.Layer<Db | RuntimeEnvTag>;
@@ -852,6 +853,52 @@ export function buildWorkerReadToolExecutor(
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : "tool execution failed" };
     }
+  };
+}
+
+// ── Attachment loader (ADR-0003 §C hydration) ──────────────────────────────
+// The DO cannot read blob storage; this Worker-native loader answers the
+// internal attachment route with provider-visible content — base64 for image
+// attachments, extracted text for documents. Ownership is enforced here against
+// the project identity (both attachment tables share one blob store).
+
+export interface WorkerAttachmentInput {
+  projectId: string;
+  storageKey: string;
+}
+
+export function buildWorkerAttachmentLoader(
+  deps: WorkerReadToolExecutorDeps
+): (input: WorkerAttachmentInput) => Promise<AttachmentContent | null> {
+  const storageLayer = Layer.provide(
+    Storage.Default,
+    Layer.mergeAll(deps.base, Layer.succeed(StorageConfig, storageConfigFor(deps.blob)))
+  ) as Layer.Layer<Storage>;
+  const dbFirst = <T>(sql: string, ...params: unknown[]): Promise<T | null> =>
+    Effect.runPromise(queryFirst<T>(deps.driver, sql, ...params)).catch(() => null);
+  return async (input) => {
+    const row =
+      (await dbFirst<{ mime_type: string }>(
+        `SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+        input.projectId,
+        input.storageKey
+      )) ??
+      (await dbFirst<{ mime_type: string }>(
+        `SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+        input.projectId,
+        input.storageKey
+      ));
+    if (!row) return null;
+    const bytes = await Effect.runPromise(
+      Effect.provide(Effect.flatMap(Storage, (storage) => storage.get(input.storageKey)), storageLayer)
+    ).catch(() => null);
+    if (!bytes) return null;
+    if (isChatImageMime(row.mime_type)) {
+      return { mimeType: row.mime_type, base64: bytesToBase64(bytes) };
+    }
+    const text = await extractDocumentText(bytes, row.mime_type);
+    if (text === null || text.trim() === "") return null;
+    return { mimeType: row.mime_type, text };
   };
 }
 

@@ -58,6 +58,16 @@ export interface AssistantTurnDeps {
    * fail a turn.
    */
   recordProviderHealth?: ((input: { providerId: string; ok: boolean }) => Promise<void>) | undefined;
+  /**
+   * Attachment hydration (ADR-0003 §C). The DO transcript carries attachments
+   * as `data-attachment` parts, which the AI SDK cannot see; these loaders turn
+   * a storage key into provider-visible content — base64 for images, extracted
+   * text for documents. Both are Workers-safe (the DO reaches blob storage
+   * through an internal route, never a Bun module). Absent = the part is
+   * dropped, mirroring the legacy `hydrateDocumentParts` loader-absent path.
+   */
+  loadImageBase64?: ((key: string) => Promise<string | null>) | undefined;
+  loadDocumentText?: ((key: string) => Promise<string | null>) | undefined;
 }
 
 /**
@@ -72,6 +82,14 @@ export interface AssistantTraceParams {
     includeRuntimeContext: Record<string, boolean>;
   };
 }
+
+/**
+ * Vision handling for image attachments, mirroring `vision.ts`'s `VisionMode`
+ * without importing that module (which pulls `@tanstack/ai` into the DO bundle).
+ * The DO resolves it from the harness `primarySupportsImages` flag; the legacy
+ * `vision_model` column is retired, so `"delegate"` is unreachable there.
+ */
+export type ImageMode = "inline" | "delegate" | "none";
 
 export interface AssistantTurnInput {
   projectId: string;
@@ -97,6 +115,13 @@ export interface AssistantTurnInput {
    * `purpose`. `"turn"` for interactive turns, `"runner"` for delegated runs.
    */
   callLogPurpose?: AssistantCallLogPurpose | undefined;
+  /**
+   * How image attachments are hydrated (mirrors the legacy `StreamRunContext`).
+   * `"inline"` embeds base64 image parts; `"none"` refuses an image attachment
+   * with VISION_NOT_CONFIGURED. Absent = `"none"` (the safe default when the
+   * harness flag is unknown).
+   */
+  imageMode?: ImageMode | undefined;
   abortSignal?: AbortSignal | undefined;
   /** Clock seam for latency in tests. */
   nowMs?: (() => number) | undefined;
@@ -111,6 +136,7 @@ export type AssistantTurnErrorCode =
   | "PROVIDER_RATE_LIMITED"
   | "PROVIDER_AUTH_FAILED"
   | "PROVIDER_UNREACHABLE"
+  | "VISION_NOT_CONFIGURED"
   | "ASSISTANT_GENERATION_FAILED";
 
 /** Maps to the LAYERS catalog status in the DO's error response. */
@@ -370,6 +396,98 @@ async function transitionRunQuietly(
   }
 }
 
+interface AttachmentPartData {
+  storageKey: string;
+  mimeType: string;
+  name: string;
+}
+
+// The `data-attachment` part the client sends on the user message
+// (`assistant-agent-adapter.ts` `agentSendParts`): `{storageKey, mimeType, name}`.
+function readAttachmentPart(part: unknown): AttachmentPartData | null {
+  if (typeof part !== "object" || part === null) return null;
+  const candidate = part as { type?: unknown; data?: unknown };
+  if (candidate.type !== "data-attachment") return null;
+  const data = candidate.data;
+  if (typeof data !== "object" || data === null) return null;
+  const record = data as { storageKey?: unknown; mimeType?: unknown; name?: unknown };
+  if (typeof record.storageKey !== "string" || record.storageKey.length === 0) return null;
+  return {
+    storageKey: record.storageKey,
+    mimeType: typeof record.mimeType === "string" ? record.mimeType : "application/octet-stream",
+    name: typeof record.name === "string" ? record.name : "",
+  };
+}
+
+function isImageAttachment(mimeType: string): boolean {
+  return mimeType.startsWith("image/");
+}
+
+/**
+ * Attachment hydration (ADR-0003 §C). `convertToModelMessages` cannot see the
+ * DO transcript's `data-attachment` parts, so this rewrites them into
+ * provider-visible content before the conversion: documents become extracted
+ * text, images become inline base64 `file` parts when the project's primary
+ * supports images (mirroring the legacy `hydrateImageParts` /
+ * `hydrateDocumentParts` in `assistant-helpers.ts`). An image attachment with
+ * vision disabled is refused server-side (the legacy `VISION_NOT_CONFIGURED`
+ * gate). A part whose content cannot be loaded is dropped, mirroring the legacy
+ * loaders. A message with no attachment parts passes through untouched.
+ */
+async function hydrateAttachmentParts(
+  messages: UIMessage[],
+  deps: AssistantTurnDeps,
+  imageMode: ImageMode | undefined
+): Promise<UIMessage[]> {
+  const mode: ImageMode = imageMode ?? "none";
+  let hasAttachment = false;
+  let hasImage = false;
+  for (const message of messages) {
+    if (!Array.isArray(message.parts)) continue;
+    for (const part of message.parts) {
+      const attachment = readAttachmentPart(part);
+      if (!attachment) continue;
+      hasAttachment = true;
+      if (isImageAttachment(attachment.mimeType)) hasImage = true;
+    }
+  }
+  if (!hasAttachment) return messages;
+  // Images gate on vision exactly as the legacy chat service does: only an
+  // image attachment (documents never need vision) is refused.
+  if (hasImage && mode === "none") {
+    throw new AssistantTurnError("VISION_NOT_CONFIGURED", 409, "Image attachments are not enabled for this project");
+  }
+  return Promise.all(
+    messages.map(async (message) => {
+      if (!Array.isArray(message.parts)) return message;
+      const parts = (
+        await Promise.all(
+          message.parts.map(async (part) => {
+            const attachment = readAttachmentPart(part);
+            if (!attachment) return part;
+            if (isImageAttachment(attachment.mimeType)) {
+              if (mode === "inline" && deps.loadImageBase64) {
+                const base64 = await deps.loadImageBase64(attachment.storageKey).catch(() => null);
+                if (base64 === null || base64 === "") return null;
+                return { type: "file" as const, mediaType: attachment.mimeType, url: `data:${attachment.mimeType};base64,${base64}` };
+              }
+              // "delegate" is unreachable on the DO (the vision_model column is
+              // retired) — a placeholder is the honest fallback when no inline
+              // loader is wired.
+              return { type: "text" as const, text: `[attached image: ${attachment.name || attachment.storageKey}]` };
+            }
+            if (!deps.loadDocumentText) return null;
+            const text = await deps.loadDocumentText(attachment.storageKey).catch(() => null);
+            if (text === null || text.trim() === "") return null;
+            return { type: "text" as const, text: `[attached document: ${attachment.name}]\n${text}` };
+          })
+        )
+      ).filter((part) => part !== null);
+      return { ...message, parts } as UIMessage;
+    })
+  );
+}
+
 /**
  * Run one assistant turn and return the UI message stream response. Throws
  * `AssistantTurnError` when the provider chain cannot produce a stream (the
@@ -385,6 +503,13 @@ export async function runAssistantTurn(
   }
   const configs = resolved.map((config) => ({ ...config, sessionId: input.sessionId }));
   const startedAtMs = input.nowMs?.() ?? Date.now();
+
+  // Attachment hydration (ADR-0003 §C): rewrite the user turn's
+  // `data-attachment` parts into provider-visible content ONCE for the whole
+  // turn, so every fallback attempt shares it. A vision-disabled image
+  // attachment refuses the turn here (before any provider call).
+  const messages = await hydrateAttachmentParts(input.messages, deps, input.imageMode);
+  const turnInput: AssistantTurnInput = { ...input, messages };
 
   // One terminal transition per turn. A pre-stream peek failure (the catch
   // below) and the SDK's `onError` can both fire for the same failed provider
@@ -403,7 +528,7 @@ export async function runAssistantTurn(
   let started: StartedTurn;
   try {
     const walked = await runWithModelFallback(configs, (config, model) =>
-      startStream(config, model, input, guardedDeps, startedAtMs)
+      startStream(config, model, turnInput, guardedDeps, startedAtMs)
     );
     started = walked.value;
     // The walk has committed to this attempt: a pre-stream `onError` on an

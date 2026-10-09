@@ -23,7 +23,7 @@ import {
 import type { RegistryModelConfig } from "./model-factory";
 import type { AssistantCallLogInput } from "../../shared/assistant";
 import type { AssistantRunKind, AssistantRunRow, AssistantRunStatus } from "../../shared/assistant";
-import type { AssistantRunStatusInput, HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
+import type { AssistantRunStatusInput, AttachmentContent, HarnessTurnContext, HarnessTurnContextRequest } from "./internal-routes";
 import type { ReadToolResponse, WriteExecuteResponse, WriteToolResponse } from "./tools-ai";
 
 export const INTERNAL_LEGACY_PATH = "/api/internal/assistant/legacy";
@@ -41,6 +41,7 @@ export const INTERNAL_TOOL_PATH = "/api/internal/assistant/tool";
 export const INTERNAL_WRITE_TOOL_PATH = "/api/internal/assistant/write-tool";
 export const INTERNAL_WRITE_EXECUTE_PATH = "/api/internal/assistant/write-execute";
 export const INTERNAL_RESUME_EXECUTE_PATH = "/api/internal/assistant/resume-execute";
+export const INTERNAL_ATTACHMENT_PATH = "/api/internal/assistant/attachment";
 
 // Bound every DO → Worker internal call: a hung fetch must not stall the
 // turn's `onEnd`/`failAttempt` terminal writes (the retry re-arms the signal).
@@ -210,6 +211,40 @@ export async function resolveHarnessContext(
  */
 export async function recordCallLog(deps: AssistantInternalDeps, input: AssistantCallLogInput): Promise<boolean> {
   return postInternal(deps, INTERNAL_CALL_LOG_PATH, input, "call-log");
+}
+
+/**
+ * Load one attachment's provider-visible content (ADR-0003 §C attachment
+ * hydration). The DO cannot read blob storage directly, so it asks the Worker
+ * for either base64 (image attachments) or extracted text (documents). `null`
+ * covers both "not found / not owned by this project" and an unreachable
+ * Worker — the engine then drops the part, mirroring the legacy loaders.
+ */
+export async function loadAttachmentRemote(
+  deps: AssistantInternalDeps,
+  storageKey: string
+): Promise<AttachmentContent | null> {
+  const fetchImpl: FetchLike = deps.fetchImpl ?? ((input, init) => fetch(input, init));
+  const url = `${originOf(deps)}${INTERNAL_ATTACHMENT_PATH}`;
+  try {
+    return await withRetryOnce(async () => {
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: await signedHeaders(deps),
+        body: JSON.stringify({ storageKey }),
+        signal: AbortSignal.timeout(INTERNAL_CALL_TIMEOUT_MS),
+      });
+      // 404 is the definitive "not found / not owned" answer — a retry cannot
+      // change it, so return without the retry-once policy.
+      if (res.status === 404) return null;
+      if (!res.ok) throw new AssistantInternalUnavailable(`attachment load failed (${res.status})`);
+      const body = (await res.json()) as { attachment?: unknown };
+      return body.attachment ? (body.attachment as AttachmentContent) : null;
+    });
+  } catch (e) {
+    console.warn("[Assistant] attachment load failed:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
 }
 
 /**
