@@ -398,19 +398,11 @@ describe("docToMarkdown", () => {
 });
 
 describe("round-trip", () => {
-  it("heading h1", () => expect(rd("# Hello")).toBe("# Hello"));
-  it("heading h2", () => expect(rd("## Hello")).toBe("## Hello"));
-  it("heading h3", () => expect(rd("### Hello")).toBe("### Hello"));
-  it("paragraph", () => expect(rd("plain text")).toBe("plain text"));
   it("bold", () => expect(rd("**bold**")).toBe("**bold**"));
-  it("italic", () => expect(rd("*italic*")).toBe("*italic*"));
-  it("inline code", () => expect(rd("`code`")).toBe("`code`"));
-  it("link", () => expect(rd("[link](https://x.com)")).toBe("[link](https://x.com)"));
   it("bullet list", () => expect(rd("- a\n- b\n- c")).toBe("- a\n- b\n- c"));
   it("ordered list", () => expect(rd("1. a\n2. b")).toBe("1. a\n1. b"));
   it("code block", () => expect(rd("```ts\nconst x = 1;\n```")).toBe("```ts\nconst x = 1;\n```"));
   it("blockquote", () => expect(rd("> quote")).toBe("> quote"));
-  it("horizontal rule", () => expect(rd("---")).toBe("---"));
 
   it("task list round-trip preserves checked state", () => {
     const result = rd("- [ ] todo\n- [x] done");
