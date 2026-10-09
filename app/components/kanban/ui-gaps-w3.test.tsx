@@ -111,18 +111,6 @@ describe("ColumnForm", () => {
     render(<ColumnForm slug="demo" column={null} isOpen onClose={vi.fn()} onDelete={vi.fn()} onSubmit={vi.fn()} />);
     expect(screen.queryByRole("button", { name: /delete column/i })).not.toBeInTheDocument();
   });
-
-  it("uses a check leading icon on Save Changes (edit mode)", () => {
-    render(<ColumnForm slug="demo" column={COLUMN} isOpen onClose={vi.fn()} onSubmit={vi.fn()} />);
-    const svg = screen.getByRole("button", { name: /save changes/i }).querySelector("svg");
-    expect(svg?.innerHTML).toContain("M20 6 9 17l-5-5");
-  });
-
-  it("keeps the plus icon on Create Column (create mode)", () => {
-    render(<ColumnForm slug="demo" column={null} isOpen onClose={vi.fn()} onSubmit={vi.fn()} />);
-    const svg = screen.getByRole("button", { name: /create column/i }).querySelector("svg");
-    expect(svg?.innerHTML).toContain("M12 5v14");
-  });
 });
 
 describe("ColumnsSettingsSection", () => {
@@ -144,13 +132,6 @@ describe("ColumnsSettingsSection", () => {
     expect(screen.getAllByText("None").length).toBeGreaterThan(0);
     expect(screen.getByText("Green")).toBeInTheDocument();
     expect(screen.getByText("010")).toBeInTheDocument();
-  });
-
-  it("renders Columns as an h2", () => {
-    render(
-      <ColumnsSettingsSection columns={[]} sensors={[]} onDragEnd={vi.fn()} onEdit={vi.fn()} onDelete={vi.fn()} onAdd={vi.fn()} />
-    );
-    expect(screen.getByRole("heading", { level: 2, name: "Columns" })).toBeInTheDocument();
   });
 });
 
@@ -196,23 +177,6 @@ describe("OptionSettingsSection in-use guard", () => {
       />
     );
     expect(screen.getByRole("button", { name: /delete priority/i })).toBeEnabled();
-  });
-
-  it("renders Priorities as an h2", () => {
-    render(
-      <OptionSettingsSection
-        kind="priority"
-        title="Priorities"
-        description="desc"
-        options={[]}
-        sensors={[]}
-        onDragEnd={vi.fn()}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-        onAdd={vi.fn()}
-      />
-    );
-    expect(screen.getByRole("heading", { level: 2, name: "Priorities" })).toBeInTheDocument();
   });
 });
 

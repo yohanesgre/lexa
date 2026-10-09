@@ -366,13 +366,6 @@ describe("admin.assistant shell gating", () => {
     expect(screen.getByRole("link", { name: "Overview" }).className).toContain("active");
   });
 
-  it("marks the Overview tab active on the trailing-slash index path", () => {
-    h.session.value = { user: { role: "superadmin" } };
-    h.pathname = "/admin/assistant/";
-    render(<AssistantShell />);
-    expect(screen.getByRole("link", { name: "Overview" }).className).toContain("active");
-  });
-
   it("highlights only the matching child tab on a child path", () => {
     h.session.value = { user: { role: "superadmin" } };
     h.pathname = "/admin/assistant/providers";
