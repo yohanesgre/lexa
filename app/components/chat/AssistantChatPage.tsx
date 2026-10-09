@@ -10,8 +10,8 @@ import {
   useChatAttachments,
   useUploadChatAttachment,
 } from "../../lib/queries";
-import { useAssistantAgent } from "../../lib/use-assistant-agent";
-import { useAssistantRunEvents } from "../../lib/use-assistant-runs";
+import { useAssistantStream } from "../../lib/use-assistant-stream";
+import type { AssistantRunsLive } from "../../lib/use-assistant-runs";
 import { mergeRunCard, type SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { isNarrowViewport } from "../../lib/viewport";
@@ -52,12 +52,6 @@ import {
   useChatProjectQueries,
   useThreadKnowledge,
 } from "./assistant-chat-session";
-import {
-  EMPTY_KNOWN_DECISIONS,
-  knownApprovalDecisions,
-  knownDecisionsEqual,
-} from "./assistant-chat-turns-state";
-import type { KnownApprovalDecisions } from "../../lib/assistant-agent-adapter";
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
@@ -79,7 +73,14 @@ import type { ChatAttachmentRef } from "../../lib/assistant-image";
 // affordances (hover copy/edit/regenerate, citation chips,
 // failed/interrupted treatments) transcribe assistant-chat-upgrades.html.
 
-
+// No live delegated-run frames on the SSE tier (delegation dropped in v1,
+// ADR-0005 D3): the run card renders from its persisted row alone.
+const NO_LIVE_RUNS: AssistantRunsLive = {
+  runsById: {},
+  liveRunIds: new Set<string>(),
+  liveFromByRunId: {},
+  resetLocalState: () => {},
+};
 
 export function AssistantChatPage({ slug, thread }: { slug: string; thread?: string | undefined }) {
   const qc = useQueryClient();
@@ -229,13 +230,23 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     setResolutionProject(projectId);
   }, [projectId, thread, chatId, applyChatId]);
 
+  // Locally-minted thread tracking (ADR-0005 §Reliability 4). A minted id with
+  // no accepted send has no server row yet, so its transcript GET would 404
+  // (the "404 noise"); skip the read until a send is accepted. `sentChatId` is
+  // sticky (never released), unlike `acceptedChatId` below which the ingress
+  // effect clears to let stale-thread recovery fire.
+  const [mintedChatId, setMintedChatId] = useState("");
+  const [sentChatId, setSentChatId] = useState("");
+  const [acceptedChatId, setAcceptedChatId] = useState("");
+  const transcriptEnabled = !!chatId && !(chatId === mintedChatId && chatId !== sentChatId);
+
   // Transcript render on load (GET /api/assistant/chat/:chatId). A fresh uuid
   // 404s — that IS the empty-thread state, not an error. ASSISTANT_THREAD_NOT_FOUND
   // is handled silently (no retry, no throw, no console spam) and falls back.
   const transcript = useQuery({
     queryKey: ["assistant-chat", chatId],
     queryFn: () => api.getAssistantChat(chatId),
-    enabled: !!chatId,
+    enabled: transcriptEnabled,
     retry: false,
     throwOnError: false,
     staleTime: Infinity,
@@ -259,20 +270,19 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     void qc.refetchQueries({ queryKey: ["assistant-chat", chatId], exact: true, type: "active" });
   }, [chatId, qc]);
 
-  // Client-known approval decisions for the live projection. Declared BEFORE
-  // `useAssistantAgent` (hook order) and fed from the settled turns below via a
-  // render-adjust, mirroring `useSettledTurns`. Settles a batch decided in this
-  // session without a reload.
-  const [knownDecisions, setKnownDecisions] = useState<KnownApprovalDecisions>(EMPTY_KNOWN_DECISIONS);
+  // Transport: the in-process SSE store (ADR-0005). Sessions live in a
+  // module-level map keyed by thread, so an in-app navigation or tab switch
+  // re-attaches to the running stream; a reload/close aborts it (partial
+  // output persists as `stopped`).
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
-  const stream = useAssistantAgent(streamKey, { projectId, decisions: knownDecisions });
+  const stream = useAssistantStream(streamKey);
   const streaming = stream.status === "connecting" || stream.status === "streaming";
-  // Sticky "a send was accepted for this chat" signal. A fresh-thread send is
-  // deferred until the socket identifies (assistantSendForKey), so `streaming`
-  // cannot flip yet; without this the landing repaints over the in-flight run
-  // while the optimistic turn is dropped by the chat-change derivation. Sticky
-  // per chat: it is true only for the chat the send was accepted on.
-  const [acceptedChatId, setAcceptedChatId] = useState("");
+  // Sticky "a send was accepted for this chat" signal (state declared above the
+  // transcript query). A fresh-thread send boots its store session via
+  // `assistantSendForKey`, so `streaming` cannot flip yet; without this the
+  // landing repaints over the in-flight run while the optimistic turn is
+  // dropped by the chat-change derivation. Sticky per chat: it is true only for
+  // the chat the send was accepted on.
   const sendAccepted = !!chatId && acceptedChatId === chatId;
 
   // The accepted-send exemption exists only for the deferred-flush window: once
@@ -310,18 +320,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
 
-  // Project the settled turns' terminal decisions for the live stream so a
-  // batch decided in-session settles locally (composer unlock + resume gate).
-  // Render-adjust instead of an effect so the stream sees the fresh overlay on
-  // the same pass the turns change.
-  const nextKnown = useMemo(() => knownApprovalDecisions(turns), [turns]);
-  if (!knownDecisionsEqual(knownDecisions, nextKnown)) setKnownDecisions(nextKnown);
-
-  // Delegated runs (ADR-0004): live state taps the SAME thread socket the chat
-  // stream rides; the durable rows come from `assistant_runs` per spawn ref
-  // discovered in the transcript. A card renders as a sibling of the spawning
-  // bubble (renderRunCard → ChatTranscriptArea).
-  const runs = useAssistantRunEvents(stream.agent, streamKey);
+  // Delegated runs (ADR-0004): delegation is dropped in v1 (ADR-0005 D3), so
+  // there are no live agent-tool frames — the durable rows come from
+  // `assistant_runs` per spawn ref discovered in the transcript and the card
+  // renders from the persisted columns alone.
   const spawnedRuns = useMemo(
     () => (turns ?? []).flatMap((turn) => turn.spawnedRuns ?? []),
     [turns]
@@ -464,6 +466,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   const ensureChatId = useCallback((): string => {
     if (chatId) return chatId;
     const id = crypto.randomUUID();
+    setMintedChatId(id);
     applyChatId(id);
     seedThreadParam(id);
     return id;
@@ -478,8 +481,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
       const threadId = startStream(message, attachments);
       // The send is accepted: the landing must dock for THIS chat even before
-      // the stream status flips (the fresh-thread write is deferred).
+      // the stream status flips, and the mint guard releases (a row will exist).
       setAcceptedChatId(threadId);
+      setSentChatId(threadId);
       // Clear the starter seed at acceptance, not via the turns>0 effect: the
       // landing→dock remount would otherwise mount the docked composer with the
       // stale seed and re-prefill the draft with the text just sent (A7). The
@@ -526,16 +530,16 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         <AssistantRunCard
           model={mergeRunCard(
             row,
-            runs.runsById[ref.runId],
-            runs.liveRunIds.has(ref.runId),
-            runs.liveFromByRunId[ref.runId] ?? 0
+            NO_LIVE_RUNS.runsById[ref.runId],
+            NO_LIVE_RUNS.liveRunIds.has(ref.runId),
+            NO_LIVE_RUNS.liveFromByRunId[ref.runId] ?? 0
           )}
           onAbort={handleRunAbort}
           onRetry={handleRunRetry}
         />
       );
     },
-    [runRowsByRunId, runs, handleRunAbort, handleRunRetry]
+    [runRowsByRunId, handleRunAbort, handleRunRetry]
   );
 
   // Client-only one-message queue (assistant-chat-deck §3.3): a message typed
@@ -621,11 +625,11 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const { handleDecide, handleApproveAll, handleRejectAll, batchBusy } = useApprovalDecisions({ setTurns });
 
-  // The resume continuation persists its assistant reply server-side; the DO
-  // does broadcast the resumed frames, but the SDK continuation has no client
-  // entry to attach out-of-band frames, so a settled resume settles the same
-  // cache pair as the terminal-refetch branch: a targeted transcript refetch
-  // (server-authoritative) plus a derivable list touch — invariant 6.
+  // The resume continuation persists its assistant reply server-side; the SSE
+  // resume streams its frames into the live bubble, and a settled resume
+  // settles the same cache pair as the terminal-refetch branch: a targeted
+  // transcript refetch (server-authoritative) plus a derivable list touch —
+  // invariant 6.
   const onResumeSettled = useCallback(() => {
     settleThreadCache({ qc, chatId, projectId });
   }, [qc, chatId, projectId]);
@@ -691,8 +695,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             seed={seed}
             streamStatus={stream.status}
             sendError={stream.error}
-            reconnecting={stream.reconnecting}
-            resumed={stream.resumed}
             attachmentsEnabled={attachmentsEnabled}
             ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}
@@ -757,8 +759,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             seed={seed}
             streamStatus={stream.status}
             sendError={stream.error}
-            reconnecting={stream.reconnecting}
-            resumed={stream.resumed}
             attachmentsEnabled={attachmentsEnabled}
             ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}

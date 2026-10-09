@@ -6,8 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { AssistantChatThreadSummary } from "../../lib/api";
 import { useRenameAssistantChat, useDeleteAssistantChat, useUpdateAssistantChatMeta } from "../../lib/queries";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
+import { assistantSendForKey, shouldPersistResume, type ResumeResult } from "../../lib/use-assistant-stream";
 import { useToast } from "../ui/Toast";
-import { assistantSendForKey, shouldPersistResume, type ResumeResult } from "../../lib/use-assistant-agent";
 import { settleTurnsWithRaw } from "./assistant-chat-turns-state";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { ChatTurn } from "./assistant-chat-utils";
@@ -478,7 +478,9 @@ export function useChatStartStream(args: {
       }
       const body = chatStreamBody({ projectId, chatId: threadId, message, effort, permissionMode, attachments, fromIndex });
       if (isNewThread) {
-        assistantSendForKey(`assistant-chat:${threadId}`, body);
+        // The page's hook is still bound to the previous (empty) key, so boot
+        // the freshly-minted thread's session through the module store.
+        assistantSendForKey(`assistant-chat:${threadId}`, "/api/assistant/chat/stream", body);
       } else {
         stream.send("/api/assistant/chat/stream", body);
       }

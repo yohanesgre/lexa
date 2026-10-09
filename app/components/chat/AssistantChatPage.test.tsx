@@ -123,9 +123,11 @@ vi.mock("../../lib/api", () => ({
   abortAssistantRun: vi.fn(async () => ({ ok: true })),
 }));
 
-vi.mock("../../lib/use-assistant-agent", () => ({
+vi.mock("../../lib/use-assistant-stream", () => ({
   assistantSendForKey: transportCapture.sendForKey,
-  useAssistantAgent: (key: string | null) => {
+  shouldPersistResume: () => true,
+  resumeOutcome: async () => ({ ok: true }),
+  useAssistantStream: (key: string | null) => {
     const snapshot = key ? streamFx.state.current : streamFx.idle();
     return {
       ...snapshot,
@@ -134,8 +136,6 @@ vi.mock("../../lib/use-assistant-agent", () => ({
       reset: vi.fn(),
       subscribe: () => () => {},
       getSnapshot: () => snapshot,
-      reconnecting: false,
-      resumed: false,
     };
   },
 }));
@@ -587,6 +587,28 @@ describe("AssistantChatPage — zero-turn landing", () => {
     expect(mintedId).not.toBe("");
     expect(new URLSearchParams(window.location.search).get("thread")).toBe(mintedId);
     expect(navigateMock).not.toHaveBeenCalled();
+    // Mint guard: the minted-but-unsent id has no server row, so the transcript
+    // GET is skipped (no 404 race).
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+  });
+
+  it("releases the mint guard and reads the transcript once a send is accepted", async () => {
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    // Attach-first mint: no transcript read while unsent.
+    act(() => {
+      composerCapture.ensureChatId!();
+    });
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+
+    // An accepted send proves a row will exist, so the read is allowed.
+    act(() => {
+      expect(composerCapture.onSend!("hello", [])).toBe(true);
+    });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledTimes(1));
   });
 
   it("clears the starter seed once a turn exists (no stale draft refill on a later landing)", async () => {
@@ -936,7 +958,8 @@ describe("AssistantChatPage — permissionMode envelope", () => {
     });
 
     expect(transportCapture.sendForKey).toHaveBeenCalledTimes(1);
-    const [key, body] = transportCapture.sendForKey.mock.calls[0] as [string, Record<string, unknown>];
+    // SSE send signature: (key, url, body).
+    const [key, , body] = transportCapture.sendForKey.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(key).toMatch(/^assistant-chat:/);
     // Unhydrated and un-picked: the envelope must NOT carry a mode, so the DO
     // keeps its sticky value (a fresh thread resolves to "ask" server-side).

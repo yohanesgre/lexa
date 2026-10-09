@@ -6,6 +6,13 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useMentionTokens } from "../../lib/useMentionTokens";
+
+// The mint path boots a store session (real fetch). Stub the module function so
+// the mint test never touches the network; the resume helpers stay real.
+vi.mock("../../lib/use-assistant-stream", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/use-assistant-stream")>();
+  return { ...actual, assistantSendForKey: vi.fn() };
+});
 import { AssistantChatComposer } from "./AssistantChatComposer";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ToastProvider } from "../ui/Toast";
