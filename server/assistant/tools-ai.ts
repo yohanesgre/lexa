@@ -24,6 +24,7 @@ import { jsonSchema, tool, type FlexibleSchema, type JSONSchema7, type ToolSet }
 import { z } from "zod";
 import type { TipTapDoc } from "../../shared/types";
 import type { ApprovalPartial, AssistantToolPermissionMode } from "../../shared/assistant";
+import { ASSISTANT_WRITE_DENIED_ERROR } from "../../shared/assistant";
 import { ASSISTANT_WRITE_TOOL_NAMES, MAX_BULK_TASK_REFS, MAX_WRITES_PER_TURN } from "./write-tool-names";
 
 export const READ_TOOL_NAMES = [
@@ -95,8 +96,8 @@ export interface WriteDeniedResponse {
 }
 
 // Final copy pinned by D3; the model reads this and can suggest a mode switch.
-export const BLOCKED_WRITE_ERROR =
-  "Write tools are blocked for this thread (composer mode: Blocked). Reads still work — the user can switch to Ask or Auto.";
+// Sourced from the shared constant so the DO and in-process tiers cannot drift.
+export const BLOCKED_WRITE_ERROR = ASSISTANT_WRITE_DENIED_ERROR;
 
 export interface AssistantToolTransport {
   /** Execute one read tool in the Worker. Never rejects for a domain failure. */

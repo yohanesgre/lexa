@@ -378,6 +378,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           ...(req.payload.attachments ? { attachments: [...req.payload.attachments] } : {}),
           ...(req.payload.fromIndex !== undefined ? { fromIndex: req.payload.fromIndex } : {}),
           ...(req.payload.reasoningEffort !== undefined ? { reasoningEffort: req.payload.reasoningEffort } : {}),
+          ...(req.payload.permissionMode !== undefined ? { permissionMode: req.payload.permissionMode } : {}),
         });
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.payload.chatId));
         return sseHttpResponse(frames);
@@ -482,7 +483,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           messages,
           summary: doSummary ?? t.summary,
           summarizedCount: doSummarizedCount ?? t.summarizedCount,
-          permissionMode: doTranscript?.permissionMode ?? "ask",
+          permissionMode: doTranscript?.permissionMode ?? t.permissionMode ?? "ask",
           createdAt: t.createdAt,
           updatedAt: t.updatedAt,
         };

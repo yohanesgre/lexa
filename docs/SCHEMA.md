@@ -863,6 +863,12 @@ SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
 -- updated_at DESC). Per-turn metadata (user `ts`, assistant `ts`/`citations`/
 -- `error`/`stopped`) lives INLINE in the messages JSON — no meta table, no
 -- migration churn when the meta shape evolves.
+-- `permission_mode` (0029) is the sticky per-chat WRITE-tool permission
+-- (`ask` | `auto` | `deny`, ADR-0005 §Port P1). Captured at turn start from
+-- the send envelope (absent → the stored value) and written back, so a reload
+-- re-hydrates the composer picker. Nullable: a pre-column row resolves to
+-- "ask". Chat-only (D5) — task/wiki runs never write it. A mid-turn change
+-- waits for the next send.
 -- DEPRECATED: `skill_id` is no longer written for chat threads — skills are
 -- invoked per message with `$name` (junction-bound) and discovered via the
 -- `get_skill` tool, never bound to the thread. The column stays nullable and
@@ -876,6 +882,7 @@ CREATE TABLE assistant_threads (
   pinned INTEGER NOT NULL DEFAULT 0,
   agent_id TEXT,
   skill_id TEXT,
+  permission_mode TEXT,
   messages TEXT NOT NULL DEFAULT '[]',
   summary TEXT,
   summarized_count INTEGER NOT NULL DEFAULT 0,
@@ -923,6 +930,18 @@ CREATE TABLE assistant_pending_writes (
 );
 CREATE INDEX idx_assistant_pending_batch ON assistant_pending_writes(batch_id, seq);
 CREATE INDEX idx_assistant_pending_thread ON assistant_pending_writes(document_type, document_id, status);
+
+-- Resume-claim idempotency (0029, ADR-0005 §Port P3; LX-80). One reservation
+-- per approval batch so a retry, a double-click, or two tabs cannot re-execute
+-- the same approved writes: `INSERT OR IGNORE` on the batch id is the atomic
+-- claim, and a duplicate request finds the row present and no-ops. The claim is
+-- RELEASED when the batch turns out not executable (still pending / no rows) so
+-- a later attempt can resume it, and KEPT once the writes have been executed
+-- (or the outcome is indeterminate — a retry must not double-apply).
+CREATE TABLE assistant_resume_claims (
+  batch_id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 ALTER TABLE task_activity ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE task_comments ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;

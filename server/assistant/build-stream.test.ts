@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
 import type { StreamFrame } from "../../shared/assistant";
 import { buildStream, buildResumeResultsNote, findNewestPendingBatch, pendingBatchIdsNewestFirst, isWriteIntentClaim, normalizeProviderMessages, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
@@ -639,5 +639,180 @@ describe("write-intent no-tool-call guard", () => {
     const frames = await drain(buildStream(writesCtx(reply, "how many tasks are there?")));
     expect(frames.some((f) => f.type === "error")).toBe(false);
     expect((frames.at(-1) as { text?: string }).text).toBe(reply);
+  });
+});
+
+// ADR-0005 §Reliability.3: a killed turn keeps its partial output. The throttle
+// window is injected, so these pins drive a fake clock deterministically (no
+// real-time sleeps).
+describe("incremental partial persistence", () => {
+  afterEach(() => vi.useRealTimers());
+
+  const slowStream = (ms: number) =>
+    (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "Hel" } as unknown as StreamChunk;
+      await new Promise((r) => setTimeout(r, ms));
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "lo" } as unknown as StreamChunk;
+      await new Promise((r) => setTimeout(r, ms));
+      yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+    })();
+
+  it("writes ≥1 partial mid-turn and the terminal persist replaces it", async () => {
+    vi.useFakeTimers();
+    const persisted: Array<{ messages: unknown[] }> = [];
+    const c = ctx(() => slowStream(20));
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages) => { persisted.push({ messages }); };
+
+    const draining = drain(buildStream(c));
+    await vi.advanceTimersByTimeAsync(60);
+    const frames = await draining;
+    expect(frames.at(-1)?.type).toBe("done");
+
+    const partials = persisted.filter((p) => (p.messages.at(-1) as { partial?: unknown } | undefined)?.partial === true);
+    expect(partials.length).toBeGreaterThanOrEqual(1);
+    // A partial never carries a pendingBatch (only the suspend path does).
+    expect(partials.every((p) => (p.messages.at(-1) as { pendingBatch?: unknown }).pendingBatch === undefined)).toBe(true);
+
+    const terminal = persisted.at(-1)!;
+    const last = terminal.messages.at(-1) as { partial?: unknown; content?: string };
+    expect(last.partial).toBeUndefined();
+    expect(last.content).toBe("Hello");
+  });
+
+  it("a failed partial write does not kill the turn", async () => {
+    vi.useFakeTimers();
+    let terminal: unknown[] | null = null;
+    const c = ctx(() => slowStream(20));
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages) => {
+      if ((messages.at(-1) as { partial?: unknown }).partial === true) throw new Error("partial write failed");
+      terminal = messages;
+    };
+
+    const draining = drain(buildStream(c));
+    await vi.advanceTimersByTimeAsync(60);
+    const frames = await draining;
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(terminal).not.toBeNull();
+  });
+
+  it("a partial queued behind a blocked persist is dropped after terminal (generation guard)", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let blocked = false;
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "x" } as unknown as StreamChunk;
+        await new Promise((r) => setTimeout(r, 30));
+        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+      })()
+    );
+    c.partialPersistIntervalMs = 5;
+    c.persist = async (messages) => {
+      const isPartial = (messages.at(-1) as { partial?: unknown }).partial === true;
+      calls.push(isPartial ? "partial" : "terminal");
+      // Block only the FIRST partial; later partials queue behind it and are
+      // superseded by the terminal persist (generation bumped in stopPartial).
+      if (isPartial && !blocked) { blocked = true; await gate; }
+    };
+
+    const draining = drain(buildStream(c));
+    await vi.advanceTimersByTimeAsync(60);
+    release();
+    const frames = await draining;
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(calls.filter((x) => x === "partial")).toHaveLength(1);
+    expect(calls.at(-1)).toBe("terminal");
+  });
+});
+
+// SEV: `TOOL_CALL_RESULT` aborted the turn for ANY write tool. In `auto` the
+// tool executed in-loop, so the abort killed the in-flight provider stream.
+// Only `ask` (drain → suspend) may abort.
+describe("write-tool result does not abort in auto", () => {
+  const writeResultThenText = () =>
+    (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "a" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "delete_task" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: JSON.stringify({ ref: "LX-1" }) } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_RESULT", toolCallId: "call_1" } as unknown as StreamChunk;
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "b" } as unknown as StreamChunk;
+      yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+    })();
+
+  it("auto completes the turn and never aborts", async () => {
+    const controller = new AbortController();
+    const c = ctx(writeResultThenText);
+    c.registry.set("c1", controller);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "auto";
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "done")).toBe(true);
+    expect((frames.at(-1) as { text?: string }).text).toBe("ab");
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it("ask aborts on the write-tool result", async () => {
+    const controller = new AbortController();
+    const c = ctx(writeResultThenText);
+    c.registry.set("c1", controller);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "ask";
+    await drain(buildStream(c));
+    expect(controller.signal.aborted).toBe(true);
+  });
+});
+
+// ADR-0005 §Port P1: only `ask` suspends on drained proposals. `auto` applies
+// in-loop (its toolset carries no drain) and `deny` refuses locally — neither
+// may suspend.
+describe("write-mode branch", () => {
+  const proposal: QueuedProposal = {
+    approvalId: "a1",
+    batchId: "b1",
+    seq: 0,
+    name: "delete_task",
+    detail: "Delete LX-1",
+    diff: { type: "task_delete", taskRef: "LX-1", taskTitle: "x" },
+    args: { ref: "LX-1" },
+  };
+  const writeCallStream = () =>
+    (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "delete_task" } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: JSON.stringify({ ref: "LX-1" }) } as unknown as StreamChunk;
+      yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+      yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+    })();
+
+  it("ask suspends on a drained proposal", async () => {
+    const c = ctx(writeCallStream);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "ask";
+    c.writeDrain = () => [proposal];
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(true);
+  });
+
+  it("auto does not suspend (writes applied in-loop, no drain)", async () => {
+    const c = ctx(writeCallStream);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "auto";
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(false);
+    expect(frames.at(-1)?.type).toBe("done");
+  });
+
+  it("deny does not suspend", async () => {
+    const c = ctx(writeCallStream);
+    c.writeTools = ["delete_task"];
+    c.writeMode = "deny";
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(false);
+    expect(frames.at(-1)?.type).toBe("done");
   });
 });

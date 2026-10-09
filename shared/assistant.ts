@@ -40,6 +40,12 @@ export function resolveThreadToolPermissionMode(
   return resolveAssistantToolPermissionMode(envelopeValue, sticky);
 }
 
+// Deny-mode write refusal (ADR-0005 §Port P1). Model-readable; the model may
+// suggest switching to Ask/Auto. Shared so the DO tier (`tools-ai.ts`) and the
+// in-process tier (`write-tools.ts`) can never drift.
+export const ASSISTANT_WRITE_DENIED_ERROR =
+  "Write tools are blocked for this thread (composer mode: Blocked). Reads still work — the user can switch to Ask or Auto.";
+
 export const ASSISTANT_PRE_INGRESS_TIMEOUT_MS = 30_000;
 export const ASSISTANT_STALL_TIMEOUT_MS = 90_000;
 export const ASSISTANT_STALL_MESSAGE = "stream stalled — no response from provider";
