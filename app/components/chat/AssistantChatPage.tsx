@@ -185,6 +185,22 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     }
   }, []);
 
+  // Seed ?thread= for a just-minted thread without a router navigation. The
+  // mint path used to navigate, which re-runs the ssr:false route loader and
+  // flashes the shell (the router `thread` prop stays undefined here); the id
+  // already lives in chatId, so the URL only needs to stay honest for a
+  // remount/reload.
+  const seedThreadParam = useCallback((threadId: string) => {
+    if (typeof window === "undefined") return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("thread", threadId);
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
   useEffect(() => {
     if (!projectId) return;
     const projectChanged = resolvedProjectRef.current !== projectId;
@@ -418,7 +434,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     projectId,
     chatId,
     applyChatId,
-    openThreadParam,
+    seedThreadParam,
     qc,
     effort,
     setEffort,
@@ -449,9 +465,9 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     if (chatId) return chatId;
     const id = crypto.randomUUID();
     applyChatId(id);
-    openThreadParam(id);
+    seedThreadParam(id);
     return id;
-  }, [chatId, applyChatId, openThreadParam]);
+  }, [chatId, applyChatId, seedThreadParam]);
 
   // Returns whether the send was accepted — the composer only clears its draft
   // / held queue + attachments on an accepted send, so a refused flush can

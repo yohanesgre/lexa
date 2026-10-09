@@ -447,7 +447,7 @@ export function useChatStartStream(args: {
   projectId: string | undefined;
   chatId: string;
   applyChatId: (id: string) => void;
-  openThreadParam: (threadId: string) => void;
+  seedThreadParam: (threadId: string) => void;
   qc: QueryClient;
   effort: string;
   setEffort: (e: "") => void;
@@ -458,7 +458,7 @@ export function useChatStartStream(args: {
   pendingTitleRef: React.RefObject<string | null>;
   ingressInsertedRef: React.RefObject<Set<string>>;
 }) {
-  const { stream, projectId, chatId, applyChatId, openThreadParam, qc, effort, setEffort, permissionMode, pendingTitleRef, ingressInsertedRef } = args;
+  const { stream, projectId, chatId, applyChatId, seedThreadParam, qc, effort, setEffort, permissionMode, pendingTitleRef, ingressInsertedRef } = args;
   return useCallback(
     (message: string, attachments: ChatAttachmentRef[], fromIndex?: number): string => {
       let threadId = chatId;
@@ -466,7 +466,7 @@ export function useChatStartStream(args: {
       if (!threadId) {
         threadId = crypto.randomUUID();
         applyChatId(threadId);
-        openThreadParam(threadId);
+        seedThreadParam(threadId);
       }
       pendingTitleRef.current = message.trim();
       if (isNewThread && projectId) {
@@ -485,7 +485,7 @@ export function useChatStartStream(args: {
       setEffort("");
       return threadId;
     },
-    [stream, projectId, chatId, effort, permissionMode, applyChatId, openThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
+    [stream, projectId, chatId, effort, permissionMode, applyChatId, seedThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
   );
 }
 

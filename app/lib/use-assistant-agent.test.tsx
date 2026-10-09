@@ -40,6 +40,7 @@ import type { KnownApprovalDecisions } from "./assistant-agent-adapter";
 type UseAgentArgs = {
   basePath?: string;
   query?: { projectId?: string } | undefined;
+  connectionTimeout?: number;
   onIdentityChange?: (oldName: string, newName: string, oldAgent: string, newAgent: string) => void;
 };
 
@@ -117,6 +118,11 @@ describe("useAssistantAgent query wiring", () => {
     const onIdentityChange = lastArgs().onIdentityChange;
     expect(typeof onIdentityChange).toBe("function");
     expect(() => onIdentityChange!("chat:old", "chat:new", "LexaAssistantAgent", "LexaAssistantAgent")).not.toThrow();
+  });
+
+  it("raises partysocket's connection timeout so a cold-DO first dial is not aborted", () => {
+    renderHook(() => useAssistantAgent("assistant-chat:c1", { projectId: "p1" }));
+    expect(lastArgs().connectionTimeout).toBe(15000);
   });
 });
 
