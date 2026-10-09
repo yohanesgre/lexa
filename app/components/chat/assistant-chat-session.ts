@@ -38,8 +38,10 @@ import {
 // Session-scoped hooks for the Assistant chat page. These own the refs and
 // effects that were inline in AssistantChatPage; the page stays an assembler.
 
-// The chat surface's transport (useAssistantAgent) reports the resume POST's
-// HTTP outcome through an optional third parameter; the SSE stream ignores it.
+// The SSE store reports the resume POST's outcome through an optional third
+// parameter: `{ok:true}` once the continuation stream terminates cleanly (or a
+// discriminated JSON ack when a DO still owns the batch), `{ok:false}` on a
+// transport/stream failure. Non-resume sends ignore it.
 type ResumeCapableStream = Stream & {
   send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => void;
 };
@@ -95,10 +97,12 @@ function resumeMode(turns: ChatTurn[] | null, batchId: string): "approve" | "rej
   return "reject";
 }
 
-// Fire the resume POST for one batch and report its discriminated outcome. The
-// in-flight key dedupes a re-issued POST while one is still outstanding; the
-// persisted set only gains a batch on a settled outcome (a failure releases it
-// so Retry can re-fire).
+// Fire the resume POST for one batch and report its outcome. The in-flight key
+// dedupes a re-issued POST while one is still outstanding. The in-memory
+// `resumedBatchesRef` guard is LATCHED here and only released by the explicit
+// `retryResume` — a failed resume's own status flip re-runs the settle effect,
+// and releasing the guard there would re-dispatch immediately (unbounded POST
+// loop). A settled outcome additionally persists the batch (never replay).
 function dispatchResume(args: {
   stream: ResumeCapableStream;
   chatId: string;
@@ -122,9 +126,8 @@ function dispatchResume(args: {
       // The continuation ran and its reply is persisted by the time the result
       // arrives — refetch so the resumed assistant entry renders live.
       onResumeSettled?.();
-    } else {
-      resumedBatchesRef.current?.delete(batchId);
     }
+    // A failure keeps the in-memory guard latched: only retryResume clears it.
     onResumeResult?.(batchId, result);
   });
 }
@@ -153,17 +156,15 @@ function settleStreamFrame(args: {
   // Fired the instant a resume is dispatched (the same trigger point) so the
   // caller can mount the post-decision progress row with the right copy variant.
   onResumeArmed?: ((batchId: string, mode: "approve" | "reject") => void) | undefined;
-  // Fired with the resume POST's discriminated outcome (after the persistence
-  // side-effects) so the caller can settle the progress row to its fallback.
+  // Fired with the resume POST's outcome (after the persistence side-effects)
+  // so the caller can settle the progress row to its fallback.
   onResumeResult?: ((batchId: string, result: ResumeResult) => void) | undefined;
-  // Fired when the resume POST settles into a terminal outcome (executed /
-  // settled / indeterminate) — a terminal outcome means any continuation reply
-  // is persisted on the DO path (the continuation is awaited before the ack),
-  // so the caller refetches the transcript + thread list; the refetch is a safe
-  // no-op when nothing new persisted (missing/unsupported/note-less noop). The
-  // legacy no-DO SSE fallback resolves at headers before its continuation runs,
-  // so the refetch there can be early (that flavor is deprecated). Never fired
-  // for pending/unavailable/failure (retryable — no persisted reply yet).
+  // Fired when the resume POST settles into a terminal outcome. On the SSE tier
+  // the continuation frames stream into the live bubble and the reply persists
+  // server-side by the time the stream terminates, so the caller refetches the
+  // transcript + thread list; the refetch is a safe no-op when nothing new
+  // persisted (duplicate / no-op resume). Never fired for a failure (retryable —
+  // no persisted reply yet).
   onResumeSettled?: (() => void) | undefined;
 }): void {
   const { stream, setTurns, turns, chatId, streaming, frozeBatchRef, frozeErrorRef, resumedBatchesRef, observedPendingRef, inFlightResumeRef, ingressInsertedRef, onResumeArmed, onResumeResult, onResumeSettled } = args;
@@ -385,8 +386,10 @@ export function useStreamFrameFreeze(args: {
     return () => window.clearTimeout(timer);
   }, [resumeProgress]);
 
-  // Retry re-attempts the resume for the armed batch: release the in-flight and
-  // persisted guards so the POST can re-fire, re-arm the running row, dispatch.
+  // Retry re-attempts the resume for the armed batch: release the in-memory
+  // latch (and the in-flight key) so the POST can re-fire, re-arm the running
+  // row, dispatch. This is the ONLY path that clears the latch — a failed
+  // resume's own status flip must not re-dispatch.
   const retryResume = useCallback(() => {
     const batchId = armedBatchRef.current;
     const cid = chatIdRef.current;
@@ -448,17 +451,20 @@ export function useChatStartStream(args: {
   chatId: string;
   applyChatId: (id: string) => void;
   seedThreadParam: (threadId: string) => void;
+  // Called with a freshly-minted id so the page can arm its mint guard (skip
+  // the transcript GET until first ingress — the row does not exist yet).
+  onMint?: ((threadId: string) => void) | undefined;
   qc: QueryClient;
   effort: string;
   setEffort: (e: "") => void;
   // Send envelope: the thread's authoritative WRITE mode, or undefined when
-  // the page has none (unhydrated / un-picked) so the DO keeps its sticky
-  // value. The DO captures it at turn start and persists it.
+  // the page has none (unhydrated / un-picked) so the server keeps its sticky
+  // value. The server captures it at turn start and persists it.
   permissionMode?: AssistantToolPermissionMode | undefined;
   pendingTitleRef: React.RefObject<string | null>;
   ingressInsertedRef: React.RefObject<Set<string>>;
 }) {
-  const { stream, projectId, chatId, applyChatId, seedThreadParam, qc, effort, setEffort, permissionMode, pendingTitleRef, ingressInsertedRef } = args;
+  const { stream, projectId, chatId, applyChatId, seedThreadParam, onMint, qc, effort, setEffort, permissionMode, pendingTitleRef, ingressInsertedRef } = args;
   return useCallback(
     (message: string, attachments: ChatAttachmentRef[], fromIndex?: number): string => {
       let threadId = chatId;
@@ -467,6 +473,7 @@ export function useChatStartStream(args: {
         threadId = crypto.randomUUID();
         applyChatId(threadId);
         seedThreadParam(threadId);
+        onMint?.(threadId);
       }
       pendingTitleRef.current = message.trim();
       if (isNewThread && projectId) {
@@ -487,7 +494,7 @@ export function useChatStartStream(args: {
       setEffort("");
       return threadId;
     },
-    [stream, projectId, chatId, effort, permissionMode, applyChatId, seedThreadParam, qc, setEffort, pendingTitleRef, ingressInsertedRef]
+    [stream, projectId, chatId, effort, permissionMode, applyChatId, seedThreadParam, onMint, qc, setEffort, pendingTitleRef, ingressInsertedRef]
   );
 }
 

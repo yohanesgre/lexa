@@ -230,15 +230,23 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     setResolutionProject(projectId);
   }, [projectId, thread, chatId, applyChatId]);
 
-  // Locally-minted thread tracking (ADR-0005 §Reliability 4). A minted id with
-  // no accepted send has no server row yet, so its transcript GET would 404
-  // (the "404 noise"); skip the read until a send is accepted. `sentChatId` is
-  // sticky (never released), unlike `acceptedChatId` below which the ingress
-  // effect clears to let stale-thread recovery fire.
+  // Transport: the in-process SSE store (ADR-0005). Sessions live in a
+  // module-level map keyed by thread, so an in-app navigation or tab switch
+  // re-attaches to the running stream; a reload/close aborts it (partial
+  // output persists as `stopped`).
+  const streamKey = chatId ? `assistant-chat:${chatId}` : null;
+  const stream = useAssistantStream(streamKey);
+  const streaming = stream.status === "connecting" || stream.status === "streaming";
+
+  // Locally-minted thread tracking (ADR-0005 §Reliability 4). A minted id has no
+  // server row until the first send's `runChatStream` upserts it BEFORE the first
+  // frame, so a transcript GET before first ingress would 404 (the "404 noise").
+  // Gate the read on `hasIngress` for a minted thread — BOTH the attach-first
+  // mint (`ensureChatId`) and the fresh-send mint (`useChatStartStream`) arm
+  // `mintedChatId`.
   const [mintedChatId, setMintedChatId] = useState("");
-  const [sentChatId, setSentChatId] = useState("");
   const [acceptedChatId, setAcceptedChatId] = useState("");
-  const transcriptEnabled = !!chatId && !(chatId === mintedChatId && chatId !== sentChatId);
+  const transcriptEnabled = !!chatId && !(chatId === mintedChatId && !stream.hasIngress);
 
   // Transcript render on load (GET /api/assistant/chat/:chatId). A fresh uuid
   // 404s — that IS the empty-thread state, not an error. ASSISTANT_THREAD_NOT_FOUND
@@ -270,13 +278,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     void qc.refetchQueries({ queryKey: ["assistant-chat", chatId], exact: true, type: "active" });
   }, [chatId, qc]);
 
-  // Transport: the in-process SSE store (ADR-0005). Sessions live in a
-  // module-level map keyed by thread, so an in-app navigation or tab switch
-  // re-attaches to the running stream; a reload/close aborts it (partial
-  // output persists as `stopped`).
-  const streamKey = chatId ? `assistant-chat:${chatId}` : null;
-  const stream = useAssistantStream(streamKey);
-  const streaming = stream.status === "connecting" || stream.status === "streaming";
   // Sticky "a send was accepted for this chat" signal (state declared above the
   // transcript query). A fresh-thread send boots its store session via
   // `assistantSendForKey`, so `streaming` cannot flip yet; without this the
@@ -285,11 +286,11 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // the chat the send was accepted on.
   const sendAccepted = !!chatId && acceptedChatId === chatId;
 
-  // The accepted-send exemption exists only for the deferred-flush window: once
-  // the send has actually landed (first ingress), recovery/turn retention are
-  // governed by hasIngress/streaming, so release the sticky marker. A transient
-  // connecting flip without ingress must NOT release it — the stale 404 would
-  // then evict the just-minted thread and strand the send.
+  // The accepted-send exemption exists only for the pre-ingress window: once the
+  // send has actually landed (first ingress), turn retention is governed by
+  // hasIngress/streaming, so release the sticky marker. A transient connecting
+  // flip without ingress must NOT release it — the optimistic turn must survive
+  // until the stream takes over.
   useEffect(() => {
     if (stream.hasIngress) setAcceptedChatId("");
   }, [stream.hasIngress]);
@@ -437,6 +438,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     chatId,
     applyChatId,
     seedThreadParam,
+    onMint: setMintedChatId,
     qc,
     effort,
     setEffort,
@@ -481,9 +483,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
       const threadId = startStream(message, attachments);
       // The send is accepted: the landing must dock for THIS chat even before
-      // the stream status flips, and the mint guard releases (a row will exist).
+      // the stream status flips (the mint guard releases on first ingress).
       setAcceptedChatId(threadId);
-      setSentChatId(threadId);
       // Clear the starter seed at acceptance, not via the turns>0 effect: the
       // landing→dock remount would otherwise mount the docked composer with the
       // stale seed and re-prefill the draft with the text just sent (A7). The

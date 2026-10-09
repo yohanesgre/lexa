@@ -57,10 +57,16 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       db.prepare(sql).first(...params).then((row) => row as unknown as T | null);
     const dbAll = <T>(sql: string, ...params: SqlParam[]): Promise<T[]> =>
       db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
-    // A duplicate resume must not re-execute the batch and has nothing to say;
-    // an empty SSE stream closes immediately (the first resume carries frames).
+    // A duplicate / no-op resume must not re-execute the batch, but it IS a
+    // settled outcome: emit a terminal `done` so the client persists the batch
+    // instead of reading an empty stream as a stall and retrying forever.
     const emptyFrameStream = (): ReadableStream<StreamFrame> =>
-      new ReadableStream<StreamFrame>({ start(controller) { controller.close(); } });
+      new ReadableStream<StreamFrame>({
+        start(controller) {
+          controller.enqueue({ type: "done", text: "", usage: { in: 0, out: 0 } });
+          controller.close();
+        },
+      });
     const gateway = yield* AssistantGateway;
     const jevService = yield* AssistantJevService;
     const providersService = yield* AssistantProvidersService;
