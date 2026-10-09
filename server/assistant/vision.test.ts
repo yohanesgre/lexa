@@ -18,18 +18,20 @@ const deps = (fetchImpl: (input: string, init?: RequestInit) => Promise<Response
 });
 
 describe("resolveVisionMode", () => {
-  it("primary_supports_images=1 → inline (regardless of vision model)", () => {
-    expect(resolveVisionMode({ primary_supports_images: 1, vision_model: null })).toBe("inline");
-    expect(resolveVisionMode({ primary_supports_images: 1, vision_model: "m" })).toBe("inline");
-    expect(resolveVisionMode({ primary_supports_images: true, vision_model: null })).toBe("inline");
+  it("configured vision model → delegate, even when the primary is multimodal (current phase)", () => {
+    expect(resolveVisionMode({ primary_supports_images: 0, vision_model: "vl-1" })).toBe("delegate");
+    expect(resolveVisionMode({ primary_supports_images: 1, vision_model: "m" })).toBe("delegate");
+    expect(resolveVisionMode({ primary_supports_images: true, vision_model: "m" })).toBe("delegate");
   });
 
-  it("no primary images + vision_model → delegate", () => {
-    expect(resolveVisionMode({ primary_supports_images: 0, vision_model: "vl-1" })).toBe("delegate");
+  it("no vision model + primary_supports_images=1 → inline (later-target branch)", () => {
+    expect(resolveVisionMode({ primary_supports_images: 1, vision_model: null })).toBe("inline");
+    expect(resolveVisionMode({ primary_supports_images: true, vision_model: null })).toBe("inline");
   });
 
   it("neither → none", () => {
     expect(resolveVisionMode({ primary_supports_images: 0, vision_model: null })).toBe("none");
+    expect(resolveVisionMode({ primary_supports_images: 0, vision_model: "" })).toBe("none");
   });
 });
 

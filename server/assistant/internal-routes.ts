@@ -640,6 +640,10 @@ export interface HarnessTurnContext {
   mcpTools: Array<{ name: string; description: string; inputSchema: unknown }>;
   writeTools: string[];
   primarySupportsImages: boolean;
+  // The project's configured vision agent model (assistant_settings.vision_model),
+  // or null when unset. The DO resolves image handling from this: a set value →
+  // "delegate" (images always route through analyze_image this phase).
+  visionModel: string | null;
   hasSearchKey: boolean;
   jevConfigured: boolean;
   delegation: { enabled: boolean; maxConcurrentRuns: number };

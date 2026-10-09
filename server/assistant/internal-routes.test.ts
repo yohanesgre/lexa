@@ -831,6 +831,7 @@ describe("turn context (POST /api/internal/assistant/turn-context)", () => {
     mcpTools: [],
     writeTools: ["create_task"],
     primarySupportsImages: false,
+    visionModel: null,
     hasSearchKey: true,
     jevConfigured: false,
     delegation: { enabled: false, maxConcurrentRuns: 0 },

@@ -127,6 +127,7 @@ describe("AssistantSettingsRepo getByProject/maskedView", () => {
           hasSearchKey: true,
           urlAllowlist: "docs.example.com,api.example.com",
           primarySupportsImages: false,
+          visionModel: null,
           reasoningEffort: null,
           writeTools: [],
           providerId: null,
@@ -185,6 +186,28 @@ describe("AssistantSettingsRepo image columns", () => {
     const repo = makeRepo(db);
     const row = await Effect.runPromise(repo.upsert("p1", {}));
     expect(row.project_id).toBe("p1");
+  });
+
+  it("round-trips visionModel (0028); omitted keeps, explicit null clears", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fresh = yield* repo.upsert("p1", {});
+        expect(fresh.vision_model).toBeNull();
+        expect((yield* repo.maskedView("p1")).visionModel).toBeNull();
+
+        const set = yield* repo.upsert("p1", { visionModel: "anthropic/claude-sonnet-4" });
+        expect(set.vision_model).toBe("anthropic/claude-sonnet-4");
+        expect((yield* repo.maskedView("p1")).visionModel).toBe("anthropic/claude-sonnet-4");
+
+        const kept = yield* repo.upsert("p1", { searchProvider: "exa" });
+        expect(kept.vision_model).toBe("anthropic/claude-sonnet-4");
+
+        const cleared = yield* repo.upsert("p1", { visionModel: null });
+        expect(cleared.vision_model).toBeNull();
+      })
+    );
   });
 });
 

@@ -5,13 +5,16 @@ import { normalizeBaseUrl, OPENCODE_SESSION_HEADER, resolveOpencodeSessionId } f
 
 export type VisionMode = "inline" | "delegate" | "none";
 
-// Vision resolution chain (docs/SCHEMA.md — Runtime): primary supports images
-// → inline parts; else a vision model is configured → internal analyze_image
-// delegation on the PRIMARY provider (same kind/api_key/base_url, only the
-// model differs); else attachments are rejected up front.
+// Vision resolution chain (docs/SCHEMA.md — Runtime). CURRENT PHASE: a configured
+// vision model ALWAYS wins — images route through the internal `analyze_image`
+// delegation even when the primary model is multimodal. The inline branch is the
+// LATER target (inline vision parts when the primary is multimodal, the agent
+// only as a fallback); it stays wired but is unreachable while a vision model is
+// set. No vision model + a multimodal primary → inline; neither → none
+// (attachments are rejected up front with VISION_NOT_CONFIGURED).
 export function resolveVisionMode(row: { primary_supports_images: number | boolean; vision_model: string | null }): VisionMode {
-  if (row.primary_supports_images === 1 || row.primary_supports_images === true) return "inline";
   if (row.vision_model !== null && row.vision_model !== "") return "delegate";
+  if (row.primary_supports_images === 1 || row.primary_supports_images === true) return "inline";
   return "none";
 }
 

@@ -206,7 +206,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql", "0028_assistant_settings_vision_model.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -217,7 +217,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql", "0028_assistant_settings_vision_model.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -244,7 +244,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql", "0028_assistant_settings_vision_model.sql"]);
   });
 
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
@@ -303,7 +303,8 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     );
     expect(cols).not.toContain("engine");
     expect(cols).not.toContain("engine_switcher_enabled");
-    expect(cols).not.toContain("vision_model");
+    // Revived by 0028 — the vision agent model.
+    expect(cols).toContain("vision_model");
     expect(cols).not.toContain("kind");
     const agents = db.prepare("SELECT id, name FROM lexa_agents WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string; name: string }>;
     expect(agents).toEqual([{ id: "assistant", name: "Assistant Agent" }]);

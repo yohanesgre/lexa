@@ -126,19 +126,24 @@ export function initialModelChoice(providers: ProviderLike[]): { providerId: str
   };
 }
 
-export type ProjectModelState = { providerId: string; modelId: string; fallbacks: string[] };
+export type ProjectModelState = { providerId: string; modelId: string; fallbacks: string[]; visionModel: string };
 
 // Hydration: apply fetched settings once, or mark settled when both the
 // project and legacy settings are confirmed null (nothing to hydrate).
 export function hydrateStep(args: {
-  settings: { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[] } | null | undefined;
+  settings: { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[]; visionModel?: string | null | undefined } | null | undefined;
   legacySettings: unknown;
   settingsLoading: boolean;
 }): { patch?: ProjectModelState; settled: boolean } {
   const { settings, legacySettings, settingsLoading } = args;
   if (settings && (settings.providerId !== undefined || settings.modelId !== undefined)) {
     return {
-      patch: { providerId: settings.providerId ?? "", modelId: settings.modelId ?? "", fallbacks: settings.fallbackModelIds ?? [] },
+      patch: {
+        providerId: settings.providerId ?? "",
+        modelId: settings.modelId ?? "",
+        fallbacks: settings.fallbackModelIds ?? [],
+        visionModel: settings.visionModel ?? "",
+      },
       settled: true,
     };
   }
@@ -162,17 +167,20 @@ export type ConnectionTestResult = { ok: true; latencyMs: number } | { ok: false
 
 // PUT is a full-row upsert (server nulls omitted search/allowlist/images/effort
 // and clears write_tools), so carry every persisted masked field forward and
-// override only the three the provider form owns.
+// override only the four the provider form owns (provider/model/fallbacks +
+// the vision agent model).
 export function savePayload(
   settings: { searchProvider?: "exa" | null | undefined; urlAllowlist?: string | null | undefined; primarySupportsImages?: boolean | undefined; reasoningEffort?: AssistantReasoningEffort | null | undefined; writeTools?: readonly string[] | undefined } | null | undefined,
   providerId: string,
   modelId: string,
-  fallbacks: string[]
+  fallbacks: string[],
+  visionModel: string
 ): AssistantSettingsInput {
   return {
     searchProvider: settings?.searchProvider ?? null,
     urlAllowlist: settings?.urlAllowlist ?? null,
     primarySupportsImages: settings?.primarySupportsImages ?? false,
+    visionModel: visionModel || null,
     reasoningEffort: settings?.reasoningEffort ?? null,
     writeTools: [...(settings?.writeTools ?? [])],
     providerId: providerId || null,

@@ -679,10 +679,13 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         stopWhen,
         runId,
         callLogPurpose: "turn",
-        // Vision chain (docs/SCHEMA.md §Runtime): `primary_supports_images=1`
-        // inlines image parts; otherwise an image attachment is refused. The
-        // legacy `vision_model` column is retired, so "delegate" is unreachable.
-        imageMode: harness?.primarySupportsImages ? "inline" : "none",
+        // Vision chain (docs/SCHEMA.md §Runtime). CURRENT PHASE: a configured
+        // vision model always wins — images become placeholder text parts and the
+        // model calls the internal `analyze_image` delegation (offered via the
+        // Worker's readTools gate). No vision model → an image attachment is
+        // refused up front. The inline branch (primary multimodal) is the later
+        // target and stays unreachable here for now.
+        imageMode: harness?.visionModel ? "delegate" : "none",
         streamTextImpl: tracedAI.streamText,
         trace: assistantTraceParams({
           agentId: this.ctx.id.toString(),

@@ -736,17 +736,20 @@ CREATE TABLE lexa_agent_skills (
 -- Assistant assistant tier + Gateway (baked into the 0001_init.sql baseline)
 -- ============================================================
 -- Per-project Assistant settings. The baseline hard-recreated this table
--- dropping legacy provider columns (kind, base_url, api_key, model, vision_model);
--- 0008_remove_agent_runtimes.sql dropped engine + engine_switcher_enabled.
--- Remaining columns: search + reasoning + write_tools, plus
--- fallback_model_ids (JSON array of assistant_models ids, ordered, ≤3) and
--- provider_id + primary_model_id (primary binding to assistant_providers/models).
+-- dropping legacy provider columns (kind, base_url, api_key, model); 0028
+-- revives vision_model as the vision agent model. 0008_remove_agent_runtimes.sql
+-- dropped engine + engine_switcher_enabled. Columns: search + reasoning +
+-- write_tools, plus fallback_model_ids (JSON array of assistant_models ids,
+-- ordered, ≤3), provider_id + primary_model_id (primary binding to
+-- assistant_providers/models), and vision_model (nullable vision agent model
+-- id; empty by default).
 CREATE TABLE assistant_settings (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   search_provider TEXT,
   search_api_key TEXT,
   url_allowlist TEXT,
   primary_supports_images INTEGER NOT NULL DEFAULT 0,
+  vision_model TEXT,
   reasoning_effort TEXT CHECK (reasoning_effort IN ('minimal','low','medium','high')),
   write_tools TEXT NOT NULL DEFAULT '',
   fallback_model_ids TEXT NOT NULL DEFAULT '[]',
@@ -1273,9 +1276,14 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
   `chatRecovery` (ADR-0003 §B.5) — a turn survives isolate eviction/redeploy and
   on give-up is marked failed through the internal route. The former Bun
   boot-time stale-`running` sweep is removed with the Bun assistant code.
-- **Vision resolution order** (per request): `primary_supports_images=1` → inline
-  image parts; else `VISION_NOT_CONFIGURED` (409). The legacy `vision_model`
-  delegation was removed in the squashed baseline.
+- **Vision resolution order** (per request): a configured `vision_model` → the
+  internal `analyze_image` delegation (delegate); else `primary_supports_images=1`
+  → inline image parts; else `VISION_NOT_CONFIGURED` (409). **Current phase:** a
+  set vision model ALWAYS wins, even when the primary is multimodal (images route
+  through the vision agent). The inline branch is the later target (inline vision
+  parts when the primary is multimodal, the agent only as a fallback). `vision_model`
+  is empty by default — nothing is preconfigured; while unset, this project's
+  image attach stays disabled.
 - **Id rebind consequence (one-time, history):** threads keyed on the pre-squash
   agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 
