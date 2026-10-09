@@ -913,8 +913,27 @@ export function buildWorkerReadToolExecutor(
       // from the project's configured vision model; unconfigured → the tool is
       // absent and the call falls through to the unknown-tool error.
       if (input.name === "analyze_image") {
-        const loadImageBase64 = (key: string): Promise<string | null> =>
-          runData(Effect.flatMap(Storage, (s) => s.get(key))).then((bytes) => bytesToBase64(bytes)).catch(() => null);
+        // Ownership gate (ADR-0003 §C): the vision agent must never read a
+        // foreign project's blob by key. Both attachment tables share one blob
+        // store, so a key counts as owned when either lists it for this project
+        // (mirrors `buildWorkerAttachmentLoader`).
+        const ownsStorageKey = async (key: string): Promise<boolean> =>
+          (await dbFirst(
+            `SELECT 1 FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+            input.projectId,
+            key
+          )) !== null ||
+          (await dbFirst(
+            `SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
+            input.projectId,
+            key
+          )) !== null;
+        const loadImageBase64 = async (key: string): Promise<string | null> => {
+          if (!(await ownsStorageKey(key))) return null;
+          return runData(Effect.flatMap(Storage, (s) => s.get(key)))
+            .then((bytes) => bytesToBase64(bytes))
+            .catch(() => null);
+        };
         const resolveMimeType = async (key: string): Promise<string> =>
           (await dbFirst<{ mime_type: string }>(
             `SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`,
@@ -928,7 +947,10 @@ export function buildWorkerReadToolExecutor(
           ))?.mime_type ??
           "image/png";
         const visionTool = await resolveWorkerVisionTool(deps, settings, loadImageBase64, resolveMimeType);
-        if (visionTool) tools.push(visionTool as unknown as (typeof tools)[number]);
+        // Unresolvable (providerId null / model row missing) → a typed tool
+        // error the model can read, never the generic unknown-tool fallthrough.
+        if (!visionTool) return { ok: false, error: "VISION_NOT_CONFIGURED: no resolvable vision model for this project" };
+        tools.push(visionTool as unknown as (typeof tools)[number]);
       }
       const tool = tools.find((t) => t.name === input.name);
       if (!tool?.execute) {

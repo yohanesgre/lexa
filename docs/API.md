@@ -2272,8 +2272,9 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
   (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
   png/jpeg/gif/webp only. Attachments require vision capability: a configured
   `vision_model` → images route through the vision agent (delegate; current
-  phase, always wins); else primary_supports_images=1 → inline parts; else 409
-  VISION_NOT_CONFIGURED.
+  phase, always wins). **Today** no vision model → 409 VISION_NOT_CONFIGURED
+  (the `primary_supports_images=1` → inline-parts branch is the later target,
+  not yet the current gate).
 → 201 AssistantTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
@@ -2347,9 +2348,10 @@ body { projectId*, chatId*, message*, agentId?,
   enqueue races on `assistant_tasks`).
   attachments are chat-attachment refs (uploads above; cross-project keys →
   422). Images feed the vision path: a configured `vision_model` routes them
-  through the vision agent (delegate; current phase, always wins), else inline
-  parts when `primary_supports_images=1`, else 409 VISION_NOT_CONFIGURED; they
-  persist as `image-ref` parts. Documents
+  through the vision agent (delegate; current phase, always wins). **Today** no
+  vision model → 409 VISION_NOT_CONFIGURED (inline parts when
+  `primary_supports_images=1` is the later target, not yet the current gate);
+  they persist as `image-ref` parts. Documents
   (PDF/Markdown/plain text) are extracted server-side (PDF via `unpdf`) and
   persist as `document-ref` parts, becoming model-visible text. Caps shared
   across images + documents: ≤3 per message, ≤5 MB each, ≤10 MB per message;

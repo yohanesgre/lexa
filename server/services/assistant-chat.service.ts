@@ -37,10 +37,11 @@ import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATIO
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
+import { AssistantProvidersService } from "./assistant-providers.service";
 import { activeChats, tryAcquireChat } from "../assistant/active-chats";
 
 export class AssistantChatService extends Effect.Service<AssistantChatService>()("Lexa/AssistantChatService", {
-  dependencies: [AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, AssistantProvidersService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
     const settingsRepo = yield* AssistantSettingsRepo;
     const threadRepo = yield* AssistantThreadRepo;
@@ -56,6 +57,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
     const gateway = yield* AssistantGateway;
     const jevService = yield* AssistantJevService;
+    const providersService = yield* AssistantProvidersService;
     const taskService = yield* TaskService;
     const commentService = yield* CommentService;
     const wikiService = yield* WikiService;
@@ -77,11 +79,36 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       });
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
-    const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
+    // Vision agent config, resolved from the registry exactly like the Worker
+    // path: `assistant_settings.provider_id` → the provider's base URL + the
+    // model row's kind, with the key opened through the providers service. The
+    // legacy per-project kind/base_url/api_key columns were dropped in 0008, so
+    // reading them yielded an empty base URL ("Invalid URL"). Null when the
+    // binding is absent or unresolvable.
+    const visionConfigOf = (row: AssistantSettingsRow): Effect.Effect<ProviderConfig | null> => Effect.gen(function* () {
+      const providerId = (row as unknown as { provider_id: string | null }).provider_id;
+      const visionModel = (row as unknown as { vision_model: string | null }).vision_model;
+      if (providerId === null || providerId === "" || visionModel === null || visionModel === "") return null;
+      const modelRow = yield* Effect.promise(() => dbFirst<{ kind: ProviderConfig["kind"] }>(`SELECT kind FROM assistant_models WHERE provider_id = ? AND model_id = ? AND enabled = 1 LIMIT 1`, providerId, visionModel));
+      if (modelRow === null) return null;
+      const providerRow = yield* Effect.promise(() => dbFirst<{ base_url: string }>(`SELECT base_url FROM assistant_providers WHERE id = ?`, providerId));
+      if (providerRow === null) return null;
+      const apiKey = yield* providersService.resolveApiKey(providerId).pipe(Effect.catchAll(() => Effect.succeed("")));
+      return { kind: modelRow.kind, baseUrl: providerRow.base_url, apiKey, model: visionModel };
+    });
     const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
     const loadBoundSkills = (agentId: string): Promise<BoundSkill[]> => dbAll<BoundSkill>(BOUND_SKILLS_SQL, agentId);
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
-    const loadImageBase64 = (key: string): Promise<string | null> => Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
+    // Project-scoped image loader: the blob read is gated on ownership by
+    // `(project_id, storage_key)` across both attachment tables, so a foreign or
+    // known-content key can never be handed to the vision model.
+    const ownsImageStorageKey = async (projectId: string, key: string): Promise<boolean> =>
+      (await dbFirst(`SELECT 1 FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null ||
+      (await dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null;
+    const loadImageBase64For = (projectId: string) => async (key: string): Promise<string | null> => {
+      if (!(await ownsImageStorageKey(projectId, key))) return null;
+      return Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
+    };
     // Chat documents are extracted once per key and cached for THAT RUN only:
     // a fresh Map per stream bounds memory to one run's documents (a
     // process-lifetime Map grew without limit). The current turn's prompt is
@@ -359,6 +386,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const modelOptions = modelOptionsWithWriteIntent(baseModelOptions, req.message, enabledWriteTools);
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const mcp = yield* loadAssistantMcp(req.projectId, allowlist);
+        const visionConfig = imageMode === "delegate" && imageAttachments.length > 0 ? yield* visionConfigOf(settingsRow) : null;
         return buildStream({
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
@@ -367,8 +395,8 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId });
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
-            return imageMode === "delegate" && imageAttachments.length > 0 ? [...base, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: chatId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
-          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+            return visionConfig !== null ? [...base, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: chatId }, loadImageBase64: loadImageBase64For(req.projectId), resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
+          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(req.projectId), loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
@@ -427,7 +455,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
-          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64, loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });

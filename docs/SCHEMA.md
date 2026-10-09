@@ -1198,6 +1198,10 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- 0027_drop_idx_wiki_project.sql drops the redundant `idx_wiki_project`
 -- (project_id): UNIQUE(project_id, slug) already carries project_id as its
 -- leading column and serves every project_id-only wiki read.
+-- 0028_assistant_settings_vision_model.sql revives `assistant_settings.vision_model`
+-- (the per-project vision agent model; empty by default). Additive ALTER (no CHECK
+-- change, so no rebuild). Current phase: set → images route through the vision
+-- agent (delegate); unset → no image attach (VISION_NOT_CONFIGURED).
 ```
 
 ## Design Notes

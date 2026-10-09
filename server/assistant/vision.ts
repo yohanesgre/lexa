@@ -99,12 +99,34 @@ async function analyzeAnthropicCompatible(deps: AnalyzeDeps, prompt: string, mim
   return text;
 }
 
+// Provider-kind → wire mapping. Only two wires exist here: the OpenAI
+// chat-completions shape (`openai_compatible` and `openai_responses`, which
+// share the host) and the Anthropic messages shape. `workers_ai` is not a
+// vision-capable wire for this path — a typed error, never a mis-sent request.
+export function visionWireForKind(kind: ProviderConfig["kind"]): "openai" | "anthropic" | "unsupported" {
+  switch (kind) {
+    case "anthropic_compatible":
+      return "anthropic";
+    case "openai_compatible":
+    case "openai_responses":
+      return "openai";
+    case "workers_ai":
+    default:
+      return "unsupported";
+  }
+}
+
 export async function analyzeImage(deps: AnalyzeDeps, storageKey: string, prompt: string): Promise<string> {
   const [base64, mimeType] = await Promise.all([deps.loadImageBase64(storageKey), deps.resolveMimeType(storageKey)]);
   if (base64 === null) throw new Error(`attachment '${storageKey}' could not be loaded`);
-  return deps.config.kind === "openai_compatible"
-    ? analyzeOpenAiCompatible(deps, prompt, mimeType, base64)
-    : analyzeAnthropicCompatible(deps, prompt, mimeType, base64);
+  switch (visionWireForKind(deps.config.kind)) {
+    case "anthropic":
+      return analyzeAnthropicCompatible(deps, prompt, mimeType, base64);
+    case "openai":
+      return analyzeOpenAiCompatible(deps, prompt, mimeType, base64);
+    case "unsupported":
+      throw new Error(`vision is not supported for provider kind '${deps.config.kind}'`);
+  }
 }
 
 // Internal plumbing — the analyze_image tool frame is SUPPRESSED from the

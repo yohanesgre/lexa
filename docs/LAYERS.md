@@ -978,10 +978,10 @@ export class AssistantMcpRepo extends Effect.Service<AssistantMcpRepo>()("Lexa/A
   // migration 0010 deletes every such row; read types keep McpTransportType, while create/update
   // inputs take McpClientTransportType ("http" | "sse") so a caller cannot persist stdio.
 }) {}
-// AssistantSettingsRepo after the squashed baseline + 0008: assistant_settings dropped kind/base_url/api_key/model/vision_model
-// (baseline) and engine/engine_switcher_enabled (0008) — now only
-// search_provider, search_api_key, url_allowlist,
-// primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
+// AssistantSettingsRepo after the squashed baseline + 0008 + 0028: assistant_settings dropped kind/base_url/api_key/model
+// (baseline) and engine/engine_switcher_enabled (0008); 0028 revives vision_model (the vision agent model).
+// Now: search_provider, search_api_key, url_allowlist, primary_supports_images, vision_model,
+// reasoning_effort, write_tools + provider_id/primary_model_id/fallback_model_ids + project_id PK. Thin upsert/maskedView.
 // price-sync: server/assistant/price-sync.ts fetch OpenRouter → assistant_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/assistant/prices/sync).
 ```
 
@@ -1618,11 +1618,15 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   by silent truncation, never errors. Resolved context rides an ephemeral
   system-prompt segment — never persisted to the thread, so transcripts stay
   byte-stable across turns.
-- **Vision resolution chain** (two outcomes; `vision_model` delegation
-  removed in the squashed baseline — columns kind/base_url/api_key/model/vision_model
-  dropped, legacy compat check remains but never fires):
-  1. `primary_supports_images=1` → inline image parts on the primary model.
-  2. else attachments are rejected up front with `VisionNotConfigured`
+- **Vision resolution chain** (`resolveVisionMode`; `vision_model` revived by
+  migration 0028 — the legacy per-project kind/base_url/api_key columns stay
+  dropped, the vision agent resolves through the registry like the primary):
+  1. a configured `vision_model` → the internal `analyze_image` delegation
+     (delegate). **Current phase:** this always wins, even when the primary is
+     multimodal; images route through the vision agent.
+  2. else `primary_supports_images=1` → inline image parts on the primary model
+     (the later target).
+  3. else attachments are rejected up front with `VisionNotConfigured`
      (409) — never a mid-stream failure.
 - **One builtin agent:** the single builtin seed constant is `assistant`
   ("Assistant Agent", companion-persona instructions), mirrored by the rebinding
@@ -1727,7 +1731,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ProviderRateLimited` | 429 | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
 | `AssistantTaskActive` | 409 | enqueue race on an `assistant_tasks` row, or thread reset while a run is claimed. A second chat client on a live thread no longer raises this — the DO serializes and queues |
 | `AssistantThreadNotFound` | 404 | missing thread row (`assistant_threads`), or the WS gate refusing a thread that is missing / not owned / not project-readable |
-| `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
+| `VisionNotConfigured` | 409 | image attachments submitted while no vision model is configured (`vision_model` unset and `primary_supports_images=0`); a configured `vision_model` enables image attach and routes images through the vision agent. Also raised by the settings PUT when a submitted `visionModel` does not resolve to an enabled model of the project's provider |
 | `ApprovalNotFound` | 404 | unknown approval id, or not the pending row's owner (owner mismatch hidden as NotFound) |
 | `ApprovalExpired` | 409 | decide on a row past its 24h TTL — lazily flipped to `expired` first |
 | `ApprovalAlreadyDecided` | 409 | second decision on a decided/expired row — payload `{ id, status }` |

@@ -712,10 +712,12 @@ availability is the junction rows only (admin-editable, no JSON columns); the
 single builtin `assistant` agent renders the catalog into the system prompt.
 `AGENT_ENTITY_IN_USE` delete guard survives and now counts `assistant_tasks`.
 
-**Vision chain:** `primarySupportsImages` checkbox drives two outcomes:
-primary supports images → inline image parts; else attachments rejected up
-front with 409 `VISION_NOT_CONFIGURED` (`vision_model` delegation was removed
-in the squashed baseline).
+**Vision chain:** a configured per-project `vision_model` (revived by migration
+0028) drives the current phase — images always route through the vision agent
+(the internal `analyze_image` delegation), even when the primary is multimodal.
+Without a vision model, `primary_supports_images=1` would inline image parts
+(the later target); otherwise attachments are rejected up front with 409
+`VISION_NOT_CONFIGURED`.
 
 **Assistant service concern split (accepted 2026-08-27; formerly a standalone
 ADR, merged here):**

@@ -35,6 +35,7 @@ import { extractText } from "../../shared/tiptap-text";
 import * as msg from "../activity-messages";
 import type { TipTapDoc, Task, WikiPage, Actor, AssistantTask, ActivityType } from "../../shared/types";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
+import { AssistantProvidersService } from "./assistant-providers.service";
 import { buildStream, findPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
 import { collectResumeResults } from "../assistant/resume-results";
 import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
@@ -44,7 +45,7 @@ import type { TaskRef } from "../assistant/tools";
 const activeTasks = new Map<string, AbortController>();
 
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
-  dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, AssistantProvidersService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
     const queueRepo = yield* AssistantTaskRepo;
     const catalogRepo = yield* AssistantCatalogRepo;
@@ -68,6 +69,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     const authz = yield* AuthorizationService;
     const gateway = yield* AssistantGateway;
     const jevService = yield* AssistantJevService;
+    const providersService = yield* AssistantProvidersService;
 
     // Read-only MCP tools for this project: globally + project enabled servers,
     // discovered fail-open. Undefined when the project has none.
@@ -138,7 +140,20 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       });
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
-    const visionConfigOf = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
+    // Vision agent config from the registry (the legacy per-project
+    // kind/base_url/api_key columns were dropped in 0008): provider base URL +
+    // model-row kind, key opened through the providers service.
+    const visionConfigOf = (row: AssistantSettingsRow): Effect.Effect<ProviderConfig | null> => Effect.gen(function* () {
+      const providerId = (row as unknown as { provider_id: string | null }).provider_id;
+      const visionModel = (row as unknown as { vision_model: string | null }).vision_model;
+      if (providerId === null || providerId === "" || visionModel === null || visionModel === "") return null;
+      const modelRow = yield* Effect.promise(() => dbFirst<{ kind: ProviderConfig["kind"] }>(`SELECT kind FROM assistant_models WHERE provider_id = ? AND model_id = ? AND enabled = 1 LIMIT 1`, providerId, visionModel));
+      if (modelRow === null) return null;
+      const providerRow = yield* Effect.promise(() => dbFirst<{ base_url: string }>(`SELECT base_url FROM assistant_providers WHERE id = ?`, providerId));
+      if (providerRow === null) return null;
+      const apiKey = yield* providersService.resolveApiKey(providerId).pipe(Effect.catchAll(() => Effect.succeed("")));
+      return { kind: modelRow.kind, baseUrl: providerRow.base_url, apiKey, model: visionModel };
+    });
     const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
     const skillJunctionBound = async (agentId: string, skillId: string): Promise<boolean> => (await dbFirst(`SELECT 1 FROM lexa_agent_skills WHERE agent_id = ? AND skill_id = ? LIMIT 1`, agentId, skillId)) !== null;
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
@@ -147,7 +162,15 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       if (documentType === "task") { const t = yield* taskRepo.findById(documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: documentId }))); const md = docToMarkdown(t.description as TipTapDoc); return { title: t.title, context: `Task: ${t.key} — ${t.title}${md ? `\nDescription:\n${md}` : ""}` }; }
       const page = yield* wikiRepo.findBySlug(projectId, documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: documentId }))); const md = docToMarkdown(page.content as TipTapDoc); return { title: page.title, context: `Wiki page: ${page.title}${md ? `\n${md}` : ""}` };
     });
-    const loadImageBase64 = (key: string): Promise<string | null> => Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
+    // Project-scoped image loader: the blob read is gated on ownership by
+    // `(project_id, storage_key)` across both attachment tables.
+    const ownsImageStorageKey = async (projectId: string, key: string): Promise<boolean> =>
+      (await dbFirst(`SELECT 1 FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null ||
+      (await dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null;
+    const loadImageBase64For = (projectId: string) => async (key: string): Promise<string | null> => {
+      if (!(await ownsImageStorageKey(projectId, key))) return null;
+      return Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
+    };
     const validateAttachments = (projectId: string, attachments: ReadonlyArray<{ storageKey: string; mimeType: string }>, caps: { maxCount: number; maxBytesEach?: number; maxTotalBytes?: number }): Effect.Effect<void, InvalidArgs | DbError> => Effect.gen(function* () {
       for (const a of attachments) { const scoped = (yield* Effect.promise(() => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, a.storageKey))) !== null; if (!scoped) return yield* new InvalidArgs({ reason: `attachment '${a.storageKey}' does not belong to this project` }); }
       const sized = yield* Effect.forEach(attachments, (a) => storage.stat(a.storageKey).pipe(Effect.catchTag("StorageError", () => Effect.succeed(null)), Effect.map((size) => ({ mimeType: a.mimeType, size: size ?? 0 }))));
@@ -400,12 +423,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];
-        const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: task.documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(task.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
+        const visionConfig = imageMode === "delegate" ? yield* visionConfigOf(settingsRow) : null;
+        const tools = visionConfig !== null ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: task.documentId }, loadImageBase64: loadImageBase64For(task.projectId), resolveMimeType: (key) => resolveMimeType(task.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         const userContent = buildUserMessage({ instruction, summary: verdict.summary, summarizedCount: verdict.summarizedCount }) as string;
         return buildStream({
           keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, ...(mcp ? { onDispose: mcp.close } : {}),
+          historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(task.projectId), imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: (text) => Effect.runPromise(completeTask(taskId, text)).then(() => {}).catch(() => {}),
           onFail: (message) => Effect.runPromise(failTask(taskId, message)).then(() => {}).catch(() => {}),
@@ -448,11 +472,12 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
         const mcpTools = mcp?.tools ?? [];
-        const tools = imageMode === "delegate" ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfigOf(settingsRow), sessionId: documentId }, loadImageBase64, resolveMimeType: (key) => resolveMimeType(thread.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
+        const visionConfig = imageMode === "delegate" ? yield* visionConfigOf(settingsRow) : null;
+        const tools = visionConfig !== null ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: documentId }, loadImageBase64: loadImageBase64For(thread.projectId), resolveMimeType: (key) => resolveMimeType(thread.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         return buildStream({
           keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+          userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });

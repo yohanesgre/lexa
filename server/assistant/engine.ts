@@ -475,9 +475,13 @@ async function hydrateAttachmentParts(
                 return { type: "file" as const, mediaType: attachment.mimeType, url: `data:${attachment.mimeType};base64,${base64}` };
               }
               // "delegate": the image is not sent to the primary. A placeholder
-              // text part names it so the model calls the internal
-              // `analyze_image` tool (offered only when a vision model is set).
-              return { type: "text" as const, text: `[attached image: ${attachment.name || attachment.storageKey}]` };
+              // text part carries the storageKey so the model can call the
+              // internal `analyze_image` tool (offered only when a vision model
+              // is set; its inputSchema requires `storageKey`).
+              return {
+                type: "text" as const,
+                text: `[attached image: ${attachment.name || attachment.storageKey} (storageKey: ${attachment.storageKey})]`,
+              };
             }
             if (!deps.loadDocumentText) return null;
             const text = await deps.loadDocumentText(attachment.storageKey).catch(() => null);

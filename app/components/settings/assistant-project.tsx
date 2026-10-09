@@ -173,7 +173,7 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
             disabled={!selectedProvider}
           >
             <option value="">— None (vision agent unset) —</option>
-            {enabledModels.map((m) => (
+            {enabledModels.filter((m) => m.kind !== "workers_ai").map((m) => (
               <option key={m.modelId} value={m.modelId}>{m.modelId} — {m.kind} · vision</option>
             ))}
           </select>
