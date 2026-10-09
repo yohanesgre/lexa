@@ -10,7 +10,7 @@ import { AssistantChatComposer } from "./AssistantChatComposer";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ToastProvider } from "../ui/Toast";
 import { appendEphemeralUserTurn, resolveResendTarget, terminalTranscriptAction } from "./assistant-chat-logic";
-import { useSettledTurns, useTerminalRefetch, useTurnResend, useStreamFrameFreeze, readResumedBatches, persistResumedBatch } from "./assistant-chat-session";
+import { useSettledTurns, useTerminalRefetch, useTurnResend, useStreamFrameFreeze, readResumedBatches, persistResumedBatch, useChatStartStream } from "./assistant-chat-session";
 import type { ChatTurn } from "./assistant-chat-utils";
 
 type Stream = ReturnType<typeof useAssistantStream>;
@@ -60,6 +60,40 @@ describe("useSettledTurns — per-thread isolation", () => {
 
     rerender({ chatId: "B", messages: [{ role: "user", content: "hi" }] });
     expect(result.current.turns).toEqual([{ role: "user", text: "hi", imageCount: 0, rawIndex: 0 }]);
+  });
+});
+
+describe("useChatStartStream — fresh-thread mint seeds the URL without navigating", () => {
+  it("seeds ?thread= via seedThreadParam (replaceState), never a router param", () => {
+    const stream = makeStream();
+    const applyChatId = vi.fn();
+    const seedThreadParam = vi.fn();
+    const setEffort = vi.fn();
+    const { result } = renderHook(() =>
+      useChatStartStream({
+        stream,
+        projectId: "p1",
+        chatId: "",
+        applyChatId,
+        seedThreadParam,
+        qc: new QueryClient(),
+        effort: "",
+        setEffort,
+        permissionMode: undefined,
+        pendingTitleRef: { current: null },
+        ingressInsertedRef: { current: new Set<string>() },
+      })
+    );
+
+    act(() => {
+      result.current("hello", []);
+    });
+
+    expect(applyChatId).toHaveBeenCalledTimes(1);
+    const minted = applyChatId.mock.calls[0]![0] as string;
+    expect(minted).not.toBe("");
+    // The mint seeds the address bar client-side; no navigate hook is involved.
+    expect(seedThreadParam).toHaveBeenCalledWith(minted);
   });
 });
 

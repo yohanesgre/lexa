@@ -245,6 +245,10 @@ export function useAssistantAgent(key: string | null, options?: AssistantAgentOp
     // of discarding; user payloads never buffer here (assistantSendForKey
     // defers to the identified socket).
     transferEnqueuedMessages: true,
+    // A cold DO's first dial regularly exceeds partysocket's 4s default; the
+    // abort closes a CONNECTING socket (browser warning) and delays the
+    // deferred first send by a whole retry cycle (~5s).
+    connectionTimeout: 15000,
   });
 
   // Advance the committed identity only once the outgoing socket has settled.

@@ -692,17 +692,18 @@ describe("AssistantChatPage — New chat stays client-side (A3)", () => {
 });
 
 describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
-  // The real app navigates the just-minted uuid into ?thread= in the same tick
-  // as the send (useChatStartStream → openThreadParam), so the fresh-thread 404
-  // reads as an untracked deep link. Mirror that here: navigateMock is inert, so
-  // the page's `thread` prop must be applied alongside the send or the
-  // stale-thread recovery would evict the minted chat.
-  function sendFirst(rerenderPage: (next: { thread?: string }) => void) {
+  // The mint seeds ?thread=<uuid> into the address bar via history.replaceState
+  // (useChatStartStream → seedThreadParam) — NO router navigation — so the page's
+  // `thread` prop stays undefined. Mirror that here: send, then read the minted
+  // id back off the URL the page itself wrote, and assert no navigate fired.
+  function sendFirst() {
+    navigateMock.mockClear();
     act(() => {
       expect(composerCapture.onSend!("hello", [])).toBe(true);
       const key = transportCapture.sendForKey.mock.calls[0]?.[0] as string;
-      rerenderPage({ thread: key.replace("assistant-chat:", "") });
+      expect(new URLSearchParams(window.location.search).get("thread")).toBe(key.replace("assistant-chat:", ""));
     });
+    expect(navigateMock).not.toHaveBeenCalled();
   }
 
   it("hides the landing + chips from the accepted send before the stream flips", async () => {
@@ -712,7 +713,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     expect(container.querySelector(".chat-landing")).toBeTruthy();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
-    sendFirst(rerenderPage);
+    sendFirst();
 
     // The send is deferred (assistantSendForKey) so the stream is still idle —
     // the landing must dock anyway, and the optimistic user turn must survive
@@ -729,7 +730,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
     const { container, rerenderPage } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
-    sendFirst(rerenderPage);
+    sendFirst();
     expect(container.querySelector(".chat-landing")).toBeNull();
 
     // Socket identifies → connecting → streaming → done: the hero never returns.
@@ -765,7 +766,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
 
     let mintedId = "";
     await act(async () => {
-      sendFirst(rerenderPage);
+      sendFirst();
       mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
       fx.lists.p1 = [
         {
@@ -808,7 +809,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     const { container, rerenderPage, queryClient } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
-    sendFirst(rerenderPage);
+    sendFirst();
     const mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(mintedId));
 
@@ -865,7 +866,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     const { rerenderPage } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
-    sendFirst(rerenderPage);
+    sendFirst();
     expect(streamFx.state.current.status).toBe("idle");
     await waitFor(() => expect(shellCapture.pendingReply).toBe(true));
 
@@ -891,7 +892,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     const { rerenderPage } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
-    sendFirst(rerenderPage);
+    sendFirst();
     await waitFor(() => expect(shellCapture.pendingReply).toBe(true));
 
     act(() => {
