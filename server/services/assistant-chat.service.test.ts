@@ -873,7 +873,8 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     seed("approved");
     db.exec(`INSERT INTO assistant_resume_claims (batch_id) VALUES ('b1')`);
     const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(frames).toEqual([]);
+    // Settled (not empty): the client persists a duplicate instead of retrying.
+    expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     expect(newTaskCount()).toBe(0);
   });
@@ -906,7 +907,8 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     db.exec(`INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
       VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[]}}]');`);
     const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(frames).toEqual([]);
+    // Marker with no rows: settled with a terminal frame, no provider turn.
+    expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     expect(claimCount()).toBe(0);
   });

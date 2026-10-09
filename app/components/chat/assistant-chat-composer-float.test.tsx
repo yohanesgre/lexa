@@ -108,25 +108,7 @@ describe("ChatComposerArea — floating composer", () => {
   });
 });
 
-// herald-chat.html "Connection lost → auto-resume" (ADR-0003 WS1): the socket
-// is down while the turn keeps running server-side — a reconnecting banner
-// rides above the composer, the composer locks, and the footer shows
-// RECONNECTING; after recovery a short-lived RESUMED marker confirms continuity.
-describe("ChatComposerArea — transport reconnect states", () => {
-  it("shows the reconnect banner and locks the composer while the socket is down", () => {
-    const { container } = renderComposerArea(false, { reconnecting: true });
-    const banner = container.querySelector(".banner-warning")!;
-    expect(banner.getAttribute("role")).toBe("status");
-    expect(banner.textContent).toContain("Connection lost — reconnecting… Your reply keeps running on the server.");
-    expect(screen.getByText(/RECONNECTING/)).toBeInTheDocument();
-    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).disabled).toBe(true);
-  });
-
-  it("shows the short-lived RESUMED marker without locking the composer", () => {
-    const { container } = renderComposerArea(false, { resumed: true });
-    expect(container.querySelector(".banner-warning")).toBeNull();
-    expect(screen.getByText("● RESUMED")).toBeInTheDocument();
-    expect(screen.getByText("Reconnected — stream resumed from the last frame.")).toBeInTheDocument();
-    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).disabled).toBe(false);
-  });
-});
+// ADR-0005: the chat transport is the in-process SSE store (no socket), so the
+// WS reconnect/RESUMED markers are retired. The wireframe copy for those states
+// (herald-chat.html "Connection lost → auto-resume") is stale — reported, not
+// edited (D8).

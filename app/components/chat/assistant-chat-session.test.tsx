@@ -6,6 +6,13 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-li
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 import { useMentionTokens } from "../../lib/useMentionTokens";
+
+// The mint path boots a store session (real fetch). Stub the module function so
+// the mint test never touches the network; the resume helpers stay real.
+vi.mock("../../lib/use-assistant-stream", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/use-assistant-stream")>();
+  return { ...actual, assistantSendForKey: vi.fn() };
+});
 import { AssistantChatComposer } from "./AssistantChatComposer";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ToastProvider } from "../ui/Toast";
@@ -698,7 +705,7 @@ function makeResumeStream() {
   const send = vi.fn((url: string, body: unknown, onResult?: (result: ResumeResult) => void) => {
     calls.push({ url, body, onResult });
   });
-  return { stream: makeStream({ send }), calls };
+  return { stream: makeStream({ send }), send, calls };
 }
 
 function renderFreeze(stream: Stream, turns: ChatTurn[], chatId: string, onResumeSettled?: () => void) {
@@ -746,6 +753,32 @@ describe("useStreamFrameFreeze — resume idempotency", () => {
     const second = makeResumeStream();
     renderFreeze(second.stream, turns, "C1");
     expect(second.calls.map((c) => c.url)).toEqual(["/api/assistant/chat/C1/resume"]);
+  });
+
+  it("does not self-retrigger a failed resume; only retryResume re-fires", () => {
+    // A failed resume's own error frame flips stream.status/stream.error — deps
+    // of the settle effect. Without the in-memory latch that re-dispatches the
+    // POST immediately (unbounded loop). Only the explicit retry clears it.
+    const turns = [terminalBatchTurn("b1")];
+    const { stream, send, calls } = makeResumeStream();
+    const ingressInsertedRef = { current: new Set<string>() };
+    const { result, rerender } = renderHook(
+      ({ s }: { s: Stream }) =>
+        useStreamFrameFreeze({ stream: s, setTurns: () => {}, turns, chatId: "C1", streaming: false, ingressInsertedRef }),
+      { initialProps: { s: stream } }
+    );
+    expect(calls).toHaveLength(1);
+
+    act(() => calls[0]!.onResult?.({ ok: false }));
+    expect(readResumedBatches("C1")).toEqual([]);
+
+    // The resume's own error frame: must NOT re-dispatch.
+    rerender({ s: makeStream({ send, status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "boom" } }) });
+    expect(calls).toHaveLength(1);
+
+    // Explicit retry clears the latch and re-fires.
+    act(() => result.current.retryResume());
+    expect(calls).toHaveLength(2);
   });
 
   it("does not persist a pending/unavailable ack, so a later pass retries", () => {

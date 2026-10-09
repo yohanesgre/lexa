@@ -123,9 +123,11 @@ vi.mock("../../lib/api", () => ({
   abortAssistantRun: vi.fn(async () => ({ ok: true })),
 }));
 
-vi.mock("../../lib/use-assistant-agent", () => ({
+vi.mock("../../lib/use-assistant-stream", () => ({
   assistantSendForKey: transportCapture.sendForKey,
-  useAssistantAgent: (key: string | null) => {
+  shouldPersistResume: () => true,
+  resumeOutcome: async () => ({ ok: true }),
+  useAssistantStream: (key: string | null) => {
     const snapshot = key ? streamFx.state.current : streamFx.idle();
     return {
       ...snapshot,
@@ -134,22 +136,11 @@ vi.mock("../../lib/use-assistant-agent", () => ({
       reset: vi.fn(),
       subscribe: () => () => {},
       getSnapshot: () => snapshot,
-      reconnecting: false,
-      resumed: false,
     };
   },
 }));
 
 vi.mock("../ui/Toast", () => ({ useToast: () => ({ push: vi.fn() }) }));
-
-vi.mock("../../lib/use-assistant-runs", () => ({
-  useAssistantRunEvents: () => ({
-    runsById: {},
-    liveRunIds: new Set<string>(),
-    liveFromByRunId: {},
-    resetLocalState: vi.fn(),
-  }),
-}));
 
 vi.mock("./AssistantChatShell", () => ({
   ChatHeader: (props: { landing: boolean; onDelete: () => void }) =>
@@ -587,6 +578,36 @@ describe("AssistantChatPage — zero-turn landing", () => {
     expect(mintedId).not.toBe("");
     expect(new URLSearchParams(window.location.search).get("thread")).toBe(mintedId);
     expect(navigateMock).not.toHaveBeenCalled();
+    // Mint guard: the minted-but-unsent id has no server row, so the transcript
+    // GET is skipped (no 404 race).
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+  });
+
+  it("releases the mint guard and reads the transcript once first ingress lands", async () => {
+    fx.lists.p1 = [];
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { rerenderPage } = renderPage();
+    await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
+
+    // Attach-first mint: no transcript read while minted and pre-ingress.
+    act(() => {
+      composerCapture.ensureChatId!();
+    });
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+
+    // An accepted send still has no row until the first frame: the read stays
+    // gated (no 404 race).
+    act(() => {
+      expect(composerCapture.onSend!("hello", [])).toBe(true);
+    });
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+
+    // First ingress proves the row exists → the read runs.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
+    });
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledTimes(1));
   });
 
   it("clears the starter seed once a turn exists (no stale draft refill on a later landing)", async () => {
@@ -770,70 +791,60 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     expect(container.querySelector(".chat-landing")).toBeNull();
   });
 
-  it("keeps the minted chat when the optimistic insert lands in the list snapshot", async () => {
-    // Real-app divergence: `useChatStartStream` optimistically calls
-    // `insertNewThread`, so `knownChatIds` contains the minted id and
-    // `isUntrackedDeepLink` no longer protects it. The mocked list hook reads
-    // fx.lists directly, so mirror the insert there; the query-error render
-    // refreshes the list snapshot. The transcript still
-    // 404s and the stream is still idle — the exact window the stale-thread
-    // recovery misreads as a dead thread (and evicts the deferred send).
+  it("skips the transcript GET for a freshly-minted send until first ingress", async () => {
+    // The send-mint path (`useChatStartStream`) arms the same guard as the
+    // attach-first mint: the thread row is upserted before the first frame, so a
+    // read before ingress would 404.
     fx.lists.p1 = [];
-    let failRead!: (error: unknown) => void;
-    getAssistantChatMock.mockReturnValue(
-      new Promise((_resolve, reject) => {
-        failRead = reject;
-      })
-    );
-    const { container } = renderPage();
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    const { container, rerenderPage } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
-    let mintedId = "";
-    await act(async () => {
-      sendFirst();
-      mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
-      fx.lists.p1 = [
-        {
-          chatId: mintedId,
-          title: "hello",
-          pinned: false,
-          snippet: null,
-          createdAt: "2026-01-01T00:00:00Z",
-          updatedAt: "2026-01-01T00:00:00Z",
-        },
-      ];
-      await Promise.resolve();
-      failRead(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
-    });
-    expect(streamFx.state.current.status).toBe("idle");
-    expect(mintedId).not.toBe("");
-
+    sendFirst();
     // The accepted send docks the landing and keeps the optimistic turn.
     expect(container.querySelector(".chat-landing")).toBeNull();
     expect(shellCapture.turns ?? []).toHaveLength(1);
     expect((shellCapture.turns as Array<{ role: string; text: string }>)[0]).toMatchObject({ role: "user", text: "hello" });
+    // Minted + no ingress: no read (the row does not exist yet).
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
 
-    // Let the settled 404 reach the recovery effects: the minted id is now in
-    // `knownChatIds` and the stream is idle, so the stale-thread predicates
-    // would evict the chat. The accepted send must suppress that — no hero.
-    await act(async () => {
-      await Promise.resolve();
+    // First ingress proves the row exists → the read is allowed.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
     });
-    expect(container.querySelector(".chat-landing")).toBeNull();
+    await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledTimes(1));
   });
 
   it("keeps the accepted marker through a transient connecting flip; ingress releases it", async () => {
-    // Run 5 (staging regression): a transient connecting/streaming flip with NO
-    // ingress must not release the marker — the stale 404 would then evict the
-    // just-minted thread and strand the deferred send. Only the first ingress
-    // (the send actually landing) releases it, after which recovery can fire.
     fx.lists.p1 = [];
     getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
-    const { container, rerenderPage, queryClient } = renderPage();
+    const { container, rerenderPage } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
     sendFirst();
     const mintedId = (transportCapture.sendForKey.mock.calls[0]?.[0] as string).replace("assistant-chat:", "");
+
+    // Pre-ingress: the transcript read is gated, so a transient connecting flip
+    // cannot surface a stale 404 — the just-minted thread stays docked.
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
+      rerenderPage({});
+    });
+    expect(getAssistantChatMock).not.toHaveBeenCalled();
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    act(() => {
+      streamFx.state.current = streamFx.idle();
+      rerenderPage({});
+    });
+    expect(container.querySelector(".chat-landing")).toBeNull();
+
+    // First ingress releases the marker and allows the read (which now 404s).
+    act(() => {
+      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
+      rerenderPage({});
+    });
     await waitFor(() => expect(getAssistantChatMock).toHaveBeenCalledWith(mintedId));
 
     // Mirror the optimistic insert so `isUntrackedDeepLink` no longer protects it.
@@ -842,36 +853,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
         { chatId: mintedId, title: "hello", pinned: false, snippet: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
       ];
     });
-    await waitFor(() => expect(queryClient.getQueryState(["assistant-chat", mintedId])?.error).toBeTruthy());
-    expect(container.querySelector(".chat-landing")).toBeNull();
-
-    // Transient connecting flip without ingress: the marker stays and the minted
-    // chat is kept.
-    act(() => {
-      streamFx.state.current = { ...streamFx.idle(), status: "connecting" };
-      rerenderPage({});
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(container.querySelector(".chat-landing")).toBeNull();
-
-    // Back to idle with no ingress at all: still suppressed (marker not released).
-    act(() => {
-      streamFx.state.current = streamFx.idle();
-      rerenderPage({});
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(container.querySelector(".chat-landing")).toBeNull();
-
-    // First ingress releases the marker …
-    act(() => {
-      streamFx.state.current = { ...streamFx.idle(), status: "streaming", hasIngress: true };
-      rerenderPage({});
-    });
-    // … so a later idle 404 recovers and lands on the fresh hero.
+    // Marker released: a later idle 404 recovers and lands on the fresh hero.
     act(() => {
       streamFx.state.current = streamFx.idle();
       rerenderPage({});
@@ -936,7 +918,8 @@ describe("AssistantChatPage — permissionMode envelope", () => {
     });
 
     expect(transportCapture.sendForKey).toHaveBeenCalledTimes(1);
-    const [key, body] = transportCapture.sendForKey.mock.calls[0] as [string, Record<string, unknown>];
+    // SSE send signature: (key, url, body).
+    const [key, , body] = transportCapture.sendForKey.mock.calls[0] as [string, string, Record<string, unknown>];
     expect(key).toMatch(/^assistant-chat:/);
     // Unhydrated and un-picked: the envelope must NOT carry a mode, so the DO
     // keeps its sticky value (a fresh thread resolves to "ask" server-side).

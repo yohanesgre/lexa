@@ -7,6 +7,47 @@ import { Duration, Effect, Schedule, Stream } from "effect";
 // live in a module-level store keyed by taskId/chatId so a closed popover or
 // route does NOT tear down the run ("Closing the popover does NOT stop the
 // run" — assistant-popover.html): reopening resubscribes to the live state.
+// ADR-0005: this store is the chat + panel transport (the DO WebSocket path is
+// retired); the module-level session is what keeps an in-app navigation or tab
+// switch from aborting a run.
+
+// Approval-resume outcome. The resume route answers with a discriminated JSON
+// ack when a Durable Object owns the batch (ADR-0003 kept path) and streams SSE
+// frames on the in-process tier; the SSE reader reports `{ ok: true }` once the
+// continuation stream terminates cleanly. Pure + transport-neutral.
+export interface ResumeResult {
+  ok: boolean;
+  executed?: boolean | undefined;
+  reason?: string | undefined;
+}
+
+export async function resumeOutcome(response: Response): Promise<ResumeResult> {
+  const contentType = response.headers?.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) return { ok: response.ok };
+  try {
+    const body = (await response.json()) as { ok?: unknown; executed?: unknown; reason?: unknown };
+    if (body.ok !== true) return { ok: false };
+    return {
+      ok: true,
+      ...(typeof body.executed === "boolean" ? { executed: body.executed } : {}),
+      ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
+    };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// The resume POST is not idempotent from the client's view, but the server claim
+// is: persist the batch (never replay) only when the writes ran, or the batch is
+// settled/indeterminate. `pending` / `unavailable` and any failure keep the batch
+// eligible for retry.
+export function shouldPersistResume(result: ResumeResult): boolean {
+  if (!result.ok) return false;
+  if (result.executed === true) return true;
+  if (result.reason === "settled" || result.reason === "indeterminate") return true;
+  if (result.reason === "pending" || result.reason === "unavailable") return false;
+  return true;
+}
 
 export interface AssistantToolChip {
   key: string;
@@ -130,13 +171,27 @@ class AssistantStreamSession {
   // render per animation frame; every status-bearing frame notifies
   // synchronously. Raw observers just ignore the argument.
   private listeners = new Set<(coalesce?: boolean) => void>();
+  private resumeReported = false;
   readonly controller = new AbortController();
 
   constructor(
     readonly key: string,
     private readonly url: string,
-    private readonly body: unknown
+    private readonly body: unknown,
+    private readonly onResult?: ((result: ResumeResult) => void) | undefined
   ) {}
+
+  private get isResume(): boolean {
+    return /\/resume$/.test(this.url);
+  }
+
+  // Report the resume outcome at most once (the client persists a success and
+  // leaves a failure retryable). Non-resume sends have no callback.
+  private reportResume(ok: boolean) {
+    if (!this.isResume || this.resumeReported) return;
+    this.resumeReported = true;
+    this.onResult?.({ ok });
+  }
 
   getSnapshot = (): AssistantStreamSnapshot => this.snapshot;
 
@@ -186,6 +241,7 @@ class AssistantStreamSession {
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "Could not reach the server." } });
+      this.reportResume(false);
       return;
     }
     if (!res.ok) {
@@ -198,10 +254,21 @@ class AssistantStreamSession {
           ...(payload.error?.details !== undefined ? { details: payload.error.details } : {}),
         },
       });
+      this.reportResume(false);
+      return;
+    }
+    // A Durable Object still owns this resume (transition window): the route
+    // acks with discriminated JSON and the continuation runs on the DO, so there
+    // are no frames to read here. Report the ack and settle.
+    if (this.isResume && (res.headers.get("content-type") ?? "").includes("application/json")) {
+      this.resumeReported = true;
+      this.onResult?.(await resumeOutcome(res));
+      this.emit({ status: "done" });
       return;
     }
     if (!res.body) {
       this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "Empty stream." } });
+      this.reportResume(false);
       return;
     }
 
@@ -386,16 +453,21 @@ class AssistantStreamSession {
       if (this.snapshot.status === "streaming") {
         this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: ASSISTANT_STALL_MESSAGE } });
       }
+      // The continuation stream terminated: a non-error terminal (done /
+      // suspended) means the resume ran; an error frame keeps it retryable.
+      this.reportResume(this.snapshot.status !== "error");
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       if ((e as Error).name === "StallTimeout") {
         this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: ASSISTANT_STALL_MESSAGE } });
+        this.reportResume(false);
         try {
           await reader.cancel();
         } catch {}
         return;
       }
       this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "The stream failed unexpectedly." } });
+      this.reportResume(false);
     }
   }
 }
@@ -406,10 +478,10 @@ function getSession(key: string): AssistantStreamSession | null {
   return sessions.get(key) ?? null;
 }
 
-export function assistantSendForKey(key: string, url: string, body: unknown): void {
+export function assistantSendForKey(key: string, url: string, body: unknown, onResult?: (result: ResumeResult) => void): void {
   const existing = sessions.get(key);
   if (existing && (existing.getSnapshot().status === "connecting" || existing.getSnapshot().status === "streaming")) return;
-  const next = new AssistantStreamSession(key, url, body);
+  const next = new AssistantStreamSession(key, url, body, onResult);
   sessions.set(key, next);
   next.start();
 }
@@ -419,7 +491,9 @@ export function assistantGetSnapshot(key: string): AssistantStreamSnapshot {
 }
 
 export interface AssistantStream extends AssistantStreamSnapshot {
-  send: (url: string, body: unknown) => void;
+  // `onResult` is only meaningful for an approval-resume POST (`/resume`): the
+  // caller learns the discriminated outcome and persists a success.
+  send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => void;
   abort: () => void;
   // Clear the terminal state back to idle (Dismiss affordances).
   reset: () => void;
@@ -479,11 +553,11 @@ export function useAssistantStream(key: string | null): AssistantStream {
     ...snapshot,
     subscribe: (listener: () => void) => (session ? session.subscribe(listener) : noopSubscribe(listener)),
     getSnapshot: () => session?.getSnapshot() ?? IDLE,
-    send: (url: string, body: unknown) => {
+    send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => {
       if (!key) return;
       const existing = sessions.get(key);
       if (existing && (existing.getSnapshot().status === "connecting" || existing.getSnapshot().status === "streaming")) return;
-      const next = new AssistantStreamSession(key, url, body);
+      const next = new AssistantStreamSession(key, url, body, onResult);
       sessions.set(key, next);
       setSessionEpoch((e) => e + 1);
       next.start();

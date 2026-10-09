@@ -379,8 +379,6 @@ export function ChatComposerArea({
   streaming,
   streamStatus,
   sendError,
-  reconnecting = false,
-  resumed = false,
   suspendedLock,
   suspendCount,
   attachDisabled,
@@ -408,9 +406,6 @@ export function ChatComposerArea({
   streaming: boolean;
   streamStatus?: AssistantStreamStatus | undefined;
   sendError?: { code: string; details?: unknown } | null | undefined;
-  // Transport reconnect (herald-chat.html "Connection lost → auto-resume").
-  reconnecting?: boolean | undefined;
-  resumed?: boolean | undefined;
   suspendedLock: boolean;
   suspendCount: number;
   attachDisabled: boolean;
@@ -452,12 +447,6 @@ export function ChatComposerArea({
     >
       {!landing && <div className="chat-composer-scrim" aria-hidden="true" />}
       <div className="chat-composer-inner">
-        {reconnecting && (
-          <div className="banner-warning" role="status" style={{ marginBottom: 12 }}>
-            <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} aria-hidden="true" />
-            <span>Connection lost — reconnecting… Your reply keeps running on the server.</span>
-          </div>
-        )}
         <AssistantChatComposer
           slug={slug}
           skills={skills}
@@ -469,8 +458,6 @@ export function ChatComposerArea({
           attachDisabled={attachDisabled}
           attachmentsEnabled={attachmentsEnabled}
           sendError={sendError}
-          reconnecting={reconnecting}
-          resumed={resumed}
           onSend={onSend}
           onAbort={onAbort}
           queued={queued}

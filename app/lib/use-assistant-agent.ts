@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgent } from "agents/react";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import type { AssistantRunAgent } from "./use-assistant-runs";
-import type { AssistantStream, AssistantStreamSnapshot } from "./use-assistant-stream";
+import { resumeOutcome, type AssistantStream, type AssistantStreamSnapshot, type ResumeResult } from "./use-assistant-stream";
+
+// The resume outcome helpers now live with the SSE store (the primary
+// transport); re-exported so this dormant module and its tests keep working.
+export { resumeOutcome, shouldPersistResume, type ResumeResult } from "./use-assistant-stream";
 import { isTerminalStreamStatus } from "../components/chat/assistant-chat-logic";
 import {
   agentSendMetadata,
@@ -125,45 +129,6 @@ export function guardResumeProbe<T extends object>(agent: T): T {
       return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
     },
   });
-}
-
-// LX-79/LX-84: the resume route answers with a discriminated JSON ack. A JSON
-// `{ok:true}` with no discriminated fields is still success (legacy
-// undiscriminated ack); a non-JSON 2xx is the legacy SSE path (no Durable
-// Object). A malformed JSON body or a JSON body without `ok:true` is a failure.
-export interface ResumeResult {
-  ok: boolean;
-  executed?: boolean | undefined;
-  reason?: string | undefined;
-}
-
-export async function resumeOutcome(response: Response): Promise<ResumeResult> {
-  const contentType = response.headers?.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) return { ok: response.ok };
-  try {
-    const body = (await response.json()) as { ok?: unknown; executed?: unknown; reason?: unknown };
-    if (body.ok !== true) return { ok: false };
-    return {
-      ok: true,
-      ...(typeof body.executed === "boolean" ? { executed: body.executed } : {}),
-      ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
-    };
-  } catch {
-    return { ok: false };
-  }
-}
-
-// The resume POST is not idempotent from the client's view, but the DO claim is:
-// persist the batch (never replay) only when the writes ran, or the batch is
-// settled/indeterminate. `pending` / `unavailable` and any RPC failure keep the
-// batch eligible for retry. A legacy undiscriminated `{ok:true}` is persisted
-// (the SSE path had no DO claim to rely on).
-export function shouldPersistResume(result: ResumeResult): boolean {
-  if (!result.ok) return false;
-  if (result.executed === true) return true;
-  if (result.reason === "settled" || result.reason === "indeterminate") return true;
-  if (result.reason === "pending" || result.reason === "unavailable") return false;
-  return true;
 }
 
 // The agent-backed stream adds the transport-only reconnect signals the chat
