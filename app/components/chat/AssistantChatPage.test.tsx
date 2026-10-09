@@ -12,10 +12,12 @@ const getAssistantChatMock = vi.hoisted(() => vi.fn());
 // the shell would render as approval chips. `pendingReply` is the send-accepted
 // placeholder gate the page derives.
 const shellCapture = vi.hoisted(() => ({ turns: null as unknown, pendingReply: null as unknown }));
-// Captured composer props — landing tests read the seed the page hands down.
+// Captured composer props — landing tests read the seed the page hands down and
+// the id-mint hook the composer uses before the first send.
 const composerCapture = vi.hoisted(() => ({
   seed: null as { text: string; nonce: number } | null,
   onSend: null as ((message: string, attachments: ChatAttachmentRef[]) => boolean) | null,
+  ensureChatId: null as (() => string) | null,
 }));
 
 // Captured transport calls: the send envelope the page builds (new thread via
@@ -164,9 +166,11 @@ vi.mock("./AssistantChatShell", () => ({
   ChatComposerArea: (props: {
     seed?: { text: string; nonce: number } | null | undefined;
     onSend?: (message: string, attachments: ChatAttachmentRef[]) => boolean;
+    ensureChatId?: () => string;
   }) => {
     composerCapture.seed = props.seed ?? null;
     composerCapture.onSend = props.onSend ?? null;
+    composerCapture.ensureChatId = props.ensureChatId ?? null;
     return null;
   },
 }));
@@ -274,6 +278,7 @@ beforeEach(() => {
   shellCapture.pendingReply = null;
   composerCapture.seed = null;
   composerCapture.onSend = null;
+  composerCapture.ensureChatId = null;
   transportCapture.sendForKey.mockReset();
   transportCapture.send.mockReset();
 });
@@ -566,6 +571,24 @@ describe("AssistantChatPage — zero-turn landing", () => {
     expect(getAssistantChatMock).not.toHaveBeenCalled();
   });
 
+  it("seeds ?thread= for a freshly minted id without a router navigation", () => {
+    // The composer mints the thread id at pick time (before the first send) via
+    // ensureChatId: it must apply the id and write ?thread= through replaceState
+    // — never a router navigate (which would re-run the ssr:false loader).
+    getAssistantChatMock.mockRejectedValue(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
+    renderPage();
+    navigateMock.mockClear();
+
+    let mintedId = "";
+    act(() => {
+      mintedId = composerCapture.ensureChatId!();
+    });
+
+    expect(mintedId).not.toBe("");
+    expect(new URLSearchParams(window.location.search).get("thread")).toBe(mintedId);
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
   it("clears the starter seed once a turn exists (no stale draft refill on a later landing)", async () => {
     fx.lists.p1 = [];
     getAssistantChatMock.mockResolvedValue({ ...TRANSCRIPT, messages: [{ role: "user", content: "hi" }] });
@@ -751,7 +774,8 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
     // Real-app divergence: `useChatStartStream` optimistically calls
     // `insertNewThread`, so `knownChatIds` contains the minted id and
     // `isUntrackedDeepLink` no longer protects it. The mocked list hook reads
-    // fx.lists directly, so mirror the insert and rerender. The transcript still
+    // fx.lists directly, so mirror the insert there; the query-error render
+    // refreshes the list snapshot. The transcript still
     // 404s and the stream is still idle — the exact window the stale-thread
     // recovery misreads as a dead thread (and evicts the deferred send).
     fx.lists.p1 = [];
@@ -761,7 +785,7 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
         failRead = reject;
       })
     );
-    const { container, rerenderPage } = renderPage();
+    const { container } = renderPage();
     await waitFor(() => expect(composerCapture.onSend).toBeTruthy());
 
     let mintedId = "";
@@ -778,7 +802,6 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
           updatedAt: "2026-01-01T00:00:00Z",
         },
       ];
-      rerenderPage({ thread: mintedId });
       await Promise.resolve();
       failRead(Object.assign(new Error("404"), { code: "ASSISTANT_THREAD_NOT_FOUND" }));
     });
@@ -818,7 +841,6 @@ describe("AssistantChatPage — fresh-chat send docks the landing (A1)", () => {
       fx.lists.p1 = [
         { chatId: mintedId, title: "hello", pinned: false, snippet: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
       ];
-      rerenderPage({ thread: mintedId });
     });
     await waitFor(() => expect(queryClient.getQueryState(["assistant-chat", mintedId])?.error).toBeTruthy());
     expect(container.querySelector(".chat-landing")).toBeNull();
