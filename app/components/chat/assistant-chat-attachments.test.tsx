@@ -247,6 +247,24 @@ describe("AssistantChatComposer — attachment error rows", () => {
   });
 });
 
+// ── Send clears the chips ──────────────────────────────────────────────────
+
+describe("AssistantChatComposer — send clears chips", () => {
+  it("clears ready chips on an accepted send; a refused send keeps them", async () => {
+    const accepted = renderComposer({ onSend: vi.fn(() => true), initialAttachments: [ready({ id: "a1" })] });
+    expect(accepted.container.querySelectorAll(".deck-attach-item")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Message Assistant"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(accepted.container.querySelectorAll(".deck-attach-item")).toHaveLength(0));
+    accepted.unmount();
+
+    const refused = renderComposer({ onSend: vi.fn(() => false), initialAttachments: [ready({ id: "b1" })] });
+    fireEvent.change(screen.getByLabelText("Message Assistant"), { target: { value: "hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(refused.container.querySelectorAll(".deck-attach-item")).toHaveLength(1);
+  });
+});
+
 // ── Caps warnings in the strip ─────────────────────────────────────────────
 
 describe("AssistantChatComposer — strip caps warnings", () => {

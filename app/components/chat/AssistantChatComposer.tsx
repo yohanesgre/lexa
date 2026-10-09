@@ -521,6 +521,10 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const reconnectSeconds = useElapsedSeconds(reconnecting);
   const uploadsRef = useRef<Map<string, { abort: () => void }>>(new Map());
   const sentIdsRef = useRef<string[]>([]);
+  // The attachment objects that rode the accepted send. The chips clear
+  // immediately (below), so this snapshot lets a refused extraction
+  // re-materialize them (the send was effectively refused).
+  const sentAttachmentsRef = useRef<ComposerAttachment[]>([]);
   const sentTextRef = useRef<string | null>(null);
 
   // Object URLs outlive the list when a send clears it or the composer
@@ -681,8 +685,14 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     if (!msg || streaming || suspendedLock || busy409 || reconnecting || hasExtractionFailure) return;
     const accepted = onSend(msg, readyRefs());
     if (!accepted) return;
-    sentIdsRef.current = attachments.filter((a) => a.status === "ready").map((a) => a.id);
+    // Accepted send: clear the ready chips immediately (the sent turn carries
+    // them); a refused send (`!accepted`) keeps them. Keep the snapshot so an
+    // ATTACHMENT_EXTRACTION_FAILED terminal can re-materialize them.
+    const sent = attachments.filter((a) => a.status === "ready");
+    sentIdsRef.current = sent.map((a) => a.id);
+    sentAttachmentsRef.current = sent;
     sentTextRef.current = msg;
+    setAttachments((prev) => prev.filter((a) => !sentIdsRef.current.includes(a.id)));
     setDraft("");
     mention.close();
     setRejections([]);
@@ -702,8 +712,11 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     if (streaming || suspendedLock || busy409 || reconnecting || hasExtractionFailure) return;
     const accepted = onSend(queued.text, readyRefs());
     if (!accepted) return;
-    sentIdsRef.current = attachments.filter((a) => a.status === "ready").map((a) => a.id);
+    const sent = attachments.filter((a) => a.status === "ready");
+    sentIdsRef.current = sent.map((a) => a.id);
+    sentAttachmentsRef.current = sent;
     sentTextRef.current = queued.text;
+    setAttachments((prev) => prev.filter((a) => !sentIdsRef.current.includes(a.id)));
     onUnqueue?.();
     setRejections([]);
     setWarning(null);
@@ -725,21 +738,32 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     });
   }, []);
 
-  // Extraction failure surfaces as a terminal stream error; keep the chips,
-  // mark the named document unreadable and restore the draft so the user can
-  // act on the error row (the whole send is refused).
+  // Extraction failure surfaces as a terminal stream error; the send was
+  // effectively refused, so re-materialize the chips that cleared on the
+  // accepted send, mark the named document unreadable, and restore the draft so
+  // the user can act on the error row.
   useEffect(() => {
     if (sendError?.code !== "ATTACHMENT_EXTRACTION_FAILED") return;
     const filename = (sendError.details as { filename?: unknown } | undefined)?.filename;
     const ids = sentIdsRef.current;
     if (ids.length > 0) {
-      setAttachments((prev) => prev.map((a) => (ids.includes(a.id) && (typeof filename !== "string" || a.name === filename) ? { ...a, status: "extraction-failed" } : a)));
+      const sent = sentAttachmentsRef.current;
+      setAttachments((prev) => {
+        const present = new Set(prev.map((a) => a.id));
+        const restored = sent
+          .filter((a) => !present.has(a.id))
+          .map((a) => (ids.includes(a.id) && (typeof filename !== "string" || a.name === filename) ? { ...a, status: "extraction-failed" as const } : a));
+        return restored.length > 0 ? [...prev, ...restored] : prev;
+      });
     }
     if (sentTextRef.current) setDraft((prev) => (prev.trim() ? prev : sentTextRef.current!));
     sentIdsRef.current = [];
+    sentAttachmentsRef.current = [];
   }, [sendError]);
 
   // Any other terminal status clears the chips that rode the accepted send.
+  // Safety net: the accepted send already cleared them, but a late-mounted
+  // composer or a resumed send must still settle.
   useEffect(() => {
     const status = streamStatus ?? (streaming ? "streaming" : "idle");
     if (status !== "done" && status !== "error" && status !== "aborted") return;
@@ -747,6 +771,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     if (sentIdsRef.current.length === 0) return;
     const ids = sentIdsRef.current;
     sentIdsRef.current = [];
+    sentAttachmentsRef.current = [];
     setAttachments((prev) => prev.filter((a) => !ids.includes(a.id)));
     setWarning(null);
   }, [streamStatus, streaming, sendError]);

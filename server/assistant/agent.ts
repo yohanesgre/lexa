@@ -21,7 +21,7 @@ import {
   verifyInternalAuth,
   type InternalAuthIdentity,
 } from "./internal-auth";
-import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, recordProviderHealthRemote, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, executeResumeBatchRemote, type AssistantInternalDeps } from "./agent-runtime";
+import { fetchLegacyTranscript, mirrorTranscript, resolveProviderConfigs, resolveHarnessContext, recordCallLog, recordProviderHealthRemote, transitionRun, callReadTool, proposeWrite, callWriteExecute, createRunRemote, updateRunRemote, getRunRemote, countRunsRemote, executeResumeBatchRemote, loadAttachmentRemote, type AssistantInternalDeps } from "./agent-runtime";
 import { AssistantTurnError, runAssistantTurn, type AssistantTurnDeps } from "./engine";
 import { buildMcpToolSet, buildReadTools, buildWriteTools, createAssistantWriteBudget, createBudgetedWriteExecutor, shouldSuspendOnProposal, type AssistantToolTransport } from "./tools-ai";
 import { MAX_WRITES_PER_TURN } from "./write-tool-names";
@@ -520,6 +520,11 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
       recordProviderHealth: async ({ providerId, ok }) => {
         await recordProviderHealthRemote(deps, { providerId, ok });
       },
+      // Attachment hydration (ADR-0003 §C): the DO reads blob content through
+      // the Worker's internal attachment route — no Bun module, no direct
+      // storage binding. Images come back base64; documents as extracted text.
+      loadImageBase64: async (key) => (await loadAttachmentRemote(deps, key))?.base64 ?? null,
+      loadDocumentText: async (key) => (await loadAttachmentRemote(deps, key))?.text ?? null,
       transitionRun: async (input) => {
         await transitionRun(deps, input);
         // Terminal transition attempted: clear the run cursor whether or not the
@@ -674,6 +679,10 @@ export class LexaAssistantAgent extends AIChatAgent<LexaAssistantEnv> {
         stopWhen,
         runId,
         callLogPurpose: "turn",
+        // Vision chain (docs/SCHEMA.md §Runtime): `primary_supports_images=1`
+        // inlines image parts; otherwise an image attachment is refused. The
+        // legacy `vision_model` column is retired, so "delegate" is unreachable.
+        imageMode: harness?.primarySupportsImages ? "inline" : "none",
         streamTextImpl: tracedAI.streamText,
         trace: assistantTraceParams({
           agentId: this.ctx.id.toString(),
