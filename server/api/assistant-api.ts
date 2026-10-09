@@ -172,10 +172,13 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           const existing = yield* repo
             .getByProject(req.path.projectId)
             .pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
+          const payloadProviderId = (req.payload as { providerId?: string | null }).providerId;
+          // An explicit null clears the binding — only an omitted field falls back
+          // to the stored provider (a `??` would skip the explicit null).
           const providerId =
-            (req.payload as { providerId?: string | null }).providerId ??
-            (existing as { provider_id?: string | null } | null)?.provider_id ??
-            null;
+            payloadProviderId !== undefined
+              ? payloadProviderId
+              : (existing as { provider_id?: string | null } | null)?.provider_id ?? null;
           const model = providerId === null
             ? null
             : yield* modelsRepo

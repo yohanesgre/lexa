@@ -173,7 +173,9 @@ export function AssistantProjectProviderSection({ project }: { project: Project 
             disabled={!selectedProvider}
           >
             <option value="">— None (vision agent unset) —</option>
-            {enabledModels.filter((m) => m.kind !== "workers_ai").map((m) => (
+            {/* Only chat-completions / Anthropic wires are vision-capable here: exclude
+                workers_ai (unsupported) and openai_responses (Responses API wire). */}
+            {enabledModels.filter((m) => m.kind !== "workers_ai" && m.kind !== "openai_responses").map((m) => (
               <option key={m.modelId} value={m.modelId}>{m.modelId} — {m.kind} · vision</option>
             ))}
           </select>

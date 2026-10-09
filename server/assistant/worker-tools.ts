@@ -691,7 +691,7 @@ async function resolveWorkerVisionTool(
       Effect.runPromise(
         queryFirst<{ kind: ProviderConfig["kind"] }>(
           deps.driver,
-          `SELECT kind FROM assistant_models WHERE provider_id = ? AND model_id = ? LIMIT 1`,
+          `SELECT kind FROM assistant_models WHERE provider_id = ? AND model_id = ? AND enabled = 1 LIMIT 1`,
           providerId,
           visionModel
         )
