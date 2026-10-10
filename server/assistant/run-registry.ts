@@ -281,45 +281,6 @@ export function reconcileStaleRuns(
   ).pipe(Effect.map((changes) => ({ failed: changes })));
 }
 
-/**
- * Document runs (`assistant_tasks`) have no recorded budget, so a crash or DO
- * eviction after the create-route INSERT (still `queued`) or after the
- * `queued → running` claim would otherwise leave the row non-terminal forever —
- * the registry sweep above only covers `assistant_runs`. Fail a row whose
- * `COALESCE(started_at, created_at)` is older than a generous bound. The sweep
- * covers `queued|running`: a crash between the route INSERT and the DO claim
- * strands a queued row with no owner. The sweep is a direct UPDATE (not a
- * `transitionAssistantRun` call), so it emits NO `task_activity` row: an
- * abandoned run that never produced a turn is visible on the task status alone
- * (invariant #12 is not violated by a silent terminal write). Fail-open at the
- * caller.
- */
-export const STALE_DOCUMENT_RUN_MS = 30 * 60_000;
-
-export interface ReconcileStaleDocumentRunsOptions {
-  now?: Date | undefined;
-  staleMs?: number | undefined;
-}
-
-export function reconcileStaleDocumentRuns(
-  driver: DbDriver,
-  options: ReconcileStaleDocumentRunsOptions = {}
-): Effect.Effect<{ failed: number }, ConstraintViolation | DbError> {
-  const now = options.now ?? new Date();
-  const staleMs = options.staleMs ?? STALE_DOCUMENT_RUN_MS;
-  return run(
-    driver,
-    `UPDATE assistant_tasks
-        SET status = 'failed',
-            error = COALESCE(error, 'run abandoned'),
-            finished_at = datetime('now')
-      WHERE status IN ('queued', 'running')
-        AND datetime(COALESCE(started_at, created_at), '+' || (? / 1000) || ' seconds') <= ?`,
-    staleMs,
-    toSqlDate(now)
-  ).pipe(Effect.map((changes) => ({ failed: changes })));
-}
-
 export interface ActiveRunCounts {
   thread: number;
   project: number;

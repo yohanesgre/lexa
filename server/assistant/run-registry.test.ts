@@ -7,7 +7,6 @@ import {
   createAssistantRun,
   getAssistantRun,
   isRunTransitionable,
-  reconcileStaleDocumentRuns,
   reconcileStaleRuns,
   transitionAssistantRunRegistry,
 } from "./run-registry";
@@ -280,71 +279,3 @@ describe("reconcileStaleRuns", () => {
   });
 });
 
-describe("reconcileStaleDocumentRuns", () => {
-  let ctx: ReturnType<typeof fresh>;
-  beforeEach(() => {
-    ctx = fresh();
-  });
-
-  function insertTask(
-    id: string,
-    status: "queued" | "running",
-    createdAt: string,
-    startedAt: string | null
-  ) {
-    ctx.db
-      .prepare(
-        `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, status, created_at, started_at)
-         VALUES (?, 'p1', 'task', 't1', 'asst', ?, ?, ?)`
-      )
-      .run(id, status, createdAt, startedAt);
-  }
-
-  it("fails a stale queued/running row to failed, leaves fresh runs, and emits no activity", async () => {
-    const now = new Date("2026-01-01T12:00:00Z");
-    // Claimed (started_at) 60m ago with the default 30m bound → stale.
-    insertTask("stale-started", "running", "2026-01-01 09:00:00", "2026-01-01 11:00:00");
-    // Claim lost its started_at: COALESCE falls back to created_at, 45m old → stale.
-    insertTask("stale-never-started", "running", "2026-01-01 11:15:00", null);
-    // Old created_at but a fresh started_at: the COALESCE must win on started_at.
-    insertTask("fresh-started", "running", "2026-01-01 08:00:00", "2026-01-01 11:45:00");
-    // A crash between the route INSERT and the DO claim strands a queued row;
-    // the sweep now covers `queued` too (COALESCE falls back to created_at).
-    insertTask("queued-stale", "queued", "2026-01-01 11:00:00", null);
-    // A queued row that was just inserted is left for the claim.
-    insertTask("queued-fresh", "queued", "2026-01-01 11:50:00", null);
-
-    const result = await Effect.runPromise(reconcileStaleDocumentRuns(ctx.driver, { now }));
-    expect(result.failed).toBe(3);
-
-    const failed = ctx.db
-      .prepare("SELECT id, status, error, finished_at FROM assistant_tasks WHERE status = 'failed' ORDER BY id")
-      .all() as Array<{ id: string; status: string; error: string; finished_at: string | null }>;
-    expect(failed.map((r) => r.id)).toEqual(["queued-stale", "stale-never-started", "stale-started"]);
-    for (const r of failed) {
-      expect(r.error).toBe("run abandoned");
-      expect(r.finished_at).not.toBeNull();
-    }
-    expect(ctx.db.prepare("SELECT status FROM assistant_tasks WHERE id = 'fresh-started'").get()).toMatchObject({ status: "running" });
-    expect(ctx.db.prepare("SELECT status FROM assistant_tasks WHERE id = 'queued-fresh'").get()).toMatchObject({ status: "queued" });
-
-    // Direct UPDATE, not `transitionAssistantRun`: an abandoned run that never
-    // produced a turn leaves no timeline row (invariant #12).
-    const activity = ctx.db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number };
-    expect(activity.n).toBe(0);
-
-    // Idempotent: a second sweep finds nothing and does not re-stamp.
-    const again = await Effect.runPromise(reconcileStaleDocumentRuns(ctx.driver, { now }));
-    expect(again.failed).toBe(0);
-    const unchanged = ctx.db
-      .prepare("SELECT finished_at FROM assistant_tasks WHERE id = 'stale-started'")
-      .get() as { finished_at: string | null };
-    expect(unchanged.finished_at).toBe(failed[1]?.finished_at);
-  });
-
-  it("surfaces a DbError instead of throwing (fail-open at the caller)", async () => {
-    ctx.db.exec("DROP TABLE assistant_tasks");
-    const outcome = await runEither(reconcileStaleDocumentRuns(ctx.driver, { now: new Date("2026-01-01T12:00:00Z") }));
-    expect(outcome._tag).toBe("Left");
-  });
-});

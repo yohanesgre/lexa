@@ -2,6 +2,7 @@
 // effect, so `process.env` is populated before every other module below (auth,
 // limits, logger) snapshots it at import scope. Do not reorder.
 import "./env-boot";
+import { Effect } from "effect";
 import { runMigrations } from "./db/migrate";
 import { backfillTaskKeys } from "./db/task-keys-backfill";
 import { runBootBackfill } from "./db/provider-secrets-boot";
@@ -9,6 +10,8 @@ import { runGithubConfigBoot } from "./db/github-config-boot";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
+import { createBunSqliteDriver } from "./db/drivers/bun-sqlite";
+import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
 import { getEnv, legacyGithubEnvVars, resolveTrustedProxyCidrs } from "./env";
@@ -139,6 +142,20 @@ if (process.env.LXK_SEED_DEV === "1") {
   } finally {
     db.close();
   }
+}
+
+// Boot-time stale assistant-task sweep (ADR-0005 §Reliability backstop): fail
+// `assistant_tasks` rows stranded `running` by a crash/restart so reset/resume
+// is never blocked. Fire-and-forget — boot must never wait on it.
+{
+  const db = new Database(DATABASE_PATH);
+  const driver = createBunSqliteDriver(db);
+  void Effect.runPromise(sweepStaleAssistantTasks(driver))
+    .then(({ failed }) => {
+      if (failed > 0) console.log(`[Assistant] failed ${failed} stale running task(s)`);
+    })
+    .catch((e) => console.error("[Assistant] stale-task sweep failed:", e instanceof Error ? e.message : String(e)))
+    .finally(() => driver.close());
 }
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);

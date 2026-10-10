@@ -44,11 +44,8 @@ import {
   migrationOrderError,
   pendingMigrations,
   readRootWranglerConfig,
-  resolveAiBinding,
   resolveDeployVars,
-  resolveDurableObjects,
   resolveObservability,
-  resolveServiceBindings,
   setCfToken,
   wrangler as cfWrangler,
   type RootWorkerConfig,
@@ -423,27 +420,8 @@ export function buildUpgradeConfig(
   },
 ): WorkerConfigJson {
   const root = opts.root;
-  let durable_objects = prior.durable_objects;
-  let migrations = prior.migrations;
-  let services = prior.services;
-  let ai = prior.ai;
   let observability = prior.observability;
-  if (root) {
-    if (!durable_objects) {
-      const derived = resolveDurableObjects(root);
-      durable_objects = derived.durable_objects;
-      if (!migrations) migrations = derived.migrations;
-    }
-    if (!services) {
-      const derived = resolveServiceBindings(root, prior.name);
-      if (derived.length > 0) services = derived;
-    }
-    if (!ai) {
-      const derived = resolveAiBinding(root);
-      if (Object.keys(derived).length > 0) ai = derived;
-    }
-    if (!observability) observability = resolveObservability(root);
-  }
+  if (root && !observability) observability = resolveObservability(root);
   const main = opts.bundle.main ?? prior.main ?? "index.js";
   const config: WorkerConfigJson = {
     name: prior.name,
@@ -462,10 +440,6 @@ export function buildUpgradeConfig(
   if (prior.d1_databases !== undefined) config.d1_databases = prior.d1_databases;
   if (prior.r2_buckets !== undefined) config.r2_buckets = prior.r2_buckets;
   if (prior.kv_namespaces !== undefined) config.kv_namespaces = prior.kv_namespaces;
-  if (durable_objects !== undefined) config.durable_objects = durable_objects;
-  if (migrations !== undefined) config.migrations = migrations;
-  if (services !== undefined) config.services = services;
-  if (ai !== undefined) config.ai = ai;
   return config;
 }
 

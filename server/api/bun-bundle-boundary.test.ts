@@ -3,14 +3,12 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ADR-0005 D7 bundle boundary. This walk covers each entry's EAGER (static)
+// ADR-0005 D7/W6 bundle boundary. This walk covers each entry's EAGER (static)
 // module graph. Lazy `import()` targets are separate chunks and are NOT
-// followed: the Bun host mounts `server/api/assistant-api.ts` with
-// `await import(...)` at handler-build time (proven at runtime by
-// `http-bun-assistant-present.test.ts`), and `summarize.ts` lazily imports the
-// DO-only model factory. So the eager Bun entry must reach no DO package
-// (`agents`, `workers-ai-provider`, `@ai-sdk/*`, `@cloudflare/ai-chat`) and no
-// DO module; the Workers entry eagerly reaches them (non-vacuous).
+// followed. After W6 removed the DO executor, NEITHER the Bun entry, the
+// lazily-mounted assistant chunk, NOR the Workers entry may reach a DO package
+// (`agents`, `workers-ai-provider`, `@ai-sdk/*`, `@cloudflare/ai-chat`) or a DO
+// module.
 //
 // Mechanism: a static import-graph walk from the Bun entry over relative
 // specifiers, collecting every bare package specifier reachable transitively.
@@ -70,7 +68,7 @@ function walkGraph(entryFile: string): WalkResult {
   return { files, bare };
 }
 
-describe("Bun bundle boundary (ADR-0005 D7)", () => {
+describe("Bun bundle boundary (ADR-0005 D7/W6)", () => {
   const bun = walkGraph(resolve(ROOT, "server/entry.ts"));
   const workers = walkGraph(resolve(ROOT, "server/workers-entry.ts"));
   // The lazily-mounted assistant chunk is a second Bun root: it loads on Bun at
@@ -97,14 +95,16 @@ describe("Bun bundle boundary (ADR-0005 D7)", () => {
     expect(assistant.files.size).toBeGreaterThan(50);
   });
 
-  it("Workers entry eagerly reaches the DO modules + a DO package (non-vacuous)", () => {
-    expect([...workers.files].some((f) => f.endsWith("/server/assistant/agent.ts"))).toBe(true);
-    expect([...workers.files].some((f) => f.endsWith("/server/assistant/model-factory.ts"))).toBe(true);
-    expect([...workers.bare].some((s) => FORBIDDEN.some((re) => re.test(s)))).toBe(true);
+  it("Workers entry eagerly reaches no DO package (ADR-0005 W6: the DO executor is gone)", () => {
+    const forbidden = [...workers.bare].filter((s) => FORBIDDEN.some((re) => re.test(s)));
+    expect(forbidden).toEqual([]);
+    // Non-vacuous: the Workers entry still walks a substantial graph.
+    expect(workers.files.size).toBeGreaterThan(50);
   });
 
-  it("Workers entry reaches the delegation runner facet; the Bun entry never does", () => {
-    expect([...workers.files].some((f) => f.endsWith("/server/assistant/runner.ts"))).toBe(true);
-    expect([...bun.files].some((f) => f.endsWith("/server/assistant/runner.ts"))).toBe(false);
+  it("Workers entry eagerly reaches no DO module (agent / runner / model-factory deleted)", () => {
+    expect([...workers.files].some((f) => f.endsWith("/server/assistant/agent.ts"))).toBe(false);
+    expect([...workers.files].some((f) => f.endsWith("/server/assistant/runner.ts"))).toBe(false);
+    expect([...workers.files].some((f) => f.endsWith("/server/assistant/model-factory.ts"))).toBe(false);
   });
 });

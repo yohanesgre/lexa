@@ -249,22 +249,13 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 
 ## Assistant — one AI execution tier (the agent-runtime tier is removed)
 
-> **ADR-0005 (accepted 2026-10-10) supersedes ADR-0003 for the assistant
-> executor.** Chat and document runs run **in-process** on TanStack AI over SSE
-> on **both flavors** (D7): no `AIChatAgent`, no WebSocket, no DO SQLite, no
-> `/api/internal/assistant/*` HMAC routes, no mirror, no migrate-on-read, no
-> facet delegation, no schedules. One canonical store: D1 `assistant_threads`.
-> The DO modules stay in the tree, dormant and off every live path, until W6
-> deletes them. The superseded paragraphs below describe the retired DO design.
-
-> This section is **superseded by ADR-0003** (accepted 2026-10-01): the assistant becomes
-> Workers-only, running on `@cloudflare/ai-chat` `AIChatAgent` Durable Objects
-> (one DO per conversation thread, WebSocket transport). The Bun flavor
-> ships without the assistant — routes absent, capability flag false, UI hidden.
-> This section still describes the pre-ADR in-process tier; the DO-based design
-> lives in `status/assistant-workers/adr-0003.md` and the harness built on it is
-> summarized in §Harness runtime below (ADR-0004,
-> `status/assistant-harness/adr-0004.md`).
+> **ADR-0005 (accepted 2026-10-10; W6 removal landed) supersedes ADR-0003 for
+> the assistant executor.** Chat and document runs run **in-process** on
+> TanStack AI over SSE on **both flavors** (D7): no `AIChatAgent`, no WebSocket,
+> no DO SQLite, no `/api/internal/assistant/*` HMAC routes, no mirror, no
+> migrate-on-read, no facet delegation, no schedules. One canonical store: D1
+> `assistant_threads`. The DO modules were deleted in W6; the superseded
+> paragraphs below describe the retired DO design.
 
 Lexa has exactly **one** AI execution tier: the **Assistant**. In the tier
 described below it runs in the server process — server-side TanStack AI `chat()`
@@ -282,36 +273,23 @@ external worker, claim loop, or heartbeat.
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.
 
-### Harness runtime — turn context, runs, schedules (ADR-0004)
+### Harness runtime — turn context, runs, schedules (ADR-0004) — retired (ADR-0005 W6)
 
-The DO turn is assembled from a harness context bundle, not identity alone.
-Every turn issues **one** `POST /api/internal/assistant/turn-context` (Workers
-only, `X-Lexa-Internal` HMAC) whose project/actor/thread identity comes from the
-signed headers — the body (`{ threadKey, runId?, userText, mode }`) never
-overrides it. The response (`HarnessTurnContext`) carries the resolved agent
-instructions (fallback builtin `assistant`), ≤3 `$skill` markdowns plus a ≤20
-catalog, the `project_memory` FTS block (K=5, 2000-char cap), doc/mention/repo
-context, the Jev advisory, the thread summary, tool descriptors, and boolean
-capability flags. **No key material or allowlist value crosses to the DO** —
-provider config stays a separate `GET provider-config` read, and the capability
-flags are booleans (ADR-0004 §1). Compaction lives on the DO
-(`thread_meta.summary`/`summarized_count`, mirrored to D1 with real values):
-past 40 messages or 64 KiB, everything outside the last-8-message window is
-condensed with one cheap `generateText`; a failure skips the event and the next
-persist retries.
-
-Delegation is a **facet child** of the thread DO — `LexaAssistantRunner extends
-AIChatAgent`, dispatched through `agents/agent-tools` foreground (`agentTool`)
-or detached (`runAgentTool` with an `onFinish` handler). D1 `assistant_runs`
-(kind `chat_run|document|schedule`, status
-`queued|running|completed|failed|cancelled`) is the durable registry; the parent
-DO owns transitions through the atomic conditional-UPDATE pattern, and
-`chat_run`/`schedule` rows emit no `task_activity` (invariant #12 untouched).
-Runs inherit the dispatching turn's write mode and are budget-capped. D1
-`assistant_schedules` (cron or `interval_seconds`, `next_run_at`) is drained by
-the existing 15-minute Worker `runScheduled` cron, which creates the
-`kind='schedule'` row and advances `next_run_at` in the same UPDATE per due row,
-capped per tick; per-project scheduler DOs are deferred.
+> The ADR-0004 harness placement was DO-bound and is retired with the DO
+> executor. In the in-process tier the turn context (agent instructions, ≤3
+> `$skill` markdowns + catalog, the `project_memory` FTS block, doc/mention/repo
+> context, the Jev advisory, the thread summary, tool descriptors) is assembled
+> **in-process** by the assistant services — no internal `POST
+> /api/internal/assistant/turn-context`, no `X-Lexa-Internal` HMAC, no signed
+> identity. Compaction lives in `build-stream.ts` over D1 (`summary` /
+> `summarized_count` on `assistant_threads`): past 40 messages or 64 KiB,
+> everything outside the last-8-message window is condensed with one cheap
+> `generateText`; a failure skips the event and the next persist retries.
+>
+> Delegation and schedules were dropped (ADR-0005 D2/D3): no `LexaAssistantRunner`
+> facet, no `agents/agent-tools` dispatch, no `*/15` schedule drain. The D1
+> `assistant_runs` and `assistant_schedules` tables stay inert (no writers); the
+> admin run read page remains.
 
 **`workers_ai` (ADR-0005 D5/P5).** A model row with kind `workers_ai` rides the
 **OpenAI wire** through Cloudflare's OpenAI-compatible endpoint
@@ -321,15 +299,13 @@ Bearer <CF API token>`) — the same `createOpenaiChatCompletions` adapter as
 `workers_ai` provider row requires a non-empty base URL + a stored CF API token
 (save-time validation). The kind label is kept for schema/labels/prices.
 
-Call logs gain `thread_key`, `run_id`, and `purpose`
+Call logs carry `thread_key`, `run_id`, and `purpose`
 (`turn|runner|preflight|summary`), and `cost_cents` is computed from the CF
 `ai/models/search` prices stored in `assistant_model_prices` when the caller
-sends no explicit value. Every DO turn also reports provider success/failure
-through an internal route so `assistant_provider_health` stays live between
-manual Test probes. Tracing is metadata-only (`wrapAISDK` from
-`agents/observability/ai`, `functionId: lexa-assistant`,
-`agentId`/`conversationId`/`runId`/`purpose`, payload storage OFF); CF traces
-are the 7-day debug surface, the Lexa dashboard remains the product surface.
+sends no explicit value. Provider success/failure is recorded by the in-process
+gateway service (`assistant_provider_health`) between manual Test probes. The
+former `wrapAISDK` tracing (`agents/observability/ai`, `server/assistant/tracing.ts`)
+was deleted with the DO tier (ADR-0005 W6).
 
 ### MCP tool bridge (`server/assistant/mcp.ts`)
 
@@ -702,10 +678,10 @@ documented, for a product whose job is the board and the wiki.
 one settings row); token streaming, tools, memory, multimodal become direct API
 surface; provider/vendor swap is a settings edit; Worker-portable by
 construction (no child processes anywhere in the AI path); feature velocity —
-most changes touch prompt/tool rows, not plumbing. A crash mid-stream can
-leave an `assistant_tasks` row `running`; a boot-time sweep in
-`server/entry.ts` marks rows older than 30 minutes `failed` ("server
-restarted") so reset/resume never stays blocked.
+most changes touch prompt/tool rows, not plumbing. A killed turn persists its
+partial output incrementally; a crash mid-stream can still leave an
+`assistant_tasks` row `running` (the DO-era reconcile tick and the Bun boot
+sweep are both retired — ADR-0005 W6; this is an accepted residual).
 
 **Accepted risks:** TanStack AI is 0.x — pinned exact versions, `chat()`
 imported in exactly one service (`server/assistant/provider.ts`); upgrades are

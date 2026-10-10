@@ -263,10 +263,6 @@ export function readPriorAccount(dir: string, flavorName: string): string {
 export interface RootWorkerConfig {
   compatibility_date?: string;
   observability?: Record<string, unknown>;
-  durable_objects?: Record<string, unknown>;
-  migrations?: Array<Record<string, unknown>>;
-  services?: Array<Record<string, unknown>>;
-  ai?: unknown;
 }
 
 // Remove // line comments and /* */ block comments while respecting string
@@ -382,129 +378,6 @@ export function resolveObservability(
     );
   }
   return block;
-}
-
-// Durable Object blocks written into the per-deploy config: root's
-// `durable_objects`/`migrations` verbatim. Installed deployments must deploy
-// the assistant DO class (ADR-0003 §B.1 / risk R11) — without these blocks the
-// generated config has no `ASSISTANT_AGENT` binding and chat dies. A missing or
-// malformed block is refused loudly rather than silently omitted.
-export function resolveDurableObjects(root: RootWorkerConfig): {
-  durable_objects: Record<string, unknown>;
-  migrations: Array<Record<string, unknown>>;
-} {
-  const durableObjects = root.durable_objects;
-  if (
-    typeof durableObjects !== "object" ||
-    durableObjects === null ||
-    Array.isArray(durableObjects)
-  ) {
-    throw new Error(
-      "root wrangler.jsonc 'durable_objects' must be a JSON object declaring the ASSISTANT_AGENT binding — add the binding or remove the assistant deploy path",
-    );
-  }
-  const bindings = durableObjects.bindings;
-  if (!Array.isArray(bindings) || bindings.length === 0) {
-    throw new Error(
-      "root wrangler.jsonc 'durable_objects.bindings' must be a non-empty array containing { name: \"ASSISTANT_AGENT\", class_name: \"LexaAssistantAgent\" }",
-    );
-  }
-  const hasAgentBinding = bindings.some((entry) => {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      return false;
-    }
-    const binding = entry as { name?: unknown; class_name?: unknown };
-    return binding.name === "ASSISTANT_AGENT" && binding.class_name === "LexaAssistantAgent";
-  });
-  if (!hasAgentBinding) {
-    throw new Error(
-      "root wrangler.jsonc 'durable_objects.bindings' must contain { name: \"ASSISTANT_AGENT\", class_name: \"LexaAssistantAgent\" }",
-    );
-  }
-  const migrations = root.migrations;
-  if (!Array.isArray(migrations) || migrations.length === 0) {
-    throw new Error(
-      "root wrangler.jsonc 'migrations' must be a non-empty array declaring the new_sqlite_classes migration for LexaAssistantAgent",
-    );
-  }
-  const hasSqliteMigration = migrations.some((entry) => {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      return false;
-    }
-    const migration = entry as { new_sqlite_classes?: unknown };
-    return (
-      Array.isArray(migration.new_sqlite_classes) &&
-      migration.new_sqlite_classes.includes("LexaAssistantAgent")
-    );
-  });
-  if (!hasSqliteMigration) {
-    throw new Error(
-      "root wrangler.jsonc 'migrations' must declare a migration whose new_sqlite_classes includes \"LexaAssistantAgent\"",
-    );
-  }
-  return { durable_objects: durableObjects, migrations };
-}
-
-// Service bindings written into the per-deploy config (ADR-0003 §B.2/R7):
-// the assistant DO reaches the Worker's internal routes through
-// `ASSISTANT_SERVICE`. Root declares the binding name (and a placeholder
-// `service`); the generated config pins `service` to the deployed worker's own
-// name so a self-binding is correct on every flavor (lexa / lexa-staging).
-// Root's `services` may be absent (older clones) — then the binding is omitted
-// and the DO keeps its public-origin fallback.
-export function resolveServiceBindings(
-  root: RootWorkerConfig,
-  workerName: string,
-): Array<Record<string, unknown>> {
-  const services = root.services;
-  if (services === undefined) return [];
-  if (!Array.isArray(services)) {
-    throw new Error(
-      "root wrangler.jsonc 'services' must be an array of service bindings",
-    );
-  }
-  const out: Array<Record<string, unknown>> = [];
-  for (const entry of services) {
-    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      throw new Error(
-        "root wrangler.jsonc 'services' entries must be objects with a string 'binding'",
-      );
-    }
-    const binding = (entry as { binding?: unknown }).binding;
-    if (typeof binding !== "string" || binding.length === 0) {
-      throw new Error(
-        "root wrangler.jsonc 'services' entries must carry a non-empty string 'binding'",
-      );
-    }
-    out.push({ binding, service: workerName });
-  }
-  return out;
-}
-
-// H9: Workers AI binding written into the per-deploy config. Root declares
-// `"ai": { "binding": "AI" }`; installed deployments transcribe it so an older
-// clone keeps deploying. ADR-0005 D5 retired the assistant's use of the binding
-// (`workers_ai` now rides the OpenAI-compatible endpoint with a CF API token);
-// the block stays transcribed until W6 removes it.
-// An absent block is omitted (older clones keep deploying without Workers AI);
-// a present but malformed block is refused loudly rather than silently dropped.
-export function resolveAiBinding(root: RootWorkerConfig): Record<string, unknown> {
-  const ai = root.ai;
-  if (ai === undefined) return {};
-  if (typeof ai !== "object" || ai === null || Array.isArray(ai)) {
-    throw new Error(
-      "root wrangler.jsonc 'ai' must be a JSON object declaring { binding: \"AI\" }",
-    );
-  }
-  const binding = (ai as { binding?: unknown }).binding;
-  // The runtime reads `env.AI` (server/assistant/agent.ts), so any other
-  // binding name would type-check here but never reach the worker.
-  if (binding !== "AI") {
-    throw new Error(
-      "root wrangler.jsonc 'ai' must declare { binding: \"AI\" } — the runtime resolves env.AI",
-    );
-  }
-  return { ai };
 }
 
 // First readable `version` across the given package.json paths, or null.
@@ -1008,8 +881,6 @@ export async function main(): Promise<void> {
   let config: Record<string, unknown>;
   try {
     const rootConfig = readRootWranglerConfig(DIR);
-    const { durable_objects, migrations } = resolveDurableObjects(rootConfig);
-    const services = resolveServiceBindings(rootConfig, FLAVOR.workerName);
     config = {
       name: FLAVOR.workerName,
       account_id: account,
@@ -1025,10 +896,6 @@ export async function main(): Promise<void> {
       ],
       r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
       kv_namespaces: [{ binding: "KV", id: kvId }],
-      durable_objects,
-      migrations,
-      ...(services.length > 0 ? { services } : {}),
-      ...resolveAiBinding(rootConfig),
       observability: resolveObservability(rootConfig),
     };
   } catch (err) {

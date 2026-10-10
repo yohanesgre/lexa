@@ -1331,106 +1331,56 @@ service-level suites `server/services/assistant-chat.service.test.ts` and
 reaches the real prompt, resume makes zero Jev calls, every failure mode leaves
 the run intact, and Jev emits no `task_activity` of its own.
 
-### Lexa/Assistant — Durable Object runtime (Workers-only)
+### Lexa/Assistant — in-process executor (both flavors)
 
-> **Workers-only (ADR-0003).** The assistant executor is one Durable Object per
-> conversation thread, reached over a session-authenticated WebSocket. The
-> Bun flavor mounts no assistant groups (`server/api/http.ts`
-> `baseRouteGroups()` only; `assistant-api.ts` is imported solely by
-> `server/workers-entry.ts`), so `/api/assistant/*` + `/api/admin/assistant/*`
-> 404 there and no `agents` / `@tanstack/ai*` package enters the Bun module
-> graph (`server/api/bun-bundle-boundary.test.ts`, `server/api/http-bun-assistant-absent.test.ts`).
+> **ADR-0005 (W6 landed).** The assistant runs **in-process on both flavors**
+> over SSE. The former Durable Object runtime (`LexaAssistantAgent` /
+> `LexaAssistantRunner`, the WS gate, the `X-Lexa-Internal` internal routes, the
+> DO SQLite canonical store + D1 mirror, `model-factory.ts`, `tools-ai.ts`,
+> `tracing.ts`, `internal-routes.ts`, `agent-gate.ts`, `runner.ts`,
+> `delegation.ts`, `doc-run.ts`, `thread-rpc.ts`, `worker-tools.ts`) is
+> **deleted**. D1 `assistant_threads` is the single canonical store.
 
-- **Agent** — `server/assistant/agent.ts` `LexaAssistantAgent extends AIChatAgent`,
-  exported from `server/workers-entry.ts` under binding `ASSISTANT_AGENT`
-  (`wrangler.jsonc` `durable_objects` + `new_sqlite_classes` migration). Instance
-  name = threadKey `` `${documentType}:${documentId}` `` (`chat|task|wiki`).
-  **DO SQLite is canonical** (messages + `thread_meta`, incl. the sticky
-  `permission_mode` + import marker); D1
-  `assistant_threads` is a per-step **mirror** (list/search/export may lag ≤1
-  mirror write). In-flight turns run via `runFiber` + `chatRecovery`, so a turn
-  survives isolate eviction/redeploy; a second client queues instead of 409.
-- **WS gate** — `server/assistant/agent-gate.ts` is IO-free: session cookie →
-  thread ACL (chat owner / project read) → strip every inbound `X-Lexa-*` →
-  forward with minted identity + `X-Lexa-Internal: v1:<unix-ts>:<hmac-sha256>`
-  headers. Missing master key → 502 `ASSISTANT_UNAVAILABLE`. Constants
-  `ASSISTANT_AGENT_ROUTE_PREFIX` / `INTERNAL_ASSISTANT_ROUTE_PREFIX`.
-- **Internal routes** — `server/assistant/internal-routes.ts`
-  (`handleInternalAssistantRequest`), mounted in `server/workers-entry.ts`
-  before the public middleware, authenticated only by the `X-Lexa-Internal` HMAC
-  (≤120s skew). Surfaces: legacy import read, mirror write, read-tool execution,
-  write-tool proposal, write execution (auto mode), provider config, turn
-  context, call-log, provider-health, run-status, and the run registry
-  (run-create/run-update/run-counts/run).
-  Writes that execute approved proposals run through the existing domain
-  services (invariant #1 intact); terminal transitions emit activity in the
-  same transaction (invariant #12).
-- **Runner + run registries** — `LexaAssistantRunner` (a facet `AIChatAgent`
-  exported from `server/workers-entry.ts`) executes delegated runs the parent DO
-  dispatches via `agents/agent-tools`. The durable registry is D1
-  `assistant_runs` (kind `chat_run|document|schedule`; status
-  `queued|running|completed|failed|cancelled`), transitioned by an atomic
-  conditional UPDATE; `chat_run`/`schedule` rows emit no `task_activity`
-  (invariant #12). `assistant_schedules` is drained by `runScheduled` on the
-  `*/15` cron, which creates the run row and advances `next_run_at` in one
-  UPDATE per due row.
-- **Observability** — call logs carry `thread_key`/`run_id`/`purpose`
-  (`turn|runner|preflight|summary`); `cost_cents` derives from
-  `assistant_model_prices` when the caller sends none; each DO turn reports
-  provider success/failure so `assistant_provider_health` stays live. DO AI
-  calls are traced via `wrapAISDK` (metadata-only; `server/assistant/tracing.ts`).
-- **Inference** — `server/assistant/model-factory.ts` maps a registry row to an
-  AI SDK provider, preserves the built-in `x-opencode-session` derivation, walks
-  the ≤3 cross-kind fallback, and maps upstream 429 → `PROVIDER_RATE_LIMITED`.
-  Tools on AI SDK defs: `server/assistant/tools-ai.ts` (reads; write dispatch is
-  mode-dependent) + `write-tools.ts` (proposal validation/diff → D1 pending row).
-
+- **Transport** — SSE via `server/api/assistant-api.ts`
+  (`streamAssistantChat` / `streamAssistantTask` / resume / cancel), mounted on
+  both flavors. The client owns the fetch in a module-level session store
+  (`app/lib/use-assistant-stream.ts`), so in-app nav + tab switch keep a run;
+  reload / tab-close / network drop kill the turn (accepted class).
+- **Engine** — `server/assistant/provider.ts` (the only `chat()` importer),
+  `build-stream.ts` (`buildStream`, stall watchdog, write drain/suspend, resume
+  note, incremental partial persist), `gateway.service.ts` (fallback walk ≤3,
+  call logs, provider health).
+- **Services** — `AssistantChatService` / `AssistantTaskService` behind the
+  `Lexa/Assistant` facade; routes parse → call service → return (Effect-TS).
+- **Tools** — `tools.ts` (reads), `write-tools.ts` (proposal validation/diff),
+  `write-execution.ts` (approved writes run through the domain services;
+  invariant #1/#12 intact), `vision.ts`, `mcp.ts`, `jev.ts`, `prompt.ts`,
+  `context.ts`, `assistant-helpers.ts`, `assistant-repo-content.ts`.
 - **Write-tool permission modes** — per-thread sticky `ask | auto | deny`
-  (`thread_meta.permission_mode`, default `ask`, with a guarded
-  `PRAGMA table_info` + `ALTER TABLE` upgrade for pre-mode DO stores; the
-  resolver lives in `shared/assistant.ts`). The mode is captured at TURN START
-  from the DO's sticky value, overridden by the send envelope's
-  `permissionMode` (chat threads only — a task/wiki run stays `ask`), and
-  persisted back as the new sticky value; a mid-turn change waits for the next
-  send (D2/D5/D6). Read tools are unaffected in every mode. Each write call
-  consumes one per-turn budget slot where a budget applies: `ask` is capped by
-  the Worker-side pending-row count, `auto` by the DO-side counter
-  (`MAX_WRITES_PER_TURN`); `deny` consumes none. A bulk call is one slot.
-  - `ask` — a write call proposes: a row in `assistant_pending_writes`,
-    `tool_pending` frames plus the persisted carrier, and the turn suspends on
-    `proposed === true` (below).
-  - `auto` — a write call executes immediately through the internal
-    `POST /api/internal/assistant/write-execute` route →
-    `applyAssistantWrite` (no pending row, no chips, no suspend). The result is
-    model-readable (`{ ok, applied, result?, error?, partial? }`); zero applied
-    is a tool error, a partially applied bulk still reports `partial`, and a
-    transport failure the DO cannot classify is marked `indeterminate` so the
-    model does not retry a possibly-applied write.
-  - `deny` — a write call returns a structured local refusal
-    (`{ ok:false, denied:true, error }`, no Worker call, no row, no suspend).
-    Write tools stay offered so the refusal is visible to the model, which may
-    suggest switching modes.
-  Emissions are unchanged: every task-mutating execution still calls the domain
-  services with `viaAssistant` (invariant #12); the other write paths are
-  unchanged.
-- **Legacy import** — `server/assistant/legacy-convert.ts` converts TanStack
-  `ModelMessage[]` → `UIMessage[]` on first DO activation for a thread whose DO
-  store is empty and whose D1 row has messages (lossy for tool-internal parts).
-- **Capability** — `server/capabilities.ts` `capabilities(flavor, env)` is the
-  single `/api/capabilities` contract; `assistant = flavor==='workers' &&
-  hasSecretsMasterKey(env)`.
+  (`assistant_threads.permission_mode`, migration 0029; resolver in
+  `shared/assistant.ts`). Captured at TURN START from the send envelope's
+  `permissionMode` (chat threads only — a task/wiki run stays `ask`) and written
+  back. `ask` → `assistant_pending_writes` row + `tool_pending` frames + suspend;
+  `auto` → `executeAssistantWrite` in-loop (no pending row, no suspend), capped
+  per turn; `deny` → local structured refusal. Emissions unchanged (every
+  task-mutating execution calls the domain services with `viaAssistant`).
+- **Resume safety** — `assistant_resume_claims` (migration 0028) makes a second
+  resume a no-op; a disconnect aborts and persists the partial with `stopped`.
+- **Legacy conversion** — `server/assistant/legacy-convert.ts` still maps the
+  stored legacy message shape to UIMessage parts on read (D4 parts-shaped
+  contract).
+- **Capability** — `server/capabilities.ts` `capabilities(flavor, env)`;
+  `assistant = hasSecretsMasterKey(env)` on **both** flavors.
 - **REST shell** — the assistant REST handlers live in
   `server/api/assistant-api.ts` (groups in `server/api/assistant-contracts.ts`),
-  composed by `createWorkersApiHandler` = base + assistant. The REST tier
-  (`AssistantService` / `AssistantChatService` / `AssistantTaskService`, SSE)
-  remains mounted on Workers for thread CRUD/admin + the document panel; the
-  chat surface uses the DO socket.
+  composed by `createWorkersApiHandler` = base + assistant, and by the Bun host
+  via `fullRouteGroups()`.
 
-### Lexa/Assistant — assistant tier (server-side TanStack AI; Workers-only legacy REST/SSE)
+### Lexa/Assistant — assistant tier (server-side TanStack AI; both flavors over SSE)
 
-> This tier backs the REST/SSE surface that remains mounted on Workers. The
-> chat surface has moved to the Durable Object socket above; the document panel
-> still uses it. It is **not** part of the Bun flavor.
+> This is the live executor (ADR-0005): the REST/SSE surface is mounted on
+> **both** flavors, and the chat surface and document panel both use it. There
+> is no Durable Object socket.
 
 ```typescript
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
@@ -1582,10 +1532,9 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   get_task → `Looking up task <key>`, web_search → `Searching the web for
   "<query>"`, fetch_url → `Fetching <hostname>`, read_s3_file /
   analyze_image → `Reading attachment <name>`.
-  *(Pre-ADR-0003 historical note: the DEVIATION below documents the retired
-  TanStack AI SSE executor's chunk ordering. The Workers DO runtime above
-  (`server/assistant/tools-ai.ts`) is the current tool path; the SSE tool-frame
-  detail still applies to the retained legacy document-panel stream.)*
+  *(ADR-0005: the TanStack AI SSE executor is the live tier on both flavors;
+  this chunk-ordering detail applies to the document-panel stream too. The
+  retired `server/assistant/tools-ai.ts` DO tool path is gone.)*
   DEVIATION: TanStack AI emits
   args on `TOOL_CALL_ARGS` chunks AFTER `TOOL_CALL_START` (which carries only
   the name), so both frames are emitted at `TOOL_CALL_END` — call frame first,
@@ -1643,7 +1592,7 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the caller ONCE — session cookie first (`SessionService.userFrom`, try/catch), Bearer key fallback (`resolveApiKeyIdentity(authHeader, db)`) — on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireSuperadmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each). `/api/auth/*` is mounted BEFORE this middleware (Better Auth handler owns that path).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request. Middleware resolves the limiter key with `resolveClientIp(peer, cf-connecting-ip, trustedProxyCidrs)` (`server/api/rate-limit.ts`): `cf-connecting-ip` is honored **only** when the peer is loopback (`127.0.0.0/8`, `::1`, v4-mapped) or matches `LXK_TRUSTED_PROXY_CIDRS` (comma-separated IPv4/IPv6 CIDRs or bare IPs; unset/empty = loopback only, resolved by `resolveTrustedProxyCidrs` in `server/env.ts`). Otherwise the peer/socket IP wins — a private non-loopback client cannot pick a fresh bucket with a spoofed header. On Workers there is no socket address: `workersClientIp` deletes any inbound `x-lexa-remote-ip` before resolving, so a leaked/forged stamp cannot be mistaken for a peer and `cf-connecting-ip` (set by Cloudflare's edge) is the source. The Bun entry's `/api/auth/*` throttle (`server/entry.ts`) uses the same helper.
 - **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/share/*` skips AUTH only too (public wiki-share capability URLs — still rate-limited with a dedicated stricter bucket, security headers kept; handlers must not consume `AuthIdentity`, since exempt paths receive a synthetic identity). `isRateLimitExemptPath` now returns `false` for every path — the removed runtime daemon surfaces were the only exemption.
-- **Assistant Worker-gate mounts sit before the key middleware (Workers only).** `GET /api/capabilities` (no auth, no DB), `GET /api/assistant/agent/:threadKey` (session-cookie WS upgrade), and `/api/internal/assistant/*` (`X-Lexa-Internal` HMAC derived `HMAC(LXK_SECRETS_MASTER_KEY, "lexa-internal-v1")`, ≤120s skew) are handled in `server/workers-entry.ts` before `handleApi`; the public middleware would otherwise demand an API key. The gate strips inbound `X-Lexa-*` and mints the signed identity headers. These are Workers-only — the Bun handler mounts none of them.
+- **Pre-app mounts (Workers).** `GET /api/capabilities` (no auth, no DB) is handled in `server/workers-entry.ts` before `handleApi`; the public middleware would otherwise demand an API key. (ADR-0005 W6: the `GET /api/assistant/agent/:threadKey` WS gate and the `/api/internal/assistant/*` `X-Lexa-Internal` HMAC routes are deleted.)
 - **Rate limiting shares one bucket** (`apiRateLimiter` singleton; `/api/share/*` excepted — it applies a dedicated stricter per-IP bucket so the public unauthenticated surface cannot exhaust the shared one) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
@@ -1749,10 +1698,11 @@ Note: `RowNotFound` (server/db/driver.ts) is a repo-level error with no
 
 Defined in the error map but never raised by any REST handler — do not match on them: `INVALID_API_KEY` / `MISSING_AUTH` (the auth middleware emits `UNAUTHORIZED` — see the Auth section).
 
-**Client-side only (never a server REST code):** `ASSISTANT_CONNECTION_LOST` — the
-assistant WebSocket adapter surfaces it while the socket is reconnecting
-(`app/lib/assistant-agent-adapter.ts`); the socket auto-resumes and the marker
-clears. Do not match on it server-side.
+**Client-side only (never a server REST code):** `ASSISTANT_CONNECTION_LOST` —
+retired with the DO/WS transport (ADR-0005 W6). The in-process SSE client
+surfaces transport failures as a snapshot `error` field instead; the constant
+remains unused in `app/lib/assistant-agent-adapter.ts`. Do not match on it
+server-side.
 
 ## Service Dependency Map
 
@@ -1761,8 +1711,8 @@ TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldCon
 FieldConfigService → FieldConfigRepo, ProjectRepo
 AssistantCatalogService → AssistantCatalogRepo, AssistantTaskRepo
 AssistantTaskService  → AssistantTaskRepo, AssistantCatalogRepo, AssistantSettingsRepo, AssistantThreadRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, ActivityService, Storage, TaskRepo, WikiRepo, AssistantGateway, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
-AssistantService      → AssistantChatService, AssistantTaskService (thin facade — delegates; see §Lexa/Assistant) [Workers-only REST/SSE legacy]
-LexaAssistantAgent (DO) → model-factory, tools-ai, write-tools, prompt, vision, mcp, jev, legacy-convert (Workers-only; calls the Worker internal routes for reads/writes, never GitHubService directly)
+AssistantService      → AssistantChatService, AssistantTaskService (thin facade — delegates; see §Lexa/Assistant) [both flavors over SSE]
+AssistantChatService  → AssistantThreadRepo, AssistantSettingsRepo, AssistantPendingWritesRepo, ProjectMemoryRepo, AssistantGateway, AssistantProvidersRepo, AssistantModelsRepo, ActivityService, Storage, provider.ts, build-stream.ts (in-process; never GitHubService directly)
 AssistantMcpService   → AssistantMcpRepo, McpConnector, + server/assistant/mcp-secret.ts (PLAIN module, not a service — crypto only, no DB, no deps) (no service/repo cycles; never GitHubService or chat services)
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService

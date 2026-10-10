@@ -1,10 +1,12 @@
 // Test-only shim: vitest workers run under node, which cannot resolve
-// `cloudflare:workers` (a workerd builtin). `server/workers-entry.ts` imports
-// the assistant DO class, which pulls in `agents` / `@cloudflare/ai-chat`, and
-// those packages `import ... from "cloudflare:workers"`. vitest.config.ts
-// aliases the specifier to this file (same pattern as the bun:sqlite shim) so
-// the node-side suite can load the module graph. Production runs under workerd,
-// where the real module exists; this file is never imported there.
+// `cloudflare:workers` (a workerd builtin). Before ADR-0005 W6 the assistant DO
+// class (`server/workers-entry.ts`) pulled in `agents` / `@cloudflare/ai-chat`,
+// which `import ... from "cloudflare:workers"`; vitest.config.ts still aliases
+// the specifier to this file (same pattern as the bun:sqlite shim) so a
+// node-side suite can load any module graph that reaches it. Production runs
+// under workerd, where the real module exists; this file is never imported
+// there. (Follow-up: the alias is likely removable now that no live path
+// imports `agents`.)
 //
 // Surface = exactly the named exports the packages import (grep
 // node_modules/agents for `from "cloudflare:workers"`): DurableObject, RpcTarget,

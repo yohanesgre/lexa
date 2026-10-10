@@ -83,10 +83,10 @@ All non-2xx responses share one shape:
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
 | 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream, or a turn whose recovery was exhausted |
 | 502 | `ASSISTANT_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| 502 | `ASSISTANT_UNAVAILABLE` | Assistant Durable Object unreachable, DO RPC failed, legacy import failed after retry, or an internal route failed — Workers only |
+| 502 | `ASSISTANT_UNAVAILABLE` | **Retired (ADR-0005 W6)** — reserved in the catalog for wire compat; no live path emits it (the DO executor is gone) |
 | 429 | `PROVIDER_RATE_LIMITED` | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
-| 409 | `ASSISTANT_TASK_ACTIVE` | Enqueue race on an `assistant_tasks` row, or thread reset while a run is claimed. A second chat client on a live thread no longer gets this — the DO serializes and queues (see Assistant) |
-| 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row, or the WS gate refusing a thread that is missing / not owned / not project-readable (no existence oracle) |
+| 409 | `ASSISTANT_TASK_ACTIVE` | Enqueue race on an `assistant_tasks` row, or a second chat client sending on a live thread (ADR-0005 D6: the DO queueing was reverted to this 409) |
+| 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row, or a thread that is missing / not owned / not project-readable (no existence oracle) |
 | 409 | `VISION_NOT_CONFIGURED` | Image attachments submitted while no vision model is configured for the project (`vision_model` unset and `primary_supports_images=0`). A configured `vision_model` enables image attach and routes images through the vision agent |
 | 400 | `SECRET_KEY_UNAVAILABLE` | A managed provider key or Jev key was submitted but `LXK_SECRETS_MASTER_KEY` is unset or malformed (an MCP token save is refused as `MCP_INVALID_TRANSPORT_CONFIG` instead) |
 | 400 | `JEV_INVALID_CONFIG` | Jev registry payload refused: `clearSecret` + `secret`, invalid base URL, or model length (details: `{ reason }`) |
@@ -156,13 +156,12 @@ injection is removed — browsers authenticate `/api/*` via the session cookie.
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
   - `GET /api/capabilities` — flavor + capability discovery (see Health & Setup).
     Unauthenticated, leak-free, no DB read; served before boot on both flavors.
-  - `/api/internal/assistant/*` — DO→Worker internal routes (Workers only).
-    Mounted before the key middleware and authenticated by an
-    `X-Lexa-Internal: v1:<unix-ts>:<hmac-sha256>` header derived from
-    `LXK_SECRETS_MASTER_KEY` — never the API key or a session.
-  - `GET /api/assistant/agent/:threadKey` — the assistant WebSocket upgrade is
-    session-cookie authenticated at the Worker gate (mounted before the key
-    middleware); it is not an API-key route.
+  - `/api/internal/assistant/*` — **removed (ADR-0005 W6)**. The DO→Worker
+    internal routes and their `X-Lexa-Internal` HMAC auth are deleted; there is
+    no internal boundary left.
+  - `GET /api/assistant/agent/:threadKey` — **removed (ADR-0005 W6)**. The
+    WebSocket upgrade route and its Worker gate are deleted; the assistant
+    streams in-process over SSE on both flavors.
 - **Login rate limit (R17):** failed logins on `/api/auth/sign-in/email` are
   throttled by an in-process limiter (5 attempts/60s per email, 15 min
   lockout; success resets — better-auth 1.6.27 has NO rate-limit plugin, so
@@ -490,11 +489,11 @@ GET    /api/health
 GET    /api/capabilities
 → 200 { assistant: boolean, flavor: "bun" | "workers",
         chatAttachments: boolean, tasksBulk: boolean }
-  API-key exempt. Flavor + capability discovery (ADR-0003 §F.2), served before
-  boot on both flavors, no DB read, no leak. `assistant` is `true` only on the
-  Workers flavor **and** when `LXK_SECRETS_MASTER_KEY` is configured (the
-  assistant needs it for HMAC derivation + provider-secret decryption), so the
-  Bun flavor always reports `false`. `chatAttachments` is
+  API-key exempt. Flavor + capability discovery (ADR-0003 §F.2, revised by
+  ADR-0005 D7), served before boot on both flavors, no DB read, no leak.
+  `assistant` is `true` on **both** flavors whenever `LXK_SECRETS_MASTER_KEY` is
+  configured (the assistant needs it for provider-secret decryption); the flavor
+  no longer decides it. `chatAttachments` is
   `assistant && !LXK_DISABLE_CHAT_ATTACHMENTS`; `tasksBulk` is
   `!LXK_DISABLE_TASKS_BULK` (flavor-independent). The frontend gates assistant
   surfaces on these flags; the server refuses regardless.
@@ -1596,9 +1595,10 @@ Notes:
   per assistant run from the project's `source_role` repos, capped by
   `assistant_repo_cap` (env bootstrap `LXK_ASSISTANT_REPO_CAP`, default 3).
 
-### Assistant (AI assistant tier — Cloudflare Workers only)
+### Assistant (AI assistant tier — in-process SSE on both flavors)
 
-> **ADR-0005 supersedes the Workers-only DO design (accepted 2026-10-10).**
+> **ADR-0005 supersedes the Workers-only DO design (accepted 2026-10-10; W6
+> removal landed).**
 > The assistant runs **in-process on TanStack AI over SSE on both flavors** —
 > there is no WebSocket, no Worker gate, no `/api/assistant/agent/:threadKey`
 > route, and no `/api/internal/assistant/*` HMAC surface. `GET /api/capabilities`
@@ -1625,162 +1625,12 @@ multiple connected clients is gone. The code also covers enqueue races on
 `assistant_tasks` rows and thread reset while a run is claimed.
 
 ```
-REMOVED (ADR-0005 W4): GET /api/assistant/agent/:threadKey  (WebSocket upgrade)
-  The WS gate and the `/api/internal/assistant/*` HMAC routes are deleted; the
-  block below is retained only as a historical record of the retired DO design.
-  (WebSocket upgrade — Workers only)
-  :threadKey = `chat:<chatId>` | `task:<taskId>` | `wiki:<documentId>`,
-  URL-encoded as one path segment. Same-origin; the Better Auth session cookie
-  rides the handshake. The Worker gate runs BEFORE the key middleware:
-    no session                       → 401 NO_USER_CONTEXT
-    thread missing / not owned /
-      not project-readable           → 404 ASSISTANT_THREAD_NOT_FOUND (no existence oracle)
-    missing chat row                 → upsert (document_type='chat', project_id
-                                       from ?projectId=, owner = session user)
-    DO unreachable / forward failed  → 502 ASSISTANT_UNAVAILABLE
-  After authorization the gate strips every inbound `X-Lexa-*` header and
-  forwards to the per-thread DO with minted `X-Lexa-*` HMAC identity headers
-  (defense-in-depth; the DO route is only reachable through the Worker).
-
-  Wire protocol: the `@cloudflare/ai-chat` WS protocol carrying `UIMessage`
-  data parts (the chat surface's replacement for the retained-legacy SSE chat
-  stream — the route itself stays mounted on Workers, see `chat/stream` below).
-  The chat send contract (attachments, `fromIndex` edit/regenerate/retry,
-  `@`-mention and `$`-skill resolution) is carried over the socket. The send
-  body also carries an optional `permissionMode: "ask" | "auto" | "deny"` — the
-  composer's per-thread WRITE-tool permission. It is sent ONLY when the page has
-  an authoritative value for the thread (an in-session pick or a loaded
-  transcript); when unhydrated it is omitted, so the DO keeps its sticky
-  `thread_meta.permission_mode` (an absent/old-client send resolves to the
-  sticky value, default `ask`). The mode is captured at TURN START and
-  chat-only: a task/wiki run stays `ask` even if a crafted body carries a mode.
-  A dropped socket auto-resumes; the client surfaces a synthetic
-  `ASSISTANT_CONNECTION_LOST` status while reconnecting (client-side only —
-  never a server REST code).
-
-  Approval resume stays a plain REST POST (below); its frames then arrive on
-  this socket. The document-panel SSE endpoints remain mounted on Workers until
-  the panel moves to the socket.
-
-  Internal DO→Worker routes (Workers only; `X-Lexa-Internal` HMAC, not the API
-  key/session). Mounted before the API-key middleware (ADR-0003 §B.2):
-    GET  /api/internal/assistant/legacy/:threadKey  → { messages }        (legacy import read)
-    POST /api/internal/assistant/mirror             → { ok: true }        (per-step D1 mirror)
-    POST /api/internal/assistant/tool               → { ok, result, error }   (read tool)
-    POST /api/internal/assistant/write-tool         → { proposed, approvalId, error }
-    POST /api/internal/assistant/write-execute       → { ok, applied, result, error, partial }
-                                                       (auto-mode write; no pending row)
-    GET  /api/internal/assistant/provider-config    → decrypted provider config per turn
-    POST /api/internal/assistant/turn-context       → { context: HarnessTurnContext }
-                                                       body { threadKey, runId?, userText,
-                                                              mode: "turn"|"resume"|"runner" }
-                                                       (project/actor/thread identity from the
-                                                        HMAC headers is authoritative; the body
-                                                        never overrides signed identity)
-    POST /api/internal/assistant/call-log           → { ok: true }
-                                                       body { projectId?, providerId?, threadKey?,
-                                                              runId?, model, kind, status,
-                                                              purpose: "turn"|"runner"|"preflight"|"summary",
-                                                              errorCode?, usageIn?, usageOut?,
-                                                              cachedIn?, cachedWriteIn?, latencyMs?,
-                                                              costCents?, estimated? }
-                                                       (purpose defaults to "turn"; threadKey falls
-                                                        back to the signed identity thread)
-    POST /api/internal/assistant/run-status         → { ok: true }        (terminal task transitions)
-    POST /api/internal/assistant/provider-health    → { ok: true, circuitState } (per-turn breaker outcome)
-                                                       body { providerId, ok }
-    POST /api/internal/assistant/run-create         → { run }             (delegation registry)
-    POST /api/internal/assistant/run-update         → assistant run row   (atomic transition)
-    POST /api/internal/assistant/run-counts         → { thread, project } (active-run caps)
-    GET  /api/internal/assistant/run?id=<runId>     → { run }
-  A missing/malformed HMAC → 401 NO_USER_CONTEXT; no master key → 502
-  ASSISTANT_UNAVAILABLE.
-  Like `GET /api/capabilities`, these mounts run before the HttpApi app and
-  before boot — they answer with no DB read.
-
-GET    /api/assistant/settings/:projectId
-→ 200 { projectId, searchProvider: "exa"|null, hasSearchKey: boolean,
-        urlAllowlist: string|null,
-        reasoningEffort: "minimal"|"low"|"medium"|"high"|null,
-        primarySupportsImages: boolean,
-        visionModel: string|null,
-        writeTools: string[],
-        providerId: string|null, modelId: string|null,
-        fallbackModelIds: string[] }
-  Masked view — no provider api_key/search_api_key ever serialized. Provider
-  binding (providerId/modelId/fallbackModelIds) comes from the global gateway
-  registry (GET /api/admin/assistant/providers). Legacy per-project provider
-  columns (kind/base_url/api_key/model) were dropped in the squashed baseline;
-  `visionModel` (revived by migration 0028) is the vision agent model id, null
-  when unset.
-  | 404 PROJECT_NOT_FOUND | 404 ASSISTANT_THREAD_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
-
-PUT    /api/assistant/settings/:projectId   (superadmin — requireSuperadmin, 403 FORBIDDEN otherwise)
-body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: string[],
-       searchProvider?: "exa"|null, searchApiKey?: string|null,
-       urlAllowlist?: string|null,
-       visionModel?: string|null,
-       reasoningEffort?: "minimal"|"low"|"medium"|"high"|null,
-       writeTools?: string[] }
-  Payload is the project-level Assistant binding + search/writeTools.
-  (engine/engineSwitcherEnabled were removed with the runtime tier.)
-  providerId/modelId = primary model (must be an enabled assistant_models row);
-  fallbackModelIds = ordered cross-kind fallback list (≤3, deduped, provider
-  registry supplies kind per model). Omitted searchApiKey keeps the stored value.
-  visionModel = the project's vision agent model id (an enabled assistant_models
-  row of the primary provider); null/omitted clears/keeps it. While unset, image
-  attach stays disabled (VISION_NOT_CONFIGURED 409); when set, images always route
-  through the vision agent (current phase).
-  kind/base_url/api_key/model are gone from assistant_settings — provider
-  credentials live in assistant_providers only.
-  writeTools: unknown names dropped, duplicates collapse, stored comma-separated.
-→ 200 masked view (same shape as GET) | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
-
-POST   /api/assistant/settings/:projectId/test   (admin — requireAdmin)
-body { kind?, baseUrl?, model?, apiKey?, searchProvider?, searchApiKey?,
-       urlAllowlist?, primarySupportsImages?,
-       visionModel?, reasoningEffort?, writeTools? }
-  UNSAVED submitted values (never persists); an omitted apiKey falls back to the
-  stored one so testing a saved config doesn't require re-entering the key.
-  After the squashed baseline the payload is legacy-compatible (kind/baseUrl/model optional) and
-  the gateway fallback is used when they are omitted.
-→ 200 { ok: true, latencyMs } | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
-  Minimal completion ping (+ Exa ping when configured).
-
-POST   /api/assistant/settings/:projectId/models   (admin — requireAdmin)
-body same as test
-→ 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
-  Lists models from the provider using submitted unsaved values (per-kind wire
-  format, base URL normalized per kind). Some OpenAI-wire endpoints lack
-  the listing route (404/405): for those kinds (`openai_compatible` and
-  `workers_ai`, ADR-0005 D5) the route then pings
-  `POST {base}/chat/completions` (`max_tokens: 1`, `stream: false`); a
-  successful ping returns `{ models: [] }` and manual model entry is always
-  available as fallback. `anthropic_compatible` and `openai_responses` never
-  take the ping fallback — their listing failure propagates unchanged.
-  Cloudflare AI (`api.cloudflare.com/client/v4/accounts/<id>/ai/v1`) has no
-  GET /models (405); its catalog is read from
-  `GET .../ai/models/search` (`task=Text Generation` when accepted, full
-  catalog otherwise), mapping `result[].name` → model ids.
-
-### Assistant Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
-
-Global provider registry. `assistant_providers` holds the label/base URL;
-`assistant_models` holds per-model kind/priority/enabled; `assistant_call_logs` is
-append-only; `assistant_model_prices` is the OpenRouter price cache. Gateway
-streams with cross-kind fallback (≤3, priority-ordered), fresh adapter per
-attempt, cost via `assistant_model_prices` (OpenRouter fetch).
-
-Provider API keys are **managed secrets**, not columns: a key is entered here,
-stored AES-256-GCM encrypted in `assistant_provider_secrets` (scope `provider`,
-AAD-bound to the provider id), and never serialized. Responses expose `hasKey`
-and `keyMask` and never a value; `apiKey` is **write-only by construction** (it
-exists on the request schemas and not on the response shape). The legacy
-`assistant_providers.api_key` column is **dead** in this release (writes `''`;
-only the one-way boot backfill reads it) and is dropped in the next release.
-Storing a key needs `LXK_SECRETS_MASTER_KEY`; without it the save is refused with
-400 `SECRET_KEY_UNAVAILABLE` and stores nothing (a keyless provider stays legal).
-
+REMOVED (ADR-0005 W4/W6): the assistant WebSocket transport and the internal
+DO->Worker routes are deleted. There is no `GET /api/assistant/agent/:threadKey`
+WS upgrade, no `/api/internal/assistant/*` HMAC surface, no DO SQLite, and no
+D1 mirror. Chat and document runs stream in-process over SSE on both flavors
+(see the SSE endpoints above and `docs/LAYERS.md`). The former DO route and
+internal-route listings are retained only in the ADR/status history, not here.
 ```
 GET    /api/admin/assistant/providers   (superadmin)
 → 200 { data: AssistantProviderMasked[], secretsEnabled: boolean }
@@ -2288,11 +2138,8 @@ GET    /api/assistant/tasks/:id
 
 POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
 → 200 text/event-stream
-  > **Retained legacy — Workers only.** Still mounted on Workers; the document
-  > panel uses it. **404 on the Bun flavor** (the assistant groups are not mounted).
-  > Superseded by the `GET /api/assistant/agent/:threadKey` WebSocket for the
-  > chat surface; new integrations should prefer the socket. (The ADR's REMOVED
-  > applies to the Bun flavor / a later release, not to today's Workers route.)
+  > **Live on both flavors (ADR-0005).** The document panel streams here over
+  > SSE; there is no WebSocket successor. Mounted on both flavors.
   Frames (exactly one terminal frame — error|done|suspended):
     event: start  data: {"taskId":"…","threadId":"…"}
     event: delta  data: {"text":"…"}
@@ -2337,10 +2184,9 @@ body { projectId*, chatId*, message*, agentId?,
   and chat-only (a task/wiki run stays `ask`). `auto` executes write tools
   in-loop (no pending row, no approval suspend, per-turn budget); `deny` refuses
   writes locally; `ask` suspends for per-chip approval.
-  > **Retained legacy — Workers only.** Still mounted on Workers (the app now
-  > sends over the `GET /api/assistant/agent/chat:<chatId>` WebSocket);
-  > **404 on the Bun flavor** (the assistant groups are not mounted). Not removed on
-  > Workers — the ADR's REMOVED applies to the Bun flavor / a later release.
+  > **Live on both flavors (ADR-0005).** The chat surface streams here over SSE;
+  > the former `GET /api/assistant/agent/chat:<chatId>` WebSocket is deleted.
+  > Mounted on both flavors.
   Freeform chat ALWAYS runs the assistant lane. Multi-thread per user: a chat
   thread is keyed by its own client-generated `chatId` and owned by one user
   (`assistant_threads` PK `(document_type, document_id)` with `owner_user_id`
@@ -2449,30 +2295,15 @@ body { verdict*: "approve" | "reject" }
 POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-stream)
   body { batchId?: string }   (optional — LX-79 single-owner resume)
 POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
-  Kept path (ADR-0003 §B.4). On the chat surface the app issues this as a plain
-  REST POST with an optional `{ batchId?: string }` body naming the exact approval
-  batch to execute (omitted → the DO's legacy newest-first walk). With a Durable
-  Object present the endpoint does not stream: the DO claims the batch, runs the
-  resume RPC, and the resumed frames arrive on the `chat:<chatId>` WebSocket. It
-  responds `202` with a discriminated ack the client uses to decide persistence:
-
-    202 { ok: true, executed: true }                    — writes ran; persist.
-    202 { ok: true, executed: false, reason: "settled" }       — nothing to run; persist.
-    202 { ok: true, executed: false, reason: "indeterminate" } — transport failed,
-        writes MAY have applied; persist (never replay).
-    202 { ok: true, executed: false, reason: "pending" }       — batch not fully
-        decided; keep eligible, retry.
-    202 { ok: true, executed: false, reason: "unavailable" }   — no DO→Worker
-        transport; keep eligible (nothing was claimed).
-
-  The endpoint's own SSE body (same frames as the respective stream endpoints)
-  remains for the document panel and the no-DO (Bun) surface. Server-side sequence:
-  sweep expired → execute approved rows in seq order (each emitting an
-  approval_result frame right after start: applied|failed, error carries
-  "CODE: message"; rejected rows emit denied) → continue the provider turn
-  with no new user message → done.
-  | 202 ack (DO present) — see reasons above
-  | 502 ASSISTANT_UNAVAILABLE (DO RPC rejected; the claim makes a retry idempotent)
+  Resumes a suspended turn: executes the approved rows of the batch in seq
+  order, then continues the provider turn with no new user message. Streams the
+  same frames as the respective stream endpoints (approval_result frames right
+  after start: applied|failed, `error` carries "CODE: message"; rejected rows
+  emit denied). ADR-0005: the in-process engine owns the resume on BOTH flavors
+  — no DO RPC, no 202 ack, no WebSocket. A resume claim
+  (`assistant_resume_claims`, migration 0028) makes a second resume a no-op
+  (LX-80 idempotency across tabs/retries); the claim is released when the batch
+  is still pending/missing and kept on executed/indeterminate.
   | 404 ASSISTANT_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume)
   | 409 ASSISTANT_TASK_ACTIVE | 409 APPROVALS_PENDING
 
@@ -2515,11 +2346,9 @@ GET    /api/assistant/runs/:runId
 POST   /api/assistant/runs/:runId/abort
 → 200 { ok: true }
   | 404 ASSISTANT_RUN_NOT_FOUND
-  Supervised abort: forwards `abortRun` to the run's thread Durable Object,
-  which cancels the facet and lands the `cancelled` registry row. Idempotent
-  (a terminal run aborts to a no-op). Runs in projects you cannot access are not
-  disclosed (404, same as unknown ids). On the Bun/no-DO flavor the RPC is a
-  no-op and the handler still acks.
+  Aborts a delegated run. ADR-0005 D3: delegation is dropped, so the registry
+  row is admin-read-only/inert and the handler acks (idempotent). Runs in
+  projects you cannot access are not disclosed (404, same as unknown ids).
 
 GET    /api/assistant/memory/:projectId
 → 200 { data: [{ id, projectId, content, source: "manual"|"assistant",
