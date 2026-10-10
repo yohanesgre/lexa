@@ -266,6 +266,62 @@ describe("readPriorDeployConfig (DO history read before staging)", () => {
   });
 });
 
+describe("buildDoRemovalMigrations (DO-era detection)", () => {
+  const CLASS = "LexaAssistantAgent";
+
+  test("binding-only (no history) → v1 delete", () => {
+    expect(
+      buildDoRemovalMigrations({ durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: CLASS }] } }),
+    ).toEqual([{ tag: "v1", deleted_classes: [CLASS] }]);
+  });
+
+  test("create history, no binding → next tag", () => {
+    expect(buildDoRemovalMigrations({ migrations: [{ tag: "v1", new_sqlite_classes: [CLASS] }] })).toEqual([
+      { tag: "v1", new_sqlite_classes: [CLASS] },
+      { tag: "v2", deleted_classes: [CLASS] },
+    ]);
+  });
+
+  test("deeper history whose last mention is a create → next tag after the highest", () => {
+    const prior = {
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: ["SomeOtherClass"] },
+        { tag: "v3", new_classes: [CLASS] },
+      ],
+    };
+    expect(buildDoRemovalMigrations(prior)).toEqual([
+      ...prior.migrations,
+      { tag: "v4", deleted_classes: [CLASS] },
+    ]);
+  });
+
+  test("repeat upgrade (create then delete, no binding) → prior verbatim, NO new tag", () => {
+    const prior = {
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: [CLASS] },
+      ],
+    };
+    const out = buildDoRemovalMigrations(prior);
+    expect(out).toEqual(prior.migrations);
+    expect(out).toHaveLength(2);
+    expect(out?.some((m) => (m as { tag?: string }).tag === "v3")).toBe(false);
+    // The applied history array is returned as-is.
+    expect(out).toBe(prior.migrations);
+  });
+
+  test("never mentioned → undefined", () => {
+    expect(buildDoRemovalMigrations({})).toBeUndefined();
+    expect(
+      buildDoRemovalMigrations({
+        durable_objects: { bindings: [{ class_name: "OtherAgent" }] },
+        migrations: [{ tag: "v1", new_sqlite_classes: ["OtherAgent"] }],
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe("root wrangler observability", () => {
   const ROOT = fileURLToPath(new URL("..", import.meta.url));
 

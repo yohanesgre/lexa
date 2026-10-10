@@ -455,6 +455,29 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
     ]);
   });
 
+  it("keeps a repeat upgrade's applied history verbatim (no redundant delete tag)", () => {
+    const prior = priorConfig({
+      migrations: [
+        { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+        { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+      ],
+    });
+    expect(buildDoRemovalMigrations(prior)).toEqual([
+      { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+    const rebuilt = buildUpgradeConfig(prior, {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+    });
+    expect(rebuilt.migrations).toEqual([
+      { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+    expect(rebuilt.migrations?.some((m) => (m as { tag?: string }).tag === "v3")).toBe(false);
+  });
+
   it("appends the next tag after the prior's highest when the history is deeper", () => {
     const prior = priorConfig({
       durable_objects: DO_BINDING,
