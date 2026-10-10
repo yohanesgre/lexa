@@ -6,7 +6,8 @@
  * Enable DEBUG: LOG_LEVEL=debug or trace, or TANSTACK_AI_DEBUG=1 / true. Structured TanStack logs: TANSTACK_AI_JSON=1 (service tanstack-ai).
  */
 import { chat, type AnyTextAdapter, type DebugOption, type ModelMessage, type StreamChunk } from "@tanstack/ai";
-import { createOpenaiChat, createOpenaiChatCompletions } from "@tanstack/ai-openai";
+import { createOpenaiChat } from "@tanstack/ai-openai";
+import { openaiCompatibleText } from "@tanstack/ai-openai/compatible";
 import { createAnthropicChat } from "@tanstack/ai-anthropic";
 import type { ProviderKind } from "../../shared/assistant";
 import { ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed } from "../api/errors";
@@ -220,7 +221,6 @@ export function buildAdapterForModel(
   return buildAdapter(configForModel(provider, model));
 }
 
-type OpenAiChatCompletionsModel = Parameters<typeof createOpenaiChatCompletions>[0];
 type OpenAiResponsesModel = Parameters<typeof createOpenaiChat>[0];
 type AnthropicChatModel = Parameters<typeof createAnthropicChat>[0];
 
@@ -264,9 +264,14 @@ export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   });
   // ADR-0005 D5/P5: `workers_ai` rides the OpenAI wire through Cloudflare's
   // OpenAI-compatible endpoint (.../ai/v1, Bearer CF API token) — the keyless
-  // env.AI binding path died with the DO. Same adapter as openai_compatible.
+  // env.AI binding path died with the DO. Uses the reasoning-aware compatible
+  // adapter (`@tanstack/ai-openai/compatible`) so `delta.reasoning_content`
+  // (CF GLM/DeepSeek/Qwen thinking streams) is emitted as a reasoning chunk;
+  // the root `createOpenaiChatCompletions` adapter drops it silently.
   if (kind === "openai_compatible" || kind === "workers_ai") {
-    return createOpenaiChatCompletions(config.model as OpenAiChatCompletionsModel, config.apiKey, {
+    return openaiCompatibleText(config.model, {
+      name: "openai-chat",
+      apiKey: config.apiKey,
       baseURL: normalizeBaseUrl(config.baseUrl, kind),
       defaultHeaders: opencodeSessionHeaders(config.sessionId, config),
     });
