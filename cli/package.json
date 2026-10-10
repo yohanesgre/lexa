@@ -1,6 +1,6 @@
 {
   "name": "lx",
-  "version": "2026.6.1",
+  "version": "2026.6.2",
   "private": true,
   "description": "Lexa operator CLI. Version is INDEPENDENT of the web app version and is the source of truth for cli-v* releases (see AGENTS.md)."
 }
