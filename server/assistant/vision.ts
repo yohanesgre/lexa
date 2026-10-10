@@ -101,8 +101,9 @@ async function analyzeAnthropicCompatible(deps: AnalyzeDeps, prompt: string, mim
 
 // Provider-kind → wire mapping. Only two wires exist here: the OpenAI
 // chat-completions shape (`openai_compatible` and `openai_responses`, which
-// share the host) and the Anthropic messages shape. `workers_ai` is not a
-// vision-capable wire for this path — a typed error, never a mis-sent request.
+// share the host) and the Anthropic messages shape. `workers_ai` rides the
+// OpenAI wire for chat (ADR-0005 D5) but is not wired for vision on this path —
+// a typed error, never a mis-sent request.
 export function visionWireForKind(kind: ProviderConfig["kind"]): "openai" | "anthropic" | "unsupported" {
   switch (kind) {
     case "anthropic_compatible":

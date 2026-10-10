@@ -8,12 +8,14 @@
 // same transcript are idempotent ("threshold once") and a wake re-reads the
 // persisted `thread_meta` values instead of recomputing.
 //
-// DO-safe: imports only `ai` + the pure model factory, never the Bun/Worker
-// stack. The `generateText` implementation is injectable so the wrapper
-// (`tracing.ts`) can supply the traced namespace and unit tests can stub it.
+// DO-safe: imports only `ai`; the pure model factory is a lazy `import()` so the
+// `workers-ai-provider` / `@ai-sdk/*` packages stay off the eager Bun bundle
+// (the only caller of `summarizeTranscript` is the dormant DO-side `agent.ts`).
+// The `generateText` implementation is injectable so the wrapper (`tracing.ts`)
+// can supply the traced namespace and unit tests can stub it.
 
 import { generateText } from "ai";
-import { buildLanguageModel, type RegistryModelConfig } from "./model-factory";
+import type { RegistryModelConfig } from "./model-factory";
 
 export const SUMMARY_THRESHOLD_MESSAGES = 40;
 export const SUMMARY_THRESHOLD_BYTES = 64 * 1024;
@@ -132,6 +134,9 @@ export async function summarizeTranscript(
   const prompt = `Summarize these earlier conversation turns for continuity. Reply with bullets only.${prior}\n\n${transcript}`;
   const generate = options.generateTextImpl ?? generateText;
   try {
+    // Lazy: keeps the DO-side model factory (workers-ai-provider / @ai-sdk/*)
+    // off the eager Bun bundle; only the dormant DO path ever runs this.
+    const { buildLanguageModel } = await import("./model-factory");
     const result = await generate({
       model: await buildLanguageModel(config),
       system: SUMMARY_SYSTEM_PROMPT,

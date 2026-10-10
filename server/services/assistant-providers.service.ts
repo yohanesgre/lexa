@@ -7,7 +7,7 @@ import {
 } from "../repos/assistant-providers.repo";
 import { InvalidArgs, ProviderAuthFailed, SecretKeyUnavailable } from "../api/errors";
 import { currentEnv } from "../runtime-env";
-import { isCloudflareAiBaseUrl } from "../assistant/provider";
+import { isCloudflareAiBaseUrl, normalizeBaseUrl } from "../assistant/provider";
 import {
   decryptSecret,
   encryptSecret,
@@ -41,9 +41,11 @@ export const PROVIDER_BASE_URL_REQUIRED = "a provider base URL is required";
 // A provider is "workers_ai-shaped" when its base URL is Cloudflare's
 // OpenAI-compatible endpoint (.../ai/v1). Provider rows carry no `kind` column
 // (kind lives on assistant_models), so the base URL is the only save-time signal.
+// Normalize first (house convention, `assistant-api.ts`): the bare `.../ai` form
+// must match too, not just the `/v1`-terminated one.
 function workersAiBaseRequiresKey(baseUrl: string): boolean {
   try {
-    return isCloudflareAiBaseUrl(baseUrl);
+    return isCloudflareAiBaseUrl(normalizeBaseUrl(baseUrl, "workers_ai"));
   } catch {
     return false;
   }

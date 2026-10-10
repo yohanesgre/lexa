@@ -1,5 +1,10 @@
 // Scheduled assistant runs — storage + dispatcher (ADR-0004 §4; H7).
 //
+// INERT as of ADR-0005 W4: the DO executor that consumed fired schedules is
+// retired (D2), and `workers-entry.ts`'s cron no longer calls
+// `dispatchDueSchedules` — no caller remains. The tables and REST CRUD stay
+// inert; W6 deletes this module.
+//
 // `assistant_schedules` rows are created/edited through the REST surface and
 // fired by the 15-minute Worker cron. `dispatchDueSchedules` selects due rows,
 // creates a `kind='schedule'` row in `assistant_runs`, and advances

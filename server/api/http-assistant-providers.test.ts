@@ -350,7 +350,8 @@ describe("provider test fallback when the listing route is absent", () => {
   });
 
   it("bare .../ai base, CF search 405, no models → ping uses the CF default model", async () => {
-    const created = await handler(authed("POST", "/api/admin/assistant/providers", { label: "CF", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai", apiKey: "" }));
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
+    const created = await handler(authed("POST", "/api/admin/assistant/providers", { label: "CF", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai", apiKey: "cf-token" }));
     expect(created.status).toBe(200);
     const { id } = await created.json() as { id: string };
     const pingBodies: string[] = [];

@@ -164,16 +164,24 @@ export async function runSweepDoTranscripts(env: SweepEnv): Promise<SweepReport 
       return stub.getTranscript();
     },
     writeTranscript: async (input) => {
+      // COALESCE preserves the D1 value when the DO has no engine value yet
+      // (`null` = "no engine value", the mirror contract). `permission_mode` is
+      // written only when the DO reports a non-default mode — "ask" is the
+      // resolve fallback, not a stored value.
       await Effect.runPromise(
         run(
           driver,
           `UPDATE assistant_threads
-             SET messages = ?, summary = ?, summarized_count = ?, permission_mode = ?, updated_at = datetime('now')
+             SET messages = ?,
+                 summary = COALESCE(?, summary),
+                 summarized_count = COALESCE(?, summarized_count),
+                 permission_mode = COALESCE(?, permission_mode),
+                 updated_at = datetime('now')
            WHERE document_type = ? AND document_id = ?`,
           JSON.stringify(input.messages),
           input.summary,
-          input.summarizedCount ?? 0,
-          input.permissionMode,
+          input.summarizedCount,
+          input.permissionMode === "ask" ? null : input.permissionMode,
           input.documentType,
           input.documentId
         )

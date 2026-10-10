@@ -1,11 +1,11 @@
 // Assistant HttpApi handlers (chat/tasks + admin registry/usage/runs/bindings,
-// MCP registry, Jev registry) — ADR-0003 §F.
+// MCP registry, Jev registry) — ADR-0003 §F, mounted on both flavors by ADR-0005
+// D7.
 //
-// Workers-only module: it imports the assistant engine / gateway / MCP bridge,
-// so the Bun entry (`server/entry.ts` → `http.ts`) never imports it. The Bun
-// handler composes only the base groups, so `/api/assistant/*` and
-// `/api/admin/assistant/*` 404 there; `createWorkersApiHandler` below mounts
-// base + assistant.
+// `http.ts` composes the base groups and the Bun handler mounts these assistant
+// groups via a dynamic import of `fullRouteGroups()` / `assistantServiceLayerWithStorage`
+// (never a static cycle). `createWorkersApiHandler` below does the same for D1.
+// The module is `agents`-free: the retired DO executor is not on this path.
 
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
@@ -82,16 +82,10 @@ import {
 import type { AssistantTaskStatus } from "../../shared/types";
 import type { StreamFrame } from "../../shared/assistant";
 
-// Best-effort DO RPC from the shared handlers (ADR-0003 §B.4). On the Bun
-// flavor the injected `AssistantThreadRpc` is the no-op layer (every call
-// resolves null), so behavior is unchanged; on Workers a transport failure is
-// no longer silent — `available` distinguishes "no DO here" (null is the
-// fallback) from a real DO failure (logged, then the handler's D1 / in-process
-// path is used).
 // ADR-0005 W4: the DO thread RPC is gone from every live path — chat resume,
 // delegated-run abort, transcript read, and thread reset/destroy all run
 // in-process. The `AssistantThreadRpc` seam and its DO modules stay in the tree
-// (M6 deletes them) but nothing here imports them.
+// (W6 deletes them) but nothing here imports them.
 
 // Run read/abort gate: a run in a project the caller cannot read is not
 // disclosed — it answers the same 404 as an unknown run id (no existence
@@ -886,9 +880,9 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           const found = existingById.get(m.id);
           if (found) {
             const current = normalizeProviderKind(found.kind);
-            // `inferModelKind` can never return `workers_ai` (a Workers-only
-            // kind with no wire signature), so auto-correcting a manually
-            // registered Workers AI row would silently flip it to
+            // `inferModelKind` can never return `workers_ai` (a manual/legacy
+            // kind with no catalog wire signature), so auto-correcting a
+            // manually registered Workers AI row would silently flip it to
             // `openai_compatible`. Only the three catalog-inferable kinds are
             // corrected.
             if (current !== "workers_ai" && current !== inferred) {

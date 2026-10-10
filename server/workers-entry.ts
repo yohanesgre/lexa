@@ -64,9 +64,7 @@ import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
 import { capabilitiesFromRuntimeEnv } from "./capabilities";
 import { LexaAssistantAgent } from "./assistant/agent";
-import { dispatchDueSchedules } from "./scheduled/schedules";
 import { reconcileStaleRuns, reconcileStaleDocumentRuns } from "./assistant/run-registry";
-import type { AssistantRunRow, AssistantScheduleRow } from "../shared/assistant";
 
 export { LexaAssistantAgent };
 // Delegation facet child (ADR-0004 §3; H3). Exported from the worker entry so
@@ -488,40 +486,19 @@ export async function pruneR2Backups(blob: R2Bucket, retention: number): Promise
   return Array.from(doomed).sort();
 }
 
-type ScheduleEnqueue = (run: AssistantRunRow, schedule: AssistantScheduleRow) => Promise<void>;
-
+// ADR-0005 D2: scheduled assistant runs are dropped. The cron no longer fires
+// `assistant_schedules` (the DO executor that consumed them is retired); the
+// tables and REST CRUD stay inert.
 async function runScheduled(env: WorkersEnv): Promise<void> {
   await ensureBoot(env);
   const { runtimeEnv, driver } = requestLayers(env);
-  const enqueue: ScheduleEnqueue | undefined = env.ASSISTANT_AGENT
-    ? async (run) => {
-        const agent = (await getAgentByName(env.ASSISTANT_AGENT!, run.threadKey)) as unknown as {
-          enqueueRun(input: {
-            projectId: string;
-            runId: string;
-            actorUserId: string;
-            kind?: "document" | "schedule";
-            selection?: string;
-            extraPrompt?: string;
-          }): Promise<{ ok: true }>;
-        };
-        await agent.enqueueRun({
-          projectId: run.projectId,
-          runId: run.id,
-          actorUserId: run.createdBy ?? "",
-          kind: "schedule",
-        });
-      }
-    : undefined;
-  await runScheduledCore(driver, runtimeEnv, env.BLOB, enqueue);
+  await runScheduledCore(driver, runtimeEnv, env.BLOB);
 }
-
 // Exported for tests: the scheduled tick minus boot/env plumbing.
 export async function runScheduledCore(
   driver: DbDriver,
   runtimeEnv: RuntimeEnv,
-  blob: R2Bucket | undefined,
-  enqueue?: ScheduleEnqueue | undefined
+  blob: R2Bucket | undefined
 ): Promise<void> {
   await Effect.runPromise(
     batchStmts(driver, [
@@ -557,16 +534,6 @@ export async function runScheduledCore(
     if (reconciledDocs.failed > 0) console.log(`[Workers] assistant stale document runs failed: ${reconciledDocs.failed}`);
   } catch (e) {
     console.error("[Workers] assistant document-run reconciliation failed:", e instanceof Error ? e.message : String(e));
-  }
-  // Scheduled assistant runs (ADR-0004 §4; H7): fire due schedules, each of
-  // which creates a `kind='schedule'` run row and advances its next fire in one
-  // atomic batch, then hands the run to the thread DO via `enqueue`. Fail-open:
-  // a dispatch error must never break the prune tick.
-  try {
-    const result = await dispatchDueSchedules(driver, { enqueue });
-    if (result.dispatched > 0) console.log(`[Workers] assistant schedules dispatched: ${result.dispatched}`);
-  } catch (e) {
-    console.error("[Workers] assistant schedule dispatch failed:", e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -626,8 +593,10 @@ const handler: ExportedHandler<WorkersEnv> = {
       }
       // ADR-0005 W4: the assistant runs in-process through the HttpApi app
       // below — no WebSocket gate, no `/api/internal/assistant/*` HMAC surface.
-      // The DO modules stay in the tree (M6 deletes them) but are off every live
-      // path; the only remaining DO reference is the schedule-dispatch tick.
+      // The DO modules stay in the tree (W6 deletes them) but are off every live
+      // path. The remaining DO references are the class exports the wrangler DO
+      // binding/facet need, the `ASSISTANT_AGENT` type on `WorkersEnv`, and the
+      // opt-in boot sweep (`LXK_SWEEP_DO_TRANSCRIPTS`).
       if (path.startsWith("/api/")) {
         return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
       }

@@ -179,6 +179,11 @@ export function convertStoredMessages(messages: readonly unknown[]): unknown[] {
  * the legacy shape until P4 rewrites it (D3 lands the parts shape in P4). Only
  * the fields the forward conversion preserves are reconstructed; tool parts and
  * `id` are dropped (same lossiness as the import, ADR D8).
+ *
+ * The `data-assistant-approval` carrier (W7b/WS1) is the one extension the
+ * forward conversion emits, so it is reconstructed back into `pendingBatch` —
+ * otherwise a suspended thread's approvals would be undecidable after the
+ * pre-cutover sweep. The last carrier wins (one turn mints one batch).
  */
 export function legacyFromUIMessages(messages: readonly unknown[]): LegacyStoredMessage[] {
   const out: LegacyStoredMessage[] = [];
@@ -187,11 +192,18 @@ export function legacyFromUIMessages(messages: readonly unknown[]): LegacyStored
     const record = message as { role?: unknown; parts?: unknown; metadata?: unknown };
     if (!isConvertibleRole(record.role)) continue;
     const texts: string[] = [];
+    let pendingBatch: { batchId: string; approvals: unknown[] } | null = null;
     if (Array.isArray(record.parts)) {
       for (const part of record.parts) {
         if (typeof part !== "object" || part === null) continue;
-        const p = part as { type?: unknown; text?: unknown };
+        const p = part as { type?: unknown; text?: unknown; data?: unknown };
         if (p.type === "text" && typeof p.text === "string") texts.push(p.text);
+        if (p.type === ASSISTANT_APPROVAL_DATA_PART) {
+          const data = (typeof p.data === "object" && p.data !== null ? p.data : null) as { batchId?: unknown; approvals?: unknown } | null;
+          if (data && typeof data.batchId === "string" && data.batchId.length > 0) {
+            pendingBatch = { batchId: data.batchId, approvals: Array.isArray(data.approvals) ? data.approvals : [] };
+          }
+        }
       }
     }
     const legacy: LegacyStoredMessage = { role: record.role, content: texts.join("") };
@@ -200,6 +212,7 @@ export function legacyFromUIMessages(messages: readonly unknown[]): LegacyStored
     if (Array.isArray(metadata.citations) && metadata.citations.length > 0) legacy.citations = metadata.citations;
     if (metadata.error) legacy.error = metadata.error;
     if (metadata.stopped === true) legacy.stopped = true;
+    if (pendingBatch !== null) legacy.pendingBatch = pendingBatch;
     out.push(legacy);
   }
   return out;

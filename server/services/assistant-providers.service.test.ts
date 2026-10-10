@@ -72,6 +72,13 @@ describe("AssistantProvidersService", () => {
     expect(noKey).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "InvalidArgs", reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }) });
     expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_providers").get()).toEqual({ n: 0 });
 
+    // The bare `.../ai` form (no /v1) must normalize before matching too.
+    const bareNoKey = await Effect.runPromise(
+      Effect.either(service.create({ label: "CF-bare", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai", apiKey: "" }).pipe(Effect.provide(RuntimeEnvLive(env))))
+    );
+    expect(bareNoKey).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "InvalidArgs", reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }) });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_providers").get()).toEqual({ n: 0 });
+
     const keyed = await run(service.create({ label: "CF", baseUrl: CF, apiKey: "cf-token-9z" }));
     expect(keyed).toMatchObject({ hasKey: true });
 
