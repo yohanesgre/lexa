@@ -61,8 +61,7 @@ All notable changes to Lexa are documented here. Format based on
 - Scheduled assistant runs no longer fire.
 - A `workers_ai` provider row needs the OpenAI-compatible base URL plus a
   CF API token — the keyless `env.AI` binding path is gone.
-- `GET /api/assistant/chat/:id` now reads D1 only (the pre-flip DO sweep
-  drained open tails before the cutover).
+- `GET /api/assistant/chat/:id` now reads D1 only — the DO's per-step D1 mirror is canonical; a deployment that skipped the pre-flip DO sweep loses any unmirrored tail from the DO era.
 
 ## [2026.9.0] - 2026-10-07
 
