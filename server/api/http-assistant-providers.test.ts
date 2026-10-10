@@ -266,6 +266,27 @@ describe("provider model sync", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("skips Google-wire gemini ids on an OpenCode Zen base and returns the skipped list", async () => {
+    process.env.LXK_SECRETS_MASTER_KEY = MASTER_KEY;
+    const create = await handler(authed("POST", "/api/admin/assistant/providers", { label: "Zen", baseUrl: "https://opencode.ai/zen/v1", apiKey: PLAINTEXT_KEY }));
+    expect(create.status).toBe(200);
+    const { id } = (await create.json()) as { id: string };
+    vi.stubGlobal("fetch", catalog(["claude-sonnet-4", "gpt-5", "qwen3.7-max", "gemini-2.5-pro"]));
+    try {
+      const res = await handler(authed("POST", `/api/admin/assistant/providers/${id}/models`));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ modelId: string; kind: string }>; skipped: Array<{ id: string; reason: string }> };
+      const rows = db.prepare("SELECT model_id, kind FROM assistant_models WHERE provider_id = ? ORDER BY priority").all(id) as Array<{ model_id: string; kind: string }>;
+      expect(rows.map((r) => r.model_id)).toEqual(["claude-sonnet-4", "gpt-5", "qwen3.7-max"]);
+      expect(rows.map((r) => r.kind)).toEqual(["anthropic_compatible", "openai_responses", "openai_compatible"]);
+      expect(body.skipped).toEqual([{ id: "gemini-2.5-pro", reason: "google wire" }]);
+      const gemini = db.prepare("SELECT COUNT(*) AS n FROM assistant_models WHERE provider_id = ? AND model_id = 'gemini-2.5-pro'").get(id) as { n: number };
+      expect(gemini.n).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 const jsonBody = (status: number, body: unknown) =>

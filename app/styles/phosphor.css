@@ -2071,6 +2071,13 @@
   .btn-primary:hover {
     background: var(--lx-text-link-hover);
   }
+  /* Pressed/selected toggle button (e.g. a provider preset, the attach trigger
+     while its menu is open). */
+  .btn.is-active {
+    background: var(--lx-bg-accent-subtle);
+    border-color: var(--lx-border-focus);
+    color: var(--lx-text-link);
+  }
   .btn-ghost {
     background: transparent;
     color: var(--lx-text-secondary);

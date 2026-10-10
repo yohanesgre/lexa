@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
-import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
+import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantSkippedModel, AssistantUsage, AssistantCall, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
 
 const BASE = "/api";
 
@@ -775,7 +775,7 @@ export function probeAssistantProvider(id: string): Promise<AssistantProviderHea
   return request(`${BASE}/admin/assistant/providers/${encodeURIComponent(id)}/probe`, { method: "POST" });
 }
 
-export function fetchAssistantProviderModels(id: string): Promise<{ data: AssistantProviderModel[] }> {
+export function fetchAssistantProviderModels(id: string): Promise<{ data: AssistantProviderModel[]; skipped: AssistantSkippedModel[] }> {
   return request(`${BASE}/admin/assistant/providers/${encodeURIComponent(id)}/models`, { method: "POST" });
 }
 

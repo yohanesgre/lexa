@@ -21,19 +21,22 @@ const h = vi.hoisted(() => ({
   secretsEnabled: true as boolean | undefined,
   created: [] as unknown[],
   updated: [] as unknown[],
+  fetch: { isPending: false, isSuccess: false, variables: undefined as string | undefined, data: undefined as { data: unknown[]; skipped: unknown[] } | undefined },
 }));
 
 vi.mock("../../lib/queries/assistant-admin", () => ({
   useAssistantProviders: () => ({ data: h.providers, isLoading: h.isLoading, secretsEnabled: h.secretsEnabled }),
   useTestProvider: () => ({ mutate: vi.fn(), isPending: false }),
-  useFetchModels: () => ({ mutate: vi.fn(), isPending: false }),
+  useFetchModels: () => ({ mutate: vi.fn(), isPending: h.fetch.isPending, isSuccess: h.fetch.isSuccess, variables: h.fetch.variables, data: h.fetch.data }),
   useCreateProvider: () => ({ mutate: (input: unknown, opts?: { onSuccess?: () => void }) => { h.created.push(input); opts?.onSuccess?.(); }, isPending: false }),
   useUpdateProvider: () => ({ mutate: (input: unknown, opts?: { onSuccess?: () => void }) => { h.updated.push(input); opts?.onSuccess?.(); }, isPending: false }),
   useDeleteProvider: () => ({ mutate: vi.fn(), isPending: false }),
+  useReorderProviderModels: () => ({ mutate: vi.fn() }),
+  useUpdateProviderModel: () => ({ mutate: vi.fn() }),
 }));
 
 import { AssistantProvidersSection } from "./AssistantProvidersSection";
-import type { AssistantProvider } from "../../../shared/assistant";
+import type { AssistantProvider, AssistantProviderModel } from "../../../shared/assistant";
 
 const WITH_KEY: AssistantProvider = { id: "p1", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", hasKey: true, keyMask: "sk-…8f3a", models: [] };
 
@@ -43,6 +46,7 @@ beforeEach(() => {
   h.secretsEnabled = true;
   h.created = [];
   h.updated = [];
+  h.fetch = { isPending: false, isSuccess: false, variables: undefined, data: undefined };
 });
 
 describe("AssistantProvidersSection — structure", () => {
@@ -172,5 +176,89 @@ describe("AssistantProvidersSection — clear key", () => {
     await user.click(screen.getByRole("button", { name: "Save provider" }));
     expect(h.updated[0]).toMatchObject({ id: "p1", apiKey: "sk-new" });
     expect(h.updated[0]).not.toHaveProperty("clearKey");
+  });
+});
+
+describe("AssistantProvidersSection — provider presets", () => {
+  it("fills Label + Base URL from a preset, marks it active, and clears the mark when a field is edited", async () => {
+    const user = userEvent.setup();
+    render(<AssistantProvidersSection />);
+
+    const zen = screen.getByRole("button", { name: "OpenCode Zen" });
+    expect(zen).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(zen);
+    expect(screen.getByLabelText("Label")).toHaveValue("OpenCode Zen");
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://opencode.ai/zen/v1");
+    expect(screen.getByRole("button", { name: "OpenCode Zen" })).toHaveAttribute("aria-pressed", "true");
+    // A preset never touches the key — the preset hint replaces the default one.
+    expect(screen.getByText(/A preset never touches the key\./)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Base URL"), "/x");
+    expect(screen.getByRole("button", { name: "OpenCode Zen" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows the Cloudflare account-id hint while the Cloudflare AI preset is active", async () => {
+    const user = userEvent.setup();
+    render(<AssistantProvidersSection />);
+    expect(screen.queryByText(/with the Cloudflare account id/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cloudflare AI" }));
+    expect(screen.getByText(/with the Cloudflare account id/)).toBeInTheDocument();
+  });
+});
+
+describe("AssistantProvidersSection — skipped model markers", () => {
+  const model = (over: Partial<AssistantProviderModel>): AssistantProviderModel => ({
+    id: "m1",
+    providerId: "p1",
+    modelId: "claude-sonnet-4",
+    kind: "anthropic_compatible",
+    priority: 0,
+    enabled: false,
+    ...over,
+  });
+  const zen = (over: Partial<AssistantProvider>): AssistantProvider => ({
+    id: "p1",
+    label: "Zen",
+    baseUrl: "https://opencode.ai/zen/v1",
+    hasKey: false,
+    keyMask: null,
+    models: [],
+    ...over,
+  });
+
+  it("renders the inert marker for a skipped id (muted badge, dash priority, disabled toggle)", async () => {
+    const user = userEvent.setup();
+    h.providers = [zen({})];
+    h.fetch = { isPending: false, isSuccess: true, variables: "p1", data: { data: [], skipped: [{ id: "gemini-2.5-pro", reason: "google wire" }] } };
+    render(<AssistantProvidersSection />);
+    await user.click(screen.getByRole("button", { name: "Zen" }));
+    const badge = screen.getByText("skipped · google wire");
+    expect(badge).toBeInTheDocument();
+    const row = badge.closest("tr")!;
+    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "gemini-2.5-pro" })).toBeDisabled();
+  });
+
+  it("passes skipped only for the provider whose fetch succeeded", async () => {
+    const user = userEvent.setup();
+    h.providers = [zen({}), zen({ id: "p2", label: "Zen Go", baseUrl: "https://opencode.ai/zen/go/v1" })];
+    h.fetch = { isPending: false, isSuccess: true, variables: "p1", data: { data: [], skipped: [{ id: "gemini-2.5-pro", reason: "google wire" }] } };
+    render(<AssistantProvidersSection />);
+    await user.click(screen.getByRole("button", { name: "Zen" }));
+    expect(screen.getByText("skipped · google wire")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Zen" })); // collapse p1
+    await user.click(screen.getByRole("button", { name: "Zen Go" }));
+    expect(screen.queryByText("skipped · google wire")).not.toBeInTheDocument();
+  });
+
+  it("de-dupes: a skipped id already persisted renders once as the live row", async () => {
+    const user = userEvent.setup();
+    h.providers = [zen({ models: [model({ modelId: "claude-sonnet-4" })] })];
+    h.fetch = { isPending: false, isSuccess: true, variables: "p1", data: { data: [], skipped: [{ id: "claude-sonnet-4", reason: "google wire" }] } };
+    render(<AssistantProvidersSection />);
+    await user.click(screen.getByRole("button", { name: "Zen" }));
+    expect(screen.getAllByText("claude-sonnet-4")).toHaveLength(1);
+    expect(screen.queryByText(/skipped ·/)).not.toBeInTheDocument();
   });
 });
