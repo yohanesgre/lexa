@@ -408,6 +408,64 @@ export function stageBundle(stageDir: string, deployDir: string, manifest: Bundl
   if (existsSync(assetsDir)) copyDirContents(assetsDir, join(deployDir, "assets"));
 }
 
+// ADR-0005: the assistant DO stack is retired. A DO-era deployment still owns
+// the `LexaAssistantAgent` class, and Cloudflare refuses a version that drops
+// it without a delete-class migration (CF error 10064). Detect the class in
+// the prior config and append a delete-class tag after the highest existing
+// tag; the binding is never copied into the rebuilt config. A never-DO config
+// gets no migrations.
+export const ASSISTANT_DO_CLASS = "LexaAssistantAgent";
+
+function durableObjectClassNames(durableObjects: unknown): string[] {
+  if (typeof durableObjects !== "object" || durableObjects === null) return [];
+  const bindings = (durableObjects as { bindings?: unknown }).bindings;
+  if (!Array.isArray(bindings)) return [];
+  const names: string[] = [];
+  for (const binding of bindings) {
+    if (typeof binding !== "object" || binding === null) continue;
+    const className = (binding as { class_name?: unknown }).class_name;
+    if (typeof className === "string") names.push(className);
+  }
+  return names;
+}
+
+function migrationClassNames(migrations: Array<Record<string, unknown>>): string[] {
+  const names: string[] = [];
+  for (const migration of migrations) {
+    for (const key of ["new_sqlite_classes", "new_classes", "deleted_classes"]) {
+      const list = migration[key];
+      if (!Array.isArray(list)) continue;
+      for (const entry of list) if (typeof entry === "string") names.push(entry);
+    }
+  }
+  return names;
+}
+
+function nextMigrationTag(migrations: Array<Record<string, unknown>>): string {
+  let max = 0;
+  for (const migration of migrations) {
+    const tag = migration.tag;
+    if (typeof tag !== "string") continue;
+    const match = /^v(\d+)$/.exec(tag);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return `v${max + 1}`;
+}
+
+export function buildDoRemovalMigrations(
+  prior: WorkerConfigJson,
+): Array<Record<string, unknown>> | undefined {
+  const priorMigrations = Array.isArray(prior.migrations) ? prior.migrations : [];
+  const ownsAgent =
+    durableObjectClassNames(prior.durable_objects).includes(ASSISTANT_DO_CLASS) ||
+    migrationClassNames(priorMigrations).includes(ASSISTANT_DO_CLASS);
+  if (!ownsAgent) return undefined;
+  return [
+    ...priorMigrations,
+    { tag: nextMigrationTag(priorMigrations), deleted_classes: [ASSISTANT_DO_CLASS] },
+  ];
+}
+
 // Rebuild the per-deploy config from the PRIOR bindings (live D1/R2/KV ids and
 // account) plus the new bundle + resolved vars. Bindings are preserved
 // verbatim — the ids identify live resources and must never be recreated.
@@ -444,6 +502,10 @@ export function buildUpgradeConfig(
   if (prior.d1_databases !== undefined) config.d1_databases = prior.d1_databases;
   if (prior.r2_buckets !== undefined) config.r2_buckets = prior.r2_buckets;
   if (prior.kv_namespaces !== undefined) config.kv_namespaces = prior.kv_namespaces;
+  // ADR-0005: drop the DO binding and append the delete-class migration for a
+  // DO-era deployment; a never-DO config carries no migrations at all.
+  const migrations = buildDoRemovalMigrations(prior);
+  if (migrations !== undefined) config.migrations = migrations;
   if (triggers !== undefined) config.triggers = triggers;
   return config;
 }

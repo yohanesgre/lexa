@@ -390,6 +390,19 @@ describe("source order — account resolves before any resource is created", () 
     expect(src).not.toContain("durable_objects,");
   });
 
+  test("main emits no DO migrations for a fresh install (root's migrations are not propagated)", () => {
+    const src = readFileSync(
+      new URL("./lib/cf-deploy.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).not.toContain("new_sqlite_classes");
+    expect(src).not.toContain("deleted_classes");
+    expect(src).not.toContain("LexaAssistantAgent");
+    // The generated config never sets a `migrations` key (D1 migrations use
+    // the separate `_migrations` journal, not this key).
+    expect(src).not.toContain("migrations:");
+  });
+
   test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {
     const src = readFileSync(
       new URL("./lib/cf-deploy.ts", import.meta.url),

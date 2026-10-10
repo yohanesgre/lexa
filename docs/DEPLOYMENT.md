@@ -249,6 +249,24 @@ For an in-place update of an existing custody dir from the headless CLI
 [`docs/CLOUDFLARE_WORKERS.md`](CLOUDFLARE_WORKERS.md#upgrading-a-workers-deployment-lx-worker-upgrade)
 §Upgrading a Workers deployment.
 
+**Upgrading from a DO-era deployment (ADR-0005).** The assistant Durable Object
+(`LexaAssistantAgent`) is retired and no longer exported by the script. A
+deployment that already owns the class must carry the frozen delete-class
+migration or the deploy fails with CF error 10064 ("New version of script does
+not export class 'LexaAssistantAgent' which is depended on by existing Durable
+Objects"). The repo `wrangler.jsonc` and `lx worker upgrade` already append it;
+a hand-managed config (e.g. a filled `wrangler.staging.local.jsonc`) must add:
+
+```jsonc
+"migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] },
+  { "tag": "v2", "deleted_classes": ["LexaAssistantAgent"] }
+]
+```
+
+A fresh install never carries this history — the installer and `lx worker
+upgrade` emit no `migrations` for a config that never owned the DO.
+
 ## Sample data
 
 Sample data is offered in every environment: the web wizard shows the

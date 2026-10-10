@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { sha256Hex, type ReleaseFetcher } from "./release";
 import {
   backupPathFor,
+  buildDoRemovalMigrations,
+  buildUpgradeConfig,
   discoverWorkerDeploys,
   parseWranglerTokenOutput,
   readDeployConfigFile,
@@ -415,6 +417,77 @@ describe("worker upgrade state preservation", () => {
     expect(readFileSync(envFile, "utf-8")).toBe('LXK_SECRETS_MASTER_KEY = "abc"\n');
     // Prior bundle retained.
     expect(existsSync(backupPathFor(config.dir))).toBe(true);
+  });
+});
+
+describe("worker upgrade DO removal migration (ADR-0005)", () => {
+  const DO_BINDING = {
+    bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }],
+  };
+  const BUNDLE = { main: "index.js", assets: { directory: "../client" } };
+
+  it("appends a delete-class migration and drops the binding for a DO-era prior config", async () => {
+    const root = makeRoot();
+    const prior = priorConfig({
+      durable_objects: DO_BINDING,
+      migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
+    });
+    const { config } = makeDeploy(root, prior);
+    const { deps } = buildDeps({ applied: [MCP_SECRET_REFS_MIGRATION, "0013_jev_registry.sql"] });
+
+    const outcome = await runUpgrade(options(config, prior), deps);
+
+    expect(outcome.status).toBe("ok");
+    const rebuilt = readDeployConfigFile(config.configPath)!;
+    expect(rebuilt.durable_objects).toBeUndefined();
+    expect(rebuilt.migrations).toEqual([
+      { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+  });
+
+  it("appends the next tag after the prior's highest when the history is deeper", () => {
+    const prior = priorConfig({
+      durable_objects: DO_BINDING,
+      migrations: [
+        { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+        { tag: "v2", deleted_classes: ["SomeOtherClass"] },
+      ],
+    });
+    const rebuilt = buildUpgradeConfig(prior, {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+    });
+    expect(rebuilt.migrations).toEqual([
+      { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", deleted_classes: ["SomeOtherClass"] },
+      { tag: "v3", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+  });
+
+  it("detects the DO class from the binding alone (no migrations history)", () => {
+    const prior = priorConfig({ durable_objects: DO_BINDING });
+    const rebuilt = buildUpgradeConfig(prior, {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+    });
+    expect(rebuilt.migrations).toEqual([
+      { tag: "v1", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+  });
+
+  it("emits no migrations for a never-DO config", () => {
+    const prior = priorConfig();
+    expect(buildDoRemovalMigrations(prior)).toBeUndefined();
+    const rebuilt = buildUpgradeConfig(prior, {
+      version: "2.0.0",
+      publicUrl: "https://lexa.example.workers.dev",
+      bundle: BUNDLE,
+    });
+    expect(rebuilt.migrations).toBeUndefined();
+    expect(rebuilt.durable_objects).toBeUndefined();
   });
 });
 

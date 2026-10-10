@@ -448,6 +448,15 @@ deploy dir back on failure. It is the CLI counterpart to re-running
 fresh-machine re-run (see `docs/DEPLOYMENT.md` §Upgrade), while
 `lx worker upgrade` updates an existing custody dir from the headless CLI.
 
+**DO-era upgrade (ADR-0005).** Deploying the removal build over a deployment
+that still owns the `LexaAssistantAgent` Durable Object fails with CF error
+10064 ("New version of script does not export class 'LexaAssistantAgent' which
+is depended on by existing Durable Objects") unless the config carries the
+delete-class migration. `lx worker upgrade` detects the class in the prior
+config (binding or migration history), drops the binding, and appends
+`{ "tag": "v2", "deleted_classes": ["LexaAssistantAgent"] }` after the prior's
+highest tag. A config that never owned the DO gets no `migrations` block.
+
 **Two different updates.** `lx upgrade` is **CLI self-update** — it replaces the
 `lx` binary from the newest `cli-v*` release asset. `lx worker upgrade` is the
 **web app** on Cloudflare Workers. CLI releases (`cli-vX.Y.Z`) and web-app
@@ -462,8 +471,10 @@ credentials. It holds:
 - `cf-workers/deploy-<flavor>/wrangler.<flavor>.json` — the per-deploy config
   (account, D1/R2/KV ids, vars). The rebuild preserves these bindings verbatim —
   the ids identify **live** resources and are never recreated. (ADR-0005 W6:
-  the assistant Durable Object binding/migration and the `ai` binding are gone
-  from the config; an upgrade no longer carries or derives them.)
+  the assistant Durable Object binding and the `ai` binding are gone from the
+  config; a DO-era deployment instead gets a delete-class migration appended —
+  without it the deploy fails with CF error 10064. A never-DO config carries
+  no `migrations`.)
 - `cf-workers/deploy-<flavor>.bak` — the prior bundle backup (the rollback source).
 - `cf-workers/.cf-token` — the saved Cloudflare API token (0600).
 - `cf-workers/.env.toml` — `LXK_SECRETS_MASTER_KEY` custody (0600); a missing

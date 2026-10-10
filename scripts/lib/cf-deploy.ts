@@ -897,6 +897,11 @@ export async function main(): Promise<void> {
       ],
       r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
       kv_namespaces: [{ binding: "KV", id: kvId }],
+      // ADR-0005: the assistant DO is retired — a fresh install emits no
+      // `durable_objects`/`migrations` block. Root's `migrations` history is
+      // deliberately NOT propagated (a fresh worker owns no DO); a DO-era
+      // deployment upgrades through `lx worker upgrade`, which appends the
+      // delete-class migration.
       // Scheduled tick carried verbatim from root (prune + R2 backup retention
       // — the only pruner on Workers; ADR-0005 W6 keeps it while dropping the
       // assistant schedule drain).
