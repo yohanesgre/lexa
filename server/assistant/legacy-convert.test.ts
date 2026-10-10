@@ -162,6 +162,21 @@ describe("convertLegacyMessages", () => {
     ]);
   });
 
+  it("restores persisted reasoning as a reasoning part + metadata.reasoningMs", () => {
+    const converted = convertLegacyMessages([
+      { role: "assistant", content: "answer", reasoning: "thought hard", reasoningMs: 4200 },
+    ]);
+    expect(converted[0]).toEqual({
+      id: "legacy-0",
+      role: "assistant",
+      parts: [
+        { type: "reasoning", text: "thought hard" },
+        { type: "text", text: "answer" },
+      ],
+      metadata: { reasoningMs: 4200 },
+    });
+  });
+
   it("returns an empty array for empty or non-array input", () => {
     expect(convertLegacyMessages([])).toEqual([]);
     expect(
@@ -204,15 +219,30 @@ describe("convertStoredMessages (mixed D1 mirror rows)", () => {
     expect(out[1]).toBe(partsShaped);
   });
 
-  it("drops unmappable legacy rows and keeps malformed parts-shaped rows verbatim", () => {
+  it("keeps unmappable legacy rows as inert placeholders and malformed parts-shaped rows verbatim", () => {
     const out = convertStoredMessages([
       { role: "tool", content: "dropped" },
       { role: "assistant", content: "kept" },
       { role: "assistant", parts: [] },
     ]);
-    expect(out).toHaveLength(2);
-    expect(out[0]).toEqual({ id: "legacy-1", role: "assistant", parts: [{ type: "text", text: "kept" }] });
-    expect(out[1]).toEqual({ role: "assistant", parts: [] });
+    expect(out).toHaveLength(3);
+    expect(out[0]).toEqual({ id: "legacy-0", role: "tool", parts: [] });
+    expect(out[1]).toEqual({ id: "legacy-1", role: "assistant", parts: [{ type: "text", text: "kept" }] });
+    expect(out[2]).toEqual({ role: "assistant", parts: [] });
+  });
+
+  it("is length-preserving so a tool row before the target keeps every later position", () => {
+    const out = convertStoredMessages([
+      { role: "user", content: "q0" },
+      { role: "tool", content: "raw wire" },
+      { role: "user", content: "q1" },
+    ]) as Array<{ role?: string; parts?: unknown[] }>;
+    expect(out).toHaveLength(3);
+    expect(out[1]!.role).toBe("tool");
+    expect(out[1]!.parts).toEqual([]);
+    // The client resolves its resend index against this array; the trailing
+    // user turn must stay at the same index the server will truncate at.
+    expect(out[2]).toEqual({ id: "legacy-2", role: "user", parts: [{ type: "text", text: "q1" }] });
   });
 });
 

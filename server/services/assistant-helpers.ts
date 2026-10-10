@@ -60,9 +60,34 @@ export function collectCitation(existing: Citation[], c: Citation): Citation[] {
   if (existing.length >= CHAT_CITATION_CAP) return existing;
   return [...existing, c];
 }
+// A stored turn can hold text in three shapes: legacy string content, legacy
+// array content with a `{type:"text"}` part, or a parts-shaped row with a
+// `{type:"text", text}` part. Mirrors `textFromPart` (assistant/legacy-convert)
+// and `rawMessageText` (app/lib/resendIndex) so validation agrees with the
+// client's locator.
+function isStoredTextPart(part: unknown): boolean {
+  if (typeof part !== "object" || part === null) return false;
+  const record = part as { type?: unknown; content?: unknown; text?: unknown };
+  if (record.type !== undefined && record.type !== "text") return false;
+  return typeof record.content === "string" || typeof record.text === "string";
+}
+function hasStoredUserText(message: unknown): boolean {
+  if (typeof message !== "object" || message === null) return false;
+  const record = message as { content?: unknown; parts?: unknown };
+  if (typeof record.content === "string") return true;
+  if (Array.isArray(record.content)) return record.content.some(isStoredTextPart);
+  if (Array.isArray(record.parts)) {
+    return record.parts.some((part) => {
+      if (typeof part !== "object" || part === null) return false;
+      const p = part as { type?: unknown; text?: unknown };
+      return p.type === "text" && typeof p.text === "string";
+    });
+  }
+  return false;
+}
 export function validateChatFromIndex(messages: unknown[], fromIndex: number): void {
   if (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex > messages.length) throw new InvalidArgs({ reason: `fromIndex must be an integer between 0 and ${messages.length}` });
-  if (fromIndex < messages.length) { const target = messages[fromIndex] as { role?: unknown; content?: unknown } | undefined; if (!target || target.role !== "user" || typeof target.content !== "string") throw new InvalidArgs({ reason: "edited turn must target a user message with text content" }); }
+  if (fromIndex < messages.length) { const target = messages[fromIndex] as { role?: unknown } | undefined; if (!target || target.role !== "user" || !hasStoredUserText(target)) throw new InvalidArgs({ reason: "edited turn must target a user message with text content" }); }
 }
 export function buildChatExport(t: { title: string | null; messages: unknown[] }): string {
   const lines: string[] = [`# ${t.title ?? "chat"}`];

@@ -30,6 +30,8 @@ export interface LegacyStoredMessage {
   error?: unknown;
   stopped?: unknown;
   partial?: unknown;
+  reasoning?: unknown;
+  reasoningMs?: unknown;
   [key: string]: unknown;
 }
 
@@ -38,6 +40,7 @@ export interface LegacyConvertMetadata {
   citations?: Citation[];
   error?: { code: string; message: string };
   stopped?: true;
+  reasoningMs?: number;
 }
 
 export type ConvertedUIMessage = UIMessage<LegacyConvertMetadata>;
@@ -68,6 +71,21 @@ function textParts(content: unknown): string[] {
     return out;
   }
   return [];
+}
+
+// Persisted reasoning (build-stream): the accumulated reasoning text and its
+// elapsed ms. Stored as top-level legacy fields; conversion restores the
+// UIMessage shape the app reads — a `{type:"reasoning"}` part plus
+// `metadata.reasoningMs`.
+function reasoningPartOf(message: LegacyStoredMessage): ConvertedUIMessage["parts"][number] | null {
+  const reasoning = message.reasoning;
+  if (typeof reasoning !== "string" || reasoning.length === 0) return null;
+  return { type: "reasoning", text: reasoning } as unknown as ConvertedUIMessage["parts"][number];
+}
+
+function reasoningMsOf(message: LegacyStoredMessage): number | null {
+  const ms = message.reasoningMs;
+  return typeof ms === "number" && Number.isFinite(ms) ? ms : null;
 }
 
 function sanitizeCitations(value: unknown): Citation[] {
@@ -128,6 +146,10 @@ export function convertLegacyMessage(message: LegacyStoredMessage, index: number
   if (!isConvertibleRole(message.role)) return null;
 
   const parts: ConvertedUIMessage["parts"] = textParts(message.content).map((text) => ({ type: "text", text }));
+  // Reasoning precedes the answer in arrival order; unshift keeps the interleave
+  // the fold rebuilds from parts.
+  const reasoning = reasoningPartOf(message);
+  if (reasoning) parts.unshift(reasoning);
   if (parts.length === 0) parts.push({ type: "text", text: "" });
   const carrier = approvalCarrierPart(message.pendingBatch);
   if (carrier) parts.push(carrier);
@@ -138,6 +160,8 @@ export function convertLegacyMessage(message: LegacyStoredMessage, index: number
   if (citations.length > 0) metadata.citations = citations;
   const error = sanitizeError(message.error);
   if (error) metadata.error = error;
+  const reasoningMs = reasoningMsOf(message);
+  if (reasoningMs !== null) metadata.reasoningMs = reasoningMs;
   // A killed turn's in-progress persist (`partial: true`, ADR-0005 §Reliability.3)
   // or its terminal stop persist (`stopped: true`) both render as stopped — the
   // read must surface the marker instead of dropping the partial silently.
@@ -166,6 +190,12 @@ export function convertLegacyMessages(messages: readonly LegacyStoredMessage[]):
 // already carries a `parts` array must pass through verbatim — re-converting it
 // through {@link convertLegacyMessage} would drop its `data-attachment` and
 // `data-assistant-approval` parts. Legacy rows convert as before.
+//
+// The read is length-preserving: an unmappable legacy role (tool / unknown)
+// keeps its slot as an inert placeholder instead of being dropped. The client
+// resolves its resend `fromIndex` against THIS converted array, while the server
+// validates and truncates the stored array — a dropped row would shift every
+// later index and reject a valid retry (or truncate the wrong turn).
 export function convertStoredMessages(messages: readonly unknown[]): unknown[] {
   const out: unknown[] = [];
   messages.forEach((message, index) => {
@@ -174,7 +204,9 @@ export function convertStoredMessages(messages: readonly unknown[]): unknown[] {
       return;
     }
     const converted = convertLegacyMessage(message as LegacyStoredMessage, index);
-    if (converted) out.push(converted);
+    if (converted) { out.push(converted); return; }
+    const role = (message as { role?: unknown } | null)?.role;
+    out.push({ id: `legacy-${index}`, role: typeof role === "string" ? role : "unknown", parts: [] });
   });
   return out;
 }

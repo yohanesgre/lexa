@@ -172,6 +172,33 @@ describe("suspendTurn persisted marker", () => {
     expect(assistantEntry.toolLog![0]!.name).toBe("delete_task");
     expect(assistantEntry).not.toHaveProperty("toolCalls");
   });
+
+  it("keeps the reasoning fold on a write-suspension persist", async () => {
+    let persisted: unknown[] | null = null;
+    const proposalStream = () =>
+      (async function* () {
+        yield { type: "REASONING_MESSAGE_CONTENT", delta: "weighing it" } as unknown as StreamChunk;
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "" } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "delete_task" } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: JSON.stringify({ ref: "LX-1" }) } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+      })();
+    const c = ctx(proposalStream);
+    c.writeDrain = () => [proposal];
+    c.writeTools = ["delete_task"];
+    c.persist = async (messages) => {
+      persisted = messages;
+    };
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "suspended")).toBe(true);
+    const assistantEntry = (persisted as unknown[] | null)!.find((m) => (m as { pendingBatch?: unknown }).pendingBatch !== undefined) as {
+      reasoning?: unknown;
+      reasoningMs?: unknown;
+    };
+    expect(assistantEntry.reasoning).toBe("weighing it");
+    expect(typeof assistantEntry.reasoningMs).toBe("number");
+  });
 });
 
 describe("sanitizeProviderMessages", () => {

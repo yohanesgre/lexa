@@ -27,6 +27,7 @@ import {
 } from "./assistant.service";
 import { buildSystemPrompts } from "../assistant/prompt";
 import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail, type AssistantToolDeps } from "../assistant/tools";
+import { convertStoredMessages } from "../assistant/legacy-convert";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
 import type { StreamFrame } from "../../shared/assistant";
 
@@ -427,6 +428,37 @@ describe("validateChatFromIndex", () => {
     expect(() => validateChatFromIndex(msgs, 2)).toThrow();
   });
 
+  it("accepts an attachment-bearing user turn (array content with a text part)", () => {
+    const withAttachment = [
+      { role: "user", content: "q0" },
+      { role: "assistant", content: "a0" },
+      { role: "user", content: [{ type: "text", content: "look at this" }, { type: "image-ref", storageKey: "k", mimeType: "image/png" }] },
+    ];
+    expect(() => validateChatFromIndex(withAttachment, 2)).not.toThrow();
+  });
+
+  it("accepts a parts-shaped stored user row", () => {
+    const partsShaped = [
+      { role: "user", parts: [{ type: "text", text: "hello" }] },
+      { role: "assistant", parts: [{ type: "text", text: "hi" }] },
+    ];
+    expect(() => validateChatFromIndex(partsShaped, 0)).not.toThrow();
+  });
+
+  it("holds when an unmappable role precedes the target (index alignment)", () => {
+    const stored = [
+      { role: "user", content: "q0" },
+      { role: "assistant", content: "a0" },
+      { role: "tool", content: "raw wire" },
+      { role: "user", content: "q1" },
+    ];
+    // The client resolves its index against the converted read...
+    const converted = convertStoredMessages(stored);
+    expect(converted).toHaveLength(stored.length);
+    // ...and the server validates that same position against the stored array.
+    expect(() => validateChatFromIndex(stored, 3)).not.toThrow();
+  });
+
   it("append at length skips the target check", () => {
     expect(() => validateChatFromIndex([], 0)).not.toThrow();
   });
@@ -615,7 +647,7 @@ describe("buildStream reasoning frames", () => {
     expect(frames.at(-1)!?.type).toBe("done");
   });
 
-  it("reasoning content is never persisted into the transcript", async () => {
+  it("persists the reasoning text + elapsed ms so the fold survives reload", async () => {
     providerMock.script = [
       { type: "REASONING_MESSAGE_CONTENT", delta: "secret thoughts" },
       { type: "TEXT_MESSAGE_CONTENT", delta: "public answer" },
@@ -625,12 +657,21 @@ describe("buildStream reasoning frames", () => {
     const frames = await drain(buildStream(ctx));
     expect(frames.at(-1)!?.type).toBe("done");
     expect(ctx.persistCalls.length).toBe(1);
-    for (const messages of ctx.persistCalls) {
-      const assistant = (messages as Array<{ role: string; content: unknown }>).at(-1)!;
-      expect(assistant?.role).toBe("assistant");
-      expect(assistant?.content).toBe("public answer");
-      expect(JSON.stringify(messages)).not.toContain("secret thoughts");
-    }
+    const messages = ctx.persistCalls[0]!;
+    const assistant = (messages as Array<{ role: string; content: unknown; reasoning?: unknown; reasoningMs?: unknown }>).at(-1)!;
+    expect(assistant?.role).toBe("assistant");
+    expect(assistant?.content).toBe("public answer");
+    expect(assistant?.reasoning).toBe("secret thoughts");
+    expect(typeof assistant?.reasoningMs).toBe("number");
+    // Survives the read conversion: the app reads a reasoning part + metadata.reasoningMs.
+    const converted = convertStoredMessages(messages) as Array<{
+      role: string;
+      parts: Array<{ type: string; text?: string }>;
+      metadata?: { reasoningMs?: number };
+    }>;
+    const convertedAssistant = converted.at(-1)!;
+    expect(convertedAssistant.parts).toContainEqual({ type: "reasoning", text: "secret thoughts" });
+    expect(convertedAssistant.metadata?.reasoningMs).toBe(assistant?.reasoningMs);
   });
 
   it("models without reasoning emit no reasoning frames", async () => {

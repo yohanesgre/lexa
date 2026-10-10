@@ -95,9 +95,9 @@ function carrierBatchOf(parts: readonly unknown[]): { batchId: string; chips: Ap
   return undefined;
 }
 
-// Post-stream activity summary shown on the trailing done turn — sourced from
-// the live stream session's memory only; transcript-loaded turns never get
-// one (reasoning is never persisted).
+// Post-stream activity summary shown on a settled turn — sourced from the live
+// stream session's memory, or rebuilt from a persisted reasoning part +
+// `metadata.reasoningMs` on a transcript-loaded turn.
 export interface ActivityView {
   items: AssistantTimelineItem[];
   tools: AssistantToolChip[];
@@ -249,6 +249,14 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
               ...(segment?.citations ?? []).map((c) => ({ url: c.url, title: c.title })),
             ])
           : [];
+      // Reload-visible reasoning fold: a persisted reasoning part + metadata
+      // duration rebuild the done-fold activity a live stream would have frozen
+      // in session memory. Tool parts stay session-memory-only, so this only
+      // attaches when reasoning is actually present.
+      const activity =
+        segment && msg.role === "assistant" && (segment.reasoningText !== "" || segment.reasoningMs !== null)
+          ? { items: segment.items, tools: segment.tools, reasoningMs: segment.reasoningMs }
+          : undefined;
       const err = isErrorMeta(metadata.error);
       out.push({
         role: msg.role,
@@ -260,6 +268,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
         ...(citations.length > 0 ? { citations } : {}),
         ...(err ? { error: err } : {}),
         ...(metadata.stopped === true ? { stopped: true } : {}),
+        ...(activity ? { activity } : {}),
         ...(spawnedRuns.length > 0 ? { spawnedRuns } : {}),
         ...(carrier
           ? carrier.chips.length > 0
