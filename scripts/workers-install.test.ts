@@ -320,6 +320,45 @@ describe("buildDoRemovalMigrations (DO-era detection)", () => {
       }),
     ).toBeUndefined();
   });
+
+  test("binding present but the last mention is a delete → still appends the next-tag delete (the !bound guard)", () => {
+    const prior = {
+      durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: CLASS }] },
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: [CLASS] },
+      ],
+    };
+    expect(buildDoRemovalMigrations(prior)).toEqual([
+      ...prior.migrations,
+      { tag: "v3", deleted_classes: [CLASS] },
+    ]);
+  });
+
+  test("buildDeployConfig keeps a repeat upgrade's applied history verbatim (no v3)", () => {
+    const priorConfig = {
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: [CLASS] },
+      ],
+    };
+    const config = buildDeployConfig({
+      workerName: "lexa",
+      d1Name: "lexa",
+      account: "acct_123",
+      d1Id: "d1-abc",
+      r2Name: "lexa-blobs",
+      kvId: "kv-abc",
+      publicUrl: "https://lexa.example.workers.dev",
+      version: "2026.9.0",
+      manifest: { main: "index.js", assets: { directory: "../client" } },
+      rootConfig: { compatibility_date: "2026-08-01" },
+      priorConfig,
+    });
+    expect(config.migrations).toEqual(priorConfig.migrations);
+    const migrations = config.migrations as Array<{ tag?: string }>;
+    expect(migrations.some((m) => m.tag === "v3")).toBe(false);
+  });
 });
 
 describe("root wrangler observability", () => {
