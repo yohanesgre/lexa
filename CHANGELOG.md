@@ -7,6 +7,30 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.11.0] - 2026-10-10
+
+### Added
+
+- **Provider presets in Workspace → Assistant Providers** — quick-fill for
+  Cloudflare AI, OpenCode Zen, and OpenCode Go (label + base URL only; the
+  key stays operator-entered). OpenCode catalogs import with provider-aware
+  per-model wires (claude → Anthropic messages, gpt/grok/muse/o-series →
+  Responses, rest → chat-completions); Google-wire ids are skipped with a
+  visible marker and de-duped against persisted models. (#376)
+
+### Fixed
+
+- **Assistant retry no longer returns `INVALID_ARGS`** — edited-turn
+  validation accepts attachment-bearing (array-content) and parts-shaped
+  user turns, and the transcript read preserves indices so the retry
+  targets the right message. (#375)
+- **The thinking process now streams for OpenAI-compatible models**
+  (Cloudflare AI / GLM) — the adapter extracts `reasoning_content`;
+  reasoning text and timing persist so the thinking fold survives
+  reloads. (#375, #378)
+- **Installer/CLI Cloudflare-token capture** — wrangler's stdout banner no
+  longer corrupts the token (headless installs). (#377)
+
 ## [2026.10.0] - 2026-10-10
 
 ### Added
