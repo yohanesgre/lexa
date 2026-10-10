@@ -270,6 +270,7 @@ export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   // the root `createOpenaiChatCompletions` adapter drops it silently.
   if (kind === "openai_compatible" || kind === "workers_ai") {
     return openaiCompatibleText(config.model, {
+      name: "openai-chat",
       apiKey: config.apiKey,
       baseURL: normalizeBaseUrl(config.baseUrl, kind),
       defaultHeaders: opencodeSessionHeaders(config.sessionId, config),

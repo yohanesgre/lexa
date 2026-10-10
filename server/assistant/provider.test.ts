@@ -303,23 +303,36 @@ describe("openai_compatible reasoning stream (adapter)", () => {
   const sseChunk = (delta: Record<string, unknown>, finish: string | null = null): string =>
     `data: ${JSON.stringify({ id: "c1", object: "chat.completion.chunk", created: 1, model: "glm", choices: [{ index: 0, delta, finish_reason: finish }] })}`;
 
-  async function drainStream(sse: string): Promise<Array<{ type: string; delta?: unknown; text?: unknown }>> {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } })));
+  async function drainStream(
+    sse: string,
+    modelOptions?: Record<string, unknown>,
+  ): Promise<{ seen: Array<{ type: string; delta?: unknown; text?: unknown }>; url: string; body: string }> {
+    let url = "";
+    let body = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        body = typeof init?.body === "string" ? init.body : "";
+        return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+      }),
+    );
     try {
       const seen: Array<{ type: string; delta?: unknown; text?: unknown }> = [];
       for await (const c of streamChat({
         config: { kind: "openai_compatible", baseUrl: "https://api.test/v1", apiKey: "k", model: "glm-5.3-flash" },
         systemPrompts: [],
         messages: [{ role: "user", content: "hi" } as never],
+        ...(modelOptions !== undefined ? { modelOptions } : {}),
       })) seen.push(c as { type: string; delta?: unknown; text?: unknown });
-      return seen;
+      return { seen, url, body };
     } finally {
       vi.unstubAllGlobals();
     }
   }
 
   it("maps a streamed reasoning_content delta to a reasoning frame (and the text delta)", async () => {
-    const seen = await drainStream([
+    const { seen } = await drainStream([
       sseChunk({ reasoning_content: "Simple" }),
       "",
       sseChunk({ content: "Hello" }),
@@ -334,7 +347,7 @@ describe("openai_compatible reasoning stream (adapter)", () => {
   });
 
   it("emits no reasoning frame for a non-reasoning stream", async () => {
-    const seen = await drainStream([
+    const { seen } = await drainStream([
       sseChunk({ content: "plain" }),
       "",
       sseChunk({}, "stop"),
@@ -344,6 +357,15 @@ describe("openai_compatible reasoning stream (adapter)", () => {
     ].join("\n"));
     expect(seen.some((c) => c.type === "REASONING_MESSAGE_CONTENT")).toBe(false);
     expect(seen.some((c) => c.type === "TEXT_MESSAGE_CONTENT" && c.delta === "plain")).toBe(true);
+  });
+
+  it("posts to {base}/v1/chat/completions and merges modelOptions into the request body", async () => {
+    const { url, body } = await drainStream(
+      [sseChunk({ content: "ok" }), "", sseChunk({}, "stop"), "", "data: [DONE]", ""].join("\n"),
+      { reasoning_effort: "high" },
+    );
+    expect(url.endsWith("/v1/chat/completions")).toBe(true);
+    expect(JSON.parse(body)).toMatchObject({ model: "glm-5.3-flash", reasoning_effort: "high" });
   });
 });
 
