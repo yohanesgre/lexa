@@ -273,11 +273,22 @@ export interface CfCredentials {
 // the operator's token).
 export type WranglerTokenReader = (cwd: string) => string | undefined;
 
-// The token is the LAST non-empty stdout line: a cold `bun x` may print install
-// progress before it, so trimming the whole stream would yield "progress\ntok".
+// wrangler 4.x prints an update banner on STDOUT, so the token is NOT simply
+// the last non-empty line (a cold `bun x` may also prepend install progress).
+// Prefer a `cfoat_`-prefixed match; else the LAST line that is a bare token
+// charset (alnum + `_`/`.`/`-`, no spaces/emoji). Returns undefined when neither
+// hits — the caller then falls through to the stored-config fallback.
+const CFOAT_TOKEN_RE = /cfoat_[A-Za-z0-9_.-]+/;
+const BARE_TOKEN_LINE_RE = /^[A-Za-z0-9_.-]+$/;
+
 export function parseWranglerTokenOutput(stdout: string): string | undefined {
-  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  return lines.length > 0 ? lines[lines.length - 1] : undefined;
+  const cfoat = stdout.match(CFOAT_TOKEN_RE);
+  if (cfoat) return cfoat[0];
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim());
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (BARE_TOKEN_LINE_RE.test(lines[i]!)) return lines[i];
+  }
+  return undefined;
 }
 
 function defaultWranglerTokenReader(cwd: string): string | undefined {

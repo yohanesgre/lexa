@@ -521,6 +521,40 @@ describe("source order — account resolves before any resource is created", () 
   });
 });
 
+describe("installer wrangler-token extraction (banner-faking fixture)", () => {
+  const LIB = fileURLToPath(new URL("./install-lib.sh", import.meta.url));
+  const runExtract = (raw: string) =>
+    spawnSync("bash", ["-c", `source ${JSON.stringify(LIB)}; _cf_extract_token`], {
+      input: raw,
+      encoding: "utf-8",
+    });
+
+  test("extracts only the cfoat token from a banner-emitting stream", () => {
+    // wrangler 4.147.0 prints this banner on STDOUT before the token.
+    const banner =
+      "⛅️ wrangler 4.147.0 (update available 4.149.0)\n───────────────────────────\ncfoat_AbC-123_xyz.token\n";
+    expect((runExtract(banner).stdout ?? "").trim()).toBe("cfoat_AbC-123_xyz.token");
+  });
+
+  test("falls back to the last bare-token line when there is no cfoat prefix", () => {
+    const banner =
+      "⛅️ wrangler 4.147.0 (update available 4.149.0)\n───────────\nplain-oauth_token.v1\n";
+    expect((runExtract(banner).stdout ?? "").trim()).toBe("plain-oauth_token.v1");
+  });
+
+  test("tolerates CRLF line endings on the fallback token line", () => {
+    const banner =
+      "⛅️ wrangler 4.147.0 (update available 4.149.0)\r\n───────────\r\nplain-tok\r\n";
+    expect((runExtract(banner).stdout ?? "").trim()).toBe("plain-tok");
+  });
+
+  test("prints nothing and exits non-zero when no token line is present", () => {
+    const res = runExtract("⛅️ wrangler 4.147.0 (update available 4.149.0)\n───────────\n");
+    expect(res.status).not.toBe(0);
+    expect((res.stdout ?? "").trim()).toBe("");
+  });
+});
+
 describe("importable core", () => {
   test("importing cf-deploy does not execute main (no deploy side effects)", () => {
     const core = fileURLToPath(new URL("./lib/cf-deploy.ts", import.meta.url));
