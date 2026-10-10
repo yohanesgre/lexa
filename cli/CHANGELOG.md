@@ -12,6 +12,15 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.6.2] - 2026-10-10
+
+### Fixed
+
+- **`lx worker upgrade` appends the assistant Durable Object delete-class
+  migration** for DO-era deployments (CF error 10064), mirroring the
+  installer. The tag is the one after the prior config's highest (`v2` when
+  the history is exactly `v1`). (#373)
+
 ## [2026.6.1] - 2026-10-03
 
 ### Added

@@ -7,6 +7,62 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.10.0] - 2026-10-10
+
+### Added
+
+- **Vision agent.** A project-configured vision model analyzes attached
+  images via internal delegation — empty by default, `workers_ai` vision
+  models supported. (#365)
+- **Document attachments** are extracted to text and injected into the
+  assistant's context. (#365)
+- **The in-process assistant tier now runs on both flavors**, and a
+  boot-time sweep fails stale `running` assistant tasks. (#367, #370)
+
+### Changed
+
+- **The assistant transport moved to plain SSE.** Runs survive in-app
+  navigation and tab switches; a reload or closed tab kills the turn and
+  keeps the partial output, rendered as stopped. (#368, #369)
+- **The busy conflict state no longer locks the composer** — Send retries,
+  and the draft and attachment chips are preserved. (#371)
+- **Auto write mode dedupes identical writes**, and Stop yields a clean
+  stopped state. (#371)
+- **`workers_ai` models run through Workers AI's OpenAI-compatible
+  endpoint** — the provider needs its base URL plus a CF API token. (#370)
+- **Resume is idempotent** across tabs and retries, and attachments render
+  and clear correctly on send. (#371, #364)
+
+### Removed
+
+- **The Durable Object executor** — WebSocket transport, internal HMAC
+  routes, the DO SQLite canonical store + D1 mirror, and migrate-on-read.
+  (#372)
+- **Schedule dispatch** — schedules stay inert. (#372)
+- **Facet delegation** (was dark-launched). (#372)
+- **The Durable Object + Workers AI bindings** from the deploy configs.
+  (#372)
+
+### Fixed
+
+- **Fresh-chat mint races** — no more 404 noise, and the first send is
+  never dropped. (#363)
+- **Killed turns keep partial output**, auto mode no longer loops on
+  duplicate writes, the busy-409 composer lock is gone, and attachment
+  hydration works again. (#371, #364)
+
+### Migration notes
+
+- DO-era deployments must carry a delete-class migration for the removed
+  Durable Object; `scripts/install.sh` re-runs and `lx worker upgrade`
+  append it automatically. (#373)
+- Sending from a second client on a live thread returns
+  `409 ASSISTANT_TASK_ACTIVE` again.
+- Scheduled assistant runs no longer fire.
+- A `workers_ai` provider row needs the OpenAI-compatible base URL plus a
+  CF API token — the keyless `env.AI` binding path is gone.
+- `GET /api/assistant/chat/:id` now reads D1 only — the DO's per-step D1 mirror is canonical; a deployment that skipped the pre-flip DO sweep loses any unmirrored tail from the DO era.
+
 ## [2026.9.0] - 2026-10-07
 
 ### Added
