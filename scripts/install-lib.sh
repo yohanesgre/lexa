@@ -805,7 +805,7 @@ _cf_extract_token() {
     printf '%s\n' "$tok"
     return 0
   fi
-  tok="$(printf '%s\n' "$raw" | grep -E '^[[:alnum:]_.-]+$' | tail -1 || true)"
+  tok="$(printf '%s\n' "$raw" | tr -d '\r' | grep -E '^[[:alnum:]_.-]+$' | tail -1 || true)"
   [ -n "$tok" ] || return 1
   printf '%s\n' "$tok"
 }

@@ -542,6 +542,12 @@ describe("installer wrangler-token extraction (banner-faking fixture)", () => {
     expect((runExtract(banner).stdout ?? "").trim()).toBe("plain-oauth_token.v1");
   });
 
+  test("tolerates CRLF line endings on the fallback token line", () => {
+    const banner =
+      "⛅️ wrangler 4.147.0 (update available 4.149.0)\r\n───────────\r\nplain-tok\r\n";
+    expect((runExtract(banner).stdout ?? "").trim()).toBe("plain-tok");
+  });
+
   test("prints nothing and exits non-zero when no token line is present", () => {
     const res = runExtract("⛅️ wrangler 4.147.0 (update available 4.149.0)\n───────────\n");
     expect(res.status).not.toBe(0);
