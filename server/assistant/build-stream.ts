@@ -436,6 +436,24 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         let usageIn = 0;
         let usageOut = 0;
         let stalled = false;
+        // Reasoning persistence (reload-visible thinking fold): accumulate the
+        // reasoning text and its elapsed ms over the turn, mirroring the client's
+        // burst timing (use-assistant-stream `closeBurst`). A burst closes on the
+        // first non-reasoning chunk; `reasoningFields` folds in any still-open
+        // burst so a partial / terminal persist never drops live reasoning.
+        let reasoningText = "";
+        let reasoningMs = 0;
+        let reasoningStartedAt: number | null = null;
+        const closeReasoning = (): void => {
+          if (reasoningStartedAt === null) return;
+          reasoningMs += Math.max(1, Math.round(Date.now() - reasoningStartedAt));
+          reasoningStartedAt = null;
+        };
+        const reasoningFields = (): Record<string, unknown> => {
+          if (reasoningText === "") return {};
+          const active = reasoningStartedAt !== null ? Math.max(1, Math.round(Date.now() - reasoningStartedAt)) : 0;
+          return { reasoning: reasoningText, reasoningMs: reasoningMs + active };
+        };
         const isEmptyUserContent = (c: string | unknown[]): boolean => {
           if (typeof c === "string") return c.trim() === "";
           if (Array.isArray(c)) {
@@ -494,7 +512,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         // `pendingBatch` is NEVER written here (only the suspend path writes it).
         const partialEntry = (): Record<string, unknown> => {
           const citations = ctx.getCitations();
-          return { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), partial: true };
+          return { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), ...reasoningFields(), partial: true };
         };
         const schedulePartial = (): void => {
           if (terminalReached || partialTimer !== undefined) return;
@@ -515,7 +533,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         const persistTerminalTurn = async (extra: Record<string, unknown>) => {
           stopPartial();
           await enqueuePersist(async () => {
-            await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...extra }], ctx.historySummary(), ctx.historySummarizedCount());
+            await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...reasoningFields(), ...extra }], ctx.historySummary(), ctx.historySummarizedCount());
           });
         };
         const suspendTurn = async (drained: QueuedProposal[]) => {
@@ -561,6 +579,9 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               // Start/keep the trailing partial-persist timer alive while the
               // turn produces anything worth persisting (text or tool log).
               schedulePartial();
+              // A reasoning burst ends at the first non-reasoning chunk (client
+              // `closeBurst` parity) so the elapsed ms measures thinking only.
+              if (chunk.type !== "REASONING_MESSAGE_CONTENT") closeReasoning();
               if (chunk.type === "TEXT_MESSAGE_CONTENT") {
                 let delta: string = chunk.delta;
                 if ((text + delta).search(/<tool_call>/i) !== -1 || delta.search(/<\/tool_call>/i) !== -1) {
@@ -571,8 +592,11 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                   text = cleanedCombined;
                 } else text += delta;
                 if (delta) push({ type: "delta", text: delta });
-              } else if (chunk.type === "REASONING_MESSAGE_CONTENT") push({ type: "reasoning", delta: chunk.delta });
-              else if (chunk.type === "TOOL_CALL_START") {
+              } else if (chunk.type === "REASONING_MESSAGE_CONTENT") {
+                if (reasoningStartedAt === null) reasoningStartedAt = Date.now();
+                reasoningText += chunk.delta;
+                push({ type: "reasoning", delta: chunk.delta });
+              } else if (chunk.type === "TOOL_CALL_START") {
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const startName = chunk.toolCallName ?? chunk.toolName ?? "";
                 pendingCalls.set(id, { name: startName, args: "" });
@@ -833,7 +857,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           }
           if (stalled && drained.length > 0) { await suspendTurn(drained); return; }
           const citations = ctx.getCitations();
-          const finalMessages = [...ctx.history, ...userEntries, { role: "assistant", content: text, ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}) }];
+          const finalMessages = [...ctx.history, ...userEntries, { role: "assistant", content: text, ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...reasoningFields() }];
           let summary = ctx.historySummary();
           let summarizedCount = ctx.historySummarizedCount();
           let kept = finalMessages;

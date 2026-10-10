@@ -66,6 +66,32 @@ describe("renderTranscript — persisted pendingBatch approvals", () => {
   });
 });
 
+describe("renderTranscript — persisted reasoning", () => {
+  it("attaches the done-fold activity from a parts-shaped assistant turn", () => {
+    const turns = renderTranscript([
+      { role: "user", parts: [{ type: "text", text: "q" }] },
+      {
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "thought hard" },
+          { type: "text", text: "answer" },
+        ],
+        metadata: { reasoningMs: 4200 },
+      },
+    ]);
+    const assistant = turns[1]!;
+    expect(assistant.activity?.reasoningMs).toBe(4200);
+    expect(assistant.activity?.items).toContainEqual(expect.objectContaining({ kind: "reasoning", text: "thought hard" }));
+  });
+
+  it("leaves a settled turn without reasoning activity", () => {
+    const turns = renderTranscript([
+      { role: "assistant", parts: [{ type: "text", text: "plain answer" }] },
+    ]);
+    expect(turns[0]!.activity).toBeUndefined();
+  });
+});
+
 describe("renderTranscript — LX-124 continuation boundary", () => {
   it("renders the proposal and continuation as two assistant turns, marker invisible", () => {
     const turns = renderTranscript([
