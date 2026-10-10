@@ -33,7 +33,7 @@ function dataUri(mimeType: string, base64: string): string {
 }
 
 async function analyzeOpenAiCompatible(deps: AnalyzeDeps, prompt: string, mimeType: string, base64: string): Promise<string> {
-  const base = normalizeBaseUrl(deps.config.baseUrl, "openai_compatible").replace(/\/+$/, "");
+  const base = normalizeBaseUrl(deps.config.baseUrl, deps.config.kind).replace(/\/+$/, "");
   const res = await deps.fetchImpl(`${base}/chat/completions`, {
     method: "POST",
     headers: {
@@ -100,18 +100,18 @@ async function analyzeAnthropicCompatible(deps: AnalyzeDeps, prompt: string, mim
 }
 
 // Provider-kind → wire mapping. Only two wires exist here: the OpenAI
-// chat-completions shape (`openai_compatible` and `openai_responses`, which
-// share the host) and the Anthropic messages shape. `workers_ai` rides the
-// OpenAI wire for chat (ADR-0005 D5) but is not wired for vision on this path —
-// a typed error, never a mis-sent request.
+// chat-completions shape (`openai_compatible`, `openai_responses`, and
+// `workers_ai`, which ride the same host/wire) and the Anthropic messages shape.
+// `workers_ai` rides the OpenAI wire (ADR-0005 D5) — CF's OpenAI-compatible
+// endpoint — so it is vision-capable on this path too.
 export function visionWireForKind(kind: ProviderConfig["kind"]): "openai" | "anthropic" | "unsupported" {
   switch (kind) {
     case "anthropic_compatible":
       return "anthropic";
     case "openai_compatible":
     case "openai_responses":
-      return "openai";
     case "workers_ai":
+      return "openai";
     default:
       return "unsupported";
   }

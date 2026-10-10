@@ -674,7 +674,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   const handleSend = useCallback(() => {
     const msg = draft.trim();
-    if (!msg || streaming || suspendedLock || busy409 || hasExtractionFailure) return;
+    if (!msg || streaming || suspendedLock || hasExtractionFailure) return;
     const accepted = onSend(msg, readyRefs());
     if (!accepted) return;
     // Accepted send: clear the ready chips immediately (the sent turn carries
@@ -689,7 +689,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     mention.close();
     setRejections([]);
     setWarning(null);
-  }, [draft, streaming, suspendedLock, busy409, hasExtractionFailure, onSend, readyRefs, attachments, mention]);
+  }, [draft, streaming, suspendedLock, hasExtractionFailure, onSend, readyRefs, attachments, mention]);
 
   const handleQueue = useCallback(() => {
     const msg = draft.trim();
@@ -753,6 +753,26 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     sentAttachmentsRef.current = [];
   }, [sendError]);
 
+  // A 409 (another run in progress) refuses the send: the optimistic turn is
+  // dropped server-side, so the accepted send's cleared draft + ready chips are
+  // restored for a retry. The composer stays usable — the next Send re-attempts
+  // the POST and the conflict state clears on success (M5b).
+  useEffect(() => {
+    if (sendError?.code !== "ASSISTANT_TASK_ACTIVE") return;
+    const ids = sentIdsRef.current;
+    if (ids.length > 0) {
+      const sent = sentAttachmentsRef.current;
+      setAttachments((prev) => {
+        const present = new Set(prev.map((a) => a.id));
+        const restored = sent.filter((a) => !present.has(a.id));
+        return restored.length > 0 ? [...prev, ...restored] : prev;
+      });
+    }
+    if (sentTextRef.current) setDraft((prev) => (prev.trim() ? prev : sentTextRef.current!));
+    sentIdsRef.current = [];
+    sentAttachmentsRef.current = [];
+  }, [sendError]);
+
   // Any other terminal status clears the chips that rode the accepted send.
   // Safety net: the accepted send already cleared them, but a late-mounted
   // composer or a resumed send must still settle.
@@ -760,6 +780,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     const status = streamStatus ?? (streaming ? "streaming" : "idle");
     if (status !== "done" && status !== "error" && status !== "aborted") return;
     if (sendError?.code === "ATTACHMENT_EXTRACTION_FAILED") return;
+    if (sendError?.code === "ASSISTANT_TASK_ACTIVE") return;
     if (sentIdsRef.current.length === 0) return;
     const ids = sentIdsRef.current;
     sentIdsRef.current = [];
@@ -768,7 +789,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     setWarning(null);
   }, [streamStatus, streaming, sendError]);
 
-  const canSend = draft.trim().length > 0 && !busy409 && !streaming && !suspendedLock && !hasExtractionFailure;
+  const canSend = draft.trim().length > 0 && !streaming && !suspendedLock && !hasExtractionFailure;
   const canQueue = draft.trim().length > 0 && !busy409;
 
   const placeholder = busy409
@@ -854,7 +875,6 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
               else handleSend();
             }
           }}
-          disabled={busy409}
           style={{ border: "none", background: "transparent" }}
         />
       </div>
@@ -870,9 +890,15 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
       )}
       <div className="deck-action composer-footer">
         {busy409 ? (
-          <span className="deck-status" style={{ color: "var(--lx-text-secondary)" }}>
-            ANOTHER ASSISTANT RUN IS IN PROGRESS
-          </span>
+          <>
+            <span className="deck-status" style={{ color: "var(--lx-text-secondary)" }}>
+              ANOTHER ASSISTANT RUN IS IN PROGRESS
+            </span>
+            <button type="button" className="btn btn-primary btn-sm" style={{ marginLeft: "auto" }} disabled={!canSend} onClick={handleSend}>
+              Send
+              <Send size={12} strokeWidth={1.5} />
+            </button>
+          </>
         ) : queueMode ? (
           <>
             <span className="deck-status" role="status">

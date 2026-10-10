@@ -479,7 +479,11 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // never destroy a held message.
   const send = useCallback(
     (message: string, attachments: ChatAttachmentRef[]): boolean => {
-      if (!message || streaming || suspendedLock || busy409) return false;
+      // `busy409` is a "last attempt conflicted" state, not a permanent gate
+      // (M5b): the other run may have finished, so a Send must be able to
+      // re-attempt the POST. A still-busy thread simply 409s again and keeps
+      // rendering the conflict state.
+      if (!message || streaming || suspendedLock) return false;
       setTurns((prev) => appendEphemeralUserTurn(prev, message, attachments));
       const threadId = startStream(message, attachments);
       // The send is accepted: the landing must dock for THIS chat even before
@@ -497,7 +501,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       if (permissionAuthoritative) setPermissionSelection({ chatId: threadId, value: permissionMode });
       return true;
     },
-    [streaming, suspendedLock, busy409, startStream, setTurns, permissionMode, permissionAuthoritative]
+    [streaming, suspendedLock, startStream, setTurns, permissionMode, permissionAuthoritative]
   );
 
   // Run-card actions. Abort stops the supervised child and flips the cached row

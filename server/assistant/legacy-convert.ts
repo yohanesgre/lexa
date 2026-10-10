@@ -11,6 +11,8 @@
 //   - `citations` → `metadata.citations` (sanitized to `{ title, url }`).
 //   - `error` → `metadata.error` (`{ code, message }`).
 //   - `stopped` → `metadata.stopped` (only when truthy).
+//   - `partial` → `metadata.stopped` (a killed turn's in-progress persist; the
+//     read renders it as stopped — ADR-0005 §Reliability.3).
 //   - `pendingBatch` → a `data-assistant-approval` carrier part (W7b/WS1) so a
 //     legacy thread's suspended approvals still rebuild on reload.
 //   - `toolLog` / `toolCalls` are NOT mapped (tool detail is session-memory-only
@@ -27,6 +29,7 @@ export interface LegacyStoredMessage {
   citations?: unknown;
   error?: unknown;
   stopped?: unknown;
+  partial?: unknown;
   [key: string]: unknown;
 }
 
@@ -135,7 +138,10 @@ export function convertLegacyMessage(message: LegacyStoredMessage, index: number
   if (citations.length > 0) metadata.citations = citations;
   const error = sanitizeError(message.error);
   if (error) metadata.error = error;
-  if (message.stopped === true) metadata.stopped = true;
+  // A killed turn's in-progress persist (`partial: true`, ADR-0005 §Reliability.3)
+  // or its terminal stop persist (`stopped: true`) both render as stopped — the
+  // read must surface the marker instead of dropping the partial silently.
+  if (message.stopped === true || message.partial === true) metadata.stopped = true;
 
   const converted: ConvertedUIMessage = {
     id: `legacy-${index}`,

@@ -729,6 +729,56 @@ describe("incremental partial persistence", () => {
   });
 });
 
+// M5b: an explicit stop / disconnect that surfaces as a graceful stream end
+// (no RUN_FINISHED) must persist a clean `stopped` turn — never
+// ASSISTANT_GENERATION_FAILED, which is reserved for genuine failures.
+describe("explicit stop persists a clean stopped turn (M5b)", () => {
+  it("a graceful abort end persists stopped, never an error frame", async () => {
+    const controller = new AbortController();
+    let persisted: unknown[] | null = null;
+    let cancelled = 0;
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "half" } as unknown as StreamChunk;
+        controller.abort();
+        // graceful end: the provider stream just stops, no RUN_FINISHED
+      })()
+    );
+    c.registry.set("c1", controller);
+    c.persist = async (messages) => { persisted = messages; };
+    c.onCancel = async () => { cancelled += 1; };
+
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    const last = persisted!.at(-1) as { stopped?: unknown; content?: string; error?: unknown };
+    expect(last.stopped).toBe(true);
+    expect(last.content).toBe("half");
+    expect(last.error).toBeUndefined();
+    expect(cancelled).toBe(1);
+  });
+
+  it("a text-less tool loop stopped mid-turn still persists a stopped marker", async () => {
+    const controller = new AbortController();
+    let persisted: unknown[] | null = null;
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TOOL_CALL_START", toolCallId: "call_1", toolCallName: "get_all_tasks" } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_ARGS", toolCallId: "call_1", delta: "{}" } as unknown as StreamChunk;
+        yield { type: "TOOL_CALL_END", toolCallId: "call_1" } as unknown as StreamChunk;
+        controller.abort();
+      })()
+    );
+    c.registry.set("c1", controller);
+    c.persist = async (messages) => { persisted = messages; };
+
+    const frames = await drain(buildStream(c));
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+    const last = persisted!.at(-1) as { stopped?: unknown; toolLog?: unknown };
+    expect(last.stopped).toBe(true);
+    expect(Array.isArray(last.toolLog)).toBe(true);
+  });
+});
+
 // SEV: `TOOL_CALL_RESULT` aborted the turn for ANY write tool. In `auto` the
 // tool executed in-loop, so the abort killed the in-flight provider stream.
 // Only `ask` (drain → suspend) may abort.
