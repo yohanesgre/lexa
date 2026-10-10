@@ -62,36 +62,11 @@ import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "./storage/c
 import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
-import { AuthorizationService } from "./services/authorization.service";
-import { AssistantGateway } from "./assistant/gateway.service";
-import type { RegistryModelConfig } from "./assistant/model-factory";
 import { capabilitiesFromRuntimeEnv } from "./capabilities";
-import {
-  ASSISTANT_AGENT_ROUTE_PREFIX,
-  INTERNAL_ASSISTANT_ROUTE_PREFIX,
-  assistantGateErrorResponse,
-  authorizeInternalRequest,
-  handleAssistantAgentRequest,
-  type AssistantThreadRow,
-  type UpsertChatThreadInput,
-} from "./assistant/agent-gate";
 import { LexaAssistantAgent } from "./assistant/agent";
-import {
-  INTERNAL_AUTH_ACTOR_HEADER,
-  INTERNAL_AUTH_PROJECT_HEADER,
-  INTERNAL_AUTH_THREAD_HEADER,
-} from "./assistant/internal-auth";
-import { handleInternalAssistantRequest } from "./assistant/internal-routes";
-import { buildWorkerAttachmentLoader, buildWorkerReadToolExecutor, buildWorkerWriteToolExecutor, resolveWorkerHarnessContext } from "./assistant/worker-tools";
 import { dispatchDueSchedules } from "./scheduled/schedules";
 import { reconcileStaleRuns, reconcileStaleDocumentRuns } from "./assistant/run-registry";
-import type { AssistantThreadRpcShape, EnqueueRunAck, ResumeBatchAck } from "./assistant/thread-rpc";
-import type {
-  AssistantRunRow,
-  AssistantScheduleRow,
-  AssistantThreadType,
-  AssistantToolPermissionMode,
-} from "../shared/assistant";
+import type { AssistantRunRow, AssistantScheduleRow } from "../shared/assistant";
 
 export { LexaAssistantAgent };
 // Delegation facet child (ADR-0004 §3; H3). Exported from the worker entry so
@@ -101,39 +76,6 @@ export { LexaAssistantAgent };
 export { LexaAssistantRunner } from "./assistant/runner";
 
 type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
-
-// DO-backed thread RPC for the REST handlers (ADR-0003 §B.4). Built here (the
-// only module allowed to import `agents`) and injected into the shared handler
-// factory, which stays `agents`-free. Structure matches the DO's RPC surface
-// in `server/assistant/agent.ts`.
-function createDoThreadRpc(namespace: AssistantAgentNamespace): AssistantThreadRpcShape {
-  interface Stub {
-    getTranscript(): Promise<{ messages: unknown[]; summary: string | null; summarizedCount: number | null; permissionMode: AssistantToolPermissionMode }>;
-    resumeBatch(batchId: string | null): Promise<ResumeBatchAck>;
-    destroyThread(): Promise<{ ok: true }>;
-    resetThread(): Promise<{ ok: true }>;
-    enqueueRun(input: {
-      projectId: string;
-      runId: string;
-      actorUserId: string;
-      kind?: "document" | "schedule";
-      selection?: string;
-      extraPrompt?: string;
-    }): Promise<EnqueueRunAck>;
-    abortRun(taskId: string): Promise<{ ok: true }>;
-  }
-  const stubFor = async (threadKey: string): Promise<Stub> =>
-    (await getAgentByName(namespace, threadKey)) as unknown as Stub;
-  return {
-    available: true,
-    getTranscript: async (threadKey) => (await stubFor(threadKey)).getTranscript(),
-    resumeBatch: async (threadKey, batchId) => (await stubFor(threadKey)).resumeBatch(batchId),
-    destroyThread: async (threadKey) => (await stubFor(threadKey)).destroyThread(),
-    resetThread: async (threadKey) => (await stubFor(threadKey)).resetThread(),
-    enqueueRun: async (threadKey, input) => (await stubFor(threadKey)).enqueueRun(input),
-    abortRun: async (threadKey, taskId) => (await stubFor(threadKey)).abortRun(taskId),
-  };
-}
 
 export interface WorkersEnv {
   DB?: D1Database;
@@ -161,6 +103,9 @@ export interface WorkersEnv {
   LXK_SECRETS_MASTER_KEY_PREV?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
+  // Pre-cutover DO transcript sweep (ADR-0005 W4b): "1" runs the one-shot sweep
+  // on the per-isolate boot. Idempotent; unset after the drain.
+  LXK_SWEEP_DO_TRANSCRIPTS?: string;
 }
 
 type BaseLayers = Layer.Layer<Db | RuntimeEnvTag>;
@@ -222,121 +167,23 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
           yield* backfillProviderSecrets(driver, runtimeEnv);
         }).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] boot sync failed:", String(e)))))
       );
+      // Pre-cutover DO transcript sweep (ADR-0005 W4b). Opt-in and idempotent:
+      // imports any DO-only tail into D1 before the route flip drains the DO.
+      // Dynamic import so the sweep module stays off the steady-state graph.
+      if (env.LXK_SWEEP_DO_TRANSCRIPTS === "1") {
+        try {
+          const { runSweepDoTranscripts } = await import("../scripts/sweep-do-transcripts");
+          const report = await runSweepDoTranscripts(env as unknown as { DB?: unknown; ASSISTANT_AGENT?: unknown });
+          if (report) console.log(`[do-sweep] ${JSON.stringify(report)}`);
+        } catch (e) {
+          console.error("[do-sweep] sweep failed:", e instanceof Error ? e.message : String(e));
+        }
+      }
     })().catch((e) => {
       console.error("[Workers] boot failed:", e instanceof Error ? e.message : String(e));
     });
   }
   return bootPromise;
-}
-
-// ─── Assistant gate data access (D1 + authorization) ─────────────────────
-// The WS gate (server/assistant/agent-gate.ts) is IO-free; these are the
-// dependency-injected implementations it runs in production.
-
-interface AssistantThreadRowRaw {
-  document_type: AssistantThreadType;
-  document_id: string;
-  project_id: string;
-  owner_user_id: string | null;
-}
-
-export async function loadAssistantThread(
-  driver: DbDriver,
-  documentType: AssistantThreadType,
-  documentId: string
-): Promise<AssistantThreadRow | null> {
-  const row = await Effect.runPromise(
-    queryFirst<AssistantThreadRowRaw>(
-      driver,
-      `SELECT document_type, document_id, project_id, owner_user_id
-       FROM assistant_threads WHERE document_type = ? AND document_id = ?`,
-      documentType,
-      documentId
-    ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)))
-  );
-  if (row === null) return null;
-  return {
-    documentType: row.document_type,
-    documentId: row.document_id,
-    projectId: row.project_id,
-    ownerUserId: row.owner_user_id,
-  };
-}
-
-// Connect-upsert for a chat thread with no D1 row (ADR-0003 §B.2). DO NOTHING
-// on conflict: project/owner never migrate, and a concurrent insert loses the
-// race harmlessly — the gate re-reads and rejects a mismatched owner.
-async function upsertChatThread(
-  driver: DbDriver,
-  input: UpsertChatThreadInput
-): Promise<AssistantThreadRow | null> {
-  try {
-    await Effect.runPromise(
-      run(
-        driver,
-        `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-         VALUES ('chat', ?, ?, ?, '[]')
-         ON CONFLICT(document_type, document_id) DO NOTHING`,
-        input.documentId,
-        input.projectId,
-        input.ownerUserId
-      )
-    );
-  } catch (e) {
-    console.error("[Assistant] chat thread upsert failed:", e instanceof Error ? e.message : String(e));
-    return null;
-  }
-  return loadAssistantThread(driver, "chat", input.documentId);
-}
-
-// Project read access via the shared authorization service (same decision as
-// the REST middleware). A DB failure is a deny, never a bypass.
-async function canReadProject(base: BaseLayers, userId: string, projectId: string): Promise<boolean> {
-  const runtime = ManagedRuntime.make(Layer.provide(AuthorizationService.Default, base));
-  try {
-    const role = await runtime.runPromise(
-      Effect.gen(function* () {
-        const authz = yield* AuthorizationService;
-        return yield* authz.projectAccess(userId, projectId);
-      })
-    );
-    return role !== null;
-  } catch (e) {
-    console.error("[Assistant] project access check failed:", e instanceof Error ? e.message : String(e));
-    return false;
-  } finally {
-    await runtime.dispose();
-  }
-}
-
-// Provider config for one assistant turn (ADR-0003 §C): the DO asks, the
-// Worker resolves the project's provider chain with the API keys decrypted in
-// this isolate. `null` = no binding (route → 409) or a resolution failure.
-async function resolveAssistantProviderConfigs(
-  base: BaseLayers,
-  projectId: string
-): Promise<RegistryModelConfig[] | null> {
-  const runtime = ManagedRuntime.make(Layer.provide(AssistantGateway.Default, base));
-  try {
-    const configs = await runtime.runPromise(
-      Effect.gen(function* () {
-        const gateway = yield* AssistantGateway;
-        return yield* gateway.resolveFallback(projectId);
-      })
-    );
-    return configs.map((c) => ({
-      kind: c.kind,
-      baseUrl: c.baseUrl,
-      apiKey: c.apiKey,
-      model: c.model,
-      ...(c.providerId !== undefined ? { providerId: c.providerId } : {}),
-    }));
-  } catch (e) {
-    console.error("[Workers] provider config resolution failed:", e instanceof Error ? e.message : String(e));
-    return null;
-  } finally {
-    await runtime.dispose();
-  }
 }
 
 // ─── Response helpers (same envelopes as the Bun host) ───────────────────
@@ -419,8 +266,7 @@ async function handleApi(
   req: WorkersRequest,
   runtimeEnv: RuntimeEnv,
   driver: DbDriver,
-  blob: R2Bucket | undefined,
-  threadRpc: AssistantThreadRpcShape | undefined
+  blob: R2Bucket | undefined
 ): Promise<Response> {
   const fingerprint = apiFingerprint(runtimeEnv);
   if (!apiCache || apiCache.fingerprint !== fingerprint) {
@@ -429,7 +275,6 @@ async function handleApi(
       driver,
       runtimeEnv,
       storage: r2StorageConfig(runtimeEnv, blob),
-      threadRpc,
       authHooks: {
         createUser: (input) =>
           lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
@@ -779,109 +624,12 @@ const handler: ExportedHandler<WorkersEnv> = {
         });
         return res as unknown as WorkersResponse;
       }
-      // Assistant WebSocket gate (ADR-0003 §B.2): session cookie → thread ACL
-      // (chat owner / project read) → stripped + HMAC-signed identity headers →
-      // forward to the per-thread Durable Object. Mounted BEFORE the general
-      // /api handler, whose API-key middleware would 401 the cookie path.
-      if (path.startsWith(ASSISTANT_AGENT_ROUTE_PREFIX)) {
-        const outcome = await handleAssistantAgentRequest(req as unknown as Request, {
-          // Deny on error (middleware convention, server/api/middleware.ts): a
-          // thrown session lookup is treated as "no session" → 401, never 500.
-          getSession: async (headers) => {
-            try {
-              return await getRuntimeAuth(runtimeEnv).auth.api.getSession({ headers });
-            } catch (e) {
-              console.error("[Workers] assistant session lookup failed (deny):", String(e));
-              return null;
-            }
-          },
-          loadThread: (documentType, documentId) => loadAssistantThread(driver, documentType, documentId),
-          canReadProject: (userId, projectId) => canReadProject(base, userId, projectId),
-          upsertChatThread: (input) => upsertChatThread(driver, input),
-          masterKey: runtimeEnv.LXK_SECRETS_MASTER_KEY,
-        });
-        if (outcome.kind === "error") {
-          return assistantGateErrorResponse(outcome) as unknown as WorkersResponse;
-        }
-        if (!env.ASSISTANT_AGENT) {
-          return json(
-            { error: { code: "ASSISTANT_UNAVAILABLE", message: "Assistant binding missing" } },
-            502
-          ) as unknown as WorkersResponse;
-        }
-        // ADR-0003 §B.6: a rejected RPC or DO error is the assistant being
-        // unavailable, not a generic Worker 500. Guard the forward so a thrown
-        // getAgentByName/fetch still yields the 502 envelope.
-        try {
-          const agent = await getAgentByName(env.ASSISTANT_AGENT, outcome.threadKey);
-          return (await agent.fetch(
-            new Request(req as unknown as Request, { headers: outcome.headers })
-          )) as unknown as WorkersResponse;
-        } catch (e) {
-          console.error("[Workers] assistant agent forward failed:", String(e));
-          return json(
-            { error: { code: "ASSISTANT_UNAVAILABLE", message: "Assistant unavailable" } },
-            502
-          ) as unknown as WorkersResponse;
-        }
-      }
-      // Internal DO → Worker routes (ADR-0003 §B.2/B.3). The public middleware
-      // would demand an API key, so this mount sits before it and accepts only
-      // a valid signed identity. Handlers: the D1 transcript read (legacy
-      // import) and the per-step mirror write.
-      if (path.startsWith(INTERNAL_ASSISTANT_ROUTE_PREFIX)) {
-        const outcome = await authorizeInternalRequest(req as unknown as Request, runtimeEnv.LXK_SECRETS_MASTER_KEY);
-        if (outcome === "unavailable") {
-          return json(
-            { error: { code: "ASSISTANT_UNAVAILABLE", message: "Assistant not configured" } },
-            502
-          ) as unknown as WorkersResponse;
-        }
-        if (outcome === "unauthorized") {
-          return json(
-            { error: { code: "NO_USER_CONTEXT", message: "Invalid internal authentication" } },
-            401
-          ) as unknown as WorkersResponse;
-        }
-        let body: unknown = null;
-        if (req.method === "POST") {
-          try {
-            body = await req.json();
-          } catch {
-            body = null;
-          }
-        }
-        const internalHeaders = new Headers(req.headers as unknown as HeadersInit);
-        const identity = {
-          actorUserId: internalHeaders.get(INTERNAL_AUTH_ACTOR_HEADER) ?? "",
-          projectId: internalHeaders.get(INTERNAL_AUTH_PROJECT_HEADER) ?? "",
-          threadKey: internalHeaders.get(INTERNAL_AUTH_THREAD_HEADER) ?? "",
-        };
-        const result = await handleInternalAssistantRequest({
-          method: req.method,
-          path,
-          query: Object.fromEntries(url.searchParams),
-          body,
-          driver,
-          identity,
-          deps: {
-            resolveProviderConfigs: (projectId) => resolveAssistantProviderConfigs(base, projectId),
-            loadAttachment: buildWorkerAttachmentLoader({ driver, base, blob: env.BLOB }),
-            resolveHarnessTurnContext: (input) => resolveWorkerHarnessContext({ driver, base, env: runtimeEnv }, input),
-            executeReadTool: buildWorkerReadToolExecutor({ driver, base, blob: env.BLOB, env: runtimeEnv }),
-            executeWriteTool: buildWorkerWriteToolExecutor({ base }),
-          },
-        });
-        return json(result.body, result.status) as unknown as WorkersResponse;
-      }
+      // ADR-0005 W4: the assistant runs in-process through the HttpApi app
+      // below — no WebSocket gate, no `/api/internal/assistant/*` HMAC surface.
+      // The DO modules stay in the tree (M6 deletes them) but are off every live
+      // path; the only remaining DO reference is the schedule-dispatch tick.
       if (path.startsWith("/api/")) {
-        return (await handleApi(
-          req,
-          runtimeEnv,
-          driver,
-          env.BLOB,
-          env.ASSISTANT_AGENT ? createDoThreadRpc(env.ASSISTANT_AGENT) : undefined
-        )) as unknown as WorkersResponse;
+        return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
       }
       // Only /share/* is server-rendered; every other route is client-only and
       // served the prerendered SPA shell (per-response entry-script patch).

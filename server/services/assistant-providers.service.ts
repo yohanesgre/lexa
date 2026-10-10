@@ -7,6 +7,7 @@ import {
 } from "../repos/assistant-providers.repo";
 import { InvalidArgs, ProviderAuthFailed, SecretKeyUnavailable } from "../api/errors";
 import { currentEnv } from "../runtime-env";
+import { isCloudflareAiBaseUrl } from "../assistant/provider";
 import {
   decryptSecret,
   encryptSecret,
@@ -26,6 +27,27 @@ export const PROVIDER_KEY_UNDECRYPTABLE =
 
 export const PROVIDER_CLEAR_KEY_CONFLICT_REJECTED =
   "clearKey: true cannot be combined with an apiKey in the same request";
+
+// ADR-0005 D5/R5: a `workers_ai` provider now rides Cloudflare's OpenAI-compatible
+// endpoint (Bearer CF API token) — the keyless env.AI binding died with the DO.
+// A provider pointed at a Cloudflare AI base URL with no stored key would build a
+// request with an empty Authorization header, so it is refused at save time
+// instead of failing on the first turn.
+export const PROVIDER_WORKERS_AI_REQUIRES_KEY =
+  "Workers AI providers need a Cloudflare OpenAI-compatible base URL and an API token — store a CF API token with Workers AI permission";
+
+export const PROVIDER_BASE_URL_REQUIRED = "a provider base URL is required";
+
+// A provider is "workers_ai-shaped" when its base URL is Cloudflare's
+// OpenAI-compatible endpoint (.../ai/v1). Provider rows carry no `kind` column
+// (kind lives on assistant_models), so the base URL is the only save-time signal.
+function workersAiBaseRequiresKey(baseUrl: string): boolean {
+  try {
+    return isCloudflareAiBaseUrl(baseUrl);
+  } catch {
+    return false;
+  }
+}
 
 // A real credential is a non-blank value; a blank field is "absent, not a
 // value", so a UI that always posts its (empty) input cannot silently wipe a
@@ -110,10 +132,16 @@ export class AssistantProvidersService extends Effect.Service<AssistantProviders
 
     const create = (
       input: ProviderCreateInput
-    ): Effect.Effect<AssistantProviderMasked, SecretKeyUnavailable | RowNotFound | DbError | ConstraintViolation> =>
+    ): Effect.Effect<AssistantProviderMasked, InvalidArgs | SecretKeyUnavailable | RowNotFound | DbError | ConstraintViolation> =>
       Effect.gen(function* () {
         const id = crypto.randomUUID();
         const apiKey = blankApiKey(input.apiKey);
+        if (input.baseUrl.trim() === "") {
+          return yield* Effect.fail(new InvalidArgs({ reason: PROVIDER_BASE_URL_REQUIRED }));
+        }
+        if (workersAiBaseRequiresKey(input.baseUrl) && apiKey === null) {
+          return yield* Effect.fail(new InvalidArgs({ reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }));
+        }
         // Encrypt BEFORE any write: a crypto fault then leaves nothing behind
         // at all, instead of a credential-less registration.
         const sealed = apiKey !== null
@@ -143,7 +171,12 @@ export class AssistantProvidersService extends Effect.Service<AssistantProviders
 
         const patch: { label?: string; baseUrl?: string } = {};
         if (input.label !== undefined) patch.label = input.label;
-        if (input.baseUrl !== undefined) patch.baseUrl = input.baseUrl;
+        if (input.baseUrl !== undefined) {
+          if (input.baseUrl.trim() === "") {
+            return yield* Effect.fail(new InvalidArgs({ reason: PROVIDER_BASE_URL_REQUIRED }));
+          }
+          patch.baseUrl = input.baseUrl;
+        }
 
         // Encrypt BEFORE any write: a crypto fault then leaves the registry
         // untouched, and a payload refused by the keyring gate never
@@ -157,6 +190,21 @@ export class AssistantProvidersService extends Effect.Service<AssistantProviders
               )
             )
           : null;
+
+        // Workers AI base → a key must survive the save (a new one, or the
+        // already-stored one when the key is not being cleared).
+        const effectiveBaseUrl = input.baseUrl ?? existing.base_url;
+        const keyAfterSave =
+          input.clearKey === true
+            ? null
+            : sealed !== null
+              ? "new"
+              : existing.secret_ciphertext !== null
+                ? "stored"
+                : null;
+        if (workersAiBaseRequiresKey(effectiveBaseUrl) && keyAfterSave === null) {
+          return yield* Effect.fail(new InvalidArgs({ reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }));
+        }
 
         if (patch.label !== undefined || patch.baseUrl !== undefined) {
           yield* repo.update(id, patch);

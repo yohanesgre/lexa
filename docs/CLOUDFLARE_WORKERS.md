@@ -380,6 +380,12 @@ POST /api/assistant/tasks → queue → server-side chat():
 
 ## Assistant harness on Workers (ADR-0004)
 
+> **ADR-0005 supersedes this section for the executor.** The assistant is
+> **in-process on both flavors** over SSE; there is no DO runtime, no
+> `/api/internal/assistant/*` HMAC surface, and no facet delegation/schedules
+> dispatch. D1 `assistant_threads` is the single store. The bullets below
+> describe the retired DO harness.
+
 The assistant is a Workers-only Durable Object runtime (`LexaAssistantAgent`,
 ADR-0003). The harness layer on top (ADR-0004) keeps secrets Worker-side and
 gives the DO a per-turn context bundle:
@@ -396,21 +402,34 @@ gives the DO a per-turn context bundle:
   by the existing `*/15` `scheduled` handler (migrations `0020`/`0021`). The
   registry surfaces through `GET /api/admin/assistant/runs`; schedules have
   per-project CRUD routes.
-- **`workers_ai` models (H9).** A model row with kind `workers_ai` builds
-  `createWorkersAI({ binding: env.AI })` for keyless Workers AI inference
-  instead of a REST provider; ids are entered manually because the binding has
-  no listing route. `wrangler.jsonc` declares `"ai": { "binding": "AI" }` and
-  `scripts/workers-install.ts` (`resolveAiBinding`, wired into the generated
-  per-deploy config) transcribes it — an absent block is omitted, a malformed
-  one or a non-`AI` binding name is refused loudly. The staging example carries
-  the same block. `ai` is remote-only by design (no local simulator), so
-  `vite.config.ts` disables the plugin's remote bindings unconditionally
-  (`remoteBindings: false`): local dev needs no Cloudflare credential, and
-  `workers_ai` models are unavailable locally (configure an external provider
-  instead). The build still ships the `ai` binding from the root config.
+- **`workers_ai` models (ADR-0005 D5/P5).** A model row with kind `workers_ai`
+  rides the OpenAI wire through Cloudflare's OpenAI-compatible endpoint
+  (`https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1`, Bearer CF API
+  token) via the shared `createOpenaiChatCompletions` adapter. The keyless
+  `env.AI` binding path is retired; a `workers_ai` provider row requires a
+  non-empty base URL + a stored CF API token (save-time validation). The
+  endpoint works locally too (it is a plain HTTPS call) — no binding, no
+  remote-only constraint.
 - **Call-log attribution.** `assistant_call_logs` gains `thread_key`, `run_id`,
   and `purpose` (`turn|runner|preflight|summary`, default `turn`); cost is
   computed from the imported CF per-token prices when the caller sends none.
+
+### Pre-cutover DO transcript sweep (ADR-0005 W4b)
+
+Before the W4 route flip drains the DO, threads whose DO held a tail the D1
+mirror never received must be imported. `scripts/sweep-do-transcripts.ts`
+reads each thread's DO transcript over the `getTranscript` RPC, converts the
+UIMessage-parts shape to the D1 legacy-stored shape, and writes it back only
+when the DO has more messages than D1 (idempotent; log+continue on failure).
+It needs the DO binding, so it runs from the worker boot:
+
+```
+LXK_SWEEP_DO_TRANSCRIPTS=1   # set on the deploy, redeploy/restart
+# read the `[do-sweep] { scanned, imported, skipped, failed }` log line
+# then unset the var and redeploy
+```
+
+Re-running is safe (a drained thread skips). The DO modules are deleted in W6.
 
 **Tracing (sampling/cost).** `server/assistant/tracing.ts` wraps the `ai`
 namespace with `wrapAISDK()` (`agents/observability/ai`) and passes

@@ -1,8 +1,9 @@
-// Capability discovery (ADR-0003 §F.2): one honest signal per flavor instead of
-// dead-but-wired endpoints. Unauthenticated, leak-free, served before boot and
-// without any DB read. The assistant is Workers-only and additionally requires
-// the secrets master key (HMAC derivation + provider-secret decryption), so the
-// Bun flavor always reports `assistant:false`.
+// Capability discovery (ADR-0003 §F.2, revised by ADR-0005 D7): one honest
+// signal per flavor instead of dead-but-wired endpoints. Unauthenticated,
+// leak-free, served before boot and without any DB read. ADR-0005 restored the
+// assistant on BOTH flavors (the executor is in-process TanStack AI), so the
+// only gate is the secrets master key (provider-secret decryption) — the flavor
+// no longer decides it.
 
 import type { RuntimeEnv } from "./env";
 
@@ -45,7 +46,9 @@ export function tasksBulkEnabled(env: CapabilityEnv): boolean {
 
 /** The `GET /api/capabilities` JSON body for a flavor. */
 export function capabilities(flavor: AssistantFlavor, env: CapabilityEnv): Capabilities {
-  const assistant = flavor === "workers" && hasSecretsMasterKey(env);
+  // ADR-0005 D7: the assistant runs on both flavors (in-process tier); only the
+  // master key gates it.
+  const assistant = hasSecretsMasterKey(env);
   return {
     assistant,
     flavor,

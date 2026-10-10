@@ -3,22 +3,24 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ADR-0003 §F bundle boundary: the Bun entry (`server/entry.ts`) must never
-// pull `agents` or `@tanstack/ai*` into its module graph — the assistant is
-// Workers-only, and the Bun flavor drops the engine/service tier entirely.
+// ADR-0005 D7 bundle boundary: the assistant tier (TanStack AI, in-process) now
+// runs on BOTH flavors, so the Bun entry legitimately reaches
+// `@tanstack/ai*` and `server/api/assistant-api.ts`. The DO executor stays off
+// the Bun path: the Bun entry must still never reach `agents`,
+// `workers-ai-provider`, `@cloudflare/ai-chat`, or `@ai-sdk/*`, nor the DO
+// modules (`assistant/agent.ts`, `assistant/runner.ts`).
 //
 // Mechanism: a static import-graph walk from the Bun entry over relative
 // specifiers, collecting every bare package specifier reachable transitively.
-// `import type` lines are erased by the bundler but are harmless here (there
-// are none to the forbidden packages on this path). The Workers entry is
-// walked too, as a non-vacuous sanity check that the boundary actually differs.
+// The Workers entry is walked too, as a non-vacuous sanity check that the
+// boundary actually differs.
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 const IMPORT_RE =
   /(?:^|\n)\s*(?:import|export)\s[^;]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
 
-const FORBIDDEN = [/^agents$/, /^@tanstack\/ai(\/|$)/];
+const FORBIDDEN = [/^agents$/, /^@ai-sdk(\/|$)/, /^workers-ai-provider$/, /^@cloudflare\/ai-chat(\/|$)/];
 
 function resolveRelative(fromFile: string, spec: string): string | null {
   if (!spec.startsWith(".") && !spec.startsWith("/")) return null;
@@ -64,23 +66,24 @@ function walkGraph(entryFile: string): WalkResult {
   return { files, bare };
 }
 
-describe("Bun bundle boundary (ADR-0003 §F)", () => {
+describe("Bun bundle boundary (ADR-0005 D7)", () => {
   const bun = walkGraph(resolve(ROOT, "server/entry.ts"));
   const workers = walkGraph(resolve(ROOT, "server/workers-entry.ts"));
 
-  it("Bun entry reaches no `agents` / `@tanstack/ai*` package", () => {
+  it("Bun entry reaches no DO package (agents / @ai-sdk / workers-ai-provider / @cloudflare/ai-chat)", () => {
     const forbidden = [...bun.bare].filter((s) => FORBIDDEN.some((re) => re.test(s)));
     expect(forbidden).toEqual([]);
   });
 
-  it("Bun entry does not reach the assistant module graph", () => {
-    expect([...bun.files].some((f) => f.endsWith("/server/api/assistant-api.ts"))).toBe(false);
+  it("Bun entry reaches the in-process assistant module graph but not the DO modules", () => {
+    expect([...bun.files].some((f) => f.endsWith("/server/api/assistant-api.ts"))).toBe(true);
     expect([...bun.files].some((f) => f.endsWith("/server/assistant/agent.ts"))).toBe(false);
+    expect([...bun.files].some((f) => f.endsWith("/server/assistant/runner.ts"))).toBe(false);
   });
 
   it("Workers entry does reach the assistant module graph (non-vacuous)", () => {
     expect([...workers.files].some((f) => f.endsWith("/server/api/assistant-api.ts"))).toBe(true);
-    expect([...workers.bare].some((s) => FORBIDDEN.some((re) => re.test(s)))).toBe(true);
+    expect([...workers.bare].some((s) => /^@tanstack\/ai(\/|$)/.test(s))).toBe(true);
   });
 
   it("Workers entry reaches the delegation runner facet; the Bun entry never does", () => {

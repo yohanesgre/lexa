@@ -204,7 +204,9 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind | string): stri
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const url = new URL(withScheme);
   const stripped = url.pathname.replace(/\/+$/, "");
-  if (coerced === "openai_compatible" || coerced === "openai_responses") {
+  // `workers_ai` rides the OpenAI wire (CF's OpenAI-compatible endpoint is
+  // .../ai/v1), so it keeps the /v1 segment exactly like openai_compatible.
+  if (coerced === "openai_compatible" || coerced === "openai_responses" || coerced === "workers_ai") {
     url.pathname = /\/v1$/.test(stripped) ? stripped : `${stripped}/v1`;
   } else {
     url.pathname = stripped.replace(/\/v1$/, "");
@@ -221,14 +223,6 @@ export function normalizeBaseUrl(raw: string, kind: ProviderKind | string): stri
 // ASSISTANT_GENERATION_FAILED via translateRunError.
 export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   const kind = normalizeProviderKind(config.kind);
-  // H9: `workers_ai` is Workers-only — it builds through the DO model factory
-  // (`createWorkersAI` with the AI binding), never the Bun/TanStack adapter.
-  // Guard loudly rather than silently falling through to the Anthropic wire.
-  if (kind === "workers_ai") {
-    throw new AssistantGenerationFailed({
-      message: "workers_ai models run only on the Workers runtime via the AI binding",
-    } as never);
-  }
   assistantLog("DEBUG", "assistant-provider buildAdapter", {
     kind,
     model: config.model,
@@ -236,7 +230,10 @@ export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
     baseUrl: (() => { try { return normalizeBaseUrl(config.baseUrl, kind); } catch { return config.baseUrl; } })(),
     apiKeyMask: maskApiKey(config.apiKey),
   });
-  if (kind === "openai_compatible") {
+  // ADR-0005 D5/P5: `workers_ai` rides the OpenAI wire through Cloudflare's
+  // OpenAI-compatible endpoint (.../ai/v1, Bearer CF API token) — the keyless
+  // env.AI binding path died with the DO. Same adapter as openai_compatible.
+  if (kind === "openai_compatible" || kind === "workers_ai") {
     return createOpenaiChatCompletions(config.model as OpenAiChatCompletionsModel, config.apiKey, {
       baseURL: normalizeBaseUrl(config.baseUrl, kind),
       defaultHeaders: opencodeSessionHeaders(config.sessionId, config),
@@ -547,7 +544,7 @@ export async function listModels(
 ): Promise<{ models: ListedModel[] }> {
   const kind = normalizeProviderKind(config.kind);
   const base = normalizeBaseUrl(config.baseUrl, kind).replace(/\/+$/, "");
-  const isOpenAiWire = kind === "openai_compatible" || kind === "openai_responses";
+  const isOpenAiWire = kind === "openai_compatible" || kind === "openai_responses" || kind === "workers_ai";
   const path = isOpenAiWire ? "/models" : "/v1/models";
   const sessionHeaders = opencodeSessionHeaders(opts?.sessionId ?? config.sessionId, config);
   if (isOpenAiWire) {

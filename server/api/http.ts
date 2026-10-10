@@ -1289,8 +1289,9 @@ const meGroup = HttpApiGroup.make("me")
   .add(HttpApiEndpoint.del("deleteMyApiKey", "/me/api-keys/:id")
     .setPath(ApiKeyPath).addSuccess(Schema.Void, { status: 204 }));
 
-// Base API: every group the Bun flavor mounts. The assistant groups are
-// composed into `LexaApi` only (Workers) — ADR-0003 §F.
+// Base API: every group except the assistant tier. `LexaApi` adds the assistant
+// groups; both flavors mount the full set (ADR-0005 D7) — the Bun host composes
+// them via `fullRouteGroups()` from `assistant-api.ts`.
 const lexaBase = HttpApi.make("lexa")
   .add(healthGroup)
   .add(setupGroup)
@@ -1364,12 +1365,22 @@ async function buildBunApp(dbPath: string, env?: RuntimeEnv) {
       revokeSession: ({ token, headers }) => auth.api.revokeSession({ body: { token }, headers }),
     } satisfies ApiAuthHooksShape),
   );
-  const serviceLayer = buildServiceLayer(dbPath, env);
-  const handlerLayer = baseRouteGroups().pipe(
+  // ADR-0005 D7: the assistant tier is in-process on BOTH flavors, so the Bun
+  // app mounts the same full route groups + assistant service layer the Workers
+  // factory does. The assistant module is imported dynamically (never a static
+  // cycle back into http.ts) and stays `agents`-free — the DO executor is not
+  // on this path.
+  const { fullRouteGroups, assistantServiceLayerWithStorage } = await import("./assistant-api");
+  const storageCfg = resolveStorageConfig(storageEnvFrom(env ?? getEnv()), dirname(dbPath));
+  const serviceLayer = Layer.mergeAll(
+    buildBaseServiceLayerWithStorage(storageCfg),
+    assistantServiceLayerWithStorage(storageCfg),
+  );
+  const handlerLayer = fullRouteGroups().pipe(
     Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),
     Layer.provide(dbLayer)
   );
-  const merged = Layer.mergeAll(baseApiLayer, handlerLayer);
+  const merged = Layer.mergeAll(HttpApiBuilder.api(LexaApi), handlerLayer);
   const finalLayer = Layer.provide(
     merged,
     createApiMiddleware(db, dbPath, env, { getSession: (headers) => auth.api.getSession({ headers }) })
@@ -3333,8 +3344,9 @@ function formatWikiPageRevision<T>(r: T): T {
   return r;
 }
 
-// Base route groups (Bun): every group except the assistant tier. Workers
-// compose baseRouteGroups() with the assistant lives in `assistant-api.ts`.
+// Base route groups: every group except the assistant tier. Both flavors
+// compose `baseRouteGroups()` with the assistant lives in `assistant-api.ts`
+// (ADR-0005 D7).
 export function baseRouteGroups() {
   return Layer.mergeAll(
     healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, sourcesLive, agentsLive, skillsLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, meLive, dashboardLive,
