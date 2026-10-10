@@ -417,9 +417,17 @@ async function summarizeOlder(config: import("./provider").ProviderConfig, older
   // re-compaction condenses only the newly-unfolded slice, so the accumulated
   // summary must be carried in or earlier content is lost on every re-summary.
   const prior = priorSummary && priorSummary.trim() !== "" ? `\n\nExisting summary so far:\n${priorSummary.trim()}` : "";
+  // Reasoning is display-only; never leak the thinking text into the summary prompt.
+  const olderRedacted = older.map((m) => {
+    if (m === null || typeof m !== "object") return m;
+    const rec = { ...(m as Record<string, unknown>) };
+    delete rec.reasoning;
+    delete rec.reasoningMs;
+    return rec;
+  });
   return completeText(config, {
     systemPrompts: [{ content: "You condense working conversations. Reply with a terse bullet summary of decisions, constraints and open threads only." }],
-    messages: [{ role: "user", content: `Summarize these earlier conversation turns for continuity. Reply with bullets only.${prior}\n\n${JSON.stringify(older).slice(0, 60000)}` }],
+    messages: [{ role: "user", content: `Summarize these earlier conversation turns for continuity. Reply with bullets only.${prior}\n\n${JSON.stringify(olderRedacted).slice(0, 60000)}` }],
   }, { sessionId });
 }
 
@@ -543,7 +551,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           const citations = ctx.getCitations();
           stopPartial();
           await enqueuePersist(async () => {
-            await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
+            await ctx.persist([...ctx.history, ...userEntries, { role: "assistant", content: stripToolCallXml(text), ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), ...reasoningFields(), pendingBatch: { batchId: drained[0]!.batchId, approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "", seq: p.seq, name: p.name, ...(p.detail !== undefined ? { detail: p.detail } : {}), diff: p.diff })) } }], ctx.historySummary(), ctx.historySummarizedCount());
           });
           push({ type: "suspended", batchId: drained[0]!.batchId });
         };
