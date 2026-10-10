@@ -344,15 +344,39 @@ export interface AutoWriteRecordDeps {
   limit?: number;
 }
 
+// Deterministic (key-sorted) JSON so an identical call whose object keys arrive
+// in a different order still dedupes.
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`)
+    .join(",")}}`;
+}
+
 export function buildAutoWriteRecord(deps: AutoWriteRecordDeps): AssistantWriteToolDeps["record"] {
   const limit = deps.limit ?? MAX_WRITES_PER_TURN;
   let used = 0;
+  // Loop safety net (M5b): a looping model can emit the SAME (tool, args) write
+  // call more than once in a turn. Auto executes in-loop, so an identical pair
+  // must run at most once — a repeated successful call returns the first
+  // outcome instead of applying a second write. Failures stay retryable. A
+  // duplicate still consumes a budget slot (every model-emitted call counts),
+  // so a looping model hits the per-turn cap rather than evading it.
+  const executed = new Map<string, AssistantWriteToolOutput>();
   return async (proposal) => {
     if (used >= limit) return { error: `write budget exceeded — at most ${limit} writes per turn` };
     used += 1;
+    const key = `${proposal.name}\u0000${canonicalJson(proposal.args)}`;
+    const prior = executed.get(key);
+    if (prior !== undefined) return { output: prior };
     const outcome = await deps.apply(proposal.name, proposal.args as Record<string, unknown>);
     if (!outcome.ok) return { error: outcome.error };
-    return { output: { ok: true, applied: true, ...(outcome.result !== undefined ? { result: outcome.result } : {}) } };
+    const output: AssistantWriteToolOutput = { ok: true, applied: true, ...(outcome.result !== undefined ? { result: outcome.result } : {}) };
+    executed.set(key, output);
+    return { output };
   };
 }
 

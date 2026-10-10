@@ -728,6 +728,21 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           let drained = drainWrites();
           if (drained.length === 0 && stripToolCallXml(text) === "" && ctx.tools && ctx.tools.length > 0) { await consume(undefined); drained = drainWrites(); }
           text = stripToolCallXml(text);
+          // Explicit stop / disconnect (M5b): an abort can surface as a graceful
+          // stream end (no RUN_FINISHED), so `didFinish` is false and the failure
+          // branch below would mislabel a deliberate stop as
+          // ASSISTANT_GENERATION_FAILED. Persist a clean stopped turn instead —
+          // never the hallucination-guard rewrite either. `!didFinish` keeps a
+          // Stop/disconnect that lands AFTER the provider finished from
+          // re-labeling a completed turn; `drained` empty distinguishes this
+          // from the ask-mode write suspension, which also aborts but has
+          // proposals to suspend.
+          if (drained.length === 0 && !didFinish && abort.signal.aborted && !stalled) {
+            const citationsStop = ctx.getCitations();
+            await persistTerminalTurn({ stopped: true, ...(citationsStop.length > 0 ? { citations: citationsStop } : {}), ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
+            await ctx.onCancel().catch(() => {});
+            return;
+          }
           {
             const hasWriteTools = ctx.writeTools !== undefined ? ctx.writeTools.length > 0 : !!ctx.writeDrain;
             if (hasWriteTools && drained.length === 0) {
@@ -861,7 +876,12 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             await ctx.onFail(`Assistant exceeded its tool budget (${e.rounds} rounds)`).catch(() => {});
             push({ type: "error", code: "ASSISTANT_TOOL_BUDGET_EXCEEDED", message: `Assistant exceeded its tool budget (${e.rounds} rounds)` });
           } else if (abort.signal.aborted && !stalled) {
-            if (stripToolCallXml(text) !== "") await persistTerminalTurn({ stopped: true }).catch(() => {});
+            // Explicit stop / disconnect: persist the partial turn as stopped even
+            // when it carries only tool activity (a text-less tool loop), so the
+            // transcript renders a clean stopped turn — never a plain partial or a
+            // failure card.
+            const citationsStop = ctx.getCitations();
+            await persistTerminalTurn({ stopped: true, ...(citationsStop.length > 0 ? { citations: citationsStop } : {}), ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onCancel().catch(() => {});
           } else {
             const err = translateRunError(e);

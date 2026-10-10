@@ -94,6 +94,16 @@ describe("convertLegacyMessages", () => {
     ]);
   });
 
+  it("maps a killed turn's `partial` marker onto metadata.stopped (M5b)", () => {
+    const converted = convertLegacyMessage({ role: "assistant", content: "half", partial: true }, 3);
+    expect(converted).toEqual({
+      id: "legacy-3",
+      role: "assistant",
+      parts: [{ type: "text", text: "half" }],
+      metadata: { stopped: true },
+    });
+  });
+
   it("keeps a part-less assistant message alive with an empty text part", () => {
     const converted = convertLegacyMessage(
       { role: "assistant", content: "", stopped: true },

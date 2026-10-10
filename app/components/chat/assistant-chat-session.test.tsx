@@ -1069,7 +1069,7 @@ function renderComposer(overrides: Partial<Parameters<typeof AssistantChatCompos
     uploadedByLabel: null,
     createdAt: "2026-01-01T00:00:00Z",
   }));
-  const utils = render(
+  const renderWith = (o: Partial<Parameters<typeof AssistantChatComposer>[0]>) => (
     <AssistantChatComposer
       slug="nimbus"
       streaming={false}
@@ -1084,9 +1084,11 @@ function renderComposer(overrides: Partial<Parameters<typeof AssistantChatCompos
       ensureChatId={() => "chat-1"}
       uploadAttachment={uploadAttachment}
       {...overrides}
+      {...o}
     />
   );
-  return { ...utils, onSend, onQueue, onUnqueue, uploadAttachment };
+  const utils = render(renderWith({}));
+  return { ...utils, rerenderComposer: (o: Partial<Parameters<typeof AssistantChatComposer>[0]>) => utils.rerender(renderWith(o)), onSend, onQueue, onUnqueue, uploadAttachment };
 }
 
 describe("AssistantChatComposer", () => {
@@ -1105,12 +1107,31 @@ describe("AssistantChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("hello", []);
   });
 
-  it("shows the wireframe busy-409 placeholder, reason line, and no action button", () => {
-    const { container } = renderComposer({ busy409: true });
+  it("shows the busy-409 conflict state but lets Send retry (M5b)", () => {
+    const { container, onSend } = renderComposer({ busy409: true });
     expect(screen.getByPlaceholderText("Waiting for the current reply…")).toBeTruthy();
     const action = container.querySelector(".deck-action")!;
     expect(action.textContent).toContain("ANOTHER ASSISTANT RUN IS IN PROGRESS");
-    expect(action.querySelectorAll("button")).toHaveLength(0);
+
+    const textarea = screen.getByLabelText("Message Assistant") as HTMLTextAreaElement;
+    expect(textarea).toBeEnabled();
+    fireEvent.change(textarea, { target: { value: "retry me" } });
+    const send = screen.getByRole("button", { name: /Send/ });
+    expect(send).toBeEnabled();
+    fireEvent.click(send);
+    expect(onSend).toHaveBeenCalledWith("retry me", []);
+  });
+
+  it("restores the draft when the send is refused with a 409 (M5b)", () => {
+    const { rerenderComposer, onSend } = renderComposer();
+    const textarea = screen.getByLabelText("Message Assistant") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "kept message" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    expect(onSend).toHaveBeenCalledWith("kept message", []);
+    expect(textarea.value).toBe("");
+
+    rerenderComposer({ busy409: true, streamStatus: "error", sendError: { code: "ASSISTANT_TASK_ACTIVE" } });
+    expect((screen.getByLabelText("Message Assistant") as HTMLTextAreaElement).value).toBe("kept message");
   });
 
   it("renders the deck regions in rail / message / action order", () => {

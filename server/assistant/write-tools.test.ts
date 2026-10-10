@@ -577,6 +577,43 @@ describe("write-tools auto/deny records (permission modes)", () => {
     expect(applied).toEqual([{ name: "archive_task", args: { ref: "NIM-1" } }]);
   });
 
+  it("auto executes an identical (tool, args) call once (loop safety net, M5b)", async () => {
+    const applied: Array<{ name: string; args: unknown }> = [];
+    const record = buildAutoWriteRecord({
+      apply: async (name, args) => { applied.push({ name, args }); return { ok: true, result: { id: "t9" } }; },
+    });
+    const t = tool(record, "archive_task");
+    const first = await t.execute({ ref: "NIM-1" });
+    const second = await t.execute({ ref: "NIM-1" });
+    expect(first).toEqual({ ok: true, applied: true, result: { id: "t9" } });
+    expect(second).toEqual(first);
+    expect(applied).toHaveLength(1);
+  });
+
+  it("auto still executes distinct args (dedupe is exact)", async () => {
+    const applied: string[] = [];
+    const record = buildAutoWriteRecord({
+      apply: async (_name, args) => { applied.push(String((args as { name?: unknown }).name)); return { ok: true }; },
+    });
+    const t = tool(record, "create_milestone");
+    await t.execute({ name: "Alpha" });
+    await t.execute({ name: "Beta" });
+    expect(applied).toEqual(["Alpha", "Beta"]);
+  });
+
+  it("auto dedupes the same args regardless of key order, including nested (canonicalJson)", async () => {
+    const applied: unknown[] = [];
+    const record = buildAutoWriteRecord({
+      apply: async (_name, args) => { applied.push(args); return { ok: true }; },
+    });
+    const t = tool(record, "create_task");
+    const docA = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] };
+    const docB = { content: [{ content: [{ text: "hi", type: "text" }], type: "paragraph" }], type: "doc" };
+    await t.execute({ title: "T", description: docA });
+    await t.execute({ description: docB, title: "T" });
+    expect(applied).toHaveLength(1);
+  });
+
   it("auto surfaces an apply failure as a recoverable error", async () => {
     const record = buildAutoWriteRecord({ apply: async () => ({ ok: false, error: "FORBIDDEN: nope" }) });
     const out = await tool(record, "archive_task").execute({ ref: "NIM-1" });

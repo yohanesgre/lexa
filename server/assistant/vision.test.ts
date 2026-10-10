@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeImage, resolveVisionMode, type AnalyzeDeps } from "./vision";
+import { analyzeImage, resolveVisionMode, visionWireForKind, type AnalyzeDeps } from "./vision";
 import { shouldEmitToolFrame, replaceImageRefsWithPlaceholders } from "../services/assistant.service";
 import type { ProviderConfig } from "./provider";
 
@@ -35,6 +35,15 @@ describe("resolveVisionMode", () => {
   });
 });
 
+describe("visionWireForKind (M5b: workers_ai allowed)", () => {
+  it("workers_ai rides the OpenAI wire (ADR-0005 D5); only Responses is openai too", () => {
+    expect(visionWireForKind("workers_ai")).toBe("openai");
+    expect(visionWireForKind("openai_compatible")).toBe("openai");
+    expect(visionWireForKind("openai_responses")).toBe("openai");
+    expect(visionWireForKind("anthropic_compatible")).toBe("anthropic");
+  });
+});
+
 describe("analyzeImage wire formats (fake fetch)", () => {
   it("openai_compatible: POST {base}/chat/completions with image_url data URI", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -52,6 +61,28 @@ describe("analyzeImage wire formats (fake fetch)", () => {
     expect(body.model).toBe("vl-1");
     const img = body.messages[0]!.content.find((p) => p.type === "image_url") as { image_url: { url: string } };
     expect(img.image_url.url.startsWith("data:image/png;base64,QkY=")).toBe(true);
+  });
+
+  it("workers_ai: POST {cf-ai-base}/chat/completions with a Bearer CF token (M5b)", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = async (input: string, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return new Response(JSON.stringify({ choices: [{ message: { content: "a chart" } }] }), { status: 200 });
+    };
+    const d: AnalyzeDeps = {
+      ...deps(fetchImpl),
+      config: {
+        kind: "workers_ai",
+        baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc/ai/v1",
+        apiKey: "cf-token",
+        model: "@cf/llava",
+      },
+    };
+    const out = await analyzeImage(d, "k1", "what is shown?");
+    expect(out).toBe("a chart");
+    expect(calls[0]!.url).toBe("https://api.cloudflare.com/client/v4/accounts/acc/ai/v1/chat/completions");
+    const headers = new Headers(calls[0]!.init.headers as Record<string, string>);
+    expect(headers.get("authorization")).toBe("Bearer cf-token");
   });
 
   it("anthropic_compatible: POST {base}/v1/messages with base64 source block; joins text blocks", async () => {
