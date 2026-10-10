@@ -54,7 +54,11 @@ export function AssistantPanel({ editor, slug, documentType, documentId, onClose
         onDismiss={panel.dismiss}
         editor={editor}
         onClose={onClose}
-        reconnecting={panel.stream.reconnecting}
+        // ADR-0005 W3: the SSE tier has no socket to reconnect — a dropped
+        // fetch kills the turn (partial persists). The panel keeps the
+        // reconnect banner slot in its renderer contract but it never fires;
+        // the wireframe's reconnect copy is stale (reported, D8).
+        reconnecting={false}
       >
         <AssistantPanelIdle
           prompt={panel.prompt}

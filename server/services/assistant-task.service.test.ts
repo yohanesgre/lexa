@@ -216,6 +216,7 @@ beforeEach(() => {
 
 afterEach(() => {
   service?.activeTasks.clear();
+  service?.activeDocuments.clear();
   vi.unstubAllGlobals();
   try { db?.close(); } catch {}
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -479,6 +480,43 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
 
     const persisted = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { messages: string };
     expect(persisted.messages).not.toContain("[approved write results]");
+  });
+});
+
+describe("task resume — no-op settle (ADR-0005 M2 follow-up)", () => {
+  // A thread whose trailing assistant turn carries a pending-batch marker.
+  const seedMarker = (): void => {
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[]}}]');
+`);
+  };
+
+  it("a duplicate resume claim settles with a terminal done frame (no re-execution)", async () => {
+    setup();
+    seedMarker();
+    db.exec(`INSERT INTO assistant_resume_claims (batch_id) VALUES ('b1')`);
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    // Settled, not empty: the client persists the duplicate instead of reading
+    // an empty stream as a stall and retrying forever (parity with chat).
+    expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
+    expect(providerMock.calls).toHaveLength(0);
+    // The pre-existing claim SURVIVES a duplicate resume (it is never released);
+    // this is what distinguishes a duplicate from the marker-with-no-rows case.
+    const claims = (db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get() as { n: number }).n;
+    expect(claims).toBe(1);
+  });
+
+  it("a marker with no rows settles with a terminal done frame and releases the claim", async () => {
+    setup();
+    seedMarker();
+
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
+    expect(providerMock.calls).toHaveLength(0);
+    const claims = (db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims").get() as { n: number }).n;
+    expect(claims).toBe(0);
   });
 });
 

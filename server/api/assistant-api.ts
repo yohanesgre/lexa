@@ -20,7 +20,6 @@ import {
   AssistantScheduleNotFound,
   AssistantTaskActive,
   AssistantThreadNotFound,
-  AssistantUnavailable,
   HasChildren,
   InvalidArgs,
   NoUserContext,
@@ -273,9 +272,10 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const project = yield* requireProjectRead(req.payload.slug);
         const service = yield* AssistantService;
-        const taskService = yield* AssistantTaskService;
-        const identity = yield* AuthIdentity;
-        const task = yield* service.enqueue({
+        // ADR-0005 W3: the client starts the document run by POSTing to
+        // /assistant/tasks/:id/stream (the in-process SSE task lane). The create
+        // route only enqueues the row — no DO `enqueueRun` RPC.
+        return yield* service.enqueue({
           projectId: project.id,
           documentType: req.payload.documentType,
           documentId: req.payload.documentId,
@@ -285,24 +285,6 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           ...(req.payload.selection !== undefined ? { selection: req.payload.selection } : {}),
           ...(req.payload.attachments !== undefined ? { attachments: [...req.payload.attachments] } : {}),
         });
-        const enqueue = yield* threadRpcControl((rpc) =>
-          rpc.enqueueRun(`${req.payload.documentType}:${req.payload.documentId}`, {
-            projectId: project.id,
-            runId: task.id,
-            actorUserId: identity.userId ?? "",
-            selection: task.selection,
-            extraPrompt: task.extraPrompt,
-          })
-        );
-        // ADR-0003 §B.4: `enqueueRun` RPC failure → task marked `failed` + 502
-        // ASSISTANT_UNAVAILABLE. `available` is false on Bun (no DO — the
-        // in-process engine owns the task), so only the Workers flavor takes
-        // this branch.
-        if (enqueue.available && !enqueue.ok) {
-          yield* taskService.fail(task.id, "ASSISTANT_UNAVAILABLE");
-          return yield* new AssistantUnavailable({ message: "Assistant unavailable" });
-        }
-        return task;
       }))
     )
     .handle("getAssistantTask", (req) =>
@@ -329,24 +311,14 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
     )
     .handle("cancelAssistantTask", (req) =>
       respond(Effect.gen(function* () {
+        // ADR-0005 W3: cancel is in-process only — abort the live SSE run (its
+        // abort branch terminalizes the task row via `onCancel`) or, when no
+        // stream is active, transition the row directly. The task row stays the
+        // terminal authority; no DO `abortRun` RPC.
         const service = yield* AssistantService;
         const taskService = yield* AssistantTaskService;
         if (!service.abortStream(req.path.id)) {
           yield* taskService.cancel(req.path.id);
-        }
-        const task = yield* taskService.getById(req.path.id).pipe(Effect.catchAll(() => Effect.succeed(null)));
-        if (task) {
-          const abort = yield* threadRpcControl((rpc) =>
-            rpc.abortRun(`${task.documentType}:${task.documentId}`, req.path.id)
-          );
-          // ADR-0003 §B.4/§B.6: `abortRun` RPC failure is the assistant being
-          // unavailable. TODO(P3): `abortRun` is still a P2 stub and the local
-          // abort (`abortStream`/`taskService.cancel`) already ran above; once
-          // the P3 engine owns the canonical turn, branch on `abort` here (502
-          // ASSISTANT_UNAVAILABLE).
-          if (abort.available && !abort.ok) {
-            yield* Effect.logWarning(`[assistant] abortRun RPC not acked for task ${req.path.id}`);
-          }
         }
         return { ok: true as const };
       }))
@@ -443,8 +415,9 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         );
         yield* requireProjectReadById(thread.projectId);
         const service = yield* AssistantService;
+        // ADR-0005 W3: the in-process task lane owns the resume (claim +
+        // execute + continuation frames). No DO `resumeBatch` RPC.
         const frames = yield* service.resumeThreadStream(req.path.documentType, req.path.documentId);
-        yield* threadRpcCall((rpc) => rpc.resumeBatch(`${req.path.documentType}:${req.path.documentId}`, null));
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.documentId));
         return sseHttpResponse(frames);
       }))

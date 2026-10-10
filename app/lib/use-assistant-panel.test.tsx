@@ -30,8 +30,8 @@ vi.mock("@tanstack/react-router", () => ({
   Link: (props: { children?: React.ReactNode }) => <a href="#settings">{props.children}</a>,
 }));
 
-vi.mock("./use-assistant-agent", () => ({
-  useAssistantAgent: (key: string | null) => {
+vi.mock("./use-assistant-stream", () => ({
+  useAssistantStream: (key: string | null) => {
     h.keys.push(key);
     return {
       frames: [],
@@ -52,10 +52,11 @@ vi.mock("./use-assistant-agent", () => ({
       reset: vi.fn(),
       subscribe: vi.fn(),
       getSnapshot: () => h.snapshot,
-      reconnecting: false,
-      resumed: false,
     };
   },
+  // The create path boots the freshly-created run's session through the module
+  // store (the hook is still bound to the previous key that tick).
+  assistantSendForKey: (...args: unknown[]) => h.send(...args),
 }));
 
 vi.mock("./queries", () => ({
@@ -141,15 +142,32 @@ describe("useAssistantPanel", () => {
     render(<Harness editor={editor} documentId="t2" />);
     expect(screen.getByTestId("status")).toHaveTextContent("idle");
     fireEvent.click(screen.getByRole("button", { name: "generate" }));
-    // The server enqueues on POST /api/assistant/tasks; the client attaches to
-    // the WS thread and the pending task row drives the connecting state. No
-    // client-side POST to /stream exists anymore.
+    // The server enqueues on POST /api/assistant/tasks; the client then boots the
+    // run's SSE session on the document thread, and the pending task row drives
+    // the connecting state until the first frame.
     expect(h.mutate).toHaveBeenCalledTimes(1);
     // Auto skill selection: the payload carries no skillId.
     expect(h.mutate.mock.calls[0]?.[0]).not.toHaveProperty("skillId");
-    expect(h.send).not.toHaveBeenCalled();
+    expect(h.send).toHaveBeenCalledWith("assistant-task:t2", "/api/assistant/tasks/t9/stream", {});
     expect(screen.getByTestId("task")).toHaveTextContent("t9");
     expect(screen.getByTestId("status")).toHaveTextContent("connecting");
+  });
+
+  it("renders frames from the SSE task stream after create", () => {
+    h.task = { status: "running", documentType: "task", documentId: "doc1" };
+    h.mutate.mockImplementation((_input: unknown, opts?: { onSuccess?: (task: { id: string }) => void }) => {
+      opts?.onSuccess?.({ id: "t9" });
+    });
+    const { editor } = makeEditor();
+    render(<Harness editor={editor} documentId="doc1" />);
+    fireEvent.click(screen.getByRole("button", { name: "generate" }));
+    expect(h.send).toHaveBeenCalledWith("assistant-task:doc1", "/api/assistant/tasks/t9/stream", {});
+
+    // The in-process stream's frames render in the panel.
+    h.snapshot = { status: "streaming", text: "streamed from SSE" };
+    fireEvent.click(screen.getByRole("button", { name: "type" }));
+    expect(screen.getByTestId("status")).toHaveTextContent("streaming");
+    expect(screen.getByTestId("text")).toHaveTextContent("streamed from SSE");
   });
 
   it("reconstructs a background-completed run from the task row", () => {

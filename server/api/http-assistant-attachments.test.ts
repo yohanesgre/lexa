@@ -174,17 +174,21 @@ describe("POST /api/assistant/tasks attachments", () => {
   });
 });
 
-describe("POST /api/assistant/tasks — DO enqueue failure", () => {
-  it("enqueueRun soft failure → 502 ASSISTANT_UNAVAILABLE and the task row lands failed/ASSISTANT_UNAVAILABLE", async () => {
-    let attemptedRunId: string | null = null;
+// ADR-0005 W3: the document lane runs in-process over SSE — the create route
+// only enqueues the row (the client POSTs /stream), cancel aborts the live
+// stream or transitions the row directly, and resume runs the in-process
+// continuation. No DO RPC on any of the three paths.
+describe("POST /api/assistant/tasks — in-process SSE lane (no DO RPC)", () => {
+  it("create returns 201 queued and never calls the DO enqueueRun RPC", async () => {
+    let enqueueCalled = false;
     const threadRpc: AssistantThreadRpcShape = {
       available: true,
       getTranscript: async () => null,
       resumeBatch: async () => null,
       destroyThread: async () => null,
       resetThread: async () => null,
-      enqueueRun: async (_threadKey, input) => {
-        attemptedRunId = input.runId;
+      enqueueRun: async () => {
+        enqueueCalled = true;
         return { ok: false, reason: "deps_unavailable" };
       },
       abortRun: async () => null,
@@ -192,16 +196,73 @@ describe("POST /api/assistant/tasks — DO enqueue failure", () => {
     const doHandler = createAssistantApiHandler(dbPath, undefined, { threadRpc });
 
     const res = await doHandler(authed("POST", "/api/assistant/tasks", assistantTaskBody()));
-    expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body.error.code).toBe("ASSISTANT_UNAVAILABLE");
+    expect(res.status).toBe(201);
+    const task = await res.json();
+    expect(task.status).toBe("queued");
+    expect(enqueueCalled).toBe(false);
+    const persisted = db.prepare("SELECT status FROM assistant_tasks WHERE id = ?").get(task.id) as { status: string };
+    expect(persisted.status).toBe("queued");
+  });
 
-    // The RPC named the run the handler failed; the durable row is failed.
-    expect(attemptedRunId).toBeTruthy();
-    const persisted = db
-      .prepare("SELECT status, error FROM assistant_tasks WHERE id = ?")
-      .get(attemptedRunId) as { status: string; error: string | null };
-    expect(persisted.status).toBe("failed");
-    expect(persisted.error).toBe("ASSISTANT_UNAVAILABLE");
+  it("cancel returns ok, lands the row cancelled, and never calls the DO abortRun RPC", async () => {
+    let abortCalled = false;
+    const threadRpc: AssistantThreadRpcShape = {
+      available: true,
+      getTranscript: async () => null,
+      resumeBatch: async () => null,
+      destroyThread: async () => null,
+      resetThread: async () => null,
+      enqueueRun: async () => null,
+      abortRun: async () => {
+        abortCalled = true;
+        return null;
+      },
+    };
+    const doHandler = createAssistantApiHandler(dbPath, undefined, { threadRpc });
+
+    db.exec(
+      `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, status)
+       VALUES ('atc', 'p1', 'task', 't1', 'assistant', 'skill-t1', '', '', 'queued')`
+    );
+    const res = await doHandler(authed("POST", "/api/assistant/tasks/atc/cancel"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(abortCalled).toBe(false);
+    const persisted = db.prepare("SELECT status FROM assistant_tasks WHERE id = 'atc'").get() as { status: string };
+    expect(persisted.status).toBe("cancelled");
+  });
+
+  it("resume streams the in-process continuation and never calls the DO resumeBatch RPC", async () => {
+    let resumeCalled = false;
+    const threadRpc: AssistantThreadRpcShape = {
+      available: true,
+      getTranscript: async () => null,
+      resumeBatch: async () => {
+        resumeCalled = true;
+        return null;
+      },
+      destroyThread: async () => null,
+      resetThread: async () => null,
+      enqueueRun: async () => null,
+      abortRun: async () => null,
+    };
+    const doHandler = createAssistantApiHandler(dbPath, undefined, { threadRpc });
+
+    // A thread whose batch is already claimed → the in-process lane settles
+    // immediately with a terminal done frame, touching neither a provider nor
+    // the DO.
+    db.exec(`
+INSERT OR REPLACE INTO assistant_providers (id, label, base_url, api_key) VALUES ('pv1', 'Test', 'https://model.test/v1', '');
+INSERT OR REPLACE INTO assistant_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m1', 'pv1', 'test-model', 'openai_compatible', 0, 1);
+INSERT OR REPLACE INTO assistant_settings (project_id, write_tools, provider_id, primary_model_id) VALUES ('p1', '[]', 'pv1', 'm1');
+INSERT OR REPLACE INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
+  VALUES ('task', 't1', 'p1', 'u1', 'assistant', 'skill-t1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"rb1","approvals":[]}}]');
+INSERT OR REPLACE INTO assistant_resume_claims (batch_id) VALUES ('rb1');
+`);
+    const res = await doHandler(authed("POST", "/api/assistant/threads/task/t1/resume"));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain("event: done");
+    expect(resumeCalled).toBe(false);
   });
 });
