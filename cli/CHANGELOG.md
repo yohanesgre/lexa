@@ -12,6 +12,14 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.6.4] - 2026-10-11
+
+### Fixed
+
+- **`lx worker upgrade` repeat upgrades** — same DO-removal detection fix as
+  the installer (shared helper): no redundant assistant delete-class
+  migration once the class is gone. (#380)
+
 ## [2026.6.3] - 2026-10-10
 
 ### Fixed
