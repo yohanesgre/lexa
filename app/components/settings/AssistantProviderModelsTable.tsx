@@ -12,7 +12,12 @@ import { AssistantSortableModelRow } from "./AssistantSortableModelRow";
 export function AssistantProviderModelsTable({ providerId, models, skippedModels }: { providerId: string; models: AssistantProviderModel[]; skippedModels?: AssistantSkippedModel[] | undefined }) {
   const reorder = useReorderProviderModels();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const skipped = skippedModels ?? [];
+  // `skipped` ids are catalog model ids (like a row's `modelId`); an id persisted
+  // by a pre-change import can still be live (sortable) AND returned in the
+  // skipped list, so de-dupe against the live rows — the marker never duplicates
+  // a live row. (The row UUID is `id`; the catalog id is `modelId`.)
+  const live = new Set(models.map((m) => m.modelId));
+  const skipped = (skippedModels ?? []).filter((s) => !live.has(s.id));
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;

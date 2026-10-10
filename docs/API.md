@@ -1693,9 +1693,11 @@ POST   /api/admin/assistant/providers/:id/models   (superadmin)
   openai_responses (Responses), most others (qwen/glm/kimi/deepseek/minimax/…) →
   openai_compatible (chat-completions); every other base keeps the legacy prefix
   heuristic. An id whose wire Lexa has no adapter for (Google-wire `gemini*`) is
-  reported in `skipped` (reason `google wire`) and NEVER persisted; the UI renders
-  it as a muted `skipped · <reason>` row that disappears on reload. Skipped ids
-  are also excluded from the CF price persistence pass.
+  never inserted by this import; it is reported in `skipped` (reason `google wire`)
+  and the UI renders it as a muted `skipped · <reason>` row that disappears on
+  reload. A row persisted by an earlier import is left as-is (the marker de-dupes
+  against the live rows, so it never renders twice). Skipped ids are also excluded
+  from the CF price persistence pass.
 
 PATCH  /api/admin/assistant/providers/:id/models/:modelId   (superadmin)
 body { enabled?: boolean, priority?: number }
