@@ -3,7 +3,7 @@ import { Trash2 } from "lucide-react";
 import { useCreateProvider, useUpdateProvider } from "../../lib/queries/assistant-admin";
 import type { AssistantProvider } from "../../../shared/assistant";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import { providerBaseUrl, providerFormPayload } from "./assistant-providers-logic";
+import { providerBaseUrl, providerFormPayload, PROVIDER_PRESETS, activePreset } from "./assistant-providers-logic";
 
 // Add/Edit provider card (wireframe admin-assistant-providers.html §provider API
 // key states). Remounts per editing target (parent keys by provider id). The
@@ -26,6 +26,10 @@ export function AssistantProviderForm({ editing, secretsEnabled, onCancel }: { e
   const hasKey = (editing?.hasKey ?? false) && !clearPending;
   const mask = editing?.keyMask ?? "sk-…8f3a";
   const canSubmit = !!label.trim() && !!baseUrl.trim() && !create.isPending && !update.isPending;
+  // The active mark is derived from the current field pair (wireframe: applying
+  // writes Label + Base URL; editing either field clears it).
+  const preset = activePreset(label, baseUrl);
+  const presetActive = preset !== null;
 
   const handleSave = () => {
     const payload = providerFormPayload({ label, baseUrl, apiKey });
@@ -52,6 +56,20 @@ export function AssistantProviderForm({ editing, secretsEnabled, onCancel }: { e
   return (
     <div className="card-panel card-panel--elevated mt-4">
       <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">{editingFlag ? "Edit provider" : "Add provider"}</h3>
+      <div className="flex items-center gap-2 mb-3" style={{ flexWrap: "wrap" }}>
+        <span className="prop-label">Preset</span>
+        {PROVIDER_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            className={`btn btn-ghost btn-sm${preset?.label === p.label ? " is-active" : ""}`}
+            aria-pressed={preset?.label === p.label}
+            onClick={() => { setLabel(p.label); setBaseUrl(p.baseUrl); }}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="provider-label">Label</label>
@@ -60,6 +78,11 @@ export function AssistantProviderForm({ editing, secretsEnabled, onCancel }: { e
         <div className="field" style={{ marginBottom: 0 }}>
           <label className="field-label" htmlFor="provider-base-url">Base URL</label>
           <input id="provider-base-url" className="prop-input w-full font-mono" placeholder="https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          {preset?.label === "Cloudflare AI" && (
+            <div className="field-hint">
+              Replace <span className="font-mono">&lt;account_id&gt;</span> with the Cloudflare account id — it is part of the URL, not a separate field. The API token needs <strong>Workers AI</strong> access.
+            </div>
+          )}
         </div>
       </div>
 
@@ -80,7 +103,7 @@ export function AssistantProviderForm({ editing, secretsEnabled, onCancel }: { e
               Saved · <span className="font-mono">{mask}</span>
             </span>
           ) : !clearPending && secretsOn ? (
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">write-only</span>
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{presetActive ? "operator-entered · write-only" : "write-only"}</span>
           ) : null}
         </div>
         <input
@@ -101,7 +124,9 @@ export function AssistantProviderForm({ editing, secretsEnabled, onCancel }: { e
               : "The field stays disabled until the key is set, so the pending clear cannot be cancelled by typing."
             : hasKey
               ? "Empty keeps the stored key. Typing replaces it on Save — write-only, never read back."
-              : "No chip — nothing is stored yet. Saving with the field empty is a legal, deliberately key-less provider."}
+              : presetActive
+                ? "A preset never touches the key. Cloudflare AI wants an API token with Workers AI access; OpenCode Zen wants an OpenCode API key; OpenCode Go wants the Go-plan key. All three are typed by the operator, write-only, and never read back."
+                : "No chip — nothing is stored yet. Saving with the field empty is a legal, deliberately key-less provider."}
         </div>
 
         {hasKey && (

@@ -59,6 +59,7 @@ export function AssistantProvidersSection() {
                   expanded={expanded === p.id}
                   testState={testResults[p.id]}
                   fetchPending={fetchModels.isPending}
+                  skippedModels={fetchModels.isSuccess && fetchModels.variables === p.id ? fetchModels.data?.skipped : undefined}
                   onToggle={() => toggle(p.id)}
                   onTest={() => handleTest(p.id)}
                   onFetch={() => fetchModels.mutate(p.id)}

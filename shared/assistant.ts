@@ -526,6 +526,14 @@ export interface AssistantProviderModel {
   updatedAt?: ISODate;
 }
 
+// A catalog id the model import refused because Lexa has no adapter for its
+// wire (e.g. Google-wire `gemini*` on an OpenCode Zen/Go base). Never persisted:
+// it rides the fetch response only, for the fetch-result view's muted marker.
+export interface AssistantSkippedModel {
+  id: string;
+  reason: string;
+}
+
 export interface AssistantProvider {
   id: string;
   label: string;

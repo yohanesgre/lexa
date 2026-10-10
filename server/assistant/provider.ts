@@ -138,6 +138,38 @@ export function inferModelKind(modelId: string): ProviderKind {
   return "openai_compatible";
 }
 
+// OpenCode Zen / Go expose models on per-model wires (https://opencode.ai/docs/zen,
+// /docs/go) rather than one wire per base, so the provider's base URL selects a
+// different inference than the legacy prefix heuristic.
+const OPENCODE_ZEN_BASE_RE = /^https?:\/\/opencode\.ai\/zen(?:\/|$)/i;
+
+export function isOpencodeZenBase(baseUrl: string): boolean {
+  const trimmed = baseUrl.trim();
+  if (trimmed === "") return false;
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return OPENCODE_ZEN_BASE_RE.test(withScheme);
+}
+
+// Zen/Go per-model wire: `claude*` → Anthropic messages; `gpt*`/`grok*`/`muse*`/
+// o-series (`o1`/`o3`/`o4`…) → Responses; most others (qwen/glm/kimi/deepseek/
+// minimax/…) → chat-completions. `gemini*` is Google-wire — Lexa has no adapter,
+// so it returns null and the caller MUST skip it (never insert).
+export function inferOpencodeModelKind(modelId: string): ProviderKind | null {
+  const lower = modelId.toLowerCase();
+  if (lower.startsWith("gemini")) return null;
+  if (lower.startsWith("claude")) return "anthropic_compatible";
+  if (lower.startsWith("gpt") || lower.startsWith("grok") || lower.startsWith("muse") || /^o\d/.test(lower)) return "openai_responses";
+  return "openai_compatible";
+}
+
+// Provider-aware inference: an OpenCode Zen/Go base uses the per-model mapping
+// (null = unsupported wire → skip); every other base keeps the legacy prefix
+// heuristic.
+export function inferModelKindForProvider(modelId: string, baseUrl: string): ProviderKind | null {
+  if (isOpencodeZenBase(baseUrl)) return inferOpencodeModelKind(modelId);
+  return inferModelKind(modelId);
+}
+
 export const OPENCODE_SESSION_HEADER = "x-opencode-session" as const;
 
 export function opencodeSessionIdFor(conversationId: string): string {

@@ -41,7 +41,7 @@ import { AssistantTaskRepo, type AdminAssistantRunKind } from "../repos/assistan
 import { AssistantSettingsRepo } from "../repos/assistant-settings.repo";
 import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { listModels, pingChatCompletion, isCloudflareAiBaseUrl, normalizeBaseUrl, CLOUDFLARE_DEFAULT_MODEL, normalizeProviderKind, inferModelKind, assistantLog, type ProviderConfig } from "../assistant/provider";
+import { listModels, pingChatCompletion, isCloudflareAiBaseUrl, normalizeBaseUrl, CLOUDFLARE_DEFAULT_MODEL, normalizeProviderKind, inferModelKindForProvider, assistantLog, type ProviderConfig } from "../assistant/provider";
 import { AssistantProvidersRepo } from "../repos/assistant-providers.repo";
 import { AssistantModelsRepo } from "../repos/assistant-models.repo";
 import { AssistantCallLogsRepo } from "../repos/assistant-call-logs.repo";
@@ -875,8 +875,17 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
         // the whole batch then rolls back and the request fails (retryable) —
         // same contract as the other converted read-then-batch sites.
         const stmts: BatchStmt[] = [];
+        // Unsupported-wire ids (Google-wire `gemini*` on an OpenCode Zen/Go base)
+        // are reported back but NEVER persisted.
+        const skipped: Array<{ id: string; reason: string }> = [];
+        const skippedIds = new Set<string>();
         for (const m of catalog.models) {
-          const inferred = inferModelKind(m.id);
+          const inferred = inferModelKindForProvider(m.id, prov.baseUrl);
+          if (inferred === null) {
+            skipped.push({ id: m.id, reason: "google wire" });
+            skippedIds.add(m.id);
+            continue;
+          }
           const found = existingById.get(m.id);
           if (found) {
             const current = normalizeProviderKind(found.kind);
@@ -900,6 +909,7 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
         // must not fail the model import.
         const priceRepo = yield* AssistantModelPricesRepo;
         for (const m of catalog.models) {
+          if (skippedIds.has(m.id)) continue;
           // Both prompt and completion prices are required before a row is
           // persisted: an input-only (or output-only) entry would upsert the
           // missing side as 0 and clobber a previously good price row.
@@ -927,7 +937,7 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
             );
         }
         const fresh = yield* mRepo.listByProvider(req.path.id);
-        return { data: fresh };
+        return { data: fresh, skipped };
       }))
     )
     .handle("adminAssistantUpdateModel", (req) =>

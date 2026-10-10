@@ -10,6 +10,9 @@ import {
   normalizeBaseUrl,
   normalizeProviderKind,
   inferModelKind,
+  inferModelKindForProvider,
+  inferOpencodeModelKind,
+  isOpencodeZenBase,
   opencodeSessionIdFor,
   resolveOpencodeSessionId,
   OPENCODE_SESSION_HEADER,
@@ -208,6 +211,47 @@ describe("inferModelKind", () => {
       ["muse-spark-1.2-contributor", "openai_responses"],
     ];
     for (const [id, kind] of cases) expect(inferModelKind(id)).toBe(kind);
+  });
+});
+
+describe("provider-aware model kind inference (OpenCode Zen/Go)", () => {
+  const ZEN = "https://opencode.ai/zen/v1";
+  const GO = "https://opencode.ai/zen/go/v1";
+
+  it("detects only opencode.ai/zen bases", () => {
+    expect(isOpencodeZenBase(ZEN)).toBe(true);
+    expect(isOpencodeZenBase(GO)).toBe(true);
+    expect(isOpencodeZenBase("opencode.ai/zen/v1")).toBe(true);
+    expect(isOpencodeZenBase("https://opencode.ai/zen")).toBe(true);
+    expect(isOpencodeZenBase("https://api.test")).toBe(false);
+    expect(isOpencodeZenBase("https://opencode.ai/docs")).toBe(false);
+    expect(isOpencodeZenBase("")).toBe(false);
+  });
+
+  it("maps per-model wires on a zen base (gemini skipped)", () => {
+    expect(inferOpencodeModelKind("claude-sonnet-4")).toBe("anthropic_compatible");
+    expect(inferOpencodeModelKind("CLAUDE-opus-4")).toBe("anthropic_compatible");
+    expect(inferOpencodeModelKind("gpt-5")).toBe("openai_responses");
+    expect(inferOpencodeModelKind("grok-4")).toBe("openai_responses");
+    expect(inferOpencodeModelKind("muse-spark")).toBe("openai_responses");
+    expect(inferOpencodeModelKind("o3-mini")).toBe("openai_responses");
+    expect(inferOpencodeModelKind("qwen3.7-max")).toBe("openai_compatible");
+    expect(inferOpencodeModelKind("glm-5")).toBe("openai_compatible");
+    expect(inferOpencodeModelKind("kimi-k2.5")).toBe("openai_compatible");
+    expect(inferOpencodeModelKind("deepseek-v4-pro")).toBe("openai_compatible");
+    expect(inferOpencodeModelKind("minimax-m3")).toBe("openai_compatible");
+    expect(inferOpencodeModelKind("gemini-2.5-pro")).toBeNull();
+  });
+
+  it("uses the per-model mapping only for zen bases; others keep the legacy heuristic", () => {
+    // qwen/minimax differ between the two mappings — the split proves it.
+    expect(inferModelKindForProvider("qwen3.7-max", ZEN)).toBe("openai_compatible");
+    expect(inferModelKindForProvider("qwen3.7-max", "https://api.test")).toBe("anthropic_compatible");
+    expect(inferModelKindForProvider("claude-sonnet-4", ZEN)).toBe("anthropic_compatible");
+    expect(inferModelKindForProvider("claude-sonnet-4", "https://api.test")).toBe("openai_responses");
+    expect(inferModelKindForProvider("gemini-2.5-pro", ZEN)).toBeNull();
+    // A gemini id on a non-zen base is not special — the legacy heuristic still applies.
+    expect(inferModelKindForProvider("gemini-2.5-pro", "https://api.test")).toBe("openai_compatible");
   });
 });
 

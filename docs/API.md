@@ -1685,8 +1685,17 @@ POST   /api/admin/assistant/providers/:id/test   (superadmin)
   (never a silent empty credential).
 
 POST   /api/admin/assistant/providers/:id/models   (superadmin)
-→ 200 { data: AssistantModelRow[] }   AssistantModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
+→ 200 { data: AssistantModelRow[], skipped: Array<{ id, reason }> }   AssistantModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
   | 403 FORBIDDEN | 404
+  Kind is inferred per returned id, provider-aware: an OpenCode Zen/Go base
+  (https://opencode.ai/zen/...) maps each id by its wire — `claude*` →
+  anthropic_compatible (Anthropic messages), `gpt*`/`grok*`/`muse*`/o-series →
+  openai_responses (Responses), most others (qwen/glm/kimi/deepseek/minimax/…) →
+  openai_compatible (chat-completions); every other base keeps the legacy prefix
+  heuristic. An id whose wire Lexa has no adapter for (Google-wire `gemini*`) is
+  reported in `skipped` (reason `google wire`) and NEVER persisted; the UI renders
+  it as a muted `skipped · <reason>` row that disappears on reload. Skipped ids
+  are also excluded from the CF price persistence pass.
 
 PATCH  /api/admin/assistant/providers/:id/models/:modelId   (superadmin)
 body { enabled?: boolean, priority?: number }

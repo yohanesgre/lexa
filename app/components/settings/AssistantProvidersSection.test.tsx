@@ -174,3 +174,31 @@ describe("AssistantProvidersSection — clear key", () => {
     expect(h.updated[0]).not.toHaveProperty("clearKey");
   });
 });
+
+describe("AssistantProvidersSection — provider presets", () => {
+  it("fills Label + Base URL from a preset, marks it active, and clears the mark when a field is edited", async () => {
+    const user = userEvent.setup();
+    render(<AssistantProvidersSection />);
+
+    const zen = screen.getByRole("button", { name: "OpenCode Zen" });
+    expect(zen).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(zen);
+    expect(screen.getByLabelText("Label")).toHaveValue("OpenCode Zen");
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://opencode.ai/zen/v1");
+    expect(screen.getByRole("button", { name: "OpenCode Zen" })).toHaveAttribute("aria-pressed", "true");
+    // A preset never touches the key — the preset hint replaces the default one.
+    expect(screen.getByText(/A preset never touches the key\./)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Base URL"), "/x");
+    expect(screen.getByRole("button", { name: "OpenCode Zen" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows the Cloudflare account-id hint while the Cloudflare AI preset is active", async () => {
+    const user = userEvent.setup();
+    render(<AssistantProvidersSection />);
+    expect(screen.queryByText(/with the Cloudflare account id/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cloudflare AI" }));
+    expect(screen.getByText(/with the Cloudflare account id/)).toBeInTheDocument();
+  });
+});

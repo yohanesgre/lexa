@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { ChevronDown, RefreshCw, Settings, Trash2 } from "lucide-react";
-import type { AssistantProvider } from "../../../shared/assistant";
+import type { AssistantProvider, AssistantSkippedModel } from "../../../shared/assistant";
 import { providerBaseUrl } from "./assistant-providers-logic";
 import { AssistantProviderModelsTable } from "./AssistantProviderModelsTable";
 
@@ -13,6 +13,7 @@ export function AssistantProviderRow({
   expanded,
   testState,
   fetchPending,
+  skippedModels,
   onToggle,
   onTest,
   onFetch,
@@ -23,6 +24,7 @@ export function AssistantProviderRow({
   expanded: boolean;
   testState: ProviderTestState | undefined;
   fetchPending: boolean;
+  skippedModels?: AssistantSkippedModel[] | undefined;
   onToggle: () => void;
   onTest: () => void;
   onFetch: () => void;
@@ -88,7 +90,7 @@ export function AssistantProviderRow({
                   Fetch models
                 </button>
               </div>
-              <AssistantProviderModelsTable providerId={provider.id} models={models} />
+              <AssistantProviderModelsTable providerId={provider.id} models={models} skippedModels={skippedModels} />
             </div>
           </td>
         </tr>
