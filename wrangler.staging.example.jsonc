@@ -74,6 +74,9 @@
       "id": "<KV_NAMESPACE_ID>"
     }
   ],
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

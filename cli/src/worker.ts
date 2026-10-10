@@ -92,6 +92,7 @@ export interface WorkerConfigJson {
   migrations?: Array<Record<string, unknown>>;
   services?: Array<Record<string, unknown>>;
   ai?: Record<string, unknown>;
+  triggers?: Record<string, unknown>;
   observability?: Record<string, unknown>;
 }
 
@@ -422,6 +423,9 @@ export function buildUpgradeConfig(
   const root = opts.root;
   let observability = prior.observability;
   if (root && !observability) observability = resolveObservability(root);
+  // Preserve the scheduled tick (prune + R2 backup retention); derive it from
+  // root when a prior config lacks it (older installs).
+  const triggers = prior.triggers ?? root?.triggers;
   const main = opts.bundle.main ?? prior.main ?? "index.js";
   const config: WorkerConfigJson = {
     name: prior.name,
@@ -440,6 +444,7 @@ export function buildUpgradeConfig(
   if (prior.d1_databases !== undefined) config.d1_databases = prior.d1_databases;
   if (prior.r2_buckets !== undefined) config.r2_buckets = prior.r2_buckets;
   if (prior.kv_namespaces !== undefined) config.kv_namespaces = prior.kv_namespaces;
+  if (triggers !== undefined) config.triggers = triggers;
   return config;
 }
 

@@ -398,6 +398,16 @@ describe("source order — account resolves before any resource is created", () 
     expect(src).toContain("observability: resolveObservability(rootConfig)");
   });
 
+  test("main carries root's scheduled tick (prune + backup retention) into the generated config", () => {
+    const ROOT = fileURLToPath(new URL("..", import.meta.url));
+    expect(readRootWranglerConfig(ROOT).triggers).toEqual({ crons: ["*/15 * * * *"] });
+    const src = readFileSync(
+      new URL("./lib/cf-deploy.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(src).toContain("...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {})");
+  });
+
   test("main emits the ASSETS binding on the static-assets directory", () => {
     const src = readFileSync(
       new URL("./lib/cf-deploy.ts", import.meta.url),

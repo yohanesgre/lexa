@@ -10,9 +10,9 @@
 // — invariants #2/#3/#8) + /api/auth/* (better-auth handler: sign-in,
 // session, invite acceptance) + every other /api/* (the full HttpApi app:
 // Bearer keys AND session cookies, same middleware order/semantics as the
-// Bun host) + scheduled handler (event prune + R2 backup-retention prune;
-// the `*/15` cron trigger was removed in ADR-0005 W6, so this fires only when
-// an operator re-adds a trigger). Non-API GETs: /share/* goes to the
+// Bun host) + scheduled handler (event prune + R2 backup-retention prune,
+// cron `*/15 * * * *` in wrangler.jsonc; the assistant schedule drain that once
+// rode this cron is gone — ADR-0005 D2). Non-API GETs: /share/* goes to the
 // TanStack Start handler (server-rendered, OG meta); every other route is
 // client-only and served the prerendered SPA shell. In source `wrangler dev`
 // the Start import is shimmed (Vite-virtuals are unresolvable outside the
@@ -429,7 +429,7 @@ function fallbackPage(): Response {
   );
 }
 
-// ─── Scheduled: prune + backup retention ────────────────────────────────
+// ─── Scheduled (cron */15 * * * *): prune + backup retention ─────────────
 // Same SQL as the Bun host's setInterval prune (server/entry.ts):
 // webhook_events older than 7 days + device_login_requests past expires_at.
 // R2 retention uses the same stamp scheme as server/storage/backup.ts

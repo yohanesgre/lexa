@@ -76,6 +76,17 @@
 			"id": "00000000000000000000000000000000"
 		}
 	],
+	// Scheduled tick: `webhook_events` (7-day) + `device_login_requests` prune
+	// and R2 backup retention — the ONLY pruner of either on Workers. The
+	// assistant schedule drain that once rode this cron is gone (ADR-0005 D2);
+	// the tick only prunes/retains. Kept in the config so both the wrangler and
+	// installer deploy paths attach it; a dashboard-only upload must add it
+	// manually (docs/DEPLOYMENT_DASHBOARD.md).
+	"triggers": {
+		"crons": [
+			"*/15 * * * *"
+		]
+	},
 	// Cloudflare observability defaults, spelled out explicitly.
 	"observability": {
 		"enabled": true,

@@ -263,6 +263,7 @@ export function readPriorAccount(dir: string, flavorName: string): string {
 export interface RootWorkerConfig {
   compatibility_date?: string;
   observability?: Record<string, unknown>;
+  triggers?: Record<string, unknown>;
 }
 
 // Remove // line comments and /* */ block comments while respecting string
@@ -896,6 +897,10 @@ export async function main(): Promise<void> {
       ],
       r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
       kv_namespaces: [{ binding: "KV", id: kvId }],
+      // Scheduled tick carried verbatim from root (prune + R2 backup retention
+      // — the only pruner on Workers; ADR-0005 W6 keeps it while dropping the
+      // assistant schedule drain).
+      ...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {}),
       observability: resolveObservability(rootConfig),
     };
   } catch (err) {

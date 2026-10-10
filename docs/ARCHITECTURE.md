@@ -679,9 +679,13 @@ one settings row); token streaming, tools, memory, multimodal become direct API
 surface; provider/vendor swap is a settings edit; Worker-portable by
 construction (no child processes anywhere in the AI path); feature velocity —
 most changes touch prompt/tool rows, not plumbing. A killed turn persists its
-partial output incrementally; a crash mid-stream can still leave an
-`assistant_tasks` row `running` (the DO-era reconcile tick and the Bun boot
-sweep are both retired — ADR-0005 W6; this is an accepted residual).
+partial output incrementally; a crash mid-stream can leave an `assistant_tasks`
+row `running`. The backstop is `server/assistant/stale-runs.ts`
+(`sweepStaleAssistantTasks`, 30-minute bound over `COALESCE(started_at,
+created_at)`), called fire-and-forget at both boots (`server/entry.ts`,
+`server/workers-entry.ts` `ensureBoot`) — it fails stale `running` rows so
+reset/resume is never blocked. Residual: a row stranded while the process stays
+up is only swept at the next boot.
 
 **Accepted risks:** TanStack AI is 0.x — pinned exact versions, `chat()`
 imported in exactly one service (`server/assistant/provider.ts`); upgrades are
