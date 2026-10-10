@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { renderTranscript } from "./assistant-chat-utils";
 import type { ChatTurn } from "./assistant-chat-utils";
-import { chipStateFromError, dropUnknownThread, orphanThreadNeedsRecovery, resolveChatId, resolveResendTarget, resumableBatchId, settleThreadCache, staleThreadNeedsRecovery } from "./assistant-chat-logic";
+import { chipStateFromError, dropUnknownThread, orphanThreadNeedsRecovery, resolveChatId, resolveResendTarget, resumableBatchId, settleThreadCache, staleThreadNeedsRecovery, appendEphemeralUserTurn } from "./assistant-chat-logic";
 
 const user = (text: string, rawIndex = -1): ChatTurn => ({ role: "user", text, imageCount: 0, rawIndex });
 const assistant = (text: string, rawIndex = -1, error?: { code: string; message: string }): ChatTurn => ({
@@ -403,5 +403,30 @@ describe("settleThreadCache — terminal/resume cache settle (invariant 6)", () 
     qc.setQueryData(["assistant-chats", "p1", "runbook"], [row("B", "2020-01-01T00:00:00Z")]);
     settleThreadCache({ qc, chatId: "A", projectId: "p1", now: "2026-10-06T00:00:00Z" });
     expect((qc.getQueryData<Array<{ chatId: string }>>(["assistant-chats", "p1", "runbook"]) ?? []).map((t) => t.chatId)).toEqual(["B"]);
+  });
+});
+
+describe("appendEphemeralUserTurn — refused-send retry dedupe (M5b)", () => {
+  it("replaces a trailing identical ephemeral user turn instead of stacking a duplicate", () => {
+    let turns: ChatTurn[] | null = [user("u1", 0), assistant("a1", 1)];
+    turns = appendEphemeralUserTurn(turns, "A", []);
+    turns = appendEphemeralUserTurn(turns, "A", []);
+    turns = appendEphemeralUserTurn(turns, "A", []);
+    expect(turns).toHaveLength(3);
+    expect(turns.map((t) => t.text)).toEqual(["u1", "a1", "A"]);
+    expect(turns.filter((t) => t.role === "user" && t.rawIndex === -1)).toHaveLength(1);
+  });
+
+  it("still appends a genuinely new prompt after a trailing ephemeral turn", () => {
+    let turns: ChatTurn[] | null = [user("u1", 0)];
+    turns = appendEphemeralUserTurn(turns, "A", []);
+    turns = appendEphemeralUserTurn(turns, "B", []);
+    expect(turns.map((t) => t.text)).toEqual(["u1", "A", "B"]);
+  });
+
+  it("does not replace a persisted (rawIndex >= 0) trailing user turn", () => {
+    const turns = appendEphemeralUserTurn([user("A", 5)], "A", []);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]!.rawIndex).toBe(-1);
   });
 });

@@ -27,6 +27,13 @@ import { matchMedia } from "../../lib/viewport";
 import { lastApprovalBatch } from "./assistant-chat-utils";
 import type { LexaSkill } from "../../../shared/types";
 
+// A cleared chip's object URL is revoked by the drop-out effect, so a restored
+// chip must mint a fresh preview URL (its File is still held) or the thumbnail
+// renders broken.
+function withFreshPreview(a: ComposerAttachment): ComposerAttachment {
+  return a.kind === "image" && typeof URL.createObjectURL === "function" ? { ...a, previewUrl: URL.createObjectURL(a.file) } : a;
+}
+
 const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Assistant.";
 const STATUS_DOT_STYLE: React.CSSProperties = { width: 6, height: 6, borderRadius: "50%", background: "var(--lx-text-warning)", display: "inline-block" };
 const QUEUED_TEXT_STYLE: React.CSSProperties = { background: "none", border: 0, padding: 0, font: "inherit", color: "inherit", cursor: "pointer", minWidth: 0 };
@@ -701,7 +708,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   const flushHeld = useCallback(() => {
     if (!queued) return;
-    if (streaming || suspendedLock || busy409 || hasExtractionFailure) return;
+    if (streaming || suspendedLock || hasExtractionFailure) return;
     const accepted = onSend(queued.text, readyRefs());
     if (!accepted) return;
     const sent = attachments.filter((a) => a.status === "ready");
@@ -712,7 +719,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     onUnqueue?.();
     setRejections([]);
     setWarning(null);
-  }, [queued, streaming, suspendedLock, busy409, hasExtractionFailure, onSend, readyRefs, attachments, onUnqueue]);
+  }, [queued, streaming, suspendedLock, hasExtractionFailure, onSend, readyRefs, attachments, onUnqueue]);
 
   // Click the queued chip text to pull the held message back into the draft.
   const editQueuedText = useCallback(() => {
@@ -744,7 +751,10 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
         const present = new Set(prev.map((a) => a.id));
         const restored = sent
           .filter((a) => !present.has(a.id))
-          .map((a) => (ids.includes(a.id) && (typeof filename !== "string" || a.name === filename) ? { ...a, status: "extraction-failed" as const } : a));
+          .map((a) => {
+            const patched = ids.includes(a.id) && (typeof filename !== "string" || a.name === filename) ? { ...a, status: "extraction-failed" as const } : a;
+            return withFreshPreview(patched);
+          });
         return restored.length > 0 ? [...prev, ...restored] : prev;
       });
     }
@@ -764,7 +774,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
       const sent = sentAttachmentsRef.current;
       setAttachments((prev) => {
         const present = new Set(prev.map((a) => a.id));
-        const restored = sent.filter((a) => !present.has(a.id));
+        const restored = sent.filter((a) => !present.has(a.id)).map(withFreshPreview);
         return restored.length > 0 ? [...prev, ...restored] : prev;
       });
     }
@@ -841,7 +851,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                disabled={streaming || suspendedLock || busy409 || hasExtractionFailure}
+                disabled={streaming || suspendedLock || hasExtractionFailure}
                 onClick={flushHeld}
               >
                 Send

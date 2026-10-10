@@ -777,6 +777,31 @@ describe("explicit stop persists a clean stopped turn (M5b)", () => {
     expect(last.stopped).toBe(true);
     expect(Array.isArray(last.toolLog)).toBe(true);
   });
+
+  it("an abort landing AFTER RUN_FINISHED keeps the completed turn (never relabeled stopped)", async () => {
+    const controller = new AbortController();
+    let persisted: unknown[] | null = null;
+    let cancelled = 0;
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "done text" } as unknown as StreamChunk;
+        yield { type: "RUN_FINISHED" } as unknown as StreamChunk;
+        // Stop/disconnect lands after the provider already finished.
+        controller.abort();
+      })()
+    );
+    c.registry.set("c1", controller);
+    c.persist = async (messages) => { persisted = messages; };
+    c.onCancel = async () => { cancelled += 1; };
+
+    const frames = await drain(buildStream(c));
+    expect(frames.at(-1)?.type).toBe("done");
+    const last = persisted!.at(-1) as { stopped?: unknown; error?: unknown; content?: string };
+    expect(last.stopped).toBeUndefined();
+    expect(last.error).toBeUndefined();
+    expect(last.content).toBe("done text");
+    expect(cancelled).toBe(0);
+  });
 });
 
 // SEV: `TOOL_CALL_RESULT` aborted the turn for ANY write tool. In `auto` the

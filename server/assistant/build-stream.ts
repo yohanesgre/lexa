@@ -732,10 +732,12 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           // stream end (no RUN_FINISHED), so `didFinish` is false and the failure
           // branch below would mislabel a deliberate stop as
           // ASSISTANT_GENERATION_FAILED. Persist a clean stopped turn instead —
-          // never the hallucination-guard rewrite either. `drained` empty
-          // distinguishes this from the ask-mode write suspension, which also
-          // aborts but has proposals to suspend.
-          if (drained.length === 0 && abort.signal.aborted && !stalled) {
+          // never the hallucination-guard rewrite either. `!didFinish` keeps a
+          // Stop/disconnect that lands AFTER the provider finished from
+          // re-labeling a completed turn; `drained` empty distinguishes this
+          // from the ask-mode write suspension, which also aborts but has
+          // proposals to suspend.
+          if (drained.length === 0 && !didFinish && abort.signal.aborted && !stalled) {
             const citationsStop = ctx.getCitations();
             await persistTerminalTurn({ stopped: true, ...(citationsStop.length > 0 ? { citations: citationsStop } : {}), ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onCancel().catch(() => {});

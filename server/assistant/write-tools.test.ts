@@ -601,6 +601,19 @@ describe("write-tools auto/deny records (permission modes)", () => {
     expect(applied).toEqual(["Alpha", "Beta"]);
   });
 
+  it("auto dedupes the same args regardless of key order, including nested (canonicalJson)", async () => {
+    const applied: unknown[] = [];
+    const record = buildAutoWriteRecord({
+      apply: async (_name, args) => { applied.push(args); return { ok: true }; },
+    });
+    const t = tool(record, "create_task");
+    const docA = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] };
+    const docB = { content: [{ content: [{ text: "hi", type: "text" }], type: "paragraph" }], type: "doc" };
+    await t.execute({ title: "T", description: docA });
+    await t.execute({ description: docB, title: "T" });
+    expect(applied).toHaveLength(1);
+  });
+
   it("auto surfaces an apply failure as a recoverable error", async () => {
     const record = buildAutoWriteRecord({ apply: async () => ({ ok: false, error: "FORBIDDEN: nope" }) });
     const out = await tool(record, "archive_task").execute({ ref: "NIM-1" });

@@ -175,7 +175,16 @@ export function ephemeralUserTurn(message: string, attachments: ChatAttachmentRe
 }
 
 export function appendEphemeralUserTurn(prev: ChatTurn[] | null, message: string, attachments: ChatAttachmentRef[]): ChatTurn[] {
-  return [...(prev ?? []), ephemeralUserTurn(message, attachments)];
+  const arr = prev ?? [];
+  const last = arr[arr.length - 1];
+  // A retry after a refused (409) send re-appends the same prompt while the
+  // previous optimistic turn is still trailing (a fresh/undloaded thread keeps
+  // it — no transcript to settle against). Replace that trailing ephemeral turn
+  // instead of stacking an identical bubble, so N retries show one bubble (M5b).
+  if (last && last.role === "user" && last.rawIndex === -1 && last.text === message) {
+    return [...arr.slice(0, -1), ephemeralUserTurn(message, attachments)];
+  }
+  return [...arr, ephemeralUserTurn(message, attachments)];
 }
 
 // Keep turns up to & including `target` (optionally rewriting its text) —
