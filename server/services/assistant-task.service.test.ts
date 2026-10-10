@@ -216,6 +216,7 @@ beforeEach(() => {
 
 afterEach(() => {
   service?.activeTasks.clear();
+  service?.activeDocuments.clear();
   vi.unstubAllGlobals();
   try { db?.close(); } catch {}
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -501,6 +502,10 @@ INSERT INTO assistant_threads (document_type, document_id, project_id, owner_use
     // an empty stream as a stall and retrying forever (parity with chat).
     expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
+    // The pre-existing claim SURVIVES a duplicate resume (it is never released);
+    // this is what distinguishes a duplicate from the marker-with-no-rows case.
+    const claims = (db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get() as { n: number }).n;
+    expect(claims).toBe(1);
   });
 
   it("a marker with no rows settles with a terminal done frame and releases the claim", async () => {

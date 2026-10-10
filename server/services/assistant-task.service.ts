@@ -46,6 +46,32 @@ import type { TaskRef } from "../assistant/tools";
 
 const activeTasks = new Map<string, AbortController>();
 
+// Per-document single-run lock (ADR-0005 D6, W3). Keyed by
+// `${projectId}:${documentType}:${documentId}` and holding the SAME
+// AbortController the run registers in `activeTasks`, so the lock, the
+// stop/disconnect abort, and the stream registry are one entry. A second run on
+// a live document thread is refused 409 instead of racing the thread (two tabs
+// used to each stream a task and silently drop one turn).
+const activeDocuments = new Map<string, AbortController>();
+
+const documentLockKey = (projectId: string, documentType: "task" | "wiki", documentId: string): string =>
+  `${projectId}:${documentType}:${documentId}`;
+
+// Acquire the document lock with the run's controller. Returns null when the
+// document already has a live run. Synchronous check-and-set (single-threaded),
+// so two concurrent fibers cannot both win.
+function tryAcquireDocument(projectId: string, documentType: "task" | "wiki", documentId: string, controller: AbortController): AbortController | null {
+  const key = documentLockKey(projectId, documentType, documentId);
+  if (activeDocuments.has(key)) return null;
+  activeDocuments.set(key, controller);
+  return controller;
+}
+
+function releaseDocument(projectId: string, documentType: "task" | "wiki", documentId: string, controller: AbortController): void {
+  const key = documentLockKey(projectId, documentType, documentId);
+  if (activeDocuments.get(key) === controller) activeDocuments.delete(key);
+}
+
 export class AssistantTaskService extends Effect.Service<AssistantTaskService>()("Lexa/AssistantTaskService", {
   dependencies: [AssistantTaskRepo.Default, AssistantCatalogRepo.Default, AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, ActivityService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, AssistantProvidersService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
@@ -288,6 +314,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
 
     return {
       activeTasks,
+      activeDocuments,
       MAX_TOOL_ROUNDS,
       abortStream: (taskId: string): boolean => { activeTasks.get(taskId)?.abort(); return activeTasks.has(taskId); },
 
@@ -343,6 +370,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       cancel: (id: string) => cancelTask(id),
 
       enqueue: (input: { projectId: string; documentType: "task" | "wiki"; documentId: string; prompt: string; agentId: string; skillId?: string; selection?: string; attachments?: Array<{ storageKey: string; mimeType: string; name: string }> }) => Effect.gen(function* () {
+        // Per-document single-run guard (D6): a second live run on the same
+        // document thread is refused 409 before a task row is created. The
+        // authoritative guard is the stream's document lock (runStream); this
+        // just fails fast for the common create-while-running case.
+        if (activeDocuments.has(documentLockKey(input.projectId, input.documentType, input.documentId))) return yield* new AssistantTaskActive();
         const settingsRow = yield* getSettingsOrFail(input.projectId);
         yield* catalogRepo.findAgentById(input.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId })));
         // Auto skill selection: an absent/blank skillId means the assistant picks
@@ -370,8 +402,25 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         yield* threadRepo.resetThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType, documentId })));
       }),
-      runStream: (taskId: string, opts?: { userId?: string }) => Effect.gen(function* () {
+      runStream: (taskId: string, opts?: { userId?: string }) => {
+        let docLock: { projectId: string; documentType: "task" | "wiki"; documentId: string; controller: AbortController } | null = null;
+        return Effect.gen(function* () {
         const task = yield* queueRepo.claimAssistantTask(taskId).pipe(Effect.catchTag("ConstraintViolation", () => new AssistantTaskActive()), Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id: taskId })));
+        // Register the run's AbortController BEFORE the setup awaits so a Stop /
+        // client disconnect during setup is not a no-op (buildStream reuses it
+        // via `existing ?? new AbortController()`). Mirrors tryAcquireChat.
+        const controller = new AbortController();
+        activeTasks.set(taskId, controller);
+        // Per-document single-run lock (D6): the same controller is the lock, so
+        // a second live run on this document thread is refused 409 rather than
+        // racing the thread. The freshly-claimed row is settled failed so it
+        // never sticks `running`.
+        if (tryAcquireDocument(task.projectId, task.documentType, task.documentId, controller) === null) {
+          activeTasks.delete(taskId);
+          yield* failTask(taskId, "ASSISTANT_TASK_ACTIVE").pipe(Effect.catchAll(() => Effect.succeed(null)));
+          return yield* new AssistantTaskActive();
+        }
+        docLock = { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, controller };
         const settingsRow = yield* getSettingsOrFail(task.projectId);
         const config = configFromRow(settingsRow);
         const existing = yield* threadRepo.loadThread(task.documentType, task.documentId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
@@ -442,30 +491,66 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         return buildStream({
           keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as object) } as never),
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(task.projectId), imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, ...(mcp ? { onDispose: mcp.close } : {}),
+          historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(task.projectId), imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: (text) => Effect.runPromise(completeTask(taskId, text)).then(() => {}).catch(() => {}),
           onFail: (message) => Effect.runPromise(failTask(taskId, message)).then(() => {}).catch(() => {}),
           onCancel: async () => { await Effect.runPromise(cancelTask(taskId)).catch(() => {}); },
+          // Release the document lock when the stream settles (success, error,
+          // or abort); buildStream already dropped the abort registry entry.
+          onDispose: async () => { try { if (mcp) await mcp.close(); } finally { releaseDocument(task.projectId, task.documentType, task.documentId, controller); } },
         });
-      }),
-      resumeThreadStream: (documentType: "task" | "wiki", documentId: string) => Effect.gen(function* () {
+        }).pipe(Effect.tapError(() => Effect.sync(() => {
+          activeTasks.delete(taskId);
+          if (docLock !== null) releaseDocument(docLock.projectId, docLock.documentType, docLock.documentId, docLock.controller);
+        })));
+      },
+      resumeThreadStream: (documentType: "task" | "wiki", documentId: string) => {
+        let docLock: { projectId: string; documentType: "task" | "wiki"; documentId: string; controller: AbortController } | null = null;
+        return Effect.gen(function* () {
         const thread = yield* threadRepo.loadThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType, documentId })));
+        // Register the resume's AbortController before the setup awaits (a Stop
+        // or disconnect during setup must not be a no-op) and take the
+        // per-document lock (D6). buildStream reuses this controller
+        // (keyId = documentId).
+        const controller = new AbortController();
+        activeTasks.set(documentId, controller);
+        const release = () => {
+          activeTasks.delete(documentId);
+          releaseDocument(thread.projectId, documentType, documentId, controller);
+        };
+        if (tryAcquireDocument(thread.projectId, documentType, documentId, controller) === null) {
+          release();
+          return yield* new AssistantTaskActive();
+        }
+        docLock = { projectId: thread.projectId, documentType, documentId, controller };
         const tasks = yield* queueRepo.listTasksForDocument(thread.projectId, documentType, documentId);
-        if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
+        // A running row whose stream already died (lock released) is still a
+        // conflict — keep the DB-level check alongside the in-memory lock.
+        if (tasks.some((t) => t.status === "running")) {
+          release();
+          return yield* new AssistantTaskActive();
+        }
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         // Claim BEFORE any work so a retry / second tab cannot re-execute the
         // same approved writes. `duplicate` no-ops; only a missing claim table
         // proceeds without a claim (`unclaimed`).
         const batchId = findPendingBatch(thread.messages);
-        if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
+        if (batchId === null) {
+          release();
+          return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
+        }
         const claim = yield* claimResumeBatch(db, batchId);
-        if (claim === "duplicate") return emptyFrameStream();
+        if (claim === "duplicate") {
+          release();
+          return emptyFrameStream();
+        }
         // Marker with no rows: nothing to execute — release and settle WITHOUT
         // a provider turn (parity with the chat resume path).
         const rows = yield* pendingWritesRepo.listByBatch(batchId);
         if (rows.length === 0) {
           yield* releaseResumeBatch(db, batchId);
+          release();
           return emptyFrameStream();
         }
         const prepared = yield* Effect.either(prepareResume(thread));
@@ -473,6 +558,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           // Not executable (still pending / no marker): release so a later
           // attempt can resume it, then surface the same error as before.
           yield* releaseResumeBatch(db, batchId);
+          release();
           return yield* Effect.fail(prepared.left);
         }
         const { messages: history, results: approvalResults, resumeResultsNote } = prepared.right;
@@ -511,11 +597,18 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         return buildStream({
           keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
-          userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+          userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
+          // Release the document lock when the stream settles; buildStream
+          // already dropped the abort registry entry.
+          onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
         });
-      }),
+        }).pipe(Effect.tapError(() => Effect.sync(() => {
+          activeTasks.delete(documentId);
+          if (docLock !== null) releaseDocument(docLock.projectId, docLock.documentType, docLock.documentId, docLock.controller);
+        })));
+      },
       decideApproval: (approvalId: string, userId: string, verdict: "approve" | "reject") => Effect.gen(function* () {
         yield* pendingWritesRepo.sweepExpired();
         const row = yield* pendingWritesRepo.getById(approvalId);
