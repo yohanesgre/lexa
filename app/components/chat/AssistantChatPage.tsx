@@ -11,8 +11,8 @@ import {
   useUploadChatAttachment,
 } from "../../lib/queries";
 import { useAssistantStream } from "../../lib/use-assistant-stream";
-import type { AssistantRunsLive } from "../../lib/use-assistant-runs";
-import { mergeRunCard, type SpawnedRunRef } from "../../lib/assistant-run-adapter";
+import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
+import { mergeRunCard } from "../../lib/assistant-run-adapter";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
@@ -75,12 +75,6 @@ import type { ChatAttachmentRef } from "../../lib/assistant-image";
 
 // No live delegated-run frames on the SSE tier (delegation dropped in v1,
 // ADR-0005 D3): the run card renders from its persisted row alone.
-const NO_LIVE_RUNS: AssistantRunsLive = {
-  runsById: {},
-  liveRunIds: new Set<string>(),
-  liveFromByRunId: {},
-  resetLocalState: () => {},
-};
 
 export function AssistantChatPage({ slug, thread }: { slug: string; thread?: string | undefined }) {
   const qc = useQueryClient();
@@ -533,12 +527,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       if (!row) return null;
       return (
         <AssistantRunCard
-          model={mergeRunCard(
-            row,
-            NO_LIVE_RUNS.runsById[ref.runId],
-            NO_LIVE_RUNS.liveRunIds.has(ref.runId),
-            NO_LIVE_RUNS.liveFromByRunId[ref.runId] ?? 0
-          )}
+          model={mergeRunCard(row, undefined, false, 0)}
           onAbort={handleRunAbort}
           onRetry={handleRunRetry}
         />

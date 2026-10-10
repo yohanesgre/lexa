@@ -20,9 +20,7 @@ import {
   readPriorAccount,
   readRootWranglerConfig,
   resolveAccountOrDie,
-  resolveAiBinding,
   resolveDeployVars,
-  resolveDurableObjects,
   resolveNames,
   resolveObservability,
   selectAccount,
@@ -302,71 +300,6 @@ describe("readRootWranglerConfig JSONC scanner", () => {
   });
 });
 
-describe("root durable objects / migrations", () => {
-  const ROOT = fileURLToPath(new URL("..", import.meta.url));
-
-  test("the generated per-deploy config carries root's DO binding + sqlite migration", () => {
-    const blocks = resolveDurableObjects(readRootWranglerConfig(ROOT));
-    expect(blocks.durable_objects).toEqual({
-      bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }],
-    });
-    expect(blocks.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }]);
-  });
-
-  test("a missing or malformed durable_objects block fails loud", () => {
-    expect(() => resolveDurableObjects({} as RootWorkerConfig)).toThrow(/durable_objects/);
-    expect(() =>
-      resolveDurableObjects({ durable_objects: [], migrations: [{}] } as unknown as RootWorkerConfig)
-    ).toThrow(/durable_objects/);
-    expect(() =>
-      resolveDurableObjects({ durable_objects: { bindings: [] } } as unknown as RootWorkerConfig)
-    ).toThrow(/durable_objects/);
-    expect(() =>
-      resolveDurableObjects({
-        durable_objects: { bindings: [{ name: "OTHER", class_name: "Other" }] },
-        migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
-      } as unknown as RootWorkerConfig)
-    ).toThrow(/ASSISTANT_AGENT/);
-  });
-
-  test("a missing or empty migrations block fails loud", () => {
-    const withDo = {
-      durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }] },
-    } as RootWorkerConfig;
-    expect(() => resolveDurableObjects(withDo)).toThrow(/migrations/);
-    expect(() =>
-      resolveDurableObjects({ ...withDo, migrations: [] } as RootWorkerConfig)
-    ).toThrow(/migrations/);
-    expect(() =>
-      resolveDurableObjects({
-        ...withDo,
-        migrations: [{ tag: "v1", new_sqlite_classes: ["Other"] }],
-      } as RootWorkerConfig)
-    ).toThrow(/new_sqlite_classes/);
-  });
-});
-
-describe("root AI binding (H9)", () => {
-  const ROOT = fileURLToPath(new URL("..", import.meta.url));
-
-  test("the generated per-deploy config carries root's ai binding", () => {
-    expect(resolveAiBinding(readRootWranglerConfig(ROOT))).toMatchObject({
-      ai: { binding: "AI", remote: true },
-    });
-  });
-
-  test("an absent ai block is omitted (older clones still deploy)", () => {
-    expect(resolveAiBinding({} as RootWorkerConfig)).toEqual({});
-  });
-
-  test("a malformed ai block fails loud", () => {
-    expect(() => resolveAiBinding({ ai: [] } as unknown as RootWorkerConfig)).toThrow(/ai/);
-    expect(() => resolveAiBinding({ ai: {} } as unknown as RootWorkerConfig)).toThrow(/binding/);
-    expect(() => resolveAiBinding({ ai: { binding: "" } } as unknown as RootWorkerConfig)).toThrow(/binding/);
-    expect(() => resolveAiBinding({ ai: { binding: "MY_AI" } } as unknown as RootWorkerConfig)).toThrow(/env\.AI/);
-  });
-});
-
 describe("per-deploy version marker + public URL (LX-36)", () => {
   const ROOT = fileURLToPath(new URL("..", import.meta.url));
   const ROOT_VERSION = (
@@ -446,14 +379,15 @@ describe("source order — account resolves before any resource is created", () 
     expect(resolveIdx).toBeLessThan(ensureIdx);
   });
 
-  test("main emits the DO blocks: resolveDurableObjects(rootConfig) spread into the config", () => {
+  test("main no longer emits DO/AI blocks: no resolveDurableObjects/resolveAiBinding in the generated config", () => {
     const src = readFileSync(
       new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
-    expect(src).toContain("resolveDurableObjects(rootConfig)");
-    expect(src).toContain("durable_objects,");
-    expect(src).toContain("migrations,");
+    expect(src).not.toContain("resolveDurableObjects");
+    expect(src).not.toContain("resolveAiBinding");
+    expect(src).not.toContain("resolveServiceBindings");
+    expect(src).not.toContain("durable_objects,");
   });
 
   test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {
@@ -464,12 +398,14 @@ describe("source order — account resolves before any resource is created", () 
     expect(src).toContain("observability: resolveObservability(rootConfig)");
   });
 
-  test("main emits the AI binding: resolveAiBinding(rootConfig) spread into the config", () => {
+  test("main carries root's scheduled tick (prune + backup retention) into the generated config", () => {
+    const ROOT = fileURLToPath(new URL("..", import.meta.url));
+    expect(readRootWranglerConfig(ROOT).triggers).toEqual({ crons: ["*/15 * * * *"] });
     const src = readFileSync(
       new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
-    expect(src).toContain("...resolveAiBinding(rootConfig),");
+    expect(src).toContain("...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {})");
   });
 
   test("main emits the ASSETS binding on the static-assets directory", () => {

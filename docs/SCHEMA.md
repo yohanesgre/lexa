@@ -649,23 +649,21 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- api_keys.key_hash is indexed by its UNIQUE constraint.
 
 -- ============================================================
--- Assistant (Cloudflare Workers only — ADR-0003)
+-- Assistant (in-process TanStack AI SSE tier — ADR-0005)
 -- ============================================================
 -- Every `assistant_*` table below stays in the shared, flavor-agnostic
--- migration set (the Bun flavor keeps them inert; D1 cannot drop columns cheaply).
--- On Workers the assistant runs on `@cloudflare/ai-chat` Durable Objects: DO
--- SQLite is the CANONICAL message store (replay/resume/recovery), and the D1
--- `assistant_threads` row is a per-step MIRROR (list/search/export may lag by
--- one mirror write). The Bun flavor serves no assistant routes and
--- reports `assistant:false` from `/api/capabilities`.
+-- migration set. The assistant runs in-process on BOTH flavors (ADR-0005 W6;
+-- the ADR-0003 `@cloudflare/ai-chat` Durable Object executor is retired). D1
+-- `assistant_threads` is the SINGLE canonical message store — there is no DO
+-- SQLite and no mirror. Both flavors report `assistant:true` from
+-- `/api/capabilities`.
 -- ============================================================
 -- Assistant task queue (document Generate)
 -- ============================================================
 -- assistant_tasks: the document-Generate queue. Rows are created from the
--- editor popover, enqueued into the per-thread DO (`enqueueRun`), and completed
--- there; status/terminal transitions are written back through the Worker
--- internal route. No daemon/machine columns — the assistant runs in a
--- per-thread Durable Object (Workers only; renamed from runtime_tasks by
+-- editor popover and completed by the in-process task stream
+-- (`AssistantTaskService`); status/terminal transitions are written in the
+-- same process. No daemon/machine columns (renamed from runtime_tasks by
 -- 0008_remove_agent_runtimes.sql).
 CREATE TABLE assistant_tasks (
   id            TEXT PRIMARY KEY,
@@ -846,12 +844,11 @@ SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
 -- opencode's auto-compaction. document_type 'chat' rows are keyed by a chat
 -- id and scoped to `owner_user_id`.
 --
--- Workers-only storage role (ADR-0003): this D1 row is a MIRROR of the
--- canonical DO SQLite store — the per-thread Durable Object is authoritative
--- for replay/resume/recovery and writes this row per persisted step. List,
--- search, and export read the mirror and may lag by one mirror write; the
--- canonical transcript read goes to the DO with a D1 fallback. On the Bun flavor
--- the table is inert (the flavor serves no assistant routes).
+-- Storage role (ADR-0005): D1 is the SINGLE canonical assistant store on both
+-- flavors — there is no DO SQLite and no mirror. The in-process tier writes
+-- this row directly (incremental partial persists during a turn, a terminal
+-- persist that replaces them, and a `stopped: true` persist on abort). List,
+-- search, export, and the transcript read all read this row.
 --
 -- Multi-thread chat: chat rows are N-per-(project_id, owner_user_id), each
 -- keyed by its own chat id. `title` is the list label — derived once from the
@@ -1212,7 +1209,7 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- ('turn','runner','preflight','summary') with DEFAULT 'turn'. Rows and the
 -- three call-log indexes are preserved verbatim.
 -- 0024_assistant_call_log_cached_write_in.sql adds `cached_write_in` (cache-write
--- tokens) so a DO-computed cost can be reproduced from the row; additive
+-- tokens) so a computed cost can be reproduced from the row; additive
 -- ALTER (no CHECK change, so no rebuild).
 -- 0027_drop_idx_wiki_project.sql drops the redundant `idx_wiki_project`
 -- (project_id): UNIQUE(project_id, slug) already carries project_id as its
@@ -1265,11 +1262,12 @@ existing hard delete).
   `deleted_at` (hidden from timeline). No revision history — edit overwrites
   `body`.
 
-### Assistant (Workers-only DO runtime) + removed agent-runtime tier
+### Assistant (in-process SSE tier) + removed agent-runtime tier
 The document **Generate** button in the task/wiki editors and freeform chat both
-run through the Workers-only Durable Object assistant (ADR-0003). There is no
-external daemon, machine registry, or warm-session state anymore — the former
-"Runtimes"/Blacksmith tier
+run through the **in-process TanStack AI SSE tier on both flavors** (ADR-0005;
+the ADR-0003 Workers-only Durable Object executor is retired). There is no
+external daemon, machine registry, warm-session state, or Durable Object — the
+former "Runtimes"/Blacksmith tier
 was deleted by `0008_remove_agent_runtimes.sql` (tables `runtimes`, `machines`,
 `runtime_events`, `runtime_sessions`, `runtime_task_logs` dropped; `runtime_tasks`
 rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
@@ -1295,10 +1293,11 @@ rebuilt+renamed to `assistant_tasks`; `assistant_settings.engine` +
 - **Auth:** every assistant endpoint is a normal Bearer/session-authenticated API
   call. The `x-runtime-token` daemon credential and the `/api/runtimes/*` routes
   no longer exist.
-- **Recovery (no boot sweep):** in-flight turns run via the DO's `runFiber` +
-  `chatRecovery` (ADR-0003 §B.5) — a turn survives isolate eviction/redeploy and
-  on give-up is marked failed through the internal route. The former Bun
-  boot-time stale-`running` sweep is removed with the Bun assistant code.
+- **Recovery:** the turn does not survive isolate eviction/redeploy (accepted
+  class, ADR-0005 §Reliability). Partial output persists incrementally; a
+  disconnect/reload aborts the run and persists the partial turn with
+  `stopped: true`. A resume claim (`assistant_resume_claims`) makes a second
+  resume a no-op. There is no DO `runFiber`/`chatRecovery` and no internal route.
 - **Vision resolution order** (per request): a configured `vision_model` → the
   internal `analyze_image` delegation (delegate); else `primary_supports_images=1`
   → inline image parts; else `VISION_NOT_CONFIGURED` (409). **Current phase:** a

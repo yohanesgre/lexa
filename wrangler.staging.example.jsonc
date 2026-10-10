@@ -74,14 +74,6 @@
       "id": "<KV_NAMESPACE_ID>"
     }
   ],
-  "services": [
-    { "binding": "ASSISTANT_SERVICE", "service": "lexa-staging" }
-  ],
-  "ai": { "binding": "AI" },
-  "durable_objects": {
-    "bindings": [{ "name": "ASSISTANT_AGENT", "class_name": "LexaAssistantAgent" }]
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] }],
   "triggers": {
     "crons": ["*/15 * * * *"]
   },

@@ -11,7 +11,8 @@
 // session, invite acceptance) + every other /api/* (the full HttpApi app:
 // Bearer keys AND session cookies, same middleware order/semantics as the
 // Bun host) + scheduled handler (event prune + R2 backup-retention prune,
-// cron */15 * * * * in wrangler.jsonc). Non-API GETs: /share/* goes to the
+// cron `*/15 * * * *` in wrangler.jsonc; the assistant schedule drain that once
+// rode this cron is gone — ADR-0005 D2). Non-API GETs: /share/* goes to the
 // TanStack Start handler (server-rendered, OG meta); every other route is
 // client-only and served the prerendered SPA shell. In source `wrangler dev`
 // the Start import is shimmed (Vite-virtuals are unresolvable outside the
@@ -32,17 +33,14 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import type {
   D1Database,
-  DurableObjectNamespace,
   ExecutionContext,
   ExportedHandler,
-  Fetcher,
   KVNamespace,
   R2Bucket,
   Request as WorkersRequest,
   Response as WorkersResponse,
   ScheduledController,
 } from "@cloudflare/workers-types";
-import { getAgentByName } from "agents";
 import { getEnvFromWorkers, legacyGithubEnvVars, type RuntimeEnv } from "./env";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
 import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
@@ -63,23 +61,10 @@ import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
 import { capabilitiesFromRuntimeEnv } from "./capabilities";
-import { LexaAssistantAgent } from "./assistant/agent";
-import { reconcileStaleRuns, reconcileStaleDocumentRuns } from "./assistant/run-registry";
-
-export { LexaAssistantAgent };
-// Delegation facet child (ADR-0004 §3; H3). Exported from the worker entry so
-// the SDK's dynamic-agents machinery can resolve it via `ctx.exports`; facets
-// need no `new_sqlite_classes` migration entry (they are not top-level DO
-// bindings). The export name must match the class name exactly.
-export { LexaAssistantRunner } from "./assistant/runner";
-
-type AssistantAgentNamespace = Parameters<typeof getAgentByName>[0];
+import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
 
 export interface WorkersEnv {
   DB?: D1Database;
-  ASSISTANT_AGENT?: AssistantAgentNamespace;
-  // Self service binding the DO uses to reach the internal routes (R7).
-  ASSISTANT_SERVICE?: Fetcher;
   BLOB?: R2Bucket;
   KV?: KVNamespace;
   LXK_ENV?: string;
@@ -101,9 +86,6 @@ export interface WorkersEnv {
   LXK_SECRETS_MASTER_KEY_PREV?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
-  // Pre-cutover DO transcript sweep (ADR-0005 W4b): "1" runs the one-shot sweep
-  // on the per-isolate boot. Idempotent; unset after the drain.
-  LXK_SWEEP_DO_TRANSCRIPTS?: string;
 }
 
 type BaseLayers = Layer.Layer<Db | RuntimeEnvTag>;
@@ -165,18 +147,14 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
           yield* backfillProviderSecrets(driver, runtimeEnv);
         }).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] boot sync failed:", String(e)))))
       );
-      // Pre-cutover DO transcript sweep (ADR-0005 W4b). Opt-in and idempotent:
-      // imports any DO-only tail into D1 before the route flip drains the DO.
-      // Dynamic import so the sweep module stays off the steady-state graph.
-      if (env.LXK_SWEEP_DO_TRANSCRIPTS === "1") {
-        try {
-          const { runSweepDoTranscripts } = await import("../scripts/sweep-do-transcripts");
-          const report = await runSweepDoTranscripts(env as unknown as { DB?: unknown; ASSISTANT_AGENT?: unknown });
-          if (report) console.log(`[do-sweep] ${JSON.stringify(report)}`);
-        } catch (e) {
-          console.error("[do-sweep] sweep failed:", e instanceof Error ? e.message : String(e));
-        }
-      }
+      // Boot-time stale assistant-task sweep (ADR-0005 §Reliability backstop):
+      // fail `assistant_tasks` rows stranded `running` by a crash/eviction so
+      // reset/resume is never blocked. Fire-and-forget — never blocks boot.
+      void Effect.runPromise(sweepStaleAssistantTasks(driver))
+        .then(({ failed }) => {
+          if (failed > 0) console.log(`[Assistant] failed ${failed} stale running task(s)`);
+        })
+        .catch((e) => console.error("[Assistant] stale-task sweep failed:", e instanceof Error ? e.message : String(e)));
     })().catch((e) => {
       console.error("[Workers] boot failed:", e instanceof Error ? e.message : String(e));
     });
@@ -486,9 +464,9 @@ export async function pruneR2Backups(blob: R2Bucket, retention: number): Promise
   return Array.from(doomed).sort();
 }
 
-// ADR-0005 D2: scheduled assistant runs are dropped. The cron no longer fires
-// `assistant_schedules` (the DO executor that consumed them is retired); the
-// tables and REST CRUD stay inert.
+// ADR-0005 D2: scheduled assistant runs are dropped. The retired DO executor
+// was the only consumer of `assistant_schedules`; the tables and REST CRUD stay
+// inert. This tick keeps the platform prune + backup retention only.
 async function runScheduled(env: WorkersEnv): Promise<void> {
   await ensureBoot(env);
   const { runtimeEnv, driver } = requestLayers(env);
@@ -515,25 +493,6 @@ export async function runScheduledCore(
     } catch (e) {
       console.error("[Workers] backup retention prune failed:", e instanceof Error ? e.message : String(e));
     }
-  }
-  // Stale run reconciliation (ADR-0004 §3): fail runs that outlived their
-  // wall-clock budget. Fail-open: a reconciliation error must never break the
-  // prune tick.
-  try {
-    const reconciled = await Effect.runPromise(reconcileStaleRuns(driver));
-    if (reconciled.failed > 0) console.log(`[Workers] assistant stale runs failed: ${reconciled.failed}`);
-  } catch (e) {
-    console.error("[Workers] assistant run reconciliation failed:", e instanceof Error ? e.message : String(e));
-  }
-  // Document-run reconciliation (LX-134): a crash/evict after the
-  // `queued → running` claim leaves an `assistant_tasks` row `running` forever;
-  // the registry sweep above only covers `assistant_runs`. Direct UPDATE, no
-  // activity. Fail-open: a reconciliation error must never break the tick.
-  try {
-    const reconciledDocs = await Effect.runPromise(reconcileStaleDocumentRuns(driver));
-    if (reconciledDocs.failed > 0) console.log(`[Workers] assistant stale document runs failed: ${reconciledDocs.failed}`);
-  } catch (e) {
-    console.error("[Workers] assistant document-run reconciliation failed:", e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -591,12 +550,9 @@ const handler: ExportedHandler<WorkersEnv> = {
         });
         return res as unknown as WorkersResponse;
       }
-      // ADR-0005 W4: the assistant runs in-process through the HttpApi app
-      // below — no WebSocket gate, no `/api/internal/assistant/*` HMAC surface.
-      // The DO modules stay in the tree (W6 deletes them) but are off every live
-      // path. The remaining DO references are the class exports the wrangler DO
-      // binding/facet need, the `ASSISTANT_AGENT` type on `WorkersEnv`, and the
-      // opt-in boot sweep (`LXK_SWEEP_DO_TRANSCRIPTS`).
+      // ADR-0005 W6: the assistant runs in-process through the HttpApi app
+      // below — no WebSocket gate, no `/api/internal/assistant/*` HMAC surface,
+      // no Durable Object. The DO modules are deleted.
       if (path.startsWith("/api/")) {
         return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
       }

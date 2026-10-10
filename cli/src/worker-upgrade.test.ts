@@ -57,8 +57,6 @@ function priorConfig(overrides: Partial<WorkerConfigJson> = {}): WorkerConfigJso
     d1_databases: [{ binding: "DB", database_name: "lexa", database_id: "d1-abc" }],
     r2_buckets: [{ binding: "BLOB", bucket_name: "lexa-blobs" }],
     kv_namespaces: [{ binding: "KV", id: "kv-abc" }],
-    durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }] },
-    migrations: [{ new_sqlite_classes: ["LexaAssistantAgent"] }],
     observability: { enabled: true },
     ...overrides,
   };
@@ -116,8 +114,6 @@ function stageFixture(dest: string): void {
     JSON.stringify({
       compatibility_date: "2026-08-01",
       observability: { enabled: true },
-      durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" }] },
-      migrations: [{ new_sqlite_classes: ["LexaAssistantAgent"] }],
     }),
   );
 }
@@ -409,7 +405,10 @@ describe("worker upgrade state preservation", () => {
     expect(rebuilt.d1_databases).toEqual(prior.d1_databases);
     expect(rebuilt.r2_buckets).toEqual(prior.r2_buckets);
     expect(rebuilt.kv_namespaces).toEqual(prior.kv_namespaces);
-    expect(rebuilt.durable_objects).toEqual(prior.durable_objects);
+    // ADR-0005 W6: the assistant DO is retired — an upgrade drops the DO blocks
+    // (they are no longer derived from root nor carried over from prior).
+    expect(rebuilt.durable_objects).toBeUndefined();
+    expect(rebuilt.migrations).toBeUndefined();
     expect(rebuilt.vars?.LXK_VERSION).toBe("2.0.0");
     // Custody untouched.
     expect(readFileSync(cfToken, "utf-8")).toBe("saved-token\n");

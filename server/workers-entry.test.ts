@@ -15,8 +15,6 @@ import {
   runScheduledCore,
   type WorkersEnv,
 } from "./workers-entry";
-import { LexaAssistantRunner as RunnerFromModule } from "./assistant/runner";
-import { LexaAssistantRunner as RunnerFromEntry } from "./workers-entry";
 
 // ManagedRuntime.make in the webhook handler returns an object literal whose
 // `dispose` is an own property (not on a prototype), so a prototype spy can't
@@ -141,103 +139,6 @@ describe("runScheduledCore", () => {
     expect(r2.deleted.sort()).toEqual([
       "backups/lexa-2026-09-01-00-00-00.db.gz",
     ]);
-  });
-
-  it("reconciles stale registry runs and stale claimed document runs on the tick", async () => {
-    const driver = memDriver();
-    await Effect.runPromise(
-      batch(driver, [
-        { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
-        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
-        {
-          sql: `CREATE TABLE assistant_runs (
-            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_key TEXT NOT NULL,
-            parent_run_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
-            goal TEXT NOT NULL, result TEXT, error TEXT, budget_ms INTEGER,
-            steps_used INTEGER NOT NULL DEFAULT 0, created_by TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT)`,
-          params: [],
-        },
-        {
-          sql: `CREATE TABLE assistant_tasks (
-            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, document_type TEXT NOT NULL,
-            document_id TEXT NOT NULL, agent_id TEXT NOT NULL, skill_id TEXT,
-            extra_prompt TEXT NOT NULL DEFAULT '', selection TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'queued', result TEXT, error TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT)`,
-          params: [],
-        },
-        {
-          sql: `INSERT INTO assistant_runs (id, project_id, thread_key, kind, status, goal, budget_ms, created_at)
-                VALUES ('stale-1', 'p1', 'chat:stale', 'chat_run', 'running', 'old', 1000, datetime('now', '-1 hour'))`,
-          params: [],
-        },
-        {
-          sql: `INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, status, created_at, started_at)
-                VALUES ('doc-stale', 'p1', 'task', 't1', 'asst', 'running', datetime('now', '-2 hours'), datetime('now', '-2 hours'))`,
-          params: [],
-        },
-      ])
-    );
-
-    await runScheduledCore(driver, {}, undefined);
-
-    const stale = await Effect.runPromise(
-      Effect.gen(function* () {
-        const { queryFirst } = yield* Effect.promise(() => import("./db/db"));
-        return yield* queryFirst<{ status: string; error: string | null }>(
-          driver,
-          "SELECT status, error FROM assistant_runs WHERE id = 'stale-1'"
-        );
-      })
-    );
-    expect(stale.status).toBe("failed");
-    expect(stale.error).toBe("run exceeded its wall-clock budget");
-
-    // The same tick sweeps a stale claimed document run (`assistant_tasks`).
-    const staleDoc = await Effect.runPromise(
-      Effect.gen(function* () {
-        const { queryFirst } = yield* Effect.promise(() => import("./db/db"));
-        return yield* queryFirst<{ status: string; error: string | null }>(
-          driver,
-          "SELECT status, error FROM assistant_tasks WHERE id = 'doc-stale'"
-        );
-      })
-    );
-    expect(staleDoc.status).toBe("failed");
-    expect(staleDoc.error).toBe("run abandoned");
-  });
-
-  it("fails open when the document sweep errors", async () => {
-    const driver = memDriver();
-    // No `assistant_tasks`: the document sweep rejects — the tick must swallow
-    // it and finish cleanly.
-    await Effect.runPromise(
-      batch(driver, [
-        { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
-        { sql: "CREATE TABLE device_login_requests (id TEXT PRIMARY KEY, expires_at TEXT)", params: [] },
-        {
-          sql: `CREATE TABLE assistant_runs (
-            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_key TEXT NOT NULL,
-            parent_run_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
-            goal TEXT NOT NULL, result TEXT, error TEXT, budget_ms INTEGER,
-            steps_used INTEGER NOT NULL DEFAULT 0, created_by TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT)`,
-          params: [],
-        },
-      ])
-    );
-
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    let docSweepErrored = false;
-    try {
-      await runScheduledCore(driver, {}, undefined);
-      docSweepErrored = error.mock.calls.some((args) => String(args[0]).includes("document-run reconciliation"));
-    } finally {
-      error.mockRestore();
-    }
-
-    expect(docSweepErrored).toBe(true);
   });
 
   it("skips R2 pruning when backups are not enabled", async () => {
@@ -367,15 +268,6 @@ describe("per-isolate caches", () => {
     const first = getRuntimeAuth(runtimeEnv);
     expect(getRuntimeAuth(runtimeEnv)).toBe(first);
     expect(getRuntimeAuth({ ...runtimeEnv, LXK_ENV: "prod" })).not.toBe(first);
-  });
-});
-
-describe("delegation facet export", () => {
-  it("re-exports the runner class from the worker entry for ctx.exports resolution", () => {
-    expect(RunnerFromEntry).toBe(RunnerFromModule);
-    expect(typeof RunnerFromEntry).toBe("function");
-    const proto = RunnerFromEntry.prototype as unknown as { onChatMessage?: unknown };
-    expect(typeof proto.onChatMessage).toBe("function");
   });
 });
 

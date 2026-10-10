@@ -17,7 +17,8 @@ clone). The first superadmin is provisioned **only** by the web `/setup` wizard
 
 Cloudflare Workers (D1 + R2 + KV) is the deploy target. The installer ships the
 prebuilt Worker bundle; there is no VPS process or tunnel. The **AI Assistant**
-runs on Workers-only `@cloudflare/ai-chat` Durable Objects (ADR-0003). See
+runs in-process on both flavors over SSE (ADR-0005; the ADR-0003
+`@cloudflare/ai-chat` Durable Object tier is retired). See
 `docs/RELEASING.md` for the release policy.
 
 The canonical config file is **`.env.toml`**. It is structured TOML where the
@@ -138,10 +139,11 @@ bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local
 
 - `wrangler.staging.example.jsonc` (repo root) mirrors the config
   `workers-install.ts` generates: worker `lexa-staging`, D1 `lexa-staging`, R2
-  `lexa-staging-blobs`, KV, the Assistant Durable Object with its self service
-  binding, `main`/`assets` from the built `dist/`, `no_bundle`
-  plus the ESModule rule, and the crons + observability from the root
-  `wrangler.jsonc`. Fill `<ACCOUNT_ID>` (multi-account tokens only),
+  `lexa-staging-blobs`, KV, `main`/`assets` from the built `dist/`, `no_bundle`
+  plus the ESModule rule, and the observability block from the root
+  `wrangler.jsonc`. (ADR-0005 W6 removed the assistant Durable Object + its
+  self service binding, the `ai` binding, and the `*/15` cron from the config.)
+  Fill `<ACCOUNT_ID>` (multi-account tokens only),
   `<D1_DATABASE_ID>`, `<KV_NAMESPACE_ID>`, and `<PUBLIC_URL>` in the copied
   file.
 - `LXK_SECRETS_MASTER_KEY` is **required** — Better Auth's session-signing
@@ -282,10 +284,10 @@ boot and never overwrites a variable already set in the real environment.
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. Workers installs auto-prune the leftover Worker secret after a successful deploy (manual fallback: `wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler.lexa.json`). |
-| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3); **Workers-only assistant** |
+| `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
 | `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
-| `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key — and, **on Workers**, the assistant's internal `X-Lexa-Internal` HMAC key derives from it. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
+| `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -434,11 +436,18 @@ configuration into the encrypted, webapp-managed store.
    dropped column); downgrading means restoring a pre-upgrade backup
    (`docs/BACKUPS.md`).
 
-## Upgrading across the assistant move to Workers (2026-10-02)
+## Upgrading across the assistant move to Workers (2026-10-02) — historical
 
-The AI Assistant became **Cloudflare Workers only** (ADR-0003): it runs on
-`@cloudflare/ai-chat` Durable Objects and is absent from the Bun local-dev
-flavor, which serves no assistant routes.
+> **Superseded by ADR-0005 (W6, 2026-10-10).** The assistant returned to the
+> **in-process TanStack AI SSE tier on both flavors**; the `@cloudflare/ai-chat`
+> Durable Object executor, its internal HMAC routes, and the DO binding are
+> retired. The notes below record the 2026-10-02 move; the "Bun flavor loses the
+> assistant" and "deploys the DO class" steps no longer apply — the assistant is
+> mounted on both flavors again and there is no DO to deploy.
+
+The AI Assistant became **Cloudflare Workers only** (ADR-0003): it ran on
+`@cloudflare/ai-chat` Durable Objects and was absent from the Bun local-dev
+flavor, which served no assistant routes.
 
 1. **The Bun local-dev flavor loses the assistant.** `/api/assistant/*` and
    `/api/admin/assistant/*` return **404** (the groups are not mounted), the
@@ -450,33 +459,34 @@ flavor, which serves no assistant routes.
    nothing reads or writes them there.
 3. **Workers requires `LXK_SECRETS_MASTER_KEY`.** Better Auth's session
    signing secret derives from it (`lexa-better-auth:<key>`), so the server fails
-   closed without it. The Workers assistant additionally derives its internal HMAC
-   key (`HMAC(master, "lexa-internal-v1")`) and decrypts provider secrets from it.
-   The installer mints and preserves this key in `cf-workers/.env.toml` custody
-   (see the Upgrade section); no manual step is needed on a normal install.
+   closed without it; provider secrets are decrypted from it. (The former
+   assistant internal HMAC key derived from it was retired with the DO tier in
+   ADR-0005 W6.) The installer mints and preserves this key in
+   `cf-workers/.env.toml` custody (see the Upgrade section); no manual step is
+   needed on a normal install.
 4. **Workers upgrade is a normal re-run** of `install.sh` from the new release
    tag: it applies the D1 migrations (none required for the assistant move —
-   the tables already exist) and deploys the DO class. Threads stay readable via
-   the D1 mirror; the first open of a legacy thread imports it into its DO once.
+   the tables already exist) and deploys the bundle. (ADR-0005 W6: no DO class
+   is deployed; D1 `assistant_threads` is the single assistant store.)
 5. **Preserved on Workers:** chat threads, `assistant_tasks` history, memory,
    provider registry and keys, project settings, call logs, prices, provider
    health, and the agents/skills catalog.
 
 ### Verifying recovery + cost on a live Workers deploy (manual, deployer-run)
 
-The local gate exercises DO persistence/eviction coherence
-(`server/assistant/agent-do.test.ts`), but in-flight turn recovery, gateway
-rate limits, and real cost are only observable on a live deploy. Steps:
+The local gate exercises the in-process SSE tier's reliability pins (partial
+persist, resume claim, 409 guard, modes), but gateway rate limits and real cost
+are only observable on a live deploy. Steps:
 
-1. **Deploy, then start a turn and redeploy mid-turn.** In one shell run
-   `bunx wrangler deploy` (or `wrangler versions deploy`) while a long chat or
-   document turn is streaming. Expected: the WS client reconnects/resumes, the
-   turn reaches a terminal frame, `assistant_tasks.status` transitions exactly
-   once, and no duplicate `task_activity` rows appear (invariant #12).
-2. **Confirm cost/limits (R1).** Workers dashboard → Durable Objects
-   (requests, duration, SQLite rows) and AI Gateway (requests, tokens). An idle
-   hibernated WS must not bill duration; DO requests should track turns, not
-   wall-clock. Compare against the plan's ~$5/mo + usage budget.
+1. **Deploy, then start a turn and reload mid-turn.** While a long chat or
+   document turn is streaming, reload the page (or drop the network). Expected:
+   the turn is killed (accepted class — ADR-0005 §Reliability), the partial turn
+   persists with `stopped: true`, `assistant_tasks.status` transitions exactly
+   once, and no duplicate `task_activity` rows appear (invariant #12). In-app
+   navigation keeps the run alive.
+2. **Confirm cost/limits (R1).** Workers dashboard → AI Gateway (requests,
+   tokens) and Workers requests/CPU. The in-process tier has no Durable Object
+   billing surface. Compare against the plan's ~$5/mo + usage budget.
 3. **Rate-limit UX (R2).** Drive a gated model through a tool loop until the
    gateway returns 20 rpm (50 with prepaid credits). Expected: a
    `PROVIDER_RATE_LIMITED` (429) frame plus the fallback-model walk, never a

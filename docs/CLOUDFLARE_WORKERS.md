@@ -49,15 +49,14 @@ replaces the other; either or both can be live at any time.
    flavor is frozen and installs from a source checkout. See `docs/DEPLOYMENT.md`
    for the deploy flow. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
 8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup
-   (cron `*/15 * * * *`): `webhook_events` older than 7 days and
-   `device_login_requests` past `expires_at` (same SQL as the Bun host's
-   `setInterval` prune), plus R2 backup retention. The `*/15` trigger lives in
-   `wrangler.jsonc` `triggers.crons` and is deployed with the Worker; a
-   dashboard-only script upload does not carry triggers — add the cron in the
-   dashboard settings on that path. `wrangler.jsonc` enables observability, and
+   (`webhook_events` older than 7 days, `device_login_requests` past
+   `expires_at` — same SQL as the Bun host's `setInterval` prune — plus R2
+   backup retention). ADR-0005 W6 **removed the `*/15` cron trigger** from
+   `wrangler.jsonc` (`triggers.crons` is gone), so the handler fires only if an
+   operator re-adds a trigger in the dashboard; the code is retained. The Bun
+   path keeps its `setInterval`. `wrangler.jsonc` enables observability, and
    the installer transcribes that observability block from the root
-   `wrangler.jsonc` into the per-deploy config. The Bun path keeps its
-   `setInterval`.
+   `wrangler.jsonc` into the per-deploy config.
 9. **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for the
    14 architectural invariants listed in `AGENTS.md` and fails any PR that introduces
    a violation. This is the durable record of the invariants for future contributors.
@@ -110,7 +109,7 @@ Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pr
 | GitHub webhook pattern | works natively | S |
 | Env/secrets/migrations | works-with-changes | S–M |
 | R2 storage driver | works-with-changes | M |
-| TanStack AI assistant path | superseded by ADR-0003 — replaced by `@cloudflare/ai-chat` Durable Objects | M |
+| TanStack AI assistant path | ADR-0005 W6 — in-process TanStack AI over SSE, both flavors (ADR-0003's `@cloudflare/ai-chat` DO tier retired) | M |
 
 ### TanStack Start
 
@@ -288,10 +287,11 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   migration clears every row, and any write to a client nulls its ref too.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it; the
   old `lexa-cli deploy` flow is gone (removed in cli-v2026.2.0).
-- The AI path runs on Workers-only `@cloudflare/ai-chat` `AIChatAgent` Durable
-  Objects (ADR-0003; the pre-ADR in-process SSE transport is retired and the
-  agent-runtime tier is removed, so the assistant does not exist on Bun) —
-  no external runner to host; outbound subrequest budget 50/request free, 1000 paid.
+- The AI path runs **in-process on both flavors** over SSE (ADR-0005 W6; the
+  ADR-0003 `@cloudflare/ai-chat` `AIChatAgent` Durable Object tier and the
+  pre-ADR agent-runtime tier are retired). The assistant exists on Bun and
+  Workers alike — no external runner to host; outbound subrequest budget
+  50/request free, 1000 paid.
 
 ## Object storage (R2)
 
@@ -315,24 +315,26 @@ Fits the agreed `Lexa/Storage` design (fs + s3 drivers):
 
 ## Assistant path via TanStack AI
 
-> This section is **superseded by ADR-0003** (accepted 2026-10-01): the assistant on this flavor
-> is `@cloudflare/ai-chat` `AIChatAgent` Durable Objects (one DO per conversation
-> thread, WebSocket transport, DO SQLite canonical + D1 `assistant_threads`
-> mirror), and the Bun flavor ships without the assistant. The TanStack AI
-> tier described below is the pre-ADR state and is transcribed in a later phase.
+> This section is **superseded by ADR-0003 and then ADR-0005** (accepted
+> 2026-10-10): the assistant on both flavors is the **in-process TanStack AI
+> SSE tier**; the ADR-0003 `@cloudflare/ai-chat` `AIChatAgent` Durable Object
+> tier (one DO per conversation thread, WebSocket transport, DO SQLite canonical
+> + D1 `assistant_threads` mirror) is retired and its modules are deleted. The
+> TanStack AI tier described below is again the live design.
 
 Current state (Aug 2026): `@tanstack/ai` 0.47.x, MIT, still 0.x (~24 minors in 3
 months; one wire-format break already shipped). Core is web-standard JS — workerd-
 clean. Official `@cloudflare/tanstack-ai` 0.2.1 exists (Workers AI binding + AI
 Gateway routing; published from `cloudflare/ai`, not the TanStack monorepo).
 
-Decision (2026-08-22, amended 2026-09-26; execution model superseded by ADR-0003):
-the `chat()` path IS the only AI tier — **Assistant** (writing assistant + PM
-assistant), now Workers-only `AIChatAgent` Durable Objects (one DO per thread)
-instead of the pre-ADR in-process engine. The daemon/opencode
-coding tier was removed end to end on 2026-09-26 (see `docs/ARCHITECTURE.md`
-§Assistant → removal record); there is no external runner, no claim loop, and
-nothing Workers-hostile left in the AI path. See `docs/ARCHITECTURE.md` §Assistant.
+Decision (2026-08-22, amended 2026-09-26; execution model restored to the
+in-process tier by ADR-0005): the `chat()` path IS the only AI tier —
+**Assistant** (writing assistant + PM assistant), **in-process on both flavors**
+over SSE (ADR-0005; the ADR-0003 `AIChatAgent` DO executor is retired). The
+daemon/opencode coding tier was removed end to end on 2026-09-26 (see
+`docs/ARCHITECTURE.md` §Assistant → removal record); there is no external
+runner, no claim loop, and nothing Workers-hostile left in the AI path. See
+`docs/ARCHITECTURE.md` §Assistant.
 
 Shape:
 
@@ -371,8 +373,8 @@ POST /api/assistant/tasks → queue → server-side chat():
   block + task tools. Not covered, and deliberately so: shell/file-edit/exec and
   sandbox filesystem work — coding territory, removed with the agent-runtime tier
   (reintroducing it needs a new architecture decision + security review).
-- **Verdict: one Assistant tier, Workers-only DO execution** (`AIChatAgent`
-  `LexaAssistantAgent`, ADR-0003), no daemon path. Services
+- **Verdict: one Assistant tier, in-process on both flavors** (ADR-0005),
+  no daemon path. Services
   `Lexa/AssistantChatService` / `Lexa/AssistantTaskService` behind the
   `Lexa/Assistant` facade.
 - Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/Assistant`
@@ -386,9 +388,9 @@ POST /api/assistant/tasks → queue → server-side chat():
 > dispatch. D1 `assistant_threads` is the single store. The bullets below
 > describe the retired DO harness.
 
-The assistant is a Workers-only Durable Object runtime (`LexaAssistantAgent`,
-ADR-0003). The harness layer on top (ADR-0004) keeps secrets Worker-side and
-gives the DO a per-turn context bundle:
+The assistant **was** a Workers-only Durable Object runtime
+(`LexaAssistantAgent`, ADR-0003), now retired. The harness layer on top
+(ADR-0004) kept secrets Worker-side and gave the DO a per-turn context bundle:
 
 - **Turn context.** Each turn makes one internal `POST
   /api/internal/assistant/turn-context` (signed `X-Lexa-Internal` identity;
@@ -414,29 +416,19 @@ gives the DO a per-turn context bundle:
   and `purpose` (`turn|runner|preflight|summary`, default `turn`); cost is
   computed from the imported CF per-token prices when the caller sends none.
 
-### Pre-cutover DO transcript sweep (ADR-0005 W4b)
+### Pre-cutover DO transcript sweep — removed (ADR-0005 W6)
 
-Before the W4 route flip drains the DO, threads whose DO held a tail the D1
-mirror never received must be imported. `scripts/sweep-do-transcripts.ts`
-reads each thread's DO transcript over the `getTranscript` RPC, converts the
-UIMessage-parts shape to the D1 legacy-stored shape, and writes it back only
-when the DO has more messages than D1 (idempotent; log+continue on failure).
-It needs the DO binding, so it runs from the worker boot:
+The one-shot sweep (`scripts/sweep-do-transcripts.ts`, `LXK_SWEEP_DO_TRANSCRIPTS`
+boot hook) was removed in W6 along with the DO binding it needed. Its purpose
+(importing a DO-only transcript tail into D1 before the route flip) is spent:
+the DO executor is deleted, D1 `assistant_threads` is the single store, and the
+route flip already drained any residual tail in W4b.
 
-```
-LXK_SWEEP_DO_TRANSCRIPTS=1   # set on the deploy, redeploy/restart
-# read the `[do-sweep] { scanned, imported, skipped, failed }` log line
-# then unset the var and redeploy
-```
-
-Re-running is safe (a drained thread skips). The DO modules are deleted in W6.
-
-**Tracing (sampling/cost).** `server/assistant/tracing.ts` wraps the `ai`
-namespace with `wrapAISDK()` (`agents/observability/ai`) and passes
-`functionId: lexa-assistant` plus `agentId`/`conversationId`/`runId`/`purpose`
-as runtime context, so a turn emits `invoke_agent → chat → execute_tool →
-tool_approval` spans to the CF Agents dashboard. Payload storage is OFF
-(`storeMessages`/`storeTools` default false) — traces are metadata-only.
+**Tracing — removed (ADR-0005 W6).** `server/assistant/tracing.ts` (the
+`wrapAISDK()` wrapper over the `agents/observability/ai` namespace) was deleted
+with the DO tier. Turns no longer emit `invoke_agent → chat → execute_tool →
+tool_approval` spans to the CF Agents dashboard; the in-process tier logs
+through the gateway service (`assistant_call_logs`).
 `wrangler.jsonc` enables observability with `head_sampling_rate: 1` (traces and
 logs persist, 7-day retention) and the installer transcribes that block.
 Workers Observability is billed from 2026-12-01, so the trace surface is
@@ -468,9 +460,10 @@ delete it**; a re-run then has no prior bindings to preserve and no saved
 credentials. It holds:
 
 - `cf-workers/deploy-<flavor>/wrangler.<flavor>.json` — the per-deploy config
-  (account, D1/R2/KV ids, vars, Durable Objects). The rebuild preserves these
-  bindings verbatim — the ids identify **live** resources and are never
-  recreated.
+  (account, D1/R2/KV ids, vars). The rebuild preserves these bindings verbatim —
+  the ids identify **live** resources and are never recreated. (ADR-0005 W6:
+  the assistant Durable Object binding/migration and the `ai` binding are gone
+  from the config; an upgrade no longer carries or derives them.)
 - `cf-workers/deploy-<flavor>.bak` — the prior bundle backup (the rollback source).
 - `cf-workers/.cf-token` — the saved Cloudflare API token (0600).
 - `cf-workers/.env.toml` — `LXK_SECRETS_MASTER_KEY` custody (0600); a missing
@@ -570,8 +563,10 @@ A dry run prints `Release`, `Latest` (with current), `Checksum`, and
 3. **D1 single-writer throughput + 30s batch ceiling.** Sequential execution queues
    under concurrency; kanban drag storms could hit overload errors. Load test before
    committing.
-4. **TanStack AI 0.x churn** — superseded by ADR-0003 (the assistant moves to
-   `@cloudflare/ai-chat` Durable Objects, which retires this risk).
+4. **TanStack AI 0.x churn** — pinned exactly; ADR-0003 briefly moved the
+   assistant to `@cloudflare/ai-chat` Durable Objects, and ADR-0005 W6 returned
+   it to the in-process TanStack AI tier on both flavors. Pin exact versions and
+   keep `chat()` behind the `Lexa/Assistant` service boundary.
 5. **Assistant capability scope** — the coding tier (shell, file edits, sandboxes)
    is gone by design; users expecting a coding agent get an explicit explanation
    rather than a degraded mode.
