@@ -7,6 +7,16 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.11.1] - 2026-10-11
+
+### Fixed
+
+- **Repeat Workers upgrades no longer append a redundant assistant
+  delete-class migration** — the DO-removal detection now treats the class
+  as live only while a `durable_objects` binding names it or its last
+  migration mention is a create; an already-deleted class keeps the applied
+  migration history verbatim. (#380)
+
 ## [2026.11.0] - 2026-10-10
 
 ### Added
