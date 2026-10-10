@@ -367,7 +367,16 @@ describe("wrangler token parse + probe seam", () => {
     }
   });
 
-  it("takes the last non-empty stdout line when a cold `bun x` prepends progress", () => {
+  it("extracts only the token from a banner-emitting stream (wrangler 4.x update banner)", () => {
+    // wrangler 4.147.0 prints this banner on STDOUT before the token.
+    const banner = "⛅️ wrangler 4.147.0 (update available 4.149.0)\n───────────────────────────\ncfoat_AbC-123_xyz.token\n";
+    expect(parseWranglerTokenOutput(banner)).toBe("cfoat_AbC-123_xyz.token");
+    // No cfoat prefix → last bare-token line (the banner lines carry spaces/emoji).
+    const plain = "⛅️ wrangler 4.147.0 (update available 4.149.0)\n───────────\nplain-oauth_token.v1\n";
+    expect(parseWranglerTokenOutput(plain)).toBe("plain-oauth_token.v1");
+  });
+
+  it("falls back to the last bare-token line when a cold `bun x` prepends progress", () => {
     expect(parseWranglerTokenOutput("Resolving dependencies\ndownloaded wrangler@4\nwrangler-tok\n")).toBe("wrangler-tok");
     expect(parseWranglerTokenOutput("wrangler-tok\n")).toBe("wrangler-tok");
     expect(parseWranglerTokenOutput(" \n\n")).toBeUndefined();

@@ -791,6 +791,25 @@ tty_read_secret() {
 # Cloudflare credentials + secrets
 # ---------------------------------------------------------------------------
 
+# _cf_extract_token — pull ONLY the OAuth token out of `wrangler auth token`
+# output. wrangler 4.x prints an update banner on STDOUT, so the stream is not a
+# bare token (stripping whitespace concatenated banner + token and the account
+# verification then failed). Prefer a `cfoat_`-prefixed match; else the LAST
+# line that is a bare token charset (alnum + `_`/`.`/`-`, no spaces/emoji).
+# Prints nothing and returns non-zero when neither hits.
+_cf_extract_token() {
+  local raw tok
+  raw="$(cat)"
+  tok="$(printf '%s\n' "$raw" | grep -oE 'cfoat_[A-Za-z0-9_.-]+' | head -1 || true)"
+  if [ -n "$tok" ]; then
+    printf '%s\n' "$tok"
+    return 0
+  fi
+  tok="$(printf '%s\n' "$raw" | grep -E '^[[:alnum:]_.-]+$' | tail -1 || true)"
+  [ -n "$tok" ] || return 1
+  printf '%s\n' "$tok"
+}
+
 # _cf_token_from_wrangler [workdir] — read the OAuth token wrangler login
 # stored, so a logged-in operator needs no CF token. `wrangler auth token` is
 # tried first: it auto-refreshes stored OAuth and works with `--use-keyring`,
@@ -799,11 +818,11 @@ tty_read_secret() {
 # absence and never echoes the token.
 _cf_token_from_wrangler() {
   local workdir="${1:-$PWD}"
-  local tok=""
-  if ! tok="$(cd "$workdir" 2>/dev/null && bun x wrangler auth token 2>/dev/null)"; then
-    tok=""
+  local raw="" tok=""
+  if ! raw="$(cd "$workdir" 2>/dev/null && bun x wrangler auth token 2>/dev/null)"; then
+    raw=""
   fi
-  tok="$(printf '%s' "$tok" | tr -d '[:space:]')"
+  tok="$(_cf_extract_token <<<"$raw" || true)"
   if [ -n "$tok" ]; then
     printf '%s\n' "$tok"
     return 0
