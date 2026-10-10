@@ -251,11 +251,14 @@ For an in-place update of an existing custody dir from the headless CLI
 
 **Upgrading from a DO-era deployment (ADR-0005).** The assistant Durable Object
 (`LexaAssistantAgent`) is retired and no longer exported by the script. A
-deployment that already owns the class must carry the frozen delete-class
-migration or the deploy fails with CF error 10064 ("New version of script does
-not export class 'LexaAssistantAgent' which is depended on by existing Durable
-Objects"). The repo `wrangler.jsonc` and `lx worker upgrade` already append it;
-a hand-managed config (e.g. a filled `wrangler.staging.local.jsonc`) must add:
+deployment that already owns the class must carry the delete-class migration or
+the deploy fails with CF error 10064 ("New version of script does not export
+class 'LexaAssistantAgent' which is depended on by existing Durable Objects").
+Re-running `install.sh` from the new tag and `lx worker upgrade` both read the
+prior deploy config and append the delete-class tag automatically (the tag after
+the prior's highest — `<next after the prior's highest, e.g. v2>` when the
+history is exactly `v1`). A hand-managed config (e.g. a filled
+`wrangler.staging.local.jsonc`) must add it by hand:
 
 ```jsonc
 "migrations": [
@@ -264,8 +267,9 @@ a hand-managed config (e.g. a filled `wrangler.staging.local.jsonc`) must add:
 ]
 ```
 
-A fresh install never carries this history — the installer and `lx worker
-upgrade` emit no `migrations` for a config that never owned the DO.
+The repo `wrangler.jsonc` carries this frozen two-tag history. A fresh install
+emits no `migrations` — the installer and `lx worker upgrade` add none for a
+config that never owned the DO.
 
 ## Sample data
 

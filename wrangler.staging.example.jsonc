@@ -34,14 +34,15 @@
 //   that already owns it MUST carry the delete-class migration or the deploy
 //   fails with CF error 10064 ("New version of script does not export class
 //   'LexaAssistantAgent' which is depended on by existing Durable Objects").
-//   Add this frozen two-tag history to the config before deploying:
+//   Add this frozen two-tag history to the config before deploying (the tag
+//   after the prior's highest is `v2` when the history is exactly `v1`):
 //     "migrations": [
 //       { "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] },
 //       { "tag": "v2", "deleted_classes": ["LexaAssistantAgent"] }
 //     ]
 //   A fresh clone has no prior DO — leave `migrations` out entirely; emitting
-//   `new_sqlite_classes` for a class the script no longer exports fails the
-//   same way.
+//   `new_sqlite_classes` for a class the script no longer exports fails with CF
+//   error 10070.
 // - `LXK_PUBLIC_URL` is required for browser sign-in. Set it to the deployed
 //   URL (workers.dev or a custom domain). Unset, it falls back to
 //   `http://localhost:5173` for the Better Auth baseURL + trustedOrigins, and

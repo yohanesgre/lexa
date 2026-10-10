@@ -452,10 +452,11 @@ fresh-machine re-run (see `docs/DEPLOYMENT.md` §Upgrade), while
 that still owns the `LexaAssistantAgent` Durable Object fails with CF error
 10064 ("New version of script does not export class 'LexaAssistantAgent' which
 is depended on by existing Durable Objects") unless the config carries the
-delete-class migration. `lx worker upgrade` detects the class in the prior
-config (binding or migration history), drops the binding, and appends
-`{ "tag": "v2", "deleted_classes": ["LexaAssistantAgent"] }` after the prior's
-highest tag. A config that never owned the DO gets no `migrations` block.
+delete-class migration. Both `lx worker upgrade` and a re-run of `install.sh`
+detect the class in the prior deploy config (binding or migration history),
+drop the binding, and append `{ "tag": "<next after the prior's highest, e.g.
+v2>", "deleted_classes": ["LexaAssistantAgent"] }` after the prior's highest
+tag. A config that never owned the DO gets no `migrations` block.
 
 **Two different updates.** `lx upgrade` is **CLI self-update** — it replaces the
 `lx` binary from the newest `cli-v*` release asset. `lx worker upgrade` is the
