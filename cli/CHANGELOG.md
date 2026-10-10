@@ -12,6 +12,14 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.6.3] - 2026-10-10
+
+### Fixed
+
+- **Token extraction from `wrangler auth token`** — banner-safe,
+  CRLF-trimmed, for `lx worker upgrade` and the shared installer lookup.
+  (#377)
+
 ## [2026.6.2] - 2026-10-10
 
 ### Fixed
