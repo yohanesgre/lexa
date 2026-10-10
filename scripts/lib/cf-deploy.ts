@@ -237,21 +237,102 @@ export function resolveAccountOrDie(
   }
 }
 
-// Read the account_id a previous deploy recorded. Must run BEFORE staging
-// wipes deploy-<name>/ — otherwise a re-run loses the account it deployed to
-// and falls back to the token's list (which is how the wrong account got
-// provisioned). Absent/unreadable config → "".
-export function readPriorAccount(dir: string, flavorName: string): string {
+// Parse a prior per-deploy config (account_id + DO migration history). Must run
+// BEFORE staging wipes deploy-<name>/ — otherwise a re-run loses the account it
+// deployed to and the DO history the removal build must migrate. Absent or
+// unreadable → null.
+export function readPriorDeployConfig(
+  dir: string,
+  flavorName: string,
+): Record<string, unknown> | null {
   const path = join(dir, `deploy-${flavorName}`, `wrangler.${flavorName}.json`);
-  if (!existsSync(path)) return "";
+  if (!existsSync(path)) return null;
   try {
-    const cfg = JSON.parse(readFileSync(path, "utf-8")) as {
-      account_id?: unknown;
-    };
-    return typeof cfg.account_id === "string" ? cfg.account_id : "";
+    const cfg = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+    return typeof cfg === "object" && cfg !== null
+      ? (cfg as Record<string, unknown>)
+      : null;
   } catch {
-    return "";
+    return null;
   }
+}
+
+// Read the account_id a previous deploy recorded (absent/unreadable → "").
+export function readPriorAccount(dir: string, flavorName: string): string {
+  const id = readPriorDeployConfig(dir, flavorName)?.account_id;
+  return typeof id === "string" ? id : "";
+}
+
+// ADR-0005: the assistant DO stack is retired. A DO-era deployment still owns
+// the `LexaAssistantAgent` class, and Cloudflare refuses a version that drops
+// it without a delete-class migration (CF error 10064). Detect the class in the
+// prior config and append a delete-class tag after the highest existing tag;
+// the binding is never emitted. A never-DO config gets no migrations. Shared by
+// the installer (`buildDeployConfig`) and `lx worker upgrade`
+// (`buildUpgradeConfig`).
+export const ASSISTANT_DO_CLASS = "LexaAssistantAgent";
+
+// The fields the DO-removal scan reads. Both the installer's parsed prior config
+// and the CLI's `WorkerConfigJson` satisfy this structurally.
+export interface DoMigrationConfig {
+  durable_objects?: unknown;
+  migrations?: unknown;
+}
+
+function durableObjectClassNames(durableObjects: unknown): string[] {
+  if (typeof durableObjects !== "object" || durableObjects === null) return [];
+  const bindings = (durableObjects as { bindings?: unknown }).bindings;
+  if (!Array.isArray(bindings)) return [];
+  const names: string[] = [];
+  for (const binding of bindings) {
+    if (typeof binding !== "object" || binding === null) continue;
+    const className = (binding as { class_name?: unknown }).class_name;
+    if (typeof className === "string") names.push(className);
+  }
+  return names;
+}
+
+function migrationClassNames(migrations: unknown): string[] {
+  if (!Array.isArray(migrations)) return [];
+  const names: string[] = [];
+  for (const migration of migrations) {
+    if (typeof migration !== "object" || migration === null) continue;
+    for (const key of ["new_sqlite_classes", "new_classes", "deleted_classes"]) {
+      const list = (migration as Record<string, unknown>)[key];
+      if (!Array.isArray(list)) continue;
+      for (const entry of list) if (typeof entry === "string") names.push(entry);
+    }
+  }
+  return names;
+}
+
+// `v<maxPriorTag+1>`; with no prior tags, `v1`.
+export function nextMigrationTag(migrations: unknown): string {
+  let max = 0;
+  if (Array.isArray(migrations)) {
+    for (const migration of migrations) {
+      if (typeof migration !== "object" || migration === null) continue;
+      const tag = (migration as { tag?: unknown }).tag;
+      if (typeof tag !== "string") continue;
+      const match = /^v(\d+)$/.exec(tag);
+      if (match) max = Math.max(max, Number(match[1]));
+    }
+  }
+  return `v${max + 1}`;
+}
+
+export function buildDoRemovalMigrations(
+  prior: DoMigrationConfig,
+): Array<Record<string, unknown>> | undefined {
+  const priorMigrations = Array.isArray(prior.migrations) ? prior.migrations : [];
+  const ownsAgent =
+    durableObjectClassNames(prior.durable_objects).includes(ASSISTANT_DO_CLASS) ||
+    migrationClassNames(priorMigrations).includes(ASSISTANT_DO_CLASS);
+  if (!ownsAgent) return undefined;
+  return [
+    ...(priorMigrations as Array<Record<string, unknown>>),
+    { tag: nextMigrationTag(priorMigrations), deleted_classes: [ASSISTANT_DO_CLASS] },
+  ];
 }
 
 // Root repo wrangler config — the per-deploy config mirrors
@@ -738,6 +819,62 @@ export async function ensureKv(flavor: WorkerFlavor): Promise<string> {
   return created.id;
 }
 
+// The per-deploy config `main()` writes. Pure so a test can assert the emitted
+// object (including the DO-removal migration) without a network or a deploy.
+export interface DeployConfigInput {
+  workerName: string;
+  d1Name: string;
+  account: string;
+  d1Id: string;
+  r2Name: string;
+  kvId: string;
+  publicUrl: string;
+  version: string | null;
+  manifest: {
+    main?: string;
+    assets?: { directory?: string };
+    rules?: unknown[];
+    no_bundle?: boolean;
+  };
+  rootConfig: RootWorkerConfig;
+  priorConfig: Record<string, unknown> | null;
+}
+
+export function buildDeployConfig(
+  input: DeployConfigInput,
+): Record<string, unknown> {
+  const { manifest, rootConfig } = input;
+  const migrations = buildDoRemovalMigrations(input.priorConfig ?? {});
+  return {
+    name: input.workerName,
+    account_id: input.account,
+    main: `./${(manifest.main ?? "index.js").split("/").pop()}`,
+    compatibility_date: rootConfig.compatibility_date ?? "2026-08-01",
+    compatibility_flags: ["nodejs_compat"],
+    ...(manifest.no_bundle ? { no_bundle: true } : {}),
+    ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
+    assets: { directory: "./assets", binding: "ASSETS" },
+    vars: resolveDeployVars({
+      version: input.version,
+      publicUrl: input.publicUrl,
+    }),
+    d1_databases: [
+      { binding: "DB", database_name: input.d1Name, database_id: input.d1Id },
+    ],
+    r2_buckets: [{ binding: "BLOB", bucket_name: input.r2Name }],
+    kv_namespaces: [{ binding: "KV", id: input.kvId }],
+    // ADR-0005: a fresh install emits no `durable_objects`/`migrations`; a
+    // DO-era deployment gets the delete-class migration so Cloudflare accepts
+    // the version that drops `LexaAssistantAgent` (else CF error 10064).
+    ...(migrations !== undefined ? { migrations } : {}),
+    // Scheduled tick carried verbatim from root (prune + R2 backup retention
+    // — the only pruner on Workers; ADR-0005 W6 keeps it while dropping the
+    // assistant schedule drain).
+    ...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {}),
+    observability: resolveObservability(rootConfig),
+  };
+}
+
 export async function main(): Promise<void> {
   CF_TOKEN =
     flag("cf-token") ||
@@ -780,12 +917,16 @@ export async function main(): Promise<void> {
   const accounts = await listAccounts();
   // Resolve the account BEFORE any ensure*/create call, and read the prior
   // deploy config BEFORE staging wipes deploy-<name>/ — a refusal here must
-  // create nothing.
+  // create nothing. The prior config also carries the DO migration history the
+  // removal build must migrate (ADR-0005).
+  const priorConfig = readPriorDeployConfig(DIR, FLAVOR_NAME);
+  const priorAccount =
+    typeof priorConfig?.account_id === "string" ? priorConfig.account_id : "";
   account = resolveAccountOrDie(
     selectAccount({
       flag: flag("account"),
       env: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
-      priorConfig: readPriorAccount(DIR, FLAVOR_NAME),
+      priorConfig: priorAccount,
       accounts,
     }),
     accounts,
@@ -877,32 +1018,25 @@ export async function main(): Promise<void> {
 
   // The root config read/parse and the observability shape check both refuse
   // through die: a bad wrangler.jsonc must read as an installer refusal, not a
-  // crash. `observability` carries root's block verbatim into the per-deploy
-  // config (bare `{ enabled: true }` when root declares none).
+  // crash. `buildDeployConfig` carries root's block verbatim into the per-deploy
+  // config (bare `{ enabled: true }` when root declares none) and appends the
+  // DO-removal migration for a DO-era prior deploy (ADR-0005).
   let config: Record<string, unknown>;
   try {
     const rootConfig = readRootWranglerConfig(DIR);
-    config = {
-      name: FLAVOR.workerName,
-      account_id: account,
-      main: `./${(manifest.main ?? "index.js").split("/").pop()}`,
-      compatibility_date: rootConfig.compatibility_date ?? "2026-08-01",
-      compatibility_flags: ["nodejs_compat"],
-      ...(manifest.no_bundle ? { no_bundle: true } : {}),
-      ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
-      assets: { directory: "./assets", binding: "ASSETS" },
-      vars: resolveDeployVars({ version: readDeployVersion(DIR), publicUrl }),
-      d1_databases: [
-        { binding: "DB", database_name: FLAVOR.d1Name, database_id: d1Id },
-      ],
-      r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
-      kv_namespaces: [{ binding: "KV", id: kvId }],
-      // Scheduled tick carried verbatim from root (prune + R2 backup retention
-      // — the only pruner on Workers; ADR-0005 W6 keeps it while dropping the
-      // assistant schedule drain).
-      ...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {}),
-      observability: resolveObservability(rootConfig),
-    };
+    config = buildDeployConfig({
+      workerName: FLAVOR.workerName,
+      d1Name: FLAVOR.d1Name,
+      account,
+      d1Id,
+      r2Name,
+      kvId,
+      publicUrl,
+      version: readDeployVersion(DIR),
+      manifest,
+      rootConfig,
+      priorConfig,
+    });
   } catch (err) {
     die(err instanceof Error ? err.message : String(err));
   }

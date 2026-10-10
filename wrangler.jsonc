@@ -76,6 +76,27 @@
 			"id": "00000000000000000000000000000000"
 		}
 	],
+	// Durable Object migration history (frozen). v1 records the original
+	// `LexaAssistantAgent` DO class; v2 deletes it now that the assistant DO
+	// stack is retired (ADR-0005). Both tags must stay: an existing prod
+	// deployment still owns the DO, and Cloudflare refuses a version that drops
+	// the class without this delete-class migration (CF error 10064). A fresh
+	// install never carries this history — the installer/CLI emit no DO
+	// migrations.
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"LexaAssistantAgent"
+			]
+		},
+		{
+			"tag": "v2",
+			"deleted_classes": [
+				"LexaAssistantAgent"
+			]
+		}
+	],
 	// Scheduled tick: `webhook_events` (7-day) + `device_login_requests` prune
 	// and R2 backup retention — the ONLY pruner of either on Workers. The
 	// assistant schedule drain that once rode this cron is gone (ADR-0005 D2);

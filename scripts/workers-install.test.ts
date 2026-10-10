@@ -14,10 +14,13 @@ import { fileURLToPath } from "node:url";
 import {
   accountAmbiguousMessage,
   accountStaleMessage,
+  buildDeployConfig,
+  buildDoRemovalMigrations,
   d1AmbiguousMessage,
   readDeployVersion,
   readPackageVersion,
   readPriorAccount,
+  readPriorDeployConfig,
   readRootWranglerConfig,
   resolveAccountOrDie,
   resolveDeployVars,
@@ -219,6 +222,50 @@ describe("readPriorAccount", () => {
   });
 });
 
+describe("readPriorDeployConfig (DO history read before staging)", () => {
+  test("reads account_id and the DO migration history, and drives the delete-class append", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wi-prior-"));
+    const deployDir = join(dir, "deploy-lexa");
+    mkdirSync(deployDir);
+    writeFileSync(
+      join(deployDir, "wrangler.lexa.json"),
+      JSON.stringify({
+        name: "lexa",
+        account_id: A.id,
+        durable_objects: {
+          bindings: [
+            { name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" },
+          ],
+        },
+        migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
+      }),
+    );
+    const prior = readPriorDeployConfig(dir, "lexa");
+    expect(prior?.account_id).toBe(A.id);
+    expect(readPriorAccount(dir, "lexa")).toBe(A.id);
+    expect(buildDoRemovalMigrations(prior ?? {})).toEqual([
+      { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+  });
+
+  test("a never-DO prior config yields no migrations", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wi-prior-"));
+    const deployDir = join(dir, "deploy-lexa");
+    mkdirSync(deployDir);
+    writeFileSync(
+      join(deployDir, "wrangler.lexa.json"),
+      JSON.stringify({ name: "lexa", account_id: A.id }),
+    );
+    expect(buildDoRemovalMigrations(readPriorDeployConfig(dir, "lexa") ?? {})).toBeUndefined();
+  });
+
+  test("absent config reads null", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wi-prior-"));
+    expect(readPriorDeployConfig(dir, "lexa")).toBeNull();
+  });
+});
+
 describe("root wrangler observability", () => {
   const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -362,7 +409,10 @@ describe("per-deploy version marker + public URL (LX-36)", () => {
       new URL("./lib/cf-deploy.ts", import.meta.url),
       "utf-8",
     );
-    expect(src).toContain("vars: resolveDeployVars({ version: readDeployVersion(DIR), publicUrl })");
+    // main() stamps the repo version into the buildDeployConfig input;
+    // buildDeployConfig turns it into vars via resolveDeployVars.
+    expect(src).toContain("version: readDeployVersion(DIR)");
+    expect(src).toContain("vars: resolveDeployVars(");
   });
 });
 
@@ -388,6 +438,60 @@ describe("source order — account resolves before any resource is created", () 
     expect(src).not.toContain("resolveAiBinding");
     expect(src).not.toContain("resolveServiceBindings");
     expect(src).not.toContain("durable_objects,");
+  });
+
+  test("buildDeployConfig emits no DO migrations for a fresh install", () => {
+    const config = buildDeployConfig({
+      workerName: "lexa",
+      d1Name: "lexa",
+      account: "acct_123",
+      d1Id: "d1-abc",
+      r2Name: "lexa-blobs",
+      kvId: "kv-abc",
+      publicUrl: "https://lexa.example.workers.dev",
+      version: "2026.9.0",
+      manifest: { main: "index.js", assets: { directory: "../client" } },
+      rootConfig: {
+        compatibility_date: "2026-08-01",
+        triggers: { crons: ["*/15 * * * *"] },
+      },
+      priorConfig: null,
+    });
+    expect(config.migrations).toBeUndefined();
+    expect(config.durable_objects).toBeUndefined();
+    expect(config.triggers).toEqual({ crons: ["*/15 * * * *"] });
+  });
+
+  test("buildDeployConfig appends the delete-class migration for a DO-era prior deploy", () => {
+    const config = buildDeployConfig({
+      workerName: "lexa",
+      d1Name: "lexa",
+      account: "acct_123",
+      d1Id: "d1-abc",
+      r2Name: "lexa-blobs",
+      kvId: "kv-abc",
+      publicUrl: "https://lexa.example.workers.dev",
+      version: "2026.9.0",
+      manifest: { main: "index.js", assets: { directory: "../client" } },
+      rootConfig: {
+        compatibility_date: "2026-08-01",
+        triggers: { crons: ["*/15 * * * *"] },
+      },
+      priorConfig: {
+        durable_objects: {
+          bindings: [
+            { name: "ASSISTANT_AGENT", class_name: "LexaAssistantAgent" },
+          ],
+        },
+        migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
+      },
+    });
+    expect(config.durable_objects).toBeUndefined();
+    expect(config.migrations).toEqual([
+      { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+    ]);
+    expect(config.triggers).toEqual({ crons: ["*/15 * * * *"] });
   });
 
   test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {
