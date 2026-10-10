@@ -63,8 +63,17 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       db.prepare(sql).first(...params).then((row) => row as unknown as T | null);
     const dbAll = <T>(sql: string, ...params: SqlParam[]): Promise<T[]> =>
       db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
+    // A duplicate / no-op resume must not re-execute the batch, but it IS a
+    // settled outcome: emit a terminal `done` so the client persists the batch
+    // instead of reading an empty stream as a stall and retrying forever
+    // (parity with assistant-chat.service.ts).
     const emptyFrameStream = (): ReadableStream<StreamFrame> =>
-      new ReadableStream<StreamFrame>({ start(controller) { controller.close(); } });
+      new ReadableStream<StreamFrame>({
+        start(controller) {
+          controller.enqueue({ type: "done", text: "", usage: { in: 0, out: 0 } });
+          controller.close();
+        },
+      });
     const taskService = yield* TaskService;
     const commentService = yield* CommentService;
     const wikiService = yield* WikiService;

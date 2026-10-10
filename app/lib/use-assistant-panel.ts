@@ -9,7 +9,7 @@ import {
   useWikiAttachments,
   useAssistantTask,
 } from "./queries";
-import { useAssistantAgent, type AssistantAgentStream } from "./use-assistant-agent";
+import { useAssistantStream, assistantSendForKey, type AssistantStream } from "./use-assistant-stream";
 import type { Attachment } from "../../shared/types";
 import {
   attachmentQueryId,
@@ -87,29 +87,24 @@ function useAssistantRun(args: RunArgs) {
   const [taskId, setTaskId] = useState<string | null>(() => getAssistantPanelSession(slug, documentType, documentId).taskId);
   const { data: assistantTaskData } = useAssistantTask(taskId, !!taskId);
 
-  // Enqueue → attach to the run's WebSocket thread: the DOCUMENT thread
-  // (`task:<documentId>` / `wiki:<documentId>`) the DO dispatches a document
-  // run on (server/api/assistant-api.ts:260 `rpc.enqueueRun(...)`) — never
-  // `task:<taskId>`, which is not a thread.
-  // The task row carries the run's document identity; fall back to this panel's
-  // own document before the row loads. The server enqueued the turn via
-  // `enqueueRun` when POST /api/assistant/tasks landed; the client never POSTs
-  // to start it, and a dropped socket does not cancel it (ADR-0003 D5,
-  // background-capable). The WS replays an IN-FLIGHT turn on connect; anything
-  // already finished is reconstructed from the task row.
+  // Transport: the module-level SSE store (ADR-0005 W3), keyed by the DOCUMENT
+  // thread (`assistant-task:<documentId>` / `assistant-wiki:<documentId>`) so a
+  // popover close/reopen re-attaches to the live/final session — never by
+  // `<taskId>`, which is not a thread. The task row carries the run's document
+  // identity; fall back to this panel's own document before the row loads.
   const runDocumentType = assistantTaskData?.documentType ?? documentType;
   const runDocumentId = assistantTaskData?.documentId ?? documentId;
   const streamKey = taskId
     ? `${runDocumentType === "wiki" ? "assistant-wiki" : "assistant-task"}:${runDocumentId}`
     : null;
-  const live = useAssistantAgent(streamKey);
+  const live = useAssistantStream(streamKey);
 
-  // A background run that completed (or is still queued/running) while this
-  // client was disconnected has no in-flight WS buffer to replay, so the
-  // popover would sit on Idle. The task row is the authority for those
+  // A run that completed (or is still queued/running) while this client was
+  // away has no in-flight SSE session to replay (reload/close kills the fetch),
+  // so the popover would sit on Idle. The task row is the authority for those
   // terminal/pending states (herald-popover.html "background run finished
-  // while disconnected lands on Done on reconnect"). A live WS turn always wins.
-  const stream = useMemo<AssistantAgentStream>(() => {
+  // while disconnected lands on Done on reconnect"). A live SSE turn always wins.
+  const stream = useMemo<AssistantStream>(() => {
     if (!assistantTaskData) return live;
     // A document thread is reused across runs on the same document, so its
     // retained turn maps ready+hasIngress → done — the PREVIOUS run's result.
@@ -166,6 +161,13 @@ function useAssistantRun(args: RunArgs) {
         onSuccess: (task) => {
           setTaskId(task.id);
           patchAssistantPanelSession(slug, documentType, documentId, { taskId: task.id });
+          // Boot the run's SSE session through the module store: this hook is
+          // still bound to the previous (null/old) key on this tick, so the
+          // POST must go through `assistantSendForKey`; the hook subscribes to
+          // the new session on the next render. The document thread key matches
+          // the key the hook derives once the task row loads.
+          const key = `${documentType === "wiki" ? "assistant-wiki" : "assistant-task"}:${documentId}`;
+          assistantSendForKey(key, `/api/assistant/tasks/${task.id}/stream`, {});
         },
       }
     );
