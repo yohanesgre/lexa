@@ -1,11 +1,11 @@
 // Assistant HttpApi handlers (chat/tasks + admin registry/usage/runs/bindings,
-// MCP registry, Jev registry) — ADR-0003 §F.
+// MCP registry, Jev registry) — ADR-0003 §F, mounted on both flavors by ADR-0005
+// D7.
 //
-// Workers-only module: it imports the assistant engine / gateway / MCP bridge,
-// so the Bun entry (`server/entry.ts` → `http.ts`) never imports it. The Bun
-// handler composes only the base groups, so `/api/assistant/*` and
-// `/api/admin/assistant/*` 404 there; `createWorkersApiHandler` below mounts
-// base + assistant.
+// `http.ts` composes the base groups and the Bun handler mounts these assistant
+// groups via a dynamic import of `fullRouteGroups()` / `assistantServiceLayerWithStorage`
+// (never a static cycle). `createWorkersApiHandler` below does the same for D1.
+// The module is `agents`-free: the retired DO executor is not on this path.
 
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
@@ -57,7 +57,6 @@ import { LiveMcpConnector } from "../assistant/mcp";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { syncModelPrices } from "../assistant/price-sync";
 import { createSchedule, deleteSchedule, getSchedule, listSchedules, updateSchedule } from "../scheduled/schedules";
-import { AssistantThreadRpc, assistantThreadRpcNoop, type AssistantThreadRpcShape } from "../assistant/thread-rpc";
 import { getAssistantRunById } from "../assistant/run-registry";
 import { convertStoredMessages, type LegacyStoredMessage } from "../assistant/legacy-convert";
 import { AuthorizationService } from "../services/authorization.service";
@@ -83,50 +82,10 @@ import {
 import type { AssistantTaskStatus } from "../../shared/types";
 import type { StreamFrame } from "../../shared/assistant";
 
-// Best-effort DO RPC from the shared handlers (ADR-0003 §B.4). On the Bun
-// flavor the injected `AssistantThreadRpc` is the no-op layer (every call
-// resolves null), so behavior is unchanged; on Workers a transport failure is
-// no longer silent — `available` distinguishes "no DO here" (null is the
-// fallback) from a real DO failure (logged, then the handler's D1 / in-process
-// path is used).
-const threadRpcCall = <A>(f: (rpc: AssistantThreadRpcShape) => Promise<A>): Effect.Effect<A | null, never, AssistantThreadRpc> =>
-  Effect.gen(function* () {
-    const rpc = yield* AssistantThreadRpc;
-    return yield* Effect.tryPromise(() => f(rpc)).pipe(
-      Effect.catchAll((e) =>
-        rpc.available
-          ? Effect.sync(() =>
-              console.warn("[assistant] DO thread RPC failed:", e instanceof Error ? e.message : String(e))
-            ).pipe(Effect.as(null))
-          : Effect.succeed(null)
-      )
-    );
-  });
-
-// Engine-control forward (enqueue/abort/resume). Reports whether a DO was
-// present and acked, plus the raw ack, so call sites can honour the ADR §B.4
-// failure semantics instead of silently degrading. On Bun `available` is false
-// (no DO — the in-process engine owns the task); on Workers a rejected call is
-// `available: true, ok: false`.
-const threadRpcControl = <A extends { ok: boolean }>(
-  f: (rpc: AssistantThreadRpcShape) => Promise<A | null>
-): Effect.Effect<{ available: boolean; ok: boolean; ack: A | null }, never, AssistantThreadRpc> =>
-  Effect.gen(function* () {
-    const rpc = yield* AssistantThreadRpc;
-    if (!rpc.available) return { available: false, ok: false, ack: null as A | null };
-    return yield* Effect.tryPromise(() => f(rpc)).pipe(
-      // A discriminated soft failure (`{ ok: false, reason }`, e.g. a lost
-      // `queued → running` claim) is not an ack: `ok` must reflect the ack's own
-      // verdict so the create route takes its 502 branch.
-      Effect.map((result) => ({ available: true, ok: result !== null && result.ok, ack: result })),
-      Effect.catchAll((e) =>
-        Effect.sync(() => {
-          console.warn("[assistant] DO thread control RPC failed:", e instanceof Error ? e.message : String(e));
-          return { available: true, ok: false, ack: null as A | null };
-        })
-      )
-    );
-  });
+// ADR-0005 W4: the DO thread RPC is gone from every live path — chat resume,
+// delegated-run abort, transcript read, and thread reset/destroy all run
+// in-process. The `AssistantThreadRpc` seam and its DO modules stay in the tree
+// (W6 deletes them) but nothing here imports them.
 
 // Run read/abort gate: a run in a project the caller cannot read is not
 // disclosed — it answers the same 404 as an unknown run id (no existence
@@ -259,7 +218,9 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
               return await listModels(config, fetch, { sessionId: `models-${req.path.projectId}` });
             } catch (e) {
               if (!isListingRouteAbsent(e)) throw e;
-              if (normalizeProviderKind(config.kind) !== "openai_compatible") throw e;
+              // The ping fallback covers every OpenAI-wire kind (including
+              // `workers_ai`); Anthropic/Responses never take it.
+              if (normalizeProviderKind(config.kind) !== "openai_compatible" && normalizeProviderKind(config.kind) !== "workers_ai") throw e;
               await pingChatCompletion({ ...config, model: listingFallbackModel(config) }, fetch, { sessionId: `models-${req.path.projectId}` });
               return { models: [] as Array<{ id: string }> };
             }
@@ -332,7 +293,6 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         yield* requireProjectReadById(thread.projectId);
         const service = yield* AssistantService;
         yield* service.resetThread(thread.projectId, req.path.documentType, req.path.documentId);
-        yield* threadRpcCall((rpc) => rpc.resetThread(`${req.path.documentType}:${req.path.documentId}`));
         return undefined;
       }))
     )
@@ -373,34 +333,8 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         yield* requireProjectReadById(t.projectId);
-        // LX-79 single-owner resume: with a Durable Object present, the DO owns
-        // the whole resume — it atomically claims the batch, executes the
-        // approved writes once through the Worker, then continues the turn on
-        // its own socket. The route is only the handoff; it must NEVER also
-        // start the in-process stream, or the same batch would be executed
-        // twice. The client names the exact batch (`payload.batchId`); a missing
-        // id keeps the DO's legacy newest-first walk.
-        const rpc = yield* AssistantThreadRpc;
-        if (rpc.available) {
-          const requested = req.payload.batchId ?? null;
-          const resume = yield* threadRpcControl((r) => r.resumeBatch(`chat:${req.path.chatId}`, requested));
-          // ADR-0003 §B.4: a real DO that rejected the call is the assistant
-          // being unavailable. 502 (not a silent 202) so the client keeps the
-          // batch eligible — the DO's claim makes the retry idempotent.
-          if (!resume.ok) {
-            return HttpServerResponse.unsafeJson(
-              { error: { code: "ASSISTANT_UNAVAILABLE", message: "Resume RPC failed" } },
-              { status: 502 }
-            );
-          }
-          // 202 carries the DO's discriminated ack so the client can decide
-          // whether to persist (`executed` / `settled` / `indeterminate`) or
-          // keep the batch eligible (`pending` / `unavailable`).
-          return HttpServerResponse.unsafeJson(resume.ack ?? { ok: true }, { status: 202 });
-        }
-        // No Durable Object (Bun flavor / P5-deprecated server path): nothing
-        // else can own the resume, so the in-process engine runs it and the
-        // frames stream to the client. Kept only for that no-DO surface.
+        // ADR-0005 W4: the in-process engine owns the resume on BOTH flavors
+        // (claim + execute + continuation frames). The DO handoff is gone.
         const service = yield* AssistantService;
         const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
@@ -431,22 +365,12 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
         );
         const service = yield* AssistantService;
-        // D3 (W7b/WS2): serve the DO canonical transcript in UIMessage-parts
-        // shape; the D1 mirror is the fallback and is forward-converted so both
-        // paths speak parts. Approvals reconciliation covers the carrier part
-        // and the legacy `pendingBatch` field alike, so the decision endpoints
-        // stay untouched.
-        const doTranscript = yield* threadRpcCall((rpc) => rpc.getTranscript(`chat:${req.path.chatId}`));
-        const doMessages =
-          doTranscript && Array.isArray(doTranscript.messages) && doTranscript.messages.length > 0
-            ? doTranscript.messages
-            : null;
-        const rawMessages = doMessages ?? convertStoredMessages(t.messages as LegacyStoredMessage[]);
+        // ADR-0005 W4: D1 `assistant_threads.messages` is the single canonical
+        // store. The stored legacy shape is forward-converted to UIMessage
+        // parts; approvals reconciliation covers the carrier part and the legacy
+        // `pendingBatch` field alike, so the decision endpoints stay untouched.
+        const rawMessages = convertStoredMessages(t.messages as LegacyStoredMessage[]);
         const messages = yield* service.reconcileChatApprovals(rawMessages);
-        // DO-first: a non-null DO value (P3 engine) wins; otherwise the D1
-        // mirror (the DO returns null until the engine tracks them).
-        const doSummary = doTranscript ? doTranscript.summary : null;
-        const doSummarizedCount = doTranscript ? doTranscript.summarizedCount : null;
         return {
           chatId: t.documentId,
           projectId: t.projectId,
@@ -454,9 +378,9 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           agentId: t.agentId,
           skillId: t.skillId,
           messages,
-          summary: doSummary ?? t.summary,
-          summarizedCount: doSummarizedCount ?? t.summarizedCount,
-          permissionMode: doTranscript?.permissionMode ?? t.permissionMode ?? "ask",
+          summary: t.summary,
+          summarizedCount: t.summarizedCount,
+          permissionMode: t.permissionMode ?? "ask",
           createdAt: t.createdAt,
           updatedAt: t.updatedAt,
         };
@@ -477,7 +401,6 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         const attachmentService = yield* AttachmentService;
         yield* attachmentService.cleanupThreadAttachments("chat", req.path.chatId);
         yield* threadRepo.resetThread("chat", req.path.chatId);
-        yield* threadRpcCall((rpc) => rpc.destroyThread(`chat:${req.path.chatId}`));
         return undefined;
       }))
     )
@@ -564,14 +487,9 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantRunNotFound({ id: req.path.runId }))
         );
         yield* requireRunProjectRead(run.projectId, run.id);
-        // Supervised abort: forward to the run's thread DO, which cancels the
-        // facet and lands the `cancelled` registry row. On the Bun/no-DO flavor
-        // the RPC is a no-op and the handler still acks (same degradation as
-        // cancelAssistantTask).
-        const abort = yield* threadRpcControl((rpc) => rpc.abortRun(run.threadKey, run.id));
-        if (abort.available && !abort.ok) {
-          yield* Effect.logWarning(`[assistant] abortRun RPC not acked for run ${run.id}`);
-        }
+        // ADR-0005 W4: the delegated-run DO facet is retired (D3). There is no
+        // DO to abort; the registry row is admin-read-only/inert and the handler
+        // acks so the client keeps its existing contract.
         return { ok: true as const };
       }))
     )
@@ -918,7 +836,7 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
               return;
             } catch (e) {
               if (!isListingRouteAbsent(e)) throw e;
-              if (normalizeProviderKind(cfg.kind) !== "openai_compatible") throw e;
+              if (normalizeProviderKind(cfg.kind) !== "openai_compatible" && normalizeProviderKind(cfg.kind) !== "workers_ai") throw e;
               await pingChatCompletion({ ...cfg, model: listingFallbackModel(cfg) });
             }
           },
@@ -962,9 +880,9 @@ const adminAssistantLive = HttpApiBuilder.group(LexaApi, "adminAssistant", (hand
           const found = existingById.get(m.id);
           if (found) {
             const current = normalizeProviderKind(found.kind);
-            // `inferModelKind` can never return `workers_ai` (a Workers-only
-            // kind with no wire signature), so auto-correcting a manually
-            // registered Workers AI row would silently flip it to
+            // `inferModelKind` can never return `workers_ai` (a manual/legacy
+            // kind with no catalog wire signature), so auto-correcting a
+            // manually registered Workers AI row would silently flip it to
             // `openai_compatible`. Only the three catalog-inferable kinds are
             // corrected.
             if (current !== "workers_ai" && current !== inferred) {
@@ -1296,16 +1214,15 @@ const assistantSchedulesLive = HttpApiBuilder.group(LexaApi, "assistantSchedules
     )
 );
 
-// ── Assistant service layer (Workers-only) ──────────────────────────────
-// Engine, gateway, MCP bridge, and the assistant-only repos/services. Kept
-// out of `http.ts`'s base layer so the Bun bundle never imports
-// `@tanstack/ai*` / `agents` (ADR-0003 §F). `AssistantCatalogService` stays
-// in the base layer — the agents/skills catalog survives on both flavors.
+// ── Assistant service layer (both flavors, ADR-0005 D7) ─────────────────
+// Engine, gateway, MCP bridge, and the assistant-only repos/services. Now
+// mounted on the Bun host too (the in-process tier runs on both flavors), so
+// this layer is `agents`-free — only TanStack AI. `AssistantCatalogService`
+// stays in the base layer — the agents/skills catalog survives on both flavors.
 
 export function assistantServiceLayerWithStorage(
   storageCfg: StorageConfigShape,
-  mcpConnector?: Layer.Layer<McpConnector>,
-  threadRpc?: AssistantThreadRpcShape
+  mcpConnector?: Layer.Layer<McpConnector>
 ) {
   return Layer.mergeAll(
     AssistantSettingsRepo.Default, AssistantThreadRepo.Default, ProjectMemoryRepo.Default,
@@ -1324,7 +1241,6 @@ export function assistantServiceLayerWithStorage(
     AssistantHealthRepo.Default, AssistantHealthService.Default, AssistantGateway.Default,
     AssistantMcpService.Default.pipe(Layer.provide(mcpConnector ?? LiveMcpConnector)),
     AssistantJevRepo.Default, AssistantJevService.Default,
-    Layer.succeed(AssistantThreadRpc, threadRpc ?? assistantThreadRpcNoop),
   );
 }
 
@@ -1333,8 +1249,9 @@ const storageLayerFor = (cfg: StorageConfigShape) =>
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
 
-// Full route groups (Workers): the base groups plus the assistant lives.
-function fullRouteGroups() {
+// Full route groups (both flavors): the base groups plus the assistant lives.
+// Exported so the Bun host composes the same set.
+export function fullRouteGroups() {
   return Layer.mergeAll(
     baseRouteGroups(),
     assistantLive, adminAssistantLive, projectAssistantUsageLive, assistantMcpLive, assistantJevLive, assistantSchedulesLive
@@ -1344,8 +1261,8 @@ function fullRouteGroups() {
 // ─── Workers-side factory ───────────────────────────────────────────────
 // Same route groups as the Bun host plus the assistant tier, composed over a
 // caller-supplied DbDriver (D1 on Workers) with per-request env, R2 storage,
-// a per-request better-auth instance, and the DO thread RPC. The webhook stays
-// outside this app (raw-body HMAC before parse — workers-entry.ts owns it).
+// and a per-request better-auth instance. The webhook stays outside this app
+// (raw-body HMAC before parse — workers-entry.ts owns it).
 
 export interface WorkersApiHandlerOptions {
   driver: DbDriver;
@@ -1353,9 +1270,6 @@ export interface WorkersApiHandlerOptions {
   storage: StorageConfigShape;
   authHooks: ApiAuthHooksShape;
   getSession?: ((headers: Headers) => Promise<MiddlewareSession | null>) | undefined;
-  // DO-backed thread RPC (ADR-0003 §B.4). Built in workers-entry.ts from the
-  // ASSISTANT_AGENT namespace so this module stays free of `agents` imports.
-  threadRpc?: AssistantThreadRpcShape | undefined;
   // MCP connector seam for tests; defaults to the live @tanstack/ai-mcp bridge.
   mcpConnector?: Layer.Layer<McpConnector> | undefined;
 }
@@ -1369,7 +1283,7 @@ export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
   );
   const serviceLayer = Layer.mergeAll(
     buildBaseServiceLayerWithStorage(storage),
-    assistantServiceLayerWithStorage(storage, opts.mcpConnector, opts.threadRpc),
+    assistantServiceLayerWithStorage(storage, opts.mcpConnector),
   );
   const handlerLayer = fullRouteGroups().pipe(
     Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),
@@ -1384,18 +1298,18 @@ export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
   return async (req: Request) => handler(req);
 }
 
-// ─── Bun-host factory including the assistant (tests only) ──────────────
+// ─── Bun-host factory including the assistant (tests) ───────────────────
 // The Bearer-key assistant suites need a full-surface handler over a local
-// sqlite file (better-auth singleton, env-resolved storage). Production Bun
-// uses the base-only `createApiHandler`; this is never imported by the Bun
-// entry, so it never reaches the Bun bundle.
+// sqlite file (better-auth singleton, env-resolved storage). Production Bun now
+// mounts the assistant too (`createApiHandler` → `buildBunApp`), but this
+// factory keeps the singleton-auth test shape the suites rely on.
 
 export function createAssistantApiHandler(
   dbPath: string,
   env?: RuntimeEnv,
-  opts?: { mcpConnector?: Layer.Layer<McpConnector>; threadRpc?: AssistantThreadRpcShape }
+  opts?: { mcpConnector?: Layer.Layer<McpConnector> }
 ) {
-  const ready = bootOrCrash(buildBunFullApp(dbPath, env, opts?.mcpConnector, opts?.threadRpc));
+  const ready = bootOrCrash(buildBunFullApp(dbPath, env, opts?.mcpConnector));
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
@@ -1416,8 +1330,7 @@ export function createAssistantApiHandler(
 async function buildBunFullApp(
   dbPath: string,
   env?: RuntimeEnv,
-  mcpConnector?: Layer.Layer<McpConnector>,
-  threadRpc?: AssistantThreadRpcShape
+  mcpConnector?: Layer.Layer<McpConnector>
 ) {
   const { Database } = await import("bun:sqlite");
   const db = new Database(dbPath);
@@ -1437,7 +1350,7 @@ async function buildBunFullApp(
   const storageCfg = resolveStorageConfig(storageEnvFrom(env ?? getEnv()), dirname(dbPath));
   const serviceLayer = Layer.mergeAll(
     buildBaseServiceLayerWithStorage(storageCfg),
-    assistantServiceLayerWithStorage(storageCfg, mcpConnector, threadRpc),
+    assistantServiceLayerWithStorage(storageCfg, mcpConnector),
   );
   const handlerLayer = fullRouteGroups().pipe(
     Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),

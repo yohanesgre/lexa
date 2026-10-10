@@ -3,6 +3,7 @@ import {
   convertLegacyMessage,
   convertLegacyMessages,
   convertStoredMessages,
+  legacyFromUIMessages,
   type LegacyStoredMessage,
 } from "./legacy-convert";
 
@@ -202,5 +203,35 @@ describe("convertStoredMessages (mixed D1 mirror rows)", () => {
     expect(out).toHaveLength(2);
     expect(out[0]).toEqual({ id: "legacy-1", role: "assistant", parts: [{ type: "text", text: "kept" }] });
     expect(out[1]).toEqual({ role: "assistant", parts: [] });
+  });
+});
+
+describe("legacyFromUIMessages (inverse)", () => {
+  it("reconstructs pendingBatch from the data-assistant-approval carrier (sweep)", () => {
+    const out = legacyFromUIMessages([
+      { role: "user", parts: [{ type: "text", text: "hi" }] },
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "proposed" },
+          { type: "data-assistant-approval", data: { batchId: "b9", approvals: [{ approvalId: "ap1", seq: 0, name: "create_task" }] } },
+        ],
+        metadata: { ts: "2026-10-10T00:00:00.000Z" },
+      },
+    ]);
+    expect(out).toEqual([
+      { role: "user", content: "hi" },
+      {
+        role: "assistant",
+        content: "proposed",
+        ts: "2026-10-10T00:00:00.000Z",
+        pendingBatch: { batchId: "b9", approvals: [{ approvalId: "ap1", seq: 0, name: "create_task" }] },
+      },
+    ]);
+  });
+
+  it("omits pendingBatch when no carrier is present", () => {
+    const out = legacyFromUIMessages([{ role: "assistant", parts: [{ type: "text", text: "plain" }] }]);
+    expect(out).toEqual([{ role: "assistant", content: "plain" }]);
   });
 });

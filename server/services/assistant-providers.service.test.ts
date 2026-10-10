@@ -14,6 +14,7 @@ import {
   PROVIDER_CLEAR_KEY_CONFLICT_REJECTED,
   PROVIDER_KEY_UNDECRYPTABLE,
   PROVIDER_SECRET_REQUIRES_MASTER_KEY,
+  PROVIDER_WORKERS_AI_REQUIRES_KEY,
 } from "./assistant-providers.service";
 import type { RuntimeEnv } from "../env";
 
@@ -60,6 +61,37 @@ describe("AssistantProvidersService", () => {
     expect(view).toMatchObject({ label: "OpenAI", baseUrl: "https://api.test", hasKey: false, keyMask: null });
     expect(secretRow(view.id)).toBeNull();
     expect(await run(service.secretsEnabled())).toBe(true);
+  });
+
+  it("rejects a Workers AI (CF AI base) provider with no key; keeps a keyed one; refuses clearing — ADR-0005 R5", async () => {
+    setup();
+    const CF = "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1";
+    const noKey = await Effect.runPromise(
+      Effect.either(service.create({ label: "CF", baseUrl: CF, apiKey: "" }).pipe(Effect.provide(RuntimeEnvLive(env))))
+    );
+    expect(noKey).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "InvalidArgs", reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }) });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_providers").get()).toEqual({ n: 0 });
+
+    // The bare `.../ai` form (no /v1) must normalize before matching too.
+    const bareNoKey = await Effect.runPromise(
+      Effect.either(service.create({ label: "CF-bare", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai", apiKey: "" }).pipe(Effect.provide(RuntimeEnvLive(env))))
+    );
+    expect(bareNoKey).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "InvalidArgs", reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }) });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_providers").get()).toEqual({ n: 0 });
+
+    const keyed = await run(service.create({ label: "CF", baseUrl: CF, apiKey: "cf-token-9z" }));
+    expect(keyed).toMatchObject({ hasKey: true });
+
+    // Clearing the only key on a CF AI provider would leave it broken → refused.
+    const cleared = await Effect.runPromise(
+      Effect.either(service.update(keyed.id, { clearKey: true }).pipe(Effect.provide(RuntimeEnvLive(env))))
+    );
+    expect(cleared).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "InvalidArgs", reason: PROVIDER_WORKERS_AI_REQUIRES_KEY }) });
+    expect(secretRow(keyed.id)).not.toBeNull();
+
+    // Repointing off the CF base with no key stays legal.
+    const repointed = await run(service.update(keyed.id, { baseUrl: "https://api.test" }));
+    expect(repointed).toMatchObject({ baseUrl: "https://api.test" });
   });
 
   it("seals a provider key, masks it, and never returns key material", async () => {

@@ -188,9 +188,9 @@ const server: Server<unknown> = Bun.serve({
 
     const path = url.pathname;
 
-    // Capability discovery (ADR-0003 §B.4): the same JSON contract the Workers
-    // host serves. The Bun flavor is honest about the assistant move — it is
-    // Workers-only, so Bun always reports `assistant:false`.
+    // Capability discovery (ADR-0005 D7): the same JSON contract the Workers
+    // host serves. The assistant runs in-process on both flavors, so the Bun
+    // host reports it whenever the secrets master key is set.
     if (path === "/api/capabilities") {
       return withSecurityHeaders(
         new Response(JSON.stringify(capabilities("bun", getEnv())), {

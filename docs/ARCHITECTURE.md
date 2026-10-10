@@ -249,6 +249,14 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 
 ## Assistant — one AI execution tier (the agent-runtime tier is removed)
 
+> **ADR-0005 (accepted 2026-10-10) supersedes ADR-0003 for the assistant
+> executor.** Chat and document runs run **in-process** on TanStack AI over SSE
+> on **both flavors** (D7): no `AIChatAgent`, no WebSocket, no DO SQLite, no
+> `/api/internal/assistant/*` HMAC routes, no mirror, no migrate-on-read, no
+> facet delegation, no schedules. One canonical store: D1 `assistant_threads`.
+> The DO modules stay in the tree, dormant and off every live path, until W6
+> deletes them. The superseded paragraphs below describe the retired DO design.
+
 > This section is **superseded by ADR-0003** (accepted 2026-10-01): the assistant becomes
 > Workers-only, running on `@cloudflare/ai-chat` `AIChatAgent` Durable Objects
 > (one DO per conversation thread, WebSocket transport). The Bun flavor
@@ -266,10 +274,10 @@ server-side tools v1 (Exa web search, SSRF-guarded `fetch_url`, `read_s3_file`,
 PM reads), curated `project_memory` FTS5 facts, repo-content grounding from
 source-role repos, and a freeform chat surface on the same engine. Queue table
 `assistant_tasks` (`queued → running → completed|failed|cancelled`); thread
-state in `assistant_threads` (ModelMessage[] JSON, rolling summary). The
-queue's only consumer is now the Workers-only DO runtime (`LexaAssistantAgent`
-`runFiber`/`chatRecovery`, ADR-0003 §B.5), not the pre-ADR in-process HTTP
-stream handler — there is no external worker, no claim loop, and no heartbeat.
+state in `assistant_threads` (ModelMessage[] JSON, rolling summary). This
+in-process tier is once again the **only** executor (ADR-0005): both flavors
+serve the assistant over SSE, the DO executor is retired, and there is no
+external worker, claim loop, or heartbeat.
 
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.
@@ -305,12 +313,13 @@ the existing 15-minute Worker `runScheduled` cron, which creates the
 `kind='schedule'` row and advances `next_run_at` in the same UPDATE per due row,
 capped per tick; per-project scheduler DOs are deferred.
 
-**`workers_ai` (H9).** A model row with kind `workers_ai` builds
-`createWorkersAI({ binding: env.AI })` — zero-key Workers AI inference — instead
-of a REST provider; model ids are manual (the binding has no catalog listing)
-while REST rows remain for catalog listing. `wrangler.jsonc` declares
-`"ai": { "binding": "AI" }` and `scripts/workers-install.ts` transcribes it into
-the per-deploy config.
+**`workers_ai` (ADR-0005 D5/P5).** A model row with kind `workers_ai` rides the
+**OpenAI wire** through Cloudflare's OpenAI-compatible endpoint
+(`https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1`, `Authorization:
+Bearer <CF API token>`) — the same `createOpenaiChatCompletions` adapter as
+`openai_compatible`. The keyless `env.AI` binding path died with the DO; a
+`workers_ai` provider row requires a non-empty base URL + a stored CF API token
+(save-time validation). The kind label is kept for schema/labels/prices.
 
 Call logs gain `thread_key`, `run_id`, and `purpose`
 (`turn|runner|preflight|summary`), and `cost_cents` is computed from the CF

@@ -482,8 +482,10 @@ export function resolveServiceBindings(
 }
 
 // H9: Workers AI binding written into the per-deploy config. Root declares
-// `"ai": { "binding": "AI" }`; installed deployments must transcribe it so a
-// `workers_ai` assistant model can build `createWorkersAI({ binding: env.AI })`.
+// `"ai": { "binding": "AI" }`; installed deployments transcribe it so an older
+// clone keeps deploying. ADR-0005 D5 retired the assistant's use of the binding
+// (`workers_ai` now rides the OpenAI-compatible endpoint with a CF API token);
+// the block stays transcribed until W6 removes it.
 // An absent block is omitted (older clones keep deploying without Workers AI);
 // a present but malformed block is refused loudly rather than silently dropped.
 export function resolveAiBinding(root: RootWorkerConfig): Record<string, unknown> {

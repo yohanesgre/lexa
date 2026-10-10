@@ -39,14 +39,12 @@ describe("tasksBulkEnabled (kill switch)", () => {
 });
 
 describe("capabilities (GET /api/capabilities)", () => {
-  it("bun flavor always reports assistant:false and chatAttachments:false", () => {
+  it("bun flavor reports assistant:true only with the master key (ADR-0005 D7)", () => {
     expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true });
-    // The master key and the kill switch cannot make the Bun host offer a
-    // Workers-only feature.
     expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({
-      assistant: false,
+      assistant: true,
       flavor: "bun",
-      chatAttachments: false,
+      chatAttachments: true,
       tasksBulk: true,
     });
   });

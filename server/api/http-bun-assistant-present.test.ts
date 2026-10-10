@@ -8,11 +8,12 @@ import { runMigrations } from "../db/migrate";
 import { createApiHandler } from "./http";
 import { capabilities } from "../capabilities";
 
-// ADR-0003 §F: the Bun flavor drops the assistant end-to-end. The assistant
-// groups are not mounted, so `/api/assistant/*` and `/api/admin/assistant/*`
-// return the framework's 404 (not 401/501), while base routes and health keep
-// working. `/api/capabilities` is served by entry.ts before the HttpApi app;
-// its contract is asserted at the `capabilities()` seam.
+// ADR-0005 D7: the Bun flavor now mounts the assistant tier (in-process TanStack
+// AI over SSE) — reversing ADR-0003 §F. `/api/assistant/*` is no longer the
+// framework's 404: a bare admin key with no user binding is refused by the
+// handler's identity gate, which proves the group is mounted. Base routes and
+// health are unaffected. `/api/capabilities` is served by entry.ts before the
+// HttpApi app; its contract is asserted at the `capabilities()` seam.
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const ADMIN_KEY = "lxk_" + "z".repeat(43);
@@ -36,7 +37,7 @@ const authed = (method: string, path: string) =>
   });
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "lexa-bun-assistant-absent-"));
+  dir = mkdtempSync(join(tmpdir(), "lexa-bun-assistant-present-"));
   const dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   const keyHash = await sha256(ADMIN_KEY);
@@ -50,26 +51,29 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("Bun flavor has no assistant surface", () => {
-  it("GET /api/assistant/chat/does-not-exist → 404", async () => {
+describe("Bun flavor mounts the assistant surface", () => {
+  it("GET /api/assistant/chat/does-not-exist is mounted (400 NO_USER_CONTEXT, not 404)", async () => {
     const res = await handler(authed("GET", "/api/assistant/chat/does-not-exist"));
-    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(404);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe("NO_USER_CONTEXT");
   });
 
-  it("POST /api/assistant/chat/stream → 404", async () => {
+  it("POST /api/assistant/chat/stream is mounted (not 404)", async () => {
     const res = await handler(authed("POST", "/api/assistant/chat/stream"));
-    expect(res.status).toBe(404);
+    expect(res.status).not.toBe(404);
   });
 
-  it("assistant 404 carries the security headers (parity with Workers)", async () => {
+  it("GET /api/admin/assistant/usage is mounted (not 404)", async () => {
+    const res = await handler(authed("GET", "/api/admin/assistant/usage"));
+    expect(res.status).not.toBe(404);
+  });
+
+  it("assistant responses carry the security headers (parity with Workers)", async () => {
     const res = await handler(authed("GET", "/api/assistant/chat/does-not-exist"));
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
-  });
-
-  it("GET /api/admin/assistant/usage → 404", async () => {
-    const res = await handler(authed("GET", "/api/admin/assistant/usage"));
-    expect(res.status).toBe(404);
   });
 
   it("base routes still work (GET /api/projects → 200)", async () => {
@@ -84,9 +88,9 @@ describe("Bun flavor has no assistant surface", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it("capabilities(\"bun\") is assistant:false, flavor:\"bun\"", () => {
-    const caps = capabilities("bun", {});
-    expect(caps.assistant).toBe(false);
+  it("capabilities(\"bun\") reports assistant:true when the master key is set (D7)", () => {
+    const caps = capabilities("bun", { LXK_SECRETS_MASTER_KEY: "k".repeat(32) });
+    expect(caps.assistant).toBe(true);
     expect(caps.flavor).toBe("bun");
   });
 });

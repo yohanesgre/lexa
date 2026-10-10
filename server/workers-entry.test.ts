@@ -8,7 +8,6 @@ import { batch } from "./db/db";
 import { getEnvFromWorkers } from "./env";
 import {
   getRuntimeAuth,
-  loadAssistantThread,
   pruneR2Backups,
   requestLayers,
   resetAuthCache,
@@ -144,7 +143,7 @@ describe("runScheduledCore", () => {
     ]);
   });
 
-  it("reconciles stale runs and fires due schedules through the enqueue callback", async () => {
+  it("reconciles stale registry runs and stale claimed document runs on the tick", async () => {
     const driver = memDriver();
     await Effect.runPromise(
       batch(driver, [
@@ -157,15 +156,6 @@ describe("runScheduledCore", () => {
             goal TEXT NOT NULL, result TEXT, error TEXT, budget_ms INTEGER,
             steps_used INTEGER NOT NULL DEFAULT 0, created_by TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT)`,
-          params: [],
-        },
-        {
-          sql: `CREATE TABLE assistant_schedules (
-            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_key TEXT, created_by TEXT,
-            title TEXT NOT NULL, prompt TEXT NOT NULL, cron TEXT, interval_seconds INTEGER,
-            enabled INTEGER NOT NULL DEFAULT 1, next_run_at TEXT NOT NULL, last_run_at TEXT,
-            last_run_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')))`,
           params: [],
         },
         {
@@ -187,27 +177,10 @@ describe("runScheduledCore", () => {
                 VALUES ('doc-stale', 'p1', 'task', 't1', 'asst', 'running', datetime('now', '-2 hours'), datetime('now', '-2 hours'))`,
           params: [],
         },
-        {
-          sql: `INSERT INTO assistant_schedules (id, project_id, thread_key, created_by, title, prompt, interval_seconds, enabled, next_run_at)
-                VALUES ('sched-1', 'p1', 'chat:schedule-sched-1', 'u1', 'Nightly', 'do it', 60, 1, datetime('now', '-1 minute'))`,
-          params: [],
-        },
       ])
     );
 
-    const enqueued: Array<{ id: string; kind: string; projectId: string; threadKey: string; goal: string; createdBy: string | null }> = [];
-    await runScheduledCore(driver, {}, undefined, async (run) => {
-      enqueued.push(run);
-    });
-
-    expect(enqueued).toHaveLength(1);
-    expect(enqueued[0]).toMatchObject({
-      kind: "schedule",
-      projectId: "p1",
-      threadKey: "chat:schedule-sched-1",
-      goal: "do it",
-      createdBy: "u1",
-    });
+    await runScheduledCore(driver, {}, undefined);
 
     const stale = await Effect.runPromise(
       Effect.gen(function* () {
@@ -235,10 +208,10 @@ describe("runScheduledCore", () => {
     expect(staleDoc.error).toBe("run abandoned");
   });
 
-  it("fails open when the document sweep errors, still dispatching due schedules", async () => {
+  it("fails open when the document sweep errors", async () => {
     const driver = memDriver();
     // No `assistant_tasks`: the document sweep rejects — the tick must swallow
-    // it and continue to the schedule dispatch below it.
+    // it and finish cleanly.
     await Effect.runPromise(
       batch(driver, [
         { sql: "CREATE TABLE webhook_events (delivery_id TEXT PRIMARY KEY, received_at TEXT)", params: [] },
@@ -252,37 +225,18 @@ describe("runScheduledCore", () => {
             created_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT, finished_at TEXT)`,
           params: [],
         },
-        {
-          sql: `CREATE TABLE assistant_schedules (
-            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, thread_key TEXT, created_by TEXT,
-            title TEXT NOT NULL, prompt TEXT NOT NULL, cron TEXT, interval_seconds INTEGER,
-            enabled INTEGER NOT NULL DEFAULT 1, next_run_at TEXT NOT NULL, last_run_at TEXT,
-            last_run_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            updated_at TEXT NOT NULL DEFAULT (datetime('now')))`,
-          params: [],
-        },
-        {
-          sql: `INSERT INTO assistant_schedules (id, project_id, thread_key, created_by, title, prompt, interval_seconds, enabled, next_run_at)
-                VALUES ('sched-1', 'p1', 'chat:schedule-sched-1', 'u1', 'Nightly', 'do it', 60, 1, datetime('now', '-1 minute'))`,
-          params: [],
-        },
       ])
     );
 
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const enqueued: unknown[] = [];
     let docSweepErrored = false;
     try {
-      await runScheduledCore(driver, {}, undefined, async (run) => {
-        enqueued.push(run);
-      });
+      await runScheduledCore(driver, {}, undefined);
       docSweepErrored = error.mock.calls.some((args) => String(args[0]).includes("document-run reconciliation"));
     } finally {
       error.mockRestore();
     }
 
-    // The doc-sweep rejection was caught and the tick drove the schedule.
-    expect(enqueued).toHaveLength(1);
     expect(docSweepErrored).toBe(true);
   });
 
@@ -306,43 +260,6 @@ describe("pruneR2Backups", () => {
     const r2 = fakeR2(["backups/lexa-b.db.gz", "backups/lexa-a.db.gz", "backups/lexa-a-blobs/f"]);
     const deleted = await pruneR2Backups(r2.binding as never, 1);
     expect(deleted.sort()).toEqual(["backups/lexa-a-blobs/f", "backups/lexa-a.db.gz"]);
-  });
-});
-
-describe("loadAssistantThread", () => {
-  const createThreads = (driver: ReturnType<typeof memDriver>) =>
-    Effect.runPromise(
-      batch(driver, [
-        {
-          sql: "CREATE TABLE assistant_threads (document_type TEXT NOT NULL, document_id TEXT NOT NULL, project_id TEXT NOT NULL, owner_user_id TEXT, PRIMARY KEY (document_type, document_id))",
-          params: [],
-        },
-      ])
-    );
-
-  it("returns null for a missing row instead of leaking the typed rejection", async () => {
-    const driver = memDriver();
-    await createThreads(driver);
-    await expect(loadAssistantThread(driver, "chat", "missing")).resolves.toBeNull();
-  });
-
-  it("maps a present row to the gate shape", async () => {
-    const driver = memDriver();
-    await createThreads(driver);
-    await Effect.runPromise(
-      batch(driver, [
-        {
-          sql: "INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id) VALUES ('chat', 'chat-1', 'proj-1', 'user-1')",
-          params: [],
-        },
-      ])
-    );
-    await expect(loadAssistantThread(driver, "chat", "chat-1")).resolves.toEqual({
-      documentType: "chat",
-      documentId: "chat-1",
-      projectId: "proj-1",
-      ownerUserId: "user-1",
-    });
   });
 });
 

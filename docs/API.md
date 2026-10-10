@@ -1598,20 +1598,17 @@ Notes:
 
 ### Assistant (AI assistant tier — Cloudflare Workers only)
 
-> **Workers-only.** The assistant runs on `@cloudflare/ai-chat` `AIChatAgent`
-> Durable Objects (one DO per conversation thread), reached over a
-> session-authenticated WebSocket through the Worker gate. It is the only flavor
-> that serves this section: on the **Bun flavor** the assistant HttpApi groups are
-> not mounted, so `/api/assistant/*` and `/api/admin/assistant/*` return the
-> framework's **404** and `GET /api/capabilities` reports
-> `{ "assistant": false, "flavor": "bun" }` (ADR-0003 §F).
+> **ADR-0005 supersedes the Workers-only DO design (accepted 2026-10-10).**
+> The assistant runs **in-process on TanStack AI over SSE on both flavors** —
+> there is no WebSocket, no Worker gate, no `/api/assistant/agent/:threadKey`
+> route, and no `/api/internal/assistant/*` HMAC surface. `GET /api/capabilities`
+> reports `assistant: true` on either flavor when `LXK_SECRETS_MASTER_KEY` is set
+> (D7). The WS route described below is retained only as a historical record.
 
-Persistence is dual-store: **DO SQLite is canonical** (replay/resume/recovery),
-while the D1 `assistant_threads` row is a **mirror** updated per persisted turn
-step. List/search/export read the mirror and may lag by at most one mirror
-write; the canonical transcript read (`GET /api/assistant/chat/:chatId`) reads
-the DO with a D1 fallback. Legacy D1 threads are imported into the DO once, on
-first activation (migrate-on-read).
+Persistence is a **single canonical store**: D1 `assistant_threads` (one row per
+thread; `messages` JSON in the stored legacy shape, forward-converted to
+UIMessage parts on read). There is no DO SQLite, no mirror, and no
+migrate-on-read; `GET /api/assistant/chat/:chatId` reads D1 directly.
 
 Per-project provider settings; keys are server-side only and never serialized
 (masked view). Settings mutations + test/models are superadmin (`403 FORBIDDEN`
@@ -1621,14 +1618,17 @@ additionally requires a session user (bare API key → `400 NO_USER_CONTEXT`).
 Visibility: Assistant task brief info (status, timestamps) is member-visible;
 the result text is admin-gated on the status endpoint.
 
-**Concurrency (intentional behavior change).** A second client sending on a live
-thread no longer receives `409 ASSISTANT_TASK_ACTIVE` — the DO serializes and
-queues the message and fans frames out to every connected client. The code
-remains only for enqueue races on `assistant_tasks` rows and for thread reset
-while a run is claimed.
+**Concurrency (ADR-0005 D6 — contract revert).** A second client sending on a
+live thread receives `409 ASSISTANT_TASK_ACTIVE` again: the in-process tier holds
+one run per thread (chat and document) and does not queue. The DO fan-out to
+multiple connected clients is gone. The code also covers enqueue races on
+`assistant_tasks` rows and thread reset while a run is claimed.
 
 ```
-GET    /api/assistant/agent/:threadKey            (WebSocket upgrade — Workers only)
+REMOVED (ADR-0005 W4): GET /api/assistant/agent/:threadKey  (WebSocket upgrade)
+  The WS gate and the `/api/internal/assistant/*` HMAC routes are deleted; the
+  block below is retained only as a historical record of the retired DO design.
+  (WebSocket upgrade — Workers only)
   :threadKey = `chat:<chatId>` | `task:<taskId>` | `wiki:<documentId>`,
   URL-encoded as one path segment. Same-origin; the Better Auth session cookie
   rides the handshake. The Worker gate runs BEFORE the key middleware:
@@ -1751,13 +1751,13 @@ POST   /api/assistant/settings/:projectId/models   (admin — requireAdmin)
 body same as test
 → 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
   Lists models from the provider using submitted unsaved values (per-kind wire
-  format, base URL normalized per kind). Some `openai_compatible` endpoints lack
-  the listing route (404/405): for that kind only, the route then pings
+  format, base URL normalized per kind). Some OpenAI-wire endpoints lack
+  the listing route (404/405): for those kinds (`openai_compatible` and
+  `workers_ai`, ADR-0005 D5) the route then pings
   `POST {base}/chat/completions` (`max_tokens: 1`, `stream: false`); a
   successful ping returns `{ models: [] }` and manual model entry is always
-  available as fallback. Non-`openai_compatible` kinds (`anthropic_compatible`,
-  `openai_responses`, `workers_ai`) never take the ping fallback — their listing
-  failure propagates unchanged.
+  available as fallback. `anthropic_compatible` and `openai_responses` never
+  take the ping fallback — their listing failure propagates unchanged.
   Cloudflare AI (`api.cloudflare.com/client/v4/accounts/<id>/ai/v1`) has no
   GET /models (405); its catalog is read from
   `GET .../ai/models/search` (`task=Text Generation` when accepted, full

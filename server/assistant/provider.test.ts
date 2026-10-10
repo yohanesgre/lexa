@@ -21,7 +21,6 @@ import {
   type FetchLike,
   type ProviderConfig,
 } from "./provider";
-import { AssistantGenerationFailed } from "../api/errors";
 
 const openaiConfig = (baseUrl = "https://api.example.com"): ProviderConfig => ({
   kind: "openai_compatible",
@@ -86,6 +85,15 @@ describe("normalizeBaseUrl", () => {
   it("openai_responses keeps non-v1 path and appends /v1", () => {
     expect(normalizeBaseUrl("https://api.x.com/api", "openai_responses")).toBe("https://api.x.com/api/v1");
   });
+
+  it("workers_ai rides the OpenAI wire (keeps/appends /v1) — ADR-0005 D5", () => {
+    expect(normalizeBaseUrl("https://api.cloudflare.com/client/v4/accounts/acc123/ai", "workers_ai")).toBe(
+      "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1"
+    );
+    expect(normalizeBaseUrl("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1", "workers_ai")).toBe(
+      "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1"
+    );
+  });
 });
 
 describe("normalizeProviderKind", () => {
@@ -102,7 +110,7 @@ describe("normalizeProviderKind", () => {
     expect(normalizeProviderKind("anthropic_compatible")).toBe("anthropic_compatible");
   });
 
-  it("keeps workers_ai verbatim (H9 — keyless Workers AI)", () => {
+  it("keeps workers_ai verbatim (ADR-0005 D5 — ported to the OpenAI-compatible endpoint)", () => {
     expect(normalizeProviderKind("workers_ai")).toBe("workers_ai");
   });
 
@@ -215,10 +223,16 @@ describe("buildAdapter", () => {
     expect(buildAdapter(anthropicConfig())).toBeDefined();
   });
 
-  it("throws AssistantGenerationFailed for workers_ai (Workers-only, built via the DO factory)", () => {
-    expect(() =>
-      buildAdapter({ kind: "workers_ai", baseUrl: "", apiKey: "", model: "@cf/meta/llama-3.2-1b-instruct" })
-    ).toThrow(AssistantGenerationFailed);
+  it("builds an OpenAI-wire adapter for workers_ai against the CF AI base (ADR-0005 D5/P5)", () => {
+    const adapter = buildAdapter({
+      kind: "workers_ai",
+      baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1",
+      apiKey: "cf-token",
+      model: "@cf/meta/llama-3.2-1b-instruct",
+    });
+    expect(adapter).toBeDefined();
+    const client = (adapter as unknown as { client: { baseURL?: string } }).client;
+    expect(client.baseURL).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1");
   });
 
   it("attaches x-opencode-session defaultHeaders on every adapter", () => {
@@ -332,6 +346,20 @@ describe("listModels", () => {
     const log: { url?: string; headers?: Record<string, string> } = {};
     await listModels(anthropicConfig(), fakeFetch(200, { models: [] }, log), { sessionId: "chat-1" });
     expect(log.headers?.[OPENCODE_SESSION_HEADER]).toBe("lexa-assistant-chat-1");
+  });
+
+  it("workers_ai wire: routes to the CF AI catalog search with Bearer (never the Anthropic wire) — ADR-0005 D5", async () => {
+    const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
+    const res = await listModels(
+      { kind: "workers_ai", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1", apiKey: "cf-token", model: "@cf/meta/llama-3.2-1b-instruct" },
+      async (input, init) => {
+        calls.push({ url: input, init });
+        return jsonResponse(200, { result: [{ name: "@cf/meta/llama-3.2-1b-instruct" }], result_info: { per_page: 50, total_count: 1 } });
+      }
+    );
+    expect(calls[0]?.url).toContain("/ai/models/search");
+    expect((calls[0]?.init?.headers as Record<string, string> | undefined)?.authorization).toBe("Bearer cf-token");
+    expect(res.models).toEqual([{ id: "@cf/meta/llama-3.2-1b-instruct" }]);
   });
 });
 
@@ -478,6 +506,19 @@ describe("cloudflare models", () => {
     expect(calls[0]?.url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1/chat/completions");
     const body = JSON.parse(String(calls[0]?.init?.body)) as Record<string, unknown>;
     expect(body).toMatchObject({ model: "@cf/meta/llama-3.2-1b-instruct", max_tokens: 1, stream: false });
+    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe("Bearer cf-token");
+  });
+
+  it("ping works for workers_ai kind against the CF AI base (OpenAI wire) — ADR-0005 D5", async () => {
+    const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
+    await pingChatCompletion(
+      { kind: "workers_ai", baseUrl: "https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1", apiKey: "cf-token", model: "@cf/meta/llama-3.2-1b-instruct" },
+      async (input, init) => {
+        calls.push({ url: input, init });
+        return jsonResponse(200, { choices: [] });
+      }
+    );
+    expect(calls[0]?.url).toBe("https://api.cloudflare.com/client/v4/accounts/acc123/ai/v1/chat/completions");
     expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe("Bearer cf-token");
   });
 
