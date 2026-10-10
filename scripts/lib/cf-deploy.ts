@@ -265,11 +265,15 @@ export function readPriorAccount(dir: string, flavorName: string): string {
 
 // ADR-0005: the assistant DO stack is retired. A DO-era deployment still owns
 // the `LexaAssistantAgent` class, and Cloudflare refuses a version that drops
-// it without a delete-class migration (CF error 10064). Detect the class in the
-// prior config and append a delete-class tag after the highest existing tag;
-// the binding is never emitted. A never-DO config gets no migrations. Shared by
-// the installer (`buildDeployConfig`) and `lx worker upgrade`
-// (`buildUpgradeConfig`).
+// it without a delete-class migration (CF error 10064). Append a delete-class
+// tag after the highest existing tag ONLY while the class is still live — live
+// means a `durable_objects` binding names it, or the LAST migration entry that
+// mentions it is a create. A class whose last mention is already
+// `deleted_classes` (a repeat upgrade) returns the prior migrations verbatim:
+// no redundant tag, so the emitted history stays applied and CF never sees a
+// delete for a class that is already gone. The binding is never emitted. A
+// never-DO config gets no migrations. Shared by the installer
+// (`buildDeployConfig`) and `lx worker upgrade` (`buildUpgradeConfig`).
 export const ASSISTANT_DO_CLASS = "LexaAssistantAgent";
 
 // The fields the DO-removal scan reads. Both the installer's parsed prior config
@@ -292,20 +296,6 @@ function durableObjectClassNames(durableObjects: unknown): string[] {
   return names;
 }
 
-function migrationClassNames(migrations: unknown): string[] {
-  if (!Array.isArray(migrations)) return [];
-  const names: string[] = [];
-  for (const migration of migrations) {
-    if (typeof migration !== "object" || migration === null) continue;
-    for (const key of ["new_sqlite_classes", "new_classes", "deleted_classes"]) {
-      const list = (migration as Record<string, unknown>)[key];
-      if (!Array.isArray(list)) continue;
-      for (const entry of list) if (typeof entry === "string") names.push(entry);
-    }
-  }
-  return names;
-}
-
 // `v<maxPriorTag+1>`; with no prior tags, `v1`.
 export function nextMigrationTag(migrations: unknown): string {
   let max = 0;
@@ -321,14 +311,40 @@ export function nextMigrationTag(migrations: unknown): string {
   return `v${max + 1}`;
 }
 
+// The class's LAST mention in the migration history: a create
+// (`new_sqlite_classes`/`new_classes`) or a delete (`deleted_classes`), or null
+// when never mentioned. The LAST mention wins — a class created then deleted is
+// gone even though earlier entries still name it.
+function lastMigrationMention(migrations: unknown): "created" | "deleted" | null {
+  if (!Array.isArray(migrations)) return null;
+  let mention: "created" | "deleted" | null = null;
+  for (const migration of migrations) {
+    if (typeof migration !== "object" || migration === null) continue;
+    const record = migration as Record<string, unknown>;
+    let createdHere = false;
+    for (const key of ["new_sqlite_classes", "new_classes"]) {
+      const list = record[key];
+      if (Array.isArray(list) && list.includes(ASSISTANT_DO_CLASS)) createdHere = true;
+    }
+    const deleted = record.deleted_classes;
+    const deletedHere = Array.isArray(deleted) && deleted.includes(ASSISTANT_DO_CLASS);
+    if (deletedHere) mention = "deleted";
+    else if (createdHere) mention = "created";
+  }
+  return mention;
+}
+
 export function buildDoRemovalMigrations(
   prior: DoMigrationConfig,
 ): Array<Record<string, unknown>> | undefined {
   const priorMigrations = Array.isArray(prior.migrations) ? prior.migrations : [];
-  const ownsAgent =
-    durableObjectClassNames(prior.durable_objects).includes(ASSISTANT_DO_CLASS) ||
-    migrationClassNames(priorMigrations).includes(ASSISTANT_DO_CLASS);
-  if (!ownsAgent) return undefined;
+  const bound = durableObjectClassNames(prior.durable_objects).includes(ASSISTANT_DO_CLASS);
+  const lastMention = lastMigrationMention(priorMigrations);
+  // Never mentioned anywhere: fresh install, no migration history.
+  if (!bound && lastMention === null) return undefined;
+  // Binding gone and the last mention is a delete: the class is ALREADY removed
+  // (a repeat upgrade). Keep the applied history verbatim — no new tag.
+  if (!bound && lastMention === "deleted") return priorMigrations as Array<Record<string, unknown>>;
   return [
     ...(priorMigrations as Array<Record<string, unknown>>),
     { tag: nextMigrationTag(priorMigrations), deleted_classes: [ASSISTANT_DO_CLASS] },

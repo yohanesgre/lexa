@@ -266,6 +266,101 @@ describe("readPriorDeployConfig (DO history read before staging)", () => {
   });
 });
 
+describe("buildDoRemovalMigrations (DO-era detection)", () => {
+  const CLASS = "LexaAssistantAgent";
+
+  test("binding-only (no history) → v1 delete", () => {
+    expect(
+      buildDoRemovalMigrations({ durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: CLASS }] } }),
+    ).toEqual([{ tag: "v1", deleted_classes: [CLASS] }]);
+  });
+
+  test("create history, no binding → next tag", () => {
+    expect(buildDoRemovalMigrations({ migrations: [{ tag: "v1", new_sqlite_classes: [CLASS] }] })).toEqual([
+      { tag: "v1", new_sqlite_classes: [CLASS] },
+      { tag: "v2", deleted_classes: [CLASS] },
+    ]);
+  });
+
+  test("deeper history whose last mention is a create → next tag after the highest", () => {
+    const prior = {
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: ["SomeOtherClass"] },
+        { tag: "v3", new_classes: [CLASS] },
+      ],
+    };
+    expect(buildDoRemovalMigrations(prior)).toEqual([
+      ...prior.migrations,
+      { tag: "v4", deleted_classes: [CLASS] },
+    ]);
+  });
+
+  test("repeat upgrade (create then delete, no binding) → prior verbatim, NO new tag", () => {
+    const prior = {
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: [CLASS] },
+      ],
+    };
+    const out = buildDoRemovalMigrations(prior);
+    expect(out).toEqual(prior.migrations);
+    expect(out).toHaveLength(2);
+    expect(out?.some((m) => (m as { tag?: string }).tag === "v3")).toBe(false);
+    // The applied history array is returned as-is.
+    expect(out).toBe(prior.migrations);
+  });
+
+  test("never mentioned → undefined", () => {
+    expect(buildDoRemovalMigrations({})).toBeUndefined();
+    expect(
+      buildDoRemovalMigrations({
+        durable_objects: { bindings: [{ class_name: "OtherAgent" }] },
+        migrations: [{ tag: "v1", new_sqlite_classes: ["OtherAgent"] }],
+      }),
+    ).toBeUndefined();
+  });
+
+  test("binding present but the last mention is a delete → still appends the next-tag delete (the !bound guard)", () => {
+    const prior = {
+      durable_objects: { bindings: [{ name: "ASSISTANT_AGENT", class_name: CLASS }] },
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: [CLASS] },
+      ],
+    };
+    expect(buildDoRemovalMigrations(prior)).toEqual([
+      ...prior.migrations,
+      { tag: "v3", deleted_classes: [CLASS] },
+    ]);
+  });
+
+  test("buildDeployConfig keeps a repeat upgrade's applied history verbatim (no v3)", () => {
+    const priorConfig = {
+      migrations: [
+        { tag: "v1", new_sqlite_classes: [CLASS] },
+        { tag: "v2", deleted_classes: [CLASS] },
+      ],
+    };
+    const config = buildDeployConfig({
+      workerName: "lexa",
+      d1Name: "lexa",
+      account: "acct_123",
+      d1Id: "d1-abc",
+      r2Name: "lexa-blobs",
+      kvId: "kv-abc",
+      publicUrl: "https://lexa.example.workers.dev",
+      version: "2026.9.0",
+      manifest: { main: "index.js", assets: { directory: "../client" } },
+      rootConfig: { compatibility_date: "2026-08-01" },
+      priorConfig,
+    });
+    expect(config.migrations).toEqual(priorConfig.migrations);
+    const migrations = config.migrations as Array<{ tag?: string }>;
+    expect(migrations.some((m) => m.tag === "v3")).toBe(false);
+  });
+});
+
 describe("root wrangler observability", () => {
   const ROOT = fileURLToPath(new URL("..", import.meta.url));
 

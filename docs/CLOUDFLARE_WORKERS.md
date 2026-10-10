@@ -453,10 +453,21 @@ that still owns the `LexaAssistantAgent` Durable Object fails with CF error
 10064 ("New version of script does not export class 'LexaAssistantAgent' which
 is depended on by existing Durable Objects") unless the config carries the
 delete-class migration. Both `lx worker upgrade` and a re-run of `install.sh`
-detect the class in the prior deploy config (binding or migration history),
-drop the binding, and append `{ "tag": "<next after the prior's highest, e.g.
-v2>", "deleted_classes": ["LexaAssistantAgent"] }` after the prior's highest
-tag. A config that never owned the DO gets no `migrations` block.
+treat the class as still live only when the prior deploy config carries a
+`durable_objects` binding naming it OR the LAST migration entry that mentions it
+is a create (`new_sqlite_classes`/`new_classes`); the binding is dropped and
+`{ "tag": "<next after the prior's highest, e.g. v2>", "deleted_classes":
+["LexaAssistantAgent"] }` is appended. When there is no binding and the last
+mention is already `deleted_classes` (a repeat upgrade), the prior migration
+history is kept **verbatim** — no redundant tag — so Cloudflare never sees a
+delete for a class that is already gone. A config that never owned the DO gets
+no `migrations` block.
+
+**Manual repair for a pre-fix repeat upgrade.** An installer run before this
+rule could write a config carrying a redundant trailing `deleted_classes` tag
+and then fail its deploy (that tag was never applied). Remove the never-applied
+trailing tag from `deploy-<flavor>/wrangler.<flavor>.json` before retrying — the
+corrected builder then keeps the applied history verbatim.
 
 **Two different updates.** `lx upgrade` is **CLI self-update** — it replaces the
 `lx` binary from the newest `cli-v*` release asset. `lx worker upgrade` is the
@@ -473,9 +484,11 @@ credentials. It holds:
   (account, D1/R2/KV ids, vars). The rebuild preserves these bindings verbatim —
   the ids identify **live** resources and are never recreated. (ADR-0005 W6:
   the assistant Durable Object binding and the `ai` binding are gone from the
-  config; a DO-era deployment instead gets a delete-class migration appended —
-  without it the deploy fails with CF error 10064. A never-DO config carries
-  no `migrations`.)
+  config; a DO-era deployment instead gets a delete-class migration appended
+  while the class is live — without it the deploy fails with CF error 10064. A
+  repeat upgrade whose last class mention is already `deleted_classes` keeps its
+  migration history verbatim, no new tag. A never-DO config carries no
+  `migrations`.)
 - `cf-workers/deploy-<flavor>.bak` — the prior bundle backup (the rollback source).
 - `cf-workers/.cf-token` — the saved Cloudflare API token (0600).
 - `cf-workers/.env.toml` — `LXK_SECRETS_MASTER_KEY` custody (0600); a missing
