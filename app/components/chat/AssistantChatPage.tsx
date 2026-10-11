@@ -99,7 +99,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     storageKey: "lexa:pane-threads",
     defaultOpen: true,
     breakpoint: 1024,
-    alwaysOpenAbove: 1024,
     storageValues: { open: "open", closed: "closed" },
     surface: "threads",
     toggleEvent: "lexa:toggle-threads-sidebar",

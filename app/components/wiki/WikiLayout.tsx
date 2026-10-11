@@ -209,7 +209,6 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     storageKey: "lexa:pane-wiki",
     defaultOpen: true,
     breakpoint: 1024,
-    alwaysOpenAbove: 1024,
     storageValues: { open: "open", closed: "closed" },
     surface: "wiki",
     toggleEvent: "lexa:toggle-wiki-sidebar",
