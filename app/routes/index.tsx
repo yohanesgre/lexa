@@ -54,7 +54,7 @@ function Home() {
 
   if (isLoading) {
     return (
-      <main className="page-frame page-frame-narrow">
+      <main className="page-frame">
         <DashboardSkeleton />
       </main>
     );
@@ -63,7 +63,7 @@ function Home() {
   const isEmpty = !dashboard?.projects.length;
 
   return (
-    <main className="page-frame page-frame-narrow">
+    <main className="page-frame">
       <div className="tm-dash-head">
         <h1>Projects</h1>
         <span className="tm-plate">Trailheads</span>

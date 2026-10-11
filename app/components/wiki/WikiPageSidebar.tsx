@@ -177,24 +177,19 @@ function SidebarList({
 
   return (
     <div className="pane-list">
-      {state === "loading" && <div className="px-4 text-xs text-lx-text-muted">Loading pages…</div>}
+      {state === "loading" && <div className="pane-note">Loading pages…</div>}
       {state === "error" && (
-        <div className="px-3">
-          <div className="tasks-error">
-            <div className="tasks-error-title">Failed to load pages</div>
-            <div className="tasks-error-sub">
-              <span className="font-mono">Network error</span> — the pages query failed to load
-            </div>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onRetryList}>
-              Retry
-            </button>
-          </div>
+        <div className="pane-error">
+          <span className="pane-void-title">Pages could not be read.</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onRetryList}>
+            Retry
+          </button>
         </div>
       )}
 
       {state === "empty" && (
-        <div className="px-4 mb-3">
-          <span className="text-xs text-lx-text-secondary">No pages yet</span>
+        <div className="pane-void">
+          <span>No pages yet</span>
         </div>
       )}
 

@@ -118,7 +118,7 @@ function resolveSelectedTask(
 
 function TasksErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <main className="page-frame page-frame-narrow">
+    <main className="page-frame">
       <div className="tasks-error">
         <div className="tasks-error-title">Failed to load tasks</div>
         <div className="tasks-error-sub">
@@ -136,7 +136,7 @@ const SKELETON_ROW_WIDTHS = ["55%", "49%", "58%", "43%", "52%"];
 
 function TasksSkeleton() {
   return (
-    <main className="page-frame page-frame-narrow">
+    <main className="page-frame">
       <div className="tasks-page">
         <div className="tasks-header">
           <div>
@@ -595,13 +595,13 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   if (error) {
     return <TasksErrorState onRetry={() => refetch()} />;
   }
-  if (!board || !tasks) return <main className="page-frame page-frame-narrow"><div className="tasks-error">Project not found</div></main>;
+  if (!board || !tasks) return <main className="page-frame"><div className="tasks-error">Project not found</div></main>;
 
   const emptyProject = board.tasks.length === 0;
   const confirmKeys = [...selectedIds].map((id) => keyById.get(id) ?? id);
 
   return (
-    <main className="page-frame page-frame-narrow">
+    <main className="page-frame">
       <div className="tasks-page">
         <div className="tasks-header">
           <div>

@@ -114,11 +114,11 @@ export function ThreadsSidebar({
             </span>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className={`text-sm truncate ${isActive ? "font-semibold" : "font-medium"} text-lx-text-primary`} style={{ lineHeight: "18px" }} title={title}>
+            <div className={`thread-title${isActive ? " is-active" : ""}`} title={title}>
               {title}
             </div>
             {searching && thread.snippet && (
-              <div className="thread-snippet truncate">
+              <div className="thread-snippet">
                 {highlightSnippet(thread.snippet, search).map((seg, i) =>
                   seg.mark ? <mark key={i}>{seg.text}</mark> : <span key={i}>{seg.text}</span>
                 )}
@@ -158,8 +158,8 @@ export function ThreadsSidebar({
 
         <div className="threads-sidebar-list">
           {threads.length === 0 ? (
-            <div className="empty-box" style={{ margin: 8, border: "none", background: "transparent", padding: "24px 16px" }}>
-              <span className="text-xs text-lx-text-secondary">{searching ? "No chats match your search" : "No threads yet — start a conversation"}</span>
+            <div className="pane-void">
+              <span>{searching ? "No chats match your search" : "No threads yet — start a conversation"}</span>
             </div>
           ) : searching ? (
             <>
