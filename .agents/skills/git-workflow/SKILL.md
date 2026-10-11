@@ -14,7 +14,6 @@ Use this skill whenever you touch git:
 - staging/committing, writing commit messages
 - pushing, force-pushing, merging, rebasing, cherry-picking
 - tagging `v*` / `cli-v*` releases
-- touching the `wireframes/` submodule
 - answering "boleh commit/push/merge?" or reviewing git history
 - any `git` command that mutates remote or branch state
 
@@ -30,7 +29,7 @@ These are never negotiable — report conflict, don't "fix" it yourself:
 4. **No merge/rebase/cherry-pick unless the user explicitly asked.** Present the options, wait for the choice. Default when work completes = push + PR.
 5. **No scope creep.** Only files/changes in the brief. If something is missing, report — don't add tables/columns/endpoints/error codes.
 6. **Names exact.** Table/column/error code/route/config key must match `docs/*.md` verbatim.
-7. **The wireframes submodule is commit-inside-first.** See §6.
+7. **The wireframes submodule is gone.** It was removed from this repo in the design-system pivot (2026-10-11); `docs/design-system.html` is a frozen artifact, never regenerated. Never reintroduce a submodule to change a surface — the visual world lives in `DESIGN.md` + `.impeccable/design.json`.
 8. **No secrets.** Never commit `.env`, `*.pem`, `*.private-key.pem`, `~/.lexa/**/config.json`, or any token. Gitleaks runs in the release CI; locally the gate checks staged filenames. A leaked secret is caught at release — never worth committing.
 9. **Gates green before commit/PR/tag.** See §3.2.
 10. **Authorization is per-action, never transitive.** "commit dan push" covers exactly commit + push — never branch create, worktree add, PR open, merge, rebase, or force-push. Each mutating step needs its own explicit ask. Approval envelopes (e.g. `/goal` execution gates) must enumerate every lifecycle step they pre-authorize, including the branch name.
@@ -77,7 +76,6 @@ Every commit must pass — if any fails, fix first, don't commit:
 - [ ] `bun run typecheck` (`tsc --noEmit`) green
 - [ ] `bun run test` green for touched modules; full suite if schema/service changed
 - [ ] `bun run check:invariants` green if `server/`, `shared/`, or `scripts/check-invariants.ts` touched
-- [ ] `bash wireframes/build.sh` green if `wireframes/src/` touched; `wireframes/dist/` never edited directly
 - [ ] No `any` outside JSON boundaries, no stray `console.log`, no `.env`/`.pem` staged (`git diff --cached --name-only`)
 - [ ] No file outside lane scope (agent boundaries in the repo `AGENTS.md`)
 - [ ] Commit message follows §3.1 and `git diff --cached --stat` matches intent
@@ -125,17 +123,9 @@ git diff --cached --name-only
 - After PR approved and `bash scripts/verify-gate.sh` green (CI no longer runs on PRs — release-prep only, see `.github/workflows/ci.yml`), merge via GitHub (squash or merge commit per repo setting — never force-push to `main`). After a local merge (only when the user picks option 1), re-run the gate on the merged result before pushing.
 - Never delete a worktree/branch until its PR is merged or the user says `discard`. Keep the worktree for PR feedback.
 
-## 6. Wireframes submodule
+## 6. Wireframes (removed)
 
-- Never edit `wireframes/dist/` (generated).
-- Edit `wireframes/src/` → `bash wireframes/build.sh`.
-- Commit **inside** the submodule first:
-  ```bash
-  cd wireframes && git add <src files> && git commit -m "feat(wireframes): <msg>" && git push
-  cd .. && git add wireframes && git commit -m "chore: bump wireframes to <sha> (<desc>)"
-  ```
-- The parent commit must record the new pointer; the submodule must be pushed so clones resolve.
-- Frontend implementation must port new wireframe CSS classes into `app/styles/phosphor.css` — they don't exist in the app until ported.
+The `wireframes/` submodule was removed from this repo on 2026-10-11 with the design-system pivot. `docs/design-system.html` remains as a frozen primitive-markup reference (no generator in-repo); `docs/brand/lexa-mark.svg` preserves the LX mark. Do not reintroduce a submodule: the visual world is `DESIGN.md` + `.impeccable/design.json`, and surfaces are built from impeccable's flow.
 
 ## 7. Release (web + CLI independent) — via branch + PR
 
@@ -143,7 +133,7 @@ See `docs/RELEASING.md` — never improvise:
 
 1. Create branch `chore/release-vX.Y.Z` from `main`.
 2. Both `CHANGELOG.md` + `cli/CHANGELOG.md` get dated `## [X.Y.Z] - YYYY-MM-DD` sections.
-3. `bun run typecheck`, `bun run test`, `bash wireframes/build.sh` green on the branch.
+3. `bun run typecheck`, `bun run test` green on the branch.
 4. Commit on the branch: `chore(release): vX.Y.Z, cli-vX.Y.Z` (one commit, both bumps).
 5. Push branch → PR to `main` → merge after review. Then on `main` (after pull):
    ```bash
