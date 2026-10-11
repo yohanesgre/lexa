@@ -77,9 +77,18 @@ git submodule update --init wireframes
 
 This retains the wireframe-first flow on any clone: `wireframes/src/` is the design source of truth, `bash wireframes/build.sh` rebuilds the previews. If the submodule is missing or empty, frontend work must not start until it is initialized (and the gate that the wireframes reflect the change first still applies). All paths in this section are relative to this repo's `wireframes/` checkout.
 
-**Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. If code and wireframes drift, the wireframe is the source of truth.
+**Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. Wireframes are authoritative for **structure, copy, and states**; `wireframes/DESIGN_SYSTEM.md` and `docs/design-system.html` are authoritative for **styling and tokens**.
 
-**Scope, not existence, scales with uncertainty:** a copy or token change edits the existing wireframe file; a new state on an existing surface draws that state (plus its annotation); a new surface, navigation change, or genuinely competing structure draws the full surface with its void states (empty/loading/partial/error/denied) before any React. Skipping the wireframe step is never permitted — only its scope is negotiable. Throwaway prototypes are not wireframes; if one is ever justified it lives in `.tmp/`, never in `artifacts/` or `wireframes/`.
+**Minimal delta (non-negotiable):** the wireframe is the decision, not a second rendering. Take the first rung that pins the change and stop:
+
+1. **Annotation + state matrix** in the *existing surface page* — copy/token/behavior changes and states that reuse existing geometry. No new file.
+2. **Minimal skeleton** in the surface page — only when geometry or hierarchy is genuinely undecided: semantic markup, real copy, existing PHOSPHOR classes/partials, no CSS, no inline styles, no re-declared page shell.
+3. **New partial** `wireframes/src/partials/_name.html` — only for a genuinely new reusable block.
+4. **New page** — only for a new surface or navigation change.
+
+**One page per surface — never one page per state.** A state with its own full page (shell + `navbar` + board header repeated around one differing block) costs a page to read, a page to author, and an `index.html` card; when you touch one, fold its delta into the surface page and delete it (drop its `index.html` card too). The page already loads `wireframes.css`, so reuse the existing classes and partials — never duplicate styling markup, and never rewrite a whole page for a local change. Skipping the wireframe step is not permitted; only its size is negotiable. Throwaway prototypes are not wireframes and live in `.tmp/`.
+
+**Read budget:** a wireframe pass must not cost more than the change it pins. Never read `docs/design-system.html`, `wireframes/DESIGN_SYSTEM.md`, `wireframes/src/design-system.html`, or a whole surface page to find one thing — grep for the class, token, or annotation you need and read that range; read a sibling page only for the block you are reusing. Needing a full-page read to understand a change means the page holds too many states: fold or split it first.
 
 **Delegation sequencing rule (non-negotiable):** When UI/UX work is divided across multiple agents, the wireframe lane MUST complete (edit `wireframes/src/`, run `bash wireframes/build.sh`, pass its gate) BEFORE any React implementation lane is dispatched. Never run wireframe work and frontend implementation in parallel — parallel lanes drift from the wireframe's actual classes, structure, and copy even when the spec looks fully pinned. React implementation transcribes the completed wireframe, including porting any new wireframe CSS classes into the app stylesheet (`app/styles/phosphor.css`) — wireframe classes do not exist in the app until ported.
 
@@ -93,16 +102,16 @@ Every UI task brief to @designer/@fixer must include: "Consult `docs/design-syst
 
 1. Start with `wireframes/src/flow-overview.html` to understand canonical user flows and project-context rules.
 2. Use `wireframes/src/index.html` to browse all surfaces and states.
-3. Match the structure, spacing, hierarchy, and interactions shown in the wireframes exactly.
+3. Match the structure, hierarchy, copy, and interactions the wireframes pin. Styling — spacing, color, type, motion values — comes from `wireframes/DESIGN_SYSTEM.md`, which stays authoritative for tokens.
 4. Use `wireframes/DESIGN_SYSTEM.md` for tokens, typography, and color values. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
-5. If a wireframe conflicts with `wireframes/DESIGN_SYSTEM.md` or any other design doc, the wireframe wins for frontend implementation. Report the conflict to the user.
+5. Precedence: the **wireframe** wins for structure, copy, and states; `wireframes/DESIGN_SYSTEM.md` + `docs/design-system.html` win for styling and tokens. A minimal wireframe deliberately does not render the final look, so its preview is not evidence about styling. If either file contradicts the other on its own ground, report the conflict to the user.
 6. Do not add screens, states, or components that are not represented in the wireframes without explicit user approval.
 
 The wireframes are static HTML/CSS previews with no JavaScript. Implement interactions (dropdowns, modals, slideovers, drag-and-drop, inline editing, etc.) to match the rendered states and annotations. Wireframes use `<INCLUDE partials/FILE />` directives — always run `bash wireframes/build.sh` after any wireframe edit.
 
 ### For @designer: wireframe-first execution
 
-When asked to implement frontend, do NOT design or invent. Read the relevant wireframe HTML file, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
+When asked to implement frontend, do NOT design or invent. Read the relevant block of the surface wireframe, then transcribe what it pins into React components: structure, hierarchy, real copy, and every state in its matrix. Styling — spacing, color, type, motion — comes from `wireframes/DESIGN_SYSTEM.md` and `docs/design-system.html`, not from the wireframe's markup. Do not add regions, states, or copy that the wireframe does not pin. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
 
 ## Frontend design workflow
 

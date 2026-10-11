@@ -1,6 +1,6 @@
 ---
 name: frontend-workflow
-description: 'Lexa frontend design + implementation operating procedure — wireframe-first design, PHOSPHOR fidelity, the design/implementation model split, the anti-slop filter, and browser verification. Load before any UI/UX design change, wireframe edit, or frontend implementation on Lexa.'
+description: 'Lexa frontend design + implementation operating procedure — minimal-delta wireframe-first design, PHOSPHOR styling, the design/implementation model split, the anti-slop filter, and browser verification. Load before any UI/UX design change, wireframe edit, or frontend implementation on Lexa.'
 ---
 
 # Frontend Design Workflow — Lexa
@@ -25,12 +25,19 @@ there. Explicit decisions beat open-ended generation; evidence beats model confi
 
 1. `AGENTS.md` — rules, agent boundaries, verification. Wins over everything here.
 2. `docs/design-system.html` — PHOSPHOR primitives: tokens + canonical component markup.
-   **Open it and copy primitive markup verbatim — never hand-write a primitive.**
-3. `wireframes/src/*.html` — the surface/state source of truth (start at
-   `flow-overview.html`, browse `index.html`).
-4. `wireframes/DESIGN_SYSTEM.md` — identity, tokens, typography, color, motion.
+   **Locate the primitive by grep and copy its markup verbatim — never hand-write a primitive,
+   never read the file whole.**
+3. `wireframes/src/*.html` — the surface source of truth (start at `flow-overview.html`, browse
+   `index.html`). Grep for the block you need; read a range, not the page.
+4. `wireframes/DESIGN_SYSTEM.md` — identity, tokens, typography, color, motion. Grep the token
+   or rule; never read it whole (80 KB).
 5. `docs/SCHEMA.md`, `docs/LAYERS.md`, `docs/API.md` — when the UI is stateful or calls an
    endpoint. Endpoint shapes are exact.
+
+**Read budget.** The three files above are the biggest in the repo (`docs/design-system.html`
+288 KB, `wireframes/src/design-system.html` 133 KB, `wireframes/DESIGN_SYSTEM.md` 80 KB) — a
+whole-file read is a defect, not diligence. Grep the class, token, or annotation you need and
+read that range. The same applies to surface pages: locate, then read the block.
 
 Do not create parallel design docs (`DESIGN.md`, `PRODUCT.md`, a UI spec file). Direction
 lives in `wireframes/DESIGN_SYSTEM.md`; primitives in `docs/design-system.html`; the router
@@ -91,17 +98,40 @@ chrome, repeated card grids, arbitrary gradients, excessive rounded containers, 
 without a source, decoration without a purpose. Minimalism is not quality; complexity is
 not creativity.
 
-## 6. Wireframe-first (non-negotiable)
+## 6. Wireframe-first, minimal delta (non-negotiable)
 
-**Any UI/UX change — new states, layout, components, copy, motion — is made in the
-wireframes FIRST, then implemented in code.** Skipping the wireframe is never permitted;
-what scales is its *scope and fidelity*, with the uncertainty of the change:
+**Any UI/UX change — new states, layout, components, copy, motion — is reflected in the
+wireframes FIRST, then implemented in code.** Skipping the wireframe step is not permitted;
+only its *size* is negotiable. The wireframe is the decision, not a second rendering: it carries
+structure, copy, and states, never proof of styling.
 
-| Uncertainty | Wireframe work |
-|---|---|
-| Copy tweak, token change, obvious one-line fix | Edit the existing wireframe file's text/markup; rebuild. |
-| New state on an existing surface | Draw the state in the existing wireframe, with an annotation. |
-| New surface, navigation change, or competing structures | Full surface wireframe: happy path + void states (empty/loading/partial/error/denied) + the state matrix, before any React. |
+Ladder — take the first rung that pins the change, and stop:
+
+| Rung | Use when | Wireframe work |
+|---|---|---|
+| 1. Annotation + state matrix | copy, token, behavior, or a state that reuses existing geometry | Extend the **existing surface page**: an annotated block plus a row in its state matrix. No new file. |
+| 2. Minimal skeleton | geometry or hierarchy is genuinely undecided | A structural skeleton in the surface page: semantic markup, real copy, existing PHOSPHOR classes/partials, no CSS, no inline styles, no re-declared shell. |
+| 3. New partial | a genuinely new reusable block | `wireframes/src/partials/_name.html`, then include it. |
+| 4. New page | a new surface or navigation change | One new `src/*.html`: happy path + void states (empty/loading/partial/error/denied) as annotated blocks + a state matrix. |
+
+- **One page per surface, never per state.** A state with its own full page — shell, `navbar`,
+  board header repeated around one differing block — costs a page to read, a page to author, and
+  an `index.html` card. When you touch such a page, fold its delta into the surface page, delete
+  it, and drop its card.
+- **Reuse beats restating.** The page already loads `wireframes.css`, so existing classes and
+  partials render correctly — use them instead of duplicating styling markup, and never rewrite a
+  whole page for a local change. A page rewrite for a local change is a defect, not thoroughness.
+- **Read budget: a wireframe pass must not cost more than the change.** Never read
+  `docs/design-system.html`, `wireframes/DESIGN_SYSTEM.md`, `wireframes/src/design-system.html`,
+  or a whole surface page to find one thing — grep the class/token/annotation you need and read
+  that range; read a sibling page only for the block being reused. Needing a full-page read is a
+  signal the page holds too many states: fold or split first.
+- Prefer editing the largest reusable unit available: partial > block > page.
+
+Wireframes are authoritative for **structure, copy, and states**; `wireframes/DESIGN_SYSTEM.md`
+and `docs/design-system.html` are authoritative for **styling and tokens**. A minimal wireframe
+therefore does not prove the rendered look — the visual review happens on the running app (§10).
+The delta shape and the state-matrix form: `templates/minimal-wireframe.html`.
 
 Mechanics:
 
@@ -169,6 +199,10 @@ The filter is not the source of creative direction; PHOSPHOR and the wireframe a
 
 Compiling is not evidence. Run the real app and exercise the change:
 
+> A minimal wireframe (§6) shows structure, copy, and states — not the rendered look. The
+> wireframe preview therefore is *not* visual evidence for the change; the running app is.
+> Reviewing composition on the wireframe is only meaningful for a rung-2 skeleton or above.
+
 1. Build the wireframes if `wireframes/src` changed; start the app (`bun run dev` → :5173;
    `dev:workers` for the Worker flavor, direct `/api`).
 2. Navigate to the affected screen; inspect the rendered result.
@@ -198,8 +232,12 @@ Compiling is not evidence. Run the real app and exercise the change:
 Do not call the work done until every applicable item is checked:
 
 - [ ] Requested behavior implemented, in the real app.
-- [ ] Wireframe reflects the change and was rebuilt (and committed/pushed in the submodule
-      with the parent pointer bumped, when landing).
+- [ ] Wireframe delta is minimal and deliberate — the lowest rung that pins the change, no
+      per-state page, no page-shell or styling duplication, no full-page rewrite for a local
+      change — and was rebuilt (committed/pushed in the submodule with the parent pointer bumped,
+      when landing).
+- [ ] No design-system doc or surface page was read whole (§6 read budget: grep, then read the
+      range).
 - [ ] UI conforms to the wireframe + `wireframes/DESIGN_SYSTEM.md`.
 - [ ] Anti-slop Delivery Gate run; PASS/FAIL with evidence in the report.
 - [ ] Browser check performed on the affected screen incl. void states and viewports.
@@ -214,7 +252,7 @@ Recorded so nobody re-introduces the conflicts:
 
 | External spec said | Here, instead |
 |---|---|
-| Wireframing optional, low-fidelity, temp under `artifacts/` | Always wireframe-first, PHOSPHOR-fidelity, `.tmp/` for throwaways |
+| Wireframing optional, low-fidelity, temp under `artifacts/` | Wireframe-first but **minimal delta**: structure/copy/states only, folded into the existing surface page, no per-state pages; `.tmp/` for throwaways |
 | `PRODUCT.md` / `DESIGN.md` / `UI-WORKFLOW.md` as authority | `AGENTS.md` + `wireframes/DESIGN_SYSTEM.md` + `docs/design-system.html`; no parallel docs |
 | Impeccable as the primary runner | The installed `designer` route table + `frontend-design` / `design-system-patterns` |
 | One generic quality stage | Anti-slop filter + wireframe conformance + browser check + repo gate, each with its own evidence |

@@ -1,0 +1,51 @@
+<!--
+  Minimal-wireframe delta — copy this SHAPE into the surface page that already owns the change.
+  Rules: .agents/skills/frontend-workflow/SKILL.md §6 + AGENTS.md "Minimal delta".
+  One page per surface, never per state. No page shell, no new CSS here: the surface page
+  already loads wireframes.css, so existing classes render correctly.
+
+  Primitive markup is copied VERBATIM from docs/design-system.html (utility classes and the
+  inline styles that primitive ships with — never invent styling, never hand-write a primitive).
+  Locate it by grep; never read that file whole.
+-->
+
+<!-- 1. The delta: only what differs from the surface's default, drawn with existing primitives. -->
+<div class="empty-state">
+  <!-- Canonical empty state (docs/design-system.html): icon 24px stroke.
+       Reference the icon instead of restating its path: <div class="empty-state-icon"><svg …/></div> -->
+  <h2 class="font-display text-lg weight-500 color-primary mt-3">No cards match this filter</h2>
+  <p class="text-sm color-secondary mt-1" style="max-width:300px;">Clear the filter to see the full board.</p>
+  <button class="btn btn-primary mt-4">Clear filter</button>
+</div>
+
+<!-- 2. Annotations carry the decisions the markup cannot: state, behavior, what persists. -->
+<span class="annotation">Filtered, zero matches. Reuses the surface's header, filter chip, and scroll area — only the body below the header differs; nothing else on the page changes.</span>
+<span class="annotation-tag">behavior: clearing the filter restores the unfiltered board; "Clear filter" is the only action in this state</span>
+
+<!-- 3. State matrix: one row per state of this surface. A row can be a sentence instead of markup
+     when its geometry matches the default (rung 1); draw markup only for rows that differ
+     structurally (rung 2). Void states are not optional rows: empty / loading / error / partial /
+     denied all appear here, and "—" is a decision, not an omission. -->
+<table class="settings-table">
+  <thead>
+    <tr>
+      <th style="width:auto;">State</th>
+      <th style="width:auto;">Delta from default</th>
+      <th style="width:auto;">Copy</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>default</td><td>—</td><td>—</td></tr>
+    <tr><td>loading</td><td>3 skeleton rows replace the card list; header and chip persist</td><td>—</td></tr>
+    <tr><td>filtered, 0 matches</td><td>body swaps to the empty state above; header + chip persist</td><td>"No cards match this filter"</td></tr>
+    <tr><td>error</td><td>inline banner above the scroll area; board stays visible</td><td>"Couldn't load cards. Retry"</td></tr>
+    <tr><td>denied</td><td>—</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<!--
+  Do NOT add here: a second <!DOCTYPE>/<head>/<link>, a navbar include, a copy of the board
+  header, or invented styling. If the change needs a genuinely new reusable block, put it in
+  wireframes/src/partials/_name.html and include it. If it needs a new surface or navigation,
+  that is rung 4 — one new src/*.html page with its own index.html card.
+-->
