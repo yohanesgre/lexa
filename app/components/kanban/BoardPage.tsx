@@ -21,7 +21,7 @@ function resolveEffectiveMilestone(milestoneParam: string | null, defaultMilesto
 
 export interface BoardPageProps {
   slug: string;
-  search: { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined };
+  search: { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined; new?: boolean | undefined };
 }
 
 function BoardSkeleton() {
@@ -125,6 +125,18 @@ export function BoardPage({ slug, search }: BoardPageProps) {
     if (!swimlaneId) return;
     setCreateTarget({ columnId, swimlaneId });
   };
+
+  // ?new=1 (the shell's "New task"): open the create slideover on the board's
+  // first column, then drop the param so a reload does not reopen it.
+  const wantsCreate = search.new === true;
+  useEffect(() => {
+    if (!wantsCreate || !board) return;
+    const column = board.columns[0];
+    const swimlane = board.swimlanes[0];
+    if (!column || !swimlane) return;
+    setCreateTarget({ columnId: column.id, swimlaneId: swimlane.id });
+    navigate({ search: { ...search, new: undefined }, replace: true } as never);
+  }, [wantsCreate, board, navigate]);
 
   const handleCreate = async (input: {
     title: string;

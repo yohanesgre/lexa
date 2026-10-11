@@ -1,15 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { Link, Outlet, useRouterState, useNavigate } from "@tanstack/react-router";
-import { Menu, X, PanelLeft, ChevronDown } from "lucide-react";
+import {
+  BookOpen,
+  Flag,
+  Layers,
+  LayoutDashboard,
+  ListChecks,
+  Menu,
+  MessagesSquare,
+  PanelLeft,
+  PanelLeftClose,
+  SquareKanban,
+  X,
+} from "lucide-react";
 import { cn } from "../ui/cn";
 import { useProjectSelection } from "../../lib/project-selection";
 import { useProjects } from "../../lib/queries";
 import { useAssistantEnabled } from "../../lib/assistant-enabled";
+import { useSidebarState } from "../../lib/sidebar-state";
 import { NavLink } from "./NavLink";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
+import { ChevronIcon } from "./ChevronIcon";
 
 // Full-screen surfaces with no app chrome: auth pages + the setup wizard.
 const BARE_PATHS = new Set(["/setup", "/login", "/set-password", "/invite", "/device-login", "/settings/github/callback"]);
@@ -32,9 +46,24 @@ function resolveRouteType(pathname: string): RouteType {
   return "home";
 }
 
+// Top-bar identity: the plain view name, beside the selected project slug.
+const VIEW_LABEL: Record<RouteType, string> = {
+  home: "Projects",
+  dashboard: "Dashboard",
+  board: "Board",
+  tasks: "Tasks",
+  wiki: "Wiki",
+  chat: "Chat",
+  milestones: "Milestones",
+  swimlanes: "Swimlanes",
+  settings: "Settings",
+};
+
 function isBarePath(pathname: string) {
   return BARE_PATHS.has(pathname) || BARE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
+
+type NavKey = "dashboard" | "board" | "tasks" | "milestones" | "swimlanes" | "wiki" | "chat";
 
 interface NavTarget {
   to: string;
@@ -49,6 +78,25 @@ function navTarget(selectedSlug: string | null | undefined, path: string): NavTa
 function linkProps(target: NavTarget) {
   if (target.params) return { to: target.to, params: target.params };
   return { to: target.to };
+}
+
+const NAV_ITEMS: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { key: "board", label: "Board", icon: SquareKanban },
+  { key: "tasks", label: "Tasks", icon: ListChecks },
+  { key: "milestones", label: "Milestones", icon: Flag },
+  { key: "swimlanes", label: "Swimlanes", icon: Layers },
+  { key: "wiki", label: "Wiki", icon: BookOpen },
+];
+
+// The map mark: two surveyor ridges. Drawn geometry, not a picture.
+function RidgeMark() {
+  return (
+    <svg className="app-rail-mark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+      <path d="M1 19L8 7l4 6.4L15 7l8 12z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8 7l2.2 3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
 }
 
 function SidebarToggleButton({ routeType }: { routeType: RouteType }) {
@@ -89,7 +137,7 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
         <span className="app-nav-menu-project-name">
           {projects.find((p) => p.slug === selectedSlug)?.name ?? selectedSlug}
         </span>
-        <ChevronDown size={14} strokeWidth={1.5} className={projectListOpen ? "rotate-180" : ""} style={{ transition: "transform 200ms", flexShrink: 0 }} />
+        <ChevronIcon />
       </button>
       {projectListOpen && (
         <div className="app-nav-menu-project-list">
@@ -128,15 +176,7 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
   );
 }
 
-function MobileMenuLinks({ targets, assistantEnabled }: { targets: {
-  dashboard: NavTarget;
-  board: NavTarget;
-  tasks: NavTarget;
-  milestones: NavTarget;
-  swimlanes: NavTarget;
-  wiki: NavTarget;
-  chat: NavTarget;
-}, assistantEnabled: boolean }) {
+function MobileMenuLinks({ targets, assistantEnabled }: { targets: Record<NavKey, NavTarget>; assistantEnabled: boolean }) {
   return (
     <>
       <Link {...linkProps(targets.dashboard)} className="app-nav-menu-link" activeOptions={{ exact: true }}>
@@ -170,7 +210,7 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug, setSelectedSlug } = useProjectSelection();
   const navigate = useNavigate();
-  // Bare surfaces (login, setup, share) have no session — the project list
+  // Bare surfaces (login, setup, share) have no session, the project list
   // would 401 and retry-spam the console. Skip the fetch there.
   const isBare = isBarePath(pathname);
   const { data: projects = [] } = useProjects({ enabled: !isBare });
@@ -181,7 +221,11 @@ export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectListOpen, setProjectListOpen] = useState(false);
 
-  // Lock body scroll while the menu is open. Standard modal pattern —
+  // Rail collapse is persisted on desktop; below the breakpoint the rail is
+  // out of the layout and the labelled menu takes over.
+  const rail = useSidebarState({ storageKey: "lexa:rail-open", defaultOpen: true, breakpoint: 768 });
+
+  // Lock body scroll while the menu is open. Standard modal pattern:
   // the menu's own overflow handles content scrolling on touch.
   useEffect(() => {
     if (!menuOpen) return;
@@ -206,60 +250,80 @@ export function AppShell() {
 
   const routeType = useMemo(() => resolveRouteType(pathname), [pathname]);
 
-  const targets = {
+  const targets: Record<NavKey, NavTarget> = {
     dashboard: navTarget(selectedSlug, "/$slug"),
     board: navTarget(selectedSlug, "/$slug/board"),
-    wiki: navTarget(selectedSlug, "/$slug/wiki"),
-    chat: navTarget(selectedSlug, "/$slug/chat"),
     tasks: navTarget(selectedSlug, "/$slug/tasks"),
     milestones: navTarget(selectedSlug, "/$slug/milestones"),
     swimlanes: navTarget(selectedSlug, "/$slug/swimlanes"),
+    wiki: navTarget(selectedSlug, "/$slug/wiki"),
+    chat: navTarget(selectedSlug, "/$slug/chat"),
   };
 
-  const navClass = menuOpen ? "app-nav app-nav-menu-open" : "app-nav";
+  const activeByKey: Record<NavKey, boolean> = {
+    dashboard: routeType === "dashboard",
+    board: routeType === "board",
+    tasks: routeType === "tasks",
+    milestones: routeType === "milestones",
+    swimlanes: routeType === "swimlanes",
+    wiki: routeType === "wiki",
+    chat: routeType === "chat",
+  };
+
+  if (isBare) {
+    return <Outlet />;
+  }
 
   return (
-    <>
-      {!isBare && (
-        <nav className={navClass}>
-          {/* Context-sensitive sidebar toggle (mobile only). Shown on routes
-             that own a left sidebar — wiki page tree, chat threads. Tapping
-             dispatches a custom event that the layout component picks up. */}
-          {(routeType === "wiki" || routeType === "chat") && <SidebarToggleButton routeType={routeType} />}
+    <div className={cn("app-shell", menuOpen && "is-menu-open")}>
+      <nav className="app-nav" data-open={rail.open ? "true" : "false"}>
+        <div className="app-rail-head">
           <Link to="/" className={routeType === "home" ? "nav-brand active" : "nav-brand"}>
-            Lexa
+            <RidgeMark />
+            <span className="nav-label">Lexa</span>
           </Link>
-          <div className="nav-links">
-            <NavLink {...linkProps(targets.dashboard)} active={routeType === "dashboard"} exact>
-              Dashboard
+          {rail.isDesktop && (
+            <button
+              type="button"
+              className="app-rail-toggle"
+              aria-label={rail.open ? "Collapse navigation" : "Expand navigation"}
+              aria-expanded={rail.open}
+              onClick={rail.toggle}
+            >
+              {rail.open ? <PanelLeftClose /> : <PanelLeft />}
+            </button>
+          )}
+        </div>
+        <div className="nav-links">
+          {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+            <NavLink
+              key={key}
+              {...linkProps(targets[key])}
+              active={activeByKey[key]}
+              exact={key !== "wiki"}
+            >
+              <Icon aria-hidden="true" focusable="false" />
+              <span className="nav-label">{label}</span>
             </NavLink>
-            <NavLink {...linkProps(targets.board)} active={routeType === "board"} exact>
-              Board
+          ))}
+          {assistantEnabled && (
+            <NavLink {...linkProps(targets.chat)} active={activeByKey.chat}>
+              <MessagesSquare aria-hidden="true" focusable="false" />
+              <span className="nav-label">Chat</span>
             </NavLink>
-            <NavLink {...linkProps(targets.tasks)} active={routeType === "tasks"} exact>
-              Tasks
-            </NavLink>
-            <NavLink {...linkProps(targets.milestones)} active={routeType === "milestones"} exact>
-              Milestones
-            </NavLink>
-            <NavLink {...linkProps(targets.swimlanes)} active={routeType === "swimlanes"} exact>
-              Swimlanes
-            </NavLink>
-            <NavLink {...linkProps(targets.wiki)} active={routeType === "wiki"}>
-              Wiki
-            </NavLink>
-            {assistantEnabled && (
-              <NavLink {...linkProps(targets.chat)} active={routeType === "chat"}>
-                Chat
-              </NavLink>
-            )}
-          </div>
-          <div className="nav-spacer" />
+          )}
+        </div>
+        <div className="nav-spacer" />
+        <div className="app-rail-foot">
           <div className="nav-right">
             <ThemeToggle />
-            <ProjectSwitcher routeType={routeType} />
             <UserMenu />
           </div>
+        </div>
+      </nav>
+
+      <div className="app-frame">
+        <header className="app-topbar">
           <button
             type="button"
             className="nav-hamburger"
@@ -267,30 +331,67 @@ export function AppShell() {
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
           >
-            {menuOpen ? <X /> : <Menu />}
+            {menuOpen ? <X aria-hidden="true" focusable="false" /> : <Menu aria-hidden="true" focusable="false" />}
+            <span>Menu</span>
           </button>
-          <div className="app-nav-menu" role="menu" aria-hidden={!menuOpen}>
-            {selectedSlug && (
-              <MobileProjectMenu
-                projects={projects}
-                selectedSlug={selectedSlug}
-                selectedProjectId={selectedProjectId}
-                projectListOpen={projectListOpen}
-                onToggleList={() => setProjectListOpen((v) => !v)}
-                onCloseMenu={() => setMenuOpen(false)}
-                onPickProject={(slug) => {
-                  setSelectedSlug(slug);
-                  setProjectListOpen(false);
-                  setMenuOpen(false);
-                  navigate({ to: "/$slug", params: { slug } });
-                }}
-              />
-            )}
-            <MobileMenuLinks targets={targets} assistantEnabled={assistantEnabled} />
+          {(routeType === "wiki" || routeType === "chat") && <SidebarToggleButton routeType={routeType} />}
+          <div className="app-topbar-title">
+            <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
+            {selectedSlug && <span className="app-topbar-slug">{selectedSlug}</span>}
           </div>
-        </nav>
-      )}
-      {!isBare && menuOpen && (
+          <div className="nav-spacer" />
+          <div className="app-topbar-switcher">
+            <ProjectSwitcher routeType={routeType} />
+          </div>
+          <div className="nav-right">
+            {/* The rail carries theme + account above 768px; on a phone this
+                cluster is the only way to reach them. */}
+            <div className="app-topbar-account">
+              <ThemeToggle />
+              <UserMenu />
+            </div>
+            {selectedSlug ? (
+              <Link
+                to="/$slug/board"
+                params={{ slug: selectedSlug }}
+                search={{ new: true } as never}
+                className="btn btn-primary btn-sm"
+              >
+                New task
+              </Link>
+            ) : (
+              <Link to="/" search={{ new: 1 } as never} className="btn btn-primary btn-sm">
+                New Project
+              </Link>
+            )}
+          </div>
+        </header>
+
+        <div className="app-content">
+          <Outlet />
+        </div>
+      </div>
+
+      <div className="app-nav-menu" role="menu" aria-hidden={!menuOpen}>
+        {selectedSlug && (
+          <MobileProjectMenu
+            projects={projects}
+            selectedSlug={selectedSlug}
+            selectedProjectId={selectedProjectId}
+            projectListOpen={projectListOpen}
+            onToggleList={() => setProjectListOpen((v) => !v)}
+            onCloseMenu={() => setMenuOpen(false)}
+            onPickProject={(slug) => {
+              setSelectedSlug(slug);
+              setProjectListOpen(false);
+              setMenuOpen(false);
+              navigate({ to: "/$slug", params: { slug } });
+            }}
+          />
+        )}
+        <MobileMenuLinks targets={targets} assistantEnabled={assistantEnabled} />
+      </div>
+      {menuOpen && (
         <button
           type="button"
           className="app-nav-backdrop"
@@ -298,7 +399,6 @@ export function AppShell() {
           onClick={() => setMenuOpen(false)}
         />
       )}
-      <Outlet />
-    </>
+    </div>
   );
 }

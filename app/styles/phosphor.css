@@ -7,137 +7,213 @@
    from wireframes/wireframes.css (class-for-class).
    ========================================================= */
 
-/* ---- Semantic tokens: DARK (default) ---- */
+/* ---- Semantic tokens: DARK (default) — the floodlit night map ----
+   Roles are stable, values are the Trail Map world. Every name that existed
+   before this redesign stays: the 830 classes already in this sheet keep
+   resolving. New names below carry the world's own furniture (trail ribbons,
+   lift-line series, stamps, map furniture). */
 :root {
-  --lx-surface-app: #0C0B09;
-  --lx-surface-elevated: #141210;
-  --lx-surface-column: #12100E;
-  --lx-surface-card: #1A1714;
-  --lx-surface-card-hover: #24201C;
-  --lx-surface-card-active: #2E2A24;
-  --lx-surface-card-dragging: #24201C;
-  --lx-surface-input: #0C0B09;
-  --lx-surface-overlay: rgba(12, 11, 9, 0.85);
-  --lx-surface-tooltip: #24201C;
-  --lx-surface-selected: rgba(240, 192, 64, 0.10);
+  /* Map furniture: ground (app field) · rail (nav/headers) · panel (cards) */
+  --lx-surface-ground: #10161B;
+  --lx-surface-rail: #0B1014;
+  --lx-surface-panel: #18222B;
 
-  --lx-border-default: #332E28;
-  --lx-border-subtle: #1A1714;
-  --lx-border-strong: #4A443D;
-  --lx-border-focus: #F0C040;
-  --lx-border-input: #6B6560;
-  --lx-border-input-hover: #8A837C;
+  --lx-surface-app: var(--lx-surface-ground);
+  --lx-surface-elevated: var(--lx-surface-rail);
+  --lx-surface-column: #141C24;
+  --lx-surface-card: var(--lx-surface-panel);
+  --lx-surface-card-hover: #1F2C36;
+  --lx-surface-card-active: #26343F;
+  --lx-surface-card-dragging: #1F2C36;
+  --lx-surface-input: #0D141A;
+  --lx-surface-overlay: rgba(8, 12, 16, 0.78);
+  --lx-surface-tooltip: #22303B;
+  --lx-surface-selected: rgba(228, 87, 46, 0.12);
 
-  --lx-text-primary: #F5F0EB;
-  --lx-text-secondary: #948E88;
-  --lx-text-tertiary: #8A837C;
-  --lx-text-muted: #867F78;
-  --lx-text-inverse: #12100E;
-  --lx-text-link: #F0C040;
-  --lx-text-link-hover: #F5D76A;
-  --lx-text-danger: #FF9999;
-  --lx-text-warning: #FCD34D;
-  --lx-text-success: #86EFAC;
+  --lx-border-default: #26333D;
+  --lx-border-subtle: #1B242C;
+  --lx-border-strong: #3E505D;
+  --lx-border-focus: #E4572E;
+  --lx-border-input: #43565F;
+  --lx-border-input-hover: #5A6E78;
 
-  --lx-bg-danger-subtle: rgba(255, 68, 68, 0.10);
-  --lx-bg-warning-subtle: rgba(240, 192, 64, 0.10);
-  --lx-bg-success-subtle: rgba(74, 222, 128, 0.10);
-  --lx-bg-accent-subtle: rgba(240, 192, 64, 0.10);
+  --lx-text-primary: #EAF2F6;
+  --lx-text-secondary: #9FB2BE;
+  --lx-text-tertiary: #8DA0AC;
+  --lx-text-muted: #7E929F;
+  --lx-text-inverse: #0B1014;
+  --lx-text-link: #F0866A;
+  --lx-text-link-hover: #F6A88F;
+  --lx-text-danger: #FF9C8F;
+  --lx-text-warning: #E8A33D;
+  --lx-text-success: #8FD9A8;
 
-  --lx-shadow-sm: 0 1px 2px rgba(12, 11, 9, 0.5);
-  --lx-shadow-md: 0 4px 12px rgba(12, 11, 9, 0.6);
-  --lx-shadow-lg: 0 12px 32px rgba(12, 11, 9, 0.7);
-  --lx-shadow-drag: 0 8px 24px rgba(12, 11, 9, 0.8), 0 0 0 1px rgba(240, 192, 64, 0.25);
-  --lx-shadow-slideover: -4px 0 24px rgba(12, 11, 9, 0.7);
+  /* Patrol orange: primary action, focus ring, "You are here", today marker */
+  --lx-accent: #E4572E;
+  --lx-accent-hover: #F06A42;
+  --lx-accent-ink: #10161B;
+  --lx-accent-muted: #8A3A20;
+
+  --lx-bg-danger-subtle: rgba(210, 55, 47, 0.14);
+  --lx-bg-warning-subtle: rgba(232, 163, 61, 0.14);
+  --lx-bg-success-subtle: rgba(46, 158, 79, 0.14);
+  --lx-bg-accent-subtle: rgba(228, 87, 46, 0.14);
+
+  --lx-shadow-sm: 0 1px 2px rgba(4, 7, 10, 0.5);
+  --lx-shadow-md: 0 6px 16px rgba(4, 7, 10, 0.55);
+  --lx-shadow-lg: 0 16px 40px rgba(4, 7, 10, 0.65);
+  --lx-shadow-drag: 0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(228, 87, 46, 0.35);
+  --lx-shadow-slideover: -6px 0 28px rgba(4, 7, 10, 0.6);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
-  --lx-focus-glow: 0 0 12px rgba(240, 192, 64, 0.20);
+  --lx-focus-glow: 0 0 12px rgba(228, 87, 46, 0.22);
 
-  --lx-scrollbar-track: var(--lx-surface-app);
-  --lx-scrollbar-thumb: #332E28;
-  --lx-scrollbar-thumb-hover: #4A443D;
+  --lx-scrollbar-track: var(--lx-surface-ground);
+  --lx-scrollbar-thumb: #26333D;
+  --lx-scrollbar-thumb-hover: #3E505D;
 
-  /* Badge/chip text on subtle tinted bgs (§5.5/§5.6 dark values) */
-  --lx-badge-feature: #4ADE80;
-  --lx-badge-bug: #FF9999;
-  --lx-badge-task: #67E8F9;
-  --lx-badge-asset: #F9A8D4;
-  --lx-pb-medium: #67E8F9;
-  --lx-pb-low: #B8B2AB;
-  --lx-status-danger: #FF4444;
-  --lx-status-warning: #F0C040;
-  --lx-status-success: #4ADE80;
+  /* Difficulty ribbons — priority encoding, rank numeral always doubled */
+  --lx-run-lowest: #2E9E4F;
+  --lx-run-normal: #2F74D0;
+  --lx-run-high: #D2372F;
+  --lx-run-highest: #0B0B0C;
+  --lx-run-lowest-ink: #0B0B0C;
+  --lx-run-normal-ink: #FFFFFF;
+  --lx-run-high-ink: #FFFFFF;
+  --lx-run-highest-ink: #FFFFFF;
+  --lx-run-rim: rgba(255, 255, 255, 0.34);
 
+  /* Lift-line hues — per-project / data series only */
+  --lx-series-glacier: #35B7C8;
+  --lx-series-gold: #E8A33D;
+  --lx-series-plum: #9A5BD0;
+  --lx-series-meadow: #2E9E4F;
+  --lx-series-slate: #7E929F;
+
+  /* Stamp ink — sync, approval, revision */
+  --lx-stamp-sync: #8FBCF5;
+  --lx-stamp-fail: #FF9C8F;
+  --lx-stamp-bg: rgba(47, 116, 208, 0.14);
+  --lx-stamp-bg-fail: rgba(210, 55, 47, 0.16);
+
+  /* Badge/chip text on subtle tinted bgs */
+  --lx-badge-feature: #8FD9A8;
+  --lx-badge-bug: #FF9C8F;
+  --lx-badge-task: #7FD8E4;
+  --lx-badge-asset: #F0A6D0;
+  --lx-pb-medium: #7FD8E4;
+  --lx-pb-low: #9FB2BE;
+  --lx-status-danger: #D2372F;
+  --lx-status-warning: #E8A33D;
+  --lx-status-success: #2E9E4F;
+  --lx-status-info: #35B7C8;
+
+  /* Three type voices: signage (plates, caps) · guide (body) · surveyor (figures) */
   --lx-font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
   --lx-font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
   --lx-font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
-  --lx-font-micro: "Departure Mono", "JetBrains Mono", monospace;
+  --lx-font-micro: var(--lx-font-mono);
+  --lx-font-signage: var(--lx-font-display);
+  --lx-font-guide: var(--lx-font-body);
+  --lx-font-surveyor: var(--lx-font-mono);
+
+  /* World geometry: 4px spacing scale, plates 6px, panels 10px, pills for chips */
+  --lx-radius-plate: 6px;
+  --lx-radius-panel: 10px;
+  --lx-space-1: 4px;
+  --lx-space-2: 8px;
+  --lx-space-3: 12px;
+  --lx-space-4: 16px;
+  --lx-space-6: 24px;
+  --lx-row-h: 36px;
+  --lx-row-h-touch: 44px;
 
   --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
 }
 
-/* ---- Semantic tokens: LIGHT ---- */
+/* ---- Semantic tokens: LIGHT — the printed day map ----
+   A daylight translation of the same map: map-paper ground, same ribbons,
+   same plates. Never an inversion. */
 [data-theme="light"] {
-  --lx-surface-app: #F5F0EB;
-  --lx-surface-elevated: #FFFFFF;
-  --lx-surface-column: #EBE5DE;
-  --lx-surface-card: #FFFFFF;
-  --lx-surface-card-hover: #F5F0EB;
-  --lx-surface-card-active: #EBE5DE;
-  --lx-surface-card-dragging: #FFFFFF;
+  --lx-surface-ground: #F2EFE7;
+  --lx-surface-rail: #E9E4D8;
+  --lx-surface-panel: #FBFAF6;
+
+  --lx-surface-app: var(--lx-surface-ground);
+  --lx-surface-elevated: var(--lx-surface-rail);
+  --lx-surface-column: #EDE8DD;
+  --lx-surface-card: var(--lx-surface-panel);
+  --lx-surface-card-hover: #F2EFE7;
+  --lx-surface-card-active: #E9E4D8;
+  --lx-surface-card-dragging: var(--lx-surface-panel);
   --lx-surface-input: #FFFFFF;
-  --lx-surface-overlay: rgba(26, 23, 20, 0.35);
-  --lx-surface-tooltip: #1A1714;
-  --lx-surface-selected: rgba(212, 160, 23, 0.10);
+  --lx-surface-overlay: rgba(23, 34, 43, 0.38);
+  --lx-surface-tooltip: #17222B;
+  --lx-surface-selected: rgba(199, 67, 30, 0.12);
 
-  --lx-border-default: #DDD5CC;
-  --lx-border-subtle: #EBE5DE;
-  --lx-border-strong: #C4BAB0;
-  --lx-border-focus: #A07908;
-  --lx-border-input: #888078;
+  --lx-border-default: #D5CFC1;
+  --lx-border-subtle: #E4DED1;
+  --lx-border-strong: #A9A192;
+  --lx-border-focus: #C7431E;
+  --lx-border-input: #8C8577;
   /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
-  --lx-border-input-hover: #5C554F;
-  --lx-status-danger: #DC2626;
-  --lx-status-warning: #D4A017;
-  --lx-status-success: #16A34A;
+  --lx-border-input-hover: #5A6B76;
+  --lx-status-danger: #B02A22;
+  --lx-status-warning: #9A6410;
+  --lx-status-success: #1F7A3A;
+  --lx-status-info: #1D7C88;
 
-  --lx-text-primary: #1A1714;
-  --lx-text-secondary: #5C554F;
-  --lx-text-tertiary: #7A7169;
-  --lx-text-muted: #6A645C;
-  --lx-text-inverse: #FFFFFF;
-  --lx-text-link: #8A6600;
-  --lx-text-link-hover: #7E5C00;
-  --lx-text-danger: #991B1B;
-  --lx-text-warning: #92400E;
-  --lx-text-success: #166534;
+  --lx-text-primary: #17222B;
+  --lx-text-secondary: #5A6B76;
+  --lx-text-tertiary: #6C7C86;
+  --lx-text-muted: #5F707B;
+  --lx-text-inverse: #FBFAF6;
+  --lx-text-link: #9E3A1B;
+  --lx-text-link-hover: #84300F;
+  --lx-text-danger: #8E2018;
+  --lx-text-warning: #7A4E0C;
+  --lx-text-success: #14572B;
 
-  --lx-bg-danger-subtle: rgba(220, 38, 38, 0.08);
-  --lx-bg-warning-subtle: rgba(212, 160, 23, 0.08);
-  --lx-bg-success-subtle: rgba(22, 163, 74, 0.08);
-  --lx-bg-accent-subtle: rgba(212, 160, 23, 0.08);
+  --lx-accent: #C7431E;
+  --lx-accent-hover: #AD3616;
+  --lx-accent-ink: #FBFAF6;
+  --lx-accent-muted: #D98569;
 
-  --lx-shadow-sm: 0 1px 2px rgba(26, 23, 20, 0.08);
-  --lx-shadow-md: 0 4px 12px rgba(26, 23, 20, 0.10);
-  --lx-shadow-lg: 0 12px 32px rgba(26, 23, 20, 0.14);
-  --lx-shadow-drag: 0 8px 24px rgba(26, 23, 20, 0.18), 0 0 0 1px rgba(212, 160, 23, 0.25);
-  --lx-shadow-slideover: -4px 0 24px rgba(26, 23, 20, 0.12);
+  --lx-bg-danger-subtle: rgba(176, 42, 34, 0.10);
+  --lx-bg-warning-subtle: rgba(154, 100, 16, 0.12);
+  --lx-bg-success-subtle: rgba(31, 122, 58, 0.10);
+  --lx-bg-accent-subtle: rgba(199, 67, 30, 0.10);
+
+  --lx-shadow-sm: 0 1px 2px rgba(23, 34, 43, 0.10);
+  --lx-shadow-md: 0 6px 16px rgba(23, 34, 43, 0.12);
+  --lx-shadow-lg: 0 16px 40px rgba(23, 34, 43, 0.16);
+  --lx-shadow-drag: 0 10px 28px rgba(23, 34, 43, 0.18), 0 0 0 1px rgba(199, 67, 30, 0.35);
+  --lx-shadow-slideover: -6px 0 28px rgba(23, 34, 43, 0.14);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
-  --lx-focus-glow: 0 0 12px rgba(212, 160, 23, 0.15);
+  --lx-focus-glow: 0 0 12px rgba(199, 67, 30, 0.16);
 
-  --lx-scrollbar-track: var(--lx-surface-app);
-  --lx-scrollbar-thumb: #C4BAB0;
-  --lx-scrollbar-thumb-hover: #9C9187;
+  --lx-scrollbar-track: var(--lx-surface-ground);
+  --lx-scrollbar-thumb: #C0B9AA;
+  --lx-scrollbar-thumb-hover: #A9A192;
+
+  /* Ribbons stay the same saturated fills in both map times of day; only the
+     rim flips so the black chip keeps an edge on paper. */
+  --lx-run-rim: rgba(11, 11, 12, 0.55);
+
+  --lx-stamp-sync: #1F5FA8;
+  --lx-stamp-fail: #8E2018;
+  --lx-stamp-bg: rgba(47, 116, 208, 0.12);
+  --lx-stamp-bg-fail: rgba(176, 42, 34, 0.12);
 
   /* Badge text needs darker values for contrast on light tints */
-  --lx-badge-feature: #15803D;
-  --lx-badge-bug: #991B1B;
-  --lx-badge-task: #0E7490;
-  --lx-badge-asset: #BE185D;
-  --lx-pb-medium: #0E7490;
-  --lx-pb-low: #5C554F;
+  --lx-badge-feature: #14572B;
+  --lx-badge-bug: #8E2018;
+  --lx-badge-task: #155E6B;
+  --lx-badge-asset: #8E1B52;
+  --lx-pb-medium: #155E6B;
+  --lx-pb-low: #5A6B76;
 }
 
 /* ---- Elevated surfaces in light mode ----
@@ -155,13 +231,13 @@
   border-bottom-color: var(--lx-border-default);
 }
 [data-theme="light"] .tl-tooltip {
-  border-color: #332E28;
+  border-color: #26333D;
 }
 [data-theme="light"] .tl-tooltip .tt-title {
-  color: #F5F0EB;
+  color: #EAF2F6;
 }
 [data-theme="light"] .tl-tooltip .tt-line {
-  color: #948E88;
+  color: #9FB2BE;
 }
 
 /* ---- Tailwind v4 theme mapping (wireframes/DESIGN_SYSTEM.md §8.1) ---- */
@@ -195,14 +271,14 @@
   --color-lx-text-warning: var(--lx-text-warning);
   --color-lx-text-success: var(--lx-text-success);
 
-  --color-lx-accent: #F0C040;
-  --color-lx-accent-hover: #F5D76A;
-  --color-lx-accent-muted: #8A7020;
+  --color-lx-accent: var(--lx-accent);
+  --color-lx-accent-hover: var(--lx-accent-hover);
+  --color-lx-accent-muted: var(--lx-accent-muted);
 
-  --color-lx-status-success: #4ADE80;
-  --color-lx-status-warning: #F0C040;
-  --color-lx-status-danger: #FF4444;
-  --color-lx-status-info: #22D3EE;
+  --color-lx-status-success: var(--lx-status-success);
+  --color-lx-status-warning: var(--lx-status-warning);
+  --color-lx-status-danger: var(--lx-status-danger);
+  --color-lx-status-info: var(--lx-status-info);
 
   --color-lx-badge-feature: var(--lx-badge-feature);
   --color-lx-badge-bug: var(--lx-badge-bug);
@@ -8987,3 +9063,1318 @@
 .run-event { display:flex; align-items:baseline; gap:6px; padding-left:2px; font-family:var(--lx-font-mono); font-size:11px; line-height:17px; color:var(--lx-text-muted); }
 .run-event-name { flex-shrink:0; font-weight:500; color:var(--lx-text-secondary); }
 .run-card-missing { font-family:var(--lx-font-mono); font-size:11px; line-height:17px; color:var(--lx-text-muted); }
+
+/* =========================================================
+   THE TRAIL MAP, app shell + dashboard
+   The world's furniture only: plates, ribbons, stamps, the trail profile.
+   Everything below is unlayered on purpose: it owns the shell and the
+   dashboard, and must outrank the ported component layer it replaces
+   without rewriting the 830 classes the rest of the app still uses.
+   ========================================================= */
+
+/* Browser surfaces belong to the palette (selection, caret, focus ring). */
+::selection {
+  background: var(--lx-accent);
+  color: var(--lx-accent-ink);
+}
+html {
+  caret-color: var(--lx-accent);
+  scrollbar-color: var(--lx-scrollbar-thumb) var(--lx-scrollbar-track);
+  background: var(--lx-surface-ground);
+}
+/* One global focus rule: 2px patrol-orange ring, 2px offset. */
+:focus-visible {
+  outline: 2px solid var(--lx-border-focus);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* ---- Signage plates: section heads and controls wear the same label ---- */
+.tm-plate {
+  font-family: var(--lx-font-signage);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--lx-text-secondary);
+  margin: 0;
+}
+.tm-plate-lg {
+  font-family: var(--lx-font-signage);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lx-text-primary);
+  margin: 0;
+}
+.tm-sub {
+  font-family: var(--lx-font-guide);
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--lx-text-muted);
+  margin: 0;
+}
+.tm-figure {
+  font-family: var(--lx-font-surveyor);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.tm-section {
+  background: var(--lx-surface-panel);
+  border: 1px solid var(--lx-border-default);
+  border-radius: var(--lx-radius-panel);
+  padding: 12px;
+}
+.tm-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.tm-section-head > div {
+  min-width: 0;
+}
+
+/* ---- Difficulty ribbons: priority as ski-run grade ----
+   Colour is never alone: the rank numeral rides the ribbon and the label is
+   in the accessible name. */
+.tm-ribbon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--lx-run-rim);
+  font-family: var(--lx-font-surveyor);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.tm-ribbon[data-tone="lowest"] { background: var(--lx-run-lowest); color: var(--lx-run-lowest-ink); }
+.tm-ribbon[data-tone="normal"] { background: var(--lx-run-normal); color: var(--lx-run-normal-ink); }
+.tm-ribbon[data-tone="high"] { background: var(--lx-run-high); color: var(--lx-run-high-ink); }
+.tm-ribbon[data-tone="highest"] { background: var(--lx-run-highest); color: var(--lx-run-highest-ink); }
+.tm-ribbon-lg {
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
+  border-radius: 5px;
+}
+
+/* ---- Route key: KEY-123 in the surveyor voice ---- */
+.tm-key {
+  font-family: var(--lx-font-surveyor);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+}
+
+/* ---- Stamps: sync and revision ink ---- */
+.tm-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  font-family: var(--lx-font-surveyor);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.tm-stamp[data-state="synced"] { color: var(--lx-stamp-sync); background: var(--lx-stamp-bg); }
+.tm-stamp[data-state="degraded"] { color: var(--lx-text-warning); background: var(--lx-bg-warning-subtle); }
+.tm-stamp[data-state="failed"] { color: var(--lx-stamp-fail); background: var(--lx-stamp-bg-fail); }
+
+/* ---- Empty / error / loading voids (drawn before layout) ---- */
+.tm-void {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--lx-border-default);
+  border-radius: var(--lx-radius-plate);
+  background: transparent;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-guide);
+  font-size: 13px;
+  line-height: 18px;
+}
+.tm-void-title {
+  font-family: var(--lx-font-signage);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--lx-text-primary);
+}
+.tm-void[data-tone="error"] {
+  border-style: solid;
+  border-color: var(--lx-status-danger);
+  background: var(--lx-bg-danger-subtle);
+  color: var(--lx-text-primary);
+}
+.tm-skel-row {
+  height: 36px;
+  border-radius: var(--lx-radius-plate);
+}
+.tm-skel-value {
+  display: inline-block;
+  width: 56px;
+  height: 14px;
+  border-radius: 4px;
+}
+.tm-profile-skeleton {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+.tm-profile-skeleton .tm-profile-ridge {
+  stroke-dasharray: 5 5;
+}
+
+/* =========================================================
+   1. Shell, rail + top bar
+   ========================================================= */
+.app-shell {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--lx-surface-ground);
+}
+.app-frame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The page frame centres with auto margins, which defeats the flex stretch:
+   a wide child (the profile panorama) would then widen the whole page. Pin
+   the frame to the viewport and let the panorama scroll inside itself. */
+.app-content > * {
+  min-width: 0;
+}
+.page-frame {
+  width: 100%;
+  min-width: 0;
+}
+
+/* The rail: 200px open, 48px collapsed, 168px in the mid band. */
+.app-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  width: 200px;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--lx-surface-rail);
+  border-right: 1px solid var(--lx-border-default);
+  overflow: hidden auto;
+  z-index: 30;
+}
+.app-nav[data-open="false"] {
+  width: 48px;
+  padding: 8px 4px;
+}
+.app-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+}
+.app-rail-head .nav-brand {
+  flex: 1;
+  min-width: 0;
+}
+.app-nav[data-open="false"] .app-rail-head {
+  flex-direction: column;
+}
+.app-rail-toggle,
+.nav-hamburger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: var(--lx-radius-plate);
+  background: transparent;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  font-family: var(--lx-font-signage);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.app-rail-toggle:hover,
+.nav-hamburger:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.app-rail-toggle:active,
+.nav-hamburger:active {
+  background: var(--lx-surface-card-active);
+  color: var(--lx-text-primary);
+}
+.app-rail-toggle svg,
+.nav-hamburger svg {
+  width: 16px;
+  height: 16px;
+}
+.nav-hamburger {
+  display: none; /* desktop rail owns navigation; shown below 768px */
+}
+.app-nav .nav-brand {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--lx-radius-plate);
+  font-family: var(--lx-font-signage);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lx-text-primary);
+  text-decoration: none;
+}
+.app-nav .nav-brand:hover {
+  background: var(--lx-surface-card-hover);
+}
+.app-nav .nav-brand.active {
+  color: var(--lx-text-primary);
+  text-decoration: none;
+}
+.app-topbar-switcher {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.app-rail-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--lx-border-subtle);
+}
+.app-nav[data-open="false"] .nav-label,
+.app-nav[data-open="false"] .app-rail-foot .user-name {
+  /* Collapsed rail: the label leaves the layout but stays in the accessible
+     name, so the icon-only plate is still announced. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.app-nav[data-open="false"] .nav-link {
+  justify-content: center;
+  padding: 0;
+}
+.app-nav[data-open="false"] .app-rail-foot {
+  align-items: center;
+}
+.app-nav[data-open="false"] .nav-right {
+  flex-direction: column;
+}
+
+/* Nav links as signage plates. */
+.app-nav .nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: stretch;
+}
+.app-nav .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--lx-row-h);
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--lx-radius-plate);
+  background: transparent;
+  font-family: var(--lx-font-signage);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lx-text-secondary);
+  text-decoration: none;
+  transition: background 120ms linear, color 120ms linear;
+}
+.app-nav .nav-link svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.app-nav .nav-link:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.app-nav .nav-link:active {
+  background: var(--lx-surface-card-active);
+}
+.app-nav .nav-link.active {
+  background: var(--lx-surface-card-active);
+  border-color: var(--lx-border-strong);
+  color: var(--lx-text-primary);
+}
+
+/* Top bar. */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 16px;
+  background: var(--lx-surface-rail);
+  border-bottom: 1px solid var(--lx-border-default);
+}
+.app-topbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.app-topbar-name {
+  font-family: var(--lx-font-signage);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-topbar-slug {
+  font-family: var(--lx-font-surveyor);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.app-topbar .nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-topbar-account {
+  display: none;
+}
+.nav-pill-icon {
+  padding: 0;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+.app-topbar .nav-pill-icon {
+  width: var(--lx-row-h-touch);
+  height: var(--lx-row-h-touch);
+}
+.app-topbar .nav-spacer,
+.app-nav .nav-spacer {
+  flex: 1;
+}
+
+/* Mobile menu panel (below 768px the rail is gone, this replaces it). */
+.app-nav-menu {
+  display: none;
+}
+.app-nav-menu-project {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+.app-nav-menu-divider {
+  height: 1px;
+  background: var(--lx-border-subtle);
+  margin: 4px 0;
+}
+.app-nav-backdrop {
+  display: none;
+}
+
+/* =========================================================
+   2. Trail report strip
+   ========================================================= */
+.tm-report {
+  display: flex;
+  align-items: stretch;
+  background: var(--lx-surface-panel);
+  border: 1px solid var(--lx-border-default);
+  border-radius: var(--lx-radius-panel);
+  min-height: 56px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.tm-report-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 14px;
+  border-right: 1px solid var(--lx-border-subtle);
+}
+.tm-report-item:last-child {
+  border-right: none;
+}
+.tm-report-item:first-child {
+  flex: 1 1 auto;
+}
+.tm-report-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--lx-font-guide);
+  font-size: 13px;
+  line-height: 17px;
+  color: var(--lx-text-primary);
+  min-width: 0;
+}
+.tm-report-value strong {
+  font-family: var(--lx-font-surveyor);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.tm-report-count {
+  font-family: var(--lx-font-surveyor);
+  font-size: 20px;
+  line-height: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lx-text-primary);
+}
+.tm-report-link {
+  align-self: center;
+  margin-left: auto;
+  padding: 0 12px;
+}
+
+/* =========================================================
+   3. Trail profile, the signature
+   ========================================================= */
+.tm-profile {
+  background: var(--lx-surface-panel);
+  border: 1px solid var(--lx-border-default);
+  border-radius: var(--lx-radius-panel);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.tm-profile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 6px;
+}
+.tm-profile-head > div {
+  min-width: 0;
+}
+.tm-profile-note {
+  font-family: var(--lx-font-guide);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.tm-profile-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px 10px;
+}
+.tm-profile svg {
+  display: block;
+}
+.tm-profile-ridge {
+  fill: none;
+  stroke: var(--lx-border-default);
+  stroke-width: 1;
+}
+.tm-profile-ridge-fill {
+  fill: var(--lx-surface-column);
+  opacity: 0.55;
+}
+.tm-profile-axis {
+  stroke: var(--lx-border-subtle);
+  stroke-width: 1;
+}
+.tm-peak-line {
+  stroke: var(--lx-border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+.tm-peak-dot {
+  fill: var(--lx-text-primary);
+}
+.tm-peak-label {
+  font-family: var(--lx-font-signage);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  fill: var(--lx-text-primary);
+}
+.tm-peak-date {
+  font-family: var(--lx-font-surveyor);
+  font-size: 10px;
+  fill: var(--lx-text-muted);
+}
+.tm-run {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.tm-run[data-tone="glacier"] { stroke: var(--lx-series-glacier); }
+.tm-run[data-tone="gold"] { stroke: var(--lx-series-gold); }
+.tm-run[data-tone="plum"] { stroke: var(--lx-series-plum); }
+.tm-run[data-tone="meadow"] { stroke: var(--lx-series-meadow); }
+.tm-run-progress {
+  fill: none;
+  stroke: var(--lx-text-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.5;
+}
+.tm-post {
+  fill: var(--lx-surface-ground);
+  stroke: var(--lx-border-strong);
+  stroke-width: 1.5;
+}
+.tm-post-done {
+  fill: var(--lx-status-success);
+  stroke: none;
+}
+.tm-post-label {
+  font-family: var(--lx-font-surveyor);
+  font-size: 10px;
+  fill: var(--lx-text-secondary);
+}
+.tm-gate {
+  stroke: var(--lx-run-high);
+  stroke-width: 2;
+}
+.tm-gate-label {
+  font-family: var(--lx-font-surveyor);
+  font-size: 10px;
+  fill: var(--lx-text-danger);
+}
+.tm-today {
+  stroke: var(--lx-accent);
+  stroke-width: 2;
+}
+.tm-today-flag {
+  fill: var(--lx-accent);
+  font-family: var(--lx-font-signage);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tm-valley {
+  fill: var(--lx-surface-column);
+}
+.tm-valley-label {
+  font-family: var(--lx-font-signage);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  fill: var(--lx-text-secondary);
+}
+
+/* Route Trace, the named interaction: 180ms linear draw per mount. */
+.tm-trace {
+  fill: none;
+  stroke: var(--lx-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  animation: tm-trace-draw 180ms linear both;
+}
+.tm-trace-head {
+  fill: var(--lx-accent);
+}
+.tm-trace-label {
+  font-family: var(--lx-font-signage);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  fill: var(--lx-text-primary);
+}
+@keyframes tm-trace-draw {
+  from { stroke-dashoffset: var(--tm-trace-len, 400); }
+  to { stroke-dashoffset: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tm-trace {
+    animation: none;
+  }
+}
+
+/* =========================================================
+   4. Needs attention, dense trail rows (36px, 44px touch)
+   ========================================================= */
+.tm-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tm-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--lx-row-h);
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--lx-radius-plate);
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background 120ms linear;
+}
+.tm-row:hover,
+.tm-row:focus-visible {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.tm-row:active {
+  background: var(--lx-surface-card-active);
+}
+.tm-row.is-traced {
+  background: var(--lx-bg-accent-subtle);
+  border-color: var(--lx-accent);
+}
+.tm-row-ribbon {
+  display: inline-flex;
+  align-items: center;
+}
+.tm-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tm-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.tm-row-title {
+  min-width: 0;
+  font-family: var(--lx-font-guide);
+  font-size: 13px;
+  line-height: 17px;
+  color: var(--lx-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--lx-font-guide);
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tm-row-owners {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tm-keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  background: var(--lx-surface-input);
+  font-family: var(--lx-font-surveyor);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+}
+.tm-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--lx-border-default);
+  font-family: var(--lx-font-guide);
+  font-size: 11px;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+}
+
+/* =========================================================
+   5. Column WIP meters, side-fill exact against the ruled limit
+   ========================================================= */
+.tm-meters {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tm-meter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--lx-radius-plate);
+  color: inherit;
+  text-decoration: none;
+}
+.tm-meter:hover,
+.tm-meter:focus-visible {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.tm-meter:active {
+  background: var(--lx-surface-card-active);
+}
+.tm-meter-name {
+  min-width: 0;
+  font-family: var(--lx-font-guide);
+  font-size: 13px;
+  color: var(--lx-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-meter-count {
+  font-family: var(--lx-font-surveyor);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+}
+.tm-meter-track {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 8px;
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 2px;
+  background: var(--lx-surface-input);
+  overflow: hidden;
+}
+.tm-meter-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--lx-series-glacier);
+}
+.tm-meter[data-state="approaching"] .tm-meter-fill {
+  background: var(--lx-status-warning);
+}
+.tm-meter[data-state="exceeded"] .tm-meter-fill {
+  background: var(--lx-status-danger);
+}
+.tm-meter[data-state="ok"] .tm-meter-fill {
+  background: var(--lx-series-meadow);
+}
+.tm-meter-limit {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--lx-border-strong);
+}
+.tm-meter-state {
+  font-family: var(--lx-font-signage);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lx-text-muted);
+}
+.tm-meter[data-state="approaching"] .tm-meter-state { color: var(--lx-text-warning); }
+.tm-meter[data-state="exceeded"] .tm-meter-state { color: var(--lx-text-danger); }
+
+/* =========================================================
+   6. Recent movement, dated stamps
+   ========================================================= */
+.tm-moves {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tm-move {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 3px 10px;
+  border-radius: var(--lx-radius-plate);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.tm-move:hover,
+.tm-move:focus-visible {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.tm-move:active {
+  background: var(--lx-surface-card-active);
+}
+.tm-move.is-traced {
+  background: var(--lx-bg-accent-subtle);
+  border-color: var(--lx-accent);
+}
+.tm-move-time {
+  font-family: var(--lx-font-surveyor);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.tm-move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tm-move-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.tm-move-line > span:last-child {
+  min-width: 0;
+  font-family: var(--lx-font-guide);
+  font-size: 13px;
+  color: var(--lx-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Utility classes this world adds ---- */
+.tm-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.tm-danger {
+  color: var(--lx-text-danger);
+}
+.tm-muted-icon {
+  color: var(--lx-text-muted);
+  flex-shrink: 0;
+}
+.tm-profile-body {
+  padding: 0 14px 14px;
+}
+.app-rail-mark {
+  flex-shrink: 0;
+  color: var(--lx-accent);
+}
+
+/* ---- Dashboard composition ---- */
+.tm-dash {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tm-dash-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tm-dash-head h1 {
+  margin: 0;
+  font-family: var(--lx-font-signage);
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--lx-text-primary);
+}
+.tm-dash-head .nav-spacer {
+  flex: 1;
+}
+.tm-dash-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+/* Trailhead plates (the projects picker). */
+.project-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  background: var(--lx-surface-panel);
+  border: 1px solid var(--lx-border-default);
+  border-radius: var(--lx-radius-panel);
+  text-decoration: none;
+}
+.project-card:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.project-card:active {
+  background: var(--lx-surface-card-active);
+}
+.project-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--lx-font-signage);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lx-text-primary);
+}
+.project-card-desc {
+  font-family: var(--lx-font-guide);
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--lx-text-secondary);
+}
+
+/* =========================================================
+   Width states: mid band 768–1023 (icon rail, tighter frame),
+   phone <768 (labelled menu, strips, stacked order).
+   ========================================================= */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .app-nav {
+    width: 168px;
+  }
+  .app-nav[data-open="false"] {
+    width: 48px;
+  }
+  /* The rail owns navigation at this width; the old tablet band hid the
+     nav row behind a hamburger and dropped the primary action. */
+  .app-nav .nav-links {
+    display: flex;
+  }
+  .app-topbar .nav-right > * {
+    display: inline-flex;
+  }
+  .tm-dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767.98px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-nav {
+    display: none;
+  }
+  .nav-hamburger {
+    display: inline-flex;
+  }
+  .app-topbar {
+    min-height: 52px;
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .app-topbar-name {
+    font-size: 12px;
+  }
+  .app-content {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  .page-frame {
+    padding: 14px 12px;
+  }
+  .page-frame-narrow {
+    max-width: none;
+  }
+
+  /* The labelled menu replaces the rail. Nothing is hidden behind a bare
+     glyph: the button reads "Menu". */
+  .app-nav-menu {
+    position: fixed;
+    top: 52px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 12px calc(24px + env(safe-area-inset-bottom));
+    background: var(--lx-surface-rail);
+    border-top: 1px solid var(--lx-border-default);
+    border-bottom: none;
+    box-shadow: none;
+    transform: none;
+    opacity: 1;
+    transition: none;
+    max-height: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    z-index: 40;
+  }
+  /* Old mobile rules hid everything but the avatar in the chrome cluster. */
+  .app-topbar .nav-right > * {
+    display: inline-flex;
+  }
+  /* The menu panel owns project switching on a phone. */
+  .app-topbar-switcher {
+    display: none;
+  }
+  .app-topbar-account {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .app-shell:not(.is-menu-open) .app-nav-menu,
+  .app-shell:not(.is-menu-open) .app-nav-backdrop {
+    display: none;
+  }
+  .app-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 52px 0 0 0;
+    border: none;
+    padding: 0;
+    background: var(--lx-surface-overlay);
+    z-index: 35;
+    cursor: pointer;
+  }
+  .app-nav-menu-link,
+  .app-nav-menu-action {
+    display: flex;
+    align-items: center;
+    min-height: var(--lx-row-h-touch);
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: var(--lx-radius-plate);
+    font-family: var(--lx-font-signage);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--lx-text-secondary);
+    text-decoration: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+  }
+  .app-nav-menu-link:hover,
+  .app-nav-menu-action:hover,
+  .app-nav-menu-link.active {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-text-primary);
+  }
+  .app-nav-menu-link:active,
+  .app-nav-menu-action:active {
+    background: var(--lx-surface-card-active);
+    color: var(--lx-text-primary);
+  }
+  .app-nav-menu-project-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--lx-row-h-touch);
+    padding: 0 12px;
+    width: 100%;
+    border: 1px solid var(--lx-border-default);
+    border-radius: var(--lx-radius-plate);
+    background: var(--lx-surface-input);
+    color: var(--lx-text-primary);
+    cursor: pointer;
+    text-align: left;
+  }
+  .app-nav-menu-project-toggle svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .app-nav-menu-project-label {
+    font-family: var(--lx-font-signage);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--lx-text-muted);
+  }
+  .app-nav-menu-project-name {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--lx-font-guide);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .app-nav-menu-project-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 6px;
+  }
+  /* Touch targets: every chrome control gets 44px and real spacing. */
+  .app-topbar .nav-pill {
+    min-width: var(--lx-row-h-touch);
+    height: var(--lx-row-h-touch);
+    padding: 0 10px;
+  }
+  .app-topbar .nav-hamburger {
+    width: auto;
+    height: auto;
+    min-width: var(--lx-row-h-touch);
+    min-height: var(--lx-row-h-touch);
+    padding: 0 12px;
+  }
+  .app-topbar .btn,
+  .app-topbar .btn-sm {
+    min-height: var(--lx-row-h-touch);
+    height: auto;
+    padding: 0 12px;
+  }
+
+  /* Trail report: one scrollable strip, never two rows. */
+  .tm-report {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tm-report-item {
+    min-width: 76%;
+    scroll-snap-align: start;
+    border-right: 1px solid var(--lx-border-subtle);
+  }
+  .tm-report-link {
+    align-self: center;
+    margin-left: 0;
+    min-height: var(--lx-row-h-touch);
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Trail profile: horizontal strip pinned at today. */
+  .tm-profile-scroll {
+    padding-bottom: 12px;
+  }
+
+  .tm-dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tm-dash {
+    gap: 10px;
+  }
+
+  /* Dense rows become touch rows; the structure stays, the height grows. */
+  .tm-row,
+  .tm-move,
+  .tm-meter {
+    min-height: var(--lx-row-h-touch);
+  }
+  .tm-move {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+  /* Recent movement collapses to 3 rows on a phone. */
+  .tm-move[data-overflow="true"] {
+    display: none;
+  }
+  .tm-section {
+    padding: 10px;
+  }
+  .tm-dash-head h1 {
+    font-size: 17px;
+    line-height: 22px;
+  }
+}
+
+/* Keyboard and pointer users get the same affordances at every width. */
+@media (hover: none) {
+  .tm-row:hover,
+  .tm-meter:hover,
+  .tm-move:hover {
+    background: transparent;
+    border-color: transparent;
+  }
+}
+
+/* Very narrow phones: the top bar keeps its controls and drops the account
+   name, so the chrome never crowds the content column. */
+@media (max-width: 479.98px) {
+  .app-topbar .user-name {
+    display: none;
+  }
+  /* One fact in the chrome at this width: the project, not the view name. */
+  .app-topbar-name {
+    display: none;
+  }
+  .app-topbar .nav-pill-icon {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+  }
+  .app-topbar-account {
+    gap: 4px;
+  }
+}

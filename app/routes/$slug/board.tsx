@@ -3,10 +3,13 @@ import { BoardPage } from "../../components/kanban/BoardPage";
 import { getBoard } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/board")({
-  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined; new?: boolean | undefined } => ({
     task: typeof search.task === "string" ? search.task : undefined,
     milestone: typeof search.milestone === "string" ? search.milestone : undefined,
     swimlane: typeof search.swimlane === "string" && search.swimlane.length > 0 ? search.swimlane : undefined,
+    // ?new=1 is the shell's "New task" entry: the board opens its create
+    // slideover, exactly as the per-cell "+" does.
+    new: search.new === "1" || search.new === true ? true : undefined,
   }),
   // The board is the most interactive surface (DnD, TipTap) — client-only
   // (`ssr: false` here; root is `ssr: true` so public routes can render), so
