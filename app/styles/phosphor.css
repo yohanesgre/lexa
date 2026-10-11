@@ -6544,6 +6544,12 @@
   max-width: var(--lx-transcript-current);
   margin: 0 auto;
 }
+/* A lane holding only a void centres it: pinned to the top, a short card leaves
+   two-fifths of a phone screen blank below it. */
+.chat-scroll:has(> .chat-void) {
+  display: grid;
+  place-items: center;
+}
 .chat-column--approvals {
   max-width: 720px;
 }
@@ -6659,6 +6665,10 @@
     min-width: 44px;
     min-height: 44px;
   }
+  /* One inset for the lane and the header (was 24px against the header's 12),
+     and a void's action takes the touch target. */
+  .chat-scroll { padding: 12px 12px 8px; }
+  .empty-state .btn { min-height: var(--lx-row-h-touch); }
 }
 /* Top fade — the mirror of the composer's bottom scrim: scrolled ink dissolves
    under the header instead of clipping at its edge. */
@@ -10380,9 +10390,10 @@ html {
 }
 
 @media (max-width: 767.98px) {
-  .app-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  /* The rail column collapses to zero (see --lx-rail-current below) instead of
+     the grid dropping to one column: the frame is placed in column 2, so a
+     one-column grid would push it into an implicit track and shift the whole
+     page right by the rail's width. */
   .app-nav {
     display: none;
   }
@@ -10390,8 +10401,11 @@ html {
     display: inline-flex;
   }
   /* Phone: no rail column in the grid, the band grows to the phone height, and
-     the brand lives in the menu panel's head instead of the band. */
-  .app-shell {
+     the brand lives in the menu panel's head instead of the band. The rail's
+     stored open/collapsed state must not resurrect a column here, so both
+     selectors are set. */
+  .app-shell,
+  .app-shell[data-rail-open="false"] {
     --lx-rail-current: 0px;
   }
   .app-band {
