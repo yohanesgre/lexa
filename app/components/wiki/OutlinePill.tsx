@@ -51,7 +51,10 @@ export function OutlinePill({ headings }: OutlinePillProps) {
     if (!isMobile) setOpen(false);
   }, [isMobile]);
 
-  if (!headings.some((heading) => heading.level >= 2)) return null;
+  // A short page has nothing to navigate: the pill earns its place once the
+  // document carries three or more sections.
+  const sections = headings.filter((heading) => heading.level >= 2);
+  if (sections.length < 3) return null;
 
   const current = headings.find((heading) => heading.id === activeId) ?? headings[0];
 

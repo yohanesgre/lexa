@@ -333,7 +333,7 @@ export function AppShell() {
           </button>
           {(routeType === "wiki" || routeType === "chat") && <PaneToggleButton routeType={routeType} />}
           <div className="app-topbar-title">
-            <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
+            <span className="app-topbar-name">{pathname.startsWith("/admin/assistant") ? "Assistant" : VIEW_LABEL[routeType]}</span>
             {selectedProjectName && <span className="app-topbar-project">{selectedProjectName}</span>}
           </div>
           <div className="nav-spacer" />

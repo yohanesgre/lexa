@@ -65,14 +65,14 @@ function ProfileSection() {
   };
 
   return (
-    <section className="mb-8">
+    <section className="mb-8 max-w-3xl">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Profile</h2>
       <div className="card-panel card-panel--elevated mt-4">
         <div className="flex items-start gap-4 flex-wrap">
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
             <div className="avatar" style={{ width: 48, height: 48, fontSize: 18 }}>{initial}</div>
           </div>
-          <div style={{ flex: 1, minWidth: 260 }}>
+          <div style={{ flex: 1, minWidth: 260, maxWidth: 560 }}>
             <Field label="Name" htmlFor="me-name" hint="Used for your initials avatar. Updates across the app after you save." className="field mb-3">
               <TextInput id="me-name" value={name} onChange={(v) => { setName(v); if (error) setError(null); }} />
             </Field>
@@ -129,20 +129,22 @@ export function PasswordSection() {
   };
 
   return (
-    <section className="mb-8">
+    <section className="mb-8 max-w-3xl">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Password</h2>
-      <form onSubmit={handleSubmit} className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
-        <Field label="Current password" htmlFor="pw-current" className="field mb-3">
-          <TextInput id="pw-current" type="password" placeholder="••••••••••••" autoComplete="current-password" value={current} onChange={(v) => { setCurrent(v); setError(null); }} />
-        </Field>
+      <form onSubmit={handleSubmit} className="card-panel card-panel--elevated mt-4">
+        <div style={{ maxWidth: 560 }}>
+          <Field label="Current password" htmlFor="pw-current" className="field mb-3">
+            <TextInput id="pw-current" type="password" placeholder="••••••••••••" autoComplete="current-password" value={current} onChange={(v) => { setCurrent(v); setError(null); }} />
+          </Field>
 
-        <Field label="New password" htmlFor="pw-new" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined} className="field mb-3">
-          <TextInput id="pw-new" type="password" placeholder="••••••••••••" autoComplete="new-password" value={next} onChange={(v) => { setNext(v); setError(null); }} />
-        </Field>
+          <Field label="New password" htmlFor="pw-new" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined} className="field mb-3">
+            <TextInput id="pw-new" type="password" placeholder="••••••••••••" autoComplete="new-password" value={next} onChange={(v) => { setNext(v); setError(null); }} />
+          </Field>
 
-        <Field label="Confirm new password" htmlFor="pw-confirm" className="field mb-0">
-          <TextInput id="pw-confirm" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(v) => { setConfirm(v); setError(null); }} />
-        </Field>
+          <Field label="Confirm new password" htmlFor="pw-confirm" className="field mb-0">
+            <TextInput id="pw-confirm" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(v) => { setConfirm(v); setError(null); }} />
+          </Field>
+        </div>
         {error && <div className="field-hint-danger mt-2">{error}</div>}
         {success && <div className="field-hint mt-2" style={{ color: "var(--lx-text-success)" }}>Password updated. All other sessions were signed out.</div>}
         <div className="flex justify-end mt-4">
@@ -162,7 +164,7 @@ function SessionsSection({ currentSessionId }: { currentSessionId: string | null
   const nowMs = Date.now();
 
   return (
-    <section className="mb-8">
+    <section className="mb-8 max-w-3xl">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Sessions</h2>
         <span className="text-xs text-lx-text-muted">Own sessions only</span>

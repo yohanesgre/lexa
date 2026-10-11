@@ -40,7 +40,7 @@ export function PersonalApiKeysSection() {
   };
 
   return (
-    <section className="mb-8">
+    <section className="mb-8 max-w-3xl">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-display text-lg font-medium text-lx-text-primary">API Keys</h2>
         <span className="text-xs text-lx-text-muted">Own keys only</span>

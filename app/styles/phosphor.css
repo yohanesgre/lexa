@@ -2885,7 +2885,7 @@
   @media (max-width: 767.98px) {
     .wiki-outline-dock {
       right: 12px;
-      bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+      bottom: calc(56px + env(safe-area-inset-bottom, 0px));
       top: auto;
       transform: none;
     }
@@ -4956,7 +4956,6 @@
   }
   .composer:focus-within {
     border-color: var(--lx-border-focus);
-    box-shadow: var(--lx-focus-glow);
   }
   /* Editable elements always match :focus-visible (even mouse) — the
      container's :focus-within signal replaces the element-level glow */
@@ -6395,11 +6394,12 @@
   letter-spacing: 0.05em;
   padding: 2px 7px;
   border-radius: 4px;
-  background: rgba(74, 110, 138, 0.10);
-  color: #67E8F9;
+  background: var(--lx-surface-card-active);
+  color: var(--lx-text-secondary);
 }
 .sl-kind-chip.backlog {
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
+  border: 1px solid var(--lx-border-subtle);
   color: var(--lx-text-muted);
 }
 .sl-row-actions {
@@ -7229,7 +7229,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--lx-space-1);
-  padding: 0 var(--lx-space-2);
+  padding: 0 var(--lx-space-2) var(--lx-space-2);
   flex-shrink: 0;
 }
 .pane-head {
@@ -9033,6 +9033,10 @@
    panel; inside the Deck it must collapse to the textarea's rows so locked
    decks (busy-409) actually shrink to one row. */
 .chat-deck .composer-editor { min-height: 0; }
+/* The deck's message surface reads its focus from the border, not the global
+   ring + glow, which reads as a halo around the whole textarea. */
+.chat-deck .composer-editor:focus-visible { box-shadow: none; }
+.chat-deck .composer-editor:focus { border-color: var(--lx-border-focus); }
 .deck-action { min-width: 0; }
 .deck-summary-chip {
   display: inline-flex;
@@ -10295,7 +10299,7 @@ select.prop-input,
 .tm-dash {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 /* Long-content state, drawn before layout: the three list regions cap their
    height and scroll inside the card, so the six regions of the first viewport
@@ -10348,7 +10352,7 @@ select.prop-input,
 .tm-dash-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  column-gap: 16px;
+  column-gap: 24px;
   row-gap: 24px;
 }
 
