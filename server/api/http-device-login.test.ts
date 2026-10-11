@@ -38,9 +38,15 @@ const tokenOf = (verifyUrl: string): string => {
   return token!;
 };
 
+interface CreatedRequest {
+  id: string;
+  token: string;
+  body: { clientName: string; verifyUrl: string; status: string; code: string; expiresMs: number };
+}
+
 // Create a pairing request via the (key-exempt) endpoint, returning id +
 // token parsed from verifyUrl.
-async function createRequest(clientName = "cli-testhost"): Promise<{ id: string; token: string; body: any }> {
+async function createRequest(clientName = "cli-testhost"): Promise<CreatedRequest> {
   const res = await call("POST", "/api/device-login/requests", { body: { clientName } });
   expect(res.status).toBe(201);
   const body = await res.json();
@@ -79,8 +85,7 @@ INSERT INTO projects (id, name, slug, key) VALUES ('p1', 'P', 'p1', 'P');
     body: { email: "maria@lexa.test", password: "password123" },
     returnHeaders: true,
   })) as unknown as { headers?: Headers };
-  const setCookie = signIn.headers?.get?.("set-cookie") ?? "";
-  sessionCookie = setCookie.split(";")[0]!!;
+  sessionCookie = (signIn.headers?.get?.("set-cookie") ?? "").split(";")[0]!!;
   expect(sessionCookie).toMatch(/^__Secure-better-auth\.session_token=/);
 });
 
@@ -88,80 +93,66 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("POST /api/device-login/requests (key-exempt)", () => {
-  it("mints a pending request without any auth and returns the verify URL", async () => {
-    const { body } = await createRequest();
+describe("device-login request + poll (key-exempt)", () => {
+  it("mints pending without auth (empty name 422); poll returns the pending shape; unknown id / wrong token / absent token → 404 no-oracle; denial → 403 DEVICE_LOGIN_DENIED; expiry → 410", async () => {
+    const { id, token, body } = await createRequest();
     expect(body.clientName).toBe("cli-testhost");
     expect(body.verifyUrl).toMatch(/^https:\/\/lexa\.test\/device-login\?request=[^&]+&token=/);
-  });
 
-  it("rejects an empty clientName (422 INVALID_NAME)", async () => {
-    const res = await call("POST", "/api/device-login/requests", { body: { clientName: "   " } });
-    expect(res.status).toBe(422);
-    expect((await res.json()).error.code).toBe("INVALID_NAME");
-  });
-});
+    const bad = await call("POST", "/api/device-login/requests", { body: { clientName: "   " } });
+    expect(bad.status).toBe(422);
+    expect((await bad.json()).error.code).toBe("INVALID_NAME");
 
-describe("GET /api/device-login/requests/:id (poll, key-exempt)", () => {
-  it("returns pending with clientName/code/expiresAt for the approve page", async () => {
-    const { id, token } = await createRequest();
-    const res = await call("GET", `/api/device-login/requests/${id}`, {
-      headers: { "x-device-token": token },
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toMatchObject({ status: "pending", clientName: "cli-testhost", code: expect.any(String) });
-    expect(body.expiresAt).toBeTruthy();
-  });
+    const pending = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
+    expect(pending.status).toBe(200);
+    const pendingBody = await pending.json();
+    expect(pendingBody).toMatchObject({ status: "pending", clientName: "cli-testhost", code: expect.any(String) });
+    expect(pendingBody.expiresAt).toBeTruthy();
 
-  it("404 DEVICE_LOGIN_NOT_FOUND on unknown id or wrong token (no oracle)", async () => {
-    const { id, token } = await createRequest();
-    for (const req of [
-      call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": "aa".repeat(32) } }),
-      call("GET", "/api/device-login/requests/does-not-exist", { headers: { "x-device-token": token } }),
+    for (const res of [
+      await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": "aa".repeat(32) } }),
+      await call("GET", "/api/device-login/requests/does-not-exist", { headers: { "x-device-token": token } }),
+      await call("GET", `/api/device-login/requests/${id}`),
     ]) {
-      const res = await req;
       expect(res.status).toBe(404);
       expect((await res.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
     }
+
+    // Denial is terminal: a later approve 404s.
+    const denied = await createRequest();
+    const deny = await call("POST", `/api/device-login/requests/${denied.id}/deny`, { body: { token: denied.token }, headers: { cookie: sessionCookie } });
+    expect(deny.status).toBe(200);
+    expect((await deny.json()).status).toBe("denied");
+    const pollDenied = await call("GET", `/api/device-login/requests/${denied.id}`, { headers: { "x-device-token": denied.token } });
+    expect(pollDenied.status).toBe(403);
+    expect((await pollDenied.json()).error.code).toBe("DEVICE_LOGIN_DENIED");
+    expect((await call("POST", `/api/device-login/requests/${denied.id}/approve`, { body: { token: denied.token }, headers: { cookie: sessionCookie } })).status).toBe(404);
+
+    // Expiry is terminal too.
+    const expiring = await createRequest();
+    const db = new Database(process.env.DATABASE_PATH!);
+    db.prepare("UPDATE device_login_requests SET expires_at = datetime('now', '-1 minute') WHERE id = ?").run(expiring.id);
+    db.close();
+    const pollExpired = await call("GET", `/api/device-login/requests/${expiring.id}`, { headers: { "x-device-token": expiring.token } });
+    expect(pollExpired.status).toBe(410);
+    expect((await pollExpired.json()).error.code).toBe("DEVICE_LOGIN_EXPIRED");
+    const approveExpired = await call("POST", `/api/device-login/requests/${expiring.id}/approve`, { body: { token: expiring.token }, headers: { cookie: sessionCookie } });
+    expect(approveExpired.status).toBe(410);
+    expect((await approveExpired.json()).error.code).toBe("DEVICE_LOGIN_EXPIRED");
   });
 });
 
 describe("approve → poll → consume", () => {
-  it("session approve records the approver without minting; the poll mints the user-bound key exactly once", async () => {
+  it("approve records the approver without minting; the poll mints the member-bound key exactly once (two concurrent polls: one mints, one 404s); the minted key reads its project and is 403 on admin; personal api-keys CRUD; a bare server key cannot mint", async () => {
     const { id, token } = await createRequest("cli-approve-host");
 
     // No session → 401.
     const noSession = await call("POST", `/api/device-login/requests/${id}/approve`, { body: { token } });
     expect(noSession.status).toBe(401);
 
-    const approve = await call("POST", `/api/device-login/requests/${id}/approve`, {
-      body: { token },
-      headers: { cookie: sessionCookie },
-    });
+    const approve = await call("POST", `/api/device-login/requests/${id}/approve`, { body: { token }, headers: { cookie: sessionCookie } });
     expect(approve.status).toBe(200);
-    expect((await approve.json())).toMatchObject({ status: "approved", clientName: "cli-approve-host" });
-
-    const poll = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
-    expect(poll.status).toBe(200);
-    const polled = await poll.json();
-    expect(polled.status).toBe("approved");
-    expect(polled.rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
-    expect(polled.keyName).toBe("cli-approve-host");
-
-    // Consumed — replay is impossible.
-    const again = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
-    expect(again.status).toBe(404);
-    expect((await again.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
-  });
-
-  it("poll mints a key bound to the recorded approver and consumes the row", async () => {
-    const { id, token } = await createRequest("cli-mint-at-poll");
-    const approve = await call("POST", `/api/device-login/requests/${id}/approve`, {
-      body: { token },
-      headers: { cookie: sessionCookie },
-    });
-    expect(approve.status).toBe(200);
+    expect(await approve.json()).toMatchObject({ status: "approved", clientName: "cli-approve-host" });
 
     const db = new Database(process.env.DATABASE_PATH!);
     const afterApprove = db
@@ -170,174 +161,81 @@ describe("approve → poll → consume", () => {
     expect(afterApprove.status).toBe("approved");
     expect(afterApprove.approver_user_id).toBeTruthy();
     expect(afterApprove.api_key_id).toBeNull();
-    expect(db.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE name = ?").get("cli-mint-at-poll")).toMatchObject({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE name = ?").get("cli-approve-host")).toMatchObject({ n: 0 });
+    db.close();
 
     const poll = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
     expect(poll.status).toBe(200);
     const polled = await poll.json();
     expect(polled.rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
-    expect(polled.keyName).toBe("cli-mint-at-poll");
+    expect(polled.keyName).toBe("cli-approve-host");
 
-    const minted = db
-      .prepare("SELECT name, user_id FROM api_keys WHERE name = ?")
-      .get("cli-mint-at-poll") as unknown as { name: string; user_id: string };
+    const db2 = new Database(process.env.DATABASE_PATH!);
+    const minted = db2.prepare("SELECT name, user_id FROM api_keys WHERE name = ?").get("cli-approve-host") as unknown as { name: string; user_id: string };
     expect(minted.user_id).toBe(afterApprove.approver_user_id);
     // The request row is consumed by the poll that delivered the key.
-    expect(db.prepare("SELECT COUNT(*) AS n FROM device_login_requests WHERE id = ?").get(id)).toMatchObject({ n: 0 });
-    db.close();
-  });
+    expect(db2.prepare("SELECT COUNT(*) AS n FROM device_login_requests WHERE id = ?").get(id)).toMatchObject({ n: 0 });
+    db2.close();
 
-  it("two concurrent polls after approval: exactly one mints, the other 404s, api_keys count 1", async () => {
-    const { id, token } = await createRequest("cli-concurrent-poll");
-    await call("POST", `/api/device-login/requests/${id}/approve`, { body: { token }, headers: { cookie: sessionCookie } });
+    // Consumed — replay is impossible.
+    const again = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
+    expect(again.status).toBe(404);
+    expect((await again.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
 
+    // Two concurrent polls after approval: exactly one mints.
+    const concurrent = await createRequest("cli-concurrent-poll");
+    await call("POST", `/api/device-login/requests/${concurrent.id}/approve`, { body: { token: concurrent.token }, headers: { cookie: sessionCookie } });
     const [a, b] = await Promise.all([
-      call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } }),
-      call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } }),
+      call("GET", `/api/device-login/requests/${concurrent.id}`, { headers: { "x-device-token": concurrent.token } }),
+      call("GET", `/api/device-login/requests/${concurrent.id}`, { headers: { "x-device-token": concurrent.token } }),
     ]);
     const winner = a.status === 200 ? a : b;
     const loser = a.status === 200 ? b : a;
     expect([a.status, b.status].sort()).toEqual([200, 404]);
-    expect((await winner.json()).rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
+    const rawKey = (await winner.json()).rawKey;
+    expect(rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
     expect((await loser.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
+    const db3 = new Database(process.env.DATABASE_PATH!);
+    expect(db3.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE name = ?").get("cli-concurrent-poll")).toMatchObject({ n: 1 });
+    db3.close();
 
-    const db = new Database(process.env.DATABASE_PATH!);
-    expect(db.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE name = ?").get("cli-concurrent-poll")).toMatchObject({ n: 1 });
-    db.close();
-  });
-
-  it("the minted key acts as the approving member (project access ok, admin gates 403)", async () => {
-    const { id, token } = await createRequest();
-    await call("POST", `/api/device-login/requests/${id}/approve`, { body: { token }, headers: { cookie: sessionCookie } });
-    const poll = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
-    const { rawKey } = await poll.json();
+    // The minted member-bound key: owner surface + project read work, admin gates 403.
     const headers = { authorization: `Bearer ${rawKey}` };
-
-    // Owner-scoped surface works (member identity).
-    const mine = await call("GET", "/api/me/api-keys", { headers });
-    expect(mine.status).toBe(200);
-
-    // Admin-only surface stays 403 for a member-bound key.
+    expect((await call("GET", "/api/me/api-keys", { headers })).status).toBe(200);
     const admin = await call("GET", "/api/settings/api-keys", { headers });
     expect(admin.status).toBe(403);
     expect((await admin.json()).error.code).toBe("FORBIDDEN");
+    expect((await call("GET", "/api/projects/p1/board", { headers })).status).toBe(200);
 
-    // Project read works for the member via AuthenticationService.
-    const board = await call("GET", "/api/projects/p1/board", { headers });
-    expect(board.status).toBe(200);
-  });
-});
-
-describe("deny", () => {
-  it("deny flips the request; poll → 403 DEVICE_LOGIN_DENIED; later approve → 404", async () => {
-    const { id, token } = await createRequest();
-    const deny = await call("POST", `/api/device-login/requests/${id}/deny`, {
-      body: { token },
-      headers: { cookie: sessionCookie },
-    });
-    expect(deny.status).toBe(200);
-    expect((await deny.json()).status).toBe("denied");
-
-    const poll = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
-    expect(poll.status).toBe(403);
-    expect((await poll.json()).error.code).toBe("DEVICE_LOGIN_DENIED");
-
-    const approve = await call("POST", `/api/device-login/requests/${id}/approve`, {
-      body: { token },
-      headers: { cookie: sessionCookie },
-    });
-    expect(approve.status).toBe(404);
-  });
-});
-
-describe("expiry", () => {
-  it("an expired pending request polls as 410 DEVICE_LOGIN_EXPIRED", async () => {
-    const { id, token } = await createRequest();
-    const db = new Database(process.env.DATABASE_PATH!);
-    db.prepare("UPDATE device_login_requests SET expires_at = datetime('now', '-1 minute') WHERE id = ?").run(id);
-    db.close();
-    const res = await call("GET", `/api/device-login/requests/${id}`, { headers: { "x-device-token": token } });
-    expect(res.status).toBe(410);
-    expect((await res.json()).error.code).toBe("DEVICE_LOGIN_EXPIRED");
-  });
-
-  it("approving an expired request → 410; polling without the token header → 404", async () => {
-    const { id, token } = await createRequest();
-    const db = new Database(process.env.DATABASE_PATH!);
-    db.prepare("UPDATE device_login_requests SET expires_at = datetime('now', '-1 minute') WHERE id = ?").run(id);
-    db.close();
-    const approve = await call("POST", `/api/device-login/requests/${id}/approve`, {
-      body: { token },
-      headers: { cookie: sessionCookie },
-    });
-    expect(approve.status).toBe(410);
-    expect((await approve.json()).error.code).toBe("DEVICE_LOGIN_EXPIRED");
-
-    const noToken = await call("GET", `/api/device-login/requests/${id}`);
-    expect(noToken.status).toBe(404);
-    expect((await noToken.json()).error.code).toBe("DEVICE_LOGIN_NOT_FOUND");
-  });
-});
-
-describe("personal api keys (/api/me/api-keys)", () => {
-  it("session creates + lists + revokes own keys", async () => {
-    const create = await call("POST", "/api/me/api-keys", {
-      body: { name: "my-script" },
-      headers: { cookie: sessionCookie },
-    });
+    // Personal api keys: create/list/revoke; a bare server key cannot mint; a
+    // foreign delete 404s without minting an oracle.
+    const create = await call("POST", "/api/me/api-keys", { body: { name: "my-script" }, headers: { cookie: sessionCookie } });
     expect(create.status).toBe(201);
-    const { key, rawKey } = await create.json();
+    const { key, rawKey: mine } = await create.json();
     expect(key.name).toBe("my-script");
-    expect(rawKey).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
-
+    expect(mine).toMatch(/^lxk_[0-9A-Za-z]{43}$/);
     const list = await call("GET", "/api/me/api-keys", { headers: { cookie: sessionCookie } });
     expect(list.status).toBe(200);
-    const { data } = await list.json();
-    expect(data.some((k: { id: string; name: string }) => k.id === key.id && k.name === "my-script")).toBe(true);
+    expect((await list.json()).data.some((k: { id: string; name: string }) => k.id === key.id && k.name === "my-script")).toBe(true);
+    expect((await call("DELETE", `/api/me/api-keys/${key.id}`, { headers: { cookie: sessionCookie } })).status).toBe(204);
+    // the revoked key no longer authenticates
+    expect((await call("GET", "/api/projects", { headers: { authorization: `Bearer ${mine}` } })).status).toBe(401);
 
-    const del = await call("DELETE", `/api/me/api-keys/${key.id}`, { headers: { cookie: sessionCookie } });
-    expect(del.status).toBe(204);
-
-    const gone = await call("GET", "/api/projects", { headers: { authorization: `Bearer ${rawKey}` } });
-    expect(gone.status).toBe(401);
-  });
-
-  it("a bare server key cannot mint — 403 NO_USER_CONTEXT; deleting someone else's key → 404", async () => {
-    const mine = await create();
-    const id = mine.body.key.id;
-
-    const noUser = await call("POST", "/api/me/api-keys", {
-      body: { name: "sneaky" },
-      headers: { authorization: `Bearer ${SERVER_KEY}` },
-    });
+    const noUser = await call("POST", "/api/me/api-keys", { body: { name: "sneaky" }, headers: { authorization: `Bearer ${SERVER_KEY}` } });
     expect(noUser.status).toBe(403);
     expect((await noUser.json()).error.code).toBe("NO_USER_CONTEXT");
 
-    // Second user's session must not delete Maria's key (404, no oracle).
     const { auth } = await import("../auth");
-    await auth.api.createUser({
-      body: { email: "pam@lexa.test", password: "password123", name: "Pam", data: { role: "member" } },
-    });
+    await auth.api.createUser({ body: { email: "pam@lexa.test", password: "password123", name: "Pam", data: { role: "member" } } });
     const signIn = (await auth.api.signInEmail({
       body: { email: "pam@lexa.test", password: "password123" },
       returnHeaders: true,
     })) as unknown as { headers?: Headers };
     const pamCookie = signIn.headers?.get?.("set-cookie")?.split(";")[0]!;
-    const del = await call("DELETE", `/api/me/api-keys/${id}`, { headers: { cookie: pamCookie } });
-    expect(del.status).toBe(404);
-
-    // Maria's key still there.
-    const list = await call("GET", "/api/me/api-keys", { headers: { cookie: sessionCookie } });
-    const { data } = await list.json();
-    expect(data.some((k: { id: string }) => k.id === id)).toBe(true);
+    const mine2 = await call("POST", "/api/me/api-keys", { body: { name: "keep-this" }, headers: { cookie: sessionCookie } });
+    const mineId = ((await mine2.json()) as { key: { id: string } }).key.id;
+    expect((await call("DELETE", `/api/me/api-keys/${mineId}`, { headers: { cookie: pamCookie } })).status).toBe(404);
+    const after = await call("GET", "/api/me/api-keys", { headers: { cookie: sessionCookie } });
+    expect((await after.json()).data.some((k: { id: string }) => k.id === mineId)).toBe(true);
   });
-
-  async function create(): Promise<{ body: { key: { id: string } } }> {
-    const res = await call("POST", "/api/me/api-keys", {
-      body: { name: "keep-this-1" },
-      headers: { cookie: sessionCookie },
-    });
-    expect(res.status).toBe(201);
-    return { body: await res.json() };
-  }
 });

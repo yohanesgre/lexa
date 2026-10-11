@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,9 +8,11 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, ConstraintViolation } from "../db/database";
 import { DbBunLive } from "../db/db";
-import { TaskService, isEmptyDoc } from "./task.service";
-import { WipLimitExceeded, RequiredFieldMissing, DeadlineAfterLane, SwimlaneNotFound } from "../api/errors";
+import { TaskService } from "./task.service";
+import { TaskRepo } from "../repos/task.repo";
+import { WipLimitExceeded, RequiredFieldMissing, DeadlineAfterLane } from "../api/errors";
 import type { Actor, TipTapDoc } from "../../shared/types";
+import { generateTaskKey, parseTaskKey } from "../task-key";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -62,6 +64,15 @@ function makeService(db: Database) {
   const layer = TaskService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, TaskService);
+}
+
+// The repo-level carries (findIdsForProject chunking, the GitHub title
+// aggregate) have no service surface, so they drive TaskRepo directly on the
+// same migrated database.
+function makeRepo(db: Database) {
+  const layer = TaskRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
+  return Context.get(ctx, TaskRepo);
 }
 
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
@@ -217,20 +228,6 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("neighborless move appends to the end of the target column", async () => {
-    seedWip(db);
-    // c-done already holds t2 (a0) + d1 (a1) — the new task must land after d1.
-    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d1','p1','c-done','s1','D1','a1','2026-01-01 10:00:00')").run();
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const { task } = yield* svc.move(maria, "t1", { columnId: "c-done", swimlaneId: "s1" });
-        expect(task.position).toBe("a2"); // keyAfter('a1')
-        expect(task.position > "a1").toBe(true);
-      })
-    );
-  });
-
   it("a position conflict surfaces as ConstraintViolation after the one-shot retry", async () => {
     seedWip(db);
     // d2 occupies exactly the key keyBetween('a1','a2') would generate.
@@ -254,52 +251,9 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("move succeeds when it exactly fills the last free slot (count = limit - 1)", async () => {
-    seedWip(db);
-    // c-todo holds 2 tasks (t1, t3); a limit of 3 leaves exactly one free slot.
-    db.prepare("UPDATE columns SET wip_limit = 3 WHERE id = 'c-todo'").run();
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const result = yield* Effect.either(svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "s1" }));
-        expect(Either.isRight(result)).toBe(true);
-        if (Either.isRight(result)) {
-          expect(result.right.task.columnId).toBe("c-todo");
-          expect(result.right.task.position).toBe("a2"); // keyAfter(t3 'a1')
-        }
-      })
-    );
-  });
-
-  it("a reorder between two existing neighbors emits no activity", async () => {
-    seedWip(db);
-    // c-todo: t1 (a0), t3 (a1), t4 (a2). Reorder t1 between t3 and t4.
-    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t4','p1','c-todo','s1','T4','a2','2026-01-01 10:00:00')").run();
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const { task, activity } = yield* svc.move(maria, "t1", { columnId: "c-todo", swimlaneId: "s1", afterTaskId: "t3", beforeTaskId: "t4" });
-        expect(task.position).toBe("a1V"); // keyBetween('a1','a2')
-        expect(activity).toEqual([]); // position-only reorder emits nothing
-        const t3 = db.prepare("SELECT position FROM tasks WHERE id = 't3'").get() as { position: string };
-        const t4 = db.prepare("SELECT position FROM tasks WHERE id = 't4'").get() as { position: string };
-        expect(t3.position < task.position).toBe(true);
-        expect(task.position < t4.position).toBe(true);
-      })
-    );
-  });
 });
 
 describe("TaskService required fields", () => {
-  it("isEmptyDoc treats an image-only description as non-empty", async () => {
-    const IMG_DOC: TipTapDoc = {
-      type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "https://x.com/i.png" } }] }],
-    };
-    expect(isEmptyDoc(IMG_DOC)).toBe(false);
-    expect(isEmptyDoc(EMPTY_DOC)).toBe(true);
-  });
-
   it("create rejects an empty or whitespace-only description (TipTap-aware)", async () => {
     seedRequired(db);
     const svc = makeService(db);
@@ -360,17 +314,6 @@ describe("TaskService required fields", () => {
 });
 
 describe("TaskService swimlane + deadline", () => {
-  it("create without swimlaneId lands in the project's backlog lane", async () => {
-    seedDeadline(db);
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const { task } = yield* svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "New task" });
-        expect(task.swimlaneId).toBe("s-backlog");
-      })
-    );
-  });
-
   it("create rejects a due date later than the lane's deadline", async () => {
     seedDeadline(db);
     const svc = makeService(db);
@@ -445,55 +388,6 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("a dueAt exactly equal to the lane's deadline is allowed on create, update, and move", async () => {
-    seedDeadline(db);
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        // create: dueAt === lane dueAt (2026-06-01) → allowed (guard is strictly-after)
-        const created = yield* Effect.either(svc.create(maria, { projectId: "p1", columnId: "c-todo", swimlaneId: "m1", title: "Equal", dueAt: "2026-06-01" }));
-        expect(Either.isRight(created)).toBe(true);
-        // update: t1 lives in m1; setting dueAt to the lane deadline → allowed
-        const updated = yield* Effect.either(svc.update(maria, "t1", { dueAt: "2026-06-01" }));
-        expect(Either.isRight(updated)).toBe(true);
-        if (Either.isRight(updated)) expect(updated.right.task.dueAt).toBe("2026-06-01");
-        // move: t3 (dueAt equal to m1's deadline) moves into m1 → allowed
-        db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, due_at, created_at) VALUES ('t3','p1','c-todo','s-backlog','T3','a5','2026-06-01','2026-01-01 10:00:00')").run();
-        const moved = yield* Effect.either(svc.move(maria, "t3", { columnId: "c-todo", swimlaneId: "m1" }));
-        expect(Either.isRight(moved)).toBe(true);
-        if (Either.isRight(moved)) expect(moved.right.task.dueAt).toBe("2026-06-01");
-      })
-    );
-  });
-
-  it("update with dueAt: null clears the deadline even when the lane has one", async () => {
-    seedDeadline(db);
-    db.prepare("UPDATE tasks SET due_at = '2026-06-01' WHERE id = 't1'").run();
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const result = yield* Effect.either(svc.update(maria, "t1", { dueAt: null }));
-        expect(Either.isRight(result)).toBe(true);
-        if (Either.isRight(result)) expect(result.right.task.dueAt).toBeNull();
-      })
-    );
-  });
-
-  it("move into an archived lane is rejected", async () => {
-    seedDeadline(db);
-    db.prepare("UPDATE swimlanes SET archived_at = '2026-03-01T00:00:00.000Z' WHERE id = 'm1'").run();
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const result = yield* Effect.either(svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "m1" }));
-        expect(Either.isLeft(result)).toBe(true);
-        if (Either.isLeft(result)) {
-          expect(result.left).toBeInstanceOf(SwimlaneNotFound);
-          expect((result.left as SwimlaneNotFound).id).toBe("m1");
-        }
-      })
-    );
-  });
 });
 
 describe("TaskService ticket keys", () => {
@@ -568,5 +462,95 @@ describe("TaskService ticket keys", () => {
     } finally {
       second.close();
     }
+  });
+});
+
+// Carried from the absorbed server/repos/task.repo.test.ts: the archived-anchor
+// collision (a new task must not reuse an archived task's position), the
+// GitHub issue-title round-trip through the JSON aggregate, and the D1
+// 100-bound-param chunking of findByIdsForProject.
+describe("TaskRepo carries — archived anchor, GitHub title, D1 chunk bound", () => {
+  it("creates a task after an archived last position instead of colliding with it", async () => {
+    seed(db);
+    db.prepare(
+      `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at, archived_at)
+       VALUES ('t-arch','p1','c-todo','s1','Archived','{"type":"doc","content":[]}','prio-1','type-1','a1','2026-01-02 10:00:00','2026-01-03 10:00:00')`
+    ).run();
+    const svc = makeService(db);
+    const { task } = await Effect.runPromise(
+      svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "New", priority: "prio-1", type: "type-1" })
+    );
+    expect(task.position > "a1").toBe(true);
+    const positions = db.prepare("SELECT position FROM tasks WHERE column_id = 'c-todo' ORDER BY position").all() as { position: string }[];
+    expect(positions.map((r) => r.position)).toEqual(["a0", "a1", task.position]);
+  });
+
+  it("round-trips a GitHub issue title containing || and commas through the SQL aggregate", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      repo.setGithubLink("t1", { issueId: "ghi9", issueNumber: 9, repo: "owner/repo", title: "a || b, c" })
+    );
+    const svc = makeService(db);
+    const task = await Effect.runPromise(svc.getById("t1"));
+    expect(task.githubs).toHaveLength(1);
+    expect(task.githubs[0]!.title).toBe("a || b, c");
+  });
+
+  it("chunks findByIdsForProject at the D1 100-param bound and returns every row once", async () => {
+    seed(db);
+    const insert = db.prepare(
+      `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at)
+       VALUES (?, 'p1', 'c-todo', 's1', ?, '{"type":"doc","content":[]}', 'prio-1', 'type-1', ?, '2026-01-01 10:00:00')`
+    );
+    const ids = Array.from({ length: 120 }, (_, i) => `chunk-${i}`);
+    for (let i = 0; i < ids.length; i++) insert.run(ids[i]!, `Chunk ${i}`, `k${String(i).padStart(3, "0")}`);
+    const repo = makeRepo(db);
+    // 120 ids span two chunks — every id must come back exactly once.
+    const rows = await Effect.runPromise(repo.findByIdsForProject("p1", ids));
+    expect(rows).toHaveLength(120);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(120);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get("chunk-0")!.description).toEqual({ type: "doc", content: [] });
+    expect(byId.get("chunk-119")!.title).toBe("Chunk 119");
+  });
+});
+
+describe("generateTaskKey", () => {
+  it("multi-word slug → word initials", () => {
+    expect(generateTaskKey("emberfall-godot", () => false)).toBe("EG");
+    expect(generateTaskKey("web-client", () => false)).toBe("WC");
+    expect(generateTaskKey("project-management-tool", () => false)).toBe("PMT");
+  });
+  it("single word → first letter + consonants", () => {
+    expect(generateTaskKey("platform", () => false)).toBe("PLT");
+    expect(generateTaskKey("api", () => false)).toBe("AP");
+    expect(generateTaskKey("web", () => false)).toBe("WB");
+  });
+  it("collision → extend with next letters of last word", () => {
+    const taken = new Set(["WC"]);
+    expect(generateTaskKey("web-crawler", (c) => taken.has(c))).toBe("WCR");
+  });
+  it("exhausted extension → digit suffix", () => {
+    const taken = new Set(["PLT", "PLTL", "PLTLA", "PLTLAT", "PLTLATF", "PLTLATFO", "PLTLATFOR", "PLTLATFORM"]);
+    expect(generateTaskKey("platform", (c) => taken.has(c))).toBe("PLT2");
+  });
+  it("digits in slug skipped for initials", () => {
+    expect(generateTaskKey("game-jam-2026", () => false)).toBe("GJ");
+  });
+});
+
+describe("parseTaskKey", () => {
+  it("parses valid keys, case-insensitive", () => {
+    expect(parseTaskKey("EMB-12")).toEqual({ prefix: "EMB", number: 12 });
+    expect(parseTaskKey("emb-12")).toEqual({ prefix: "EMB", number: 12 });
+  });
+  it("rejects malformed", () => {
+    expect(parseTaskKey("EMB-")).toBeNull();
+    expect(parseTaskKey("EMB-abc")).toBeNull();
+    expect(parseTaskKey("EMB-0")).toEqual({ prefix: "EMB", number: 0 });
+    expect(parseTaskKey("a-1")).toBeNull();       // prefix too short
+    expect(parseTaskKey("ABCDEFG-1")).toBeNull(); // prefix too long
+    expect(parseTaskKey("t1")).toBeNull();        // UUID-ish, not a key
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +10,7 @@ import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
 import { FieldConfigService } from "./field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ProjectNotFound, OptionInUse, InvalidOption } from "../api/errors";
+import { OptionInUse, InvalidOption } from "../api/errors";
 import type { FieldOption } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -75,16 +75,6 @@ describe("FieldConfigService.seedDefaults", () => {
     const first = await Effect.runPromise(repo.findFirstPriority("p1"));
     expect(first?.label).toBe("Urgent");
     expect(first?.position).toBe(0);
-  });
-});
-
-describe("FieldConfigService.findByProject", () => {
-  it("unknown project → ProjectNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.findByProject("nope")));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
@@ -240,13 +230,5 @@ describe("FieldConfigService.replace", () => {
     const after = await Effect.runPromise(repo.findByProject("p1"));
     expect(after.priorities.map((o) => o.label)).toEqual(before.priorities.map((o) => o.label));
     expect(after.types.map((o) => o.label)).toEqual(before.types.map((o) => o.label));
-  });
-
-  it("unknown project → ProjectNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.replace("nope", { priorities: [opt("", "P")], types: [opt("", "T")] })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 });

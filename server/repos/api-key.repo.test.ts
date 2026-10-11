@@ -61,39 +61,6 @@ describe("ApiKeyRepo", () => {
     expect(dup).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "ConstraintViolation" }) });
   });
 
-  it("listAll orders by created_at DESC and joins the owner", async () => {
-    setup();
-    db.exec(`INSERT INTO api_keys (id, name, key_hash, user_id, created_at) VALUES
-      ('k_old','old','h_old','u1','2026-01-01 00:00:00'),
-      ('k_new','new','h_new',NULL,'2026-01-02 00:00:00')`);
-    const all = await Effect.runPromise(repo.listAll());
-    expect(all.map((k) => k.id)).toEqual(["k_new", "k_old"]);
-    expect(all[1]!.owner_email).toBe("u1@example.com");
-    expect(all[1]!.owner_name).toBe("User One");
-    expect(all[0]!.owner_email).toBeNull();
-    expect(all[0]!.owner_name).toBeNull();
-  });
-
-  it("listByUser filters to the owner", async () => {
-    setup();
-    await Effect.runPromise(repo.create({ id: "k1", name: "a", keyHash: "h1", userId: "u1" }));
-    await Effect.runPromise(repo.create({ id: "k2", name: "b", keyHash: "h2", userId: "u2" }));
-    await Effect.runPromise(repo.create({ id: "k3", name: "c", keyHash: "h3", userId: "u1" }));
-    const mine = await Effect.runPromise(repo.listByUser("u1"));
-    expect(mine.map((k) => k.id).sort()).toEqual(["k1", "k3"]);
-  });
-
-  it("deleteById removes and fails RowNotFound on an unknown id", async () => {
-    setup();
-    await Effect.runPromise(repo.create({ id: "k1", name: "a", keyHash: "h1", userId: "u1" }));
-    await Effect.runPromise(repo.deleteById("k1"));
-    const gone = await Effect.runPromise(Effect.either(repo.findByHash("h1")));
-    expect(gone).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
-
-    const missing = await Effect.runPromise(Effect.either(repo.deleteById("nope")));
-    expect(missing).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
-  });
-
   it("deleteOwn is owner-scoped and hides foreign/missing rows", async () => {
     setup();
     await Effect.runPromise(repo.create({ id: "k1", name: "a", keyHash: "h1", userId: "u1" }));

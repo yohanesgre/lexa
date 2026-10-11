@@ -1,333 +1,62 @@
+// ADR-0003 P4b (WS1) + LX-120: approval-suspension projection.
+//
+// The load-bearing protection here is the duplicate-execution guard: two carriers
+// for one approval (the merged shape the DO persists) must settle to ONE terminal
+// chip in either arrival order. If a pending carrier overwrites a terminal chip,
+// the batch re-arms and the UI POSTs `/resume` for an already-executed batch.
+// Also retained: the run-status→card-state mapping and the LX-124 resend boundary
+// (merged from assistant-run-adapter / resendIndex).
 import { describe, expect, it } from "vitest";
 import type { UIDataTypes, UIMessage, UIMessagePart, UITools } from "ai";
-import type { AssistantWriteDiff } from "../../shared/assistant";
-import {
-  agentSendMetadata,
-  agentSendParts,
-  agentToolLabel,
-  emptyAgentSegment,
-  hasUserMessage,
-  lastAssistantMessage,
-  reasoningMsFromMessage,
-  segmentFromAssistantMessage,
-  segmentFromMessages,
-  snapshotFromSegment,
-  statusFromChat,
-  suspensionFromMessages,
-  usageFromMessage,
-} from "./assistant-agent-adapter";
-import type { KnownApprovalDecisions } from "./assistant-agent-adapter";
-
-// ADR-0003 P4b (WS1): pure adapter tests. No React, no transport — every case
-// builds a UIMessage from the AI SDK part shapes and asserts the legacy
-// `AssistantStreamSnapshot` projection the transcript renderers consume.
+import type { AssistantRunRow, AssistantWriteDiff } from "../../shared/assistant";
+import { suspensionFromMessages } from "./assistant-agent-adapter";
+import { liveStatusToCardState, runCardFromLive, runStatusToCardState } from "./assistant-run-adapter";
+import { rawUserIndexByText, resolveRawUserIndex } from "./resendIndex";
 
 type Part = UIMessagePart<UIDataTypes, UITools>;
 
 const DIFF = { type: "task_create", title: "New task", fields: {} } as unknown as AssistantWriteDiff;
 
-function assistant(parts: Part[], metadata?: unknown): UIMessage {
-  return { id: "m1", role: "assistant", parts, ...(metadata !== undefined ? { metadata } : {}) } as unknown as UIMessage;
+function assistant(parts: Part[]): UIMessage {
+  return { id: "m1", role: "assistant", parts } as unknown as UIMessage;
 }
 
 function user(text: string): UIMessage {
   return { id: "u1", role: "user", parts: [{ type: "text", text }] as Part[] } as unknown as UIMessage;
 }
 
-function text(value: string): Part {
-  return { type: "text", text: value } as Part;
-}
-
-function reasoning(value: string): Part {
-  return { type: "reasoning", text: value } as Part;
-}
-
-function sourceUrl(url: string, title?: string): Part {
-  return { type: "source-url", sourceId: "s1", url, ...(title !== undefined ? { title } : {}) } as unknown as Part;
-}
-
 function dataPart(name: string, data: unknown): Part {
   return { type: `data-${name}`, data } as unknown as Part;
-}
-
-function toolCall(name: string, toolCallId: string, input?: unknown): Part {
-  return { type: `tool-${name}`, toolCallId, state: "input-available", input: input ?? {} } as unknown as Part;
 }
 
 function toolResult(name: string, toolCallId: string, input: unknown, output: unknown): Part {
   return { type: `tool-${name}`, toolCallId, state: "output-available", input, output } as unknown as Part;
 }
 
-function toolError(name: string, toolCallId: string, input: unknown, errorText: string): Part {
-  return { type: `tool-${name}`, toolCallId, state: "output-error", input, errorText } as unknown as Part;
+function runRow(overrides: Partial<AssistantRunRow> = {}): AssistantRunRow {
+  return {
+    id: "run-1",
+    projectId: "p1",
+    threadKey: "chat:c1",
+    parentRunId: null,
+    kind: "chat_run",
+    status: "running",
+    goal: "Cross-check the rollback section",
+    result: null,
+    error: null,
+    budgetMs: 600_000,
+    stepsUsed: 9,
+    createdBy: "u1",
+    createdAt: "2026-01-01 10:00:00",
+    startedAt: "2026-01-01 10:00:01",
+    finishedAt: null,
+    ...overrides,
+  };
 }
-
-function dynamicTool(name: string, toolCallId: string, state: "input-streaming" | "input-available"): Part {
-  return { type: "dynamic-tool", toolName: name, toolCallId, state, ...(state === "input-available" ? { input: {} } : {}) } as unknown as Part;
-}
-
-describe("agentToolLabel", () => {
-  it("maps the wireframe tool names to chip copy", () => {
-    expect(agentToolLabel("web_search")).toBe("Searching web…");
-    expect(agentToolLabel("fetch_url")).toBe("Reading file…");
-    expect(agentToolLabel("read_s3_file")).toBe("Reading file…");
-    expect(agentToolLabel("jev_assess")).toBe("Asking Jev…");
-  });
-
-  it("falls back to the raw tool name", () => {
-    expect(agentToolLabel("wiki_search")).toBe("wiki_search");
-  });
-});
-
-describe("emptyAgentSegment", () => {
-  it("is the idle projection", () => {
-    expect(emptyAgentSegment()).toEqual({
-      text: "",
-      items: [],
-      tools: [],
-      pending: [],
-      suspendedBatchId: null,
-      reasoningText: "",
-      reasoningMs: null,
-      citations: [],
-      hasIngress: false,
-    });
-  });
-});
-
-describe("segmentFromAssistantMessage — text", () => {
-  it("returns the empty segment for undefined or non-assistant messages", () => {
-    expect(segmentFromAssistantMessage(undefined)).toEqual(emptyAgentSegment());
-    expect(segmentFromAssistantMessage(user("hi"))).toEqual(emptyAgentSegment());
-  });
-
-  it("merges consecutive text parts into one timeline item and sets hasIngress", () => {
-    const segment = segmentFromAssistantMessage(assistant([text("Hello "), text("world")]));
-    expect(segment.text).toBe("Hello world");
-    expect(segment.hasIngress).toBe(true);
-    expect(segment.items).toHaveLength(1);
-    expect(segment.items[0]).toMatchObject({ kind: "text", text: "Hello world" });
-  });
-});
-
-describe("segmentFromAssistantMessage — reasoning", () => {
-  it("accumulates a reasoning burst into one item and leaves ms null (no fabricated duration)", () => {
-    const segment = segmentFromAssistantMessage(assistant([reasoning("think "), reasoning("harder")]));
-    expect(segment.reasoningText).toBe("think harder");
-    expect(segment.reasoningMs).toBeNull();
-    expect(segment.hasIngress).toBe(true);
-    expect(segment.items).toEqual([{ id: expect.any(Number), kind: "reasoning", text: "think harder", ms: null }]);
-  });
-
-  it("reads a real reasoning duration from the message metadata", () => {
-    const segment = segmentFromAssistantMessage(assistant([reasoning("think")], { reasoningMs: 4200 }));
-    expect(segment.reasoningMs).toBe(4200);
-  });
-
-  it("ignores a non-numeric reasoning duration in metadata", () => {
-    expect(segmentFromAssistantMessage(assistant([reasoning("think")], { reasoningMs: "4200" })).reasoningMs).toBeNull();
-  });
-
-  it("keeps reasoningMs null when no reasoning arrived", () => {
-    expect(segmentFromAssistantMessage(assistant([text("hi")])).reasoningMs).toBeNull();
-  });
-});
-
-describe("segmentFromAssistantMessage — timeline order", () => {
-  it("interleaves text, tool and reasoning in arrival order", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([text("a"), toolCall("web_search", "call_1", { detail: 'Searching wiki for "x"' }), reasoning("hmm"), text("b")])
-    );
-    expect(segment.items.map((i) => i.kind)).toEqual(["text", "tool", "reasoning", "text"]);
-    expect(segment.text).toBe("ab");
-    expect(segment.reasoningText).toBe("hmm");
-  });
-});
-
-describe("segmentFromAssistantMessage — tool parts", () => {
-  it("projects an input-available call to a call-phase chip with the input detail", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([toolCall("web_search", "call_1", { detail: 'Searching wiki for "setup"' })])
-    );
-    expect(segment.tools).toEqual([
-      { key: "call_1", name: "web_search", label: "Searching web…", phase: "call", detail: 'Searching wiki for "setup"' },
-    ]);
-    expect(segment.items[0]).toMatchObject({ kind: "tool" });
-    expect(segment.hasIngress).toBe(true);
-  });
-
-  it("flips the same chip to result when the output arrives and carries the result detail", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([toolResult("web_search", "call_1", { detail: "searching" }, { detail: "3 results" })])
-    );
-    expect(segment.tools).toHaveLength(1);
-    expect(segment.tools[0]).toMatchObject({
-      key: "call_1",
-      name: "web_search",
-      phase: "result",
-      detail: "searching",
-      resultDetail: "3 results",
-    });
-    expect(segment.items).toHaveLength(1);
-  });
-
-  it("keeps the call detail when a result arrives from a separate part", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([toolCall("web_search", "call_1", { detail: "searching" }), toolResult("web_search", "call_1", undefined, "done")])
-    );
-    expect(segment.tools).toHaveLength(1);
-    expect(segment.tools[0]).toMatchObject({ phase: "result", detail: "searching", resultDetail: "done" });
-  });
-
-  it("reads the human sentence from the input's arg fallback", () => {
-    const segment = segmentFromAssistantMessage(assistant([toolCall("fetch_url", "c1", { arg: "https://x.test" })]));
-    expect(segment.tools[0]!.detail).toBe("https://x.test");
-  });
-
-  it("projects output-error to a result chip with the errorText as result detail", () => {
-    const segment = segmentFromAssistantMessage(assistant([toolError("read_s3_file", "c1", {}, "boom")]));
-    expect(segment.tools[0]).toMatchObject({ name: "read_s3_file", phase: "result", resultDetail: "boom" });
-  });
-
-  it("uses the toolName for a dynamic-tool part", () => {
-    const segment = segmentFromAssistantMessage(assistant([dynamicTool("custom_tool", "c9", "input-available")]));
-    expect(segment.tools[0]).toMatchObject({ name: "custom_tool", key: "c9", phase: "call", label: "custom_tool" });
-  });
-
-  it("reads a string output as the result detail", () => {
-    const segment = segmentFromAssistantMessage(assistant([toolResult("fetch_url", "c1", {}, "content here")]));
-    expect(segment.tools[0]!.resultDetail).toBe("content here");
-  });
-});
-
-describe("segmentFromAssistantMessage — citations", () => {
-  it("collects https source-url parts with hostname and title", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([sourceUrl("https://example.com/a", "Example"), sourceUrl("https://docs.test/b")])
-    );
-    expect(segment.citations).toEqual([
-      { url: "https://example.com/a", title: "Example", hostname: "example.com" },
-      { url: "https://docs.test/b", title: null, hostname: "docs.test" },
-    ]);
-  });
-
-  it("drops non-https and unparseable urls", () => {
-    const segment = segmentFromAssistantMessage(assistant([sourceUrl("http://insecure.test"), sourceUrl("not a url")]));
-    expect(segment.citations).toEqual([]);
-  });
-
-  it("dedupes citations by url", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([sourceUrl("https://example.com/a", "Example"), sourceUrl("https://example.com/a", "Example again")])
-    );
-    expect(segment.citations).toEqual([{ url: "https://example.com/a", title: "Example", hostname: "example.com" }]);
-  });
-});
-
-describe("segmentFromAssistantMessage — approval chips", () => {
-  it("builds a pending chip from a full tool output payload", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([
-        toolResult("create_task", "c1", {}, {
-          approvalId: "a1",
-          batchId: "b1",
-          seq: 0,
-          name: "create_task",
-          detail: "Create task",
-          diff: DIFF,
-        }),
-      ])
-    );
-    expect(segment.pending).toEqual([
-      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", diff: DIFF },
-    ]);
-    expect(segment.suspendedBatchId).toBe("b1");
-  });
-
-  it("ignores a proposal-only tool output with no batchId/diff (P3 engine shape)", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([toolResult("create_task", "c1", {}, { proposed: true, approvalId: "a1" })])
-    );
-    expect(segment.pending).toEqual([]);
-    expect(segment.suspendedBatchId).toBeNull();
-  });
-
-  it("builds chips from a single data-part payload", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([dataPart("assistant-approval", { approvalId: "a2", batchId: "b2", seq: 1, name: "delete_task", diff: DIFF })])
-    );
-    expect(segment.pending).toEqual([{ approvalId: "a2", batchId: "b2", seq: 1, name: "delete_task", diff: DIFF }]);
-  });
-
-  it("builds chips from a batch envelope and sorts by seq", () => {
-    const segment = segmentFromAssistantMessage(
-      assistant([
-        dataPart("assistant-approval", {
-          batchId: "b3",
-          approvals: [
-            { approvalId: "a2", seq: 1, name: "delete_task", diff: DIFF },
-            { approvalId: "a1", seq: 0, name: "create_task", diff: DIFF },
-          ],
-        }),
-      ])
-    );
-    expect(segment.pending.map((c) => c.approvalId)).toEqual(["a1", "a2"]);
-    expect(segment.suspendedBatchId).toBe("b3");
-  });
-
-  it("ignores data parts that are not approval envelopes", () => {
-    const segment = segmentFromAssistantMessage(assistant([dataPart("usage", { tokens: 1 })]));
-    expect(segment.pending).toEqual([]);
-    expect(segment.suspendedBatchId).toBeNull();
-  });
-});
 
 describe("segmentFromMessages — merged suspension projection (LX-120)", () => {
-  it("projects a carrier landing on an earlier assistant message than the last", () => {
-    const carrier = assistant([
-      toolResult("create_task", "c1", {}, {
-        approvalId: "a1",
-        batchId: "b1",
-        seq: 0,
-        name: "create_task",
-        detail: "Create task",
-        diff: DIFF,
-      }),
-    ]);
-    const messages = [user("go"), carrier, assistant([text("done")])];
-    const segment = segmentFromMessages(messages);
-    expect(segment.suspendedBatchId).toBe("b1");
-    expect(segment.pending).toEqual([
-      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", diff: DIFF },
-    ]);
-    // `segmentFromMessages` still projects the last message's own text.
-    expect(segment.text).toBe("done");
-  });
-
-  it("flips suspendedBatchId for a marker-only carrier (no reconstructable chips)", () => {
-    const messages = [
-      user("go"),
-      assistant([text("proposed"), dataPart("assistant-approval", { batchId: "b9", approvals: [] })]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBe("b9");
-    expect(pending).toEqual([]);
-    expect(segmentFromMessages(messages).suspendedBatchId).toBe("b9");
-  });
-
-  it("merges chips for the same batch split across trailing messages", () => {
-    const messages = [
-      user("go"),
-      assistant([dataPart("assistant-approval", { batchId: "b1", approvals: [{ approvalId: "a2", seq: 1, name: "delete_task", diff: DIFF }] })]),
-      assistant([dataPart("assistant-approval", { batchId: "b1", approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }] })]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(pending.map((c) => c.approvalId)).toEqual(["a1", "a2"]);
-    expect(suspendedBatchId).toBe("b1");
-  });
-
-  it("does not re-arm a batch whose chips are all terminal", () => {
-    const messages = [
+  it("does not re-arm an all-terminal batch and lets the later terminal carrier win", () => {
+    const allTerminal = suspensionFromMessages([
       user("go"),
       assistant([
         dataPart("assistant-approval", {
@@ -335,140 +64,14 @@ describe("segmentFromMessages — merged suspension projection (LX-120)", () => 
           approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
         }),
       ]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([
+    ]);
+    expect(allTerminal.suspendedBatchId).toBeNull();
+    expect(allTerminal.pending).toEqual([
       { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF },
     ]);
-  });
 
-  it("ignores a suspension from an earlier trailing turn", () => {
-    const messages = [
-      user("first"),
-      assistant([dataPart("assistant-approval", { batchId: "b1", approvals: [] })]),
-      user("second"),
-      assistant([text("ok")]),
-    ];
-    expect(suspensionFromMessages(messages).suspendedBatchId).toBeNull();
-    expect(segmentFromMessages(messages).suspendedBatchId).toBeNull();
-  });
-
-  // Two carriers for one approval (the merged shape the DO persists): a pending
-  // carrier must never overwrite an already-terminal chip, in EITHER arrival
-  // order, or the batch re-arms and the UI POSTs `/resume` for an executed batch.
-  it("keeps the terminal chip when a pending carrier arrives after it (terminal→pending)", () => {
-    const messages = [
-      user("go"),
-      assistant([
-        dataPart("assistant-approval", {
-          batchId: "b1",
-          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
-        }),
-      ]),
-      assistant([
-        dataPart("assistant-approval", {
-          batchId: "b1",
-          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
-        }),
-      ]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([
-      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF },
-    ]);
-  });
-
-  it("adopts the terminal chip when it arrives after a pending carrier (pending→terminal)", () => {
-    const messages = [
-      user("go"),
-      assistant([
-        dataPart("assistant-approval", {
-          batchId: "b1",
-          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
-        }),
-      ]),
-      assistant([
-        dataPart("assistant-approval", {
-          batchId: "b1",
-          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
-        }),
-      ]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([
-      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF },
-    ]);
-  });
-
-  // The decision can ride the live proposal output itself; the adapter must read
-  // `output.status` (the server's `approvalFromProposal` does) or a terminal
-  // carrier projects as pending and re-arms an executed batch.
-  it("adopts a terminal tool-output carrier arriving after a pending one (pending→terminal)", () => {
-    const messages = [
-      user("go"),
-      assistant([
-        toolResult("create_task", "c1", {}, {
-          approvalId: "a1",
-          batchId: "b1",
-          seq: 0,
-          name: "create_task",
-          detail: "Create task",
-          diff: DIFF,
-        }),
-      ]),
-      assistant([
-        toolResult("create_task", "c2", {}, {
-          approvalId: "a1",
-          batchId: "b1",
-          seq: 0,
-          name: "create_task",
-          detail: "Create task",
-          diff: DIFF,
-          status: "approved",
-        }),
-      ]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([
-      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", state: "approved", diff: DIFF },
-    ]);
-  });
-
-  it("keeps a terminal tool-output carrier when a pending carrier arrives after it (terminal→pending)", () => {
-    const messages = [
-      user("go"),
-      assistant([
-        toolResult("create_task", "c1", {}, {
-          approvalId: "a1",
-          batchId: "b1",
-          seq: 0,
-          name: "create_task",
-          detail: "Create task",
-          diff: DIFF,
-          status: "approved",
-        }),
-      ]),
-      assistant([
-        dataPart("assistant-approval", {
-          batchId: "b1",
-          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
-        }),
-      ]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([
-      { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", state: "approved", diff: DIFF },
-    ]);
-  });
-
-  // Terminal-vs-terminal: the later carrier is the newer decision.
-  it("lets the later terminal carrier win between two terminal carriers", () => {
-    const messages = [
+    // Terminal-vs-terminal: the later carrier is the newer decision.
+    const twoTerminal = suspensionFromMessages([
       user("go"),
       assistant([
         dataPart("assistant-approval", {
@@ -482,228 +85,113 @@ describe("segmentFromMessages — merged suspension projection (LX-120)", () => 
           approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "rejected" }],
         }),
       ]),
-    ];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages);
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([
+    ]);
+    expect(twoTerminal.suspendedBatchId).toBeNull();
+    expect(twoTerminal.pending).toEqual([
       { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "rejected", diff: DIFF },
     ]);
   });
-});
 
-describe("suspensionFromMessages — KnownApprovalDecisions overlay", () => {
-  type KnownTerminal = "approved" | "rejected" | "expired";
-  function known(byApproval: Record<string, KnownTerminal>, settledBatches: string[]): KnownApprovalDecisions {
-    return { byApproval: new Map(Object.entries(byApproval)), settledBatches: new Set(settledBatches) };
-  }
-  const carrier = (approvalId: string, status?: string) =>
-    assistant([
-      dataPart("assistant-approval", {
-        batchId: "b1",
-        approvals: [{ approvalId, seq: 0, name: "create_task", diff: DIFF, ...(status ? { status } : {}) }],
-      }),
-    ]);
-  const marker = assistant([text("proposed"), dataPart("assistant-approval", { batchId: "b9", approvals: [] })]);
-
-  it("overlays a client decision onto a still-pending carrier chip", () => {
-    const messages = [user("go"), carrier("a1")];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages, known({ a1: "rejected" }, ["b1"]));
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([{ approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "rejected", diff: DIFF }]);
-  });
-
-  it("does not override a terminal carrier with an older client decision", () => {
-    const messages = [user("go"), carrier("a1", "approved")];
-    const { pending, suspendedBatchId } = suspensionFromMessages(messages, known({ a1: "rejected" }, []));
-    expect(suspendedBatchId).toBeNull();
-    expect(pending).toEqual([{ approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF }]);
-  });
-
-  it("settles a marker-only carrier for a batch the client knows is decided", () => {
-    expect(suspensionFromMessages([user("go"), marker], known({}, ["b9"])).suspendedBatchId).toBeNull();
-  });
-
-  it("keeps a marker-only suspension when the batch is not in the settled set", () => {
-    expect(suspensionFromMessages([user("go"), marker], known({ a1: "rejected" }, ["other"])).suspendedBatchId).toBe("b9");
-  });
-
-  it("overlays through segmentFromMessages", () => {
-    const segment = segmentFromMessages([user("go"), carrier("a1")], known({ a1: "expired" }, ["b1"]));
-    expect(segment.suspendedBatchId).toBeNull();
-    expect(segment.pending[0]!.state).toBe("expired");
-  });
-});
-
-describe("segmentFromMessages — LX-124 continuation boundary", () => {
-  it("projects the continuation as the last turn and ignores the marker", () => {
-    const messages = [
-      user("go"),
-      assistant([
-        text("proposed"),
-        dataPart("assistant-approval", {
-          batchId: "b1",
-          approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
-        }),
-      ]),
-      assistant([dataPart("continuation", { batchId: "b1", ts: "2026-01-01T00:00:00Z" })]),
-      assistant([text("Done — nothing ran.")]),
-    ];
-    const segment = segmentFromMessages(messages);
-
-    // The continuation message is the last assistant turn; the marker adds none.
-    expect((lastAssistantMessage(messages)!.parts[0] as { text?: string }).text).toBe("Done — nothing ran.");
-    expect(segment.text).toBe("Done — nothing ran.");
-    // Terminal carrier → no re-arm; the marker contributes no chips.
-    expect(segment.suspendedBatchId).toBeNull();
-    expect(segment.pending.map((c) => c.approvalId)).toEqual(["a1"]);
-  });
-});
-
-describe("lastAssistantMessage / hasUserMessage", () => {
-  it("returns the last assistant message and detects user ingress", () => {
-    const a1 = assistant([text("first")]);
-    const a2 = assistant([text("second")]);
-    expect(lastAssistantMessage([user("hi"), a1, a2])).toBe(a2);
-    expect(lastAssistantMessage([user("hi")])).toBeUndefined();
-    expect(hasUserMessage([user("hi")])).toBe(true);
-    expect(hasUserMessage([a1])).toBe(false);
-  });
-});
-
-describe("message metadata helpers", () => {
-  it("reads reasoningMs only from a real numeric metadata duration", () => {
-    expect(reasoningMsFromMessage(assistant([reasoning("x")], { reasoningMs: 1500 }))).toBe(1500);
-    expect(reasoningMsFromMessage(assistant([reasoning("x")], { reasoningMs: null }))).toBeNull();
-    expect(reasoningMsFromMessage(assistant([reasoning("x")], {}))).toBeNull();
-    expect(reasoningMsFromMessage(assistant([reasoning("x")]))).toBeNull();
-    expect(reasoningMsFromMessage(undefined)).toBeNull();
-  });
-
-  it("maps metadata.usage to the { in, out } snapshot shape", () => {
-    expect(usageFromMessage(assistant([text("x")], { usage: { in: 10, out: 4 } }))).toEqual({ in: 10, out: 4 });
-    expect(usageFromMessage(assistant([text("x")], { usage: { input: 10, output: 4 } }))).toEqual({ in: 10, out: 4 });
-    expect(usageFromMessage(assistant([text("x")], { usage: { inputTokens: 10, outputTokens: 4 } }))).toEqual({ in: 10, out: 4 });
-    expect(usageFromMessage(assistant([text("x")], { usage: { in: 10 } }))).toEqual({ in: 10, out: 0 });
-  });
-
-  it("returns null usage when metadata carries none", () => {
-    expect(usageFromMessage(assistant([text("x")]))).toBeNull();
-    expect(usageFromMessage(assistant([text("x")], { usage: { tokens: 1 } }))).toBeNull();
-    expect(usageFromMessage(undefined)).toBeNull();
-  });
-});
-
-describe("statusFromChat", () => {
-  const seg = (overrides: Partial<ReturnType<typeof emptyAgentSegment>> = {}) => ({ ...emptyAgentSegment(), ...overrides });
-
-  it("maps the SDK chat status onto the stream status union", () => {
-    expect(statusFromChat("error", seg(), undefined)).toBe("error");
-    expect(statusFromChat("ready", seg(), new Error("x"))).toBe("error");
-    expect(statusFromChat("submitted", seg(), undefined)).toBe("connecting");
-    expect(statusFromChat("streaming", seg(), undefined)).toBe("connecting");
-    expect(statusFromChat("streaming", seg({ hasIngress: true }), undefined)).toBe("streaming");
-    expect(statusFromChat("ready", seg({ hasIngress: true }), undefined)).toBe("done");
-    expect(statusFromChat("ready", seg(), undefined)).toBe("idle");
-  });
-
-  it("reports suspended whenever a batch is awaiting decisions", () => {
-    expect(statusFromChat("ready", seg({ suspendedBatchId: "b1" }), undefined)).toBe("suspended");
-  });
-});
-
-describe("snapshotFromSegment", () => {
-  it("folds the segment into the legacy snapshot with empty frames", () => {
-    const segment = segmentFromAssistantMessage(assistant([text("hi")]));
-    const snapshot = snapshotFromSegment(segment, { status: "ready", error: undefined, usage: { in: 1, out: 2 } });
-    expect(snapshot).toMatchObject({
-      status: "done",
-      frames: [],
-      text: "hi",
-      pending: [],
-      suspendedBatchId: null,
-      error: null,
-      usage: { in: 1, out: 2 },
-      hasIngress: true,
-      reasoningActive: false,
+  // Two carriers for one approval (the merged shape the DO persists): a pending
+  // carrier must never overwrite an already-terminal chip, in EITHER arrival
+  // order or carrier shape, or the batch re-arms and the UI POSTs `/resume` for
+  // an executed batch.
+  it("keeps the terminal chip when a pending carrier arrives, in either arrival order and carrier shape", () => {
+    const terminalData = dataPart("assistant-approval", {
+      batchId: "b1",
+      approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF, status: "approved" }],
     });
-  });
-
-  it("maps an SDK error to the assistant error frame shape", () => {
-    const snapshot = snapshotFromSegment(emptyAgentSegment(), {
-      status: "error",
-      error: Object.assign(new Error("nope"), { code: "PROVIDER_UNREACHABLE" }),
+    const pendingData = dataPart("assistant-approval", {
+      batchId: "b1",
+      approvals: [{ approvalId: "a1", seq: 0, name: "create_task", diff: DIFF }],
     });
-    expect(snapshot.status).toBe("error");
-    expect(snapshot.error).toEqual({ code: "PROVIDER_UNREACHABLE", message: "nope" });
-  });
+    const terminalTool = toolResult("create_task", "c2", {}, {
+      approvalId: "a1",
+      batchId: "b1",
+      seq: 0,
+      name: "create_task",
+      detail: "Create task",
+      diff: DIFF,
+      status: "approved",
+    });
+    const pendingTool = toolResult("create_task", "c1", {}, {
+      approvalId: "a1",
+      batchId: "b1",
+      seq: 0,
+      name: "create_task",
+      detail: "Create task",
+      diff: DIFF,
+    });
+    const terminalDataChip = { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", state: "approved", diff: DIFF };
+    const terminalToolChip = { approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", detail: "Create task", state: "approved", diff: DIFF };
 
-  it("defaults the error code when the SDK error carries none", () => {
-    const snapshot = snapshotFromSegment(emptyAgentSegment(), { status: "error", error: new Error("nope") });
-    expect(snapshot.error).toEqual({ code: "ASSISTANT_GENERATION_FAILED", message: "nope" });
-  });
+    // data-part carriers: terminal → pending and pending → terminal
+    let result = suspensionFromMessages([user("go"), assistant([terminalData]), assistant([pendingData])]);
+    expect(result.suspendedBatchId).toBeNull();
+    expect(result.pending).toEqual([terminalDataChip]);
+    result = suspensionFromMessages([user("go"), assistant([pendingData]), assistant([terminalData])]);
+    expect(result.suspendedBatchId).toBeNull();
+    expect(result.pending).toEqual([terminalDataChip]);
 
-  it("reports usage null when omitted", () => {
-    expect(snapshotFromSegment(emptyAgentSegment(), { status: "ready", error: undefined }).usage).toBeNull();
-  });
-
-  it("surfaces a terminal connection error as the failed state", () => {
-    const connError = Object.assign(new Error("socket closed"), { code: 1006, reason: "abnormal", wasClean: false });
-    const snapshot = snapshotFromSegment(emptyAgentSegment(), { status: "ready", error: undefined, connectionError: connError });
-    expect(snapshot.status).toBe("error");
-    expect(snapshot.error).toEqual({ code: "ASSISTANT_CONNECTION_LOST", message: "socket closed" });
-  });
-
-  it("prefers an explicit chat error over the transport error", () => {
-    const connError = Object.assign(new Error("socket closed"), { code: 1006 });
-    const chatError = Object.assign(new Error("bad request"), { code: "PROVIDER_UNREACHABLE" });
-    const snapshot = snapshotFromSegment(emptyAgentSegment(), { status: "error", error: chatError, connectionError: connError });
-    expect(snapshot.error).toEqual({ code: "PROVIDER_UNREACHABLE", message: "bad request" });
+    // The decision can also ride the live proposal output; the adapter must read
+    // `output.status` or a terminal carrier projects as pending.
+    result = suspensionFromMessages([user("go"), assistant([pendingTool]), assistant([terminalTool])]);
+    expect(result.suspendedBatchId).toBeNull();
+    expect(result.pending).toEqual([terminalToolChip]);
+    result = suspensionFromMessages([user("go"), assistant([terminalTool]), assistant([pendingData])]);
+    expect(result.suspendedBatchId).toBeNull();
+    expect(result.pending).toEqual([terminalToolChip]);
   });
 });
 
-describe("agentSendParts", () => {
-  it("emits a text part plus one data-attachment part per attachment", () => {
-    expect(
-      agentSendParts({
-        message: "hello",
-        attachments: [{ storageKey: "k1", mimeType: "image/png", name: "a.png" }],
-      })
-    ).toEqual([
-      { type: "text", text: "hello" },
-      { type: "data-attachment", data: { storageKey: "k1", mimeType: "image/png", name: "a.png" } },
-    ]);
+// Merged from assistant-run-adapter.test.ts — the status mapping and the
+// interrupt classification carried on the run card.
+describe("run status → card state", () => {
+  it("maps the registry and live SDK statuses 1:1 (aborted → stopped)", () => {
+    expect(runStatusToCardState("queued")).toBe("dispatching");
+    expect(runStatusToCardState("running")).toBe("running");
+    expect(runStatusToCardState("completed")).toBe("done");
+    expect(runStatusToCardState("failed")).toBe("failed");
+    expect(runStatusToCardState("cancelled")).toBe("stopped");
+
+    expect(liveStatusToCardState("running")).toBe("running");
+    expect(liveStatusToCardState("completed")).toBe("done");
+    expect(liveStatusToCardState("error")).toBe("failed");
+    expect(liveStatusToCardState("interrupted")).toBe("failed");
+    expect(liveStatusToCardState("aborted")).toBe("stopped");
   });
 
-  it("omits an empty message but keeps attachments", () => {
-    expect(agentSendParts({ message: "", attachments: [{ storageKey: "k1", mimeType: "image/png", name: "a.png" }] })).toHaveLength(1);
-  });
+  it("keeps a soft interrupt Running and lands a hard interrupt as Failed with the live error", () => {
+    const soft = runCardFromLive(runRow(), { status: "interrupted", childStillRunning: true });
+    expect(soft.state).toBe("running");
 
-  it("returns no parts for an empty body", () => {
-    expect(agentSendParts({})).toEqual([]);
+    const hard = runCardFromLive(runRow(), { status: "interrupted", childStillRunning: false, error: "ASSISTANT_RUN_BUDGET_EXCEEDED" });
+    expect(hard.state).toBe("failed");
+    expect(hard.error).toBe("ASSISTANT_RUN_BUDGET_EXCEEDED");
   });
 });
 
-describe("agentSendMetadata", () => {
-  it("forwards only the request-level fields that are present", () => {
-    expect(
-      agentSendMetadata({
-        projectId: "p1",
-        chatId: "c1",
-        fromIndex: 3,
-        reasoningEffort: "high",
-        attachments: [{ storageKey: "k1", mimeType: "image/png", name: "a.png" }],
-      })
-    ).toEqual({
-      projectId: "p1",
-      chatId: "c1",
-      fromIndex: 3,
-      reasoningEffort: "high",
-      attachments: [{ storageKey: "k1", mimeType: "image/png", name: "a.png" }],
-    });
+// Merged from resendIndex.test.ts — LX-124: the split persists a zero-text
+// `data-continuation` boundary marker and a text-only continuation as assistant
+// messages. Resend targeting keys on role+text and must never latch onto either.
+describe("resendIndex — LX-124 continuation boundary", () => {
+  const rawUser = (text: string) => ({ role: "user", parts: [{ type: "text", text }] });
+  const boundary = (batchId: string) => ({
+    role: "assistant",
+    parts: [{ type: "data-continuation", data: { batchId, ts: "2026-01-01T00:00:00Z" } }],
   });
+  const continuation = (text: string) => ({ role: "assistant", parts: [{ type: "text", text }] });
 
-  it("omits absent fields, including fromIndex 0 (a real fork index)", () => {
-    expect(agentSendMetadata({ chatId: "c1", fromIndex: 0 })).toEqual({ chatId: "c1", fromIndex: 0 });
-    expect(agentSendMetadata({})).toEqual({});
+  const splitTranscript = [
+    rawUser("go"),
+    { role: "assistant", parts: [{ type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } }] },
+    boundary("b1"),
+    continuation("Done — nothing ran."),
+  ];
+
+  it("never maps a resend target onto the boundary or continuation", () => {
+    expect(rawUserIndexByText(splitTranscript, "")).toBeNull();
+    expect(resolveRawUserIndex(splitTranscript, { rawIndex: 2, text: "" }, 0)).toBeNull();
+    expect(resolveRawUserIndex(splitTranscript, { rawIndex: 3, text: "Done — nothing ran." }, 0)).toBeNull();
   });
 });

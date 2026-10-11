@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cliTagToVersion, lxInstallPath } from "./upgrade";
 
 const childMocks = vi.hoisted(() => ({
   curlCalls: [] as Array<{ cmd: string; args: string[] }>,
@@ -41,6 +42,11 @@ function stubReleases(tags: string[]): void {
 function stubBunFile(size: number): void {
   vi.stubGlobal("Bun", { file: () => ({ stat: async () => ({ size }) }) });
 }
+
+const CLI_ASSETS = [
+  "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lx",
+  "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lexa-cli",
+];
 
 let dir = "";
 
@@ -88,7 +94,7 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
 
     expect(childMocks.curlCalls.length).toBe(1);
     expect(childMocks.curlCalls[0]!.cmd).toBe("curl");
-    expect(childMocks.curlCalls[0]!.args).toEqual(["-fsSL", "-o", join(dir, "lx.new"), "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lx"]);
+    expect(childMocks.curlCalls[0]!.args).toEqual(["-fsSL", "-o", join(dir, "lx.new"), CLI_ASSETS[0]]);
     // chmod 755 + rename: the .new file is gone, the binary is in place.
     expect(existsSync(join(dir, "lx.new"))).toBe(false);
     expect(existsSync(join(dir, "lx"))).toBe(true);
@@ -108,7 +114,7 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     const mod = await import("./upgrade");
     await Effect.runPromise(mod.cmdUpgradeCli());
 
-    expect(childMocks.curlCalls[0]!.args).toEqual(["-fsSL", "-o", join(dir, "lx.new"), "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lx"]);
+    expect(childMocks.curlCalls[0]!.args).toEqual(["-fsSL", "-o", join(dir, "lx.new"), CLI_ASSETS[0]]);
     expect(existsSync(join(dir, "lx"))).toBe(true);
     expect(existsSync(join(dir, "lexa-cli"))).toBe(false);
     expect(statSync(join(dir, "lx")).mode & 0o777).toBe(0o755);
@@ -118,23 +124,7 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     restoreExecPath();
   });
 
-  it("fails when both the lx and legacy asset downloads exit non-zero", async () => {
-    stubReleases(["cli-v2.0.0"]);
-    stubBunFile(2 * 1024 * 1024);
-    childMocks.curlStatus = 22;
-    const restoreExecPath = mockExecPath(join(dir, "lx"));
-    writeFileSync(join(dir, "lx"), "old");
-    const mod = await import("./upgrade");
-    const err = (await Effect.runPromise(mod.cmdUpgradeCli()).catch((e) => e)) as Error;
-    expect(err.message).toBe("download failed (curl status 22)");
-    expect(childMocks.curlCalls.map((c) => c.args[3])).toEqual([
-      "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lx",
-      "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lexa-cli",
-    ]);
-    restoreExecPath();
-  });
-
-  it("falls back to the legacy release asset when the lx download fails", async () => {
+  it("falls back to the legacy asset when the lx download fails, and fails when both do", async () => {
     stubReleases(["cli-v2.0.0"]);
     stubBunFile(2 * 1024 * 1024);
     childMocks.curlStatuses.push(22, 0);
@@ -143,14 +133,19 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     writeFileSync(join(dir, "lx"), "old-binary");
     const mod = await import("./upgrade");
     await Effect.runPromise(mod.cmdUpgradeCli());
-    expect(childMocks.curlCalls.map((c) => c.args[3])).toEqual([
-      "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lx",
-      "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lexa-cli",
-    ]);
+    expect(childMocks.curlCalls.map((c) => c.args[3])).toEqual(CLI_ASSETS);
     // The legacy download is chmod 755 + renamed into place.
     expect(existsSync(join(dir, "lx"))).toBe(true);
     expect(statSync(join(dir, "lx")).mode & 0o777).toBe(0o755);
     log.mockRestore();
+
+    childMocks.curlCalls.length = 0;
+    childMocks.curlStatuses.length = 0;
+    childMocks.curlStatus = 22;
+    writeFileSync(join(dir, "lx"), "old-binary");
+    const err = (await Effect.runPromise(mod.cmdUpgradeCli()).catch((e) => e)) as Error;
+    expect(err.message).toBe("download failed (curl status 22)");
+    expect(childMocks.curlCalls.map((c) => c.args[3])).toEqual(CLI_ASSETS);
     restoreExecPath();
   });
 
@@ -165,5 +160,29 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     // The broken download is not renamed into place — self keeps its content.
     expect(existsSync(join(dir, "lx"))).toBe(true);
     restoreExecPath();
+  });
+});
+
+// Carried from cli/src/upgrade.test.ts (K5/K7 — the cli-vs-web tag guard and
+// the lexa-cli→lx rename transition that cmdUpgradeCli depends on).
+describe("cli tag + install path guards", () => {
+  it("cliTagToVersion parses cli-vX.Y.Z / dotted numeric and rejects web tags + malformed", () => {
+    expect(cliTagToVersion("cli-v1.2.3")).toBe("1.2.3");
+    expect(cliTagToVersion("cli-v0.1.0")).toBe("0.1.0");
+    expect(cliTagToVersion("cli-v1.2")).toBe("1.2");
+    expect(cliTagToVersion("cli-v1.2.3.4")).toBe("1.2.3.4");
+    expect(cliTagToVersion("v1.2.3")).toBeNull();
+    expect(cliTagToVersion("cli-v")).toBeNull();
+    expect(cliTagToVersion("releases/latest")).toBeNull();
+    expect(cliTagToVersion("cli-v1.2.")).toBeNull();
+    expect(cliTagToVersion("cli-vx")).toBeNull();
+    expect(cliTagToVersion("cli-v1..2")).toBeNull();
+  });
+
+  it("lxInstallPath keeps an existing lx path and migrates legacy names to the sibling lx", () => {
+    expect(lxInstallPath("/home/u/.local/bin/lx")).toBe("/home/u/.local/bin/lx");
+    expect(lxInstallPath("/usr/local/bin/lx")).toBe("/usr/local/bin/lx");
+    expect(lxInstallPath("/home/u/.local/bin/lexa-cli")).toBe("/home/u/.local/bin/lx");
+    expect(lxInstallPath("/usr/local/bin/lexa-cli")).toBe("/usr/local/bin/lx");
   });
 });

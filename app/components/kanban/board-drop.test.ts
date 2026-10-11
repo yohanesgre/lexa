@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Task, TipTapDoc } from "../../../shared/types";
 import { computeDropTarget, computeDropPosition } from "./board-drop";
+import { laneNeighbors } from "../../lib/lane-neighbors";
 
 const doc: TipTapDoc = { type: "doc", content: [] };
 
@@ -16,42 +17,47 @@ const tasksInCell = (columnId: string, laneId: string) =>
 const over = (id: string, data?: unknown) => ({ id, data: { current: data } }) as never;
 
 describe("computeDropTarget", () => {
-  it("drops onto a column cell → appends after the last task in that cell", () => {
-    const target = computeDropTarget(tasks[0]!, over("cell:l1:c2", { type: "column", columnId: "c2", swimlaneId: "l1" }), tasksInCell, tasks);
-    expect(target).toEqual({ columnId: "c2", swimlaneId: "l1", beforeTaskId: "t3", afterTaskId: undefined });
+  it("drops onto a column cell after its last task, or with no anchors when the cell is empty", () => {
+    expect(computeDropTarget(tasks[0]!, over("cell:l1:c2", { type: "column", columnId: "c2", swimlaneId: "l1" }), tasksInCell, tasks)).toEqual(
+      { columnId: "c2", swimlaneId: "l1", beforeTaskId: "t3", afterTaskId: undefined },
+    );
+    expect(computeDropTarget(tasks[0]!, over("cell:l1:cX", { type: "column", columnId: "cX", swimlaneId: "l1" }), tasksInCell, tasks)).toEqual(
+      { columnId: "cX", swimlaneId: "l1", beforeTaskId: undefined, afterTaskId: undefined },
+    );
   });
 
-  it("drops onto an empty column cell → no before/after anchor", () => {
-    const target = computeDropTarget(tasks[0]!, over("cell:l1:cX", { type: "column", columnId: "cX", swimlaneId: "l1" }), tasksInCell, tasks);
-    expect(target).toEqual({ columnId: "cX", swimlaneId: "l1", beforeTaskId: undefined, afterTaskId: undefined });
-  });
-
-  it("drops from above onto a task → lands before it", () => {
-    const target = computeDropTarget(tasks[2]!, over("t2"), tasksInCell, tasks);
-    expect(target).toEqual({ columnId: "c1", swimlaneId: "l1", beforeTaskId: "t2", afterTaskId: undefined });
-  });
-
-  it("drops from below onto a task → lands after it", () => {
+  it("drops onto a task before it from above and after it from below, and is null for a missing over task", () => {
+    // t3 (c2) dragged onto t2 (c1) — approaches from above.
+    expect(computeDropTarget(tasks[2]!, over("t2"), tasksInCell, tasks)).toEqual({ columnId: "c1", swimlaneId: "l1", beforeTaskId: "t2", afterTaskId: undefined });
     // t2 (a1) dragged onto t1 (a0) in the same column — below the target.
-    const target = computeDropTarget(tasks[1]!, over("t1"), tasksInCell, tasks);
-    expect(target).toEqual({ columnId: "c1", swimlaneId: "l1", beforeTaskId: undefined, afterTaskId: "t1" });
-  });
-
-  it("missing over task → null", () => {
+    expect(computeDropTarget(tasks[1]!, over("t1"), tasksInCell, tasks)).toEqual({ columnId: "c1", swimlaneId: "l1", beforeTaskId: undefined, afterTaskId: "t1" });
     expect(computeDropTarget(tasks[0]!, over("ghost"), tasksInCell, tasks)).toBeNull();
   });
 });
 
 describe("computeDropPosition", () => {
-  it("generates a key between anchors", () => {
-    const before = tasks[2]!;
-    const target = { columnId: "c1", swimlaneId: "l1", beforeTaskId: "t1", afterTaskId: "t2" };
-    const pos = computeDropPosition(before, target, tasks);
-    expect(pos > "a0" && pos < "a1").toBe(true);
+  it("generates a key between anchors and appends after the trailing task without a before anchor", () => {
+    const between = computeDropPosition(tasks[2]!, { columnId: "c1", swimlaneId: "l1", beforeTaskId: "t1", afterTaskId: "t2" }, tasks);
+    expect(between > "a0" && between < "a1").toBe(true);
+    expect(computeDropPosition(tasks[2]!, { columnId: "c1", swimlaneId: "l1", beforeTaskId: undefined, afterTaskId: undefined }, tasks)).toBe("a2");
+  });
+});
+
+// Merged from lib/lane-neighbors.test.ts — the same-column anchors a lane-only
+// move sends (TaskDetail spreads laneNeighbors into the move payload), so the
+// move keeps the task's relative order instead of repositioning it.
+describe("laneNeighbors — same-column anchors for a lane-only move", () => {
+  const laneTask = (id: string, columnId: string, position: string): Task => ({ ...tasks[0]!, id, key: id, columnId, position });
+
+  it("returns the nearest same-column neighbors, with one-sided edges at the ends", () => {
+    const lane = [laneTask("a", "c1", "a0"), laneTask("b", "c1", "a1"), laneTask("c", "c1", "a2"), laneTask("d", "c1", "a3")];
+    expect(laneNeighbors(lane, laneTask("c", "c1", "a2"))).toEqual({ beforeTaskId: "b", afterTaskId: "d" });
+    expect(laneNeighbors(lane, laneTask("a", "c1", "a0"))).toEqual({ afterTaskId: "b" });
+    expect(laneNeighbors(lane, laneTask("d", "c1", "a3"))).toEqual({ beforeTaskId: "c" });
   });
 
-  it("appends after the trailing task when there is no before anchor", () => {
-    const target = { columnId: "c1", swimlaneId: "l1", beforeTaskId: undefined, afterTaskId: undefined };
-    expect(computeDropPosition(tasks[2]!, target, tasks)).toBe("a2");
+  it("ignores tasks in other columns", () => {
+    const lane = [laneTask("other", "c2", "a0"), laneTask("a", "c1", "a0"), laneTask("other2", "c2", "a1"), laneTask("b", "c1", "a5")];
+    expect(laneNeighbors(lane, laneTask("a", "c1", "a0"))).toEqual({ afterTaskId: "b" });
   });
 });

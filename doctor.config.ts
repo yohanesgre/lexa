@@ -16,7 +16,7 @@ export default {
       // Deploy commands were hard-removed from the CLI (cli-v2026.2.0, owner
       // decision). The deleted files were previously scanned by react-doctor
       // and the maintainability analyzer cannot handle removed paths (upstream
-      // 0.9.13 bug — see status/rd-grind.md TOOL BUG) → ignore the ghosts.
+      // 0.9.13 bug: the analyzer cannot resolve removed paths) → ignore the ghosts.
       "cli/src/deploy.ts", "cli/src/deploy-workers.ts",
       "cli/src/deploy.test.ts", "cli/src/deploy-workers.test.ts",
       "cli/src/packed-compose.ts", "cli/src/packed-compose.test.ts",

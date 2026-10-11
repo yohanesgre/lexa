@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const navigateMock = vi.hoisted(() => vi.fn());
 const toastPush = vi.hoisted(() => vi.fn());
@@ -145,79 +145,6 @@ afterEach(() => {
   fx.board.tasks[0]!.assignees = [];
 });
 
-describe("TasksPage selection semantics", () => {
-  beforeEach(() => {
-    navigateMock.mockClear();
-    toastPush.mockClear();
-    bulkMutateAsync.mockReset();
-    fx.caps = { assistant: false, flavor: "bun", tasksBulk: true };
-  });
-
-  it("toggles a row without opening the task and shows the count", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EG-1 First task" }));
-
-    expect(screen.getByRole("checkbox", { name: "Deselect EG-1 First task" })).toHaveAttribute("aria-checked", "true");
-    expect(countText()).toBe("1 selected");
-    // The selection control never opens the detail slideover.
-    expect(navigateMock).not.toHaveBeenCalled();
-  });
-
-  it("marks select-all mixed when only some rows are selected", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EG-1 First task" }));
-
-    expect(screen.getByRole("checkbox", { name: /Select all tasks/ })).toHaveAttribute("aria-checked", "mixed");
-  });
-
-  it("shift-clicks a contiguous range in displayed order", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EG-1 First task" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EG-3 Third task" }), { shiftKey: true });
-
-    expect(countText()).toBe("3 selected");
-    expect(screen.getByRole("checkbox", { name: "Deselect EG-2 Second task" })).toHaveAttribute("aria-checked", "true");
-  });
-
-  it("select-all flips checked and back", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select all tasks" }));
-    expect(countText()).toBe("3 selected");
-    expect(screen.getByRole("checkbox", { name: "Deselect all tasks" })).toHaveAttribute("aria-checked", "true");
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Deselect all tasks" }));
-    expect(countText()).toBeNull();
-  });
-
-  it("clears selection when the sort changes", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EG-1 First task" }));
-    expect(countText()).toBe("1 selected");
-
-    fireEvent.change(screen.getByLabelText("Sort order"), { target: { value: "priority" } });
-    expect(countText()).toBeNull();
-  });
-
-  it("clears selection on Escape inside the list", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: "Select EG-1 First task" }));
-    expect(countText()).toBe("1 selected");
-
-    fireEvent.keyDown(document.querySelector(".tasks-list")!, { key: "Escape" });
-    expect(countText()).toBeNull();
-  });
-
-  it("hides selection controls and the bulk bar when the capability is off", () => {
-    fx.caps = { assistant: false, flavor: "bun", tasksBulk: false };
-    render(<TasksPage slug="demo" search={{}} />);
-
-    expect(document.querySelector(".task-selectbox")).toBeNull();
-    expect(document.querySelector(".tasks-list-head")).toBeNull();
-    // The row body still opens the task.
-    expect(screen.getByRole("button", { name: "Open EG-1: First task" })).toBeInTheDocument();
-  });
-});
-
 describe("TasksPage bulk actions", () => {
   beforeEach(() => {
     navigateMock.mockClear();
@@ -226,20 +153,16 @@ describe("TasksPage bulk actions", () => {
     fx.caps = { assistant: false, flavor: "bun", tasksBulk: true };
   });
 
-  it("archives the selection through the named confirm dialog", async () => {
-    bulkMutateAsync.mockResolvedValueOnce({ applied: ["t1", "t2"], failed: [] });
+  it("hides selection controls when the capability is off, and keeps only the failed rows selected with the server reason", async () => {
+    fx.caps = { assistant: false, flavor: "bun", tasksBulk: false };
     render(<TasksPage slug="demo" search={{}} />);
-    await selectTwo();
+    expect(document.querySelector(".task-selectbox")).toBeNull();
+    expect(document.querySelector(".tasks-list-head")).toBeNull();
+    // The row body still opens the task.
+    expect(screen.getByRole("button", { name: "Open EG-1: First task" })).toBeInTheDocument();
+    cleanup();
 
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    expect(screen.getByText("Archive 2 tasks?")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Archive 2 tasks" }));
-    await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith({ ids: ["t1", "t2"], action: "archive" }));
-    await waitFor(() => expect(countText()).toBeNull());
-  });
-
-  it("keeps only the failed rows selected and names them with the server reason", async () => {
+    fx.caps = { assistant: false, flavor: "bun", tasksBulk: true };
     bulkMutateAsync.mockResolvedValueOnce({
       applied: ["t1"],
       failed: [{ id: "t2", code: "WIP_LIMIT", message: "Column is at its WIP limit" }],
@@ -254,47 +177,6 @@ describe("TasksPage bulk actions", () => {
     expect(screen.getByRole("checkbox", { name: "Deselect EG-2 Second task" })).toHaveAttribute("aria-checked", "true");
     expect(toastPush).toHaveBeenCalledWith("error", "1 task not updated", "EG-2: Column is at its WIP limit");
   });
-
-  it("changes nothing when the request fails", async () => {
-    bulkMutateAsync.mockRejectedValueOnce(new Error("network"));
-    render(<TasksPage slug="demo" search={{}} />);
-    await selectTwo();
-
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("button", { name: "Archive 2 tasks" }));
-
-    await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalled());
-    expect(countText()).toBe("2 selected");
-    expect(document.querySelector(".bulk-bar-count")?.textContent).toBe("2 selected");
-  });
-
-  it("keeps the selection when the confirm is cancelled", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    void selectTwo();
-
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(bulkMutateAsync).not.toHaveBeenCalled();
-    expect(countText()).toBe("2 selected");
-  });
-
-  it("focuses Cancel, cancels on Escape, and returns focus to the bulk bar", async () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    await selectTwo();
-
-    const archiveBtn = screen.getByRole("button", { name: "Archive" });
-    archiveBtn.focus();
-    fireEvent.click(archiveBtn);
-
-    const cancel = screen.getByRole("button", { name: "Cancel" });
-    await waitFor(() => expect(cancel).toHaveFocus());
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByText("Archive 2 tasks?")).toBeNull());
-    expect(countText()).toBe("2 selected");
-    expect(archiveBtn).toHaveFocus();
-  });
 });
 
 describe("TasksPage bulk action payloads", () => {
@@ -306,43 +188,31 @@ describe("TasksPage bulk action payloads", () => {
     fx.caps = { assistant: false, flavor: "bun", tasksBulk: true };
   });
 
-  it("sends { action: 'move', columnId }", async () => {
+  it("sends { action: 'move' } with the target column, then with the target swimlane", async () => {
     render(<TasksPage slug="demo" search={{}} />);
     await selectTwo();
 
     clickMenuItem("Move to column…", "Doing");
     await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith({ ids: ["t1", "t2"], action: "move", columnId: "c2" }));
-  });
 
-  it("sends { action: 'move', swimlaneId }", async () => {
-    render(<TasksPage slug="demo" search={{}} />);
     await selectTwo();
-
     clickMenuItem("Move to sprint…", "Sprint 1");
     await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith({ ids: ["t1", "t2"], action: "move", swimlaneId: "s2" }));
   });
 
-  it("sends { action: 'update', assignees }", async () => {
+  it("sends { action: 'update' } for assignees, priority and dueAt", async () => {
     fx.board.tasks[0]!.assignees = ["Ada"];
     render(<TasksPage slug="demo" search={{}} />);
     await selectTwo();
 
     clickMenuItem("Set assignee…", "Ada");
     await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith({ ids: ["t1", "t2"], action: "update", assignees: ["Ada"] }));
-  });
 
-  it("sends { action: 'update', priority }", async () => {
-    render(<TasksPage slug="demo" search={{}} />);
     await selectTwo();
-
     clickMenuItem("Set priority…", "High");
     await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith({ ids: ["t1", "t2"], action: "update", priority: "pr2" }));
-  });
 
-  it("sends { action: 'update', dueAt }", async () => {
-    render(<TasksPage slug="demo" search={{}} />);
     await selectTwo();
-
     fireEvent.click(screen.getByRole("button", { name: "Set due date…" }));
     fireEvent.click(screen.getByRole("button", { name: "Today" }));
     await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith(
@@ -358,46 +228,5 @@ describe("TasksPage bulk action payloads", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
     fireEvent.click(screen.getByRole("button", { name: "Restore 3 tasks" }));
     await waitFor(() => expect(bulkMutateAsync).toHaveBeenCalledWith({ ids: ["t1", "t2", "t3"], action: "restore" }));
-  });
-});
-
-describe("TasksPage create trigger", () => {
-  beforeEach(() => {
-    navigateMock.mockClear();
-    createMutateAsync.mockReset();
-    fx.caps = { assistant: false, flavor: "bun", tasksBulk: true };
-  });
-
-  it("opens the create slideover at ?new=1", () => {
-    render(<TasksPage slug="demo" search={{ new: true }} />);
-    expect(screen.getByTestId("task-detail")).toHaveAttribute("data-mode", "create");
-  });
-
-  it("navigates to ?new=1 from the header New task control", () => {
-    render(<TasksPage slug="demo" search={{}} />);
-    fireEvent.click(screen.getByRole("button", { name: /New task/ }));
-    expect(navigateMock).toHaveBeenCalledWith({ search: { new: true }, replace: true });
-  });
-
-  it("submits the create payload and renders the created task in the list", async () => {
-    createMutateAsync.mockResolvedValueOnce({ data: {}, activity: [] });
-    const { rerender } = render(<TasksPage slug="demo" search={{ new: true }} />);
-    const input = {
-      title: "New task",
-      columnId: "c1",
-      priority: "pr1",
-      type: "tp1",
-      assignees: [] as string[],
-      description: { type: "doc", content: [] },
-    };
-
-    await act(async () => { await detailProps.current!.onCreate!(input); });
-    expect(createMutateAsync).toHaveBeenCalledWith(input);
-
-    // The real useCreateTask appends the created task to the board cache, which
-    // deriveTaskList feeds into this list — the row must render.
-    fx.list = [...fx.list, fx.makeListItem("t9", "EG-9", "New task")];
-    rerender(<TasksPage slug="demo" search={{ new: true }} />);
-    expect(screen.getByRole("button", { name: "Open EG-9: New task" })).toBeInTheDocument();
   });
 });

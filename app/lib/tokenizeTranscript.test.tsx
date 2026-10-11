@@ -35,17 +35,16 @@ describe("renderTokenized — transcript chips", () => {
     expect(container.innerHTML).not.toContain("/wiki/");
   });
 
-  it("keeps a member-name token as plain text", () => {
-    const { container } = render(<div>{renderTokenized("hi @Maria", "nimbus")}</div>);
-    expect(container.querySelector(".mention-chip")).toBeNull();
-    expect(container.textContent).toBe("hi @Maria");
-  });
+  it("keeps a member-name token as plain text and renders $name as a non-link skill chip", () => {
+    const member = render(<div>{renderTokenized("hi @Maria", "nimbus")}</div>);
+    expect(member.container.querySelector(".mention-chip")).toBeNull();
+    expect(member.container.textContent).toBe("hi @Maria");
+    member.unmount();
 
-  it("renders $name as a non-link skill chip", () => {
-    const { container } = render(<div>{renderTokenized("use $Status", "nimbus")}</div>);
-    const chip = container.querySelector(".mention-chip-skill");
+    const skill = render(<div>{renderTokenized("use $Status", "nimbus")}</div>);
+    const chip = skill.container.querySelector(".mention-chip-skill");
     expect(chip).toBeTruthy();
     expect(chip!.textContent).toBe("$Status");
-    expect(container.querySelector("a")).toBeNull();
+    expect(skill.container.querySelector("a")).toBeNull();
   });
 });

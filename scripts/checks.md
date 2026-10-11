@@ -7,7 +7,7 @@ Parity with the release CI (`.github/workflows/ci.yml`, release-prep only) and A
 - Before every `git commit`
 - Before every PR create / tag
 - Before every release-prep push (`chore/release-*` / `release/*`) — the only points CI runs
-- Before `status/<lane>.md` → DONE
+- Before flipping a `status/<plan>/status.md` (or a lane file) to DONE
 
 ## Commands
 
@@ -33,6 +33,9 @@ bash scripts/test-install.sh   # installer unit + dry-run suite (no vitest)
 # 3. Invariants (if touched server/, shared/, docs/SCHEMA.md, scripts/check-invariants.ts)
 bun run check:invariants
 
+# 3b. Test-hygiene guard rail (runs on every gate; no vitest needed)
+bun run check:test-hygiene
+
 # 4. Wireframes (if touched wireframes/src/)
 bash wireframes/build.sh
 
@@ -47,6 +50,23 @@ git diff --cached | head -n 200  # spot stray console.log / debug
 # 7. Lint / doctor (optional, non-blocking unless CI fails)
 npx react-doctor@latest --scope changed  # if React changes
 ```
+
+## Test-density rule (2026-10-11 trim)
+
+The suite was cut from 321 files / 3,820 tests / 66.7k LOC to ~119 files / ~1.4k tests / ~31k LOC; the
+old fast-subset lane script was retired with it (the full suite is now ~46s). Every new test must name the
+criterion it protects — an architectural invariant, a documented contract (`docs/API.md`,
+`docs/SCHEMA.md`, `docs/LAYERS.md`), a security boundary, a race/atomicity property, a
+migration/upgrade path, a destructive op, or a core-flow smoke. Do not add copy/label/class/px
+assertions, internal-wiring or mock-argument echoes, implementation-detail pins, source-text scans, or a
+second-tier restatement of an effect already asserted where it lives. Invariant→test map:
+`docs/TESTING.md` (lanes, guard rail, budget, invariant→test map).
+
+Mechanically enforced by `bun run check:test-hygiene` (also in `verify-gate.sh` and `ci-local.sh`):
+snapshot assertions fail outright, and every anti-pattern count
+(`toHaveClass`/`toHaveStyle`, `toBeTruthy`/`toBeDefined`, `toHaveBeenCalledWith`, `readFileSync`) is
+capped per file in `scripts/test-hygiene-allow.json` — a ratchet that only tightens. Suite budget
+(100 files / 900 cases / 27k LOC) warns when exceeded.
 
 ## Scoped test step (verify-gate.sh)
 

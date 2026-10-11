@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,26 +87,7 @@ function row(overrides: Partial<AssistantPendingWriteRow>): AssistantPendingWrit
   };
 }
 
-describe("AssistantPendingWritesRepo insert/getById", () => {
-  it("insert defaults status='pending' and round-trips via getById", async () => {
-    seed(db);
-    const repo = makeRepo(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const r = row({ id: "w1" });
-        yield* repo.insert(r);
-        const got = yield* repo.getById("w1");
-        expect(got).not.toBeNull();
-        expect(got!.status).toBe("pending");
-        expect(got!.batch_id).toBe("b1");
-        expect(got!.seq).toBe(0);
-        expect(got!.execution_error).toBeNull();
-        expect(got!.decided_at).toBeNull();
-        expect(yield* repo.getById("missing")).toBeNull();
-      })
-    );
-  });
-
+describe("AssistantPendingWritesRepo insert", () => {
   it("FK enforcement: insert without the assistant_threads composite key fails", async () => {
     seed(db);
     const repo = makeRepo(db);

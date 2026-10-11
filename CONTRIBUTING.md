@@ -63,7 +63,8 @@ by design.
    TypeScript strict, no `any` outside JSON-payload boundaries. No comments
    unless the behavior is genuinely non-obvious.
 5. **Verify before pushing.** `tsc --noEmit` must pass, `vitest run` must be
-   green. Run both before opening a PR.
+   green. Run both before opening a PR. Test shape, lanes and the guard rail for
+   new tests (`bun run check:test-hygiene`) are documented in `docs/TESTING.md`.
 
 ## Pull requests
 

@@ -1,8 +1,7 @@
 import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
@@ -15,7 +14,30 @@ import { RuntimeEnvLive } from "../runtime-env";
 import { AssistantChatService } from "./assistant-chat.service";
 import { activeChats } from "../assistant/active-chats";
 import { encryptSecret, parseMasterKey } from "../assistant/secrets";
-import type { StreamFrame } from "../../shared/assistant";
+import type { AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
+import {
+  APPROVAL_TTL_HOURS,
+  MAX_BULK_TASK_REFS,
+  MAX_WRITES_PER_TURN,
+  buildAssistantWriteTools,
+  buildAutoWriteRecord,
+  createWriteRecorder,
+  type AssistantWriteToolDeps,
+  type WriteRecorderInsertRow,
+  type WriteTaskSnapshot,
+} from "../assistant/write-tools";
+import { executeAssistantWrite, type AssistantWriteExecutionCtx } from "../assistant/write-execution";
+import {
+  approvalCarriersOf,
+  messageCarriesBatch,
+  reconcileApprovalCarriers,
+  withApprovalCarriers,
+  withContinuationBoundary,
+} from "../assistant/approval-carrier";
+import { resolveMentionContext, firstUserText, lastUserText, type MentionResolverDeps } from "../assistant/context";
+import type { TipTapDoc } from "../../shared/types";
+import { ASSISTANT_APPROVAL_DATA_PART, type AssistantWriteDiff, type StreamFrame } from "../../shared/assistant";
+import type { UIMessage } from "ai";
 import type { RuntimeEnv } from "../env";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -163,22 +185,6 @@ async function drain(stream: ReadableStream<StreamFrame>): Promise<StreamFrame[]
   return out;
 }
 
-// The preflight writes its one-line record to stderr; captured here so a test
-// can assert what a run logged without touching the real stream.
-async function captureStderr(fn: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
-    lines.push(String(chunk));
-    return true;
-  }) as typeof process.stderr.write);
-  try {
-    await fn();
-  } finally {
-    spy.mockRestore();
-  }
-  return lines;
-}
-
 function promptText(call: { systemPrompts: unknown }): string {
   return (call.systemPrompts as Array<{ content: string }>).map((p) => p.content).join("\n");
 }
@@ -228,130 +234,6 @@ describe("chat preflight — new run", () => {
     expect(text).toContain("write intent: write");
     expect(text).toContain("live project data remains authoritative");
   });
-
-  it("offers jev_assess to the model on a new run when Jev is configured", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-
-    await drain(await runStream("c1", "hello"));
-    expect(toolNames(providerMock.calls[0]!)).toContain("jev_assess");
-  });
-});
-
-describe("chat preflight — resume", () => {
-  it("resumes with zero Jev calls and no advisory block", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    // A decided batch whose tool is unknown to the executor: resume must apply
-    // the verdicts and still reach the model, without Jev being consulted.
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":"b1"}]');
-INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'no_such_write_tool', '{}', '{}', 'approved', '2099-01-01 00:00:00');
-`);
-
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(jevCalls).toHaveLength(0);
-    expect(providerMock.calls).toHaveLength(1);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-  });
-
-  it("still offers jev_assess on a resume — its budget is per stream", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":"b1"}]');
-INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'no_such_write_tool', '{}', '{}', 'approved', '2099-01-01 00:00:00');
-`);
-
-    await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(toolNames(providerMock.calls[0]!)).toContain("jev_assess");
-  });
-
-  it("applies an approved create_task and streams the follow-up (no Die)", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    db.exec(`
-INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
-INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"create it"},{"role":"assistant","content":"proposed","toolCalls":[{"name":"create_task","detail":"New task"}],"pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
-INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'pending', '2099-01-01 00:00:00');
-`);
-
-    const decided = await run(service.decideApproval("ap1", "u1", "approve"));
-    expect(decided.remaining).toBe(0);
-
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
-    expect(applied.map((f) => f.status)).toContain("applied");
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(frames.some((f) => f.type === "error" && (f as { code?: string }).code === "ASSISTANT_GENERATION_FAILED")).toBe(false);
-    const created = db.prepare("SELECT title FROM tasks WHERE project_id = 'p1'").all() as Array<{ title: string }>;
-    expect(created.map((c) => c.title)).toContain("New task");
-    // Mock seam: provider.streamChat is stubbed, so this assertion on the exact
-    // messages handed to it (not the library) is the hermetic boundary guard.
-    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
-    const assistantHanded = handed.find((m) => m.role === "assistant")!;
-    expect(assistantHanded.toolCalls).toBeUndefined();
-    // The resumed provider context carries the executed-writes note (tool +
-    // created ticket key + status) so the model does not re-propose it...
-    const note = handed.find((m) => m.role === "user" && String(m.content).includes("[approved write results]"))!;
-    expect(note).toBeDefined();
-    expect(String(note.content)).toContain("create_task");
-    expect(String(note.content)).toContain("[EG-2]");
-    expect(String(note.content)).toContain("applied");
-    // ...while the persisted transcript never gains it as a turn.
-    const persisted = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
-    expect(persisted.messages).not.toContain("[approved write results]");
-  });
-
-  it("tells the resumed model an all-rejected batch was not executed", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"delete_task"}]}}]');
-INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'delete_task', '{"ref":"EG-1"}', '{}', 'rejected', '2099-01-01 00:00:00');
-`);
-
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
-    expect(applied.map((f) => f.status)).toEqual(["denied"]);
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-
-    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
-    const note = handed.find((m) => String(m.content).includes("[approved write results]"))!;
-    expect(String(note.content)).toContain("None of the proposed writes were executed.");
-    expect(String(note.content)).toContain("rejected (not executed)");
-  });
-
-  it("notes a failed write with its error in the resumed context", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"update_task"}]}}]');
-INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'update_task', '{"ref":"EG-999","title":"t"}', '{}', 'approved', '2099-01-01 00:00:00');
-`);
-
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
-    expect(applied.map((f) => f.status)).toEqual(["failed"]);
-
-    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
-    const note = handed.find((m) => String(m.content).includes("[approved write results]"))!;
-    expect(String(note.content)).toContain("update_task");
-    expect(String(note.content)).toContain("failed (not executed)");
-    expect(String(note.content)).toMatch(/failed \(not executed\): /);
-  });
 });
 
 describe("chat resume — carrier-shaped transcript (DO path)", () => {
@@ -360,15 +242,6 @@ describe("chat resume — carrier-shaped transcript (DO path)", () => {
        VALUES ('chat', 'c1', 'p1', 'u1', '[{"id":"m1","role":"user","parts":[{"type":"text","text":"go"}]},{"id":"m2","role":"assistant","parts":[{"type":"text","text":"proposed"},{"type":"data-assistant-approval","data":{"batchId":"b1","approvals":[{"approvalId":"ap1","seq":0,"name":"no_such_write_tool"}]}}]}]');
      INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
        VALUES ('ap1', 'p1', 'chat', 'c1', 'u1', 'b1', 0, 'no_such_write_tool', '{}', '{}', '${status}', '2099-01-01 00:00:00');`;
-
-  it("resumes past the gate when every carrier approval is decided", async () => {
-    setup();
-    db.exec(carrierThread("approved"));
-
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(providerMock.calls).toHaveLength(1);
-  });
 
   it("still 409s while a carrier approval remains pending", async () => {
     setup();
@@ -418,72 +291,26 @@ describe("chat preflight — fail-open and disable", () => {
     expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
   });
 
-  it("an upstream rejection leaves the run intact with no advisory", async () => {
-    stubFetch(() => Promise.resolve(new Response("nope", { status: 500 })));
-    setup();
-
-    const frames = await drain(await runStream("c1", "hello"));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-  });
-
-  it("an unreadable answer payload leaves the run intact with no advisory", async () => {
-    stubFetch(() => Promise.resolve(new Response("not json", { status: 200 })));
-    setup();
-
-    const frames = await drain(await runStream("c1", "hello"));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-  });
-
-  it("no stored key disables the preflight and omits jev_assess entirely", async () => {
+  it("every missing gate (no stored key, no project opt-in, no master key) disables Jev and omits jev_assess", async () => {
     setup({ jev: "no-secret" });
     stubUnreachable();
-
-    const frames = await drain(await runStream("c1", "hello"));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
+    const noSecret = await drain(await runStream("c1", "hello"));
+    expect(noSecret.some((f) => f.type === "done")).toBe(true);
     expect(jevCalls).toHaveLength(0);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
-  });
+    expect(promptText(providerMock.calls.at(-1)!)).not.toContain("Jev advisory");
+    expect(toolNames(providerMock.calls.at(-1)!)).not.toContain("jev_assess");
 
-  it("an absent project opt-in disables Jev", async () => {
     setup({ jev: "no-project" });
     stubUnreachable();
-
     await drain(await runStream("c1", "hello"));
     expect(jevCalls).toHaveLength(0);
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
-  });
+    expect(toolNames(providerMock.calls.at(-1)!)).not.toContain("jev_assess");
 
-  it("no master key leaves the stored ciphertext unopenable, disabling Jev", async () => {
     setup({ env: {} as unknown as RuntimeEnv });
     stubUnreachable();
-
     await drain(await runStream("c1", "hello"));
     expect(jevCalls).toHaveLength(0);
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
-  });
-
-  it("stays silent on stderr without a key — an unconfigured Jev is not a run event", async () => {
-    setup({ env: {} as unknown as RuntimeEnv });
-    stubUnreachable();
-    const lines = await captureStderr(async () => {
-      await drain(await runStream("c1", "hello"));
-    });
-    expect(lines.filter((l) => l.includes("assistant-jev"))).toEqual([]);
-  });
-
-  it("still logs a configured preflight that actually failed", async () => {
-    stubFetch(() => Promise.resolve(new Response("nope", { status: 500 })));
-    setup();
-    const lines = await captureStderr(async () => {
-      await drain(await runStream("c1", "hello"));
-    });
-    const jev = lines.filter((l) => l.includes("assistant-jev")).map((l) => JSON.parse(l) as { meta: Record<string, unknown> });
-    expect(jev).toHaveLength(1);
-    expect(jev[0]!.meta.code).toBe("HTTP_500");
-    expect(jev[0]!.meta.outcome).toBe("failed");
+    expect(toolNames(providerMock.calls.at(-1)!)).not.toContain("jev_assess");
   });
 });
 
@@ -522,322 +349,6 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
   });
 });
 
-// The chat harness is reused as-is: real migrations seed the `assistant` agent
-// with six junction-bound skills (Status/Review/Polish/Requirements/…), so the
-// `$name` path can be exercised end-to-end without touching the DB schema.
-describe("chat — per-message $skills", () => {
-  function userContentOf(call: { messages: unknown }): unknown {
-    return (call.messages as Array<Record<string, unknown>>).find((m) => m.role === "user")?.content;
-  }
-
-  it("injects a mentioned bound skill under `## Skill: {name}`", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "give me a $Status update"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("## Skill: Status");
-    expect(text).toContain("Be honest; flag risks early.");
-  });
-
-  it("injects only the first three mentions; the fourth stays literal", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "$Status $Review $Polish $Requirements"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("## Skill: Status");
-    expect(text).toContain("## Skill: Review");
-    expect(text).toContain("## Skill: Polish");
-    expect(text).not.toContain("## Skill: Requirements");
-    // The user's message is handed to the model untouched — the dropped token
-    // is still literal text, not rewritten or removed.
-    expect(userContentOf(providerMock.calls[0]!)).toBe("$Status $Review $Polish $Requirements");
-  });
-
-  it("leaves an unbound `$name` literal with nothing injected", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "please $nope that"));
-
-    expect(promptText(providerMock.calls[0]!)).not.toContain("## Skill:");
-    expect(userContentOf(providerMock.calls[0]!)).toBe("please $nope that");
-  });
-
-  it("carries the bound-skill catalog when skills are bound", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "hi"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("Available skills");
-    expect(text).toContain("- Status — ");
-  });
-
-  it("omits the catalog when no skills are bound", async () => {
-    setup({ jev: "no-secret" });
-    db.exec("DELETE FROM lexa_agent_skills");
-    await drain(await runStream("c1", "hi"));
-
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Available skills");
-  });
-
-  it("omits the trailing dash for a catalog skill with no description", async () => {
-    setup({ jev: "no-secret" });
-    db.exec("DELETE FROM lexa_agent_skills");
-    db.exec(`INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('sk-nodesc', 'NoDesc', '', '');
-            INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('assistant', 'sk-nodesc');`);
-    await drain(await runStream("c1", "hi"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("- NoDesc");
-    expect(text).not.toContain("- NoDesc —");
-  });
-
-  it("offers get_skill only when the agent has bound skills", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "hi"));
-    expect(toolNames(providerMock.calls[0]!)).toContain("get_skill");
-
-    providerMock.calls.length = 0;
-    db.exec("DELETE FROM lexa_agent_skills");
-    await drain(await runStream("c2", "hi"));
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("get_skill");
-  });
-
-  it("describes at most 20 catalog skills and counts the rest", async () => {
-    setup({ jev: "no-secret" });
-    db.exec("DELETE FROM lexa_agent_skills");
-    const seed = Array.from({ length: 25 }, (_, i) => {
-      const n = String(i + 1).padStart(2, "0");
-      return `INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('sk${n}', 'Skill ${n}', 'does ${n}', '');
-              INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('assistant', 'sk${n}');`;
-    }).join("\n");
-    db.exec(seed);
-    await drain(await runStream("c1", "hi"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("- Skill 01 — does 01");
-    expect(text).toContain("… and 5 more");
-  });
-
-  it("changing the `$skill` between turns does not mint a fresh thread", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "$Status first turn"));
-    await drain(await runStream("c1", "$Review second turn"));
-
-    expect(providerMock.calls).toHaveLength(2);
-    const secondText = promptText(providerMock.calls[1]!);
-    expect(secondText).toContain("## Skill: Review");
-    expect(secondText).not.toContain("## Skill: Status");
-    // History survived: the earlier user turn rides the second request.
-    const handed = providerMock.calls[1]!.messages as Array<Record<string, unknown>>;
-    expect(handed.some((m) => m.role === "user" && m.content === "$Status first turn")).toBe(true);
-    const count = db.prepare("SELECT COUNT(*) AS c FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { c: number };
-    expect(count.c).toBe(1);
-  });
-});
-
-describe("chat — @mention resolution", () => {
-  // Milestones/swimlanes/columns have no `slug` column, so the token is the
-  // derived slug of the name (mentionSlug = shared/skill-tokens#skillToken).
-  function seedEntities(): void {
-    db.exec(`
-INSERT INTO milestones (id, project_id, name, description, position, due_at) VALUES ('m1', 'p1', 'Q3 Launch', '', 0, '2026-09-30');
-INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-design', 'p1', 'Design Sprint', 1, 'sprint');
-INSERT INTO columns (id, project_id, name, position) VALUES ('c-review', 'p1', 'In Review', 2);
-`);
-  }
-
-  it("resolves one @token per entity type into the ephemeral context block", async () => {
-    setup({ jev: "no-secret" });
-    seedEntities();
-    await drain(await runStream("c1", "@q3-launch @design-sprint @in-review please"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("- [milestone] Q3 Launch\ndue 2026-09-30");
-    expect(text).toContain("- [swimlane] Design Sprint\nsprint");
-    expect(text).toContain("- [column] In Review\nposition 3");
-  });
-
-  it("skips an unknown slug with nothing injected", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await runStream("c1", "@nope please"));
-
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Referenced by the user just now:");
-  });
-
-  it("resolves a swimlane's owning milestone name in its context line", async () => {
-    setup({ jev: "no-secret" });
-    seedEntities();
-    db.exec(`UPDATE swimlanes SET milestone_id = 'm1' WHERE id = 's-design'`);
-    await drain(await runStream("c1", "@design-sprint"));
-
-    expect(promptText(providerMock.calls[0]!)).toContain("- [swimlane] Design Sprint\nsprint · milestone Q3 Launch");
-  });
-
-  it("resolves every kind a slug matches — a wiki page and a column collide, both contribute", async () => {
-    setup({ jev: "no-secret" });
-    db.exec(`
-INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('w-rev', 'p1', 'In Review', 'in-review', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"How review works."}]}]}');
-INSERT INTO columns (id, project_id, name, position) VALUES ('c-rev', 'p1', 'In Review', 3);
-`);
-    await drain(await runStream("c1", "@in-review"));
-
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain("- [wiki] In Review");
-    expect(text).toContain("- [column] In Review");
-  });
-});
-
-describe("chat — document attachments", () => {
-  it("feeds extracted document text to the model and persists a document-ref part", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-
-    const bytes = new TextEncoder().encode("# Spec\n\nThe widget enqueues work.");
-    const sha = createHash("sha256").update(bytes).digest("hex");
-    const key = `blobs/${sha}`;
-    const onDisk = join(dir, "blobs", key);
-    mkdirSync(dirname(onDisk), { recursive: true });
-    writeFileSync(onDisk, bytes);
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
-`);
-    db.prepare(
-      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
-       VALUES ('ca1', 'p1', 'chat', 'c1', 'spec.md', 'text/markdown', ?, ?, ?, 'u1')`
-    ).run(bytes.byteLength, sha, key);
-
-    const frames = await drain(await run(service.runChatStream("c1", "u1", {
-      projectId: "p1",
-      chatId: "c1",
-      message: "summarize the spec",
-      attachments: [{ storageKey: key, mimeType: "text/markdown", name: "spec.md" }],
-    })));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-
-    // The model saw the extracted text, labelled with the file name.
-    const sent = JSON.stringify(providerMock.calls[0]!.messages);
-    expect(sent).toContain("attached document: spec.md");
-    expect(sent).toContain("The widget enqueues work.");
-
-    // The transcript persists the document-ref part (reload labels by name).
-    const row = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
-    const messages = JSON.parse(row.messages) as Array<{ role: string; content: unknown }>;
-    const user = messages.find((m) => m.role === "user")!;
-    expect(user.content).toEqual([
-      { type: "text", content: "summarize the spec" },
-      { type: "document-ref", storageKey: key, mimeType: "text/markdown", name: "spec.md" },
-    ]);
-  });
-
-  it("blocks the send with AttachmentExtractionFailed when a document yields no text", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-
-    const bytes = new TextEncoder().encode("not really a pdf");
-    const sha = createHash("sha256").update(bytes).digest("hex");
-    const key = `blobs/${sha}`;
-    const onDisk = join(dir, "blobs", key);
-    mkdirSync(dirname(onDisk), { recursive: true });
-    writeFileSync(onDisk, bytes);
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
-`);
-    db.prepare(
-      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
-       VALUES ('ca1', 'p1', 'chat', 'c1', 'broken.pdf', 'application/pdf', ?, ?, ?, 'u1')`
-    ).run(bytes.byteLength, sha, key);
-
-    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
-      projectId: "p1",
-      chatId: "c1",
-      message: "read this",
-      attachments: [{ storageKey: key, mimeType: "application/pdf", name: "broken.pdf" }],
-    })));
-    expect(result._tag).toBe("Left");
-    expect((result as { left: { _tag: string; filename: string } }).left).toMatchObject({
-      _tag: "AttachmentExtractionFailed",
-      filename: "broken.pdf",
-    });
-    expect(providerMock.calls).toHaveLength(0);
-  });
-});
-
-describe("chat — attachment validation on the send path", () => {
-  function seedThread(): void {
-    db.exec(`
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-  VALUES ('chat', 'c1', 'p1', 'u1', '[]');
-`);
-  }
-
-  function insertChatAttachment(id: string, key: string, mime: string): void {
-    db.prepare(
-      `INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
-       VALUES (?, 'p1', 'chat', 'c1', 'doc.md', ?, 5, ?, ?, 'u1')`
-    ).run(id, mime, `sha-${id}`, key);
-  }
-
-  it("refuses a send carrying attachments when the kill switch is on", async () => {
-    setup({ env: { LXK_DISABLE_CHAT_ATTACHMENTS: "1" } as RuntimeEnv });
-    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
-      projectId: "p1",
-      chatId: "c1",
-      message: "read this",
-      attachments: [{ storageKey: "blobs/x", mimeType: "text/plain", name: "x.txt" }],
-    })));
-    expect(result._tag).toBe("Left");
-    expect((result as { left: { _tag: string } }).left._tag).toBe("ChatAttachmentsDisabled");
-    expect(providerMock.calls).toHaveLength(0);
-  });
-
-  it("rejects a storage key that does not belong to the project", async () => {
-    setup();
-    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
-      projectId: "p1",
-      chatId: "c1",
-      message: "read this",
-      attachments: [{ storageKey: "blobs/other-project", mimeType: "text/plain", name: "sneaky.txt" }],
-    })));
-    expect(result._tag).toBe("Left");
-    expect((result as { left: { _tag: string; reason: string } }).left).toMatchObject({ _tag: "InvalidArgs" });
-    expect((result as { left: { reason: string } }).left.reason).toContain("does not belong to this project");
-    expect(providerMock.calls).toHaveLength(0);
-  });
-
-  it("rejects a declared mime that differs from the stored sniffed mime", async () => {
-    setup();
-    seedThread();
-    insertChatAttachment("ca-mm", "blobs/mm", "text/markdown");
-    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
-      projectId: "p1",
-      chatId: "c1",
-      message: "read this",
-      attachments: [{ storageKey: "blobs/mm", mimeType: "text/plain", name: "doc.md" }],
-    })));
-    expect(result._tag).toBe("Left");
-    expect((result as { left: { _tag: string; reason: string } }).left).toMatchObject({ _tag: "InvalidArgs" });
-    expect((result as { left: { reason: string } }).left.reason).toContain("mimeType mismatch");
-    expect(providerMock.calls).toHaveLength(0);
-  });
-
-  it("rejects a fourth attachment (images + documents share the count)", async () => {
-    setup();
-    seedThread();
-    for (let i = 1; i <= 4; i += 1) insertChatAttachment(`ca-${i}`, `blobs/cap-${i}`, "text/plain");
-    const result = await run(Effect.either(service.runChatStream("c1", "u1", {
-      projectId: "p1",
-      chatId: "c1",
-      message: "many files",
-      attachments: [1, 2, 3, 4].map((i) => ({ storageKey: `blobs/cap-${i}`, mimeType: "text/plain", name: `f${i}.txt` })),
-    })));
-    expect(result._tag).toBe("Left");
-    expect((result as { left: { _tag: string; reason: string } }).left).toMatchObject({ _tag: "InvalidArgs" });
-    expect((result as { left: { reason: string } }).left.reason).toContain("at most 3 attachments");
-    expect(providerMock.calls).toHaveLength(0);
-  });
-});
-
 // ADR-0005 §Port P3 (LX-80): one execution per approval batch. A claim row
 // makes a duplicate resume idempotent.
 describe("chat resume — claim idempotency", () => {
@@ -857,7 +368,7 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
 `);
   };
 
-  it("claims the batch on the first resume and executes once", async () => {
+  it("executes the batch once on the first resume", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
     seed("approved");
@@ -867,69 +378,341 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     expect(newTaskCount()).toBe(1);
   });
 
-  it("a pre-claimed batch resumes as a no-op without executing", async () => {
+  it("a pre-claimed batch or a marker with no rows settles without executing", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
     seed("approved");
     db.exec(`INSERT INTO assistant_resume_claims (batch_id) VALUES ('b1')`);
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
+    const claimed = await drain(await run(service.resumeChatStream("c1", "u1")));
     // Settled (not empty): the client persists a duplicate instead of retrying.
-    expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
+    expect(claimed).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     expect(newTaskCount()).toBe(0);
-  });
 
-  it("releases the claim while the batch is pending, so a later resume succeeds", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    seed("pending");
-    const first = await run(Effect.either(service.resumeChatStream("c1", "u1")));
-    expect(first._tag).toBe("Left");
-    expect(claimCount()).toBe(0); // released: still pending
-    await run(service.decideApproval("ap1", "u1", "approve"));
-    const second = await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(second.some((f) => f.type === "done")).toBe(true);
-    expect(newTaskCount()).toBe(1);
-  });
-
-  it("keeps the claim when the batch executed even with a failed write", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    seed("approved", "update_task", '{"ref":"EG-999","title":"t"}', "{}");
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    const statuses = frames.filter((f) => f.type === "approval_result").map((f) => (f as { status: string }).status);
-    expect(statuses).toContain("failed");
-    expect(claimCount()).toBe(1); // executed (attempted) → claim kept
-  });
-
-  it("a marker with no rows settles without a provider turn and releases the claim", async () => {
+    activeChats.clear();
     setup();
     db.exec(`INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
       VALUES ('chat', 'c1', 'p1', 'u1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[]}}]');`);
-    const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    // Marker with no rows: settled with a terminal frame, no provider turn.
-    expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
+    providerMock.calls.length = 0;
+    const empty = await drain(await run(service.resumeChatStream("c1", "u1")));
+    // Marker with no rows: settled with a terminal frame, no provider turn, and
+    // the claim released.
+    expect(empty).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     expect(claimCount()).toBe(0);
   });
 });
 
-// ADR-0005 §Port P1: the send-envelope mode is captured at turn start and
-// persisted sticky; an absent envelope keeps the stored value.
-describe("chat permission mode — sticky capture", () => {
-  const modeOf = (): string | null =>
-    (db.prepare("SELECT permission_mode FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { permission_mode: string | null } | null)?.permission_mode ?? null;
+// ── Carried assertions ─────────────────────────────────────────────────────
+// The trim collapsed the assistant unit suites (write-tools / approval-carrier)
+// into this file; each block keeps the assertion the manifest named, at the
+// tier where the chat service owns it.
 
-  it("persists the send-envelope mode as the thread's sticky value", async () => {
-    setup({ jev: "no-secret" });
-    await drain(await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "hi", permissionMode: "auto" })));
-    expect(modeOf()).toBe("auto");
+describe("carried — approval carrier continuation split and reconcile", () => {
+  const DIFF: AssistantWriteDiff = { type: "task_create", title: "Write docs", fields: { priority: "high" } };
+
+  function assistantTurn(proposal: Record<string, unknown>): UIMessage {
+    return {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I can do that." },
+        {
+          type: "tool-create_task",
+          toolCallId: "call_1",
+          state: "output-available",
+          input: {},
+          output: proposal,
+        },
+      ],
+    } as unknown as UIMessage;
+  }
+
+  function proposal(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      proposed: true,
+      approvalId: "w1",
+      batchId: "b1",
+      seq: 0,
+      name: "create_task",
+      detail: "Create “Write docs”",
+      diff: DIFF,
+      ...over,
+    };
+  }
+
+  function combinedTurn(): UIMessage {
+    const [proposalTurn] = withApprovalCarriers([assistantTurn(proposal())]);
+    return {
+      ...proposalTurn!,
+      parts: [
+        ...proposalTurn!.parts,
+        { type: "step-start" },
+        { type: "text", text: "Approved — done.", state: "done" },
+      ],
+    } as unknown as UIMessage;
+  }
+
+  it("splits the continuation into its own message and keeps a re-proposed write with it", () => {
+    const split = withContinuationBoundary([combinedTurn()]);
+
+    expect(split).toHaveLength(3);
+    const [proposalTurn, boundary, continuation] = split;
+    // Proposal bubble unchanged: same id, carrier still last.
+    expect(proposalTurn!.id).toBe("a1");
+    expect((proposalTurn!.parts.at(-1) as { type?: string }).type).toBe(ASSISTANT_APPROVAL_DATA_PART);
+    expect(JSON.stringify(proposalTurn)).not.toContain("Approved — done.");
+    // Boundary: zero-text, only the data-continuation part, names the batch.
+    expect(boundary!.parts).toEqual([
+      { type: "data-continuation", data: { batchId: "b1", ts: expect.any(String) } },
+    ]);
+    // Continuation: fresh id, only the appended parts, no carrier.
+    expect(continuation!.id).not.toBe("a1");
+    expect(continuation!.parts).toEqual([
+      { type: "step-start" },
+      { type: "text", text: "Approved — done.", state: "done" },
+    ]);
+    expect(messageCarriesBatch(continuation, "b1")).toBe(false);
+
+    // A re-proposed write lands in the continuation bubble (carrier derived
+    // after the split), never in the original proposal bubble.
+    const [proposalTurn2] = withApprovalCarriers([assistantTurn(proposal())]);
+    const combined = {
+      ...proposalTurn2!,
+      parts: [
+        ...proposalTurn2!.parts,
+        { type: "step-start" },
+        {
+          type: "tool-create_task",
+          toolCallId: "call_2",
+          state: "output-available",
+          input: {},
+          output: proposal({ approvalId: "w2", batchId: "b2" }),
+        },
+      ],
+    } as unknown as UIMessage;
+
+    const withCarriers = withApprovalCarriers(withContinuationBoundary([combined]));
+    expect(withCarriers).toHaveLength(3);
+    const [proposalBubble, , reContinuation] = withCarriers;
+    expect(approvalCarriersOf(proposalBubble).map((c) => c.batchId)).toEqual(["b1"]);
+    expect(JSON.stringify(proposalBubble)).not.toContain("call_2");
+    expect(approvalCarriersOf(reContinuation).map((c) => c.batchId)).toEqual(["b2"]);
   });
 
-  it("an absent envelope keeps the stored sticky value", async () => {
-    setup({ jev: "no-secret" });
-    db.exec(`INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, permission_mode, messages) VALUES ('chat','c1','p1','u1','deny','[]')`);
-    await drain(await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "hi" })));
-    expect(modeOf()).toBe("deny");
+  it("reconcileApprovalCarriers backfills a marker-only carrier from its decision rows", () => {
+    const markerOnly = {
+      role: "assistant",
+      parts: [{ type: ASSISTANT_APPROVAL_DATA_PART, data: { batchId: "b1", approvals: [] } }],
+    };
+    const reconciled = reconcileApprovalCarriers([markerOnly], [
+      { id: "w1", batchId: "b1", status: "pending", seq: 0, name: "create_task", diff: DIFF },
+    ]);
+
+    expect(approvalCarriersOf(reconciled[0])).toEqual([
+      {
+        batchId: "b1",
+        approvals: [{ approvalId: "w1", seq: 0, name: "create_task", status: "pending", diff: DIFF }],
+      },
+    ]);
+  });
+});
+
+describe("carried — continuation boundary text probes (LX-124)", () => {
+  it("user-text probes ignore the approval/continuation markers", () => {
+    const transcript = [
+      { role: "user", content: "go" },
+      {
+        role: "assistant",
+        parts: [
+          { type: "text", text: "proposed" },
+          { type: "data-assistant-approval", data: { batchId: "b1", approvals: [] } },
+        ],
+      },
+      { role: "assistant", parts: [{ type: "data-continuation", data: { batchId: "b1", ts: "2026-01-01T00:00:00Z" } }] },
+      { role: "assistant", parts: [{ type: "text", text: "Done — nothing ran." }] },
+    ];
+    expect(lastUserText(transcript)).toBe("go");
+    expect(firstUserText(transcript)).toBe("go");
+    expect(lastUserText([...transcript, { role: "user", parts: [{ type: "text", text: "again" }] }])).toBe("again");
+  });
+});
+
+describe("carried — mention resolution scoping, slug retry, fail-open", () => {
+  const doc: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }] };
+  const deps = (over: Partial<MentionResolverDeps> = {}): MentionResolverDeps => ({
+    dbAll: async () => [],
+    findTaskByKey: async () => null,
+    findWikiBySlug: async () => null,
+    ...over,
+  });
+
+  it("skips a cross-project task token, retries a wiki slug lowercased, and never throws", async () => {
+    const foreign = await resolveMentionContext(
+      deps({ findTaskByKey: async () => ({ id: "t1", projectId: "other", key: "LX-1", title: "X", description: doc }) }),
+      "p1",
+      "@LX-1"
+    );
+    expect(foreign).toBe("");
+
+    const seen: string[] = [];
+    const lowered = await resolveMentionContext(
+      deps({
+        findWikiBySlug: async (_p, slug) => {
+          seen.push(slug);
+          return slug === "guide" ? { id: "w1", title: "Guide", content: doc } : null;
+        },
+      }),
+      "p1",
+      "@Guide"
+    );
+    expect(seen).toEqual(["Guide", "guide"]);
+    expect(lowered).toContain("- [wiki] Guide");
+
+    const failed = await resolveMentionContext(
+      deps({
+        findTaskByKey: async () => {
+          throw new Error("db down");
+        },
+        dbAll: async () => {
+          throw new Error("db down");
+        },
+      }),
+      "p1",
+      "@LX-1 @Whatever"
+    );
+    expect(failed).toBe("");
+  });
+});
+
+describe("carried — write-tools scope, budget, bulk schema, auto dedupe", () => {
+  const writeSnapshot: WriteTaskSnapshot = {
+    id: "t1",
+    key: "NIM-1",
+    title: "Task 1",
+    columnName: "Todo",
+    priority: "high",
+    type: "bug",
+    dueAt: null,
+    assignees: [],
+    descriptionText: "body",
+    archivedAt: null,
+  };
+
+  interface CarriedTool {
+    name: string;
+    execute: (args: unknown) => Promise<Record<string, unknown>>;
+    inputSchema: { safeParse: (v: unknown) => { success: boolean } };
+  }
+
+  function bulkDeps(): { recorded: Array<{ diff: AssistantWriteDiff }>; tool: (name: string) => CarriedTool } {
+    const recorded: Array<{ diff: AssistantWriteDiff }> = [];
+    const deps: AssistantWriteToolDeps = {
+      projectId: "p1",
+      findTaskByRef: async (ref) => (ref === "NIM-1" ? writeSnapshot : null),
+      findColumn: async () => null,
+      findWikiPageBySlug: async () => null,
+      findMilestone: async () => null,
+      countSprints: async () => 0,
+      findSwimlane: async () => null,
+      record: async (p) => {
+        recorded.push(p as { diff: AssistantWriteDiff });
+        return { approvalId: "ap-1", batchId: "b1", seq: recorded.length - 1 };
+      },
+    };
+    const all = buildAssistantWriteTools(deps) as unknown as CarriedTool[];
+    return { recorded, tool: (name: string) => all.find((t) => t.name === name)! };
+  }
+
+  it("denies a task ref that resolves to another project", async () => {
+    const marked: string[] = [];
+    let updateCalled = false;
+    const row = {
+      id: "a1",
+      project_id: "p1",
+      owner_user_id: "u1",
+      tool_name: "update_task",
+      args: JSON.stringify({ ref: "foreign-task", title: "New title" }),
+    } as unknown as AssistantPendingWriteRow;
+    const ctx = {
+      authz: { projectAccess: () => Effect.succeed({ role: "admin" }) },
+      pendingWritesRepo: {
+        markExecutionError: (id: string, message: string) => Effect.sync(() => { marked.push(`${id}:${message}`); }),
+      },
+      taskRepo: {
+        findById: () => Effect.succeed({ id: "foreign-task", projectId: "p2" }),
+        findByKey: () => Effect.succeed({ id: "foreign-task", projectId: "p2" }),
+      },
+      taskService: {
+        update: () => { updateCalled = true; return Effect.void; },
+      },
+    } as unknown as AssistantWriteExecutionCtx;
+
+    const out = (await Effect.runPromise(executeAssistantWrite(row, ctx))) as { ok: boolean; error?: string };
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("FORBIDDEN");
+    expect(marked).toHaveLength(1);
+    expect(updateCalled).toBe(false);
+  });
+
+  it("accepts up to MAX_WRITES_PER_TURN proposals with a ~TTL expiry, then rejects the next", async () => {
+    const rows: WriteRecorderInsertRow[] = [];
+    const turn = { projectId: "p1", documentType: "chat" as const, documentId: "c1", ownerUserId: "u1" };
+    const recorder = createWriteRecorder(turn, async (r) => {
+      rows.push(r);
+    });
+    const turnProposal = (n: number) => ({
+      name: "create_task" as const,
+      args: { title: `t${n}` },
+      diff: { type: "task_create", title: `t${n}`, fields: {} } as AssistantWriteDiff,
+    });
+
+    for (let i = 0; i < MAX_WRITES_PER_TURN; i += 1) {
+      const r = await recorder.record(turnProposal(i));
+      expect("error" in r).toBe(false);
+    }
+    const over = await recorder.record(turnProposal(MAX_WRITES_PER_TURN));
+    expect(over).toEqual({ error: `write budget exceeded — at most ${MAX_WRITES_PER_TURN} proposals per turn` });
+
+    const expectedMs = Date.now() + APPROVAL_TTL_HOURS * 3_600_000;
+    const actualMs = Date.parse((rows[0]!.expiresAt as string).replace(" ", "T") + "Z");
+    expect(Math.abs(expectedMs - actualMs)).toBeLessThan(5_000);
+  });
+
+  it("bulk refs: rejects over-cap/empty/missing at the schema and dedupes + trims repeats", async () => {
+    const { recorded, tool } = bulkDeps();
+    const schema = tool("archive_task").inputSchema;
+    const tooMany = Array.from({ length: MAX_BULK_TASK_REFS + 1 }, (_, i) => `NIM-${i + 1}`);
+    expect(schema.safeParse({ refs: tooMany }).success).toBe(false);
+    expect(schema.safeParse({ refs: [] }).success).toBe(false);
+    expect(schema.safeParse({}).success).toBe(false);
+
+    const out = await tool("archive_task").execute({ refs: ["NIM-1", "NIM-1", " NIM-1 "] });
+    expect(out).toEqual({ proposed: true, approvalId: "ap-1" });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]!.diff).toEqual({ type: "task_archive", taskRef: "NIM-1", taskTitle: "Task 1" });
+  });
+
+  it("auto executes an identical (tool, args) call once (loop safety net, M5b)", async () => {
+    const applied: Array<{ name: string; args: unknown }> = [];
+    const record = buildAutoWriteRecord({
+      apply: async (name, args) => { applied.push({ name, args }); return { ok: true, result: { id: "t9" } }; },
+    });
+    const deps: AssistantWriteToolDeps = {
+      projectId: "p1",
+      findTaskByRef: async (ref) => (ref === "NIM-1" ? writeSnapshot : null),
+      findColumn: async () => null,
+      findWikiPageBySlug: async () => null,
+      findMilestone: async () => null,
+      countSprints: async () => 0,
+      findSwimlane: async () => null,
+      record,
+    };
+    const t = (buildAssistantWriteTools(deps) as unknown as CarriedTool[]).find((x) => x.name === "archive_task")!;
+    const first = await t.execute({ ref: "NIM-1" });
+    const second = await t.execute({ ref: "NIM-1" });
+    expect(first).toEqual({ ok: true, applied: true, result: { id: "t9" } });
+    expect(second).toEqual(first);
+    expect(applied).toHaveLength(1);
   });
 });

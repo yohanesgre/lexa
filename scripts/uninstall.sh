@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Lexa uninstall script — teardown per target. Data is KEPT unless --purge
-# (which requires typing 'purge' on a TTY). Flow source of truth:
-# status/design-deploy-tooling.md §13.
+# (which requires typing 'purge' on a TTY). Flow source of truth: docs/DEPLOYMENT.md.
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]:-}"

@@ -4,7 +4,6 @@
   "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, two-way GitHub issue sync.",
   "scripts": {
     "test": "vitest run",
-    "test:critical": "vitest run shared server/services server/db server/repos server/env-file.test.ts",
     "test:full": "vitest run",
     "test:shared": "vitest run shared",
     "test:be": "vitest run shared server",
@@ -32,6 +31,7 @@
     "doctor": "npx react-doctor@latest",
     "check:mobile": "bun scripts/check-mobile.mjs",
     "check:invariants": "bun run scripts/check-invariants.ts",
+    "check:test-hygiene": "bun run scripts/check-test-hygiene.ts",
     "ci:local": "bash scripts/ci-local.sh"
   },
   "repository": {

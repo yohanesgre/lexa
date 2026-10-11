@@ -21,11 +21,8 @@ function driverWith(run: () => Promise<{ changes: number }> | { changes: number 
 const claim = (db: DbDriver) => Effect.runPromise(claimResumeBatch(db, "b1"));
 
 describe("claimResumeBatch degrade branches", () => {
-  it("claimed when the INSERT OR IGNORE wrote a row", async () => {
+  it("claimed when the INSERT OR IGNORE wrote a row, duplicate when the claim already exists (0 rows)", async () => {
     expect(await claim(driverWith(() => ({ changes: 1 })))).toBe("claimed");
-  });
-
-  it("duplicate when the claim already exists (0 rows)", async () => {
     expect(await claim(driverWith(() => ({ changes: 0 })))).toBe("duplicate");
   });
 

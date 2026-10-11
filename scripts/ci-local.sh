@@ -2,20 +2,17 @@
 # ci-local — local mirror of the release CI (.github/workflows/ci.yml). CI runs
 # only at release preparation (push to chore/release-* / release/* or manual
 # workflow_dispatch); PR/main merges rely on this + verify-gate.sh + review.
-# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli]  |  CRITICAL=1 bash scripts/ci-local.sh
-# Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only;
-# `--critical` is a local-only fast mode (no CI counterpart) — the default full path mirrors release CI.
+# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--lane=shared|be|fe|cli]
+# Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). The default path mirrors release CI.
 # Missing optional tools (gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
 set -euo pipefail
 
 export LXK_SKIP_PREPARE=1
 
-CRITICAL="${CRITICAL:-0}"
 LANE=""
 for arg in "$@"; do
   case "$arg" in
-    --critical) CRITICAL=1 ;;
     --lane=*) LANE="${arg#--lane=}" ;;
   esac
 done
@@ -63,11 +60,9 @@ section "typecheck"
 if bun run typecheck; then ok "typecheck"; else fail "typecheck"; fi
 
 # ── Tests ─────────────────────────────────────────────────────────────
-if [ -n "$LANE" ]; then section "tests (lane: $LANE)"; elif [ "$CRITICAL" = "1" ]; then section "tests (critical)"; else section "tests (full)"; fi
+if [ -n "$LANE" ]; then section "tests (lane: $LANE)"; else section "tests (full)"; fi
 if [ -n "$LANE" ]; then
   if bun run "test:$LANE"; then ok "tests (lane: $LANE)"; else fail "tests (lane: $LANE)"; fi
-elif [ "$CRITICAL" = "1" ]; then
-  if bun run test:critical; then ok "tests (critical)"; else fail "tests (critical)"; fi
 else
   if bun run test; then ok "tests"; else fail "tests"; fi
 fi
@@ -75,6 +70,10 @@ fi
 # ── Invariant compliance ──────────────────────────────────────────────
 section "check:invariants"
 if bun run check:invariants; then ok "invariants"; else fail "invariants"; fi
+
+# ── Test hygiene guard rail ───────────────────────────────────────────
+section "check:test-hygiene"
+if bun run check:test-hygiene; then ok "test hygiene"; else fail "test hygiene"; fi
 
 # ── Build (vite) ──────────────────────────────────────────────────────
 section "build"

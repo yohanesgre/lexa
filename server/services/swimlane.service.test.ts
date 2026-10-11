@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,12 +10,16 @@ import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
 import { SwimlaneService } from "./swimlane.service";
 import {
-  SwimlaneNotFound,
-  ProjectNotFound,
+  buildSwimlaneArchiveBatch,
+  buildMilestoneArchiveBatch,
+  buildSwimlaneRestoreBatch,
+  buildMilestoneRestoreBatch,
+} from "../repos/cascade-batch";
+import type { BatchStmt } from "../repos/task-batch";
+import {
   HasChildren,
   BacklogProtected,
   DeadlineAfterLane,
-  MilestoneNotFound,
   InvalidArgs,
 } from "../api/errors";
 import type { Actor } from "../../shared/types";
@@ -73,37 +77,6 @@ function makeService(db: Database) {
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
 describe("SwimlaneService create", () => {
-  it("creates a sprint lane with dueAt appended after the last position", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const lane = yield* svc.create({ projectId: "p1", name: "Sprint 3", dueAt: "2026-08-01" });
-        expect(lane.kind).toBe("sprint");
-        expect(lane.dueAt).toBe("2026-08-01");
-        expect(lane.position).toBe(3);
-        expect(lane.projectId).toBe("p1");
-      })
-    );
-  });
-
-  it("creates a loose sprint by default; milestoneId + startAt persist when given", async () => {
-    seed(db);
-    const svc = makeService(db);
-    db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const lane = yield* svc.create({ projectId: "p1", name: "Sprint A", startAt: "2026-08-10", dueAt: "2026-08-30", milestoneId: "ms1" });
-        expect(lane.kind).toBe("sprint");
-        expect(lane.startAt).toBe("2026-08-10");
-        expect(lane.milestoneId).toBe("ms1");
-        const loose = yield* svc.create({ projectId: "p1", name: "Loose" });
-        expect(loose.milestoneId).toBeNull();
-        expect(loose.startAt).toBeNull();
-      })
-    );
-  });
-
   it("rejects startAt later than dueAt (INVALID_ARGS)", async () => {
     seed(db);
     const svc = makeService(db);
@@ -112,26 +85,6 @@ describe("SwimlaneService create", () => {
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InvalidArgs);
   });
 
-  it("rejects an unknown or cross-project milestoneId (MILESTONE_NOT_FOUND)", async () => {
-    seed(db);
-    const svc = makeService(db);
-    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
-    db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms-p2','p2','other',0)").run();
-    const unknown = await Effect.runPromise(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "nope" })));
-    expect(Either.isLeft(unknown)).toBe(true);
-    if (Either.isLeft(unknown)) expect(unknown.left).toBeInstanceOf(MilestoneNotFound);
-    const cross = await Effect.runPromise(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "ms-p2" })));
-    expect(Either.isLeft(cross)).toBe(true);
-    if (Either.isLeft(cross)) expect(cross.left).toBeInstanceOf(MilestoneNotFound);
-  });
-
-  it("rejects a missing project", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.create({ projectId: "nope", name: "X" })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(ProjectNotFound);
-  });
 });
 
 describe("SwimlaneService update", () => {
@@ -152,46 +105,17 @@ describe("SwimlaneService update", () => {
     expect(lane.due_at).toBe("2026-06-01");
   });
 
-  it("allows moving the deadline after all task due dates", async () => {
+  it("backlog lane rejects deadline and startAt changes (BACKLOG_PROTECTED)", async () => {
     seed(db);
     const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const lane = yield* svc.update("m1", { dueAt: "2026-08-01" });
-        expect(lane.dueAt).toBe("2026-08-01");
-      })
-    );
-  });
-
-  it("rejects setting a deadline on the backlog lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.update("s-backlog", { dueAt: "2026-01-01" })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(BacklogProtected);
-      expect((result.left as BacklogProtected).action).toBe("deadline");
+    for (const patch of [{ dueAt: "2026-01-01" }, { startAt: "2026-01-01" }]) {
+      const result = await Effect.runPromise(Effect.either(svc.update("s-backlog", patch)));
+      expect(Either.isLeft(result)).toBe(true);
+      if (Either.isLeft(result)) {
+        expect(result.left).toBeInstanceOf(BacklogProtected);
+        expect((result.left as BacklogProtected).action).toBe("deadline");
+      }
     }
-  });
-
-  it("rejects updating a missing lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.update("nope", { name: "X" })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
-  });
-
-  it("updates name and position", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const lane = yield* svc.update("m2", { name: "Renamed", position: 5 });
-        expect(lane.name).toBe("Renamed");
-        expect(lane.position).toBe(5);
-      })
-    );
   });
 
   it("update rejects startAt > dueAt on an existing lane (INVALID_ARGS)", async () => {
@@ -224,40 +148,6 @@ describe("SwimlaneService update", () => {
     }
   });
 
-  it("update persists startAt/milestoneId and clears them with null", async () => {
-    seed(db);
-    const svc = makeService(db);
-    db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const lane = yield* svc.update("m1", { startAt: "2026-05-10", milestoneId: "ms1" });
-        expect(lane.startAt).toBe("2026-05-10");
-        expect(lane.milestoneId).toBe("ms1");
-        const cleared = yield* svc.update("m1", { startAt: null, milestoneId: null });
-        expect(cleared.startAt).toBeNull();
-        expect(cleared.milestoneId).toBeNull();
-      })
-    );
-  });
-
-  it("update rejects unknown milestoneId on an existing lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.update("m1", { milestoneId: "nope" })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(MilestoneNotFound);
-  });
-
-  it("backlog lane rejects startAt/milestoneId too (BACKLOG_PROTECTED)", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.update("s-backlog", { startAt: "2026-01-01" })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(BacklogProtected);
-      expect((result.left as BacklogProtected).action).toBe("deadline");
-    }
-  });
 });
 
 describe("SwimlaneService delete", () => {
@@ -272,14 +162,6 @@ describe("SwimlaneService delete", () => {
     }
   });
 
-  it("deletes an empty milestone lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(svc.delete("m2"));
-    const row = db.prepare("SELECT COUNT(*) AS n FROM swimlanes WHERE id = 'm2'").get() as { n: number };
-    expect(row.n).toBe(0);
-  });
-
   it("deleting the backlog lane is rejected (BACKLOG_PROTECTED)", async () => {
     seed(db);
     const svc = makeService(db);
@@ -291,14 +173,6 @@ describe("SwimlaneService delete", () => {
     }
     const row = db.prepare("SELECT COUNT(*) AS n FROM swimlanes WHERE id = 's-backlog'").get() as { n: number };
     expect(row.n).toBe(1);
-  });
-
-  it("rejects deleting a missing lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.delete("nope")));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
 });
 
@@ -340,14 +214,6 @@ describe("SwimlaneService archive", () => {
         expect(second.activity).toEqual([]);
       })
     );
-  });
-
-  it("rejects archiving a missing lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.archive(maria, "nope")));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
 
   it("a failure mid-cascade rolls back the whole batch (no partial archive, no activity)", async () => {
@@ -393,46 +259,9 @@ describe("SwimlaneService restore", () => {
     );
   });
 
-  it("restore leaves individually-archived tasks (older stamps) archived", async () => {
-    seed(db);
-    const svc = makeService(db);
-    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at)
-                VALUES ('t-old','p1','c1','m1','Old','a2','2026-01-01 10:00:00')`).run();
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* svc.archive(maria, "m1");
-        const { activity } = yield* svc.restore(maria, "m1");
-        expect(activity).toHaveLength(2);
-        const old = db.prepare("SELECT archived_at FROM tasks WHERE id = 't-old'").get() as { archived_at: string | null };
-        expect(old.archived_at).toBe("2026-01-01 10:00:00");
-      })
-    );
-  });
-
-  it("rejects restoring a missing lane", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const result = await Effect.runPromise(Effect.either(svc.restore(maria, "nope")));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
-  });
 });
 
 describe("SwimlaneService queries", () => {
-  it("getById returns the lane; missing → SwimlaneNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const lane = yield* svc.getById("m1");
-        expect(lane.kind).toBe("sprint");
-        const missing = yield* Effect.either(svc.getById("nope"));
-        expect(Either.isLeft(missing)).toBe(true);
-        if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(SwimlaneNotFound);
-      })
-    );
-  });
-
   it("findByProject hides archived lanes unless includeArchived", async () => {
     seed(db);
     const svc = makeService(db);
@@ -445,5 +274,73 @@ describe("SwimlaneService queries", () => {
         expect(all.map((l) => l.id)).toEqual(["s-backlog", "m1", "m2"]);
       })
     );
+  });
+});
+
+// Carried from the absorbed server/repos/cascade-batch.test.ts: archive stamps
+// are scoped, so an individually-archived sprint survives a later milestone
+// archive and its own restore cascades only its own tasks.
+describe("cascade-batch archive stamps", () => {
+  const actor = { actorKind: "user" as const, actorLabel: "Maria", actorUserId: "u1", message: "Maria archived this task", viaAssistant: false };
+
+  function seedCascade(database: Database) {
+    database.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
+    database.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0)").run();
+    database.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','maria@lexa.test','Maria','member')").run();
+    database.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','M1',0)").run();
+    database.prepare("INSERT INTO swimlanes (id, project_id, name, position, milestone_id) VALUES ('s-live','p1','Sprint live',1,'ms1'), ('s-old','p1','Sprint old',2,'ms1')").run();
+    database.prepare(
+      `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES
+        ('t-live','p1','c1','s-live','L','a0','2026-01-01 10:00:00'),
+        ('t-old','p1','c1','s-old','O','a1','2026-01-01 10:00:00')`
+    ).run();
+  }
+
+  it("an individually-archived sprint keeps its older stamp through the milestone archive, then restores on its own", () => {
+    seedCascade(db);
+    const T1 = "2026-01-01T00:00:00Z";
+    const T2 = "2026-08-25T10:00:00Z";
+    const run = (stmts: BatchStmt[]) =>
+      db.transaction(() => {
+        for (const s of stmts) db.prepare(s.sql).run(...s.params);
+      })();
+    const stamp = (id: string): string | null => {
+      const row = db.query(`SELECT archived_at FROM swimlanes WHERE id = '${id}'`).get() as { archived_at: string | null };
+      return row.archived_at;
+    };
+    const taskStamp = (id: string): string | null => {
+      const row = db.query(`SELECT archived_at FROM tasks WHERE id = '${id}'`).get() as { archived_at: string | null };
+      return row.archived_at;
+    };
+    const restoredIds = () =>
+      (db.query("SELECT task_id FROM task_activity WHERE type = 'restored' ORDER BY id").all() as { task_id: string }[]).map((r) => r.task_id);
+
+    // T1: archive s-old on its own → it and its task take T1.
+    run(buildSwimlaneArchiveBatch({ swimlaneId: "s-old", archivedAt: T1, actor }));
+    // T2: archive the milestone → the already-archived sprint is skipped, s-live takes T2.
+    run(buildMilestoneArchiveBatch({ milestoneId: "ms1", archivedAt: T2, actor: { ...actor, viaAssistant: true } }));
+
+    expect(stamp("s-old")).toBe(T1);
+    expect(stamp("s-live")).toBe(T2);
+    expect(taskStamp("t-old")).toBe(T1);
+    expect(taskStamp("t-live")).toBe(T2);
+
+    // Restore the milestone (T2 stamp) — only T2-stamped children return; a
+    // second pass is a no-op (no duplicate activity).
+    const milestoneRestore = buildMilestoneRestoreBatch({ milestoneId: "ms1", milestoneArchivedAt: T2, actor: { ...actor, message: "Maria restored this task" } });
+    run(milestoneRestore);
+    run(milestoneRestore);
+
+    expect(restoredIds()).toEqual(["t-live"]);
+    expect(stamp("s-old")).toBe(T1);
+    expect(taskStamp("t-old")).toBe(T1);
+    expect(stamp("s-live")).toBeNull();
+    expect(taskStamp("t-live")).toBeNull();
+
+    // Restoring the individually-archived sprint cascades its own T1-stamped task.
+    run(buildSwimlaneRestoreBatch({ swimlaneId: "s-old", swimlaneArchivedAt: T1, actor: { ...actor, message: "Maria restored this task" } }));
+    expect(stamp("s-old")).toBeNull();
+    expect(taskStamp("t-old")).toBeNull();
+    expect(restoredIds()).toEqual(["t-live", "t-old"]);
   });
 });

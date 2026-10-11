@@ -7,6 +7,24 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Test suite trimmed to the invariant/contract floor** — 321 files / 3,820 tests / 66.7k LOC cut to
+  ~125 files / ~1.4k tests / ~31k LOC (−61% files, −62% tests), full suite ~45s. Removed: duplicated
+  repo/route re-assertions of effects already covered at the tier where they live, per-endpoint error
+  variants beyond one catalog matrix (`server/api/error-catalog.test.ts` now covers all 86 documented
+  codes), per-component render/composition suites, copy/px/class pins, internal-wiring and mock-argument
+  echoes, and source-text scans. Retained: every dynamic guard of the 14 architectural invariants
+  (map: `docs/TESTING.md`), the auth/HMAC/secrets/SSRF/share-token boundaries,
+  migrations and upgrade paths, destructive CLI paths, and one UI smoke. `test:critical` retired (the
+  full suite is the dev loop).
+- **Test guard rail** — `bun run check:test-hygiene` (`scripts/check-test-hygiene.ts`) now runs in
+  `verify-gate.sh` and `ci-local.sh`: snapshot assertions fail outright, and `toHaveClass`/`toHaveStyle`,
+  `toBeTruthy`/`toBeDefined`, `toHaveBeenCalledWith` and `readFileSync` are capped per file in
+  `scripts/test-hygiene-allow.json` as a ratchet that only tightens. The suite budget (100 files /
+  900 cases / 27k LOC) warns when exceeded. The agent-facing rule — name the criterion, one test per
+  effect at the tier where it lives, banned patterns — is in `AGENTS.md` and `scripts/checks.md`.
+
 ## [2026.11.1] - 2026-10-11
 
 ### Fixed

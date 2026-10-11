@@ -1,35 +1,32 @@
 import { describe, expect, it, vi } from "vitest";
-import { ASSISTANT_STALL_MESSAGE, ASSISTANT_STALL_TIMEOUT_MS } from "../../shared/assistant";
+import { ASSISTANT_STALL_TIMEOUT_MS, type StreamFrame } from "../../shared/assistant";
 import {
-  assertAttachmentCaps,
-  buildChatExport,
-  buildChatSnippet,
-  buildMentionContextBlock,
+  applyResumeResults,
   buildStream,
-  CHAT_CITATION_CAP,
-  CHAT_IMAGE_CAPS,
-  collectCitation,
-  DOC_IMAGE_CAPS,
-  hydrateImageParts,
-  isStoredImageRef,
-  MENTION_CAPS,
+  findPendingBatch,
   modelOptionsForEffort,
-  needsSummary,
-  ResolvedMention,
   resolveChatTitle,
   resolveAssistantThread,
   resolveReasoningEffort,
-  scanMentionTokens,
-  StreamRunContext,
-  SUMMARY_THRESHOLD_MESSAGES,
-  type StoredImageRef,
-  validateChatFromIndex,
+  type StreamRunContext,
 } from "./assistant.service";
-import { buildSystemPrompts } from "../assistant/prompt";
-import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail, type AssistantToolDeps } from "../assistant/tools";
-import { convertStoredMessages } from "../assistant/legacy-convert";
+import {
+  ALL_TASKS_CAP,
+  buildAssistantTools,
+  JEV_ASSESS_BUDGET_CODE,
+  JEV_ASSESS_MAX_CALLS,
+  JEV_ASSESS_MAX_STATE_CHARS,
+  MAX_CHAT_TOOL_ROUNDS,
+  MAX_TOOL_ROUNDS,
+  WIKI_READ_CAP,
+  type AssistantToolDeps,
+  type TaskRef,
+  type WikiPageContent,
+} from "../assistant/tools";
+import { summaryWindow, SUMMARY_WINDOW } from "../assistant/summarize";
+import type { JevQuestions, JevRuntimeConfig } from "../assistant/jev";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
-import type { StreamFrame } from "../../shared/assistant";
+import type { TipTapDoc } from "../../shared/types";
 
 const providerMock = vi.hoisted(() => ({
   script: [] as Array<Record<string, unknown>>,
@@ -64,8 +61,10 @@ vi.mock("../assistant/provider", () => ({
   },
 }));
 
-describe("Assistant toolset", () => {
-  const baseDeps: AssistantToolDeps = {
+// ── toolset helpers ─────────────────────────────────────────────────────────
+
+function toolDeps(overrides: Partial<AssistantToolDeps> = {}): AssistantToolDeps {
+  return {
     projectId: "p1",
     allowlist: null,
     searchApiKey: null,
@@ -79,13 +78,142 @@ describe("Assistant toolset", () => {
     listAllTasks: async () => [],
     listWikiPagesFull: async () => [],
     getBoardStructure: async () => ({ columns: [], swimlanes: [], milestones: [] }),
+    ...overrides,
   };
+}
 
-  it("includes the wiki tools alongside the PM reads", () => {
-    const names = buildAssistantTools(baseDeps).map((t) => t.name);
+type Exec = (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+function tool(depsOverrides: Partial<AssistantToolDeps>, name: string): Exec {
+  const t = buildAssistantTools(toolDeps(depsOverrides)).find((x) => x.name === name);
+  if (!t) throw new Error(`missing tool ${name}`);
+  return (t as unknown as { execute: Exec }).execute;
+}
+
+const doc = (text: string): TipTapDoc => ({
+  type: "doc",
+  content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+});
+
+describe("Assistant toolset (read-only surface)", () => {
+  it("carries the read tools and never a write tool name", () => {
+    const names = buildAssistantTools(toolDeps({ loadSkillByName: async () => null })).map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(["search_wiki", "read_wiki_page", "get_task", "search_tasks"]));
+    for (const n of names) expect(n).not.toMatch(/^(create|update|move|archive|delete|add|set)_/);
   });
 });
+
+describe("bulk read caps", () => {
+  const task = (key: string, markdown: string): TaskRef => ({
+    id: `id-${key}`,
+    key,
+    title: `Task ${key}`,
+    priority: "p2",
+    dueAt: null,
+    archivedAt: null,
+    markdown,
+  });
+
+  it("get_all_tasks and get_all_wiki_pages cap each document and flag truncation", async () => {
+    const under = tool({ listAllTasks: async () => [task("LEX-1", "first"), task("LEX-2", "second")] }, "get_all_tasks");
+    const out = await under({});
+    expect(out.truncated).toBeUndefined();
+    const tasks = out.tasks as Array<{ key: string; markdown: string }>;
+    expect(tasks.map((t) => t.key)).toEqual(["LEX-1", "LEX-2"]);
+    expect(tasks[0]!.markdown).toBe("first");
+
+    const big = task("LEX-1", "x".repeat(ALL_TASKS_CAP - 10));
+    const capped = tool({ listAllTasks: async () => [big, task("LEX-2", "y".repeat(100))] }, "get_all_tasks");
+    const over = await capped({});
+    expect(over.truncated).toBe(true);
+    expect(over.tasks).toHaveLength(1);
+
+    const pages: WikiPageContent[] = [
+      { title: "Big", slug: "big", content: doc("x".repeat(WIKI_READ_CAP + 500)) },
+      { title: "Small", slug: "small", content: doc("hi") },
+    ];
+    const underWiki = tool({ listWikiPagesFull: async () => pages }, "get_all_wiki_pages");
+    const wikiOut = await underWiki({});
+    expect(wikiOut.truncated).toBeUndefined();
+    expect((wikiOut.pages! as Array<{ markdown: string }>)[0]!.markdown.length).toBe(WIKI_READ_CAP);
+    expect((wikiOut.pages! as Array<{ markdown: string }>)[1]!.markdown).toBe("hi");
+
+    const many: WikiPageContent[] = Array.from({ length: 10 }, (_, i) => ({
+      title: `P${i}`,
+      slug: `p${i}`,
+      content: doc("x".repeat(WIKI_READ_CAP)),
+    }));
+    const cappedWiki = tool({ listWikiPagesFull: async () => many }, "get_all_wiki_pages");
+    const wikiOver = await cappedWiki({});
+    expect(wikiOver.truncated).toBe(true);
+    expect((wikiOver.pages as unknown[]).length).toBeLessThan(10);
+  });
+});
+
+describe("get_skill", () => {
+  const loader = async (name: string) =>
+    name === "Status Report" ? { name: "Status Report", description: "rank work", instructions: "## Status\nrank" } : null;
+
+  it("returns a typed error result for an unbound name — never a throw", async () => {
+    const exec = tool({ loadSkillByName: loader }, "get_skill");
+    const out = await exec({ name: "nope" });
+    expect(out.error).toContain("nope");
+    expect(out.instructions).toBeUndefined();
+  });
+});
+
+// ── jev_assess caps + per-stream budget ─────────────────────────────────────
+
+const JEV_CONFIG: JevRuntimeConfig = { apiKey: "tk-secret", baseUrl: "", model: "" };
+const ASK_QUESTIONS: JevQuestions = {
+  next_step: { type: "choice", instructions: "What next?", criteria: { act: null, ask: null } },
+};
+
+function jevFetch(payload: unknown, status = 200) {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = (async (input: unknown, init?: RequestInit) => {
+    calls.push({ url: String(input), init: init ?? {} });
+    return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, calls };
+}
+
+function jevTool(overrides: Partial<AssistantToolDeps> = {}): { exec: Exec; calls: Array<{ url: string; init: RequestInit }> } {
+  const { fetchImpl, calls } = jevFetch({
+    model: "jev-latest",
+    answers: { next_step: { type: "choice", choice: "ask", probabilities: { act: 0.4, ask: 0.6 }, confidence: 0.6 } },
+    usage: { input_tokens: 10, output_tokens: 4 },
+  });
+  return { exec: tool({ ...overrides, jevConfig: JEV_CONFIG, fetchImpl }, "jev_assess"), calls };
+}
+
+describe("jev_assess caps and per-stream budget", () => {
+  it("refuses over-cap state without a request, and enforces the per-stream call budget", async () => {
+    const stateTooLarge = jevTool();
+    const out = await stateTooLarge.exec({ state: "x".repeat(JEV_ASSESS_MAX_STATE_CHARS + 1), questions: ASK_QUESTIONS });
+    expect(out).toEqual({
+      ok: false,
+      code: "STATE_TOO_LARGE",
+      message: `state exceeds the ${JEV_ASSESS_MAX_STATE_CHARS}-character limit — re-send a shorter state`,
+    });
+    expect(stateTooLarge.calls).toHaveLength(0);
+
+    const { exec, calls } = jevTool();
+    for (let i = 0; i < JEV_ASSESS_MAX_CALLS; i++) {
+      expect(await exec({ state: "s", questions: ASK_QUESTIONS })).toMatchObject({ ok: true });
+    }
+    expect(calls).toHaveLength(JEV_ASSESS_MAX_CALLS);
+    const over = await exec({ state: "s", questions: ASK_QUESTIONS });
+    expect(over).toEqual({
+      ok: false,
+      code: JEV_ASSESS_BUDGET_CODE,
+      message: `budget exhausted — at most ${JEV_ASSESS_MAX_CALLS} jev_assess calls per run`,
+    });
+    expect(calls).toHaveLength(JEV_ASSESS_MAX_CALLS);
+  });
+});
+
+// ── thread / title resolution ───────────────────────────────────────────────
 
 function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
   return {
@@ -108,430 +236,115 @@ function thread(overrides: Partial<AssistantThread> = {}): AssistantThread {
 }
 
 describe("resolveAssistantThread", () => {
-  it("null existing → fresh", () => {
-    const v = resolveAssistantThread(null, "a1");
-    expect(v.mode).toBe("fresh");
-    expect(v.messages).toEqual([]);
-    expect(v.summary).toBeNull();
-    expect(v.summarizedCount).toBe(0);
-  });
+  it("resolves fresh (summary slots cleared) vs continue, ignoring a differing stored skill id", () => {
+    const fresh = resolveAssistantThread(null, "a1");
+    expect(fresh.mode).toBe("fresh");
+    expect(fresh.messages).toEqual([]);
+    expect(fresh.summary).toBeNull();
+    expect(fresh.summarizedCount).toBe(0);
 
-  it("same doc + same agent → continue with history", () => {
+    expect(resolveAssistantThread(thread(), "a2").mode).toBe("fresh");
+    const unbound = thread({ agentId: null, skillId: null });
+    expect(resolveAssistantThread(unbound, "a1").mode).toBe("fresh");
+    expect(resolveAssistantThread(unbound, null).mode).toBe("continue");
+
     const t = thread();
     const v = resolveAssistantThread(t, "a1");
     expect(v.mode).toBe("continue");
     expect(v.messages).toBe(t.messages);
     expect(v.summary).toBe("prior summary");
     expect(v.summarizedCount).toBe(4);
-  });
-
-  it("agent mismatch → fresh", () => {
-    expect(resolveAssistantThread(thread(), "a2").mode).toBe("fresh");
-  });
-
-  it("a stored skill id no longer affects the verdict (skills are per-message)", () => {
+    // Skills are per-message now: a differing stored skillId is not a mismatch.
     expect(resolveAssistantThread(thread({ skillId: "other" }), "a1").mode).toBe("continue");
-  });
-
-  it("null stored id vs provided id → fresh; both null → continue", () => {
-    const t = thread({ agentId: null, skillId: null });
-    expect(resolveAssistantThread(t, "a1").mode).toBe("fresh");
-    expect(resolveAssistantThread(t, null).mode).toBe("continue");
   });
 });
 
 describe("resolveChatTitle", () => {
-  it("first send derives the title from the message text", () => {
+  it("derives from the message text when untitled, but a stored title wins and survives an agent wipe", () => {
     expect(resolveChatTitle(null, "Fix the login bug\r\nthen verify sessions")).toBe(
       "Fix the login bug then verify sessions"
     );
-  });
-
-  it("stored title wins over new derivation (rename survives)", () => {
-    const t = thread({ documentType: "chat", documentId: "c1", ownerUserId: "u1", title: "Renamed" });
-    expect(resolveChatTitle(t, "a brand new message")).toBe("Renamed");
-  });
-
-  it("existing row with NULL title derives from this send (image-only first message caveat)", () => {
-    const t = thread({ documentType: "chat", documentId: "c1", ownerUserId: "u1", title: null });
-    expect(resolveChatTitle(t, "second message text")).toBe("second message text");
-  });
-
-  it("empty derivation → null (title stays unset)", () => {
+    const row = thread({ documentType: "chat", documentId: "c1", ownerUserId: "u1", title: null });
+    expect(resolveChatTitle(row, "second message text")).toBe("second message text");
     expect(resolveChatTitle(null, "   \n\t ")).toBeNull();
     expect(resolveChatTitle(null, "")).toBeNull();
-  });
 
-  it("agent change wipes messages but keeps the title", () => {
     const t = thread({
       documentType: "chat",
       documentId: "c1",
       ownerUserId: "u1",
       title: "Kept title",
-      agentId: "a1",
-      skillId: "s1",
       messages: [{ role: "user", content: "old conversation" }],
     });
-    // Mismatched agent → fresh verdict (history gone)…
-    const verdict = resolveAssistantThread(t, "a2");
-    expect(verdict.mode).toBe("fresh");
-    expect(verdict.messages).toEqual([]);
-    // …but the list label survives.
+    expect(resolveChatTitle(t, "a brand new message")).toBe("Kept title");
+    expect(resolveAssistantThread(t, "a2").messages).toEqual([]);
     expect(resolveChatTitle(t, "whatever comes next")).toBe("Kept title");
   });
 });
 
-function capture(fn: () => void): { _tag: string; reason?: string } {
-  try {
-    fn();
-  } catch (e) {
-    return e as { _tag: string; reason?: string };
-  }
-  throw new Error("expected throw");
-}
+// ── summary window (carried from server/assistant/summarize.test.ts) ────────
 
-describe("assertAttachmentCaps", () => {
-  it("passes within caps (doc: per-image limit)", () => {
-    const refs = [
-      { mimeType: "image/png", size: 1024 },
-      { mimeType: "image/jpeg", size: 2 * 1024 * 1024 },
+describe("summaryWindow", () => {
+  const msg = (i: number) => ({
+    id: `m${i}`,
+    role: i % 2 === 0 ? "user" : "assistant",
+    parts: [{ type: "text", text: `message ${i}` }],
+  });
+  const many = (count: number) => Array.from({ length: count }, (_, i) => msg(i));
+
+  it("slides only the not-yet-summarized prefix and reports the new total", () => {
+    const window = summaryWindow(many(41), 0);
+    expect(window?.older).toHaveLength(41 - SUMMARY_WINDOW);
+    expect(window?.summarizedCount).toBe(41 - SUMMARY_WINDOW);
+    const incremental = summaryWindow(many(42), 33);
+    expect(incremental?.older).toHaveLength(1);
+    expect(incremental?.summarizedCount).toBe(34);
+  });
+
+  it("is idempotent: a repeat of the same transcript yields no window", () => {
+    const window = summaryWindow(many(41), 0);
+    expect(window).not.toBeNull();
+    expect(summaryWindow(many(41), window!.summarizedCount)).toBeNull();
+  });
+});
+
+// ── resume markers (carried from server/services/assistant-resume.test.ts) ──
+
+describe("findPendingBatch", () => {
+  it("prefers the newest marker and the object shape over a legacy string", () => {
+    const messages = [
+      { role: "assistant", content: "old", pendingBatch: "batch-string" },
+      { role: "assistant", content: "new", pendingBatch: { batchId: "batch-object", approvals: [] } },
     ];
-    expect(() => assertAttachmentCaps(refs, DOC_IMAGE_CAPS)).not.toThrow();
-  });
-
-  it("over count → INVALID_ARGS", () => {
-    const refs = Array.from({ length: CHAT_IMAGE_CAPS.maxCount + 1 }, () => ({ mimeType: "image/png", size: 10 }));
-    const err = capture(() => assertAttachmentCaps(refs, CHAT_IMAGE_CAPS));
-    expect(err._tag).toBe("InvalidArgs");
-    expect(err.reason).toContain(`at most ${CHAT_IMAGE_CAPS.maxCount}`);
-  });
-
-  it("unsupported mime → INVALID_ARGS", () => {
-    const err = capture(() => assertAttachmentCaps([{ mimeType: "application/pdf", size: 10 }], CHAT_IMAGE_CAPS));
-    expect(err._tag).toBe("InvalidArgs");
-    expect(err.reason).toContain("unsupported image type application/pdf");
-  });
-
-  it("per-image byte cap exceeded → INVALID_ARGS", () => {
-    const err = capture(() =>
-      assertAttachmentCaps([{ mimeType: "image/png", size: DOC_IMAGE_CAPS.maxBytesEach + 1 }], DOC_IMAGE_CAPS)
-    );
-    expect(err._tag).toBe("InvalidArgs");
-    expect(err.reason).toContain("MB limit");
-  });
-
-  it("total byte cap exceeded → INVALID_ARGS", () => {
-    const half = Math.floor(CHAT_IMAGE_CAPS.maxTotalBytes / 2) + 100;
-    const err = capture(() =>
-      assertAttachmentCaps(
-        [
-          { mimeType: "image/png", size: half },
-          { mimeType: "image/png", size: half },
-        ],
-        CHAT_IMAGE_CAPS
-      )
-    );
-    expect(err._tag).toBe("InvalidArgs");
-    expect(err.reason).toContain("request limit");
+    expect(findPendingBatch(messages)).toBe("batch-object");
   });
 });
 
-const ref = (storageKey: string, mimeType = "image/png"): StoredImageRef => ({
-  type: "image-ref",
-  storageKey,
-  mimeType,
-});
+describe("applyResumeResults", () => {
+  it("clears the object markers of resolved batches and leaves unresolved ones alone", () => {
+    const resolved = {
+      role: "assistant",
+      content: "proposed writes",
+      ts: "2026-08-24T00:00:00Z",
+      pendingBatch: { batchId: "b1", approvals: [{ approvalId: "a1", toolCallId: "call_1" }] },
+    };
+    const out = applyResumeResults([{ role: "user", content: "go" }, resolved], ["b1"]);
+    expect(out[0]!).toEqual({ role: "user", content: "go" });
+    expect(out[1]!).toEqual({ role: "assistant", content: "proposed writes", ts: "2026-08-24T00:00:00Z" });
 
-describe("isStoredImageRef", () => {
-  it("accepts image-ref parts with string storageKey; rejects others", () => {
-    expect(isStoredImageRef(ref("k"))).toBe(true);
-    expect(isStoredImageRef({ type: "text", content: "hi" })).toBe(false);
-    expect(isStoredImageRef({ type: "image-ref" })).toBe(false);
-    expect(isStoredImageRef(null)).toBe(false);
-    expect(isStoredImageRef("nope")).toBe(false);
+    const unresolved = { role: "assistant", content: "a", pendingBatch: { batchId: "b2", approvals: [] } };
+    const kept = applyResumeResults([unresolved], ["b1"]);
+    expect(kept[0]!).toEqual(unresolved);
+  });
+
+  it("does not mutate the input transcript", () => {
+    const messages = [{ role: "assistant", content: "a", pendingBatch: "b1" }];
+    applyResumeResults(messages, ["b1"]);
+    expect(messages[0]!).toHaveProperty("pendingBatch", "b1");
   });
 });
 
-describe("hydrateImageParts", () => {
-  const loader = async (key: string) => (key === "dead" ? null : `b64:${key}`);
-
-  it("replaces image-ref with base64 data image part", async () => {
-    const out = await hydrateImageParts(
-      [{ role: "user", content: ["look", ref("k1")] }],
-      loader
-    );
-    expect(out[0]!.content).toEqual([
-      "look",
-      { type: "image", source: { type: "data", value: "b64:k1", mimeType: "image/png" } },
-    ]);
-  });
-
-  it("drops refs whose blob fails to load — silently", async () => {
-    const out = await hydrateImageParts([{ role: "user", content: [ref("dead"), "text stays"] }], loader);
-    expect(out[0]!.content).toEqual(["text stays"]);
-  });
-
-  it("loader rejection also drops the ref", async () => {
-    const out = await hydrateImageParts([{ role: "user", content: [ref("boom")] }], async () => {
-      throw new Error("storage gone");
-    });
-    expect(out[0]!.content).toEqual([]);
-  });
-
-  it("string content passes through untouched", async () => {
-    const msg = { role: "assistant", content: "plain" };
-    const out = await hydrateImageParts([msg], loader);
-    expect(out[0]!).toBe(msg);
-  });
-
-  it("preserves message identity fields on hydrated messages", async () => {
-    const out = await hydrateImageParts([{ role: "user", name: "u1", content: [ref("k")] }], loader);
-    expect(out[0]!.role).toBe("user");
-    expect((out[0]! as { name?: string }).name).toBe("u1");
-  });
-});
-
-describe("needsSummary", () => {
-  it("true when message count exceeds threshold", () => {
-    const msgs = Array.from({ length: SUMMARY_THRESHOLD_MESSAGES + 1 }, (_, i) => ({ role: "user", content: `m${i}` }));
-    expect(needsSummary(msgs)).toBe(true);
-  });
-
-  it("false for small short transcripts", () => {
-    expect(needsSummary([{ role: "user", content: "hi" }])).toBe(false);
-  });
-
-  it("true when JSON bytes exceed threshold even at low count", () => {
-    const big = "x".repeat(64 * 1024);
-    expect(needsSummary([{ role: "user", content: big }])).toBe(true);
-  });
-});
-
-describe("@-mention chat resolution", () => {
-  it("scans plain tokens; ignores non-token text", () => {
-    expect(scanMentionTokens("see @LEX-42 and @home-page, email a@b.no")).toEqual(["LEX-42", "home-page"]);
-    expect(scanMentionTokens("no mentions here")).toEqual([]);
-    expect(scanMentionTokens("")).toEqual([]);
-  });
-
-  it("caps: ≤5 mentions, ≤4000 chars per document, ≤20000 total — silent truncation", () => {
-    const many: ResolvedMention[] = Array.from({ length: 8 }, (_, i) => ({
-      kind: "task" as const,
-      id: `t${i}`,
-      label: `T-${i}`,
-      text: "x".repeat(50),
-    }));
-    const block = buildMentionContextBlock(many);
-    expect(block.split("\n- [task]").length - 1).toBe(5);
-
-    const big: ResolvedMention[] = [
-      { kind: "wiki", id: "w1", label: "Big", text: "y".repeat(6000) },
-    ];
-    const bigBlock = buildMentionContextBlock(big);
-    expect(bigBlock.length).toBeLessThan(6000 + 100);
-    expect(bigBlock).toContain("…");
-
-    const huge: ResolvedMention[] = Array.from({ length: 5 }, (_, i) => ({
-      kind: "task" as const,
-      id: `t${i}`,
-      label: `T-${i}`,
-      text: "z".repeat(9000),
-    }));
-    const hugeBlock = buildMentionContextBlock(huge);
-    expect(hugeBlock.length).toBeLessThanOrEqual(20000 + 200);
-  });
-
-  it("empty resolution → empty block (no context segment)", () => {
-    expect(buildMentionContextBlock([])).toBe("");
-  });
-
-  it("persistence purity: the user message passes through verbatim; context rides only in system prompts", () => {
-    // The chat turn assembles userContent from req.message ALONE — mention
-    // content is resolved into systemPrompts.gherkin-style structural check:
-    const message = "check @LEX-42 and @home";
-    const mentionContext = buildMentionContextBlock([
-      { kind: "task", id: "t1", label: "LEX-42 — T", text: "ctx" },
-    ]);
-    const systemPrompts = buildSystemPrompts({
-      identity: "i",
-      memoryBlock: null,
-      agentMarkdown: null,
-      mentionContext,
-    });
-    // userContent would be exactly `message` (no injected block anywhere).
-    expect(message).not.toContain("ctx");
-    // The ephemeral block IS present in the last system prompt.
-    expect(systemPrompts[systemPrompts.length - 1]!.content).toContain("[task] LEX-42 — T");
-    expect(systemPrompts[systemPrompts.length - 1]!.content).toContain("Referenced by the user just now:");
-    // No mentionContext → no extra segment (existing behavior unchanged).
-    const without = buildSystemPrompts({ identity: "i", memoryBlock: null, agentMarkdown: null });
-    expect(without.length).toBe(2);
-  });
-});
-
-describe("collectCitation", () => {
-  it("accepts https citations", () => {
-    const out = collectCitation([], { title: "Docs", url: "https://lexa.example/guide" });
-    expect(out).toEqual([{ title: "Docs", url: "https://lexa.example/guide" }]);
-  });
-
-  it("rejects non-https URLs", () => {
-    expect(collectCitation([], { title: null, url: "http://lexa.example/guide" })).toEqual([]);
-    expect(collectCitation([], { title: null, url: "ftp://x" })).toEqual([]);
-  });
-
-  it("dedupes by URL (first title wins)", () => {
-    let out = collectCitation([], { title: "First", url: "https://x.example/a" });
-    out = collectCitation(out, { title: "Second", url: "https://x.example/a" });
-    expect(out).toHaveLength(1);
-    expect(out[0]!.title).toBe("First");
-  });
-
-  it("caps at CHAT_CITATION_CAP entries", () => {
-    let out: ReturnType<typeof collectCitation> = [];
-    for (let i = 0; i < CHAT_CITATION_CAP + 5; i++) {
-      out = collectCitation(out, { title: `t${i}`, url: `https://x.example/${i}` });
-    }
-    expect(out).toHaveLength(CHAT_CITATION_CAP);
-  });
-});
-
-describe("validateChatFromIndex", () => {
-  const msgs = [
-    { role: "user", content: "q0" },
-    { role: "assistant", content: "a0" },
-    { role: "user", content: [{ type: "image-ref", storageKey: "k" }] },
-  ];
-  const allText = [
-    { role: "user", content: "q0" },
-    { role: "assistant", content: "a0" },
-    { role: "user", content: "q1" },
-  ];
-
-  it("accepts integers in [0, length] targeting user text entries", () => {
-    expect(() => validateChatFromIndex(allText, 0)).not.toThrow();
-    expect(() => validateChatFromIndex(allText, 2)).not.toThrow();
-    expect(() => validateChatFromIndex(allText, 3)).not.toThrow(); // append
-  });
-
-  it("rejects non-integers and out-of-range indices", () => {
-    expect(() => validateChatFromIndex(msgs, 1.5)).toThrow();
-    expect(() => validateChatFromIndex(msgs, -1)).toThrow();
-    expect(() => validateChatFromIndex(msgs, 4)).toThrow();
-    expect(() => validateChatFromIndex(msgs, Number.NaN)).toThrow();
-  });
-
-  it("rejects replacing a non-user or image-part entry", () => {
-    // assistant entry
-    expect(() => validateChatFromIndex(msgs, 1)).toThrow();
-    // image-part user entry — rejected in v1
-    expect(() => validateChatFromIndex(msgs, 2)).toThrow();
-  });
-
-  it("accepts an attachment-bearing user turn (array content with a text part)", () => {
-    const withAttachment = [
-      { role: "user", content: "q0" },
-      { role: "assistant", content: "a0" },
-      { role: "user", content: [{ type: "text", content: "look at this" }, { type: "image-ref", storageKey: "k", mimeType: "image/png" }] },
-    ];
-    expect(() => validateChatFromIndex(withAttachment, 2)).not.toThrow();
-  });
-
-  it("accepts a parts-shaped stored user row", () => {
-    const partsShaped = [
-      { role: "user", parts: [{ type: "text", text: "hello" }] },
-      { role: "assistant", parts: [{ type: "text", text: "hi" }] },
-    ];
-    expect(() => validateChatFromIndex(partsShaped, 0)).not.toThrow();
-  });
-
-  it("holds when an unmappable role precedes the target (index alignment)", () => {
-    const stored = [
-      { role: "user", content: "q0" },
-      { role: "assistant", content: "a0" },
-      { role: "tool", content: "raw wire" },
-      { role: "user", content: "q1" },
-    ];
-    // The client resolves its index against the converted read...
-    const converted = convertStoredMessages(stored);
-    expect(converted).toHaveLength(stored.length);
-    // ...and the server validates that same position against the stored array.
-    expect(() => validateChatFromIndex(stored, 3)).not.toThrow();
-  });
-
-  it("append at length skips the target check", () => {
-    expect(() => validateChatFromIndex([], 0)).not.toThrow();
-  });
-});
-
-describe("buildChatSnippet", () => {
-  const msgs = [
-    { role: "user", content: "please find the zebra crossing notes" },
-    { role: "assistant", content: "here they are" },
-  ];
-
-  it("cuts a window around the first case-insensitive match", () => {
-    const s = buildChatSnippet(msgs, "ZEBRA");
-    expect(s).not.toBeNull();
-    expect(s!.toLowerCase()).toContain("zebra");
-  });
-
-  it("adds ellipses when the window truncates the transcript", () => {
-    const long = [{ role: "user", content: "x".repeat(200) + " needle " + "y".repeat(200) }];
-    const s = buildChatSnippet(long, "needle");
-    expect(s).not.toBeNull();
-    expect(s!.startsWith("…")).toBe(true);
-    expect(s!.endsWith("…")).toBe(true);
-    expect(s!.length).toBeLessThan(120);
-  });
-
-  it("returns null for title-only matches (no transcript hit)", () => {
-    expect(buildChatSnippet(msgs, "absent")).toBeNull();
-  });
-
-  it("ignores non-string (image-part) contents", () => {
-    expect(buildChatSnippet([{ role: "user", content: [{ type: "image-ref" }] }], "x")).toBeNull();
-  });
-});
-
-describe("buildChatExport", () => {
-  it("renders header, speaker blocks with ts, citations and terminal markers", () => {
-    const md = buildChatExport({
-      title: "Thread title",
-      messages: [
-        { role: "user", content: "What is Lexa?", ts: "2026-08-22T10:00:00.000Z" },
-        {
-          role: "assistant",
-          content: "A project tool.",
-          ts: "2026-08-22T10:00:05.000Z",
-          citations: [{ title: "Lexa Docs", url: "https://lexa.example/guide" }, { title: null, url: "https://raw.example/x" }],
-        },
-        { role: "user", content: "continue" },
-        { role: "assistant", content: "par", error: { code: "ASSISTANT_GENERATION_FAILED", message: "boom" } },
-        { role: "assistant", content: "frag", stopped: true },
-      ],
-    });
-    expect(md.startsWith("# Thread title\n")).toBe(true);
-    expect(md).toContain("**You** · 2026-08-22T10:00:00.000Z\nWhat is Lexa?");
-    expect(md).toContain("**Assistant** · 2026-08-22T10:00:05.000Z\nA project tool.");
-    expect(md).toContain("- [Lexa Docs](https://lexa.example/guide)");
-    expect(md).toContain("- <https://raw.example/x>");
-    expect(md).toContain("**You**\ncontinue"); // no ts → no suffix
-    expect(md).toContain("[failed turn: ASSISTANT_GENERATION_FAILED]");
-    expect(md).toContain("[stopped]");
-    expect(md.endsWith("\n")).toBe(true);
-  });
-
-  it("falls back to 'chat' when untitled; renders image parts as [image]", () => {
-    const md = buildChatExport({
-      title: null,
-      messages: [{ role: "user", content: [{ type: "text", content: "with picture" }, { type: "image-ref", storageKey: "k" }] }],
-    });
-    expect(md.startsWith("# chat\n")).toBe(true);
-    expect(md).toContain("with picture");
-    expect(md).toContain("[image]");
-  });
-});
+// ── buildStream ─────────────────────────────────────────────────────────────
 
 const toolEnd = (name = "search_wiki"): Record<string, unknown> => ({ type: "TOOL_CALL_END", toolCallName: name });
 
@@ -546,146 +359,9 @@ async function drain(s: ReadableStream<StreamFrame>): Promise<StreamFrame[]> {
   return out;
 }
 
-describe("Assistant tool budget", () => {
-  const baseCtx = (toolRoundCap: number): StreamRunContext => ({
-    keyId: "c1",
-    idField: "chatId",
-    threadId: "c1",
-    registry: new Map(),
-    config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
-    systemPrompts: [],
-    history: [],
-    userTs: "2026-08-24T00:00:00Z",
-    getCitations: () => [],
-    userContent: "hi",
-    tools: [],
-    toolRoundCap,
-    loadImageBase64: async () => null,
-    imageMode: "inline",
-    historySummary: () => null,
-    historySummarizedCount: () => 0,
-    persist: async () => {},
-    onDone: async () => {},
-    onFail: async () => {},
-    onCancel: async () => {},
-  });
-
-  it("freeform chat cap allows MAX_CHAT_TOOL_ROUNDS rounds before tripping", async () => {
-    providerMock.script = Array.from({ length: MAX_CHAT_TOOL_ROUNDS }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
-    const frames = await drain(buildStream(baseCtx(MAX_CHAT_TOOL_ROUNDS)));
-    expect(frames.at(-1)!?.type).toBe("done");
-    expect(frames.some((f) => f.type === "error")).toBe(false);
-  });
-
-  it("freeform chat cap trips at MAX_CHAT_TOOL_ROUNDS + 1 with ASSISTANT_TOOL_BUDGET_EXCEEDED", async () => {
-    providerMock.script = Array.from({ length: MAX_CHAT_TOOL_ROUNDS + 1 }, () => toolEnd());
-    const frames = await drain(buildStream(baseCtx(MAX_CHAT_TOOL_ROUNDS)));
-    const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
-    expect(err?.code).toBe("ASSISTANT_TOOL_BUDGET_EXCEEDED");
-    expect(err?.message).toContain(`(${MAX_CHAT_TOOL_ROUNDS} rounds)`);
-  });
-
-  it("document-task cap still trips at MAX_TOOL_ROUNDS + 1 and allows exactly MAX_TOOL_ROUNDS", async () => {
-    providerMock.script = Array.from({ length: MAX_TOOL_ROUNDS }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
-    const okFrames = await drain(buildStream(baseCtx(MAX_TOOL_ROUNDS)));
-    expect(okFrames.at(-1)!?.type).toBe("done");
-
-    providerMock.script = Array.from({ length: MAX_TOOL_ROUNDS + 1 }, () => toolEnd());
-    const frames = await drain(buildStream(baseCtx(MAX_TOOL_ROUNDS)));
-    const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
-    expect(err?.code).toBe("ASSISTANT_TOOL_BUDGET_EXCEEDED");
-    expect(err?.message).toContain(`(${MAX_TOOL_ROUNDS} rounds)`);
-  });
-});
-
-describe("buildStream reasoning frames", () => {
-  const baseCtx = (): StreamRunContext & { persistCalls: unknown[][] } => {
-    const persistCalls: unknown[][] = [];
-    return {
-      keyId: "c1",
-      idField: "chatId",
-      threadId: "c1",
-      registry: new Map(),
-      config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
-      systemPrompts: [],
-      history: [],
-      userTs: "2026-08-24T00:00:00Z",
-      getCitations: () => [],
-      userContent: "hi",
-      tools: [],
-      toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
-      loadImageBase64: async () => null,
-      imageMode: "inline",
-      historySummary: () => null,
-      historySummarizedCount: () => 0,
-      persist: async (messages) => {
-        persistCalls.push(messages);
-      },
-      persistCalls,
-      onDone: async () => {},
-      onFail: async () => {},
-      onCancel: async () => {},
-    };
-  };
-
-  it("reasoning chunks yield reasoning frames in order, interleaved with deltas", async () => {
-    providerMock.script = [
-      { type: "REASONING_MESSAGE_START" },
-      { type: "REASONING_MESSAGE_CONTENT", delta: "think " },
-      { type: "REASONING_MESSAGE_CONTENT", delta: "hard" },
-      { type: "TEXT_MESSAGE_START" },
-      { type: "TEXT_MESSAGE_CONTENT", delta: "answer" },
-      { type: "RUN_FINISHED" },
-    ];
-    const frames = await drain(buildStream(baseCtx()));
-    const streamFrames = frames.filter((f) => f.type === "reasoning" || f.type === "delta");
-    expect(streamFrames).toEqual([
-      { type: "reasoning", delta: "think " },
-      { type: "reasoning", delta: "hard" },
-      { type: "delta", text: "answer" },
-    ]);
-    expect(frames.at(-1)!?.type).toBe("done");
-  });
-
-  it("persists the reasoning text + elapsed ms so the fold survives reload", async () => {
-    providerMock.script = [
-      { type: "REASONING_MESSAGE_CONTENT", delta: "secret thoughts" },
-      { type: "TEXT_MESSAGE_CONTENT", delta: "public answer" },
-      { type: "RUN_FINISHED" },
-    ];
-    const ctx = baseCtx();
-    const frames = await drain(buildStream(ctx));
-    expect(frames.at(-1)!?.type).toBe("done");
-    expect(ctx.persistCalls.length).toBe(1);
-    const messages = ctx.persistCalls[0]!;
-    const assistant = (messages as Array<{ role: string; content: unknown; reasoning?: unknown; reasoningMs?: unknown }>).at(-1)!;
-    expect(assistant?.role).toBe("assistant");
-    expect(assistant?.content).toBe("public answer");
-    expect(assistant?.reasoning).toBe("secret thoughts");
-    expect(typeof assistant?.reasoningMs).toBe("number");
-    // Survives the read conversion: the app reads a reasoning part + metadata.reasoningMs.
-    const converted = convertStoredMessages(messages) as Array<{
-      role: string;
-      parts: Array<{ type: string; text?: string }>;
-      metadata?: { reasoningMs?: number };
-    }>;
-    const convertedAssistant = converted.at(-1)!;
-    expect(convertedAssistant.parts).toContainEqual({ type: "reasoning", text: "secret thoughts" });
-    expect(convertedAssistant.metadata?.reasoningMs).toBe(assistant?.reasoningMs);
-  });
-
-  it("models without reasoning emit no reasoning frames", async () => {
-    providerMock.script = [
-      { type: "TEXT_MESSAGE_CONTENT", delta: "plain" },
-      { type: "RUN_FINISHED" },
-    ];
-    const frames = await drain(buildStream(baseCtx()));
-    expect(frames.some((f) => f.type === "reasoning")).toBe(false);
-  });
-});
-
-describe("tool frame detail", () => {
-  const baseCtx = (): StreamRunContext => ({
+function ctx(overrides: Partial<StreamRunContext> = {}): StreamRunContext & { persistCalls: unknown[][] } {
+  const persistCalls: unknown[][] = [];
+  return {
     keyId: "c1",
     idField: "chatId",
     threadId: "c1",
@@ -702,97 +378,47 @@ describe("tool frame detail", () => {
     imageMode: "inline",
     historySummary: () => null,
     historySummarizedCount: () => 0,
-    persist: async () => {},
+    persist: async (messages) => {
+      persistCalls.push(messages);
+    },
+    persistCalls,
     onDone: async () => {},
     onFail: async () => {},
     onCancel: async () => {},
-  });
+    ...overrides,
+  };
+}
 
-  it("call and result frames carry the detail built from the streamed args", async () => {
-    providerMock.script = [
-      { type: "TOOL_CALL_START", toolCallId: "t1", toolCallName: "search_wiki" },
-      { type: "TOOL_CALL_ARGS", toolCallId: "t1", delta: '{"query":"auth flow"}' },
-      { type: "TOOL_CALL_END", toolCallId: "t1" },
-      { type: "RUN_FINISHED" },
-    ];
-    const frames = await drain(buildStream(baseCtx()));
-    const toolFrames = frames.filter((f) => f.type === "tool") as Array<{ phase: string; name: string; detail?: string }>;
-    expect(toolFrames).toEqual([
-      { type: "tool", phase: "call", name: "search_wiki", detail: 'Searching wiki for "auth flow"' },
-      { type: "tool", phase: "result", name: "search_wiki", detail: 'Searching wiki for "auth flow"' },
-    ]);
-  });
+describe("Assistant tool budget", () => {
+  it("allows exactly the round cap and trips at +1 for both the chat and document-task caps", async () => {
+    for (const cap of [MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS]) {
+      providerMock.script = Array.from({ length: cap }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
+      const ok = await drain(buildStream(ctx({ toolRoundCap: cap })));
+      expect(ok.at(-1)!?.type).toBe("done");
+      expect(ok.some((f) => f.type === "error")).toBe(false);
 
-  it("END without START/ARGS still emits bare frames (no detail)", async () => {
-    providerMock.script = [toolEnd(), { type: "RUN_FINISHED" }];
-    const frames = await drain(buildStream(baseCtx()));
-    const toolFrames = frames.filter((f) => f.type === "tool") as Array<{ detail?: string }>;
-    expect(toolFrames).toHaveLength(2);
-    for (const f of toolFrames) expect(f.detail).toBeUndefined();
-  });
-
-  it("unparseable args yield no detail", async () => {
-    providerMock.script = [
-      { type: "TOOL_CALL_START", toolCallId: "t1", toolCallName: "get_task" },
-      { type: "TOOL_CALL_ARGS", toolCallId: "t1", delta: "{not json" },
-      { type: "TOOL_CALL_END", toolCallId: "t1" },
-      { type: "RUN_FINISHED" },
-    ];
-    const frames = await drain(buildStream(baseCtx()));
-    const toolFrames = frames.filter((f) => f.type === "tool") as Array<{ detail?: string }>;
-    expect(toolFrames).toHaveLength(2);
-    for (const f of toolFrames) expect(f.detail).toBeUndefined();
-  });
-
-  it("details truncate to ~80 chars with an ellipsis", async () => {
-    const long = toolCallDetail("search_wiki", { query: "x".repeat(200) })!;
-    expect(long.length).toBe(80);
-    expect(long).toMatch(/…$/);
+      providerMock.script = Array.from({ length: cap + 1 }, () => toolEnd());
+      const frames = await drain(buildStream(ctx({ toolRoundCap: cap })));
+      const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
+      expect(err?.code).toBe("ASSISTANT_TOOL_BUDGET_EXCEEDED");
+      expect(err?.message).toContain(`(${cap} rounds)`);
+    }
   });
 });
 
 describe("stream stall watchdog", () => {
-  const baseCtx = (): StreamRunContext & { persistCalls: unknown[][] } => {
-    const persistCalls: unknown[][] = [];
-    return {
-      keyId: "c1",
-      idField: "chatId",
-      threadId: "c1",
-      registry: new Map(),
-      config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
-      systemPrompts: [],
-      history: [],
-      userTs: "2026-08-24T00:00:00Z",
-      getCitations: () => [],
-      userContent: "hi",
-      tools: [],
-      toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
-      loadImageBase64: async () => null,
-      imageMode: "inline",
-      historySummary: () => null,
-      historySummarizedCount: () => 0,
-      persist: async (messages) => {
-        persistCalls.push(messages);
-      },
-      persistCalls,
-      onDone: async () => {},
-      onFail: async () => {},
-      onCancel: async () => {},
-    };
-  };
-
   it("trips at 90s of silence → ASSISTANT_GENERATION_FAILED + partial text persisted", async () => {
     vi.useFakeTimers();
     try {
       providerMock.script = [{ type: "TEXT_MESSAGE_CONTENT", delta: "par" }, { hang: true }];
-      const ctx = baseCtx();
-      const pending = drain(buildStream(ctx));
+      const c = ctx();
+      const pending = drain(buildStream(c));
       await vi.advanceTimersByTimeAsync(ASSISTANT_STALL_TIMEOUT_MS);
       const frames = await pending;
       const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
       expect(err?.code).toBe("ASSISTANT_GENERATION_FAILED");
       expect(err?.message).toBe("Assistant generation failed");
-      const last = (ctx.persistCalls.at(-1)! as Array<{ role?: string; content?: unknown; error?: unknown }>).at(-1)!;
+      const last = (c.persistCalls.at(-1)! as Array<{ role?: string; content?: unknown; error?: unknown }>).at(-1)!;
       expect(last).toMatchObject({
         role: "assistant",
         content: "par",
@@ -811,8 +437,7 @@ describe("stream stall watchdog", () => {
         { type: "TEXT_MESSAGE_CONTENT", delta: "b", delayMs: 50_000 },
         { hang: true },
       ];
-      const ctx = baseCtx();
-      const pending = drain(buildStream(ctx));
+      const pending = drain(buildStream(ctx()));
       await vi.advanceTimersByTimeAsync(50_000); // chunk 1 lands at t=50s, timer resets
       await vi.advanceTimersByTimeAsync(50_000); // chunk 2 lands at t=100s, timer resets
       await vi.advanceTimersByTimeAsync(90_000); // trips at t=190s (90s after the last chunk)
@@ -826,11 +451,8 @@ describe("stream stall watchdog", () => {
   it("normal streams finish without tripping the watchdog", async () => {
     vi.useFakeTimers();
     try {
-      providerMock.script = [
-        { type: "TEXT_MESSAGE_CONTENT", delta: "ok" },
-        { type: "RUN_FINISHED" },
-      ];
-      const pending = drain(buildStream(baseCtx()));
+      providerMock.script = [{ type: "TEXT_MESSAGE_CONTENT", delta: "ok" }, { type: "RUN_FINISHED" }];
+      const pending = drain(buildStream(ctx()));
       await vi.advanceTimersByTimeAsync(ASSISTANT_STALL_TIMEOUT_MS * 2);
       const frames = await pending;
       expect(frames.at(-1)!?.type).toBe("done");
@@ -841,61 +463,20 @@ describe("stream stall watchdog", () => {
 });
 
 describe("reasoning effort resolution", () => {
-  it("per-turn override beats the project default", () => {
+  it("per-turn override beats the project default, and buildStream forwards the body key", async () => {
     expect(resolveReasoningEffort("high", "low")).toBe("low");
-    expect(resolveReasoningEffort(null, "minimal")).toBe("minimal");
-  });
-
-  it("absent/null override falls back to the project default", () => {
     expect(resolveReasoningEffort("medium", undefined)).toBe("medium");
-    expect(resolveReasoningEffort("medium", null)).toBe("medium");
-  });
-
-  it("both unset → null (no param sent)", () => {
-    expect(resolveReasoningEffort(null, undefined)).toBeNull();
     expect(resolveReasoningEffort(null, null)).toBeNull();
-  });
-
-  it("modelOptionsForEffort: null → undefined; effort → reasoning_effort body key", () => {
     expect(modelOptionsForEffort(null)).toBeUndefined();
     expect(modelOptionsForEffort("high")).toEqual({ reasoning_effort: "high" });
-  });
 
-  it("buildStream forwards modelOptions into streamChat; absent → no modelOptions", async () => {
-    providerMock.script = [
-      { type: "TEXT_MESSAGE_CONTENT", delta: "ok" },
-      { type: "RUN_FINISHED" },
-    ];
-    const baseCtx = (modelOptions?: Record<string, import("../../shared/types").JSONValue>): StreamRunContext => ({
-      keyId: "c1",
-      idField: "chatId",
-      threadId: "c1",
-      registry: new Map(),
-      config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
-      systemPrompts: [],
-      history: [],
-      userTs: "2026-08-24T00:00:00Z",
-      getCitations: () => [],
-      userContent: "hi",
-      tools: [],
-      toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
-      loadImageBase64: async () => null,
-      imageMode: "inline",
-      historySummary: () => null,
-      historySummarizedCount: () => 0,
-      persist: async () => {},
-      onDone: async () => {},
-      onFail: async () => {},
-      onCancel: async () => {},
-      ...(modelOptions !== undefined ? { modelOptions } : {}),
-    });
-
+    providerMock.script = [{ type: "TEXT_MESSAGE_CONTENT", delta: "ok" }, { type: "RUN_FINISHED" }];
     providerMock.calls = [];
-    await drain(buildStream(baseCtx({ reasoning_effort: "high" })));
+    await drain(buildStream(ctx({ modelOptions: { reasoning_effort: "high" } })));
     expect(providerMock.calls.at(-1)!?.input?.modelOptions).toEqual({ reasoning_effort: "high" });
 
     providerMock.calls = [];
-    await drain(buildStream(baseCtx()));
+    await drain(buildStream(ctx()));
     expect(providerMock.calls.at(-1)!?.input?.modelOptions).toBeUndefined();
   });
 });

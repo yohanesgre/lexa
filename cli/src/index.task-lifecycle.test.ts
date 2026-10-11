@@ -36,18 +36,10 @@ describe("task id resolution + move (server-delegating)", () => {
           res.end(JSON.stringify({ data: [{ id: "col-1", name: "In Progress", wipLimit: null, requiredFields: null, color: null, position: 0, githubState: null }] }));
           return;
         }
-        if (url.pathname === "/api/projects/demo/swimlanes") {
-          res.end(JSON.stringify({ data: [{ id: "lane-2", name: "Lane Two", position: 1 }] }));
-          return;
-        }
         const move = url.pathname.match(/^\/api\/projects\/demo\/tasks\/(.+)\/move$/);
         if (req.method === "POST" && move) {
           const payload = JSON.parse(body) as { columnId: string; swimlaneId: string };
           res.end(JSON.stringify({ data: { ...task, columnId: payload.columnId, swimlaneId: payload.swimlaneId } }));
-          return;
-        }
-        if (req.method === "GET" && url.pathname === "/api/projects/demo/tasks") {
-          res.end(JSON.stringify({ data: [task] }));
           return;
         }
         const get = url.pathname.match(/^\/api\/projects\/demo\/tasks\/(.+)$/);
@@ -71,51 +63,28 @@ describe("task id resolution + move (server-delegating)", () => {
     requests = [];
   });
 
+  function env(): Record<string, string> {
+    return { LEXA_URL: base, LEXA_API_KEY: API_KEY };
+  }
   function moveRequest(): { columnId: string; swimlaneId: string } | undefined {
     const req = requests.find((q) => q.method === "POST" && q.url.endsWith("/move"));
     return req ? (JSON.parse(req.body) as { columnId: string; swimlaneId: string }) : undefined;
   }
 
-  it("task move without --swimlane sends the task's current non-empty swimlaneId", async () => {
-    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
-    expect(r.status).toBe(0);
-    const payload = moveRequest();
-    expect(payload).toBeDefined();
-    expect(payload!.columnId).toBe("col-1");
-    expect(payload!.swimlaneId).toBe("lane-1");
-    expect(payload!.swimlaneId).not.toBe("");
-  });
-
-  it("task move with --swimlane sends the resolved named swimlane id", async () => {
-    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--swimlane", "Lane Two"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
-    expect(r.status).toBe(0);
-    expect(moveRequest()!.swimlaneId).toBe("lane-2");
-  });
-
-  it("task list non-JSON output shows the full UUID", async () => {
-    const r = await runCli(["task", "list", "--project", "demo"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain(UUID);
-  });
-
-  it("PREFIX-N task id passes through to the server verbatim (no client-side list scan)", async () => {
-    const r = await runCli(["task", "move", "NIM-12", "--project", "demo", "--column", "In Progress"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
-    expect(r.status).toBe(0);
+  it("PREFIX-N and full-UUID task ids pass through to the server verbatim (no client-side list scan)", async () => {
+    const moved = await runCli(["task", "move", "NIM-12", "--project", "demo", "--column", "In Progress"], env());
+    expect(moved.status).toBe(0);
     expect(requests.some((q) => q.url === "/api/projects/demo/tasks/NIM-12")).toBe(true);
     expect(requests.some((q) => q.url.includes("?limit="))).toBe(false);
     expect(moveRequest()!.swimlaneId).toBe("lane-1");
-  });
 
-  it("full UUID task id passes through unchanged", async () => {
-    const r = await runCli(["task", "get", UUID, "--project", "demo", "--json"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
-    expect(r.status).toBe(0);
+    const uuid = await runCli(["task", "get", UUID, "--project", "demo", "--json"], env());
+    expect(uuid.status).toBe(0);
     expect(requests.some((q) => q.url === `/api/projects/demo/tasks/${UUID}`)).toBe(true);
     expect(requests.some((q) => q.url.includes("?limit="))).toBe(false);
-  });
 
-  it("PREFIX-N task id passes through for task get too", async () => {
-    const r = await runCli(["task", "get", "NIM-12", "--project", "demo", "--json"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
-    expect(r.status).toBe(0);
+    const key = await runCli(["task", "get", "NIM-12", "--project", "demo", "--json"], env());
+    expect(key.status).toBe(0);
     expect(requests.some((q) => q.url === "/api/projects/demo/tasks/NIM-12")).toBe(true);
     expect(requests.some((q) => q.url.includes("?limit="))).toBe(false);
   });
@@ -168,12 +137,6 @@ describe("lifecycle writes (task delete/update, wiki, github links)", () => {
           res.end(JSON.stringify({ ...page, slug: wikiPage[1] }));
           return;
         }
-        if (method === "POST" && url.pathname === "/api/projects/demo/wiki") {
-          const payload = JSON.parse(body || "{}") as { title?: string; slug?: string; parentId?: string };
-          res.writeHead(201);
-          res.end(JSON.stringify({ ...page, title: payload.title ?? "", slug: payload.slug ?? "new-page", parentId: payload.parentId ?? null }));
-          return;
-        }
         if (method === "PATCH" && wikiPage?.[1] !== undefined) {
           const payload = JSON.parse(body || "{}") as { slug?: string; title?: string; parentId?: string | null };
           res.end(JSON.stringify({ ...page, slug: payload.slug ?? wikiPage[1], title: payload.title ?? page.title, parentId: payload.parentId !== undefined ? payload.parentId : page.parentId }));
@@ -189,18 +152,8 @@ describe("lifecycle writes (task delete/update, wiki, github links)", () => {
           res.end();
           return;
         }
-        const linkExisting = url.pathname.match(/^\/api\/projects\/demo\/tasks\/([^/]+)\/github-link-existing$/);
-        if (method === "POST" && linkExisting) {
-          res.end(JSON.stringify({ data: task, activity: [] }));
-          return;
-        }
         const unlink = url.pathname.match(/^\/api\/projects\/demo\/tasks\/([^/]+)\/github-link\/([^/]+)$/);
         if (method === "DELETE" && unlink) {
-          res.end(JSON.stringify({ data: task, activity: [] }));
-          return;
-        }
-        const link = url.pathname.match(/^\/api\/projects\/demo\/tasks\/([^/]+)\/github-link$/);
-        if (method === "POST" && link) {
           res.end(JSON.stringify({ data: task, activity: [] }));
           return;
         }
@@ -247,154 +200,206 @@ describe("lifecycle writes (task delete/update, wiki, github links)", () => {
     return requests.filter((r) => r.method === method && r.url === path).pop();
   }
 
-  it("task delete → 204, exit 0, prints Deleted", async () => {
-    const r = await runCli(["task", "delete", UUID, "--project", "demo"], env());
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("  Deleted ");
-    expect(lastReq("DELETE", `/api/projects/demo/tasks/${UUID}`)).toBeDefined();
+  it("parent guards: task delete 409 TASK_HAS_CHILDREN and wiki delete 409 HAS_CHILDREN exit 1 with [CODE]", async () => {
+    const taskDel = await runCli(["task", "delete", "has-children", "--project", "demo"], env());
+    expect(taskDel.status).toBe(1);
+    expect(taskDel.stderr).toContain("TASK_HAS_CHILDREN");
+    expect(taskDel.stderr).toContain("[TASK_HAS_CHILDREN]");
+
+    const wikiDel = await runCli(["wiki", "delete", "parent-page", "--project", "demo"], env());
+    expect(wikiDel.status).toBe(1);
+    expect(wikiDel.stderr).toContain("HAS_CHILDREN");
+    expect(wikiDel.stderr).toContain("[HAS_CHILDREN]");
   });
 
-  it("task delete 409 TASK_HAS_CHILDREN → exit 1 with the [CODE] suffix", async () => {
-    const r = await runCli(["task", "delete", "has-children", "--project", "demo"], env());
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("TASK_HAS_CHILDREN");
-    expect(r.stderr).toContain("[TASK_HAS_CHILDREN]");
-  });
-
-  it("task update --description sends a TipTap doc", async () => {
-    const r = await runCli(["task", "update", UUID, "--project", "demo", "--description", "hello"], env());
-    expect(r.status).toBe(0);
-    const body = JSON.parse(lastReq("PATCH", `/api/projects/demo/tasks/${UUID}`)!.body) as { description?: { type?: string } };
-    expect(body.description?.type).toBe("doc");
-  });
-
-  it("task update --assignees a,b → array; --assignees= → empty array", async () => {
+  it("task update maps assignees/due flags to the payload and rejects a no-flag update", async () => {
     await runCli(["task", "update", UUID, "--project", "demo", "--assignees", "a,b"], env());
     expect((JSON.parse(lastReq("PATCH", `/api/projects/demo/tasks/${UUID}`)!.body) as { assignees?: string[] }).assignees).toEqual(["a", "b"]);
     await runCli(["task", "update", UUID, "--project", "demo", "--assignees="], env());
     expect((JSON.parse(lastReq("PATCH", `/api/projects/demo/tasks/${UUID}`)!.body) as { assignees?: string[] }).assignees).toEqual([]);
-  });
-
-  it("task update bare --assignees (no value) → usage, exit 1", async () => {
-    const r = await runCli(["task", "update", UUID, "--project", "demo", "--assignees"], env());
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Usage: lx task update");
-  });
-
-  it("task update --due sets dueAt; --clear-due sends dueAt: null", async () => {
     await runCli(["task", "update", UUID, "--project", "demo", "--due", "2026-10-01"], env());
     expect((JSON.parse(lastReq("PATCH", `/api/projects/demo/tasks/${UUID}`)!.body) as { dueAt?: string | null }).dueAt).toBe("2026-10-01");
     await runCli(["task", "update", UUID, "--project", "demo", "--clear-due"], env());
     expect((JSON.parse(lastReq("PATCH", `/api/projects/demo/tasks/${UUID}`)!.body) as { dueAt?: string | null }).dueAt).toBeNull();
+
+    const noFlags = await runCli(["task", "update", UUID, "--project", "demo"], env());
+    expect(noFlags.status).toBe(1);
+    expect(noFlags.stderr).toContain("Usage: lx task update");
   });
 
-  it("task update with no field flags → usage, exit 1", async () => {
-    const r = await runCli(["task", "update", UUID, "--project", "demo"], env());
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Usage: lx task update");
-  });
-
-  it("wiki create prints the created slug", async () => {
-    const r = await runCli(["wiki", "create", "--project", "demo", "--title", "New Page"], env());
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("new-page");
-    const body = JSON.parse(lastReq("POST", "/api/projects/demo/wiki")!.body) as { title?: string };
-    expect(body.title).toBe("New Page");
-  });
-
-  it("wiki update --slug prints the rename arrow", async () => {
-    const r = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--slug", "new-slug"], env());
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("→ new-slug");
-  });
-
-  it("wiki update --parent-root sends parentId: null", async () => {
-    const r = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--parent-root"], env());
-    expect(r.status).toBe(0);
+  it("wiki update --parent-root sends parentId: null and --parent resolves the slug to its page id", async () => {
+    const root = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--parent-root"], env());
+    expect(root.status).toBe(0);
     expect((JSON.parse(lastReq("PATCH", "/api/projects/demo/wiki/old-slug")!.body) as { parentId?: string | null }).parentId).toBeNull();
-  });
 
-  it("wiki update --parent resolves the parent slug to its page id", async () => {
-    const r = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--parent", "root-page"], env());
-    expect(r.status).toBe(0);
+    const child = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--parent", "root-page"], env());
+    expect(child.status).toBe(0);
     expect(lastReq("GET", "/api/projects/demo/wiki/root-page")).toBeDefined();
     expect((JSON.parse(lastReq("PATCH", "/api/projects/demo/wiki/old-slug")!.body) as { parentId?: string | null }).parentId).toBe("w-page");
   });
 
-  it("wiki create --content sends a TipTap doc", async () => {
-    const r = await runCli(["wiki", "create", "--project", "demo", "--title", "New Page", "--content", "hello"], env());
-    expect(r.status).toBe(0);
-    expect((JSON.parse(lastReq("POST", "/api/projects/demo/wiki")!.body) as { content?: { type?: string } }).content?.type).toBe("doc");
-  });
-
-  it("wiki update --content sends a TipTap doc", async () => {
-    const r = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--content", "hello"], env());
-    expect(r.status).toBe(0);
-    expect((JSON.parse(lastReq("PATCH", "/api/projects/demo/wiki/old-slug")!.body) as { content?: { type?: string } }).content?.type).toBe("doc");
-  });
-
-  it("wiki update --parent= (empty) → usage, exit 1", async () => {
-    const r = await runCli(["wiki", "update", "old-slug", "--project", "demo", "--parent="], env());
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Usage: lx wiki update");
-  });
-
-  it("wiki create --content= (empty) → usage, exit 1", async () => {
-    const r = await runCli(["wiki", "create", "--project", "demo", "--title", "New Page", "--content="], env());
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Usage: lx wiki create");
-  });
-
-  it("wiki delete 409 HAS_CHILDREN → exit 1 with the [CODE] suffix", async () => {
-    const r = await runCli(["wiki", "delete", "parent-page", "--project", "demo"], env());
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("HAS_CHILDREN");
-    expect(r.stderr).toContain("[HAS_CHILDREN]");
-  });
-
-  it("github link POSTs repo and prints Linked", async () => {
-    const r = await runCli(["github", "link", UUID, "--project", "demo", "--repo", "owner/repo"], env());
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain(`  Linked ${UUID} → owner/repo`);
-    const body = JSON.parse(lastReq("POST", `/api/projects/demo/tasks/${UUID}/github-link`)!.body) as { repo?: string };
-    expect(body).toEqual({ repo: "owner/repo" });
-  });
-
-  it("github link-existing POSTs repo + issueNumber", async () => {
-    const r = await runCli(["github", "link-existing", UUID, "--project", "demo", "--repo", "owner/repo", "--issue", "7"], env());
-    expect(r.status).toBe(0);
-    const body = JSON.parse(lastReq("POST", `/api/projects/demo/tasks/${UUID}/github-link-existing`)!.body) as { repo?: string; issueNumber?: number };
-    expect(body).toEqual({ repo: "owner/repo", issueNumber: 7 });
-  });
-
-  it("github unlink --issue-id unlinks by node id", async () => {
-    const r = await runCli(["github", "unlink", UUID, "--project", "demo", "--issue-id", "i9"], env());
-    expect(r.status).toBe(0);
+  it("github unlink by --issue-id, by --repo+--issue (node-id resolution), and the unmatched case", async () => {
+    const byId = await runCli(["github", "unlink", UUID, "--project", "demo", "--issue-id", "i9"], env());
+    expect(byId.status).toBe(0);
     expect(lastReq("DELETE", `/api/projects/demo/tasks/${UUID}/github-link/i9`)).toBeDefined();
-  });
 
-  it("github unlink --repo + --issue resolves the node id via task get", async () => {
-    const r = await runCli(["github", "unlink", UUID, "--project", "demo", "--repo", "owner/repo", "--issue", "5"], env());
-    expect(r.status).toBe(0);
+    const byIssue = await runCli(["github", "unlink", UUID, "--project", "demo", "--repo", "owner/repo", "--issue", "5"], env());
+    expect(byIssue.status).toBe(0);
     expect(lastReq("GET", `/api/projects/demo/tasks/${UUID}`)).toBeDefined();
     expect(lastReq("DELETE", `/api/projects/demo/tasks/${UUID}/github-link/i1`)).toBeDefined();
+
+    const unmatched = await runCli(["github", "unlink", UUID, "--project", "demo", "--repo", "owner/repo", "--issue", "99"], env());
+    expect(unmatched.status).toBe(1);
+    expect(unmatched.stderr).toContain("No linked issue");
+  });
+});
+
+describe("planning surface (column/swimlane/milestone + task move edges)", () => {
+  let server: Server;
+  let base = "";
+  let requests: Array<{ method: string; url: string; body: string }> = [];
+  const API_KEY = "lxk_planning_key_123456789012345678901234567890123";
+  const UUID = "11111111-2222-3333-4444-555555555555";
+  const task = {
+    id: UUID,
+    key: "NIM-12",
+    title: "Fix the thing",
+    priority: null,
+    type: null,
+    columnId: "col-1",
+    swimlaneId: "lane-1",
+    assignees: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+  const columns = [
+    { id: "col-1", projectId: "p1", name: "In Progress", wipLimit: 3, requiredFields: null, color: null, position: 0, githubState: null, isDone: false },
+    { id: "col-2", projectId: "p1", name: "Done", wipLimit: null, requiredFields: null, color: null, position: 1, githubState: "closed", isDone: true },
+    { id: "col-wip", projectId: "p1", name: "Full", wipLimit: 1, requiredFields: null, color: null, position: 2, githubState: null, isDone: false },
+  ];
+  const swimlanes = [
+    { id: "lane-1", projectId: "p1", name: "Sprint A", description: "", position: 0, dueAt: "2026-06-01", archivedAt: null, startAt: "2026-05-01", kind: "sprint", milestoneId: "ms-1" },
+  ];
+  const milestones = [
+    { id: "ms-1", projectId: "p1", name: "v1", description: "", position: 0, dueAt: "2026-09-30", archivedAt: null, sprintCount: 2, archivedSprintCount: 0 },
+  ];
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        const url = new URL(req.url ?? "", base);
+        const method = req.method ?? "GET";
+        requests.push({ method, url: url.pathname + url.search, body });
+        res.setHeader("Content-Type", "application/json");
+        if (url.pathname === "/api/projects/demo/columns" && method === "GET") { res.end(JSON.stringify({ data: columns })); return; }
+        if (url.pathname === "/api/projects/demo/swimlanes" && method === "GET") { res.end(JSON.stringify({ data: swimlanes })); return; }
+        if (url.pathname === "/api/projects/demo/milestones" && method === "GET") { res.end(JSON.stringify({ data: milestones })); return; }
+        const ms = url.pathname.match(/^\/api\/projects\/demo\/milestones\/([^/]+)$/);
+        if (ms && method === "PATCH") {
+          const p = JSON.parse(body || "{}") as { name?: string; dueAt?: string | null };
+          res.end(JSON.stringify({ ...milestones[0], name: p.name ?? milestones[0]!.name, dueAt: p.dueAt !== undefined ? p.dueAt : milestones[0]!.dueAt }));
+          return;
+        }
+        const getTask = url.pathname.match(/^\/api\/projects\/demo\/tasks\/([^/]+)$/);
+        if (getTask && method === "GET") { res.end(JSON.stringify(task)); return; }
+        const move = url.pathname.match(/^\/api\/projects\/demo\/tasks\/([^/]+)\/move$/);
+        if (move && method === "POST") {
+          const p = JSON.parse(body || "{}") as { columnId: string; swimlaneId: string };
+          if (p.columnId === "col-wip") {
+            res.writeHead(409);
+            res.end(JSON.stringify({ error: { code: "WIP_LIMIT", message: "WIP limit reached", details: { limit: 1 } } }));
+            return;
+          }
+          res.end(JSON.stringify({ data: { ...task, columnId: p.columnId, swimlaneId: p.swimlaneId }, activity: [] }));
+          return;
+        }
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: { code: "NOT_FOUND", message: "not found" } }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
 
-  it("github unlink with an unmatched repo+issue → exit 1", async () => {
-    const r = await runCli(["github", "unlink", UUID, "--project", "demo", "--repo", "owner/repo", "--issue", "99"], env());
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    requests = [];
+  });
+
+  function env(): Record<string, string> {
+    return { LEXA_URL: base, LEXA_API_KEY: API_KEY };
+  }
+  function lastReq(method: string, path: string): { method: string; url: string; body: string } | undefined {
+    return requests.filter((r) => r.method === method && r.url === path).pop();
+  }
+  function lastMove(): { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean } | undefined {
+    const req = requests.filter((r) => r.method === "POST" && r.url.endsWith("/move")).pop();
+    return req ? (JSON.parse(req.body) as { columnId: string; swimlaneId: string }) : undefined;
+  }
+
+  it("unknown milestone/column/swimlane refs exit 1 listing the available names", async () => {
+    const ms = await runCli(["milestone", "update", "Nope", "--project", "demo", "--name", "x"], env());
+    expect(ms.status).toBe(1);
+    expect(ms.stderr).toContain('Milestone "Nope" not found. Available: v1');
+
+    const col = await runCli(["task", "move", UUID, "--project", "demo", "--column", "Nope"], env());
+    expect(col.status).toBe(1);
+    expect(col.stderr).toContain('Column "Nope" not found. Available: In Progress, Done, Full');
+
+    const lane = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--swimlane", "Nope"], env());
+    expect(lane.status).toBe(1);
+    expect(lane.stderr).toContain('Swimlane "Nope" not found. Available: Sprint A');
+  });
+
+  it("resolves a mixed-case milestone ref and a --swimlane id before name", async () => {
+    const ms = await runCli(["milestone", "update", "V1", "--project", "demo", "--name", "v1.2"], env());
+    expect(ms.status).toBe(0);
+    expect(lastReq("PATCH", "/api/projects/demo/milestones/ms-1")).toBeDefined();
+
+    const moved = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--swimlane", "lane-1"], env());
+    expect(moved.status).toBe(0);
+    expect(requests.some((q) => q.url === "/api/projects/demo/swimlanes")).toBe(true);
+    expect(lastMove()!.swimlaneId).toBe("lane-1");
+  });
+
+  it("task move with no --swimlane sends the task's current swimlane (column resolved by exact id first)", async () => {
+    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "col-1"], env());
+    expect(r.status).toBe(0);
+    expect(lastMove()!.columnId).toBe("col-1");
+    expect(lastMove()!.swimlaneId).toBe("lane-1");
+  });
+
+  it("task move --before/--after pass ids verbatim and --clear-due sends clearDueAt: true", async () => {
+    const before = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--before", "NIM-3"], env());
+    expect(before.status).toBe(0);
+    expect(lastMove()!.columnId).toBe("col-1");
+    expect(lastMove()!.beforeTaskId).toBe("NIM-3");
+
+    const after = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--after", "NIM-4"], env());
+    expect(after.status).toBe(0);
+    expect(lastMove()!.afterTaskId).toBe("NIM-4");
+
+    const clearDue = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--clear-due"], env());
+    expect(clearDue.status).toBe(0);
+    expect(lastMove()!.clearDueAt).toBe(true);
+  });
+
+  it("task move --before + --after is a usage error with no request sent", async () => {
+    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--before", "NIM-3", "--after", "NIM-4"], env());
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("No linked issue");
+    expect(r.stderr).toContain("Usage: lx task move");
+    expect(requests.filter((q) => q.url.endsWith("/move")).length).toBe(0);
   });
 
-  it("group help lists the new subcommands", async () => {
-    const taskHelp = await runCli(["task", "bogus"], { LEXA_URL: "", LEXA_API_KEY: "" });
-    expect(taskHelp.status).toBe(1);
-    expect(taskHelp.stdout).toContain("task delete");
-    const wikiHelp = await runCli(["wiki", "bogus"], { LEXA_URL: "", LEXA_API_KEY: "" });
-    expect(wikiHelp.status).toBe(1);
-    expect(wikiHelp.stdout).toContain("wiki create");
-    const githubHelp = await runCli(["github", "bogus"], { LEXA_URL: "", LEXA_API_KEY: "" });
-    expect(githubHelp.status).toBe(1);
-    expect(githubHelp.stdout).toContain("github link <id> --project <slug> --repo <owner/name>");
+  it("task move WIP 409 → stderr carries the [WIP_LIMIT] suffix", async () => {
+    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "Full"], env());
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("WIP_LIMIT");
+    expect(r.stderr).toContain("[WIP_LIMIT]");
   });
 });

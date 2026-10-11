@@ -2,8 +2,7 @@
 
 > **Status: draft from docs, not from clicks.** Every step below marked
 > `[verify]` needs confirmation against the live dashboard during the
-> staging spike (spec `status/design-deploy-dashboard.md` wave2 S).
-> Do not treat menu labels as exact until verified.
+> staging spike. Do not treat menu labels as exact until verified.
 
 Goal: Lexa on Workers with **only a browser** — no bun, no wrangler,
 no token, no secrets to invent. You download one release file and click.

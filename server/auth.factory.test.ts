@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { makeSignature } from "better-auth/crypto";
 import { runMigrations } from "./db/migrate";
 import { auth, createAuth, authIpLimiter, authLimiterSizes, loginLimiter, sweepAuthLimiters, handleAuthSurface } from "./auth";
+import { capabilities, capabilitiesFromRuntimeEnv, chatAttachmentsEnabled, hasSecretsMasterKey, tasksBulkEnabled } from "./capabilities";
 import { getEnv, type RuntimeEnv } from "./env";
 
 const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -13,6 +14,7 @@ const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
 // better-auth's fixed fallback when no `secret` is configured.
 const LIBRARY_DEFAULT_SECRET = "better-auth-secret-12345678901234567890";
 const MASTER_KEY = Buffer.from("factory-test-master-key-000000000").toString("base64");
+const KEY = Buffer.from("k".repeat(32)).toString("base64");
 
 let dir: string;
 let dbPath: string;
@@ -50,44 +52,32 @@ afterAll(() => {
 });
 
 describe("createAuth(env) per-request factory", () => {
-  it("resolves publicUrl/databasePath/trustedOrigins from the passed env, not process.env", () => {
+  it("resolves publicUrl/databasePath/trustedOrigins from the passed env, with Bun-host defaults when absent", () => {
     const lexa = createAuth(baseEnv());
     expect(lexa.publicUrl).toBe("https://factory.test");
     expect(lexa.databasePath).toBe(dbPath);
     expect(lexa.trustedOrigins).toEqual(["https://factory.test"]);
     expect(lexa.env.LXK_PUBLIC_URL).toBe("https://factory.test");
-  });
 
-  it("dev env adds the vite host plus extras; prod does not", () => {
-    const dev = createAuth({
-      ...baseEnv(),
-      LXK_ENV: "dev",
-      LXK_TRUSTED_ORIGINS: "https://extra.test",
-    });
+    const fallback = createAuth({ DATABASE_PATH: dbPath, LXK_SECRETS_MASTER_KEY: MASTER_KEY });
+    expect(fallback.publicUrl).toBe("http://localhost:5173");
+    expect(fallback.trustedOrigins).toEqual(["http://localhost:5173"]);
+
+    const dev = createAuth({ ...baseEnv(), LXK_ENV: "dev", LXK_TRUSTED_ORIGINS: "https://extra.test" });
     expect(dev.trustedOrigins).toEqual(["https://factory.test", "http://localhost:5173", "https://extra.test"]);
     const prod = createAuth({ ...baseEnv(), LXK_TRUSTED_ORIGINS: "https://extra.test" });
     expect(prod.trustedOrigins).toEqual(["https://factory.test", "https://extra.test"]);
   });
 
-  it("falls back to Bun-host defaults when keys are absent", () => {
-    const lexa = createAuth({ DATABASE_PATH: dbPath, LXK_SECRETS_MASTER_KEY: MASTER_KEY });
-    expect(lexa.publicUrl).toBe("http://localhost:5173");
-    expect(lexa.trustedOrigins).toEqual(["http://localhost:5173"]);
-  });
-
-  it("two factories from different envs are isolated", () => {
+  it("recreates an isolated handler per env and exposes the shared limiters", () => {
     const a = createAuth({ ...baseEnv(), LXK_PUBLIC_URL: "https://a.test" });
     const b = createAuth({ ...baseEnv(), LXK_PUBLIC_URL: "https://b.test" });
     expect(a.publicUrl).toBe("https://a.test");
     expect(b.publicUrl).toBe("https://b.test");
     expect(a.handler).not.toBe(b.handler);
-  });
-
-  it("exposes a request handler and the shared limiters", () => {
-    const lexa = createAuth(baseEnv());
-    expect(typeof lexa.handler).toBe("function");
-    expect(typeof lexa.authIpLimiter).toBe("function");
-    expect(typeof lexa.loginLimiter.check).toBe("function");
+    expect(typeof a.handler).toBe("function");
+    expect(typeof a.authIpLimiter).toBe("function");
+    expect(typeof a.loginLimiter.check).toBe("function");
   });
 });
 
@@ -117,11 +107,13 @@ describe("auth signing secret (cookieCache forgery closed)", () => {
       }>;
     }).$context;
 
-  it("derives the secret from LXK_SECRETS_MASTER_KEY, never the library default", async () => {
+  it("derives the secret from LXK_SECRETS_MASTER_KEY and fails closed when missing or blank", async () => {
     const lexa = createAuth(baseEnv());
     const ctx = await ctxOf(lexa);
     expect(ctx.secret).toBe(`lexa-better-auth:${MASTER_KEY}`);
     expect(ctx.secret).not.toBe(LIBRARY_DEFAULT_SECRET);
+    expect(() => createAuth({ DATABASE_PATH: dbPath, LXK_PUBLIC_URL: "https://factory.test" })).toThrow(/LXK_SECRETS_MASTER_KEY/);
+    expect(() => createAuth({ ...baseEnv(), LXK_SECRETS_MASTER_KEY: "   " })).toThrow(/LXK_SECRETS_MASTER_KEY/);
   });
 
   it("rejects a session cookie signed with better-auth's library-default secret", async () => {
@@ -134,23 +126,14 @@ describe("auth signing secret (cookieCache forgery closed)", () => {
     });
     expect(session).toBeNull();
   });
-
-  it("fails closed when LXK_SECRETS_MASTER_KEY is missing or blank", () => {
-    expect(() => createAuth({ DATABASE_PATH: dbPath, LXK_PUBLIC_URL: "https://factory.test" })).toThrow(/LXK_SECRETS_MASTER_KEY/);
-    expect(() => createAuth({ ...baseEnv(), LXK_SECRETS_MASTER_KEY: "   " })).toThrow(/LXK_SECRETS_MASTER_KEY/);
-  });
 });
 
 describe("Bun-host auth singleton (lazy)", () => {
-  it("exposes handler + api without import-time side effects", () => {
+  it("initializes from the process env snapshot at first use", () => {
     expect(typeof auth.handler).toBe("function");
     expect(auth.api).toBeTruthy();
     expect(typeof auth.api.getSession).toBe("function");
-  });
-
-  it("initializes from the process env snapshot at first use", () => {
     expect(getEnv().LXK_PUBLIC_URL).toBe("http://process-env-decoy.test");
-    expect(typeof auth.handler).toBe("function");
   });
 });
 
@@ -166,7 +149,7 @@ describe("handleAuthSurface", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("BODY_TOO_LARGE");
   });
 
-  it("throttles an IP that exhausted its window with 429 before reaching the handler", async () => {
+  it("throttles an exhausted IP and locks an email after repeated 401s", async () => {
     const ip = "10.0.0.2";
     for (let i = 0; i < 120; i++) authIpLimiter(ip);
     expect(authIpLimiter(ip).ok).toBe(false);
@@ -178,9 +161,7 @@ describe("handleAuthSurface", () => {
     expect(called).toBe(false);
     expect(res.status).toBe(429);
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("RATE_LIMITED");
-  });
 
-  it("locks an email after repeated 401s and then short-circuits 429", async () => {
     const email = "throttle@lexa.test";
     let calls = 0;
     const deps = { ip: "10.0.0.3", maxBodyBytes: 1024, handler: async () => { calls += 1; return new Response("", { status: 401 }); } };
@@ -199,6 +180,45 @@ describe("handleAuthSurface", () => {
     expect(calls).toBe(5);
     expect(((await blocked.json()) as { error: { code: string } }).error.code).toBe("RATE_LIMITED");
     loginLimiter.recordSuccess(email);
+  });
+});
+
+describe("capabilities (GET /api/capabilities)", () => {
+  it("hasSecretsMasterKey requires a non-empty key", () => {
+    expect(hasSecretsMasterKey({})).toBe(false);
+    expect(hasSecretsMasterKey({ LXK_SECRETS_MASTER_KEY: "" })).toBe(false);
+    expect(hasSecretsMasterKey({ LXK_SECRETS_MASTER_KEY: KEY })).toBe(true);
+  });
+
+  it("both kill switches are enabled unless set to exactly '1'", () => {
+    expect(chatAttachmentsEnabled({})).toBe(true);
+    expect(chatAttachmentsEnabled({ LXK_DISABLE_CHAT_ATTACHMENTS: "0" })).toBe(true);
+    expect(chatAttachmentsEnabled({ LXK_DISABLE_CHAT_ATTACHMENTS: "true" })).toBe(true);
+    expect(chatAttachmentsEnabled({ LXK_DISABLE_CHAT_ATTACHMENTS: "" })).toBe(true);
+    expect(chatAttachmentsEnabled({ LXK_DISABLE_CHAT_ATTACHMENTS: "1" })).toBe(false);
+    expect(tasksBulkEnabled({})).toBe(true);
+    expect(tasksBulkEnabled({ LXK_DISABLE_TASKS_BULK: "0" })).toBe(true);
+    expect(tasksBulkEnabled({ LXK_DISABLE_TASKS_BULK: "1" })).toBe(false);
+  });
+
+  it("gates assistant on the master key and the rest on their kill switches, per flavor", () => {
+    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true });
+    expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({ assistant: true, flavor: "bun", chatAttachments: true, tasksBulk: true });
+    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false, tasksBulk: true });
+    expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_CHAT_ATTACHMENTS: "1" })).toEqual({
+      assistant: true,
+      flavor: "workers",
+      chatAttachments: false,
+      tasksBulk: true,
+    });
+    expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_TASKS_BULK: "1" })).toEqual({
+      assistant: true,
+      flavor: "workers",
+      chatAttachments: true,
+      tasksBulk: false,
+    });
+    const env = { LXK_SECRETS_MASTER_KEY: KEY } as RuntimeEnv;
+    expect(capabilitiesFromRuntimeEnv("workers", env)).toEqual(capabilities("workers", env));
   });
 });
 

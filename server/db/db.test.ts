@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, beforeEach } from "vitest";
 import { Effect } from "effect";
 import { Database } from "bun:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   Db,
   DbBunLive,
@@ -11,7 +15,6 @@ import {
   queryAll,
   queryFirst,
   run,
-  runReturning,
   withTx,
   ConstraintViolation,
   DbError,
@@ -19,6 +22,7 @@ import {
 } from "./db";
 import { createBunSqliteDriver } from "./drivers/bun-sqlite";
 import type { DbDriver } from "./driver";
+import { runMigrations } from "./migrate";
 
 function memDriver(): { driver: DbDriver; close: () => void } {
   const native = new Database(":memory:");
@@ -69,19 +73,6 @@ describe("async wrappers over the bun driver", () => {
         expect(dup.left).toBeInstanceOf(ConstraintViolation);
         expect((dup.left as ConstraintViolation).isPositionConflict).toBe(false);
       }
-    } finally {
-      close();
-    }
-  });
-
-  it("runReturning surfaces INSERT...RETURNING rows and constraint errors", async () => {
-    const { driver, close } = memDriver();
-    try {
-      const row = await runEff(runReturning<{ id: string; v: string }>(driver, "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id, v", "a", "1"));
-      expect(row).toEqual({ id: "a", v: "1" });
-      const dup = await Effect.runPromise(Effect.either(runReturning(driver, "INSERT INTO t (id, v) VALUES (?, ?) RETURNING id", "a", "2")));
-      expect(dup._tag).toBe("Left");
-      if (dup._tag === "Left") expect(dup.left).toBeInstanceOf(ConstraintViolation);
     } finally {
       close();
     }
@@ -230,5 +221,77 @@ describe("async wrappers over the bun driver", () => {
     } finally {
       native.close();
     }
+  });
+});
+
+// ── migrated-schema constraints (absorbed from database.test.ts) ──────────
+// A real migrated file DB proves the schema-level UNIQUE guards the in-memory
+// `t` fixture above cannot: task positions and the one-issue-per-task rule.
+const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
+let migratedDir: string;
+let migratedNative: Database;
+let migratedDriver: DbDriver;
+
+beforeAll(() => {
+  migratedDir = mkdtempSync(join(tmpdir(), "lexa-db-test-"));
+  const dbPath = join(migratedDir, "test.db");
+  runMigrations(dbPath, MIGRATIONS);
+  migratedNative = new Database(dbPath);
+  migratedNative.exec("PRAGMA foreign_keys = ON");
+  migratedDriver = createBunSqliteDriver(migratedNative);
+});
+
+afterAll(() => {
+  try { migratedNative.close(); } catch { /* already closed */ }
+  rmSync(migratedDir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  migratedNative.exec("PRAGMA foreign_keys = OFF");
+  const tables = migratedNative
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'")
+    .all() as { name: string }[];
+  for (const { name } of tables) {
+    try { migratedNative.exec(`DELETE FROM "${name}"`); } catch { /* no deleteable rows */ }
+  }
+  try { migratedNative.exec("DELETE FROM sqlite_sequence"); } catch { /* no autoincrement */ }
+  migratedNative.exec("PRAGMA foreign_keys = ON");
+});
+
+const SEED = `
+INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
+INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s1', 'p1', 'Main', 0);
+`;
+
+const INSERT_TASK = (id: string, position: string) =>
+  `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position) VALUES ('${id}','p1','c1','s1','T','${position}')`;
+
+describe("unique indexes on the migrated schema", () => {
+  it("rejects two tasks with the same (column_id, position)", async () => {
+    migratedNative.exec(SEED);
+    await runEff(run(migratedDriver, INSERT_TASK("t1", "a0")));
+    const result = await Effect.runPromise(Effect.either(run(migratedDriver, INSERT_TASK("t2", "a0"))));
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left).toBeInstanceOf(ConstraintViolation);
+      expect((result.left as ConstraintViolation).isPositionConflict).toBe(true);
+    }
+  });
+
+  it("rejects a second task_github_issues row with the same issue_id", async () => {
+    migratedNative.exec(SEED);
+    await runEff(run(migratedDriver, INSERT_TASK("t1", "a0")));
+    await runEff(run(migratedDriver, INSERT_TASK("t2", "a1")));
+    migratedNative.exec("INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo) VALUES ('t1','ghi1',1,'r')");
+    const result = await Effect.runPromise(
+      Effect.either(run(migratedDriver, "INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo) VALUES (?,?,?,?)", "t2", "ghi1", 1, "r"))
+    );
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left).toBeInstanceOf(ConstraintViolation);
+      expect((result.left as ConstraintViolation).isPositionConflict).toBe(false);
+    }
+    expect(await runEff(queryAll(migratedDriver, "SELECT COUNT(*) AS n FROM task_github_issues"))).toEqual([{ n: 1 }]);
   });
 });

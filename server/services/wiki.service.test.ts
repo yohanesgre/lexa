@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,12 +8,10 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
-import { WikiRepo } from "../repos/wiki.repo";
-import { ProjectRepo } from "../repos/project.repo";
-import { UserRepo } from "../repos/user.repo";
 import { WikiService } from "./wiki.service";
-import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent, SearchError } from "../api/errors";
-import type { TipTapDoc, WikiPage } from "../../shared/types";
+import { WikiShareService } from "./wiki-share.service";
+import { ShareLinkNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent } from "../api/errors";
+import type { TipTapDoc } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -49,7 +47,6 @@ beforeEach(() => {
 
 
 const DOC: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] };
-const DOC2: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "goodbye" }] }] };
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1'), ('p2','P2','p2')").run();
@@ -61,64 +58,7 @@ function makeService(db: Database) {
   return Context.get(ctx, WikiService);
 }
 
-const MOCK_PAGE: WikiPage = {
-  id: "a",
-  projectId: "p1",
-  title: "A",
-  slug: "a",
-  parentId: null,
-  position: 0,
-  updatedBy: null,
-  updatedByName: null,
-  updatedAt: "2026-01-01T00:00:00.000Z",
-  createdAt: "2026-01-01T00:00:00.000Z",
-  content: { type: "doc", content: [] },
-};
-
-// Provides a stub WikiRepo (DefaultWithoutDependencies bypasses the baked-in
-// WikiRepo.Default) so a specific write failure can be injected
-// deterministically. The update path now runs a single `batch` of
-// builder-produced statements, so a failure is injected through the SQL the
-// builder returns, not through a repo method.
-function makeServiceWithRepo(db: Database, overrides: Record<string, unknown>) {
-  const base = {
-    findById: () => Effect.succeed(MOCK_PAGE),
-    isDescendant: () => Effect.succeed(false),
-    createRevisionStmt: () => ({ sql: "SELECT 1", params: [] }),
-    pruneRevisionsStmt: () => ({ sql: "SELECT 1", params: [] }),
-    updateStmt: () => ({ sql: "SELECT 1", params: [] }),
-  };
-  const layer = WikiService.DefaultWithoutDependencies.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.succeed(WikiRepo, { ...base, ...overrides } as unknown as never),
-        ProjectRepo.Default,
-        UserRepo.Default
-      )
-    ),
-    Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db)))
-  );
-  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
-  return Context.get(ctx, WikiService);
-}
-
 describe("WikiService.create", () => {
-  it("creates a page with slugified title, content, and contentText", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.create("p1", { title: "Getting Started", content: DOC, contentText: "hello" })));
-    expect(Either.isRight(res)).toBe(true);
-    if (Either.isRight(res)) {
-      expect(res.right.slug).toBe("getting-started");
-      expect(res.right.title).toBe("Getting Started");
-      expect(res.right.parentId).toBeNull();
-      expect(res.right.position).toBe(0);
-      expect(res.right.content).toEqual(DOC);
-      const raw = db.prepare("SELECT content_text FROM wiki_pages WHERE id = ?").get(res.right.id) as { content_text: string };
-      expect(raw.content_text).toBe("hello");
-    }
-  });
-
   it("slug uniqueness is per project — same slug in another project is fine", async () => {
     seed(db);
     const svc = makeService(db);
@@ -130,127 +70,8 @@ describe("WikiService.create", () => {
     expect(Either.isRight(other)).toBe(true);
     if (Either.isRight(other)) expect(other.right.slug).toBe("home");
   });
-
-  it("unknown project → ProjectNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.create("nope", { title: "X" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
-  });
-
-  it("nested children get positions scoped to their parent", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const root1 = await Effect.runPromise(svc.create("p1", { title: "Root 1" }));
-    const root2 = await Effect.runPromise(svc.create("p1", { title: "Root 2" }));
-    expect(root1.position).toBe(0);
-    expect(root2.position).toBe(1);
-    const child1 = await Effect.runPromise(svc.create("p1", { title: "Child 1", parentId: root1.id }));
-    const child2 = await Effect.runPromise(svc.create("p1", { title: "Child 2", parentId: root1.id }));
-    expect(child1.parentId).toBe(root1.id);
-    expect(child1.position).toBe(0);
-    expect(child2.position).toBe(1);
-    // a root sibling created after the children still counts root siblings only
-    const root3 = await Effect.runPromise(svc.create("p1", { title: "Root 3" }));
-    expect(root3.position).toBe(2);
-  });
 });
-
-describe("WikiService.read", () => {
-  it("findByProject returns metas ordered by parent then position", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const root = await Effect.runPromise(svc.create("p1", { title: "Root" }));
-    await Effect.runPromise(svc.create("p1", { title: "Child", parentId: root.id }));
-    const pages = await Effect.runPromise(svc.findByProject("p1"));
-    // ORDER BY COALESCE(parent_id, '') ASC → roots (''), then children by parent
-    expect(pages.map((p) => p.title)).toEqual(["Root", "Child"]);
-  });
-
-  it("findChildren returns only direct children ordered by position", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const root = await Effect.runPromise(svc.create("p1", { title: "Root" }));
-    const c1 = await Effect.runPromise(svc.create("p1", { title: "B", parentId: root.id }));
-    const c2 = await Effect.runPromise(svc.create("p1", { title: "A", parentId: root.id }));
-    const children = await Effect.runPromise(svc.findChildren("p1", root.id));
-    expect(children.map((c) => c.id)).toEqual([c1.id, c2.id]);
-    expect(children.map((c) => c.title)).toEqual(["B", "A"]);
-  });
-
-  it("findBySlug missing → WikiPageNotFound; unknown project → ProjectNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const missing = await Effect.runPromise(Effect.either(svc.findBySlug("p1", "nope")));
-    expect(Either.isLeft(missing)).toBe(true);
-    if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(WikiPageNotFound);
-    const noProject = await Effect.runPromise(Effect.either(svc.findBySlug("nope", "home")));
-    expect(Either.isLeft(noProject)).toBe(true);
-    if (Either.isLeft(noProject)) expect(noProject.left).toBeInstanceOf(ProjectNotFound);
-  });
-});
-
 describe("WikiService.update", () => {
-  it("updates title/content/contentText and records an autosave revision of the prior state", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "Old", content: DOC, contentText: "hello" }));
-    const updated = await Effect.runPromise(
-      Effect.either(svc.update(page.id, { title: "New", content: JSON.stringify(DOC2), contentText: "goodbye" }))
-    );
-    expect(Either.isRight(updated)).toBe(true);
-    if (Either.isRight(updated)) {
-      expect(updated.right.title).toBe("New");
-      expect(updated.right.content).toEqual(DOC2);
-    }
-    const revisions = db.prepare("SELECT title, content_text, save_type FROM wiki_page_revisions WHERE page_id = ?").all(page.id) as { title: string; content_text: string; save_type: string }[];
-    expect(revisions).toEqual([{ title: "Old", content_text: "hello", save_type: "autosave" }]);
-  });
-
-  it("slug conflict on update → SlugTaken", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
-    await Effect.runPromise(svc.create("p1", { title: "B" }));
-    const res = await Effect.runPromise(Effect.either(svc.update(a.id, { slug: "b" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) {
-      expect(res.left).toBeInstanceOf(SlugTaken);
-      if (res.left instanceof SlugTaken) expect(res.left.slug).toBe("b");
-    }
-  });
-
-  it("unique-slug ConstraintViolation → SlugTaken (narrowed mapping)", async () => {
-    seed(db);
-    db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('a','p1','A','a','{\"type\":\"doc\",\"content\":[]}')").run();
-    db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('b','p1','B','b','{\"type\":\"doc\",\"content\":[]}')").run();
-    const svc = makeServiceWithRepo(db, {
-      updateStmt: () => ({ sql: "UPDATE wiki_pages SET slug = 'b' WHERE id = 'a'", params: [] }),
-    });
-    const res = await Effect.runPromise(Effect.either(svc.update("a", { slug: "b" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) {
-      expect(res.left).toBeInstanceOf(SlugTaken);
-      if (res.left instanceof SlugTaken) expect(res.left.slug).toBe("b");
-    }
-  });
-
-  it("FK ConstraintViolation → WikiPageNotFound, not SlugTaken (narrowed mapping)", async () => {
-    seed(db);
-    db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content) VALUES ('a','p1','A','a','{\"type\":\"doc\",\"content\":[]}')").run();
-    const svc = makeServiceWithRepo(db, {
-      updateStmt: () => ({ sql: "UPDATE wiki_pages SET parent_id = 'missing' WHERE id = 'a'", params: [] }),
-    });
-    const res = await Effect.runPromise(Effect.either(svc.update("a", { parentId: "other" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) {
-      expect(res.left).toBeInstanceOf(WikiPageNotFound);
-      expect(res.left).not.toBeInstanceOf(SlugTaken);
-      if (res.left instanceof WikiPageNotFound) expect(res.left.id).toBe("a");
-    }
-  });
-
   it("self-parent → InvalidParent(self), page unchanged", async () => {
     seed(db);
     const svc = makeService(db);
@@ -280,20 +101,6 @@ describe("WikiService.update", () => {
     expect(raw.parent_id).toBeNull();
   });
 
-  it("deep cycle (grandchild as parent) → InvalidParent(cycle)", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
-    const b = await Effect.runPromise(svc.create("p1", { title: "B", parentId: a.id }));
-    const c = await Effect.runPromise(svc.create("p1", { title: "C", parentId: b.id }));
-    const res = await Effect.runPromise(Effect.either(svc.update(a.id, { parentId: c.id })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) {
-      expect(res.left).toBeInstanceOf(InvalidParent);
-      if (res.left instanceof InvalidParent) expect(res.left.reason).toBe("cycle");
-    }
-  });
-
   it("cross-project parent → InvalidParent(cross-project)", async () => {
     seed(db);
     const svc = makeService(db);
@@ -305,61 +112,6 @@ describe("WikiService.update", () => {
       expect(res.left).toBeInstanceOf(InvalidParent);
       if (res.left instanceof InvalidParent) expect(res.left.reason).toBe("cross-project");
     }
-  });
-
-  it("missing parent → WikiPageNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "P" }));
-    const res = await Effect.runPromise(Effect.either(svc.update(page.id, { parentId: "nope" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
-  });
-
-  it("reparenting to the current parent is a no-op success", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
-    const b = await Effect.runPromise(svc.create("p1", { title: "B", parentId: a.id }));
-    const res = await Effect.runPromise(Effect.either(svc.update(b.id, { parentId: a.id })));
-    expect(Either.isRight(res)).toBe(true);
-    if (Either.isRight(res)) expect(res.right.parentId).toBe(a.id);
-  });
-
-  it("moves a page under a new parent and repositions it", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
-    const b = await Effect.runPromise(svc.create("p1", { title: "B" }));
-    const moved = await Effect.runPromise(Effect.either(svc.update(b.id, { parentId: a.id, position: 5 })));
-    expect(Either.isRight(moved)).toBe(true);
-    if (Either.isRight(moved)) {
-      expect(moved.right.parentId).toBe(a.id);
-      expect(moved.right.position).toBe(5);
-    }
-    // back to root
-    const reRooted = await Effect.runPromise(Effect.either(svc.update(b.id, { parentId: null })));
-    expect(Either.isRight(reRooted)).toBe(true);
-    if (Either.isRight(reRooted)) expect(reRooted.right.parentId).toBeNull();
-  });
-
-  it("missing id → WikiPageNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.update("nope", { title: "X" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
-  });
-
-  it("prunes revisions to the newest 100", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "P" }));
-    for (let i = 0; i < 105; i++) {
-      await Effect.runPromise(svc.update(page.id, { contentText: `v${i}` }));
-    }
-    const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_page_revisions WHERE page_id = ?").get(page.id) as { n: number }).n;
-    expect(n).toBe(100);
   });
 });
 
@@ -383,36 +135,28 @@ describe("WikiService revisions", () => {
     }
   });
 
-  it("restoreRevision rolls back title/slug/content and records a manual revision", async () => {
+  it("restores an earlier revision (and rejects a revision owned by another page)", async () => {
     seed(db);
     const svc = makeService(db);
     const page = await Effect.runPromise(svc.create("p1", { title: "Guide", content: DOC, contentText: "old text" }));
-    await Effect.runPromise(svc.update(page.id, { title: "Guide 2", content: JSON.stringify(DOC2), contentText: "new text" }));
-    const revisions = await Effect.runPromise(svc.listRevisions("guide", "p1"));
-    expect(revisions).toHaveLength(1);
-    const restored = await Effect.runPromise(Effect.either(svc.restoreRevision(revisions[0]!.id, "guide", "p1")));
+    const other = await Effect.runPromise(svc.create("p1", { title: "Other" }));
+    await Effect.runPromise(svc.update(page.id, { title: "Guide 2", contentText: "new text" }));
+    await Effect.runPromise(svc.update(other.id, { title: "Other 2" }));
+
+    const [rev] = await Effect.runPromise(svc.listRevisions("guide", "p1"));
+    const restored = await Effect.runPromise(Effect.either(svc.restoreRevision(rev!.id, "guide", "p1")));
     expect(Either.isRight(restored)).toBe(true);
     if (Either.isRight(restored)) {
       expect(restored.right.title).toBe("Guide");
       expect(restored.right.content).toEqual(DOC);
     }
-    const after = db.prepare("SELECT title, save_type FROM wiki_page_revisions WHERE page_id = ?").all(page.id) as { title: string; save_type: string }[];
-    expect(after).toHaveLength(2);
-    expect(after.map((r) => r.save_type).sort()).toEqual(["autosave", "manual"]);
-  });
+    const rows = db.prepare("SELECT save_type FROM wiki_page_revisions WHERE page_id = ?").all(page.id) as { save_type: string }[];
+    expect(rows.map((r) => r.save_type).sort()).toEqual(["autosave", "manual"]);
 
-  it("restoring a revision of a different page → WikiPageNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
-    const b = await Effect.runPromise(svc.create("p1", { title: "B" }));
-    await Effect.runPromise(svc.update(a.id, { title: "A2" }));
-    const revs = await Effect.runPromise(svc.listRevisions("a", "p1"));
-    const res = await Effect.runPromise(Effect.either(svc.restoreRevision(revs[0]!.id, "b", "p1")));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
-    const unchanged = await Effect.runPromise(svc.findBySlug("p1", "b"));
-    expect(unchanged.title).toBe("B");
+    const [otherRev] = await Effect.runPromise(svc.listRevisions("other", "p1"));
+    const bad = await Effect.runPromise(Effect.either(svc.restoreRevision(otherRev!.id, "guide", "p1")));
+    expect(Either.isLeft(bad)).toBe(true);
+    if (Either.isLeft(bad)) expect(bad.left).toBeInstanceOf(WikiPageNotFound);
   });
 });
 
@@ -444,14 +188,6 @@ describe("WikiService.delete", () => {
     const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_pages WHERE id = ?").get(parent.id) as { n: number }).n;
     expect(n).toBe(1);
   });
-
-  it("missing id → WikiPageNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.delete("nope")));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
-  });
 });
 
 describe("WikiService.search", () => {
@@ -467,94 +203,153 @@ describe("WikiService.search", () => {
       expect(results.right[0]!.snippet).toContain("fractional");
     }
   });
+});
 
-  it("scopes results per project and respects the limit", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(svc.create("p1", { title: "One", contentText: "fractional" }));
-    await Effect.runPromise(svc.create("p1", { title: "Two", contentText: "fractional" }));
-    await Effect.runPromise(svc.create("p2", { title: "Other", contentText: "fractional" }));
-    const all = await Effect.runPromise(svc.search("p1", "fractional"));
-    expect(all).toHaveLength(2);
-    const limited = await Effect.runPromise(svc.search("p1", "fractional", 1));
-    expect(limited).toHaveLength(1);
-    const other = await Effect.runPromise(svc.search("p2", "fractional"));
-    expect(other).toHaveLength(1);
-    const none = await Effect.runPromise(svc.search("p1", "zzz"));
-    expect(none).toEqual([]);
+// ── wiki share service (absorbed from wiki-share.service.test.ts) ──────────
+const ROOT_DOC = {
+  type: "doc",
+  content: [{ type: "paragraph", content: [{ type: "text", text: "root text" }] }],
+};
+
+function seedShare(db: Database) {
+  db.prepare("INSERT INTO users (id, email, name) VALUES ('u1', 'u1@test.dev', 'User One')").run();
+  db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1'), ('p2','P2','p2')").run();
+  const emptyDoc = JSON.stringify({ type: "doc", content: [] });
+  db.prepare(
+    `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES
+       ('w-root', 'p1', 'Root', 'root', ?, 'root text', NULL, 0),
+       ('w-child', 'p1', 'Child', 'child', ?, '', 'w-root', 0),
+       ('w-other', 'p2', 'Other', 'other', ?, '', NULL, 0)`
+  ).run(JSON.stringify(ROOT_DOC), emptyDoc, emptyDoc);
+}
+
+function makeShareService(db: Database) {
+  const layer = WikiShareService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
+  return Context.get(ctx, WikiShareService);
+}
+
+async function createLink(
+  svc: WikiShareService,
+  overrides: Partial<{ projectId: string; pageId: string; expiresAt: string | null; createdBy: string }> = {}
+) {
+  return await Effect.runPromise(
+    Effect.either(
+      svc.create({
+        projectId: "p1",
+        pageId: "w-root",
+        expiresAt: null,
+        createdBy: "u1",
+        ...overrides,
+      })
+    )
+  );
+}
+
+describe("WikiShareService.create", () => {
+  it("creates a link with a base64url token, uuid id, and NULL expiry preserved", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const res = await createLink(svc);
+    expect(Either.isRight(res)).toBe(true);
+    if (Either.isRight(res)) {
+      expect(res.right.token).toMatch(/^[A-Za-z0-9_-]{24}$/);
+      expect(res.right.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(res.right.page_id).toBe("w-root");
+      expect(res.right.created_by).toBe("u1");
+      expect(res.right.expires_at).toBeNull();
+    }
   });
 
-  it("update re-indexes contentText via the FTS trigger", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "P", contentText: "alpha" }));
-    let results = await Effect.runPromise(svc.search("p1", "alpha"));
-    expect(results).toHaveLength(1);
-    results = await Effect.runPromise(svc.search("p1", "beta"));
-    expect(results).toHaveLength(0);
-    await Effect.runPromise(svc.update(page.id, { contentText: "beta" }));
-    results = await Effect.runPromise(svc.search("p1", "beta"));
-    expect(results).toHaveLength(1);
-  });
-
-  it("invalid FTS5 query → SearchError", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(svc.create("p1", { title: "P", contentText: "alpha" }));
-    const res = await Effect.runPromise(Effect.either(svc.search("p1", "\"unterminated")));
+  it("page of another project → WikiPageNotFound", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const res = await createLink(svc, { projectId: "p1", pageId: "w-other" });
     expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(SearchError);
+    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
   });
 
-  it("hyphenated query → SearchError (FTS5 parses '-' as column syntax)", async () => {
-    seed(db);
-    const svc = makeService(db);
-    await Effect.runPromise(svc.create("p1", { title: "P", contentText: "alpha" }));
-    const res = await Effect.runPromise(Effect.either(svc.search("p1", "foo-bar")));
+  it("unknown page → WikiPageNotFound", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const res = await createLink(svc, { pageId: "nope" });
     expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(SearchError);
+    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
   });
 });
 
-describe("WikiService last-edited author", () => {
-  it("records updated_by on create and both save types, and resolves the display name", async () => {
-    seed(db);
-    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','al@lexa.test','Al','member')").run();
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "Home", updatedBy: "u1" }));
-    expect(page.updatedBy).toBe("u1");
-    expect(page.updatedByName).toBe("Al");
-    const raw = db.prepare("SELECT updated_by FROM wiki_pages WHERE id = ?").get(page.id) as { updated_by: string | null };
-    expect(raw.updated_by).toBe("u1");
+describe("WikiShareService.list", () => {
+  it("lists links for a page, oldest first; other pages unaffected", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const a = await createLink(svc);
+    const b = await createLink(svc);
+    expect(Either.isRight(a) && Either.isRight(b)).toBe(true);
+    if (!Either.isRight(a) || !Either.isRight(b)) throw new Error("create failed");
+    const links = await Effect.runPromise(svc.list("w-root"));
+    // ORDER BY created_at ASC, id ASC — same-second inserts tie-break on id
+    const expected = [a.right, b.right]
+      .map((r) => ({ token: r.token, created_at: r.created_at, id: r.id }))
+      .sort((x, y) => x.created_at.localeCompare(y.created_at) || x.id.localeCompare(y.id))
+      .map((r) => r.token);
+    expect(links.map((l) => l.token)).toEqual(expected);
+    expect(await Effect.runPromise(svc.list("w-child"))).toEqual([]);
+  });
+});
 
-    const manual = await Effect.runPromise(svc.update(page.id, { title: "Home v2" }, "manual", "u1"));
-    expect(manual.updatedBy).toBe("u1");
-    expect(manual.updatedByName).toBe("Al");
+describe("WikiShareService.revoke", () => {
+  it("deletes the link; resolving it afterwards fails ShareLinkNotFound", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const created = await createLink(svc);
+    if (!Either.isRight(created)) throw new Error("create failed");
+    const revoked = await Effect.runPromise(Effect.either(svc.revoke(created.right.id, "p1")));
+    expect(Either.isRight(revoked)).toBe(true);
+    const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_share_links WHERE id = ?").get(created.right.id) as { n: number }).n;
+    expect(n).toBe(0);
+    const resolved = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
+    expect(Either.isLeft(resolved)).toBe(true);
+    if (Either.isLeft(resolved)) expect(resolved.left).toBeInstanceOf(ShareLinkNotFound);
+  });
+});
 
-    const auto = await Effect.runPromise(svc.update(page.id, { title: "Home v3" }, "autosave", "u1"));
-    expect(auto.updatedBy).toBe("u1");
-    expect(auto.updatedByName).toBe("Al");
-
-    // Read path resolves the author name too.
-    const read = await Effect.runPromise(svc.findBySlug("p1", "home"));
-    expect(read.updatedByName).toBe("Al");
+describe("WikiShareService.resolvePublic", () => {
+  it("valid token returns root + descendants with parsed JSON content", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const created = await createLink(svc);
+    if (!Either.isRight(created)) throw new Error("create failed");
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
+    expect(Either.isRight(res)).toBe(true);
+    if (Either.isRight(res)) {
+      const root = res.right.root;
+      expect(root.id).toBe("w-root");
+      expect(root.title).toBe("Root");
+      expect(root.slug).toBe("root");
+      expect(typeof root.updatedAt).toBe("string");
+      expect(root.content).toEqual(ROOT_DOC);
+      expect(root.children).toHaveLength(1);
+      expect(root.children[0]!.id).toBe("w-child");
+      expect(root.children[0]!.content).toEqual({ type: "doc", content: [] });
+      expect(root.children[0]!.children).toEqual([]);
+    }
   });
 
-  it("leaves legacy rows with a null author", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "Legacy" }));
-    expect(page.updatedBy).toBeNull();
-    expect(page.updatedByName).toBeNull();
+  it("expired link → ShareLinkNotFound", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const created = await createLink(svc, { expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    if (!Either.isRight(created)) throw new Error("create failed");
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ShareLinkNotFound);
   });
 
-  it("keeps a previously recorded author when a later save has no user context", async () => {
-    seed(db);
-    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','al@lexa.test','Al','member')").run();
-    const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "Home", updatedBy: "u1" }));
-    await Effect.runPromise(svc.update(page.id, { title: "Machine edit" }, "autosave", null));
-    const raw = db.prepare("SELECT updated_by FROM wiki_pages WHERE id = ?").get(page.id) as { updated_by: string | null };
-    expect(raw.updated_by).toBe("u1");
+  it("unknown token → ShareLinkNotFound (same failure path)", async () => {
+    seedShare(db);
+    const svc = makeShareService(db);
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic("nope")));
+    expect(Either.isLeft(res)).toBe(true);
+    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ShareLinkNotFound);
   });
 });

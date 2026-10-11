@@ -4,7 +4,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 
 const h = vi.hoisted(() => ({
   session: { value: { user: { role: "superadmin" } } as { user: { role: string } } | null },
@@ -51,14 +51,13 @@ afterEach(() => {
 });
 
 describe("GithubCallbackPage", () => {
-  it("shows the completing state while the exchange is in flight", () => {
+  it("shows the completing state while the exchange is in flight, then the connected confirmation and auto-return", () => {
     h.complete.mutate.mockImplementation(() => {});
     renderPage({ code: "c0de", state: "s1" });
     expect(screen.getByText("Finishing GitHub connection…")).toBeInTheDocument();
     expect(h.complete.mutate).toHaveBeenCalledWith({ code: "c0de", state: "s1" }, expect.anything());
-  });
+    cleanup();
 
-  it("renders the connected confirmation and auto-returns to Settings", () => {
     vi.useFakeTimers();
     h.complete.data = { appId: "1234567", appSlug: "lexa-nimbus" };
     h.complete.mutate.mockImplementation((_input: unknown, opts: { onSuccess?: () => void }) => opts.onSuccess?.());
@@ -76,28 +75,25 @@ describe("GithubCallbackPage", () => {
     expect(screen.getByText("Connection cancelled — nothing was changed.")).toBeInTheDocument();
   });
 
-  it("shows the invalid state and never calls the server when state is missing", () => {
+  it("renders the invalid state for a missing or stale state and the fixed cause-neutral copy for every manifest failure code", () => {
     renderPage({});
     expect(screen.getByText("This connection link is no longer valid.")).toBeInTheDocument();
     expect(h.complete.mutate).not.toHaveBeenCalled();
-  });
+    cleanup();
 
-  it("shows the invalid state when the consumed state no longer verifies", () => {
     h.complete.mutate.mockImplementation((_input: unknown, opts: { onError?: (e: unknown) => void }) => opts.onError?.({ code: "GITHUB_MANIFEST_STATE_INVALID" }));
     renderPage({ code: "c0de", state: "stale" });
     expect(screen.getByText("This connection link is no longer valid.")).toBeInTheDocument();
-  });
 
-  it.each(["GITHUB_MANIFEST_EXCHANGE_FAILED", "GITHUB_MANIFEST_PERMISSIONS_DENIED", "GITHUB_SECRET_WRITE_FAILED"])(
-    "renders the fixed cause-neutral failure copy for %s, never the reason-specific variant",
-    (code) => {
+    for (const code of ["GITHUB_MANIFEST_EXCHANGE_FAILED", "GITHUB_MANIFEST_PERMISSIONS_DENIED", "GITHUB_SECRET_WRITE_FAILED"]) {
+      cleanup();
       h.complete.mutate.mockImplementation((_input: unknown, opts: { onError?: (e: unknown) => void }) => opts.onError?.({ code }));
       renderPage({ code: "c0de", state: "s1" });
       expect(screen.getByText("Lexa couldn't finish connecting — no credentials were saved.")).toBeInTheDocument();
       expect(screen.queryByText(/handshake|required permissions|store the credentials/)).not.toBeInTheDocument();
       expect(screen.getByText("Retry from settings")).toBeInTheDocument();
     }
-  );
+  });
 
   it("redirects a non-superadmin to their own settings surface", () => {
     h.session.value = { user: { role: "member" } };

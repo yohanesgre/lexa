@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# verify-gate — pre-commit / pre-PR gate (typecheck → scoped tests → invariants → secrets).
+# verify-gate — pre-commit / pre-PR gate (typecheck → scoped tests → test hygiene → invariants → secrets).
 #
 # Usage: bash scripts/verify-gate.sh [--full] [--lane=<fe|be|cli|full>] [--print-plan]
 #   default        scope the test step to the changed areas (see below)
@@ -124,6 +124,13 @@ if [ "$PLAN_LABEL" = "skip" ]; then
 else
   printf "  command: %s\n" "${PLAN_CMDS[*]}"
 fi
+printf "  test-hygiene: bun run check:test-hygiene (always)\n"
+if [ "$touched_invariants" -eq 1 ]; then
+  printf "  invariants: bun run check:invariants\n"
+fi
+if [ "$touched_wireframes" -eq 1 ]; then
+  printf "  wireframes: bash wireframes/build.sh\n"
+fi
 if [ "$touched_installer" -eq 1 ]; then
   printf "  install-script: bash scripts/test-install.sh\n"
 fi
@@ -154,6 +161,9 @@ else
   say "Gate: vitest run ($PLAN_LABEL)"
   if "${PLAN_CMDS[@]}" 2>&1 | tee -a "$LOG" | tail -n 30; then ok "tests passed ($PLAN_LABEL)"; else bad "tests failed ($PLAN_LABEL)"; fi
 fi
+
+say "Gate: test-hygiene guard rail (scripts/check-test-hygiene.ts)"
+if bun run check:test-hygiene 2>&1 | tee -a "$LOG" | tail -n 20; then ok "test hygiene passed"; else bad "test hygiene failed"; fi
 
 if [ "$touched_installer" -eq 1 ]; then
   say "Gate: install-script suite (scripts/test-install.sh)"

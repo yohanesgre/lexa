@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
 import { ColumnService } from "./column.service";
+import { DashboardService } from "./dashboard.service";
 import { ProjectNotFound, ColumnNotFound, HasChildren } from "../api/errors";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -154,14 +155,6 @@ describe("ColumnService.update", () => {
     }
   });
 
-  it("missing id → ColumnNotFound", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.update("nope", { name: "X" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ColumnNotFound);
-  });
-
   it("update sets and clears isDone", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Done',0)").run();
@@ -203,11 +196,80 @@ describe("ColumnService.delete", () => {
     expect(n).toBe(1);
   });
 
-  it("missing id → ColumnNotFound", async () => {
+});
+
+// Carried from the absorbed server/repos/column.repo.test.ts (the service now
+// owns the column surface): the value round-trip plus the schema CHECK that
+// invariant #9 relies on for columns.github_state.
+describe("ColumnService github_state", () => {
+  it("round-trips open/closed/null; the CHECK rejects any other value", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.delete("nope")));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ColumnNotFound);
+    const open = await Effect.runPromise(svc.create({ projectId: "p1", name: "Todo", githubState: "open" }));
+    expect(open.githubState).toBe("open");
+
+    const closed = await Effect.runPromise(svc.update(open.id, { githubState: "closed" }));
+    expect(closed.githubState).toBe("closed");
+
+    const cleared = await Effect.runPromise(svc.update(open.id, { githubState: null }));
+    expect(cleared.githubState).toBeNull();
+    const raw = db.prepare("SELECT github_state FROM columns WHERE id = ?").get(open.id) as { github_state: string | null };
+    expect(raw.github_state).toBeNull();
+
+    expect(() =>
+      db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('bad','p1','X',0,'merged')").run()
+    ).toThrow(/CHECK/i);
+  });
+});
+
+// Carried from the absorbed server/services/dashboard.service.test.ts (batched
+// WIP segments): reuses the shared migrated db + cleanDb above.
+function seedWip(db: Database) {
+  db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
+  db.prepare("INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1','p1','Medium','#888',0)").run();
+  db.prepare("INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1','p1','Bug','#f00',0)").run();
+  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1','p1','Backlog',0,'backlog')").run();
+  db.prepare(`INSERT INTO columns (id, project_id, name, position, wip_limit, github_state) VALUES
+                ('c-empty','p1','Empty',0,NULL,NULL),
+                ('c-ok','p1','Ok',1,2,NULL),
+                ('c-approach','p1','Approach',2,3,NULL),
+                ('c-exceed','p1','Exceed',3,1,NULL)`).run();
+  db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
+                ('t-ok','p1','c-ok','s1','Ok','{"type":"doc","content":[]}','prio-1','type-1','a0','2026-01-01 10:00:00'),
+                ('t-ok-arch','p1','c-ok','s1','Archived','{"type":"doc","content":[]}','prio-1','type-1','a1','2026-01-02 10:00:00'),
+                ('t-a1','p1','c-approach','s1','A1','{"type":"doc","content":[]}','prio-1','type-1','b0','2026-01-03 10:00:00'),
+                ('t-a2','p1','c-approach','s1','A2','{"type":"doc","content":[]}','prio-1','type-1','b1','2026-01-04 10:00:00'),
+                ('t-a3','p1','c-approach','s1','A3','{"type":"doc","content":[]}','prio-1','type-1','b2','2026-01-05 10:00:00'),
+                ('t-e1','p1','c-exceed','s1','E1','{"type":"doc","content":[]}','prio-1','type-1','c0','2026-01-06 10:00:00'),
+                ('t-e2','p1','c-exceed','s1','E2','{"type":"doc","content":[]}','prio-1','type-1','c1','2026-01-07 10:00:00')`).run();
+  db.prepare("UPDATE tasks SET archived_at = '2026-01-08 10:00:00' WHERE id = 't-ok-arch'").run();
+}
+
+function makeDashboardService(db: Database) {
+  const layer = DashboardService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
+  return Context.get(ctx, DashboardService);
+}
+
+describe("DashboardService.getDashboard wipSegments", () => {
+  it("derives per-column state/flex from batched counts and excludes archived tasks", async () => {
+    seedWip(db);
+    const svc = makeDashboardService(db);
+    const dashboard = await Effect.runPromise(svc.getDashboard());
+    const project = dashboard.projects.find((p) => p.project.id === "p1");
+    expect(project).toBeDefined();
+    // findByProject orders by position: c-empty, c-ok, c-approach, c-exceed.
+    expect(project!.wipSegments.map((s) => s.state)).toEqual(["empty", "ok", "approaching", "exceeded"]);
+    expect(project!.wipSegments.map((s) => s.flex)).toEqual([1, 1, 3, 2]);
+  });
+
+  it("counts a zero-task column as 0 (empty), never a batched-map miss", async () => {
+    seedWip(db);
+    const svc = makeDashboardService(db);
+    const dashboard = await Effect.runPromise(svc.getDashboard());
+    const project = dashboard.projects.find((p) => p.project.id === "p1")!;
+    const empty = project.wipSegments[0]!;
+    expect(empty.state).toBe("empty");
+    expect(empty.flex).toBe(1);
   });
 });
