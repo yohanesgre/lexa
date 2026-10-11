@@ -112,7 +112,7 @@ git diff --cached --name-only
 ## 5. PR & merge rules — branch → PR → trunk
 
 - Always `branch → push → PR → review → merge to main`. Never commit on `main`, and never merge locally without a PR unless the user explicitly says "merge locally".
-- When work completes, present exactly two options and wait: **(1) merge locally** (only if the user wants local integration without GitHub review) or **(2) push and create a PR** (default). Do not act until the user picks.
+- When work completes: push the branch, open the PR, and arm **auto-merge** (`gh pr merge --auto --squash`). Auto-merge is the standing preference (the repo setting `allow_auto_merge` is enabled), so a green lane lands itself: do not stop to ask for a merge decision. Merge locally only when the user explicitly asks for local integration, and then re-run the gate on the merged result before pushing.
 - Branch must be green before PR:
   ```bash
   bash scripts/verify-gate.sh
@@ -157,7 +157,7 @@ Direct tag/commit on `main` without PR is blocked — releases also go through b
 | `worktree add` / branch create | yes | §2 checks |
 | `git commit` | yes | §3.2 checklist |
 | `git push` | yes | §4 checks |
-| `git merge/rebase` | yes | option menu + re-verify gate |
+| `git merge/rebase` | yes — but a lane PR arms auto-merge itself | re-verify gate after merge |
 | `git tag v*` / `cli-v*` | yes | §7 checklist |
 | `push --force` | explicit "force" | `--force-with-lease` only |
 
