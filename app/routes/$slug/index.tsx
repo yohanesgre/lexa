@@ -603,7 +603,7 @@ function TrailProfile({
           <div className="tm-void">
             <span className="tm-void-title">No peaks on the map yet</span>
             <span>A milestone sets the target; its sprints become the runs down to Done.</span>
-            <Link to="/$slug/milestones" params={{ slug }} className="btn btn-primary btn-sm">
+            <Link to="/$slug/milestones" params={{ slug }} className="btn btn-ghost btn-sm">
               Add milestone
             </Link>
           </div>
@@ -1082,19 +1082,21 @@ function ProjectDashboard() {
           <h1>{health.project.name}</h1>
           <span className="tm-plate">Dashboard</span>
           <span className="nav-spacer" />
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            aria-label="Project settings"
-            onClick={() => navigate({ to: "/settings/project/$projectId", params: { projectId: health.project.id } })}
-          >
-            <Settings size={14} strokeWidth={1.5} aria-hidden="true" />
-            Project settings
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCreate(true)}>
-            <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
-            New Project
-          </button>
+          <div className="tm-dash-actions">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-label="Project settings"
+              onClick={() => navigate({ to: "/settings/project/$projectId", params: { projectId: health.project.id } })}
+            >
+              <Settings size={14} strokeWidth={1.5} aria-hidden="true" />
+              Project settings
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCreate(true)}>
+              <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
+              New Project
+            </button>
+          </div>
         </div>
 
         <TrailReport

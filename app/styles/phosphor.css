@@ -5033,7 +5033,7 @@
   .tasks-search {
     flex: 1;
     min-width: 200px;
-    height: 28px;
+    height: var(--lx-row-h);
     padding: 0 10px;
     background: var(--lx-surface-input);
     border: 1px solid var(--lx-border-input);
@@ -5048,7 +5048,7 @@
   .tasks-search:focus { border-color: var(--lx-border-focus); }
 
   .tasks-select {
-    height: 28px;
+    height: var(--lx-row-h);
     max-width: 140px;
     padding: 0 8px;
     background: var(--lx-surface-input);
@@ -5066,7 +5066,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    height: 28px;
+    height: var(--lx-row-h);
     padding: 0 10px;
     background: transparent;
     border: 1px solid var(--lx-border-default);
@@ -7881,6 +7881,11 @@
     width: 100%;
     justify-content: center;
   }
+  .tasks-search,
+  .tasks-select,
+  .tasks-archive-toggle {
+    height: var(--lx-row-h-touch);
+  }
   .task-row-title {
     font-size: 14px;
   }
@@ -9119,14 +9124,14 @@ html {
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
-  padding: 8px;
+  padding: 12px;
 }
 .tm-section-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .tm-section-head > div {
   min-width: 0;
@@ -9436,7 +9441,7 @@ html {
   align-items: center;
   gap: 10px;
   min-height: 48px;
-  padding: 0 16px;
+  padding: 0 40px;
   background: var(--lx-surface-rail);
   border-bottom: 1px solid var(--lx-border-default);
 }
@@ -9485,7 +9490,7 @@ html {
 .app-topbar-account {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .nav-pill-icon {
   padding: 0;
@@ -9539,9 +9544,9 @@ html {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px 14px;
+  padding: 8px 14px;
   border-right: 1px solid var(--lx-border-subtle);
 }
 .tm-report-item:last-child {
@@ -10079,10 +10084,15 @@ html {
 .tm-dash-head .nav-spacer {
   flex: 1;
 }
+.tm-dash-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .tm-dash-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 16px;
   align-items: start;
 }
 
@@ -10090,13 +10100,13 @@ html {
 .project-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 .project-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px;
+  gap: 8px;
+  padding: 16px;
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
@@ -10125,6 +10135,7 @@ html {
   font-size: 12px;
   line-height: 17px;
   color: var(--lx-text-secondary);
+  text-wrap: pretty;
 }
 
 /* =========================================================
@@ -10143,11 +10154,50 @@ html {
   .app-nav .nav-links {
     display: flex;
   }
-  .app-topbar .nav-right > * {
-    display: inline-flex;
+  /* Chrome shares the page frame's content guide at every width. */
+  .app-topbar {
+    padding: 0 24px;
   }
   .tm-dash-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Board + dashboard, phone: the swimlane bar and the page-head action row are
+   laid out as wrapped rows instead of squeezing their groups onto one line. */
+@media (max-width: 767.98px) {
+  .swimlane-header {
+    height: auto;
+    min-height: var(--lx-row-h-touch);
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 8px 12px;
+  }
+  .swimlane-desc {
+    flex-basis: 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+  .tm-dash-actions {
+    flex: 1 1 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .tm-dash-actions .btn {
+    justify-content: center;
+    min-height: var(--lx-row-h-touch);
+  }
+}
+
+/* Phone, narrowest band: the attention row's title carries two lines instead
+   of ellipsising mid-word (the row is already taller than the touch floor). */
+@media (max-width: 479.98px) {
+  .tm-row-title {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 }
 
@@ -10164,7 +10214,7 @@ html {
   .app-topbar {
     min-height: 52px;
     padding: 0 12px;
-    gap: 8px;
+    gap: 12px;
   }
   .app-topbar-name {
     font-size: 12px;

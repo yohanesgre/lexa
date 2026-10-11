@@ -68,7 +68,7 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-label={`${user.name}, ${roleDisplay} (${roleLabel})`}
         className="nav-pill"
-        style={{ gap: 8, padding: "0 8px 0 6px" }}
+        style={{ gap: 8, padding: "0 10px" }}
         onClick={() => setOpen((v) => !v)}
       >
         <div className="avatar" style={{ width: 20, height: 20, fontSize: 10 }}>{initial}</div>
