@@ -1081,7 +1081,6 @@ function ProjectDashboard() {
       <div className="tm-dash">
         <div className="tm-dash-head">
           <h1>{health.project.name}</h1>
-          <span className="tm-plate">Dashboard</span>
           <span className="nav-spacer" />
           <div className="tm-dash-actions">
             <button

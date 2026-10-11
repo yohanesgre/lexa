@@ -9783,6 +9783,19 @@ select.prop-input,
   padding: 8px 14px;
   border-right: 1px solid var(--lx-border-subtle);
 }
+/* One line box per row, on every item: the labels share a line and the values
+   share the next, instead of each cell centring its own ragged content. */
+.tm-report-item .tm-plate {
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+.tm-report-item .tm-report-value,
+.tm-report-item .tm-report-count {
+  height: 22px;
+  display: flex;
+  align-items: center;
+}
 .tm-report-item:last-child {
   border-right: none;
 }
