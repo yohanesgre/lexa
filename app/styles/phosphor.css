@@ -127,6 +127,14 @@
   --lx-space-6: 24px;
   --lx-row-h: 36px;
   --lx-row-h-touch: 44px;
+  /* One content column: the page frames and the shell chrome both read this,
+     so the top bar's contents and the page's contents share one guide. */
+  --lx-content-max: 1200px;
+  /* The LX brand mark (docs/brand/lexa-mark.svg) is the one colour in the app
+     that is not from the Trail Map palette: it carries the product's identity,
+     so it keeps its own plate and ink. */
+  --lx-brand-plate: #F0C040;
+  --lx-brand-ink: #0C0B09;
 
   --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
@@ -139,6 +147,8 @@
   --lx-surface-ground: #F2EFE7;
   --lx-surface-rail: #E9E4D8;
   --lx-surface-panel: #FBFAF6;
+  /* The day map's brand plate: the favicon's own light-scheme tile. */
+  --lx-brand-plate: #D4A017;
 
   --lx-surface-app: var(--lx-surface-ground);
   --lx-surface-elevated: var(--lx-surface-rail);
@@ -2222,28 +2232,8 @@
   }
 
   /* Nav / page frame */
-  .app-nav {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-    height: 48px;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--lx-border-default);
-    background: var(--lx-surface-elevated);
-    flex-shrink: 0;
-  }
   .nav-spacer {
     flex: 1;
-  }
-  .nav-links {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-  }
-  .nav-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
   }
 
   /* Runtime status pill in the navbar (running / done / failed states) */
@@ -2428,7 +2418,7 @@
   /* Form-heavy surfaces (settings) keep a readable line-length while the
      rest of the app uses full width. */
   .page-frame-narrow {
-    max-width: 1200px;
+    max-width: var(--lx-content-max);
   }
 
   .settings-table {
@@ -7600,10 +7590,6 @@
   .nav-sidebar-toggle {
     display: inline-flex;
   }
-  .nav-right {
-    margin-left: auto;
-    gap: 4px;
-  }
   /* Hide the brand text "Lexa" on very narrow screens — keep just the brand
      area clickable. The icon-only mark is implicit via the .nav-brand box. */
   .nav-brand {
@@ -9285,6 +9271,7 @@ html {
   height: 100dvh;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 4px;
   padding: 8px;
   background: var(--lx-surface-rail);
@@ -9439,11 +9426,19 @@ html {
   z-index: 25;
   display: flex;
   align-items: center;
-  gap: 10px;
   min-height: 48px;
-  padding: 0 40px;
   background: var(--lx-surface-rail);
   border-bottom: 1px solid var(--lx-border-default);
+}
+/* The chrome rides the frame's own inline gutter, at the window's edges: the
+   narrow content column is a reading measure for the page body, not a cage the
+   top bar gets pulled into. */
+.app-topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 24px;
 }
 .app-topbar-title {
   display: flex;
@@ -9468,11 +9463,6 @@ html {
   letter-spacing: 0.02em;
   color: var(--lx-text-muted);
   white-space: nowrap;
-}
-.app-topbar .nav-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 /* Top bar pills run at row height, not the compact 28px chrome size: the
    label, the value and the chevron need room (the layered .nav-pill base
@@ -10039,7 +10029,9 @@ html {
 }
 .app-rail-mark {
   flex-shrink: 0;
-  color: var(--lx-accent);
+  display: block;
+  width: 24px;
+  height: 24px;
 }
 
 /* ---- Dashboard composition ---- */
@@ -10155,8 +10147,8 @@ html {
     display: flex;
   }
   /* Chrome shares the page frame's content guide at every width. */
-  .app-topbar {
-    padding: 0 24px;
+  .app-topbar-inner {
+    padding: 0 16px;
   }
   .tm-dash-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -10217,6 +10209,8 @@ html {
   }
   .app-topbar {
     min-height: 52px;
+  }
+  .app-topbar-inner {
     padding: 0 12px;
     gap: 12px;
   }
@@ -10256,10 +10250,6 @@ html {
     overflow-y: auto;
     overscroll-behavior: contain;
     z-index: 40;
-  }
-  /* Old mobile rules hid everything but the avatar in the chrome cluster. */
-  .app-topbar .nav-right > * {
-    display: inline-flex;
   }
   /* The menu panel owns project switching on a phone. */
   .app-topbar-switcher {

@@ -73,9 +73,10 @@ current licence, a hosted multi-tenant offering, native mobile apps, and any sec
 - Name: **Lexa**. The CLI is `lx`.
 - The design system is named **PHOSPHOR** (warm phosphor workspace: amber-tinted darks, a small
   disciplined signal palette, three type voices, density as the working loop).
-- Brand assets: the LX monogram (`lexa-mark.svg`) and favicon (`lexa-favicon.svg`). They currently
-  live in the wireframes submodule's `src/assets/` and **must be moved into this repo before that
-  submodule is removed**.
+- Brand assets: the LX monogram (`docs/brand/lexa-mark.svg`) and the favicon
+  (`public/favicon.svg`), both in this repo; the rail inlines the monogram through the
+  `--lx-brand-plate` / `--lx-brand-ink` tokens, and the mark keeps its own plate because
+  identity is the brand's job, not the world's.
 - Voice in the product is plain and functional; no marketing claims are established as binding.
 
 ## Evidence on Hand

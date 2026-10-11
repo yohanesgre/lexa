@@ -89,12 +89,17 @@ const NAV_ITEMS: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] 
   { key: "wiki", label: "Wiki", icon: BookOpen },
 ];
 
-// The map mark: two surveyor ridges. Drawn geometry, not a picture.
-function RidgeMark() {
+// The brand mark, copied verbatim from docs/brand/lexa-mark.svg: the LX
+// monogram on its own plate. It is the one colour in the app outside the
+// palette, because identity is the brand's job, not the world's.
+function LexaMark() {
   return (
-    <svg className="app-rail-mark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
-      <path d="M1 19L8 7l4 6.4L15 7l8 12z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-      <path d="M8 7l2.2 3.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    <svg className="app-rail-mark" viewBox="0 0 64 64" width="24" height="24" aria-hidden="true" focusable="false">
+      <rect width="64" height="64" rx="14" fill="var(--lx-brand-plate)" />
+      <g fill="none" stroke="var(--lx-brand-ink)" strokeWidth={8} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 16 V48 H26" />
+        <path d="M29 16 L53 48 M53 16 L29 48" />
+      </g>
     </svg>
   );
 }
@@ -279,7 +284,7 @@ export function AppShell() {
       <nav className="app-nav" data-open={rail.open ? "true" : "false"}>
         <div className="app-rail-head">
           <Link to="/" className={routeType === "home" ? "nav-brand active" : "nav-brand"}>
-            <RidgeMark />
+            <LexaMark />
             <span className="nav-label">Lexa</span>
           </Link>
           {rail.isDesktop && (
@@ -317,44 +322,30 @@ export function AppShell() {
 
       <div className="app-frame">
         <header className="app-topbar">
-          <button
-            type="button"
-            className="nav-hamburger"
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            {menuOpen ? <X aria-hidden="true" focusable="false" /> : <Menu aria-hidden="true" focusable="false" />}
-            <span>Menu</span>
-          </button>
-          {(routeType === "wiki" || routeType === "chat") && <SidebarToggleButton routeType={routeType} />}
-          <div className="app-topbar-title">
-            <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
-            {selectedSlug && <span className="app-topbar-slug">{selectedSlug}</span>}
-          </div>
-          <div className="nav-spacer" />
-          <div className="app-topbar-switcher">
-            <ProjectSwitcher routeType={routeType} />
-          </div>
-          <div className="nav-right">
+          <div className="app-topbar-inner">
+            <button
+              type="button"
+              className="nav-hamburger"
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              {menuOpen ? <X aria-hidden="true" focusable="false" /> : <Menu aria-hidden="true" focusable="false" />}
+              <span>Menu</span>
+            </button>
+            {(routeType === "wiki" || routeType === "chat") && <SidebarToggleButton routeType={routeType} />}
+            <div className="app-topbar-title">
+              <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
+              {selectedSlug && <span className="app-topbar-slug">{selectedSlug}</span>}
+            </div>
+            <div className="nav-spacer" />
+            <div className="app-topbar-switcher">
+              <ProjectSwitcher routeType={routeType} />
+            </div>
             <div className="app-topbar-account">
               <ThemeToggle />
               <UserMenu />
             </div>
-            {selectedSlug ? (
-              <Link
-                to="/$slug/board"
-                params={{ slug: selectedSlug }}
-                search={{ new: true } as never}
-                className="btn btn-primary btn-sm"
-              >
-                New task
-              </Link>
-            ) : (
-              <Link to="/" search={{ new: 1 } as never} className="btn btn-primary btn-sm">
-                New Project
-              </Link>
-            )}
           </div>
         </header>
 
