@@ -51,69 +51,46 @@ All work tracking uses one folder per plan under `status/` (the global `work-pla
 
 ## Document authority (read in this order before touching code)
 
-0. `docs/design-system.html` — PHOSPHOR primitives: tokens + canonical component markup. **Before any UI work, open this file and copy primitive markup from it verbatim — never hand-write a primitive.** For primitive work it precedes the surface wireframes; for composite/surface work read it first, then the relevant `wireframes/src/*.html`. The operating procedure for UI/UX work is `.agents/skills/frontend-workflow/SKILL.md` — load it first.
-1. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
-2. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
-3. `docs/API.md` — REST contract. Endpoint shapes are exact.
-4. `wireframes/DESIGN_SYSTEM.md` + the wireframes submodule (`wireframes/`) — all visual decisions.
+0. `DESIGN.md` (root) — the design system. Its token frontmatter is **normative** (the single token source — no second token list anywhere); its prose is how to apply them. `.impeccable/design.json` is the sidecar (tonal ramps, shadows, motion, breakpoints, component snippets, `themeOverrides` for the light theme). `PRODUCT.md` (root) is product truth. The operating procedure for UI/UX work is `.agents/skills/frontend-workflow/SKILL.md` — load it first.
+1. `docs/design-system.html` — the canonical PHOSPHOR **primitive-markup reference**. **Before any UI work, open it and copy primitive markup verbatim — never hand-write a primitive.**
+2. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
+3. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
+4. `docs/API.md` — REST contract. Endpoint shapes are exact.
 5. `docs/ARCHITECTURE.md` — context and rationale only.
+
+`wireframes/` is a retired archive (its submodule is removed from this repo in a later step); no UI work may depend on it.
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
 ## Design authority
 
-Committed design authority lives in the top-level `docs/*.md` — SCHEMA
-(SQL + data invariants), LAYERS (service patterns, error catalog), API (REST
-contract), ARCHITECTURE (context + rationale). There is no private design area;
-historical specs/plans were archived and removed.
+Design authority is `DESIGN.md` (root) + `.impeccable/design.json` (the visual system), `PRODUCT.md` (root, product truth), and `docs/design-system.html` (canonical PHOSPHOR primitive markup). `DESIGN.md` is the single token source. PHOSPHOR tokens only — no raw hex outside `app/styles/phosphor.css`. Committed architectural authority stays in the top-level `docs/*.md` — SCHEMA (SQL + data invariants), LAYERS (service patterns, error catalog), API (REST contract), ARCHITECTURE (context + rationale). `wireframes/` is retired and is not a design source.
 
-## Wireframes are the frontend source of truth
+## Design system (Impeccable)
 
-**Wireframes are a git submodule** — `wireframes/` points at the separate PRIVATE repo `yohanesgre/lexa-wireframes` (see `.gitmodules`). **When working on frontend, ALWAYS ensure the submodule is present first** — before any frontend task, run:
+The design system is the authority; Impeccable (`.agents/skills/impeccable/`, engine launcher `.agents/skills/impeccable/scripts/impeccable`) is the design process; antislop is the quality filter. `DESIGN.md` (root) + `.impeccable/design.json` hold the tokens and the visual system — the frontmatter tokens are normative, the prose is how to apply them, and `DESIGN.md` is the single token source (no second token list anywhere). `PRODUCT.md` (root) is product truth. `docs/design-system.html` is the canonical primitive-markup reference: open it and copy primitive markup verbatim — never hand-write a primitive. PHOSPHOR tokens only — no raw hex outside `app/styles/phosphor.css`.
 
-```bash
-git submodule update --init wireframes
-```
+**Design flow (context once per session, then the request's playbook):**
 
-This retains the wireframe-first flow on any clone: `wireframes/src/` is the design source of truth, `bash wireframes/build.sh` rebuilds the previews. If the submodule is missing or empty, frontend work must not start until it is initialized (and the gate that the wireframes reflect the change first still applies). All paths in this section are relative to this repo's `wireframes/` checkout.
+1. Run `.agents/skills/impeccable/scripts/impeccable context` once per session; follow its directives.
+2. Load the request's playbook from `.agents/skills/impeccable/reference/` — its Commands-table reference for an explicit/implied sub-command, or `new-work.md` for a new surface / replacement visual world.
+3. Read `craft-floor.md` immediately before any UI edit.
+4. Implement in the real app.
+5. After UI work, run `.agents/skills/impeccable/scripts/impeccable detect --json <changed targets>` once (no hooks are installed, so the detector runs manually).
 
-**Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. If code and wireframes drift, the wireframe is the source of truth.
+A new or redesigned surface runs `init` (captures `PRODUCT.md`) → `new-work` → `DESIGN.md`: replace the previous visual world rather than polishing a discarded look.
 
-**Scope, not existence, scales with uncertainty:** a copy or token change edits the existing wireframe file; a new state on an existing surface draws that state (plus its annotation); a new surface, navigation change, or genuinely competing structure draws the full surface with its void states (empty/loading/partial/error/denied) before any React. Skipping the wireframe step is never permitted — only its scope is negotiable. Throwaway prototypes are not wireframes; if one is ever justified it lives in `.tmp/`, never in `artifacts/` or `wireframes/`.
-
-**Delegation sequencing rule (non-negotiable):** When UI/UX work is divided across multiple agents, the wireframe lane MUST complete (edit `wireframes/src/`, run `bash wireframes/build.sh`, pass its gate) BEFORE any React implementation lane is dispatched. Never run wireframe work and frontend implementation in parallel — parallel lanes drift from the wireframe's actual classes, structure, and copy even when the spec looks fully pinned. React implementation transcribes the completed wireframe, including porting any new wireframe CSS classes into the app stylesheet (`app/styles/phosphor.css`) — wireframe classes do not exist in the app until ported.
-
-Every UI task brief to @designer/@fixer must include: "Consult `docs/design-system.html` first; copy primitive markup verbatim."
-
-**Annotation rule:** All notes, specs, behaviors, and design decisions inside wireframes use annotation notes — `<span class="annotation">` for inline element notes, `<span class="annotation-tag">` for behavior/spec tags. Never document wireframe decisions in plain HTML comments or invisible markup; notes must be visible in the rendered wireframe.
-
-**Source vs compiled:** `wireframes/src/` is the wireframe source of truth — edit only there. `wireframes/dist/` is the compiled output (generated by `bash wireframes/build.sh`); never edit files in `wireframes/dist/` directly.
-
-**Submodule commits (non-negotiable):** commit and push inside `wireframes/` first, then bump the pointer in the parent (see the `git-workflow` skill §6).
-
-1. Start with `wireframes/src/flow-overview.html` to understand canonical user flows and project-context rules.
-2. Use `wireframes/src/index.html` to browse all surfaces and states.
-3. Match the structure, spacing, hierarchy, and interactions shown in the wireframes exactly.
-4. Use `wireframes/DESIGN_SYSTEM.md` for tokens, typography, and color values. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
-5. If a wireframe conflicts with `wireframes/DESIGN_SYSTEM.md` or any other design doc, the wireframe wins for frontend implementation. Report the conflict to the user.
-6. Do not add screens, states, or components that are not represented in the wireframes without explicit user approval.
-
-The wireframes are static HTML/CSS previews with no JavaScript. Implement interactions (dropdowns, modals, slideovers, drag-and-drop, inline editing, etc.) to match the rendered states and annotations. Wireframes use `<INCLUDE partials/FILE />` directives — always run `bash wireframes/build.sh` after any wireframe edit.
-
-### For @designer: wireframe-first execution
-
-When asked to implement frontend, do NOT design or invent. Read the relevant wireframe HTML file, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
+**Change spec (replaces the wireframe's structure pin):** every UI change carries a short spec in its plan/PR — the regions it touches, its states matrix (empty / loading / error / partial / denied), the real copy, and which design-system components and tokens it uses. Never add a screen, state, or component the spec does not name without explicit user approval.
 
 ## Frontend design workflow
 
-The operating procedure for UI/UX work is `.agents/skills/frontend-workflow/SKILL.md` — load it before any design change, wireframe edit, or frontend implementation. It is binding. The points below are the ones that must survive compaction.
+The operating procedure for UI/UX work is `.agents/skills/frontend-workflow/SKILL.md` — load it before any design change or frontend implementation. It is binding: it composes Impeccable (the design process) with the antislop filter, over Lexa's design system. The points below are the ones that must survive compaction.
 
-- **Roles.** `@designer` owns direction, wireframe structure, and visual review, and runs on the design-model tier; `@swe` transcribes the wireframe into React and runs on the implementation tier. Neither edits the other's files. A design decision the specs cannot settle escalates to `@designer` as a `task` handoff: screenshot path or preview URL + intended direction + acceptance criteria + a numbered list of unresolved problems, asking for **prioritized corrections, not a redesign**. If the design model cannot be invoked, never claim a review that did not happen — produce the handoff artifact and name the outstanding review in the report.
-- **No escalation for the obvious.** A spacing, responsive, or styling fix that follows from the wireframe and the design system is implemented directly; the design model is not consulted for it.
-- **Quality filter (anti-slop).** For UI work load `~/.agents/skills/antislop/SKILL.md` plus the sub-skill matching the touch (`antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`). It is a filter, not the direction — PHOSPHOR and the wireframe are the direction; a deliberate pattern stays when the reason is written down. Its Delivery Gate is mandatory: after significant visual changes, append its one-line-per-item PASS/FAIL block with evidence to `status/<plan>/report.md`, and fix a FAIL before delivering.
-- **Verification composition** (all of it, not a substitute for any part): wireframe build when `wireframes/src` changed → `bash scripts/verify-gate.sh` → agent-browser against the running app (`bun run dev`, :5173) covering the affected screen's void states and at least mobile + desktop → lane tests. Snapshot-first when the model lacks vision; hand any image to `@vision`, never to a text-only model.
-- **No parallel design docs.** Direction lives in `wireframes/DESIGN_SYSTEM.md`, primitives in `docs/design-system.html`, and this file is the router. Do not add a `DESIGN.md`, `PRODUCT.md`, or per-feature design spec — a second source of truth is the failure this section exists to prevent.
-- **Efficiency.** One wireframe and one meaningful revision by default; never generate a preview nobody will inspect; during refinement fix the three highest-impact issues instead of rewriting the interface; when fixes stop converging, escalate.
+- **Roles.** `@designer` owns design direction and visual review and runs on the design-model tier; `@swe` implements in React and runs on the implementation tier. Neither edits the other's files. A design decision the specs cannot settle escalates to `@designer` as a `task` handoff: screenshot path or preview URL + intended direction + acceptance criteria + a numbered list of unresolved problems, asking for **prioritized corrections, not a redesign**. If the design model cannot be invoked, never claim a review that did not happen — produce the handoff artifact and name the outstanding review in the report.
+- **No escalation for the obvious.** A spacing, responsive, or styling fix that follows from `DESIGN.md` and the primitives is implemented directly; the design model is not consulted for it.
+- **Quality filter (anti-slop) — mandatory, and it complements Impeccable.** For UI work load `~/.agents/skills/antislop/SKILL.md` plus the sub-skill matching the touch (`antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`). It is a filter, not the direction — `DESIGN.md` and the primitives are the direction. After UI work both antislop *and* Impeccable's `detect` are run; dedupe the findings, and neither substitutes for the other. antislop's Delivery Gate is mandatory: append its one-line-per-item PASS/FAIL-with-evidence block to `status/<plan>/report.md`, and fix a FAIL before delivering. A deliberate pattern stays when the reason is written down.
+- **Verification composition** (all of it, not a substitute for any part): `bun run dev` (:5173) + agent-browser against the running app covering the affected screen's void states and at least mobile + desktop → lane tests → `bash scripts/verify-gate.sh` → antislop Delivery Gate → Impeccable `detect`. Snapshot-first when the model lacks vision; hand any image to `@vision`, never to a text-only model.
+- **Efficiency.** One meaningful revision by default; never generate a preview nobody will inspect; during refinement fix the three highest-impact issues instead of rewriting the interface; when fixes stop converging, escalate.
 
 ## Non-negotiable rules
 
@@ -151,13 +128,13 @@ Each is a hard-won design fix; rationale lives in `docs/ARCHITECTURE.md` and the
 These rules are non-negotiable and apply to every agent working on Lexa:
 
 - **@designer may only modify:**
-  - `wireframes/src/**` and `wireframes/DESIGN_SYSTEM.md` (the wireframes submodule)
+  - `DESIGN.md` and `PRODUCT.md` (root)
+  - `.impeccable/**` (the design sidecar: `design.json`, `surfaces/*.md`, `critique/*.md`, `config.json`)
   - `docs/design-system.html` (PHOSPHOR primitives)
-  - design tokens/specs as represented in the wireframes
 - **@designer must never touch:**
   - `app/`, `server/`, `shared/`, `cli/` (all implementation belongs to @swe)
   - `package.json`, `tsconfig.json`, `app.config.ts`
-- **@swe owns all implementation:** `app/components/`, `app/routes/`, `app/styles/`, `app/lib/`, `server/`, `shared/`, `cli/`. Implement UI from `wireframes/` verbatim; missing/drifted wireframes → report back for a designer pass, never invent UI.
+- **@swe owns all implementation:** `app/components/`, `app/routes/`, `app/styles/`, `app/lib/`, `server/`, `shared/`, `cli/`. Implement UI from `DESIGN.md` + the primitives in `docs/design-system.html`; a missing or drifted decision → report back for a design pass, never invent UI.
 - **@fixer scope is per-task** — specify exact files; same constraints apply unless the task explicitly includes backend files.
 - If an agent discovers a need for a new backend endpoint or shared type, it must report back to the orchestrator — never add it itself.
 
@@ -166,7 +143,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 - **Effect-TS everywhere on the backend.** Services/repos use `Effect.Service<Name>()("Lexa/Name", { effect: Effect.gen(...) })`. Domain errors are `Data.TaggedError`. Repos surface `RowNotFound | DbError | ConstraintViolation`; services map to domain errors per the catalog.
 - **Repos are thin.** Raw SQLite prepared statements via bun:sqlite. No business logic in repos. `updated_at = datetime('now')` inside every UPDATE statement.
 - **Routes are thinner.** `@effect/platform` HttpApi groups; parse → call service → return. Error→status mapping is declarative (`.addError`), from the catalog — no hand-rolled try/catch responses.
-- **Frontend:** TanStack Query for all server state; components match `wireframes/src/*.html` structure and `wireframes/DESIGN_SYSTEM.md` tokens exactly. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`. Update cache via `setQueryData` from mutation responses only; never `invalidateQueries` on the mutation path.
+- **Frontend:** TanStack Query for all server state; components conform to `DESIGN.md` tokens plus the primitives in `docs/design-system.html` exactly. PHOSPHOR tokens only — no raw hex outside `phosphor.css`. Update cache via `setQueryData` from mutation responses only; never `invalidateQueries` on the mutation path.
 - **File placement:** `app/` (TanStack Start routes + components), `server/` (db/repos/services/api/github), `shared/` (types + pure functions). Nothing else at root except config.
 
 ## Verification
@@ -322,8 +299,16 @@ Key facts:
   self-hosting goes through `scripts/install.sh`).
 - **Frontend design workflow:** the `frontend-workflow` skill
   (`.agents/skills/frontend-workflow/SKILL.md`, committed with this repo) — the operating
-  procedure for any UI/UX change: authority order, wireframe scope scaling, design-vs-
-  implementation roles, escalation handoff, verification composition, delivery criteria.
+  procedure for any UI/UX change: it composes Impeccable (the design process) with the
+  antislop filter over Lexa's design system — authority order, design-vs-implementation
+  roles, escalation handoff, verification composition, delivery criteria.
+- **Design system (Impeccable):** the `impeccable` skill (`.agents/skills/impeccable/`;
+  engine launcher `.agents/skills/impeccable/scripts/impeccable`). Run
+  `scripts/impeccable context` once per session, load the request's playbook from
+  `.agents/skills/impeccable/reference/` (`new-work.md` for a new surface), read
+  `craft-floor.md` before any UI edit, and run `scripts/impeccable detect --json <targets>`
+  once after UI work. `DESIGN.md` + `.impeccable/design.json` are the design authority;
+  `PRODUCT.md` is product truth.
 - **Anti-slop filter:** `~/.agents/skills/antislop/SKILL.md` plus the sub-skill matching the
   touch (`antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`).
   A filter over the design, never the design itself; its Delivery Gate report belongs in
