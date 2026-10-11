@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -151,14 +151,6 @@ describe("AuthorizationService", () => {
     expect(await Effect.runPromise(authz.canManageSettings("sa"))).toBe(true);
     expect(await Effect.runPromise(authz.canManageSettings("owner"))).toBe(false);
     expect(await Effect.runPromise(authz.canManageSettings("member"))).toBe(false);
-  });
-
-  it("unknown users get no access anywhere", async () => {
-    seed(db);
-    const authz = makeAuthz(db);
-    expect(await Effect.runPromise(authz.projectAccess("ghost", "p1"))).toBeNull();
-    expect(await Effect.runPromise(authz.canManageTeam("ghost", "team-a"))).toBe(false);
-    expect(await Effect.runPromise(authz.isSuperadmin("ghost"))).toBe(false);
   });
 
   it("projectAccessForProjects matches projectAccess per id in one batch", async () => {

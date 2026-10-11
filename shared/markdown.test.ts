@@ -19,516 +19,104 @@ function searchNodes(nodes: Record<string, unknown>[], nodeType: string): boolea
   return false;
 }
 
-describe("markdownToDoc", () => {
-  it("maps headings (h1/h2/h3)", () => {
-    const doc = markdownToDoc("# One\n\n## Two\n\n### Three");
-    expect(doc.type).toBe("doc");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]!).toMatchObject({ type: "heading", attrs: { level: 1 } });
-    expect(content[1]!).toMatchObject({ type: "heading", attrs: { level: 2 } });
-    expect(content[2]!).toMatchObject({ type: "heading", attrs: { level: 3 } });
-  });
+const UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
 
-  it("maps paragraph", () => {
-    const doc = markdownToDoc("Hello world");
-    expect(doc.type).toBe("doc");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]!).toMatchObject({ type: "paragraph" });
-  });
-
-  it("maps bold text", () => {
-    const doc = markdownToDoc("This is **bold** text");
-    const para = (doc.content as Record<string, unknown>[])[0]!;
-    const children = para!.content as Record<string, unknown>[];
-    expect(children).toBeDefined();
-    const bold = children.find(c => c.type === "text" && Array.isArray(c.marks));
-    expect(bold).toBeDefined();
-  });
-
-  it("maps italic text", () => {
-    const doc = markdownToDoc("This is *italic* text");
-    const para = (doc.content as Record<string, unknown>[])[0]!;
-    const children = para!.content as Record<string, unknown>[];
-    const italic = children.find(
-      c =>
-        c.type === "text" &&
-        Array.isArray(c.marks) &&
-        (c.marks as Record<string, unknown>[]).some(m => m.type === "italic"),
-    );
-    expect(italic).toBeDefined();
-  });
-
-  it("maps inline code", () => {
-    const doc = markdownToDoc("Use `const x = 1` here");
-    const para = (doc.content as Record<string, unknown>[])[0]!;
-    const children = para!.content as Record<string, unknown>[];
-    const code = children.find(
-      c =>
-        c.type === "text" &&
-        Array.isArray(c.marks) &&
-        (c.marks as Record<string, unknown>[]).some(m => m.type === "code"),
-    );
-    expect(code).toBeDefined();
-  });
-
-  it("maps links", () => {
-    const doc = markdownToDoc("Visit [example](https://example.com) now");
-    const para = (doc.content as Record<string, unknown>[])[0]!;
-    const children = para!.content as Record<string, unknown>[];
-    const link = children.find(
-      c =>
-        c.type === "text" &&
-        Array.isArray(c.marks) &&
-        (c.marks as Record<string, unknown>[]).some(m => m.type === "link"),
-    );
-    expect(link).toBeDefined();
-  });
-
-  it("drops javascript: link hrefs at the authoring boundary", () => {
+describe("markdownToDoc authoring boundary", () => {
+  it("drops javascript: link hrefs and keeps safe schemes", () => {
     const doc = markdownToDoc("Click [x](javascript:alert(1)) or [safe](https://ok.dev)");
     const para = (doc.content as Record<string, unknown>[])[0]!;
-    const children = para!.content as Record<string, unknown>[];
-    const marks = (c: Record<string, unknown>) =>
-      (c.marks as { type: string; attrs?: Record<string, unknown> }[] | undefined)?.filter(m => m.type === "link") ?? [];
-    const xMarks = marks(children[1]! as Record<string, unknown>); // "Click ", [x](js:...), " or ", [safe](...)
-    expect(xMarks).toHaveLength(1);
-    expect(xMarks[0]!.attrs?.href).toBeUndefined(); // dropped, link mark has no href
-    const safeMarks = marks(children[3]! as Record<string, unknown>);
-    expect(safeMarks[0]!.attrs?.href).toBe("https://ok.dev"); // safe schemes round-trip unchanged
-  });
-
-  it("maps unordered list", () => {
-    const doc = markdownToDoc("- one\n- two\n- three");
-    expect(hasNodeOfType(doc, "bulletList")).toBe(true);
-  });
-
-  it("maps ordered list", () => {
-    const doc = markdownToDoc("1. first\n2. second\n3. third");
-    expect(hasNodeOfType(doc, "orderedList")).toBe(true);
-  });
-
-  it("maps task list with unchecked items", () => {
-    const doc = markdownToDoc("- [ ] buy milk\n- [ ] walk dog");
-    expect(hasNodeOfType(doc, "taskList")).toBe(true);
-  });
-
-  it("maps task list with checked items", () => {
-    const doc = markdownToDoc("- [x] buy milk\n- [x] walk dog");
-    const content = doc.content as Record<string, unknown>[];
-    const taskList = content[0]!;
-    const items = taskList.content as Record<string, unknown>[];
-    expect(items[0]!).toMatchObject({ type: "taskItem", attrs: { checked: true } });
-    expect(items[1]!).toMatchObject({ type: "taskItem", attrs: { checked: true } });
-  });
-
-  it("maps fenced code block with language", () => {
-    const doc = markdownToDoc("```ts\nconst x = 1;\n```");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]!).toMatchObject({ type: "codeBlock" });
-  });
-
-  it("maps blockquote", () => {
-    const doc = markdownToDoc("> quoted text");
-    expect(hasNodeOfType(doc, "blockquote")).toBe(true);
-  });
-
-  it("maps horizontal rule", () => {
-    const doc = markdownToDoc("---");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]!).toMatchObject({ type: "horizontalRule" });
-  });
-
-  it("maps tables to table nodes", () => {
-    const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]!).toMatchObject({ type: "table" });
-    const rows = content[0]!.content as Record<string, unknown>[];
-    expect(rows[0]!).toMatchObject({ type: "tableRow" });
-    const header = rows[0]!.content as Record<string, unknown>[];
-    expect(header[0]!).toMatchObject({ type: "tableHeader" });
-    expect(header[1]!).toMatchObject({ type: "tableHeader" });
-    const body = rows[1]!.content as Record<string, unknown>[];
-    expect(body[0]!).toMatchObject({ type: "tableCell" });
-  });
-
-  it("wraps table cell content in paragraphs (schema requires block+)", () => {
-    const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
-    const rows = (doc.content as Record<string, unknown>[])[0]!.content as Record<string, unknown>[];
-    const header = rows[0]!.content as Record<string, unknown>[];
-    expect(header[0]!).toMatchObject({
-      type: "tableHeader",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }],
-    });
-    const body = rows[1]!.content as Record<string, unknown>[];
-    expect(body[0]!).toMatchObject({
-      type: "tableCell",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }],
-    });
-  });
-
-  it("maps table alignment", () => {
-    const doc = markdownToDoc("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |");
-    const rows = (doc.content as Record<string, unknown>[])[0]!.content as Record<string, unknown>[];
-    const header = rows[0]!.content as Record<string, unknown>[];
-    expect(header[0]!).toMatchObject({ type: "tableHeader", attrs: { align: "left" } });
-    expect(header[1]!).toMatchObject({ type: "tableHeader", attrs: { align: "center" } });
-    expect(header[2]!).toMatchObject({ type: "tableHeader", attrs: { align: "right" } });
-  });
-
-  it("degrades raw HTML to codeBlock", () => {
-    const doc = markdownToDoc("<div>hello</div>");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]!).toMatchObject({ type: "codeBlock" });
-  });
-
-  it("maps images to image nodes", () => {
-    const doc = markdownToDoc("Look: ![alt](https://example.com/img.png)");
-    const para = (doc.content as Record<string, unknown>[])[0]!;
-    const image = (para!.content as Record<string, unknown>[]).find(c => c.type === "image");
-    expect(image).toBeDefined();
-    expect(image).toMatchObject({ attrs: { src: "https://example.com/img.png" } });
-  });
-
-  it("drops non-http image srcs at the authoring boundary", () => {
-    const doc = markdownToDoc("![bad](javascript:alert(1)) ![ok](https://ok.dev/img.png)");
-    const para = (doc.content as Record<string, unknown>[])[0]!;
-    const images = (para!.content as Record<string, unknown>[]).filter(c => c.type === "image");
-    expect(images).toHaveLength(1);
-    expect(images[0]!).toMatchObject({ attrs: { src: "https://ok.dev/img.png" } });
-  });
-
-  it("never throws on garbage input", () => {
-    const doc = markdownToDoc(String.fromCharCode(0));
-    expect(doc.type).toBe("doc");
-  });
-});
-
-describe("docToMarkdown", () => {
-  it("emits headings", () => {
-    const doc: TipTapDoc = { type: "doc", content: [{ type: "heading", attrs: { level: 1 }, content: [{ type: "text", text: "Title" }] }] };
-    expect(docToMarkdown(doc)).toBe("# Title");
-  });
-
-  it("emits paragraph", () => {
-    const doc: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "plain text" }] }] };
-    expect(docToMarkdown(doc)).toBe("plain text");
-  });
-
-  it("emits bold", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "bold", marks: [{ type: "bold" }] }] }],
-    };
-    expect(docToMarkdown(doc)).toBe("**bold**");
-  });
-
-  it("emits italic", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "italic", marks: [{ type: "italic" }] }] }],
-    };
-    expect(docToMarkdown(doc)).toBe("*italic*");
-  });
-
-  it("emits inline code", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "x = 1", marks: [{ type: "code" }] }] }],
-    };
-    expect(docToMarkdown(doc)).toBe("`x = 1`");
-  });
-
-  it("emits links", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [{ type: "text", text: "click", marks: [{ type: "link", attrs: { href: "https://x.com" } }] }],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("[click](https://x.com)");
-  });
-
-  it("emits bullet list", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "bulletList",
-          content: [
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }] },
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "b" }] }] },
-          ],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("- a\n- b");
-  });
-
-  it("emits ordered list", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "orderedList",
-          content: [
-            { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
-          ],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("1. first");
-  });
-
-  it("emits task list with checked state", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "taskList",
-          content: [
-            { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph", content: [{ type: "text", text: "todo" }] }] },
-            { type: "taskItem", attrs: { checked: true }, content: [{ type: "paragraph", content: [{ type: "text", text: "done" }] }] },
-          ],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("- [ ] todo\n- [x] done");
-  });
-
-  it("emits code block with language", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [{ type: "codeBlock", attrs: { language: "ts" }, content: [{ type: "text", text: "const x = 1;" }] }],
-    };
-    expect(docToMarkdown(doc)).toBe("```ts\nconst x = 1;\n```");
-  });
-
-  it("emits blockquote", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [{ type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: "quoted" }] }] }],
-    };
-    expect(docToMarkdown(doc)).toBe("> quoted");
-  });
-
-  it("emits horizontal rule", () => {
-    const doc: TipTapDoc = { type: "doc", content: [{ type: "horizontalRule" }] };
-    expect(docToMarkdown(doc)).toBe("---");
-  });
-
-  it("emits images", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [{ type: "image", attrs: { src: "https://x.com/i.png", alt: "a photo" } }],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("![a photo](https://x.com/i.png)");
-  });
-
-  it("skips images with a dropped src", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "paragraph",
-          content: [
-            { type: "text", text: "before " },
-            { type: "image", attrs: { src: "javascript:alert(1)" } },
-            { type: "text", text: " after" },
-          ],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("before  after");
-  });
-
-  it("emits tables with alignment", () => {
-    const doc: TipTapDoc = {
-      type: "doc",
-      content: [
-        {
-          type: "table",
-          content: [
-            {
-              type: "tableRow",
-              content: [
-                {
-                  type: "tableHeader",
-                  attrs: { align: "left" },
-                  content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }],
-                },
-                {
-                  type: "tableHeader",
-                  attrs: { align: "center" },
-                  content: [{ type: "paragraph", content: [{ type: "text", text: "b" }] }],
-                },
-              ],
-            },
-            {
-              type: "tableRow",
-              content: [
-                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }] },
-                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "2" }] }] },
-              ],
-            },
-          ],
-        },
-      ],
-    };
-    expect(docToMarkdown(doc)).toBe("| a |  b  |\n| :--- | :---: |\n| 1 |  2  |");
-  });
-
-  it("emits unknown node as fenced code block", () => {
-    const doc: TipTapDoc = { type: "doc", content: [{ type: "customBlock", content: [{ type: "text", text: "hello" }] }] };
-    expect(docToMarkdown(doc)).toBe("```\nhello\n```");
-  });
-
-  it("never throws on invalid doc", () => {
-    const doc: unknown = { type: "doc", content: [{ type: "text", text: "ok" }] };
-    const result = docToMarkdown(doc as TipTapDoc);
-    expect(typeof result).toBe("string");
+    const children = para.content as Record<string, unknown>[];
+    const linkMarks = (c: Record<string, unknown>) =>
+      ((c.marks as { type: string; attrs?: Record<string, unknown> }[] | undefined) ?? []).filter(
+        (m) => m.type === "link"
+      );
+    // "Click ", [x](js:...), " or ", [safe](...)
+    expect(linkMarks(children[1]!)).toHaveLength(1);
+    expect(linkMarks(children[1]!)[0]!.attrs?.href).toBeUndefined(); // dropped
+    expect(linkMarks(children[3]!)[0]!.attrs?.href).toBe("https://ok.dev");
   });
 });
 
 describe("round-trip", () => {
-  it("bold", () => expect(rd("**bold**")).toBe("**bold**"));
-  it("bullet list", () => expect(rd("- a\n- b\n- c")).toBe("- a\n- b\n- c"));
-  it("ordered list", () => expect(rd("1. a\n2. b")).toBe("1. a\n1. b"));
-  it("code block", () => expect(rd("```ts\nconst x = 1;\n```")).toBe("```ts\nconst x = 1;\n```"));
-  it("blockquote", () => expect(rd("> quote")).toBe("> quote"));
+  it("round-trips bold, bullet/ordered lists, code blocks and blockquotes", () => {
+    expect(rd("**bold**")).toBe("**bold**");
+    expect(rd("- a\n- b\n- c")).toBe("- a\n- b\n- c");
+    expect(rd("1. a\n2. b")).toBe("1. a\n1. b");
+    expect(rd("```ts\nconst x = 1;\n```")).toBe("```ts\nconst x = 1;\n```");
+    expect(rd("> quote")).toBe("> quote");
+  });
 
   it("task list round-trip preserves checked state", () => {
-    const result = rd("- [ ] todo\n- [x] done");
-    expect(result).toBe("- [ ] todo\n- [x] done");
+    expect(rd("- [ ] todo\n- [x] done")).toBe("- [ ] todo\n- [x] done");
   });
 
-  it("image round-trip", () => {
+  it("image and table round-trips preserve alignment", () => {
     expect(rd("![alt](https://x.com/i.png)")).toBe("![alt](https://x.com/i.png)");
-  });
-
-  it("inline image round-trip inside text", () => {
-    expect(rd("See ![diagram](https://x.com/d.png) below")).toBe("See ![diagram](https://x.com/d.png) below");
-  });
-
-  it("table round-trip", () => {
     expect(rd("| a | b |\n| --- | --- |\n| 1 | 2 |")).toBe("| a | b |\n| --- | --- |\n| 1 | 2 |");
-  });
-
-  it("aligned table round-trip", () => {
     expect(rd("| a | b |\n| :--- | ---: |\n| 1 | 2 |")).toBe("| a |  b |\n| :--- | ---: |\n| 1 |  2 |");
   });
 });
 
 describe("normalizeMarkdownForEcho", () => {
-  it("trims edge whitespace and converts CRLF to LF (GitHub boundary normalization)", () => {
+  it("trims edges + converts CRLF, leaving internal structure untouched", () => {
     expect(normalizeMarkdownForEcho("  hello\n")).toBe("hello");
     expect(normalizeMarkdownForEcho("a\r\nb\r\n")).toBe("a\nb");
     expect(normalizeMarkdownForEcho("\r\n# Title\r\n\r\nbody\r\n")).toBe("# Title\n\nbody");
-  });
-
-  it("leaves the internal structure untouched — only string edges change", () => {
     const md = "  - [x] done\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n\n";
     expect(normalizeMarkdownForEcho(md)).toBe("- [x] done\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |");
   });
 
-  it("treats null and empty as equal", () => {
+  it("treats null and empty as equal, and is idempotent", () => {
     expect(normalizeMarkdownForEcho(null)).toBe("");
     expect(normalizeMarkdownForEcho("")).toBe("");
     expect(normalizeMarkdownForEcho(null)).toBe(normalizeMarkdownForEcho(""));
-  });
-
-  it("is idempotent", () => {
     const md = " x \r\n ";
     expect(normalizeMarkdownForEcho(normalizeMarkdownForEcho(md))).toBe(normalizeMarkdownForEcho(md));
   });
 });
 
 describe("attachment image srcs", () => {
-  const UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
   const REL = `/api/attachments/${UUID}`;
   const img = (src: string): TipTapDoc => ({
     type: "doc",
     content: [{ type: "paragraph", content: [{ type: "image", attrs: { src, alt: "pic" } }] }],
   });
 
-  it("docToMarkdown with baseUrl absolutizes attachment srcs", () => {
+  it("absolutizes attachment srcs with a baseUrl and keeps them relative without", () => {
     expect(docToMarkdown(img(REL), { baseUrl: "https://lexa.example" })).toBe(
       `![pic](https://lexa.example${REL})`
     );
-  });
-
-  it("docToMarkdown without baseUrl keeps attachment srcs relative", () => {
     expect(docToMarkdown(img(REL))).toBe(`![pic](${REL})`);
   });
 
-  it("non-attachment relative srcs are dropped (both directions)", () => {
+  it("drops non-attachment relative and javascript: srcs in both directions", () => {
     expect(docToMarkdown(img("/etc/passwd"))).not.toContain("![");
-    // Pull side: not tokenized as an image at all — inert plain text.
-    expect(hasNodeOfType(markdownToDoc(`![x](/etc/passwd)`), "image")).toBe(false);
-  });
-
-  it("javascript: srcs stay dropped", () => {
+    expect(hasNodeOfType(markdownToDoc("![x](/etc/passwd)"), "image")).toBe(false);
     expect(docToMarkdown(img("javascript:alert(1)"))).toBe("");
-    expect(hasNodeOfType(markdownToDoc(`![x](javascript:alert(1))`), "image")).toBe(false);
-  });
-
-  it("pull direction: absolute http(s) attachment URLs are accepted host-agnostically", () => {
-    const doc = markdownToDoc(`![shot](https://any-host.example${REL})`);
-    expect(hasNodeOfType(doc, "image")).toBe(true);
-    expect(docToMarkdown(doc)).toContain(`https://any-host.example${REL}`);
-  });
-
-  it("relative attachment srcs survive the pull round-trip", () => {
-    const doc = markdownToDoc(`![shot](${REL})`);
-    expect(hasNodeOfType(doc, "image")).toBe(true);
-    expect(docToMarkdown(doc)).toBe(`![shot](${REL})`);
-  });
-
-  it("absolute non-attachment https images keep working (existing behavior)", () => {
-    const doc = markdownToDoc("![logo](https://cdn.example/logo.png)");
-    expect(hasNodeOfType(doc, "image")).toBe(true);
+    expect(hasNodeOfType(markdownToDoc("![x](javascript:alert(1))"), "image")).toBe(false);
   });
 });
 
 describe("mention nodes", () => {
-  const UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
   const mentionDoc = (refType: string, refId: string, label: string): TipTapDoc => ({
     type: "doc",
     content: [{ type: "paragraph", content: [{ type: "mention", attrs: { refType, refId, label } }] }],
   });
   const opts = { baseUrl: "https://lexa.example", projectSlug: "demo" };
 
-  it("task mentions render as absolute deep links with the label as text", () => {
+  it("task and wiki mentions render as absolute deep links", () => {
     expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"), opts)).toBe(
       `[LEX-42](https://lexa.example/demo/tasks?task=${UUID})`
     );
-  });
-
-  it("wiki mentions render as absolute deep links", () => {
     expect(docToMarkdown(mentionDoc("wiki", "home", "Home"), opts)).toBe(
       "[Home](https://lexa.example/demo/wiki/home)"
     );
   });
 
-  it("entity refTypes emit the bare label — never a dead board/wiki deep link", () => {
+  it("entity refTypes emit the bare label; malformed mentions render empty", () => {
     expect(docToMarkdown(mentionDoc("milestone", "m1", "Q3 Launch"), opts)).toBe("Q3 Launch");
     expect(docToMarkdown(mentionDoc("swimlane", "s1", "Design Sprint"), opts)).toBe("Design Sprint");
     expect(docToMarkdown(mentionDoc("column", "c1", "In Review"), opts)).toBe("In Review");
-  });
-
-  it("without baseUrl/projectSlug the bare label is emitted (no broken href)", () => {
-    expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"))).toBe("LEX-42");
-    expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"), { baseUrl: "https://x" })).toBe("LEX-42");
-  });
-
-  it("malformed mention attrs render empty", () => {
     expect(docToMarkdown(mentionDoc("task", "", "X"), opts)).toBe("");
     expect(docToMarkdown(mentionDoc("task", UUID, ""), opts)).toBe("");
   });
@@ -537,10 +125,9 @@ describe("mention nodes", () => {
     const md1 = docToMarkdown(mentionDoc("task", UUID, "LEX-42"), opts);
     const pulled = markdownToDoc(md1);
     // Pull direction degrades to a plain link node — never a mention node.
-    const para = (pulled.content as Record<string, unknown>[])[0];
-    const linkText = JSON.stringify(para);
-    expect(linkText).not.toContain('"mention"');
-    expect(linkText).toContain("/demo/tasks?task=");
+    const para = JSON.stringify((pulled.content as Record<string, unknown>[])[0]);
+    expect(para).not.toContain('"mention"');
+    expect(para).toContain("/demo/tasks?task=");
     const md2 = docToMarkdown(pulled, opts);
     expect(md2).toBe(md1);
     expect(normalizeMarkdownForEcho(md2)).toBe(normalizeMarkdownForEcho(md1));

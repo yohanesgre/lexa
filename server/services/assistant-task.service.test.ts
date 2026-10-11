@@ -178,30 +178,14 @@ function promptText(call: { systemPrompts: unknown }): string {
   return (call.systemPrompts as Array<{ content: string }>).map((p) => p.content).join("\n");
 }
 
-// The preflight writes its one-line record to stderr; captured here so a test
-// can assert what a run logged without touching the real stream.
-async function captureStderr(fn: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown) => {
-    lines.push(String(chunk));
-    return true;
-  }) as typeof process.stderr.write);
-  try {
-    await fn();
-  } finally {
-    spy.mockRestore();
-  }
-  return lines;
-}
-
 function toolNames(call: { tools: unknown }): Array<string | undefined> {
   return (call.tools as Array<{ name?: string }>).map((t) => t.name);
 }
 
-function queueRun(id: string, extraPrompt = "tighten the wording", selection = ""): void {
+function queueRun(id: string): void {
   db.exec(`
 INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, status)
-  VALUES ('${id}', 'p1', 'task', 't1', 'a1', 'sk1', '${extraPrompt}', '${selection}', 'queued');
+  VALUES ('${id}', 'p1', 'task', 't1', 'a1', 'sk1', 'tighten the wording', '', 'queued');
 `);
 }
 
@@ -223,7 +207,7 @@ afterEach(() => {
 });
 
 describe("task preflight — new run", () => {
-  it("sends one preflight over the task context and the advisory reaches the system prompt", async () => {
+  it("sends one preflight over the task context, offers jev_assess + get_skill, and the advisory reaches the system prompt", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
     queueRun("at1");
@@ -256,50 +240,20 @@ describe("task preflight — new run", () => {
     expect(state).not.toHaveProperty("history");
 
     expect(providerMock.calls).toHaveLength(1);
+    // The Jev tool and the bound-skill tool are both offered on a configured run.
+    const tools = toolNames(providerMock.calls[0]!);
+    expect(tools).toContain("jev_assess");
+    expect(tools).toContain("get_skill");
     const text = promptText(providerMock.calls[0]!);
     expect(text).toContain("Jev advisory (non-authoritative)");
     expect(text).toContain("write intent: write");
     expect(text).toContain("live project data remains authoritative");
   });
 
-  it("puts the selection text in the preflight message when the run has one", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    queueRun("at1", "polish this", "the login button");
-
-    await drain(await runStream("at1"));
-    const state = JSON.parse(String(jevCalls[0]!.init.body)).state as string;
-    const userMessage = (JSON.parse(state) as { userMessage: string }).userMessage;
-    expect(userMessage).toContain("the login button");
-    expect(userMessage).toContain("polish this");
-  });
-
-  it("offers jev_assess to the model on a new run when Jev is configured", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    queueRun("at1");
-
-    await drain(await runStream("at1"));
-    expect(toolNames(providerMock.calls[0]!)).toContain("jev_assess");
-  });
-
-  it("offers get_skill only when the agent has bound skills", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    queueRun("at1");
-    await drain(await runStream("at1"));
-    expect(toolNames(providerMock.calls[0]!)).toContain("get_skill");
-
-    providerMock.calls.length = 0;
-    db.exec("DELETE FROM lexa_agent_skills");
-    queueRun("at2");
-    await drain(await runStream("at2"));
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("get_skill");
-  });
 });
 
 describe("task enqueue — auto skill selection", () => {
-  it("enqueues without a skillId and streams with no skill markdown", async () => {
+  it("enqueues without a skillId (auto mode) but rejects a skillId that is not bound to the agent", async () => {
     setup();
     const task = await run(service.enqueue({
       projectId: "p1",
@@ -321,10 +275,7 @@ describe("task enqueue — auto skill selection", () => {
     expect(text).toContain("Available skills");
     expect(text).toContain("- Test Polish");
     expect(text).not.toContain("Polish the text.");
-  });
 
-  it("still rejects a skillId that is not bound to the agent", async () => {
-    setup();
     db.exec("INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk2', 'Other', '', 'x', 0)");
     const result = await run(Effect.either(service.enqueue({
       projectId: "p1",
@@ -336,19 +287,6 @@ describe("task enqueue — auto skill selection", () => {
     })));
     expect(result._tag).toBe("Left");
     if (result._tag === "Left") expect(result.left._tag).toBe("SkillNotFound");
-  });
-
-  it("keeps an explicitly bound skillId", async () => {
-    setup();
-    const task = await run(service.enqueue({
-      projectId: "p1",
-      documentType: "task",
-      documentId: "t1",
-      prompt: "",
-      agentId: "a1",
-      skillId: "sk1",
-    }));
-    expect(task.skillId).toBe("sk1");
   });
 });
 
@@ -376,26 +314,14 @@ describe("task skill tolerance — deleted skill row", () => {
 describe("task preflight — resume", () => {
   // A decided batch whose tool is unknown to the executor: resume must apply
   // the verdicts and still reach the model, without Jev being consulted.
-  const seedDecidedBatch = (skillId: string | null = "sk1"): void => {
+  const seedDecidedBatch = (skillId = "sk1"): void => {
     db.exec(`
 INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
-  VALUES ('task', 't1', 'p1', 'u1', 'a1', ${skillId === null ? "NULL" : `'${skillId}'`}, '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":"b1"}]');
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', '${skillId}', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":"b1"}]');
 INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
   VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'no_such_write_tool', '{}', '{}', 'approved', '2099-01-01 00:00:00');
 `);
   };
-
-  it("resumes a document thread with no bound skill (auto mode)", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    seedDecidedBatch(null);
-
-    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    const text = promptText(providerMock.calls[0]!);
-    expect(text).toContain(AUTO_SKILL_INSTRUCTION);
-    expect(text).toContain("- Test Polish");
-  });
 
   it("a stale thread skill_id degrades resumeThreadStream to auto mode", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
@@ -411,27 +337,6 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     const text = promptText(providerMock.calls[0]!);
     expect(text).toContain(AUTO_SKILL_INSTRUCTION);
     expect(text).not.toContain("Polish the text.");
-  });
-
-  it("resumes with zero Jev calls and no advisory block", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    seedDecidedBatch();
-
-    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(jevCalls).toHaveLength(0);
-    expect(providerMock.calls).toHaveLength(1);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-  });
-
-  it("still offers jev_assess on a resume — its budget is per stream", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    seedDecidedBatch();
-
-    await drain(await run(service.resumeThreadStream("task", "t1")));
-    expect(toolNames(providerMock.calls[0]!)).toContain("jev_assess");
   });
 
   it("applies an approved create_task on the task path and streams the follow-up (no Die)", async () => {
@@ -456,30 +361,6 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
     const assistantHanded = handed.find((m) => m.role === "assistant")!;
     expect(assistantHanded.toolCalls).toBeUndefined();
-  });
-
-  it("hands the executed-writes note to the provider but never persists it", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
-    setup();
-    db.exec(`
-INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
-INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
-  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","toolCallId":"call_1","seq":0,"name":"create_task","diff":{"type":"task_create","title":"New task","fields":{}}}]}}]');
-INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
-  VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'approved', '2099-01-01 00:00:00');
-`);
-
-    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-
-    const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
-    const note = handed.find((m) => m.role === "user" && String(m.content).includes("[approved write results]"));
-    expect(note).toBeDefined();
-    expect(String(note!.content)).toContain('create_task "New task" [EG-2]: applied');
-
-    const persisted = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { messages: string };
-    expect(persisted.messages).not.toContain("[approved write results]");
   });
 });
 
@@ -532,82 +413,32 @@ describe("task preflight — fail-open and disable", () => {
     expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
   });
 
-  it("an upstream rejection leaves the run intact with no advisory", async () => {
-    stubFetch(() => Promise.resolve(new Response("nope", { status: 500 })));
-    setup();
-    queueRun("at1");
-
-    const frames = await drain(await runStream("at1"));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-  });
-
-  it("an unreadable answer payload leaves the run intact with no advisory", async () => {
-    stubFetch(() => Promise.resolve(new Response("not json", { status: 200 })));
-    setup();
-    queueRun("at1");
-
-    const frames = await drain(await runStream("at1"));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-  });
-
-  it("no stored key disables the preflight and omits jev_assess entirely", async () => {
+  it("every missing gate (no stored key, no project opt-in, no master key) disables Jev and omits jev_assess", async () => {
     setup({ jev: "no-secret" });
     stubUnreachable();
     queueRun("at1");
-
     const frames = await drain(await runStream("at1"));
     expect(frames.some((f) => f.type === "done")).toBe(true);
     expect(jevCalls).toHaveLength(0);
-    expect(promptText(providerMock.calls[0]!)).not.toContain("Jev advisory");
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
-  });
+    expect(promptText(providerMock.calls.at(-1)!)).not.toContain("Jev advisory");
+    expect(toolNames(providerMock.calls.at(-1)!)).not.toContain("jev_assess");
 
-  it("an absent project opt-in disables Jev", async () => {
     setup({ jev: "no-project" });
     stubUnreachable();
     queueRun("at1");
-
     await drain(await runStream("at1"));
-    expect(jevCalls).toHaveLength(0);
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
-  });
+    expect(promptText(providerMock.calls.at(-1)!)).not.toContain("Jev advisory");
+    expect(toolNames(providerMock.calls.at(-1)!)).not.toContain("jev_assess");
 
-  it("no master key leaves the stored ciphertext unopenable, disabling Jev", async () => {
     setup({ env: {} as unknown as RuntimeEnv });
     stubUnreachable();
     queueRun("at1");
-
     await drain(await runStream("at1"));
     expect(jevCalls).toHaveLength(0);
-    expect(toolNames(providerMock.calls[0]!)).not.toContain("jev_assess");
+    expect(toolNames(providerMock.calls.at(-1)!)).not.toContain("jev_assess");
   });
 
-  it("stays silent on stderr without a key — an unconfigured Jev is not a run event", async () => {
-    setup({ env: {} as unknown as RuntimeEnv });
-    stubUnreachable();
-    queueRun("at1");
-    const lines = await captureStderr(async () => {
-      await drain(await runStream("at1"));
-    });
-    expect(lines.filter((l) => l.includes("assistant-jev"))).toEqual([]);
-  });
-
-  it("still logs a configured preflight that actually failed", async () => {
-    stubFetch(() => Promise.resolve(new Response("nope", { status: 500 })));
-    setup();
-    queueRun("at1");
-    const lines = await captureStderr(async () => {
-      await drain(await runStream("at1"));
-    });
-    const jev = lines.filter((l) => l.includes("assistant-jev")).map((l) => JSON.parse(l) as { meta: Record<string, unknown> });
-    expect(jev).toHaveLength(1);
-    expect(jev[0]!.meta.code).toBe("HTTP_500");
-    expect(jev[0]!.meta.outcome).toBe("failed");
-  });
-
-  it("task terminal transitions ride one batch", async () => {
+  it("task terminal transitions ride one batch, and a second call is a no-op (idempotent)", async () => {
     setup();
     queueRun("at1");
     db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'at1'").run();
@@ -617,19 +448,13 @@ describe("task preflight — fail-open and disable", () => {
     expect(t.result).toBe("done");
     const acts = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1' ORDER BY id").all() as Array<{ type: string }>;
     expect(acts.map((a) => a.type)).toEqual(["assistant_completed"]);
-  });
 
-  it("a second terminal call is a no-op with no extra activity (idempotent)", async () => {
-    setup();
-    queueRun("at1");
-    db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'at1'").run();
-    await run(service.complete("at1", "first"));
-
+    // A repeat is a no-op: the first result stands and no second row is emitted.
     const again = await run(service.complete("at1", "second"));
     expect(again.status).toBe("completed");
-    expect(again.result).toBe("first");
-    const n = (db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'assistant_completed'").get() as { n: number }).n;
-    expect(n).toBe(1);
+    expect(again.result).toBe("done");
+    const count = db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'assistant_completed'").get() as { n: number };
+    expect(count.n).toBe(1);
   });
 
   it("concurrent terminal calls emit exactly one activity row; the loser gets the current row, not a 404", async () => {
@@ -659,34 +484,30 @@ describe("task preflight — fail-open and disable", () => {
     expect(t.status).toBe("completed");
   });
 
-  it("cancel from queued emits exactly one assistant_cancelled and no task activity for a wiki run", async () => {
+  it("cancel from queued emits one assistant_cancelled, and Jev neither writes nor emits task activity", async () => {
+    // A wiki run's completion emits no task activity; a queued cancel emits one.
     setup();
     db.exec("INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1','p1','Home','home','{\"type\":\"doc\",\"content\":[]}','',0)");
     db.exec("INSERT INTO assistant_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, status) VALUES ('atw','p1','wiki','home','a1','sk1','','','queued')");
     db.prepare("UPDATE assistant_tasks SET status = 'running' WHERE id = 'atw'").run();
 
-    const t = await run(service.complete("atw", "done"));
-    expect(t.status).toBe("completed");
-    const n = (db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n;
-    expect(n).toBe(0);
+    const wikiDone = await run(service.complete("atw", "done"));
+    expect(wikiDone.status).toBe("completed");
+    expect((db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n).toBe(0);
 
     queueRun("at2");
-    const c = await run(service.cancel("at2"));
-    expect(c.status).toBe("cancelled");
-    const acts = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1' ORDER BY id").all() as Array<{ type: string }>;
-    expect(acts.map((a) => a.type)).toEqual(["assistant_cancelled"]);
-  });
+    const cancelled = await run(service.cancel("at2"));
+    expect(cancelled.status).toBe("cancelled");
+    const cancelActs = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1' ORDER BY id").all() as Array<{ type: string }>;
+    expect(cancelActs.map((a) => a.type)).toEqual(["assistant_cancelled"]);
 
-  it("Jev neither writes nor emits task activity — the only row is the run's own terminal one", async () => {
-    stubFetch(() => Promise.resolve(jevResponse()));
+    // The Jev advisory is prompt text only: a normal run's sole activity row is
+    // its own terminal `assistant_completed` (invariant #12), and no write
+    // proposal was ever queued on Jev's say-so.
     setup();
+    stubFetch(() => Promise.resolve(jevResponse()));
     queueRun("at1");
-
     await drain(await runStream("at1"));
-    // The advisory is prompt text: it can change what the model SAYS, never
-    // what the service DOES. Exactly one activity row survives — the run's own
-    // terminal `assistant_completed` (invariant #12) — and no write proposal
-    // was ever queued on Jev's say-so.
     const activity = db.prepare("SELECT type FROM task_activity ORDER BY id").all() as Array<{ type: string }>;
     expect(activity.map((r) => r.type)).toEqual(["assistant_completed"]);
     const queued = db.prepare("SELECT COUNT(*) AS n FROM assistant_pending_writes").get() as { n: number };

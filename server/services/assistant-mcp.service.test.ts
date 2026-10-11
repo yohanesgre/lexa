@@ -196,14 +196,12 @@ function insertLegacyStdioRow(id = "legacy") {
 }
 
 describe("validateTransportConfig", () => {
-  it("accepts remote http and sse and hands back the narrowed transport", () => {
+  it("accepts remote http/sse (narrowed) and rejects stdio on every runtime — no local process spawn", () => {
     expect(validateTransportConfig(http({ url: "https://mcp.test/x" })))
       .toEqual({ ok: true, transportType: "http", url: "https://mcp.test/x" });
     expect(validateTransportConfig(http({ transportType: "sse", url: "https://mcp.test/sse" })))
       .toEqual({ ok: true, transportType: "sse", url: "https://mcp.test/sse" });
-  });
 
-  it("rejects stdio on every runtime — no local process spawn", () => {
     const stdio: McpTransportConfig = { transportType: "stdio", url: null, command: "jev-mcp", args: [] };
     expect(validateTransportConfig(stdio)).toEqual({ ok: false, reason: STDIO_REASON });
     // The transport itself is refused, whatever else the payload carries.
@@ -211,7 +209,7 @@ describe("validateTransportConfig", () => {
     expect(validateTransportConfig({ ...stdio, command: null })).toEqual({ ok: false, reason: STDIO_REASON });
   });
 
-  it("requires a url for http/sse and rejects bad urls and userinfo", () => {
+  it("requires a url for http/sse, rejects userinfo, and refuses any command or non-empty args (blank = absent)", () => {
     expect(validateTransportConfig(http({ url: null })))
       .toEqual({ ok: false, reason: "url is required for http/sse transport" });
     expect(validateTransportConfig(http({ url: "   " })))
@@ -222,12 +220,7 @@ describe("validateTransportConfig", () => {
       .toEqual({ ok: false, reason: "url scheme must be http or https" });
     expect(validateTransportConfig(http({ url: "https://user:pw@x.test" })))
       .toEqual({ ok: false, reason: "url must not contain userinfo credentials" });
-  });
 
-  // A remote client has no process to configure: `command`/`args` exist only as
-  // the historical 0009 columns and are refused, never stored, never ignored.
-  // A blank command is the wire-compat exception — absent, not refused.
-  it("refuses any command or non-empty args with one reason", () => {
     expect(validateTransportConfig(http({ command: "nope" })))
       .toEqual({ ok: false, reason: PROCESS_FIELDS_REJECTED });
     expect(validateTransportConfig(http({ args: ["--verbose"] })))
@@ -237,9 +230,7 @@ describe("validateTransportConfig", () => {
     expect(validateTransportConfig(http({ command: "nope", args: ["--x"] })))
       .toEqual({ ok: false, reason: PROCESS_FIELDS_REJECTED });
     expect(validateTransportConfig(http())).toEqual({ ok: true, transportType: "http", url: "https://mcp.test/x" });
-  });
 
-  it("accepts a blank command as absent (pre-remote wire compat)", () => {
     expect(validateTransportConfig(http({ command: "" })))
       .toEqual({ ok: true, transportType: "http", url: "https://mcp.test/x" });
     expect(validateTransportConfig(http({ command: "   " })))
@@ -248,7 +239,7 @@ describe("validateTransportConfig", () => {
 });
 
 describe("AssistantMcpService", () => {
-  it("create derives a slug id, seeds nothing, and stores a secret-less client", async () => {
+  it("create derives a slug id, stores a secret-less client, and refuses process fields / stdio / invalid shapes", async () => {
     setup();
     const created = await run(service.create({ label: "My Client", transportType: "http", url: "https://mcp.test/x" }));
     expect(created.id).toBe("my-client");
@@ -259,45 +250,38 @@ describe("AssistantMcpService", () => {
     expect(created.hasSecret).toBe(false);
     expect(created.secretSource).toBe("none");
     expect(JSON.stringify(created)).not.toContain("secretRef");
-
     // 0010 removed the seeded `jev` row: the registry starts empty.
     expect((await run(service.list())).map((s) => s.id)).toEqual(["my-client"]);
-  });
+    // slugify fallback for a blank label.
+    expect(slugifyMcpId("   ")).toBe("mcp-server");
 
-  it("create refuses a command or args instead of silently dropping them", async () => {
-    setup();
+    // A blank command is the wire-compat exception — stored as null, not refused.
+    const blank = await run(service.create({ label: "Blank Command", transportType: "http", url: "https://mcp.test/x", command: "" }));
+    expect(blank.command).toBeNull();
+    expect((await run(service.list())).map((s) => s.id).sort()).toEqual(["blank-command", "my-client"]);
+    const patched = await run(service.update("blank-command", { command: "  " }));
+    expect(patched.command).toBeNull();
+
+    // Process fields are refused, never silently dropped.
     const withCommand = await runEither(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x", command: "npx" }));
     expect(withCommand).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: PROCESS_FIELDS_REJECTED } });
     const withArgs = await runEither(service.create({ label: "Remote", transportType: "sse", url: "https://mcp.test/x", args: ["--x"] }));
     expect(withArgs).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: PROCESS_FIELDS_REJECTED } });
-    expect(await run(service.list())).toEqual([]);
-  });
 
-  it("create accepts a blank command and stores null (wire compat)", async () => {
-    setup();
-    const created = await run(service.create({ label: "Blank Command", transportType: "http", url: "https://mcp.test/x", command: "" }));
-    expect(created.command).toBeNull();
-    expect((await run(service.list()))[0]).toMatchObject({ id: "blank-command", command: null, args: [] });
+    // An invalid transport shape is refused too.
+    const noUrl = await runEither(service.create({ label: "Remote", transportType: "http", url: null }));
+    expect(noUrl).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpInvalidTransportConfig", reason: "url is required for http/sse transport" }) });
 
-    const patched = await run(service.update("blank-command", { command: "  " }));
-    expect(patched.command).toBeNull();
-  });
-
-  it("rejects stdio with MCP_INVALID_TRANSPORT_CONFIG on Bun and on Workers", async () => {
-    setup();
+    // stdio is refused on both runtimes and nothing extra is persisted.
     for (const workers of [false, true]) {
       runtimeMock.workers = workers;
       const res = await runEither(service.create({ label: "Local", transportType: "stdio", command: "local-mcp", args: ["--stdio"] }));
-      expect(res).toMatchObject({
-        _tag: "Left",
-        left: { _tag: "McpInvalidTransportConfig", reason: STDIO_REASON },
-      });
+      expect(res).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: STDIO_REASON } });
     }
-    // Nothing was persisted on either runtime.
-    expect(await run(service.list())).toEqual([]);
+    expect((await run(service.list())).map((s) => s.id).sort()).toEqual(["blank-command", "my-client"]);
   });
 
-  it("slug `jev` is an ordinary user-owned client", async () => {
+  it("slug `jev` is an ordinary user-owned client; remove deletes it and 404s unknown ids", async () => {
     setup();
     const created = await run(service.create({ label: "Jev", transportType: "http", url: "https://mcp.test/jev" }));
     expect(created).toMatchObject({ id: "jev", label: "Jev", transportType: "http", enabled: false });
@@ -305,13 +289,9 @@ describe("AssistantMcpService", () => {
 
     await run(service.remove("jev"));
     expect(await run(service.list())).toEqual([]);
-  });
 
-  it("rejects an invalid transport shape", async () => {
-    setup();
-    const noUrl = await runEither(service.create({ label: "Remote", transportType: "http", url: null }));
-    expect(noUrl).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpInvalidTransportConfig", reason: "url is required for http/sse transport" }) });
-    expect(await run(service.list())).toEqual([]);
+    const missing = await runEither(service.remove("nope"));
+    expect(missing).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpServerNotFound" }) });
   });
 
   it("runs the SSRF guard on http/sse saves", async () => {
@@ -328,7 +308,7 @@ describe("AssistantMcpService", () => {
     expect(ok.command).toBeNull();
   });
 
-  it("update patches fields and re-validates the merged transport shape", async () => {
+  it("update patches and re-validates the merged shape, refuses process fields, refuses stdio, and normalises legacy rows", async () => {
     setup();
     await run(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x" }));
 
@@ -339,57 +319,34 @@ describe("AssistantMcpService", () => {
     const clearedUrl = await runEither(service.update("remote", { url: null }));
     expect(clearedUrl).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpInvalidTransportConfig" }) });
 
-    const switched = await run(service.update("remote", { transportType: "sse" }));
-    expect(switched.transportType).toBe("sse");
-    expect(switched.url).toBe("https://mcp.test/x");
-    expect(switched.command).toBeNull();
-  });
+    // A stored client cannot be switched to stdio, on either runtime.
+    for (const workers of [false, true]) {
+      runtimeMock.workers = workers;
+      const res = await runEither(service.update("remote", { transportType: "stdio", command: "local-mcp" }));
+      expect(res).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: STDIO_REASON } });
+    }
+    expect((await run(service.list())).map((s) => s.transportType)).toEqual(["http"]);
 
-  it("update refuses a command or non-empty args and never persists them", async () => {
-    setup();
-    await run(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x" }));
-
+    // Process fields are refused and never persisted.
     const withCommand = await runEither(service.update("remote", { command: "npx" }));
     expect(withCommand).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: PROCESS_FIELDS_REJECTED } });
     const withArgs = await runEither(service.update("remote", { args: ["--verbose"] }));
     expect(withArgs).toMatchObject({ _tag: "Left", left: { _tag: "McpInvalidTransportConfig", reason: PROCESS_FIELDS_REJECTED } });
     expect(await run(service.list())).toMatchObject([{ id: "remote", command: null, args: [] }]);
-  });
 
-  it("update normalises legacy stored process fields away", async () => {
-    setup();
+    const switched = await run(service.update("remote", { transportType: "sse" }));
+    expect(switched.transportType).toBe("sse");
+    expect(switched.url).toBe("https://mcp.test/x");
+    expect(switched.command).toBeNull();
+
     // A row written by an older build can still hold `args` (the 0009 CHECK only
     // pins `command`); the next write clears it instead of blocking the patch.
     db.exec(
       `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, enabled)
        VALUES ('legacy-http', 'Legacy Http', 'http', 'https://mcp.test/legacy', NULL, '["--old"]', 0)`
     );
-    const renamed = await run(service.update("legacy-http", { label: "Legacy 2" }));
-    expect(renamed).toMatchObject({ label: "Legacy 2", transportType: "http", command: null, args: [] });
-  });
-
-  it("update refuses to switch a stored client to stdio", async () => {
-    setup();
-    await run(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x" }));
-    for (const workers of [false, true]) {
-      runtimeMock.workers = workers;
-      const res = await runEither(service.update("remote", { transportType: "stdio", command: "local-mcp" }));
-      expect(res).toMatchObject({
-        _tag: "Left",
-        left: { _tag: "McpInvalidTransportConfig", reason: STDIO_REASON },
-      });
-    }
-    expect((await run(service.list())).map((s) => s.transportType)).toEqual(["http"]);
-  });
-
-  it("remove deletes a registered client and 404s unknown ids", async () => {
-    setup();
-    const missing = await runEither(service.remove("nope"));
-    expect(missing).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpServerNotFound" }) });
-
-    await run(service.create({ label: "Temp", transportType: "http", url: "https://mcp.test/t" }));
-    await run(service.remove("temp"));
-    expect(await run(service.list())).toEqual([]);
+    const legacyRenamed = await run(service.update("legacy-http", { label: "Legacy 2" }));
+    expect(legacyRenamed).toMatchObject({ label: "Legacy 2", transportType: "http", command: null, args: [] });
   });
 
   it("project availability is a replace-set and validates server ids", async () => {
@@ -408,7 +365,7 @@ describe("AssistantMcpService", () => {
     expect(bad).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpServerNotFound" }) });
   });
 
-  it("test endpoint reports the connector result and never throws for a live row", async () => {
+  it("test endpoint reports a live connector and folds a failed connect into an error report", async () => {
     setup(okConnector);
     await run(service.create({ label: "Remote", transportType: "http", url: "https://mcp.test/x" }));
     const report = await run(service.testConnection("remote"));
@@ -416,15 +373,13 @@ describe("AssistantMcpService", () => {
 
     const missing = await runEither(service.testConnection("nope"));
     expect(missing).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "McpServerNotFound" }) });
-  });
 
-  it("test endpoint folds a failed connect into an error report (still resolvable)", async () => {
     setup(failConnector);
-    await run(service.create({ label: "Remote", transportType: "sse", url: "https://mcp.test/s" }));
-    const report = await run(service.testConnection("remote"));
-    expect(report.ok).toBe(false);
-    expect(report.toolCount).toBe(0);
-    expect(report.error).toEqual({ code: "MCP_CONNECT_FAILED", message: "no route to host" });
+    await run(service.create({ label: "Failing", transportType: "sse", url: "https://mcp.test/s" }));
+    const failed = await run(service.testConnection("failing"));
+    expect(failed.ok).toBe(false);
+    expect(failed.toolCount).toBe(0);
+    expect(failed.error).toEqual({ code: "MCP_CONNECT_FAILED", message: "no route to host" });
   });
 
   // End-to-end pin through the real LiveMcpConnector + the real report shape:
@@ -524,7 +479,7 @@ describe("managed MCP client secrets", () => {
     ...over,
   });
 
-  it("1. stores a managed token on create, allows a secret-less client, and refuses clearSecret with a token", async () => {
+  it("1. stores a managed token and allows a secret-less client, but refuses clearSecret+token and any managed write without a valid key", async () => {
     setup();
 
     // Managed: ciphertext row written, registry ref stays null, the public shape
@@ -564,13 +519,10 @@ describe("managed MCP client secrets", () => {
       left: { _tag: "McpInvalidTransportConfig", reason: SECRET_CLEAR_CONFLICT_REJECTED },
     });
     expect(secretRow("managed")).not.toBeNull();
-  });
-
-  it("2. refuses a managed write with no master key, and a malformed key, without half-applying anything", async () => {
-    setup();
 
     // The documented disable switch: no key, no managed secret, and the registry
     // row is not created either — a disabled deployment accumulates no orphans.
+    setup();
     const noKey = await withKeyEither(noKeyEnv(), service.create(createInput({ secret: MARKER })));
     expect(noKey).toMatchObject({
       _tag: "Left",
@@ -593,8 +545,8 @@ describe("managed MCP client secrets", () => {
 
     // A secret-less client saves fine with no key, and an update that would
     // store a token is refused the same way.
-    const bare = await withKey(noKeyEnv(), service.create(createInput({ label: "Bare" })));
-    expect(bare).toMatchObject({ id: "bare", hasSecret: false, secretSource: "none" });
+    const bare2 = await withKey(noKeyEnv(), service.create(createInput({ label: "Bare" })));
+    expect(bare2).toMatchObject({ id: "bare", hasSecret: false, secretSource: "none" });
     const refusedUpdate = await withKeyEither(noKeyEnv(), service.update("bare", { secret: MARKER }));
     expect(refusedUpdate).toMatchObject({
       _tag: "Left",
@@ -607,22 +559,22 @@ describe("managed MCP client secrets", () => {
   // Managed-only: a row stored before references were removed (`secret_ref`
   // set, no managed ciphertext) must hard-fail at connect rather than connect
   // anonymously — an unauthenticated client looks identical to a working one.
-  it("3. hard-fails a stored legacy secret_ref at connect, never connecting anonymously", async () => {
+  it("2. hard-fails a legacy secret_ref and an undecryptable blob at connect, leaking neither ref nor ciphertext", async () => {
     setupLive();
     db.exec(
       `INSERT INTO assistant_mcp_servers (id, label, transport_type, url, command, args, secret_ref, enabled)
        VALUES ('legacy-ref', 'Legacy Ref', 'http', 'https://mcp.test/legacy', NULL, '[]', 'env:LINEAR_TOKEN', 0)`
     );
 
-    const report = await withKey(managedEnv(), service.testConnection("legacy-ref"));
-    expect(report).toMatchObject({
+    const legacyReport = await withKey(managedEnv(), service.testConnection("legacy-ref"));
+    expect(legacyReport).toMatchObject({
       ok: false,
       toolCount: 0,
       readOnlyToolCount: 0,
       error: { code: "MCP_CONNECT_FAILED", message: SECRET_REF_UNSUPPORTED },
     });
     // Neither the ref nor the SDK was reached.
-    expect(JSON.stringify(report)).not.toContain("LINEAR_TOKEN");
+    expect(JSON.stringify(legacyReport)).not.toContain("LINEAR_TOKEN");
     expect(sdkMock.calls).toEqual([]);
 
     // An unrelated patch clears the legacy ref (repo.update nulls it) and the
@@ -630,10 +582,7 @@ describe("managed MCP client secrets", () => {
     const renamed = await withKey(managedEnv(), service.update("legacy-ref", { label: "Legacy Renamed" }));
     expect(renamed).toMatchObject({ label: "Legacy Renamed", hasSecret: false, secretSource: "none" });
     expect(refOf("legacy-ref")).toBeNull();
-  });
 
-  it("4. an undecryptable blob is a hard error that leaks neither secret nor ciphertext", async () => {
-    setupLive();
     // The URL plants a KNOWN plaintext string in the database so the byte scan
     // below is a positive control: it can see plaintext that really is stored,
     // so "not present" for the token means absent, not invisible. The label
@@ -700,7 +649,7 @@ describe("managed MCP client secrets", () => {
     expect(raw).not.toContain(MARKER);
   });
 
-  it("5. a row written under the active key survives that key moving to PREV, and dies when it is dropped", async () => {
+  it("3. survives a key rotation to PREV (read-path only) and clearSecret revokes keylessly", async () => {
     setupLive();
     // Written while KEY_A is active; the row records the slot, not the key.
     await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
@@ -731,32 +680,27 @@ describe("managed MCP client secrets", () => {
     });
     expect(JSON.stringify(retired)).not.toContain(MARKER);
     expect(sdkMock.calls).toEqual([]);
-  });
 
-  it("6. clearSecret revokes a stored token with no master key configured", async () => {
+    // clearSecret is a pure row delete: revocation must not depend on a key
+    // being present, or a rotated-away key would leave a credential no one can
+    // remove. remove() takes the child row with it (FK-OFF runner included).
     setup();
     await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
     expect(secretCount()).toBe(1);
-
-    // A pure row delete: revocation must not depend on a key being present, or
-    // a rotated-away key would leave a credential no one can remove.
     const cleared = await withKey(noKeyEnv(), service.update("managed", { clearSecret: true }));
     expect(cleared).toMatchObject({ id: "managed", hasSecret: false, secretSource: "none" });
     expect(secretCount()).toBe(0);
     expect(refOf("managed")).toBeNull();
-
-    // Same for a client that never had a secret.
     const bareCleared = await withKey(noKeyEnv(), service.update("managed", { clearSecret: true, label: "Managed" }));
     expect(bareCleared).toMatchObject({ label: "Managed", hasSecret: false, secretSource: "none" });
 
-    // remove() takes the child row with it (FK-OFF runner included).
     await withKey(managedEnv(), service.create(createInput({ label: "Doomed", secret: MARKER })));
     expect(secretCount()).toBe(1);
     await withKey(managedEnv(), service.remove("doomed"));
     expect(secretCount()).toBe(0);
   });
 
-  it("7. never returns the token, the ciphertext, or the key in a public shape", async () => {
+  it("4. never returns the token/ciphertext/key in a public shape, and an unrelated patch leaves the blob untouched", async () => {
     setup();
     const created = await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
     const stored = secretRow("managed")!;
@@ -789,15 +733,10 @@ describe("managed MCP client secrets", () => {
     const report = await withKey(managedEnv(), service.testConnection("managed"));
     expect(JSON.stringify(report)).not.toContain(MARKER);
     expect(JSON.stringify(report)).not.toContain(stored.ciphertext);
-  });
-
-  it("8. an unrelated patch passes the stored ciphertext through untouched, with or without a key", async () => {
-    setup();
-    await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
-    const managedBefore = secretRow("managed")!;
 
     // Renaming a managed client must not re-encrypt (a fresh IV per write would
     // change the blob), must not need a key, and must not drop the row.
+    const managedBefore = secretRow("managed")!;
     const renamed = await withKey(noKeyEnv(), service.update("managed", { label: "Managed Renamed" }));
     expect(renamed).toMatchObject({ label: "Managed Renamed", hasSecret: true, secretSource: "managed" });
     expect(secretRow("managed")).toEqual(managedBefore);
@@ -817,7 +756,9 @@ describe("managed MCP client secrets", () => {
   // The write ORDER is the safety property: the token is sealed and the
   // ciphertext upsert runs BEFORE the registry write, so a fault between them
   // leaves the previous credential in place rather than a credential-less row.
-  it("9. a fault at the ciphertext upsert leaves the previous blob in place", async () => {
+  // A failing key import reduces to a fixed shape message, never the
+  // third-party WebCrypto text (which can quote the key material).
+  it("5. a ciphertext-upsert fault keeps the previous blob, and a failing key import reports the fixed shape message", async () => {
     setup();
     await withKey(managedEnv(), service.create(createInput({ label: "Managed", secret: MARKER })));
     const before = secretRow("managed")!;
@@ -852,24 +793,18 @@ describe("managed MCP client secrets", () => {
     } finally {
       sealFault.mockRestore();
     }
-    expect(await run(service.list())).toMatchObject([{ id: "managed" }]);
     // No registration and no ciphertext row for the failed label: the whole row
     // is absent, not a row with an empty credential.
     expect(db.prepare("SELECT id FROM assistant_mcp_servers WHERE id = ?").get("never")).toBeNull();
     expect(secretRow("never")).toBeNull();
-  });
 
-  // The 400 body is built from `reason` verbatim, so a third-party WebCrypto or
-  // driver message must never reach it: such text can quote the key material
-  // the import choked on. Every import failure reduces to the fixed shape
-  // message, and no other text (canary included) survives.
-  it("10. a failing key import reports the fixed shape message, never the third-party error", async () => {
-    setup();
+    // A failing key import reduces to the fixed shape message; no other text
+    // (canary included) survives, and a later create still seals normally.
     const canary = "CANARY-THIRD-PARTY-KEY-MATERIAL";
     const importKey = crypto.subtle.importKey.bind(crypto.subtle);
     const spy = vi.spyOn(crypto.subtle, "importKey").mockRejectedValueOnce(new Error(`${canary}: unsupported key length`));
     try {
-      const refused = await withKeyEither(managedEnv(), service.create(createInput({ secret: MARKER })));
+      const refused = await withKeyEither(managedEnv(), service.create(createInput({ label: "ImportFail", secret: MARKER })));
       expect(refused).toMatchObject({
         _tag: "Left",
         left: { _tag: "McpInvalidTransportConfig", reason: SECRETS_MASTER_KEY_INVALID },
@@ -881,18 +816,8 @@ describe("managed MCP client secrets", () => {
     } finally {
       spy.mockRestore();
     }
-    // Nothing was written, and the key still imports normally afterwards.
-    expect(await run(service.list())).toEqual([]);
-    expect(secretCount()).toBe(0);
-    const ok = await withKey(managedEnv(), service.create(createInput({ secret: MARKER })));
-    expect(ok).toMatchObject({ id: "managed", hasSecret: true, secretSource: "managed" });
     expect(importKey).toBeTypeOf("function");
-  });
-});
-
-describe("slugifyMcpId", () => {
-  it("slugifies labels and falls back when empty", () => {
-    expect(slugifyMcpId("My Cool Server")).toBe("my-cool-server");
-    expect(slugifyMcpId("   ")).toBe("mcp-server");
+    const afterImport = await withKey(managedEnv(), service.create(createInput({ label: "AfterImport", secret: MARKER })));
+    expect(afterImport).toMatchObject({ id: "afterimport", hasSecret: true, secretSource: "managed" });
   });
 });

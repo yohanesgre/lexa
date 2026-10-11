@@ -6,6 +6,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { QueryClient } from "@tanstack/react-query";
 import type { Board, Task, Project, Swimlane, Column, FieldConfig } from "../../shared/types";
 import { createFetchMock, createQueryWrapper, createTestQueryClient } from "../test-utils";
+import { getSession } from "./auth";
 import {
   useProjects, useDashboard, useBoard, useTasks, useFieldConfig, useWikiPages, useWikiPage,
   useSearchWikiPages, useRevisions, useColumns, useSwimlanes, useApiKeys, useUsers,
@@ -93,21 +94,19 @@ describe("query hooks — keys + URLs", () => {
     expect(queryClient.getQueryCache().findAll({ queryKey: ["api-keys"], exact: true })).toHaveLength(1);
   });
 
-  it("useAssistantTask fetches /api/assistant/tasks/:id and keys on the id", async () => {
+  it("useAssistantTask fetches /api/assistant/tasks/:id and stays idle without an id", async () => {
     routes.set("GET /api/assistant/tasks/at1", { id: "at1", projectId: "p1", status: "completed", documentTitle: "Doc" });
     const { result } = renderHook(() => useAssistantTask("at1", true), { wrapper });
     const data = await awaitData(result);
     expect(data).toMatchObject({ id: "at1", status: "completed" });
     expect(queryClient.getQueryCache().findAll({ queryKey: ["assistant-task", "at1"], exact: true })).toHaveLength(1);
-  });
 
-  it("useAssistantTask stays idle without an id", () => {
-    const { result } = renderHook(() => useAssistantTask(null, true), { wrapper });
-    expect(result.current.fetchStatus).toBe("idle");
+    const idle = renderHook(() => useAssistantTask(null, true), { wrapper });
+    expect(idle.result.current.fetchStatus).toBe("idle");
   });
 });
-describe("deriveTaskList", () => {
-  it("resolves names/colors from the board maps and falls back to ids", () => {
+describe("deriveTaskList + selectProjectHealth", () => {
+  it("resolves names/colors from the board maps (id fallbacks) and finds the project's health entry or undefined", () => {
     const rows = deriveTaskList(BOARD);
     expect(rows[0]).toMatchObject({
       id: "t1",
@@ -133,10 +132,6 @@ describe("deriveTaskList", () => {
       typeLabel: "type-x",
       githubNumber: 7,
     });
-  });
-});
-describe("selectProjectHealth", () => {
-  it("finds the project's health entry or returns undefined", () => {
     const dashboard = {
       projects: [{ project: PROJECT, taskCount: 1, columnCount: 1, urgentCount: 0, syncCount: 0, health: "ok" as const, wipSegments: [] }],
       stats: { totalTasks: 1, activeProjects: 1, wipExceeded: 0, outOfSync: 0 },
@@ -162,5 +157,30 @@ describe("prependActivity", () => {
     expect(cached.pages[0]!.data).toHaveLength(2);
     expect(cached.pages[1]!.data).toHaveLength(0);
     expect((cached.pages[0]!.data[1] as { message: string }).message).toBe("m2");
+  });
+});
+
+// Merged from lib/auth.test.ts — getSession normalizes Better Auth's responses
+// (SSR guard: a literal `null` body must never reach the session reader).
+describe("getSession — session read normalization", () => {
+  it("degrades a null body and a non-ok response to an empty session (SSR crash guard)", async () => {
+    fetchMock.mockResolvedValue(new Response("null", { status: 200, headers: { "Content-Type": "application/json" } }));
+    const nullBody = await getSession();
+    expect(nullBody).toEqual({ session: null, user: null });
+    expect(nullBody.session).toBeNull();
+
+    fetchMock.mockResolvedValue(new Response(null, { status: 500 }));
+    expect(await getSession()).toEqual({ session: null, user: null });
+  });
+
+  it("passes a real session through unchanged", async () => {
+    const body = {
+      session: { id: "s1", userId: "u1", expiresAt: "t", createdAt: "t" },
+      user: { id: "u1", email: "y@lexa.test", name: "Y", role: "superadmin", createdAt: "t", lastSeen: null },
+    };
+    fetchMock.mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    const res = await getSession();
+    expect(res.session?.id).toBe("s1");
+    expect(res.user?.email).toBe("y@lexa.test");
   });
 });

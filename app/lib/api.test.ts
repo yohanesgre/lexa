@@ -52,19 +52,20 @@ const cases: Case[] = [
 ];
 
 describe("api request building matrix", () => {
-  for (const c of cases) {
-    it(c.name, async () => {
+  it("builds each endpoint's URL/method/body from the request matrix", async () => {
+    for (const c of cases) {
+      fetchMock.mockReset();
       fetchMock.mockResolvedValue(jsonResponse(c.response, c.status ?? 200));
       const result = await c.call();
       expect(fetchMock).toHaveBeenCalledTimes(1);
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect(url).toBe(c.url);
-      expect(init.method ?? "GET").toBe(c.method);
-      if (c.body !== undefined) expect(JSON.parse(String(init.body))).toEqual(c.body);
+      expect(url, c.name).toBe(c.url);
+      expect(init.method ?? "GET", c.name).toBe(c.method);
+      if (c.body !== undefined) expect(JSON.parse(String(init.body)), c.name).toEqual(c.body);
       if (c.expectResult) c.expectResult(result);
-      else expect(result).toBeDefined();
-    });
-  }
+      else expect(result, c.name).toBeDefined();
+    }
+  });
 
   it("createComment unwraps the {data:{comment,activity}} envelope", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: { comment: { id: 1, taskId: "t1", authorId: null, authorKind: "user", authorLabel: "Maria", body: {}, editedAt: null, deletedAt: null, createdAt: "t" }, activity: EV } }));
@@ -73,6 +74,28 @@ describe("api request building matrix", () => {
     expect(result.activity.type).toBe("created");
   });
 
+});
+
+// Merged from lib/assistant-chat-api.test.ts — the same client URL/body contract
+// for the assistant chat list and meta PATCH.
+describe("assistant chat api", () => {
+  it("listAssistantChats appends ?q= only for non-empty queries; updateAssistantChatMeta PATCHes {title?, pinned?}", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ data: [] })));
+    await api.listAssistantChats("p1");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/assistant/chats/p1");
+    await api.listAssistantChats("p1", "  runbook ");
+    expect(fetchMock.mock.calls[1]![0]).toBe("/api/assistant/chats/p1?q=runbook");
+    await api.listAssistantChats("p1", "   ");
+    expect(fetchMock.mock.calls[2]![0]).toBe("/api/assistant/chats/p1");
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(jsonResponse({ chatId: "c1", pinned: true }));
+    await api.updateAssistantChatMeta("c1", { pinned: true });
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("/api/assistant/chat/c1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(String(init.body))).toEqual({ pinned: true });
+  });
 });
 
 describe("request headers", () => {
@@ -84,5 +107,38 @@ describe("request headers", () => {
     expect(headers.Authorization).toBeUndefined();
     expect(headers["x-lxk-user"]).toBeUndefined();
     expect(headers["Content-Type"]).toBe("application/json");
+  });
+});
+
+// Merged from lib/api-errors.test.ts — the error envelope is the documented
+// client contract (docs/API.md §Error Envelope): code + message extracted,
+// status not carried on the error.
+describe("api error mapping", () => {
+  const envelope = (code: string, message: string, status: number) =>
+    new Response(JSON.stringify({ error: { code, message } }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  async function failureOf(p: Promise<unknown>): Promise<Error & { code?: string }> {
+    try {
+      await p;
+      throw new Error("expected a rejection");
+    } catch (e) {
+      return e as Error & { code?: string };
+    }
+  }
+
+  it("maps the envelope code and message for 401 UNAUTHORIZED and 403 FORBIDDEN", async () => {
+    fetchMock.mockResolvedValue(envelope("UNAUTHORIZED", "Invalid or missing API key", 401));
+    const unauthorized = await failureOf(api.listProjects());
+    expect(unauthorized).toBeInstanceOf(Error);
+    expect(unauthorized.code).toBe("UNAUTHORIZED");
+    expect(unauthorized.message).toBe("Invalid or missing API key");
+
+    fetchMock.mockResolvedValue(envelope("FORBIDDEN", "Admin role required", 403));
+    const forbidden = await failureOf(api.listUsers());
+    expect(forbidden.code).toBe("FORBIDDEN");
+    expect(forbidden.message).toBe("Admin role required");
   });
 });

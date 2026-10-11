@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   loading: false,
   navigate: vi.fn(),
   selection: { selectedSlug: undefined as string | undefined },
+  lastOptions: undefined as { enabled?: boolean } | undefined,
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -23,12 +24,17 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => h.navigate,
 }));
 
-vi.mock("../lib/assistant-enabled", () => ({
-  useAssistantEnabled: () => ({ enabled: h.enabled, loading: h.loading, flavor: h.enabled ? "workers" : "bun" }),
-}));
-
+// Backs the real `useAssistantEnabled` gate (ADR-0003 §F.3): the routes and the
+// hook read the same capability source.
 vi.mock("../lib/queries", () => ({
   useProjects: () => ({ data: [{ id: "p1", slug: "demo", name: "Demo" }] }),
+  useCapabilities: (opts?: { enabled?: boolean }) => {
+    h.lastOptions = opts;
+    return {
+      data: h.loading ? undefined : { assistant: h.enabled, flavor: h.enabled ? "workers" : "bun" },
+      isLoading: h.loading,
+    };
+  },
 }));
 
 vi.mock("../lib/project-selection", () => ({
@@ -38,6 +44,9 @@ vi.mock("../lib/project-selection", () => ({
 vi.mock("../components/chat/AssistantChatPage", () => ({
   AssistantChatPage: () => <div data-testid="assistant-chat-page" />,
 }));
+
+import { renderHook } from "@testing-library/react";
+import { useAssistantEnabled } from "../lib/assistant-enabled";
 
 const { Route: chatRoute } = await import("./$slug/chat");
 const { Route: bareChatRoute } = await import("./chat");
@@ -50,6 +59,7 @@ beforeEach(() => {
   h.loading = false;
   h.navigate.mockReset();
   h.selection = { selectedSlug: undefined };
+  h.lastOptions = undefined;
 });
 
 describe("/$slug/chat capability gate", () => {
@@ -87,5 +97,36 @@ describe("/chat bare redirect capability gate", () => {
     render(<BareChatRedirect />);
     expect(screen.getByText("The Assistant runs on the Cloudflare Workers deployment")).toBeInTheDocument();
     expect(h.navigate).not.toHaveBeenCalled();
+  });
+});
+
+// Merged from lib/assistant-enabled.test.tsx — the hook itself is the single
+// capability gate the UI reads: `enabled` is strictly true only once
+// `GET /api/capabilities` resolves with `assistant:true`.
+describe("useAssistantEnabled — capability gate", () => {
+  it("is enabled on the Workers flavor and disabled on the Bun flavor", () => {
+    h.enabled = true;
+    const workers = renderHook(() => useAssistantEnabled());
+    expect(workers.result.current).toEqual({ enabled: true, loading: false, flavor: "workers" });
+
+    h.enabled = false;
+    const bun = renderHook(() => useAssistantEnabled());
+    expect(bun.result.current).toEqual({ enabled: false, loading: false, flavor: "bun" });
+  });
+
+  it("stays gated while the capabilities read is in flight or has not resolved", () => {
+    h.loading = true;
+    const inFlight = renderHook(() => useAssistantEnabled());
+    expect(inFlight.result.current).toEqual({ enabled: false, loading: true, flavor: undefined });
+
+    h.loading = false;
+    h.enabled = false;
+    const unresolved = renderHook(() => useAssistantEnabled());
+    expect(unresolved.result.current.enabled).toBe(false);
+  });
+
+  it("forwards the enabled option to suppress the read on bare pages", () => {
+    renderHook(() => useAssistantEnabled({ enabled: false }));
+    expect(h.lastOptions).toEqual({ enabled: false });
   });
 });

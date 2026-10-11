@@ -1,0 +1,124 @@
+{
+ "note": "Anti-pattern allowances recorded at the 2026-10-11 trim close. The ratchet only tightens: measured > allowance fails `bun run check:test-hygiene`; measured < allowance is reported so the cap can be lowered. Raise a cap only with a stated criterion.",
+ "budget": {
+  "files": 100,
+  "cases": 900,
+  "loc": 27000
+ },
+ "measuredAt": {
+  "files": 95,
+  "cases": 818,
+  "loc": 25673
+ },
+ "files": {
+  "app/components/kanban/BoardLane.subtask.test.tsx": {
+   "class_pin": 4
+  },
+  "app/components/swimlanes/ui-gaps-w3.test.tsx": {
+   "weak_assert": 1
+  },
+  "app/components/tasks/TasksPage.bulk.test.tsx": {
+   "mock_echo": 7
+  },
+  "app/components/useTaskDetailActions.test.tsx": {
+   "mock_echo": 3
+  },
+  "app/lib/api.test.ts": {
+   "weak_assert": 1
+  },
+  "app/lib/assistant-chat-queries.test.tsx": {
+   "mock_echo": 1
+  },
+  "app/lib/queries-mutations.test.tsx": {
+   "weak_assert": 2,
+   "mock_echo": 1
+  },
+  "app/lib/queries.test.tsx": {
+   "weak_assert": 1,
+   "mock_echo": 1
+  },
+  "app/lib/tokenizeTranscript.test.tsx": {
+   "weak_assert": 2
+  },
+  "app/routes/assistant-route-gates.test.tsx": {
+   "mock_echo": 1
+  },
+  "app/routes/settings/github.callback.test.tsx": {
+   "mock_echo": 2
+  },
+  "app/routes/share.$token.test.tsx": {
+   "mock_echo": 1
+  },
+  "cli/src/config.test.ts": {
+   "mock_echo": 4,
+   "source_read": 8
+  },
+  "cli/src/index.entry.test.ts": {
+   "source_read": 8
+  },
+  "cli/src/index.task-lifecycle.test.ts": {
+   "weak_assert": 5
+  },
+  "cli/src/worker-upgrade.test.ts": {
+   "source_read": 6
+  },
+  "server/api/auth-key.test.ts": {
+   "weak_assert": 1
+  },
+  "server/api/bun-bundle-boundary.test.ts": {
+   "source_read": 1
+  },
+  "server/api/error-catalog.test.ts": {
+   "source_read": 3
+  },
+  "server/api/http-assistant-attachments.test.ts": {
+   "weak_assert": 1
+  },
+  "server/api/http-attachments.test.ts": {
+   "weak_assert": 2
+  },
+  "server/api/http-device-login.test.ts": {
+   "weak_assert": 3
+  },
+  "server/api/http-projects.test.ts": {
+   "weak_assert": 1
+  },
+  "server/api/http-tasks.test.ts": {
+   "weak_assert": 1
+  },
+  "server/api/http-wiki-admin.test.ts": {
+   "weak_assert": 4
+  },
+  "server/assistant/gateway-retry.test.ts": {
+   "weak_assert": 1
+  },
+  "server/assistant/gateway.service.test.ts": {
+   "weak_assert": 1
+  },
+  "server/auth.factory.test.ts": {
+   "weak_assert": 1
+  },
+  "server/db/migrate.test.ts": {
+   "source_read": 6
+  },
+  "server/env-file.test.ts": {
+   "source_read": 4
+  },
+  "server/github/client.test.ts": {
+   "weak_assert": 1
+  },
+  "server/github/config-store.test.ts": {
+   "mock_echo": 1
+  },
+  "server/services/assistant-mcp.service.test.ts": {
+   "weak_assert": 1,
+   "source_read": 1
+  },
+  "server/services/column.service.test.ts": {
+   "weak_assert": 1
+  },
+  "server/services/workspace-invites.service.test.ts": {
+   "weak_assert": 2
+  }
+ }
+}

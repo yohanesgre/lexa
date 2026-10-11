@@ -33,6 +33,11 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 
 ## Status protocol + report contract
 
+**`status/` is gitignored and never pushed** — it is ephemeral, machine-local orchestration state. Durable
+outputs (rules, maps, contracts, rationale, decisions another device or clone must read) belong in `docs/`,
+code comments, or `CHANGELOG.md`; a `status/` path must never be the only reference to something that
+matters. Keep working artifacts there, promote the durable parts before closing.
+
 All work tracking uses one folder per plan under `status/` (the global `work-plans` skill; load it when opening, updating, or closing a plan):
 - **Plan:** `status/<plan>/plan.md` — problem, scope, graph. Single source of requirements (read FIRST; the dispatch prompt is only context).
 - **Status:** `status/<plan>/status.md` — `state: <PLAN|WAIT|WORKING|DONE|FAILED>` + `ts: <epoch>` + `msg: <message>`. Heartbeat on every significant action (fresh ts).
@@ -184,6 +189,28 @@ with `--print-plan`.
 **Iteration contract:** during iteration run only the touched test file(s)
 (`bun run test -- <path>`, ~1s each); run the lane (`test:app`/`test:fe`/
 `test:be`/`test:cli`) at lane close; run the full suite only at pre-merge.
+
+**Test guard rail** (rules, budget, and the invariant→test map live in `docs/TESTING.md`): write minimal and
+important tests only. Enforced by `bun run check:test-hygiene`, which `scripts/verify-gate.sh` runs on
+every gate.
+
+1. **Name the criterion before writing the test.** It must be one of: an architectural invariant (the 14
+   in `scripts/check-invariants.ts`), a documented contract (`docs/API.md`, `docs/SCHEMA.md`,
+   `docs/LAYERS.md`), a security/auth boundary, a race/atomicity property, a migration/upgrade path, a
+   destructive operation, or a core-flow smoke. No criterion → do not write the test.
+2. **One test per effect, at the tier where the effect lives.** Route-level for the documented HTTP
+   contract, service-level for domain rules, db-level for schema/migration, the static scanner for
+   structural invariants, one smoke per UI surface. Never restate at a second tier.
+3. **Banned** (the checker fails a gate on these): snapshot assertions; and any *new* use of
+   `toHaveClass`/`toHaveStyle`, `toBeTruthy`/`toBeDefined`, `toHaveBeenCalledWith` (mock-argument echo)
+   or `readFileSync` — those are recorded per file in `scripts/test-hygiene-allow.json` as a ratchet that
+   only tightens. Also banned by judgment: copy/label/px pins, internal wiring, source-text scans,
+   implementation-detail pins, and tests whose subject has no production caller.
+4. **Budget**: 100 files / 900 cases / 27k LOC of tests. Exceeding a ceiling is a warning; growth needs a
+   stated criterion in the PR/commit body, not a silent addition.
+5. **Ceilings are not a license to duplicate**: prefer extending an existing case's assertions over
+   adding a near-identical case, and never re-pin existing wording/implementation behavior — delete it.
+   Invariant→test map, non-droppable surfaces and the checker's rules: `docs/TESTING.md`.
 
 Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them and paste the output.
 

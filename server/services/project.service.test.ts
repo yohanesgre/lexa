@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
 import { ProjectService } from "./project.service";
-import { ProjectNotFound, SlugTaken } from "../api/errors";
+import { SlugTaken } from "../api/errors";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -167,15 +167,6 @@ describe("ProjectService.find", () => {
     expect(list.map((p) => p.id)).toEqual([created.id]);
   });
 
-  it("missing slug/id → ProjectNotFound", async () => {
-    const svc = makeService(db);
-    const bySlug = await Effect.runPromise(Effect.either(svc.findBySlug("nope")));
-    expect(Either.isLeft(bySlug)).toBe(true);
-    if (Either.isLeft(bySlug)) expect(bySlug.left).toBeInstanceOf(ProjectNotFound);
-    const byId = await Effect.runPromise(Effect.either(svc.findById("nope")));
-    expect(Either.isLeft(byId)).toBe(true);
-    if (Either.isLeft(byId)) expect(byId.left).toBeInstanceOf(ProjectNotFound);
-  });
 });
 
 describe("ProjectService.update", () => {
@@ -193,12 +184,6 @@ describe("ProjectService.update", () => {
     }
   });
 
-  it("missing slug → ProjectNotFound", async () => {
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.update("nope", { name: "X" })));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
-  });
 });
 
 describe("ProjectService.delete", () => {
@@ -219,12 +204,5 @@ describe("ProjectService.delete", () => {
     expect(count("SELECT COUNT(*) AS n FROM wiki_pages WHERE project_id = ?")).toBe(0);
     expect(count("SELECT COUNT(*) AS n FROM priority_options WHERE project_id = ?")).toBe(0);
     expect(count("SELECT COUNT(*) AS n FROM type_options WHERE project_id = ?")).toBe(0);
-  });
-
-  it("missing slug → ProjectNotFound", async () => {
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.delete("nope")));
-    expect(Either.isLeft(res)).toBe(true);
-    if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 });

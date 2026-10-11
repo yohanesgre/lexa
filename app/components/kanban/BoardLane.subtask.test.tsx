@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
-import { render, renderHook, screen } from "@testing-library/react";
+import { cleanup, render, renderHook, screen } from "@testing-library/react";
 import { DndContext } from "@dnd-kit/core";
 import type { ReactNode } from "react";
 import type { Board, BoardTask, Column, Swimlane, Task } from "../../../shared/types";
@@ -150,22 +150,19 @@ describe("BoardLane subtask rendering", () => {
     expect(document.querySelectorAll(".kanban-card")).toHaveLength(2);
   });
 
-  it("renders an orphaned child top-level when its parent is absent (archived)", () => {
-    const orphaned: Board = makeBoard({ columns: [COLUMN], swimlanes: [LANE], links: BOARD.links, tasks: [CHILD] });
-    renderLane(orphaned);
-
-    const childCard = screen.getByRole("button", { name: "Open task Child task" }).querySelector(".kanban-card");
-    expect(childCard).not.toBeNull();
-    expect(childCard).not.toHaveClass("kanban-card-subtask");
+  it("renders an orphaned child top-level when its parent is absent (archived) or filtered out", () => {
+    const absent: Board = makeBoard({ columns: [COLUMN], swimlanes: [LANE], links: BOARD.links, tasks: [CHILD] });
+    renderLane(absent);
+    const absentCard = screen.getByRole("button", { name: "Open task Child task" }).querySelector(".kanban-card");
+    expect(absentCard).not.toBeNull();
+    expect(absentCard).not.toHaveClass("kanban-card-subtask");
     expect(document.querySelectorAll(".kanban-card")).toHaveLength(1);
-  });
 
-  it("renders an orphaned child top-level when its parent is filtered out", () => {
+    cleanup();
     renderLane(BOARD, (t) => t.id === "t1");
-
-    const childCard = screen.getByRole("button", { name: "Open task Child task" }).querySelector(".kanban-card");
-    expect(childCard).not.toBeNull();
-    expect(childCard).not.toHaveClass("kanban-card-subtask");
+    const filteredCard = screen.getByRole("button", { name: "Open task Child task" }).querySelector(".kanban-card");
+    expect(filteredCard).not.toBeNull();
+    expect(filteredCard).not.toHaveClass("kanban-card-subtask");
     expect(document.querySelectorAll(".kanban-card")).toHaveLength(1);
   });
 

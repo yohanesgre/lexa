@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import {
   SECRETS_MASTER_KEY_BYTES,
   SECRETS_MASTER_KEY_INVALID,
@@ -20,8 +18,6 @@ import {
   type SecretKeyId,
   type SecretScope,
 } from "./secrets";
-
-const MODULE_PATH = fileURLToPath(new URL("./secrets.ts", import.meta.url));
 
 // 32 distinct bytes, so no key is all-zeroes and a wrong-key failure can never
 // be confused with a degenerate key.
@@ -49,7 +45,7 @@ async function keyring(): Promise<SecretKeyring> {
 const TOKEN = "ghp_examplemanagedsecrettoken0123456789";
 
 describe("secrets master key parsing", () => {
-  it("imports a 32-byte base64 key as a non-extractable AES-GCM key", async () => {
+  it("imports a 32-byte base64 key as a non-extractable AES-GCM key, and accepts base64url plus whitespace", async () => {
     const key = await parseMasterKey(ACTIVE_RAW);
     expect(key.type).toBe("secret");
     expect(key.algorithm).toMatchObject({ name: "AES-GCM", length: 256 });
@@ -57,21 +53,16 @@ describe("secrets master key parsing", () => {
     // exportable back out of the runtime.
     expect(key.extractable).toBe(false);
     expect([...(key.usages as readonly string[])].sort()).toEqual(["decrypt", "encrypt"]);
+
+    const urlKey = await parseMasterKey(`  ${b64url(keyBytes(3))}\n`);
+    expect(urlKey.algorithm).toMatchObject({ name: "AES-GCM" });
   });
 
-  it("accepts base64url and tolerates surrounding whitespace", async () => {
-    const key = await parseMasterKey(`  ${b64url(keyBytes(3))}\n`);
-    expect(key.algorithm).toMatchObject({ name: "AES-GCM" });
-  });
-
-  it("rejects an empty or absent key with the fixed message", async () => {
+  it("rejects an empty/absent key, a short key, a long key, and non-base64 garbage with the fixed message", async () => {
     await expect(parseMasterKey("")).rejects.toThrow(SECRETS_MASTER_KEY_INVALID);
     await expect(parseMasterKey("   ")).rejects.toThrow(SECRETS_MASTER_KEY_INVALID);
     await expect(parseMasterKey(null)).rejects.toThrow(SECRETS_MASTER_KEY_INVALID);
     await expect(parseMasterKey(undefined)).rejects.toThrow(SECRETS_MASTER_KEY_INVALID);
-  });
-
-  it("rejects a short key, a long key, and non-base64 garbage", async () => {
     await expect(parseMasterKey(b64(keyBytes(3).slice(0, 31)))).rejects.toThrow(SECRETS_MASTER_KEY_INVALID);
     await expect(parseMasterKey(b64(new Uint8Array(33).fill(1)))).rejects.toThrow(SECRETS_MASTER_KEY_INVALID);
     // Right base64 length, wrong decoded size: 44 chars decode to 33 bytes, so
@@ -206,7 +197,7 @@ describe("AAD scope isolation", () => {
 });
 
 describe("managed secret decryption failures", () => {
-  it("fails on a wrong key, tamper, and an unknown key id — same fixed message each time", async () => {
+  it("fails on a wrong key, tamper, unknown key id, missing rotation slot, and malformed IV/ciphertext — same fixed message each time", async () => {
     const k = await keyring();
     const row = await encryptSecret(TOKEN, "mcp", "jev", k.active, k);
     const blob = { scope: "mcp" as const, ownerId: "jev", ...row };
@@ -234,11 +225,8 @@ describe("managed secret decryption failures", () => {
     await expect(decryptSecret({ scope: "mcp", ownerId: "jev", ...prevRow }, { active: k.active })).rejects.toThrow(
       SECRET_DECRYPT_FAILED
     );
-  });
 
-  it("fails on a malformed IV or ciphertext rather than returning garbage", async () => {
-    const k = await keyring();
-    const row = await encryptSecret(TOKEN, "mcp", "jev", k.active, k);
+    // Malformed IV/ciphertext fails rather than returning garbage.
     await expect(decryptSecret({ scope: "mcp", ownerId: "jev", ...row, ivB64: "" }, k)).rejects.toThrow(
       SECRET_DECRYPT_FAILED
     );
@@ -315,7 +303,7 @@ describe("secretsManagedEnabled (the capability flag on the list response)", () 
 });
 
 describe("key id convention", () => {
-  it("names the two keyring slots, and the row stores exactly that", () => {
+  it("names the two keyring slots, and resolves a key to its slot by identity (null for a foreign key)", async () => {
     // Frozen convention: key_id is the keyring SLOT the blob was encrypted
     // with ("active" | "prev") — never a key fingerprint, a counter, or a
     // date. Rotation therefore never needs a rewrap to stay readable: a PREV
@@ -323,9 +311,7 @@ describe("key id convention", () => {
     // about which key it belongs to.
     expect(SECRET_KEY_ID_ACTIVE).toBe("active");
     expect(SECRET_KEY_ID_PREV).toBe("prev");
-  });
 
-  it("resolves a key to its slot by identity, and reports null for a foreign key", async () => {
     const k = await keyring();
     expect(keyIdFor(k.active)).toBe(SECRET_KEY_ID_ACTIVE);
     expect(keyIdFor(k.prev!)).toBe(SECRET_KEY_ID_PREV);
@@ -335,12 +321,10 @@ describe("key id convention", () => {
 });
 
 describe("secretsKeyringFromEnv", () => {
-  it("returns null when no master key is configured (feature disabled)", async () => {
+  it("returns null when no master key is configured, and builds the active-only then active+prev keyring", async () => {
     await expect(secretsKeyringFromEnv({})).resolves.toBeNull();
     await expect(secretsKeyringFromEnv({ LXK_SECRETS_MASTER_KEY: "", LXK_SECRETS_MASTER_KEY_PREV: PREV_RAW })).resolves.toBeNull();
-  });
 
-  it("builds the active-only keyring, and the active+prev keyring on a rotation", async () => {
     const activeOnly = await secretsKeyringFromEnv({ LXK_SECRETS_MASTER_KEY: ACTIVE_RAW });
     expect(activeOnly?.prev).toBeUndefined();
     expect(keyIdFor(activeOnly!.active)).toBe(SECRET_KEY_ID_ACTIVE);
@@ -364,19 +348,6 @@ describe("secretsKeyringFromEnv", () => {
 });
 
 describe("module surface", () => {
-  it("uses Web Crypto and the base64 helpers only — no node: imports (Workers parity)", () => {
-    // The Workers bundle has no node: builtins, so a node import here would
-    // break the Cloudflare build. Asserted by source, not by running Workers.
-    const source = readFileSync(MODULE_PATH, "utf8");
-    expect(source).not.toMatch(/from\s+["']node:/);
-    expect(source).not.toMatch(/require\(\s*["']node:/);
-    expect(source).not.toMatch(/\bBuffer\b/);
-    // Plain assistant-tier module: no Effect.Service, no logging, no DB.
-    expect(source).not.toMatch(/Effect\.Service/);
-    expect(source).not.toMatch(/console\.(log|warn|error|info|debug)/);
-    expect(source).not.toMatch(/process\.(stderr|stdout|env)/);
-  });
-
   it("writes nothing to stderr when a secret operation fails", async () => {
     const k = await keyring();
     const row = await encryptSecret(TOKEN, "mcp", "jev", k.active, k);

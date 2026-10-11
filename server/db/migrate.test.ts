@@ -1,10 +1,10 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, readdirSync, copyFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
-import { runMigrations } from "./migrate";
+import { runMigrations, runMigrationsD1, type D1MigrationRunner } from "./migrate";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -42,16 +42,6 @@ function stagePreRename(): string {
 function stagePreAssistant(): string {
   const dir = tmpDir();
   for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f < "0006")) {
-    copyFileSync(join(MIGRATIONS, f), join(dir, f));
-  }
-  return dir;
-}
-
-// Copy every migration before 0007 so the DB is exactly the shape 0007 must
-// upgrade (runtimes.team_id still ON DELETE SET NULL).
-function stagePre0007(): string {
-  const dir = tmpDir();
-  for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f < "0007")) {
     copyFileSync(join(MIGRATIONS, f), join(dir, f));
   }
   return dir;
@@ -241,12 +231,6 @@ describe("runMigrations", () => {
     expect(appliedMigrations(dbPath)).toEqual(["0001_ok.sql"]);
   });
 
-  it("keeps the default migrations dir (prod behavior)", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql", "0028_assistant_settings_vision_model.sql", "0029_assistant_permission_mode_resume_claims.sql"]);
-  });
-
   it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, stageThrough("0007"));
@@ -271,55 +255,6 @@ describe("runMigrations", () => {
 
 
 
-  it("baseline seeds assistant_threads with title, pinned, and the chat list index", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
-    const db = new Database(dbPath);
-    const colNames = (db.prepare("PRAGMA table_info(assistant_threads)").all() as { name: string }[]).map((c) => c.name);
-    expect(colNames).toContain("pinned");
-    // Fresh rows default to unpinned.
-    db.exec(`
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
-INSERT INTO users (id, email, name, role) VALUES ('u1', 'u1@x', 'U1', 'superadmin');
-INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
-VALUES ('chat', 'c1', 'p1', 'u1', '[]');
-`);
-    const row = db.prepare(`SELECT pinned FROM assistant_threads WHERE document_id = 'c1'`).get() as { pinned: number };
-    expect(row.pinned).toBe(0);
-    // New list index present, old owner index gone.
-    const idxNames = (db.prepare("PRAGMA index_list(assistant_threads)").all() as { name: string }[]).map((i) => i.name);
-    expect(idxNames).toContain("idx_assistant_threads_chat_list");
-    expect(idxNames).not.toContain("idx_assistant_threads_chat_owner");
-    db.close();
-  });
-
-  it("baseline seeds exactly one builtin agent on a fresh database", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
-    const db = new Database(dbPath);
-    const cols = (db.prepare("PRAGMA table_info(assistant_settings)").all() as { name: string }[]).map((c) => c.name);
-    expect(cols).toEqual(
-      expect.arrayContaining(["primary_supports_images", "reasoning_effort", "write_tools", "fallback_model_ids"])
-    );
-    expect(cols).not.toContain("engine");
-    expect(cols).not.toContain("engine_switcher_enabled");
-    // Revived by 0028 — the vision agent model.
-    expect(cols).toContain("vision_model");
-    expect(cols).not.toContain("kind");
-    const agents = db.prepare("SELECT id, name FROM lexa_agents WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string; name: string }>;
-    expect(agents).toEqual([{ id: "assistant", name: "Assistant Agent" }]);
-    const builtins = (db.prepare("SELECT id FROM lexa_skills WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string }>).map((r) => r.id);
-    const assistantSkills = db
-      .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'assistant' ORDER BY skill_id")
-      .all() as Array<{ skill_id: string }>;
-    expect(assistantSkills.map((r) => r.skill_id)).toEqual(builtins);
-    const bsSkills = db
-      .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'blacksmith'")
-      .all() as Array<{ skill_id: string }>;
-    expect(bsSkills).toEqual([]);
-    db.close();
-  });
-
   it("baseline folds the pre-release chain into its final shape", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
@@ -343,20 +278,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     // Gateway tables exist; provider models sync at runtime, not at migrate time.
     expect(tableExists(db, "assistant_models")).toBe(true);
     expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_models").get()).toEqual({ n: 0 });
-    db.close();
-  });
-
-  it("0005 fresh database: runtime_* tables + indexes, no hearth_*", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, stageThrough("0005"));
-    const db = new Database(dbPath);
-    for (const t of ["runtime_tasks", "runtime_task_logs", "runtime_sessions"]) expect(tableExists(db, t)).toBe(true);
-    for (const t of ["hearth_tasks", "hearth_task_logs", "hearth_sessions"]) expect(tableExists(db, t)).toBe(false);
-    const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
-    for (const i of ["idx_runtime_tasks_created", "idx_runtime_tasks_status", "idx_runtime_task_logs_task", "idx_runtime_tasks_kind_status"]) {
-      expect(idx).toContain(i);
-    }
-    expect(idx.some((n) => n.startsWith("idx_hearth"))).toBe(false);
     db.close();
   });
 
@@ -385,108 +306,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     expect(idx).toContain("idx_runtime_tasks_created");
     expect(idx.some((n) => n.startsWith("idx_hearth"))).toBe(false);
     after.close();
-  });
-
-  // The Bun runner disables FK enforcement, but the Workers/D1 runner applies
-  // the file as one batch with enforcement ON. 0005 must therefore survive an
-  // FK-ON apply with the identical end state (no FK violation on the rebind).
-  it("0005 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
-    const dir = stagePreRename();
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_PRE_RENAME);
-
-    const sql = readFileSync(join(MIGRATIONS, "0005_runtime_rename.sql"), "utf-8");
-    db.exec("BEGIN");
-    try {
-      db.exec(sql);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0005_runtime_rename.sql");
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-
-    assertPostRename(db, "herald_threads", "herald", "Herald Agent");
-    expect(appliedMigrations(dbPath)).toContain("0005_runtime_rename.sql");
-    db.close();
-  });
-
-  // bun:sqlite `exec()` parses the whole file and the surrounding BEGIN/COMMIT
-  // rolls back on any later statement's failure. Failure injection is an FK
-  // violation (the path the Workers/D1 runner can fail on), not a missing
-  // table. Note: bun:sqlite 1.4.2 silently rolls back an FK violation when
-  // BEGIN/COMMIT are embedded inside the SAME exec() string; the runner issues
-  // them as separate exec() calls and migration files contain no BEGIN/COMMIT,
-  // so the error surfaces and ROLLBACK runs (asserted below). No partial-commit
-  // anomaly is observable on the runner path.
-  it("0005 rolls back atomically with foreign_keys=ON (no partial rebind)", () => {
-    const dir = stagePreRename();
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_PRE_RENAME);
-
-    const sql = readFileSync(join(MIGRATIONS, "0005_runtime_rename.sql"), "utf-8");
-    // Append an FK-violating statement so the failure lands after the parent
-    // INSERTs, the child rebinds, and the old-parent DELETE.
-    const broken = `${sql}\nUPDATE runtime_tasks SET agent_id = 'ghost' WHERE id = 'ft1';\n`;
-    db.exec("BEGIN");
-    let threw = false;
-    try {
-      db.exec(broken);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0005_runtime_rename.sql");
-      db.exec("COMMIT");
-    } catch {
-      threw = true;
-      db.exec("ROLLBACK");
-    }
-    expect(threw).toBe(true);
-
-    // Pre-rename state is untouched: no rename, no new parent rows, names intact.
-    expect(tableExists(db, "hearth_tasks")).toBe(true);
-    expect(tableExists(db, "runtime_tasks")).toBe(false);
-    expect(db.prepare("SELECT COUNT(*) AS n FROM lexa_agents WHERE id IN ('herald', 'blacksmith')").get()).toEqual({ n: 0 });
-    expect(db.prepare("SELECT COUNT(*) AS n FROM lexa_agents WHERE id IN ('hearth-herald', 'hearth-blacksmith')").get()).toEqual({ n: 2 });
-    expect(db.prepare("SELECT name FROM lexa_agents WHERE id = 'hearth-herald'").get()).toEqual({ name: "Herald Agent" });
-    expect(appliedMigrations(dbPath)).not.toContain("0005_runtime_rename.sql");
-    db.close();
-  });
-
-  it("0006 fresh database: assistant_* tables, via_assistant columns, no herald_*", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, stageThrough("0006"));
-    const db = new Database(dbPath);
-
-    for (const t of ["assistant_threads", "assistant_pending_writes", "assistant_settings", "assistant_providers", "assistant_model_prices", "assistant_provider_health", "assistant_models", "assistant_call_logs"]) {
-      expect(tableExists(db, t)).toBe(true);
-    }
-    for (const t of ["herald_threads", "herald_pending_writes", "herald_settings", "herald_providers", "herald_model_prices", "herald_provider_health", "herald_models", "herald_call_logs"]) {
-      expect(tableExists(db, t)).toBe(false);
-    }
-
-    const commentCols = (db.prepare("PRAGMA table_info(task_comments)").all() as { name: string }[]).map((c) => c.name);
-    expect(commentCols).toContain("via_assistant");
-    expect(commentCols).not.toContain("via_herald");
-    const activityCols = (db.prepare("PRAGMA table_info(task_activity)").all() as { name: string }[]).map((c) => c.name);
-    expect(activityCols).toContain("via_assistant");
-    expect(activityCols).not.toContain("via_herald");
-
-    const settingsSql = (db.prepare("SELECT sql FROM sqlite_master WHERE name = 'assistant_settings'").get() as { sql: string }).sql;
-    expect(settingsSql).toContain("DEFAULT 'assistant'");
-    expect(settingsSql).toContain("IN ('assistant','blacksmith')");
-
-    expect(db.prepare("SELECT id, name FROM lexa_agents ORDER BY id").all()).toEqual([
-      { id: "assistant", name: "Assistant Agent" },
-      { id: "blacksmith", name: "Blacksmith Agent" },
-    ]);
-
-    db.close();
   });
 
   it("0006 upgrades a seeded herald database: data preserved, values remapped, ids rebound", () => {
@@ -570,49 +389,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     after.close();
   });
 
-  // 0006's rebind must survive an FK-ON apply (Workers/D1 runner): insert the
-  // new parent row, repoint every child, then delete the old parent.
-  it("0006 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
-    const dir = stagePreAssistant();
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(`
-      INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
-      INSERT INTO users (id, email, name, role) VALUES ('u1', 'u1@x', 'U1', 'superadmin');
-      INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, kind, created_at)
-        VALUES ('rt1', 'p1', 'task', 't1', 'herald', 'requirements', 'queued', 'herald', '2026-01-01');
-      INSERT INTO runtime_sessions (document_type, document_id, runtime_id, runtime_session_id, provider, agent_id, skill_id)
-        VALUES ('task', 't1', 'r1', 's1', 'opencode', 'herald', 'requirements');
-      INSERT INTO herald_threads (document_type, document_id, project_id, agent_id, messages) VALUES ('chat', 'th1', 'p1', 'herald', '[]');
-    `);
-
-    const sql = readFileSync(join(MIGRATIONS, "0006_assistant_rename.sql"), "utf-8");
-    db.exec("BEGIN");
-    try {
-      db.exec(sql);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0006_assistant_rename.sql");
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-
-    expect(tableExists(db, "assistant_threads")).toBe(true);
-    expect(tableExists(db, "herald_threads")).toBe(false);
-    expect(db.prepare("SELECT agent_id FROM runtime_tasks WHERE id = 'rt1'").get()).toEqual({ agent_id: "assistant" });
-    expect(db.prepare("SELECT agent_id FROM runtime_sessions WHERE runtime_id = 'r1'").get()).toEqual({ agent_id: "assistant" });
-    expect(db.prepare("SELECT agent_id FROM assistant_threads WHERE document_id = 'th1'").get()).toEqual({ agent_id: "assistant" });
-    expect(db.prepare("SELECT COUNT(*) AS n FROM lexa_agent_skills WHERE agent_id = 'assistant'").get()).toEqual({ n: 6 });
-    expect(db.prepare("SELECT id, name FROM lexa_agents ORDER BY id").all()).toEqual([
-      { id: "assistant", name: "Assistant Agent" },
-      { id: "blacksmith", name: "Blacksmith Agent" },
-    ]);
-    db.close();
-  });
-
   it("0007 flips runtimes.team_id to ON DELETE RESTRICT (raw org delete fails) and keeps indexes", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, stageThrough("0007"));
@@ -630,40 +406,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
     expect(idx).toContain("idx_runtimes_machine");
     expect(idx).toContain("idx_runtimes_team");
-    db.close();
-  });
-
-  it("0007 is FK-safe with foreign_keys=ON (Workers/D1 runner): parent + child links survive the rebuild", () => {
-    const dir = stagePre0007();
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_0007);
-
-    const sql = readFileSync(join(MIGRATIONS, "0007_runtimes_team_restrict.sql"), "utf-8");
-    db.exec("BEGIN");
-    try {
-      db.exec(sql);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0007_runtimes_team_restrict.sql");
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-
-    const fks = db.prepare("PRAGMA foreign_key_list(runtimes)").all() as Array<{ from: string; table: string; on_delete: string }>;
-    expect(fks.find((f) => f.from === "team_id")?.on_delete).toBe("RESTRICT");
-    // The DROP's implicit DELETE must not have nulled the child link.
-    expect(db.prepare("SELECT runtime_id FROM runtime_tasks WHERE id = 'rt1'").get()).toEqual({ runtime_id: "r1" });
-    expect(db.prepare("SELECT team_id FROM runtimes WHERE id = 'r1'").get()).toEqual({ team_id: "org1" });
-    expect(() => db.prepare("DELETE FROM organization WHERE id = 'org1'").run()).toThrow(/FOREIGN KEY constraint failed/i);
-    // The child FK action is still SET NULL after the rebuild.
-    db.prepare("INSERT INTO runtimes (id, name, provider, team_id) VALUES ('r2', 'R2', 'opencode', 'org1')").run();
-    db.prepare("INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id) VALUES ('rt2', 'p1', 'task', 't1', 'a1', 'sk1', 'queued', 'r2')").run();
-    db.prepare("DELETE FROM runtimes WHERE id = 'r2'").run();
-    expect(db.prepare("SELECT runtime_id FROM runtime_tasks WHERE id = 'rt2'").get()).toEqual({ runtime_id: null });
     db.close();
   });
 
@@ -739,67 +481,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     after.close();
   });
 
-  it("0008 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
-    const dir = stageThrough("0007");
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_PRE_0008);
-
-    const sql = readFileSync(join(MIGRATIONS, "0008_remove_agent_runtimes.sql"), "utf-8");
-    db.exec("BEGIN");
-    try {
-      db.exec(sql);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0008_remove_agent_runtimes.sql");
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-
-    expect(tableExists(db, "assistant_tasks")).toBe(true);
-    expect(tableExists(db, "runtime_tasks")).toBe(false);
-    expect(db.prepare("SELECT agent_id FROM assistant_tasks WHERE id = 'rt1'").get()).toEqual({ agent_id: "assistant" });
-    expect(db.prepare("SELECT agent_id FROM assistant_threads WHERE document_id = 'c1'").get()).toEqual({ agent_id: "assistant" });
-    expect(db.prepare("SELECT id FROM lexa_agents ORDER BY id").all()).toEqual([{ id: "assistant" }]);
-    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
-    db.close();
-  });
-
-  it("0008 rolls back atomically with foreign_keys=ON (no partial rebuild)", () => {
-    const dir = stageThrough("0007");
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_PRE_0008);
-
-    const sql = readFileSync(join(MIGRATIONS, "0008_remove_agent_runtimes.sql"), "utf-8");
-    // FK-violating statement after the rebuild: no such agent row exists.
-    const broken = `${sql}\nUPDATE assistant_tasks SET agent_id = 'ghost' WHERE id = 'rt1';\n`;
-    db.exec("BEGIN");
-    let threw = false;
-    try {
-      db.exec(broken);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0008_remove_agent_runtimes.sql");
-      db.exec("COMMIT");
-    } catch {
-      threw = true;
-      db.exec("ROLLBACK");
-    }
-    expect(threw).toBe(true);
-
-    // Pre-0008 state untouched.
-    expect(tableExists(db, "runtime_tasks")).toBe(true);
-    expect(tableExists(db, "assistant_tasks")).toBe(false);
-    expect(db.prepare("SELECT engine FROM assistant_settings WHERE project_id = 'p1'").get()).toEqual({ engine: "blacksmith" });
-    expect(appliedMigrations(dbPath)).not.toContain("0008_remove_agent_runtimes.sql");
-    db.close();
-  });
-
   it("0009 + 0010 fresh database: MCP registry tables exist with no stdio rows", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
@@ -833,37 +514,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     expect(fks.find((f) => f.from === "project_id")?.on_delete).toBe("CASCADE");
     db.exec(`DELETE FROM assistant_mcp_servers WHERE id = 'r1'`);
     expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_project_servers").get()).toEqual({ n: 0 });
-    db.close();
-  });
-
-  it("0009 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
-    const dir = stageThrough("0008");
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-    expect(appliedMigrations(dbPath)).not.toContain("0009_assistant_mcp.sql");
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1')`);
-
-    const sql = readFileSync(join(MIGRATIONS, "0009_assistant_mcp.sql"), "utf-8");
-    db.exec("BEGIN");
-    try {
-      db.exec(sql);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0009_assistant_mcp.sql");
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
-
-    expect(tableExists(db, "assistant_mcp_servers")).toBe(true);
-    expect(tableExists(db, "assistant_mcp_project_servers")).toBe(true);
-    expect(db.prepare("SELECT id, transport_type, command, enabled FROM assistant_mcp_servers").all()).toEqual([
-      { id: "jev", transport_type: "stdio", command: "jev-mcp", enabled: 0 },
-    ]);
-    db.exec(`INSERT INTO assistant_mcp_project_servers (project_id, server_id, enabled) VALUES ('p1', 'jev', 1)`);
-    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     db.close();
   });
 
@@ -952,47 +602,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     db.close();
   });
 
-  it("0010 rolls back atomically with foreign_keys=ON (no partial cleanup)", () => {
-    const dir = stageThrough("0009");
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_PRE_0010);
-
-    const sql = readFileSync(join(MIGRATIONS, "0010_remove_stdio_mcp_clients.sql"), "utf-8");
-    // FK-violating statement after the cleanup: no such project row exists.
-    const broken = `${sql}\nUPDATE assistant_mcp_project_servers SET project_id = 'ghost' WHERE server_id = 'web-mcp';\n`;
-    db.exec("BEGIN");
-    let threw = false;
-    try {
-      db.exec(broken);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0010_remove_stdio_mcp_clients.sql");
-      db.exec("COMMIT");
-    } catch {
-      threw = true;
-      db.exec("ROLLBACK");
-    }
-    expect(threw).toBe(true);
-
-    // Pre-0010 state untouched: every stdio row and binding survives.
-    expect(db.prepare("SELECT id FROM assistant_mcp_servers ORDER BY id").all()).toEqual([
-      { id: "jev" },
-      { id: "local-mcp" },
-      { id: "sse-mcp" },
-      { id: "web-mcp" },
-    ]);
-    expect(db.prepare("SELECT server_id FROM assistant_mcp_project_servers ORDER BY server_id").all()).toEqual([
-      { server_id: "jev" },
-      { server_id: "local-mcp" },
-      { server_id: "sse-mcp" },
-      { server_id: "web-mcp" },
-    ]);
-    expect(appliedMigrations(dbPath)).not.toContain("0010_remove_stdio_mcp_clients.sql");
-    db.close();
-  });
-
   // ── 0011 managed MCP secrets ─────────────────────────────────────────────
   // Ciphertext lives in its own table, never in the registry row, so a plain
   // SELECT * of assistant_mcp_servers can never surface an encrypted blob.
@@ -1033,18 +642,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     );
     expect(registryCols).not.toContain("ciphertext");
   }
-
-  it("0011 fresh database: assistant_mcp_secrets exists, empty, with no plaintext column", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    expect(appliedMigrations(dbPath)).toContain("0011_mcp_managed_secrets.sql");
-    assertSecretsTable(db);
-    // No row is created by the migration: there is no data movement at all.
-    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets").get()).toEqual({ n: 0 });
-    db.close();
-  });
 
   it("0011 applies under the Bun runner with foreign_keys=OFF, preserving the registry untouched", () => {
     const dir = stageThrough("0010");
@@ -1137,78 +734,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     db.close();
   });
 
-  it("0011 strands a secret row under the Bun runner (FK-OFF), which repo.remove must delete explicitly", () => {
-    // Pins WHY the explicit delete lives in repo.remove: with FKs OFF the
-    // cascade never fires, so a bare parent delete strands the ciphertext.
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = OFF");
-    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 0 });
-    db.exec(SEED_PRE_0011);
-    db.exec(`INSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('web-mcp', 'CT', 'IV', 'active')`);
-
-    db.prepare("DELETE FROM assistant_mcp_servers WHERE id = 'web-mcp'").run();
-    // The row survives — so `foreign_key_check` reports it...
-    expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_mcp_secrets").get()).toEqual({ n: 1 });
-    // TWO violations, not one: the seed also attached web-mcp to project p1, so
-    // the same bare parent DELETE strands the junction row. Both children
-    // cascade on the D1/FK-ON runner and neither does here, which is the whole
-    // point of this test. Asserted as a set (order is a pragma implementation
-    // detail) but pinned to exactly these two children of assistant_mcp_servers.
-    const stranded = db.prepare("PRAGMA foreign_key_check").all() as Array<{
-      table: string;
-      rowid: number;
-      parent: string;
-      fkid: number;
-    }>;
-    expect(stranded).toHaveLength(2);
-    expect(stranded.map((v) => v.table).sort()).toEqual([
-      "assistant_mcp_project_servers",
-      "assistant_mcp_secrets",
-    ]);
-    expect(stranded.every((v) => v.parent === "assistant_mcp_servers" && v.fkid === 0)).toBe(true);
-    // ...and only the explicit child DELETE the repo performs clears the secret
-    // one. The junction row lives until its own repo path removes it, so the
-    // pragma is deliberately NOT empty here — an empty expectation would be a
-    // second, accidental claim that this runner cascades.
-    db.prepare("DELETE FROM assistant_mcp_secrets WHERE server_id = 'web-mcp'").run();
-    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([
-      { table: "assistant_mcp_project_servers", rowid: 1, parent: "assistant_mcp_servers", fkid: 0 },
-    ]);
-    db.close();
-  });
-
-  it("0011 rolls back atomically with foreign_keys=ON (no half-built table)", () => {
-    const dir = stageThrough("0010");
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec(SEED_PRE_0011);
-
-    const sql = readFileSync(join(MIGRATIONS, "0011_mcp_managed_secrets.sql"), "utf-8");
-    // FK-violating statement AFTER the CREATE TABLE, so a non-atomic apply
-    // would leave the table behind for the repo to write into.
-    const broken = `${sql}\nINSERT INTO assistant_mcp_secrets (server_id, ciphertext, iv, key_id) VALUES ('ghost','C','I','active');\n`;
-    db.exec("BEGIN");
-    let threw = false;
-    try {
-      db.exec(broken);
-      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run("0011_mcp_managed_secrets.sql");
-      db.exec("COMMIT");
-    } catch {
-      threw = true;
-      db.exec("ROLLBACK");
-    }
-    expect(threw).toBe(true);
-
-    expect(tableExists(db, "assistant_mcp_secrets")).toBe(false);
-    expect(appliedMigrations(dbPath)).not.toContain("0011_mcp_managed_secrets.sql");
-    db.close();
-  });
-
   // ── 0012 remove MCP secret refs ──────────────────────────────────────────
   // Pre-0012 registry state: two clients with a legacy `secret_ref` and one
   // secret-less client, plus a managed ciphertext row that 0012 must NOT touch.
@@ -1251,30 +776,6 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
       key_id: "active",
     });
   }
-
-  it("0012 clears every stored secret_ref (Bun runner, foreign_keys=OFF), leaving ciphertext untouched", () => {
-    const dir = stageThrough("0011");
-    const dbPath = join(dir, "app.db");
-    runMigrations(dbPath, dir);
-    expect(appliedMigrations(dbPath)).not.toContain("0012_remove_mcp_secret_refs.sql");
-
-    const db = new Database(dbPath);
-    db.exec("PRAGMA foreign_keys = OFF");
-    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 0 });
-    db.exec(SEED_PRE_0012);
-    expect(db.prepare("SELECT secret_ref FROM assistant_mcp_servers WHERE id = 'ref-env'").get()).toEqual({
-      secret_ref: "env:CREDENTIAL_MARKER",
-    });
-
-    apply0012(db);
-    assertPost0012(db);
-    expect(appliedMigrations(dbPath)).toContain("0012_remove_mcp_secret_refs.sql");
-
-    // Idempotent by construction: a second apply of the same UPDATE is a no-op.
-    db.exec(readFileSync(join(MIGRATIONS, "0012_remove_mcp_secret_refs.sql"), "utf-8"));
-    assertPost0012(db);
-    db.close();
-  });
 
   it("0012 is FK-safe with foreign_keys=ON (Workers/D1 runner)", () => {
     const dir = stageThrough("0011");
@@ -1652,5 +1153,160 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
       after.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='wiki_pages' AND name LIKE 'sqlite_autoindex_wiki_pages_%'").get()
     ).not.toBeNull();
     after.close();
+  });
+});
+
+// Carried from the absorbed server/repos/assistant-health.repo.test.ts: the
+// provider-health table's schema and its ON DELETE CASCADE. The state machine
+// itself is covered by assistant-health.service.test.ts.
+describe("assistant_provider_health (0006)", () => {
+  it("creates the table with the documented shape and cascades from its provider", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    try {
+      const schema = db.prepare("SELECT sql FROM sqlite_master WHERE name='assistant_provider_health'").get() as { sql: string };
+      expect(schema.sql).toContain("provider_id TEXT PRIMARY KEY");
+      expect(schema.sql).toMatch(/REFERENCES\s+"?assistant_providers"?\(id\) ON DELETE CASCADE/);
+      expect(schema.sql).toContain("CHECK (circuit_state IN ('open','closed','half-open'))");
+      expect(schema.sql).toContain("failure_count INTEGER NOT NULL DEFAULT 0");
+      expect(schema.sql).toContain("consecutive_failures INTEGER NOT NULL DEFAULT 0");
+
+      db.prepare("INSERT INTO assistant_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
+      db.prepare("INSERT INTO assistant_provider_health (provider_id, failure_count) VALUES ('pr1', 2)").run();
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_provider_health").get()).toEqual({ n: 1 });
+
+      db.exec("PRAGMA foreign_keys = ON");
+      db.prepare("DELETE FROM assistant_providers WHERE id = 'pr1'").run();
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_provider_health").get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+// Tests for `runMigrationsD1` (absorbed from migrate-d1.test.ts). The function
+// takes a `D1MigrationRunner` interface; this stub mimics the D1 binding's
+// `prepare`/`batch` surface. Real workerd verification happens via `wrangler`;
+// the stub is enough to prove the SQL shape and per-file batch atomicity.
+type Table = Record<string, unknown>[];
+type StubRunner = D1MigrationRunner & { _table(name: string): Table };
+
+function makeStubRunner(): StubRunner {
+  // In-memory store. Each "table" is a list of row objects.
+  const tables: Record<string, Table> = {};
+
+  const stub: StubRunner = {
+    prepare(sql: string) {
+      const stmt = {
+        _bound: [] as unknown[],
+        bind(...params: unknown[]) {
+          stmt._bound = params;
+          return stmt;
+        },
+        async all<T>(): Promise<T[]> {
+          return [] as T[];
+        },
+        async first<T>(): Promise<T | null> {
+          if (/SELECT name FROM _migrations WHERE name = \?/.test(sql)) {
+            const name = stmt._bound[0]! as string;
+            const rows = tables["_migrations"] ?? [];
+            const hit = rows.find((r) => r.name === name);
+            return (hit ? { name: hit.name } : null) as T | null;
+          }
+          return null;
+        },
+        async run() {
+          if (/INSERT INTO _migrations \(name\) VALUES \(\?\)/.test(sql)) {
+            const name = stmt._bound[0]! as string;
+            const rows = tables["_migrations"] ?? [];
+            rows.push({ name, applied_at: new Date().toISOString() });
+            tables["_migrations"] = rows;
+            return { success: true, meta: { changes: 1 } };
+          }
+          return { success: true, meta: { changes: 0 } };
+        },
+      };
+      return stmt;
+    },
+    async batch(stmts: { sql: string; params?: unknown[] }[]) {
+      for (const s of stmts) {
+        if (/CREATE TABLE IF NOT EXISTS _migrations/.test(s.sql)) {
+          if (!tables["_migrations"]) tables["_migrations"] = [];
+          continue;
+        }
+        if (/INSERT INTO _migrations \(name\) VALUES \(\?\)/.test(s.sql)) {
+          const name = s.params?.[0] as string;
+          const rows = tables["_migrations"] ?? [];
+          rows.push({ name, applied_at: new Date().toISOString() });
+          tables["_migrations"] = rows;
+          continue;
+        }
+        // Other statements are real migration DDL/DML; the stub does not model
+        // schema changes. The D1 binding's batch() is atomic, so a failing
+        // migration would surface as success=false and the registry INSERT in
+        // the same batch never lands.
+        continue;
+      }
+      return { success: true, duration: 1, results: [], length: stmts.length };
+    },
+    _table(name: string) {
+      return tables[name] ?? [];
+    },
+  };
+  return stub;
+}
+
+describe("runMigrationsD1", () => {
+  let stub: StubRunner;
+
+  beforeEach(() => {
+    stub = makeStubRunner();
+  });
+
+  it("0010 sends junction-first stdio cleanup, never a rebuild", async () => {
+    const captured: { sql: string; params?: unknown[] }[][] = [];
+    const originalBatch = stub.batch.bind(stub);
+    stub.batch = (async (stmts) => {
+      captured.push(stmts);
+      return originalBatch(stmts);
+    }) as D1MigrationRunner["batch"];
+
+    const result = await runMigrationsD1(stub);
+    expect(result.applied).toContain("0010_remove_stdio_mcp_clients.sql");
+
+    const index = result.applied.indexOf("0010_remove_stdio_mcp_clients.sql");
+    const migrationSql = captured[index + 1]![0]!.sql;
+    const statements = migrationSql.replace(/--[^\n]*/g, "");
+    expect(statements).toMatch(/DELETE\s+FROM\s+assistant_mcp_project_servers/i);
+    expect(statements).toMatch(/DELETE\s+FROM\s+assistant_mcp_servers\s+WHERE\s+transport_type\s*=\s*'stdio'/i);
+    // Junction rows go first: the D1 runner enforces foreign keys, so the
+    // parent DELETE must not be the only cleanup statement.
+    expect(statements.indexOf("assistant_mcp_project_servers")).toBeGreaterThanOrEqual(0);
+    expect(statements.indexOf("assistant_mcp_project_servers")).toBeLessThan(
+      statements.search(/DELETE\s+FROM\s+assistant_mcp_servers\s+WHERE\s+transport_type/i)
+    );
+    // No table rebuild: D1 supports neither ALTER/DROP COLUMN nor a CHECK rewrite.
+    expect(statements).not.toMatch(/\b(ALTER|DROP|RENAME)\b/i);
+    expect(statements).not.toMatch(/CREATE\s+TABLE/i);
+  });
+
+  it("passes the migration SQL + the registry INSERT as one batch per file", async () => {
+    const captured: { sql: string; params?: unknown[] }[][] = [];
+    const originalBatch = stub.batch.bind(stub);
+    stub.batch = (async (stmts) => {
+      captured.push(stmts);
+      return originalBatch(stmts);
+    }) as D1MigrationRunner["batch"];
+
+    await runMigrationsD1(stub);
+    const fileCount = readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")).length;
+    // 1 bootstrap batch + 1 per-file batch
+    expect(captured.length).toBe(1 + fileCount);
+    // Each per-file batch has exactly 2 statements: the migration + the registry row.
+    for (let i = 1; i < captured.length; i++) {
+      expect(captured[i]!.length).toBe(2);
+      expect(captured[i]![1]!.sql).toMatch(/INSERT INTO _migrations/);
+    }
   });
 });

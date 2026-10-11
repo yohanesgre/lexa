@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ComponentType, ReactNode } from "react";
 
 type PeekData =
@@ -78,38 +78,36 @@ describe("InvitePage gating", () => {
     expect(createButton()).toBeNull();
   });
 
-  it("renders the invalid-or-expired state with no form for reason expired", () => {
+  it("renders the invalid-or-expired state with no form for expired/unknown reasons, a failed peek, or a missing token", () => {
     setPeek({ data: { valid: false, reason: "expired" } });
-    render(<InvitePage />);
+    const expired = render(<InvitePage />);
     expect(screen.getByText(/invalid or has expired/i)).toBeInTheDocument();
     expect(createButton()).toBeNull();
-  });
+    expired.unmount();
 
-  it("renders the invalid-or-expired state with no form for reason unknown", () => {
     setPeek({ data: { valid: false, reason: "unknown" } });
-    render(<InvitePage />);
+    const unknown = render(<InvitePage />);
     expect(screen.getByText(/invalid or has expired/i)).toBeInTheDocument();
     expect(createButton()).toBeNull();
-  });
+    unknown.unmount();
 
-  it("renders the invalid state with a Retry and no form when the peek fails", () => {
     setPeek({ data: undefined, isError: true });
     render(<InvitePage />);
     expect(screen.getByText(/invalid or has expired/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(createButton()).toBeNull();
+    cleanup();
+
+    h.token.value = undefined;
+    setPeek({ data: undefined });
+    render(<InvitePage />);
+    expect(screen.getByText(/invalid or has expired/i)).toBeInTheDocument();
     expect(createButton()).toBeNull();
   });
 
   it("never renders the form while the peek is loading", () => {
     setPeek({ data: undefined, isLoading: true });
     render(<InvitePage />);
-    expect(createButton()).toBeNull();
-  });
-
-  it("renders the invalid state with no form when the token is missing", () => {
-    h.token.value = undefined;
-    render(<InvitePage />);
-    expect(screen.getByText(/invalid or has expired/i)).toBeInTheDocument();
     expect(createButton()).toBeNull();
   });
 });

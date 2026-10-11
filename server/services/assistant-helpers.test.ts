@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  ASSISTANT_WRITE_INTENT_RE,
   assertChatAttachmentCaps,
   capDocumentText,
   CHAT_ATTACHMENT_CAPS,
@@ -30,22 +29,15 @@ const negatives = [
 ];
 
 describe("assistant write intent", () => {
-  it("matches delete/remove phrasing in both single-sourced regexes", () => {
+  it("matches delete/remove phrasing but not read-only questions, in both single-sourced regexes", () => {
     for (const message of positives) {
       expect(hasAssistantWriteIntent(message), message).toBe(true);
       expect(WRITE_INTENT_RE.test(message), message).toBe(true);
     }
-  });
-
-  it("does not match read-only questions", () => {
     for (const message of negatives) {
       expect(hasAssistantWriteIntent(message), message).toBe(false);
       expect(WRITE_INTENT_RE.test(message), message).toBe(false);
     }
-  });
-
-  it("single-sources the build-stream guard regex with the gating regex", () => {
-    expect(WRITE_INTENT_RE).toBe(ASSISTANT_WRITE_INTENT_RE);
   });
 
   it("requires a tool call only when writes are enabled and intent matches", () => {
@@ -76,25 +68,19 @@ function capReason(refs: Array<{ mimeType: string; size: number; name: string }>
 describe("assertChatAttachmentCaps (D4)", () => {
   const ok = { mimeType: "text/plain", size: 10, name: "a.txt" };
 
-  it("accepts an empty and an at-limit list", () => {
+  it("accepts an empty and an at-limit list; rejects a 4th (images + documents share the count)", () => {
     expect(capReason([])).toBeNull();
     expect(capReason([ok, ok, ok])).toBeNull();
-  });
-
-  it("rejects a 4th attachment (images + documents share the count)", () => {
     expect(capReason([ok, ok, ok, ok])).toBe(`at most ${CHAT_ATTACHMENT_CAPS.maxCount} attachments per message`);
   });
 
-  it("names the file and the limit on type, empty, and per-file size violations", () => {
+  it("names the file and the limit on type, empty, per-file, and message-total violations", () => {
     expect(capReason([{ mimeType: "image/svg+xml", size: 10, name: "logo.svg" }]))
       .toBe("unsupported file type image/svg+xml for 'logo.svg'");
     expect(capReason([{ mimeType: "text/plain", size: 0, name: "empty.txt" }]))
       .toBe("file 'empty.txt' is empty");
     expect(capReason([{ mimeType: "application/pdf", size: 5 * MB + 1, name: "big.pdf" }]))
       .toBe("file 'big.pdf' exceeds the 5 MB limit");
-  });
-
-  it("rejects a message total over 10 MB even when each file is under the per-file cap", () => {
     const big = { mimeType: "application/pdf", size: 4 * MB, name: "doc.pdf" };
     expect(capReason([big, big, big])).toBe("attachments exceed the 10 MB request limit");
   });

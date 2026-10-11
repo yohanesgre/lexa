@@ -476,7 +476,8 @@ judgments. Both advisory modes are retained.
 
 **Status:** Accepted · **Date:** 2026-09-28 · **Decider:** maintainer
 (extends "Jev — System 1 advisory layer + MCP Clients" above and the fixed-key
-`secret_ref` contract from `status/jev-system1-mcp-clients/plan.md`; assessed
+`secret_ref` contract superseded by managed secrets in `migrations/0011_mcp_managed_secrets.sql`
+(see the MCP section of `docs/API.md`); assessed
 with Jev — worth_cost 0.71, master_key_risk 0.32, security_sound closed at
 level 2).
 

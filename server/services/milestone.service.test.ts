@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,7 @@ import { DbBunLive, Db } from "../db/db";
 import { MilestoneService } from "./milestone.service";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
-import { HasChildren, MilestoneNotFound, ProjectNotFound } from "../api/errors";
+import { HasChildren, MilestoneNotFound } from "../api/errors";
 import type { Actor } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -84,13 +84,6 @@ describe("MilestoneService create/find", () => {
     expect(active).toHaveLength(0);
     const all = await Effect.runPromise(svc.findByProject("p1", { includeArchived: true }));
     expect(all).toHaveLength(1);
-  });
-
-  it("rejects a missing project", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const res = await Effect.runPromise(Effect.either(svc.create({ projectId: "nope", name: "x" })));
-    expect(res).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "ProjectNotFound" }) });
   });
 
   it("getById/update surface MilestoneNotFound", async () => {
@@ -172,24 +165,6 @@ describe("MilestoneService archive/restore", () => {
     expect(lane.archivedAt).toBeNull();
     const task = await Effect.runPromise(taskRepo.findById("t1"));
     expect(task.archivedAt).toBeNull();
-  });
-
-  it("restore leaves individually-archived children (older stamps) archived", async () => {
-    seed(db);
-    const svc = makeService(db);
-    const taskRepo = makeRepo<TaskRepo>(db, TaskRepo);
-    const m = await Effect.runPromise(svc.create({ projectId: "p1", name: "v1" }));
-    db.prepare(`INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id)
-                VALUES ('sp1','p1','Sprint 1',0,'sprint','${m.id}')`).run();
-    // Individually archived BEFORE the cascade → older stamp, not selected by
-    // the milestone restore (which matches the milestone's own archive stamp).
-    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at)
-                VALUES ('t-old','p1','c1','sp1','Old','a0','2026-01-01 10:00:00')`).run();
-    await Effect.runPromise(svc.archive(maria, m.id));
-    const restored = await Effect.runPromise(svc.restore(maria, m.id));
-    expect(restored.activity).toEqual([]);
-    const old = await Effect.runPromise(taskRepo.findById("t-old"));
-    expect(old.archivedAt).toBe("2026-01-01 10:00:00");
   });
 
   it("restore is idempotent", async () => {

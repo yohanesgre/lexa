@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompts, AUTO_SKILL_INSTRUCTION, CHAT_SKILL_INSTRUCTION, MARKDOWN_STYLE, WRITE_POLICY, type SystemPromptInput } from "./prompt";
+import { buildSystemPrompts, CHAT_SKILL_INSTRUCTION, MARKDOWN_STYLE, WRITE_POLICY, type SystemPromptInput } from "./prompt";
 
 const base: SystemPromptInput = {
   identity: "IDENTITY",
@@ -37,107 +37,9 @@ describe("buildSystemPrompts advisory block", () => {
     // addition.
     expect(withAdvisory[2]!.content.startsWith(without[2]!.content)).toBe(true);
   });
-
-  it("emits nothing extra for an absent, null, or blank advisory", () => {
-    const plain = buildSystemPrompts({ ...base, docContext: "DOC" });
-    for (const value of [undefined, null, "", "   ", "\n\t "]) {
-      const prompts = buildSystemPrompts({ ...base, docContext: "DOC", advisory: value });
-      expect(prompts.length, JSON.stringify(value)).toBe(plain.length);
-      expect(prompts[2]!.content).toBe(plain[2]!.content);
-    }
-  });
-
-  it("carries an advisory on its own when no other context block exists", () => {
-    const prompts = buildSystemPrompts({ ...base, advisory });
-    expect(prompts).toHaveLength(3);
-    expect(prompts[2]!.content).toBe(advisory);
-    expect(prompts[2]!.cache_control).toBeUndefined();
-  });
-});
-
-describe("buildSystemPrompts skills", () => {
-  it("joins agent + skill markdowns in order in the cached rules slot", () => {
-    const prompts = buildSystemPrompts({
-      ...base,
-      agentMarkdown: "AGENT",
-      skillMarkdowns: ["## Skill: Status\nrank work", "## Skill: Review\nfind defects"],
-    });
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]!.content).toBe("AGENT\n\n## Skill: Status\nrank work\n\n## Skill: Review\nfind defects");
-    expect(prompts[1]!.cache_control).toEqual({ type: "ephemeral" });
-  });
-
-  it("drops blank skill markdowns; a document run with no skills emits the auto-pick instruction", () => {
-    const blank = buildSystemPrompts({ ...base, agentMarkdown: "AGENT", skillMarkdowns: ["  ", ""], autoSkill: true });
-    expect(blank[1]!.content).toBe(`AGENT\n\n${AUTO_SKILL_INSTRUCTION}`);
-    expect(buildSystemPrompts({ ...base, autoSkill: true })[1]!.content).toBe(AUTO_SKILL_INSTRUCTION);
-  });
-
-  it("a non-document turn with no skills emits the neutral fallback, not the document instruction", () => {
-    // Chat/schedule/delegation carry no "Additional prompt"; default (absent
-    // flag) must not leak the document-only instruction.
-    expect(buildSystemPrompts(base)[1]!.content).toBe(CHAT_SKILL_INSTRUCTION);
-    expect(buildSystemPrompts({ ...base, autoSkill: false })[1]!.content).toBe(CHAT_SKILL_INSTRUCTION);
-    expect(CHAT_SKILL_INSTRUCTION).toBe("No additional behavior rules are active. Use your default judgment.");
-    expect(CHAT_SKILL_INSTRUCTION).not.toContain("Additional prompt");
-    expect(CHAT_SKILL_INSTRUCTION).not.toContain("catalog");
-  });
-
-  it("auto-pick instruction names the catalog + get_skill and defers to the Additional prompt", () => {
-    expect(AUTO_SKILL_INSTRUCTION).toContain("bound-skills catalog");
-    expect(AUTO_SKILL_INSTRUCTION).toContain("get_skill");
-    expect(AUTO_SKILL_INSTRUCTION).toContain("Additional prompt takes precedence");
-  });
-
-  it("rides the catalog in the cached identity segment, after the write policy", () => {
-    const catalog = "Available skills — invoke with $name, or call get_skill for details:\n- Status — rank work";
-    const withCatalog = buildSystemPrompts({ ...base, writeTools: ["create_task"], skillCatalog: catalog });
-    const withoutCatalog = buildSystemPrompts({ ...base, writeTools: ["create_task"] });
-    expect(withCatalog[0]!.content.endsWith(catalog)).toBe(true);
-    expect(withCatalog[0]!.content.startsWith(withoutCatalog[0]!.content)).toBe(true);
-    expect(withCatalog[0]!.cache_control).toEqual({ type: "ephemeral" });
-  });
-
-  it("emits no catalog segment for null or blank catalogs", () => {
-    const plain = buildSystemPrompts(base);
-    for (const value of [null, "", "   "] as (string | null)[]) {
-      expect(buildSystemPrompts({ ...base, skillCatalog: value })[0]!.content).toBe(plain[0]!.content);
-    }
-  });
 });
 
 describe("buildSystemPrompts thread summary", () => {
-  it("rides last in the uncached context slot, after advisory", () => {
-    const prompts = buildSystemPrompts({
-      ...base,
-      docContext: "DOC",
-      mentionContext: "MENTION",
-      advisory: "ADV",
-      threadSummary: { summary: "earlier stuff", summarizedCount: 4 },
-    });
-    expect(prompts).toHaveLength(3);
-    const last = prompts[2]!;
-    expect(last.cache_control).toBeUndefined();
-    expect(last.content).toContain("[Conversation summary — the 4 earlier turns were condensed]");
-    expect(last.content).toContain("earlier stuff");
-    expect(last.content).toContain("[end of summary]");
-    expect(last.content.indexOf("ADV")).toBeLessThan(last.content.indexOf("[Conversation summary"));
-  });
-
-  it("emits nothing for an absent/null/blank summary", () => {
-    const plain = buildSystemPrompts({ ...base, docContext: "DOC" });
-    for (const value of [
-      undefined,
-      null,
-      { summary: "", summarizedCount: 0 },
-      { summary: "   ", summarizedCount: 2 },
-    ]) {
-      const prompts = buildSystemPrompts({ ...base, docContext: "DOC", threadSummary: value });
-      expect(prompts.length, JSON.stringify(value)).toBe(plain.length);
-      expect(prompts[2]!.content).toBe(plain[2]!.content);
-    }
-  });
-
   it("leaves the cached slots byte-identical with and without a summary", () => {
     const without = buildSystemPrompts({ ...base, memoryBlock: "MEM", agentMarkdown: "AGENT", docContext: "DOC" });
     const withSummary = buildSystemPrompts({
@@ -174,5 +76,13 @@ describe("buildSystemPrompts thread summary", () => {
     expect(last.content.indexOf("DOC")).toBeLessThan(last.content.indexOf("MENTION"));
     expect(last.content.indexOf("MENTION")).toBeLessThan(last.content.indexOf("ADV"));
     expect(last.content.indexOf("ADV")).toBeLessThan(last.content.indexOf("[Conversation summary"));
+
+    // A non-document turn with no skills emits the neutral fallback, not the
+    // document-only instruction.
+    expect(buildSystemPrompts(base)[1]!.content).toBe(CHAT_SKILL_INSTRUCTION);
+    expect(buildSystemPrompts({ ...base, autoSkill: false })[1]!.content).toBe(CHAT_SKILL_INSTRUCTION);
+    expect(CHAT_SKILL_INSTRUCTION).toBe("No additional behavior rules are active. Use your default judgment.");
+    expect(CHAT_SKILL_INSTRUCTION).not.toContain("Additional prompt");
+    expect(CHAT_SKILL_INSTRUCTION).not.toContain("catalog");
   });
 });

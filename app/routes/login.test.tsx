@@ -19,24 +19,20 @@ vi.mock("../lib/api", () => ({
 import { safeRedirect } from "../lib/safe-redirect";
 
 describe("safeRedirect", () => {
-  it("returns an internal path unchanged", () => {
+  it("returns an internal path unchanged, round-tripping path, query and hash", () => {
     expect(safeRedirect("/foo/bar")).toBe("/foo/bar");
+    expect(safeRedirect("/foo?x=1#h")).toBe("/foo?x=1#h");
   });
 
-  it("rejects protocol-relative targets", () => {
+  it("rejects protocol-relative and absolute external targets", () => {
     expect(safeRedirect("//evil.com")).toBe("/");
+    expect(safeRedirect("https://evil.com")).toBe("/");
+    expect(safeRedirect("https://evil.com/x")).toBe("/");
   });
 
   it("rejects backslash targets", () => {
     expect(safeRedirect("/\\evil")).toBe("/");
-  });
-
-  it("rejects absolute external URLs", () => {
-    expect(safeRedirect("https://evil.com")).toBe("/");
-  });
-
-  it("falls back to home when undefined", () => {
-    expect(safeRedirect(undefined)).toBe("/");
+    expect(safeRedirect("/\\evil.com")).toBe("/");
   });
 
   it("rejects tab/newline whitespace tricks via URL normalization", () => {
@@ -44,19 +40,8 @@ describe("safeRedirect", () => {
     expect(safeRedirect("/\n/evil.com")).toBe("/");
   });
 
-  it("rejects literal backslash tricks", () => {
-    expect(safeRedirect("/\\evil.com")).toBe("/");
-  });
-
-  it("keeps encoded slashes on the same origin", () => {
+  it("falls back to home when undefined and keeps encoded slashes on the same origin", () => {
+    expect(safeRedirect(undefined)).toBe("/");
     expect(safeRedirect("/%2F%2Fevil.com")).toBe("/%2F%2Fevil.com");
-  });
-
-  it("rejects external URLs with paths", () => {
-    expect(safeRedirect("https://evil.com/x")).toBe("/");
-  });
-
-  it("round-trips path, query and hash", () => {
-    expect(safeRedirect("/foo?x=1#h")).toBe("/foo?x=1#h");
   });
 });

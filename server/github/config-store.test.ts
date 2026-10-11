@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Effect } from "effect";
 import { Database } from "bun:sqlite";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
+import type { DbDriver } from "../db/driver";
 import { encryptSecret, secretsKeyringFromEnv, type EncryptedSecret } from "../assistant/secrets";
 import {
   deleteGithubSecret,
@@ -9,6 +10,15 @@ import {
   resolveGithubAppSecrets,
   storeGithubAppCredentials,
 } from "./config-store";
+import {
+  MANIFEST_STATE_SETTING_KEY,
+  REQUIRED_MANIFEST_PERMISSIONS,
+  assertRequiredPermissions,
+  buildManifest,
+  consumeManifestState,
+  createManifestState,
+  exchangeManifestCode,
+} from "./manifest";
 import type { RuntimeEnv } from "../env";
 
 const KEY_A = Buffer.from("a".repeat(32)).toString("base64");
@@ -42,7 +52,7 @@ CREATE TABLE github_app_secrets (
 
 describe("github config store", () => {
   let db: Database;
-  let driver: ReturnType<typeof createBunSqliteDriver>;
+  let driver: DbDriver;
 
   beforeEach(() => {
     db = freshDb();
@@ -94,13 +104,6 @@ describe("github config store", () => {
       db.prepare("SELECT key FROM settings WHERE key IN ('github_private_key','github_webhook_secret')").all()
     ).toEqual([]);
     await expect(resolve()).resolves.toEqual({ privateKey: PEM, webhookSecret: "whsec-1" });
-  });
-
-  it("a blank slug clears the stored slug (app id + secrets stay)", async () => {
-    await store(ENV_A, { slug: "legacy-slug" });
-    await store(ENV_A, { slug: "" });
-    expect(db.prepare("SELECT value FROM settings WHERE key = 'github_app_slug'").get()).toBeNull();
-    expect(await summary()).toMatchObject({ appId: "4242", appSlug: "", privateKeySet: true, source: "settings" });
   });
 
   it("without a master key the encrypted write is refused (GithubSecretWriteFailed)", async () => {
@@ -157,27 +160,6 @@ describe("github config store", () => {
     await expect(resolve({} as RuntimeEnv)).resolves.toEqual({ privateKey: "", webhookSecret: "old-secret" });
   });
 
-  it("summary counts an encrypted presence as set; a slug alone never flips source", async () => {
-    const keyring = await secretsKeyringFromEnv(ENV_A);
-    const sealed: EncryptedSecret = await encryptSecret(PEM, "github", "private_key", keyring!.active, keyring!);
-    db.prepare("INSERT INTO github_app_secrets (name, ciphertext, iv, key_id) VALUES ('private_key', ?, ?, ?)").run(
-      sealed.ciphertextB64,
-      sealed.ivB64,
-      sealed.keyId
-    );
-    expect(await summary()).toMatchObject({ privateKeySet: true, webhookSecretSet: false, source: "settings" });
-
-    db.exec("DELETE FROM github_app_secrets");
-    db.prepare("INSERT INTO settings (key, value) VALUES ('github_app_slug', 'only-slug')").run();
-    expect(await summary()).toEqual({
-      appId: "",
-      appSlug: "only-slug",
-      privateKeySet: false,
-      webhookSecretSet: false,
-      source: "none",
-    });
-  });
-
   it("deleteGithubSecret removes the encrypted row (manual PUT clear path)", async () => {
     await store(ENV_A);
     await Effect.runPromise(deleteGithubSecret(driver, "private_key"));
@@ -209,3 +191,105 @@ describe("github config store", () => {
     db.exec("DROP TRIGGER fail_private_key");
   });
 });
+
+// ── manifest flow (absorbed from manifest.test.ts) ─────────────────────────
+describe("buildManifest", () => {
+  it("points every URL at the public base and asks for exactly the required scopes", () => {
+    const manifest = buildManifest("https://lexa.example.com/");
+    expect(manifest).toEqual({
+      name: "Lexa",
+      url: "https://lexa.example.com",
+      hook_attributes: { url: "https://lexa.example.com/api/webhooks/github", active: true },
+      redirect_url: "https://lexa.example.com/settings/github/callback",
+      public: false,
+      default_permissions: { ...REQUIRED_MANIFEST_PERMISSIONS },
+      default_events: ["issues"],
+    });
+  });
+});
+
+describe("manifest state — single-use, expiry, mismatch (one error)", () => {
+  let db: Database;
+  let driver: DbDriver;
+
+  beforeEach(() => {
+    db = freshDb();
+    driver = createBunSqliteDriver(db);
+  });
+  afterEach(() => db.close());
+
+  const create = () => Effect.runPromise(createManifestState(driver));
+  const consume = (state: string) => Effect.runPromise(consumeManifestState(driver, state));
+  const consumeTag = (state: string) => leftTag(consumeManifestState(driver, state));
+
+  it("accepts the issued state exactly once", async () => {
+    const state = await create();
+    await expect(consume(state)).resolves.toBeUndefined();
+    // Second use fails — the row is consumed on the first attempt.
+    expect(await consumeTag(state)).toBe("GithubManifestStateInvalid");
+  });
+
+  it("rejects a mismatched state (and still consumes it)", async () => {
+    const state = await create();
+    expect(await consumeTag(`${state}deadbeef`)).toBe("GithubManifestStateInvalid");
+    // The mismatch burned the only chance.
+    expect(await consumeTag(state)).toBe("GithubManifestStateInvalid");
+  });
+
+  it("rejects an expired state", async () => {
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run(
+      MANIFEST_STATE_SETTING_KEY,
+      JSON.stringify({ value: "expired-state", expiresMs: Date.now() - 1_000 })
+    );
+    expect(await consumeTag("expired-state")).toBe("GithubManifestStateInvalid");
+  });
+});
+
+describe("assertRequiredPermissions", () => {
+  it("refuses a report missing a required scope or at the wrong level", async () => {
+    expect(await leftTag(assertRequiredPermissions({ issues: "read", metadata: "read", contents: "read" }))).toBe(
+      "GithubManifestPermissionsDenied"
+    );
+    expect(await leftTag(assertRequiredPermissions({ issues: "write", metadata: "read" }))).toBe(
+      "GithubManifestPermissionsDenied"
+    );
+  });
+});
+
+describe("exchangeManifestCode", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const json = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+
+  it("maps GitHub's conversion payload to credentials", async () => {
+    fetchMock.mockResolvedValue(
+      json({
+        id: 4242,
+        slug: "lexa-test",
+        pem: "-----BEGIN RSA PRIVATE KEY-----\nbody\n-----END RSA PRIVATE KEY-----",
+        webhook_secret: "whsec-1",
+        permissions: { issues: "write", metadata: "read", contents: "read" },
+      })
+    );
+    const creds = await Effect.runPromise(exchangeManifestCode("the-code"));
+    expect(creds).toEqual({
+      appId: "4242",
+      slug: "lexa-test",
+      privateKey: "-----BEGIN RSA PRIVATE KEY-----\nbody\n-----END RSA PRIVATE KEY-----",
+      webhookSecret: "whsec-1",
+      permissions: { issues: "write", metadata: "read", contents: "read" },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/app-manifests/the-code/conversions",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+});
+

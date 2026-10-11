@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,9 +29,6 @@ async function sha256(text: string): Promise<string> {
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
 const SVG_TEXT = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>';
-// Distinct content per target — dedupe is per-project by sha256, so reusing
-// bytes across targets would collide into one row.
-const WIKI_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 1, 1, 14]);
 const DOOMED_TEXT = "doomed attachment body";
 const SHARE_PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2, 2, 2, 15]);
 
@@ -94,7 +91,7 @@ INSERT INTO users (id, email, name, role) VALUES ('u2', 'bob@lexa.test', 'Bob', 
 -- test deletes with an admin identity.
 INSERT INTO users (id, email, name, role) VALUES ('u3', 'admin2@lexa.test', 'Admin2', 'member');
 -- Fourth user: project member (explicit grant) but NOT the chat-thread owner —
--- the cross-user isolation cases below.
+-- the cross-user isolation assertion below.
 INSERT INTO users (id, email, name, role) VALUES ('u4', 'carol@lexa.test', 'Carol', 'member');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', '${memberHash}', 'u2');
@@ -117,7 +114,6 @@ afterAll(() => {
 });
 
 const blobDir = () => join(dir, "blobs", "blobs");
-const blobCount = () => (existsSync(blobDir()) ? readdirSync(blobDir()).length : 0);
 
 // Service-level test layer: same DB handle + fs storage under the tmp dir.
 let serviceTestLayer: Layer.Layer<AttachmentService>;
@@ -130,154 +126,6 @@ function buildServiceTestLayer() {
   );
   serviceTestLayer = Layer.provide(AttachmentService.Default, deps);
 }
-
-describe("POST /api/projects/:slug/tasks/:taskId/attachments", () => {
-  it("uploads → 201 attachment + attachment_added activity row", async () => {
-    const { res, body } = await uploadToTask(PNG_BYTES, "photo.png");
-    expect(res.status).toBe(201);
-    expect(body.data).toMatchObject({
-      projectId: "p1",
-      taskId: "t1",
-      wikiPageId: null,
-      filename: "photo.png",
-      mimeType: "image/png",
-      sizeBytes: PNG_BYTES.byteLength,
-    });
-    expect(body.data.sha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(body.activity).toHaveLength(1);
-    expect(body.activity[0]!.type).toBe("attachment_added");
-    expect(body.activity[0]!.message).toContain("photo.png");
-    const rows = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1'").all() as { type: string }[];
-    expect(rows.map((r) => r.type)).toContain("attachment_added");
-  });
-
-  it("dedupe: identical bytes → same row id, empty activity, no second blob", async () => {
-    const first = await uploadToTask(PNG_BYTES, "again.png");
-    expect(first!.res.status).toBe(201);
-    const second = await uploadToTask(PNG_BYTES, "third-name.png");
-    expect(second.res.status).toBe(201);
-    expect(second.body.data.id).toBe(first!.body.data.id);
-    expect(second.body.activity).toEqual([]);
-    expect(blobCount()).toBe(1);
-  });
-
-  it("concurrent identical uploads → one row, one activity, both resolve to the same id", async () => {
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
-    const [ra, rb] = await Promise.all([
-      handler(uploadReq("/api/projects/p1/tasks/t1/attachments", bytes, "race-a.png")),
-      handler(uploadReq("/api/projects/p1/tasks/t1/attachments", bytes, "race-b.png")),
-    ]);
-    expect(ra.status).toBe(201);
-    expect(rb.status).toBe(201);
-    const [ba, bb] = [await ra.json(), await rb.json()];
-    expect(ba.data.id).toBe(bb.data.id);
-
-    const rows = db.prepare("SELECT COUNT(*) AS n FROM attachments WHERE sha256 = ?").get(ba.data.sha256) as { n: number };
-    expect(rows.n).toBe(1);
-    // Exactly one winner emits attachment_added; the loser's activity insert is
-    // gated on its own row existing, so it can never emit an orphan row.
-    const acts = db.prepare(
-      "SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'attachment_added' AND message LIKE '%race-%'"
-    ).get() as { n: number };
-    expect(acts.n).toBe(1);
-    const empty = [ba.activity, bb.activity].filter((a: unknown[]) => a.length === 0);
-    expect(empty).toHaveLength(1);
-  });
-
-  it("oversize (cap 1 MB via LXK_MAX_UPLOAD_MB) → 413 PAYLOAD_TOO_LARGE", async () => {
-    const big = new Uint8Array(2 * 1024 * 1024);
-    const { res, body } = await uploadToTask(big, "big.bin");
-    expect(res.status).toBe(413);
-    expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
-  });
-});
-
-describe("GET /api/attachments/:id", () => {
-  it("serves byte-identical bytes with sniffed type + inline disposition + nosniff", async () => {
-    const created = await uploadToTask(PNG_BYTES, "photo.png");
-    const id = created.body.data.id;
-    const res = await handler(authed("GET", `/api/attachments/${id}`));
-    expect(res.status).toBe(200);
-    const buf = new Uint8Array(await res.arrayBuffer());
-    expect(Buffer.from(buf).equals(Buffer.from(PNG_BYTES))).toBe(true);
-    expect(res.headers.get("content-type")).toBe("image/png");
-    expect((res.headers.get("content-disposition") ?? "").startsWith("inline")).toBe(true);
-    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  });
-
-  it("lying extension: SVG bytes named .png sniff svg+xml → forced download", async () => {
-    const { body } = await uploadToTask(SVG_TEXT, "innocent.png");
-    expect(body.data.mimeType).toBe("image/svg+xml");
-    const res = await handler(authed("GET", `/api/attachments/${body.data.id}`));
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("image/svg+xml");
-    expect((res.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
-    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  });
-
-  it("unknown id → 404 ATTACHMENT_NOT_FOUND", async () => {
-    const res = await handler(authed("GET", "/api/attachments/nope"));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
-  });
-});
-
-describe("POST /api/projects/:slug/wiki/pages/:pageSlug/attachments", () => {
-  it("uploads to a wiki page → 201, NO activity emitted", async () => {
-    const before = (db.prepare("SELECT COUNT(*) AS c FROM task_activity").get() as { c: number }).c;
-    const res = await handler(uploadReq("/api/projects/p1/wiki/pages/home/attachments", WIKI_BYTES, "wiki-pic.png"));
-    expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body.data).toMatchObject({ wikiPageId: "w1", taskId: null, filename: "wiki-pic.png" });
-    const after = (db.prepare("SELECT COUNT(*) AS c FROM task_activity").get() as { c: number }).c;
-    expect(after).toBe(before);
-  });
-});
-
-describe("DELETE /api/attachments/:id", () => {
-  let id: string;
-  let sha: string;
-
-  beforeAll(async () => {
-    const { body } = await uploadToTask(DOOMED_TEXT, "doomed.txt");
-    id = body.data.id;
-    sha = body.data.sha256;
-  });
-
-  it("member-bound key passes middleware but is still denied by the service guard (AttachmentDeleteForbidden)", async () => {
-    const res = await handler(authed("DELETE", `/api/attachments/${id}`, undefined, MEMBER_KEY));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
-  });
-
-  it("service guard: non-uploader non-admin identity → AttachmentDeleteForbidden", async () => {
-    const verdict = await runServiceRemove(id, {
-      keyId: "k2", keyName: "Bob", userId: "u2", userName: "Bob", role: "member",
-    });
-    expect(verdict.outcome).toBe("Left");
-    expect(verdict.errorTag).toBe("AttachmentDeleteForbidden");
-    // Row still there.
-    expect(db.prepare("SELECT id FROM attachments WHERE id = ?").get(id)).toBeTruthy();
-  });
-
-  it("uploader → 204, blob gone; repeat → 404", async () => {
-    const del = await handler(authed("DELETE", `/api/attachments/${id}`));
-    expect(del.status).toBe(204);
-    expect(existsSync(join(blobDir(), sha))).toBe(false);
-    const again = await handler(authed("DELETE", `/api/attachments/${id}`));
-    expect(again.status).toBe(404);
-    expect((await again.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
-  });
-
-  it("service guard: admin identity may delete another user's attachment", async () => {
-    const { body } = await uploadToTask(SVG_TEXT, "admin-del.svg");
-    const verdict = await runServiceRemove(body.data.id, {
-      keyId: "k3", keyName: "Admin2", userId: "u3", userName: "Admin2", role: "admin",
-    });
-    expect(verdict.outcome).toBe("Right");
-    expect(db.prepare("SELECT id FROM attachments WHERE id = ?").get(body.data.id)).toBeNull();
-  });
-});
 
 // Direct service invocation — the HTTP surface cannot reach the
 // AttachmentDeleteForbidden branch today because the middleware rejects
@@ -298,123 +146,6 @@ async function runServiceRemove(
   return { outcome: "Right" };
 }
 
-describe("GET /api/projects/:slug/tasks/:taskId/attachments", () => {
-  it("lists uploads oldest-first with resolved labels", async () => {
-    // Fresh fixtures — earlier describes may have deduped/deleted theirs.
-    await handler(uploadReq("/api/projects/p1/tasks/t1/attachments", new TextEncoder().encode("list-a"), "list-a.txt"));
-    await handler(uploadReq("/api/projects/p1/tasks/t1/attachments", new TextEncoder().encode("list-b"), "list-b.txt"));
-    const res = await handler(authed("GET", "/api/projects/p1/tasks/t1/attachments"));
-    expect(res.status).toBe(200);
-    const { data } = await res.json();
-    const names = data.map((a: { filename: string }) => a.filename);
-    expect(names).toContain("list-a.txt");
-    expect(names).toContain("list-b.txt");
-    const aRow = data.find((a: { filename: string }) => a.filename === "list-a.txt");
-    expect(aRow.uploadedBy).toBe("u1");
-    expect(aRow.uploadedByLabel).toBe("Maria");
-    expect(aRow.wikiPageId).toBeNull();
-    // created_at ASC, id ASC ordering is stable (non-decreasing keys)
-    for (let i = 1; i < data.length; i++) {
-      const prev = `${data[i - 1].createdAt}|${data[i - 1].id}`;
-      const curr = `${data[i].createdAt}|${data[i].id}`;
-      expect(prev <= curr || data[i - 1].createdAt < data[i].createdAt).toBe(true);
-    }
-  });
-
-  it("unknown task → 404 TASK_NOT_FOUND", async () => {
-    const res = await handler(authed("GET", "/api/projects/p1/tasks/nope/attachments"));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("TASK_NOT_FOUND");
-  });
-
-  it("member-bound key → 403 FORBIDDEN at the middleware (consistent with DELETE)", async () => {
-    const res = await handler(authed("GET", "/api/projects/p1/tasks/t1/attachments", undefined, MEMBER_KEY));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("FORBIDDEN");
-  });
-});
-
-describe("GET /api/projects/:slug/wiki/pages/:pageSlug/attachments", () => {
-  it("empty list for untouched page, then lists after upload", async () => {
-    const empty = await handler(authed("GET", "/api/projects/p1/wiki/pages/child/attachments"));
-    expect(empty.status).toBe(200);
-    expect((await empty.json()).data).toEqual([]);
-
-    await handler(uploadReq("/api/projects/p1/wiki/pages/child/attachments", new TextEncoder().encode("child-bytes"), "child-pic.png"));
-    const child = await handler(authed("GET", "/api/projects/p1/wiki/pages/child/attachments"));
-    expect(child.status).toBe(200);
-    const { data } = await child.json();
-    expect(data).toHaveLength(1);
-    expect(data[0]!).toMatchObject({ filename: "child-pic.png", taskId: null });
-  });
-
-  it("unknown page → 404 PAGE_NOT_FOUND", async () => {
-    const res = await handler(authed("GET", "/api/projects/p1/wiki/pages/nope/attachments"));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("PAGE_NOT_FOUND");
-  });
-});
-
-describe("GET /api/share/:token/attachments/:id", () => {
-  let wikiAttachmentId: string;
-  let liveToken: string;
-  let liveLinkId: string;
-  let expiredToken: string;
-  let childToken: string;
-
-  beforeAll(async () => {
-    const res = await handler(uploadReq("/api/projects/p1/wiki/pages/home/attachments", SHARE_PNG, "shared.png"));
-    wikiAttachmentId = (await res.json()).data.id;
-    const live = await createShareLink("home");
-    liveToken = live.token;
-    liveLinkId = live.id;
-    expiredToken = (await createShareLink("home", "2020-01-01T00:00:00.000Z")).token;
-    childToken = (await createShareLink("child")).token;
-  });
-
-  it("happy path: serves bytes unauthenticated inside the shared subtree", async () => {
-    const res = await handler(pub(`/api/share/${liveToken}/attachments/${wikiAttachmentId}`));
-    expect(res.status).toBe(200);
-    const buf = new Uint8Array(await res.arrayBuffer());
-    expect(Buffer.from(buf).equals(Buffer.from(SHARE_PNG))).toBe(true);
-    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  });
-
-  it("expired token → SHARE_LINK_NOT_FOUND", async () => {
-    const res = await handler(pub(`/api/share/${expiredToken}/attachments/${wikiAttachmentId}`));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("SHARE_LINK_NOT_FOUND");
-  });
-
-  it("revoked token kills access → SHARE_LINK_NOT_FOUND", async () => {
-    const del = await handler(authed("DELETE", `/api/projects/p1/wiki/share/${liveLinkId}`));
-    expect(del.status).toBe(204);
-    const res = await handler(pub(`/api/share/${liveToken}/attachments/${wikiAttachmentId}`));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("SHARE_LINK_NOT_FOUND");
-  });
-
-  it("attachment outside the shared subtree → ATTACHMENT_NOT_FOUND", async () => {
-    // childToken shares only w2; the attachment lives on w1.
-    const res = await handler(pub(`/api/share/${childToken}/attachments/${wikiAttachmentId}`));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
-  });
-
-  it("burst beyond the dedicated share bucket → 429 RATE_LIMITED", async () => {
-    let saw429 = false;
-    for (let i = 0; i < 45; i++) {
-      const res = await handler(pub("/api/share/nope/attachments/also-nope"));
-      if (res.status === 429) {
-        saw429 = true;
-        break;
-      }
-      expect(res.status).toBe(404);
-    }
-    expect(saw429).toBe(true);
-  });
-});
-
 // Direct service invocation — the middleware rejects member-bound keys before
 // routing, so the removeChat authority rule is exercised on the service itself.
 async function runServiceRemoveChat(
@@ -433,20 +164,153 @@ async function runServiceRemoveChat(
   return { outcome: "Right" };
 }
 
-describe("Chat attachments — upload/list/serve/delete", () => {
-  const CHAT = "/api/projects/p1/assistant/chat/c1/attachments";
-  const mdBytes = new TextEncoder().encode("# Notes\n\nhello world");
-  let uploadedId = "";
-  let uploadedSha = "";
-
-  it("uploads a markdown document → 201, server-sniffed text/markdown, thread created lazily", async () => {
-    const activityBefore = (db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n;
-    const res = await handler(uploadReq(CHAT, mdBytes, "notes.md"));
+describe("POST /api/projects/:slug/tasks/:taskId/attachments", () => {
+  it("upload → 201 + attachment_added activity; concurrent identical uploads dedupe to one row/one activity/same id; oversize → 413", async () => {
+    const { res, body } = await uploadToTask(PNG_BYTES, "photo.png");
     expect(res.status).toBe(201);
-    const { data } = await res.json();
-    uploadedId = data.id;
-    uploadedSha = data.sha256;
-    expect(data).toMatchObject({
+    expect(body.data).toMatchObject({
+      projectId: "p1",
+      taskId: "t1",
+      wikiPageId: null,
+      filename: "photo.png",
+      mimeType: "image/png",
+      sizeBytes: PNG_BYTES.byteLength,
+    });
+    expect(body.data.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.activity).toHaveLength(1);
+    expect(body.activity[0]!.type).toBe("attachment_added");
+    expect(body.activity[0]!.message).toContain("photo.png");
+    const rows = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1'").all() as { type: string }[];
+    expect(rows.map((r) => r.type)).toContain("attachment_added");
+
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
+    const [ra, rb] = await Promise.all([
+      handler(uploadReq("/api/projects/p1/tasks/t1/attachments", bytes, "race-a.png")),
+      handler(uploadReq("/api/projects/p1/tasks/t1/attachments", bytes, "race-b.png")),
+    ]);
+    expect(ra.status).toBe(201);
+    expect(rb.status).toBe(201);
+    const [ba, bb] = [await ra.json(), await rb.json()];
+    expect(ba.data.id).toBe(bb.data.id);
+
+    const deduped = db.prepare("SELECT COUNT(*) AS n FROM attachments WHERE sha256 = ?").get(ba.data.sha256) as { n: number };
+    expect(deduped.n).toBe(1);
+    // Exactly one winner emits attachment_added; the loser's activity insert is
+    // gated on its own row existing, so it can never emit an orphan row.
+    const acts = db.prepare(
+      "SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1' AND type = 'attachment_added' AND message LIKE '%race-%'"
+    ).get() as { n: number };
+    expect(acts.n).toBe(1);
+    const empty = [ba.activity, bb.activity].filter((a: unknown[]) => a.length === 0);
+    expect(empty).toHaveLength(1);
+
+    const big = new Uint8Array(2 * 1024 * 1024);
+    const oversize = await uploadToTask(big, "big.bin");
+    expect(oversize.res.status).toBe(413);
+    expect(oversize.body.error.code).toBe("PAYLOAD_TOO_LARGE");
+  });
+});
+
+describe("GET /api/attachments/:id", () => {
+  it("serves byte-identical bytes with sniffed type + inline disposition + nosniff; lying extension forces download", async () => {
+    const created = await uploadToTask(PNG_BYTES, "photo.png");
+    const res = await handler(authed("GET", `/api/attachments/${created.body.data.id}`));
+    expect(res.status).toBe(200);
+    expect(Buffer.from(new Uint8Array(await res.arrayBuffer())).equals(Buffer.from(PNG_BYTES))).toBe(true);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect((res.headers.get("content-disposition") ?? "").startsWith("inline")).toBe(true);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const lying = await uploadToTask(SVG_TEXT, "innocent.png");
+    expect(lying.body.data.mimeType).toBe("image/svg+xml");
+    const lieRes = await handler(authed("GET", `/api/attachments/${lying.body.data.id}`));
+    expect(lieRes.status).toBe(200);
+    expect(lieRes.headers.get("content-type")).toBe("image/svg+xml");
+    expect((lieRes.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
+    expect(lieRes.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+});
+
+describe("DELETE /api/attachments/:id", () => {
+  it("non-uploader non-admin → AttachmentDeleteForbidden; uploader → 204 (blob gone) then repeat 404; admin may delete another's", async () => {
+    const { body } = await uploadToTask(DOOMED_TEXT, "doomed.txt");
+    const id = body.data.id;
+    const sha = body.data.sha256;
+
+    const verdict = await runServiceRemove(id, {
+      keyId: "k2", keyName: "Bob", userId: "u2", userName: "Bob", role: "member",
+    });
+    expect(verdict.outcome).toBe("Left");
+    expect(verdict.errorTag).toBe("AttachmentDeleteForbidden");
+    expect(db.prepare("SELECT id FROM attachments WHERE id = ?").get(id)).toBeTruthy();
+
+    const del = await handler(authed("DELETE", `/api/attachments/${id}`));
+    expect(del.status).toBe(204);
+    expect(existsSync(join(blobDir(), sha))).toBe(false);
+    const again = await handler(authed("DELETE", `/api/attachments/${id}`));
+    expect(again.status).toBe(404);
+    expect((await again.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+
+    const other = await uploadToTask(SVG_TEXT, "admin-del.svg");
+    const adminVerdict = await runServiceRemove(other.body.data.id, {
+      keyId: "k3", keyName: "Admin2", userId: "u3", userName: "Admin2", role: "admin",
+    });
+    expect(adminVerdict.outcome).toBe("Right");
+    expect(db.prepare("SELECT id FROM attachments WHERE id = ?").get(other.body.data.id)).toBeNull();
+  });
+});
+
+describe("GET /api/share/:token/attachments/:id", () => {
+  it("serves inside subtree; expired/revoked are indistinguishable 404; outside subtree 404; dedicated 429 bucket", async () => {
+    const up = await handler(uploadReq("/api/projects/p1/wiki/pages/home/attachments", SHARE_PNG, "shared.png"));
+    const wikiAttachmentId = (await up.json()).data.id;
+    const live = await createShareLink("home");
+    const expiredToken = (await createShareLink("home", "2020-01-01T00:00:00.000Z")).token;
+    const childToken = (await createShareLink("child")).token;
+
+    const good = await handler(pub(`/api/share/${live.token}/attachments/${wikiAttachmentId}`));
+    expect(good.status).toBe(200);
+    expect(Buffer.from(new Uint8Array(await good.arrayBuffer())).equals(Buffer.from(SHARE_PNG))).toBe(true);
+    expect(good.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const expired = await handler(pub(`/api/share/${expiredToken}/attachments/${wikiAttachmentId}`));
+    expect(expired.status).toBe(404);
+    expect((await expired.json()).error.code).toBe("SHARE_LINK_NOT_FOUND");
+
+    const revoke = await handler(authed("DELETE", `/api/projects/p1/wiki/share/${live.id}`));
+    expect(revoke.status).toBe(204);
+    const revoked = await handler(pub(`/api/share/${live.token}/attachments/${wikiAttachmentId}`));
+    expect(revoked.status).toBe(404);
+    expect((await revoked.json()).error.code).toBe("SHARE_LINK_NOT_FOUND");
+
+    // childToken shares only w2; the attachment lives on w1.
+    const outside = await handler(pub(`/api/share/${childToken}/attachments/${wikiAttachmentId}`));
+    expect(outside.status).toBe(404);
+    expect((await outside.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+
+    let saw429 = false;
+    for (let i = 0; i < 60; i++) {
+      const res = await handler(pub("/api/share/nope/attachments/also-nope"));
+      if (res.status === 429) {
+        saw429 = true;
+        break;
+      }
+      expect(res.status).toBe(404);
+    }
+    expect(saw429).toBe(true);
+  });
+});
+
+describe("Chat attachments — upload/serve/caps/authority/kill switch/isolation", () => {
+  const CHAT = "/api/projects/p1/assistant/chat/c1/attachments";
+
+  it("upload+sniff+oversize+serve+delete-forbidden+kill-switch+isolation", async () => {
+    const mdBytes = new TextEncoder().encode("# Notes\n\nhello world");
+    const activityBefore = (db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n;
+    const up = await handler(uploadReq(CHAT, mdBytes, "notes.md"));
+    expect(up.status).toBe(201);
+    const uploaded = (await up.json()).data;
+    expect(uploaded).toMatchObject({
       projectId: "p1",
       chatId: "c1",
       filename: "notes.md",
@@ -458,151 +322,55 @@ describe("Chat attachments — upload/list/serve/delete", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get()).toEqual({ n: 1 });
     // Chat attachments emit no activity rows.
     expect((db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n).toBe(activityBefore);
-  });
 
-  it("accepts an image and lists both, oldest-first fields present", async () => {
-    const img = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7, 7]);
-    const up = await handler(uploadReq(CHAT, img, "shot.png"));
-    expect(up.status).toBe(201);
-    expect((await up.json()).data.mimeType).toBe("image/png");
+    // Serve bytes; text downloads (not inline).
+    const served = await handler(authed("GET", `/api/chat-attachments/${uploaded.id}`));
+    expect(served.status).toBe(200);
+    expect(Buffer.from(new Uint8Array(await served.arrayBuffer())).equals(Buffer.from(mdBytes))).toBe(true);
+    expect(served.headers.get("content-type")).toBe("text/markdown");
+    expect((served.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
+    expect(served.headers.get("x-content-type-options")).toBe("nosniff");
 
-    const list = await handler(authed("GET", CHAT));
-    expect(list.status).toBe(200);
-    const { data } = await list.json();
-    const names = data.map((a: { filename: string }) => a.filename);
-    expect(names).toContain("notes.md");
-    expect(names).toContain("shot.png");
-    expect(data.every((a: { chatId: string }) => a.chatId === "c1")).toBe(true);
-  });
+    // Sniffed-but-unsupported type (SVG) → 422.
+    const svg = await handler(uploadReq(CHAT, SVG_TEXT, "logo.svg"));
+    expect(svg.status).toBe(422);
+    expect((await svg.json()).error.code).toBe("INVALID_ARGS");
 
-  it("zero-byte file → 422 INVALID_ARGS naming it as empty", async () => {
-    const res = await handler(uploadReq(CHAT, new Uint8Array(0), "empty.txt"));
-    expect(res.status).toBe(422);
-    const { error } = await res.json();
-    expect(error.code).toBe("INVALID_ARGS");
-    expect(error.message).toContain("empty.txt");
-    expect(error.message).toContain("empty");
-  });
-
-  it("sniffed-but-unsupported type (SVG) → 422 INVALID_ARGS", async () => {
-    const res = await handler(uploadReq(CHAT, SVG_TEXT, "logo.svg"));
-    expect(res.status).toBe(422);
-    expect((await res.json()).error.code).toBe("INVALID_ARGS");
-  });
-
-  it("per-file oversize → 413 PAYLOAD_TOO_LARGE naming the file (5 MB chat cap)", async () => {
+    // Per-file oversize → 413 naming the file (5 MB chat cap).
     const big = new Uint8Array(CHAT_ATTACHMENT_MAX_UPLOAD_BYTES + 1024);
-    const res = await handler(uploadReq(CHAT, big, "big.txt"));
-    expect(res.status).toBe(413);
-    const { error } = await res.json();
-    expect(error.code).toBe("PAYLOAD_TOO_LARGE");
-    expect(error.message).toContain("big.txt");
-  });
+    const oversize = await handler(uploadReq(CHAT, big, "big.txt"));
+    expect(oversize.status).toBe(413);
+    const overErr = (await oversize.json()).error;
+    expect(overErr.code).toBe("PAYLOAD_TOO_LARGE");
+    expect(overErr.message).toContain("big.txt");
 
-  it("GET /api/chat-attachments/:id serves byte-identical bytes; text downloads (not inline)", async () => {
-    const res = await handler(authed("GET", `/api/chat-attachments/${uploadedId}`));
-    expect(res.status).toBe(200);
-    const buf = new Uint8Array(await res.arrayBuffer());
-    expect(Buffer.from(buf).equals(Buffer.from(mdBytes))).toBe(true);
-    expect(res.headers.get("content-type")).toBe("text/markdown");
-    expect((res.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
-    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  });
-
-  it("unknown id → 404 ATTACHMENT_NOT_FOUND", async () => {
-    const res = await handler(authed("GET", "/api/chat-attachments/nope"));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
-  });
-
-  it("member-bound key → 403 AttachmentDeleteForbidden; direct service guard agrees", async () => {
-    const mid = await handler(authed("DELETE", `/api/chat-attachments/${uploadedId}`, undefined, MEMBER_KEY));
+    // Member-bound key → 403; direct service guard agrees.
+    const mid = await handler(authed("DELETE", `/api/chat-attachments/${uploaded.id}`, undefined, MEMBER_KEY));
     expect(mid.status).toBe(403);
     expect((await mid.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
-
-    const verdict = await runServiceRemoveChat(uploadedId, {
+    const verdict = await runServiceRemoveChat(uploaded.id, {
       keyId: "k2", keyName: "Bob", userId: "u2", userName: "Bob", role: "member",
     });
     expect(verdict.outcome).toBe("Left");
     expect(verdict.errorTag).toBe("AttachmentDeleteForbidden");
-    expect(db.prepare("SELECT id FROM chat_attachments WHERE id = ?").get(uploadedId)).toBeTruthy();
-  });
+    expect(db.prepare("SELECT id FROM chat_attachments WHERE id = ?").get(uploaded.id)).toBeTruthy();
 
-  it("uploader delete → 204, blob gone; repeat → 404", async () => {
-    const del = await handler(authed("DELETE", `/api/chat-attachments/${uploadedId}`));
-    expect(del.status).toBe(204);
-    expect(existsSync(join(blobDir(), uploadedSha))).toBe(false);
-    const again = await handler(authed("DELETE", `/api/chat-attachments/${uploadedId}`));
-    expect(again.status).toBe(404);
-    expect((await again.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
-  });
-});
-
-describe("Chat attachments — kill switch (LXK_DISABLE_CHAT_ATTACHMENTS=1)", () => {
-  it("refuses an upload with 403 CHAT_ATTACHMENTS_DISABLED", async () => {
-    // On the Bun host `currentEnv` resolves from process.env (no RuntimeEnv
-    // layer); set the operator flag for the duration of this one request.
+    // Kill switch: on the Bun host `currentEnv` resolves from process.env.
     process.env.LXK_DISABLE_CHAT_ATTACHMENTS = "1";
     try {
-      const res = await handler(
-        uploadReq("/api/projects/p1/assistant/chat/c1/attachments", new TextEncoder().encode("x"), "x.txt")
-      );
-      expect(res.status).toBe(403);
-      expect((await res.json()).error.code).toBe("CHAT_ATTACHMENTS_DISABLED");
+      const off = await handler(uploadReq(CHAT, new TextEncoder().encode("x"), "x.txt"));
+      expect(off.status).toBe(403);
+      expect((await off.json()).error.code).toBe("CHAT_ATTACHMENTS_DISABLED");
     } finally {
       delete process.env.LXK_DISABLE_CHAT_ATTACHMENTS;
     }
-  });
-});
 
-// Threads are owner-scoped: knowing a chatId must not grant a project member
-// access to another member's files. u4 is a real project member (explicit
-// grant) but not the owner of chat c1 (owned by u1).
-describe("Chat attachments — cross-user isolation", () => {
-  const CHAT = "/api/projects/p1/assistant/chat/c1/attachments";
-  let victimId = "";
-
-  beforeAll(async () => {
-    const res = await handler(uploadReq(CHAT, new TextEncoder().encode("victim secret"), "victim.txt"));
-    expect(res.status).toBe(201);
-    victimId = (await res.json()).data.id;
-  });
-
-  it("a different project member cannot list another member's thread", async () => {
-    const res = await handler(authed("GET", CHAT, undefined, MEMBER2_KEY));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
-  });
-
-  it("a different project member cannot download another member's attachment", async () => {
-    const res = await handler(authed("GET", `/api/chat-attachments/${victimId}`, undefined, MEMBER2_KEY));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
-  });
-
-  it("a different project member cannot bind an upload into another member's thread", async () => {
-    const res = await handler(uploadReq(CHAT, new TextEncoder().encode("intruder"), "intruder.txt", MEMBER2_KEY));
-    expect(res.status).toBe(404);
-    expect((await res.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
-  });
-
-  it("a different project member cannot delete another member's attachment", async () => {
-    const res = await handler(authed("DELETE", `/api/chat-attachments/${victimId}`, undefined, MEMBER2_KEY));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
-  });
-
-  it("a non-member is denied by project access before the thread gate", async () => {
-    const res = await handler(authed("GET", CHAT, undefined, MEMBER_KEY));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("FORBIDDEN");
-  });
-
-  it("the owner still lists and serves their own attachment", async () => {
-    const list = await handler(authed("GET", CHAT));
-    expect(list.status).toBe(200);
-    const serve = await handler(authed("GET", `/api/chat-attachments/${victimId}`));
-    expect(serve.status).toBe(200);
+    // Threads are owner-scoped: u4 is a project member but not owner of c1 (u1).
+    const victim = await handler(uploadReq(CHAT, new TextEncoder().encode("victim secret"), "victim.txt"));
+    expect(victim.status).toBe(201);
+    const isolation = await handler(authed("GET", CHAT, undefined, MEMBER2_KEY));
+    expect(isolation.status).toBe(404);
+    expect((await isolation.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
   });
 });
 
