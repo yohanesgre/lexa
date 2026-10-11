@@ -982,7 +982,7 @@ function RecentMovement({
                 <span className="tm-move-line">
                   <Ribbon priorities={priorities} priorityId={row.priorityId} />
                   <span className="tm-key">{row.key}</span>
-                  <span>{row.title}</span>
+                  <span className="tm-move-title">{row.title}</span>
                 </span>
                 <span className="tm-row-meta">
                   {row.columnName}

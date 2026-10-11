@@ -10193,11 +10193,15 @@ html {
 /* Phone, narrowest band: the attention row's title carries two lines instead
    of ellipsising mid-word (the row is already taller than the touch floor). */
 @media (max-width: 479.98px) {
-  .tm-row-title {
+  .tm-row-title,
+  .tm-move-title {
     white-space: normal;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
+  }
+  .tm-move-line {
+    flex-wrap: wrap;
   }
 }
 
