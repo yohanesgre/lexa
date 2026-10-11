@@ -1857,6 +1857,7 @@
     box-shadow: none;
   }
   .editor-content .ProseMirror:focus-visible {
+    outline: none;
     box-shadow: none;
   }
   .editor-content .ProseMirror p {
@@ -4960,6 +4961,8 @@
   /* Editable elements always match :focus-visible (even mouse) — the
      container's :focus-within signal replaces the element-level glow */
   .composer-editor:focus-visible {
+    outline: 2px solid var(--lx-border-focus);
+    outline-offset: -2px;
     box-shadow: none;
   }
   .composer-toolbar {
@@ -9033,10 +9036,13 @@
    panel; inside the Deck it must collapse to the textarea's rows so locked
    decks (busy-409) actually shrink to one row. */
 .chat-deck .composer-editor { min-height: 0; }
-/* The deck's message surface reads its focus from the border, not the global
-   ring + glow, which reads as a halo around the whole textarea. */
-.chat-deck .composer-editor:focus-visible { box-shadow: none; }
-.chat-deck .composer-editor:focus { border-color: var(--lx-border-focus); }
+/* The deck's message surface keeps the app's 2px ring but draws it inside the
+   box: the global offset-2px version spills past the deck's container. */
+.chat-deck .composer-editor:focus-visible {
+  outline: 2px solid var(--lx-border-focus);
+  outline-offset: -2px;
+  box-shadow: none;
+}
 .deck-action { min-width: 0; }
 .deck-summary-chip {
   display: inline-flex;
