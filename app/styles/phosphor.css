@@ -66,7 +66,7 @@
   --lx-shadow-slideover: -6px 0 28px rgba(4, 7, 10, 0.6);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
-  --lx-focus-glow: 0 0 12px rgba(228, 87, 46, 0.22);
+  --lx-focus-glow: 0 0 12px rgba(240, 192, 64, 0.22);
 
   --lx-scrollbar-track: var(--lx-surface-ground);
   --lx-scrollbar-thumb: #26333D;
@@ -152,44 +152,45 @@
   --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
 }
 
-/* ---- Semantic tokens: LIGHT — the printed day map ----
-   A daylight translation of the same map: map-paper ground, same ribbons,
-   same plates. Never an inversion. */
+/* ---- Semantic tokens: LIGHT — the survey sheet ----
+   The night slate lifted to daylight: cool stock, pencil hairlines, the same
+   ribbons and plates, and the amber plate the only warm mark on the sheet. The
+   day map is a translation of the same mountain, never an inversion. */
 [data-theme="light"] {
-  --lx-surface-ground: #F2EFE7;
-  --lx-surface-rail: #E9E4D8;
-  --lx-surface-panel: #FBFAF6;
+  --lx-surface-ground: #F2F5F7;
+  --lx-surface-rail: #E1E7EB;
+  --lx-surface-panel: #FAFBFC;
   /* The day map's brand plate: the favicon's own light-scheme tile. */
   --lx-brand-plate: #D4A017;
 
   --lx-surface-app: var(--lx-surface-ground);
   --lx-surface-elevated: var(--lx-surface-rail);
-  --lx-surface-column: #EDE8DD;
+  --lx-surface-column: #EAEFF2;
   --lx-surface-card: var(--lx-surface-panel);
-  --lx-surface-card-hover: #F2EFE7;
-  --lx-surface-card-active: #E9E4D8;
+  --lx-surface-card-hover: #D2DBE2;
+  --lx-surface-card-active: #CCD5DD;
   --lx-surface-card-dragging: var(--lx-surface-panel);
   --lx-surface-input: #FFFFFF;
-  --lx-surface-overlay: rgba(23, 34, 43, 0.38);
+  --lx-surface-overlay: rgba(23, 34, 43, 0.42);
   --lx-surface-tooltip: #17222B;
   --lx-surface-selected: rgba(212, 160, 23, 0.12);
 
-  --lx-border-default: #D5CFC1;
-  --lx-border-subtle: #E4DED1;
-  --lx-border-strong: #A9A192;
+  --lx-border-default: #C7CFD5;
+  --lx-border-subtle: #DDE3E8;
+  --lx-border-strong: #5F6A72;
   --lx-border-focus: #7E5C00;
-  --lx-border-input: #8C8577;
+  --lx-border-input: #5F6A72;
   /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
-  --lx-border-input-hover: #5A6B76;
+  --lx-border-input-hover: #3B4750;
   --lx-status-danger: #B02A22;
   --lx-status-warning: #9A6410;
   --lx-status-success: #1F7A3A;
   --lx-status-info: #1D7C88;
 
   --lx-text-primary: #17222B;
-  --lx-text-secondary: #5A6B76;
-  --lx-text-tertiary: #6C7C86;
-  --lx-text-muted: #5F707B;
+  --lx-text-secondary: #3B4750;
+  --lx-text-tertiary: #46535D;
+  --lx-text-muted: #4B5963;
   --lx-text-inverse: #FBFAF6;
   --lx-text-link: #7E5C00;
   --lx-text-link-hover: #6B4E00;
@@ -217,11 +218,11 @@
   --lx-shadow-slideover: -6px 0 28px rgba(23, 34, 43, 0.14);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
-  --lx-focus-glow: 0 0 12px rgba(199, 67, 30, 0.16);
+  --lx-focus-glow: 0 0 12px rgba(212, 160, 23, 0.16);
 
   --lx-scrollbar-track: var(--lx-surface-ground);
-  --lx-scrollbar-thumb: #C0B9AA;
-  --lx-scrollbar-thumb-hover: #A9A192;
+  --lx-scrollbar-thumb: #7E8890;
+  --lx-scrollbar-thumb-hover: #5F6B74;
 
   /* Ribbons stay the same saturated fills in both map times of day; only the
      rim flips so the black chip keeps an edge on paper. */
