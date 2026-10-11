@@ -127,7 +127,11 @@ function PaneToggleButton({ routeType }: { routeType: RouteType }) {
         window.dispatchEvent(new CustomEvent(isWiki ? "lexa:toggle-wiki-sidebar" : "lexa:toggle-threads-sidebar"));
       }}
     >
-      <PanelLeft aria-hidden="true" focusable="false" />
+      {isWiki ? (
+        <BookOpen aria-hidden="true" focusable="false" />
+      ) : (
+        <MessagesSquare aria-hidden="true" focusable="false" />
+      )}
       <span className="nav-label">{paneName}</span>
     </button>
   );

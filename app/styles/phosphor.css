@@ -7317,11 +7317,50 @@
   display: inline-flex;
   color: var(--lx-text-muted);
 }
+/* Pane voids and rows own their styling — the pane markup carries no utility
+   class this app does not generate. */
+.pane-void,
+.pane-note {
+  padding: 16px 8px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--lx-text-secondary);
+}
+.pane-note {
+  color: var(--lx-text-muted);
+}
+.pane-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px 8px;
+}
+.pane-void-title {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--lx-text-danger);
+}
+.thread-title {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--lx-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-title.is-active {
+  font-weight: 600;
+}
 .thread-snippet {
   font-family: var(--lx-font-micro);
   font-size: 10px;
   color: var(--lx-text-muted);
   line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .thread-meta {
   font-family: var(--lx-font-micro);

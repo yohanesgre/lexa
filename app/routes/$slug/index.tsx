@@ -1069,14 +1069,14 @@ function ProjectDashboard() {
 
   if (isLoading) {
     return (
-      <main className="page-frame page-frame-narrow">
+      <main className="page-frame">
         <DashboardSkeleton />
       </main>
     );
   }
 
   return (
-    <main className="page-frame page-frame-narrow">
+    <main className="page-frame">
       <div className="tm-dash">
         <div className="tm-dash-head">
           <h1>{health.project.name}</h1>
