@@ -27,7 +27,7 @@ this repo, this file wins:
 
 ## Git Workflow — single trunk (local auto-enforce)
 
-Trunk `main` — never commit directly. Every task: `main` → new branch → work → PR → merge to `main`. Before any git mutation (branch/worktree, checkout -b, add, commit, push, merge/rebase/cherry-pick, tag `v*`/`cli-v*`, or `wireframes/` submodule) load the `git-workflow` skill and follow guardrails verbatim. No commit/push/merge without explicit user ask; gate (`tsc --noEmit` + `vitest run` + `check:invariants` + secrets check) must be green. Quick gate: `bash scripts/verify-gate.sh`.
+Trunk `main` — never commit directly. Every task: `main` → new branch → work → PR → merge to `main`. Before any git mutation (branch/worktree, checkout -b, add, commit, push, merge/rebase/cherry-pick, tag `v*`/`cli-v*`) load the `git-workflow` skill and follow guardrails verbatim. No commit/push/merge without explicit user ask; gate (`tsc --noEmit` + `vitest run` + `check:invariants` + secrets check) must be green. Quick gate: `bash scripts/verify-gate.sh`.
 
 You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
 
@@ -58,7 +58,7 @@ All work tracking uses one folder per plan under `status/` (the global `work-pla
 4. `docs/API.md` — REST contract. Endpoint shapes are exact.
 5. `docs/ARCHITECTURE.md` — context and rationale only.
 
-`wireframes/` is a retired archive (its submodule is removed from this repo in a later step); no UI work may depend on it.
+`docs/design-system.html` is a **frozen artifact**: the wireframes submodule that generated it was removed from this repo (2026-10-11, the design-system pivot), so it is no longer rebuilt. Copy primitive markup from it, but `DESIGN.md` + `.impeccable/design.json` are the living system.
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 

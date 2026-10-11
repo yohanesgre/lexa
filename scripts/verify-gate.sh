@@ -59,7 +59,6 @@ has_cli=0
 has_unknown=0
 any=0
 touched_invariants=0
-touched_wireframes=0
 touched_installer=0
 for p in "${CHANGED[@]-}"; do
   [ -z "$p" ] && continue
@@ -73,9 +72,6 @@ for p in "${CHANGED[@]-}"; do
   esac
   case "$p" in
     server/*|shared/*|docs/SCHEMA*|*check-invariants*) touched_invariants=1 ;;
-  esac
-  case "$p" in
-    wireframes/src/*) touched_wireframes=1 ;;
   esac
   case "$p" in
     scripts/install*|scripts/uninstall*|scripts/test-install*|scripts/workers-install*|scripts/lib/*|wrangler.jsonc) touched_installer=1 ;;
@@ -128,9 +124,6 @@ printf "  test-hygiene: bun run check:test-hygiene (always)\n"
 if [ "$touched_invariants" -eq 1 ]; then
   printf "  invariants: bun run check:invariants\n"
 fi
-if [ "$touched_wireframes" -eq 1 ]; then
-  printf "  wireframes: bash wireframes/build.sh\n"
-fi
 if [ "$touched_installer" -eq 1 ]; then
   printf "  install-script: bash scripts/test-install.sh\n"
 fi
@@ -175,11 +168,6 @@ if [ "$touched_invariants" -eq 1 ]; then
   if bun run check:invariants 2>&1 | tee -a "$LOG" | tail -n 30; then ok "invariants passed"; else bad "invariants failed"; fi
 fi
 
-if [ "$touched_wireframes" -eq 1 ]; then
-  say "Gate: wireframes/build.sh (wireframes/src touched)"
-  if bash wireframes/build.sh 2>&1 | tee -a "$LOG" | tail -n 20; then ok "wireframes build passed"; else bad "wireframes build failed"; fi
-fi
-
 say "Gate: secrets / staged check"
 STAGED="$(git diff --cached --name-only || true)"
 # `(^|/)\.env` covers .env, .env.toml, .env.legacy, .env.staging.toml/.prod; the
@@ -188,11 +176,6 @@ if echo "$STAGED" | grep -vE '\.env\.toml\.example$' | grep -qE '((^|/)\.env|pri
   bad "secrets staged: $STAGED"
 else
   ok "no secrets staged"
-fi
-if echo "$STAGED" | grep -q "wireframes/dist/"; then
-  bad "wireframes/dist staged — never edit dist directly"
-else
-  ok "no dist staged"
 fi
 
 if [ -n "$STAGED" ]; then
