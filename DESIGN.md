@@ -26,8 +26,8 @@ colors:
   border-subtle-day: "#E4DED1"
   border-strong-night: "#3E505D"
   border-strong-day: "#A9A192"
-  border-focus-night: "#E4572E"
-  border-focus-day: "#C7431E"
+  border-focus-night: "#F0C040"
+  border-focus-day: "#7E5C00"
   border-input-night: "#43565F"
   border-input-day: "#8C8577"
   border-input-hover-night: "#5A6E78"
@@ -47,19 +47,24 @@ colors:
   ink-warning-day: "#7A4E0C"
   ink-success-night: "#8FD9A8"
   ink-success-day: "#14572B"
-  link-night: "#F0866A"
-  link-day: "#9E3A1B"
-  link-hover-night: "#F6A88F"
-  link-hover-day: "#84300F"
-  # Patrol orange: primary action, focus ring, today marker, "You are here"
-  patrol-orange-night: "#E4572E"
-  patrol-orange-day: "#C7431E"
-  patrol-orange-hover-night: "#F06A42"
-  patrol-orange-hover-day: "#AD3616"
-  patrol-orange-ink-night: "#10161B"
-  patrol-orange-ink-day: "#FBFAF6"
-  patrol-orange-muted-night: "#8A3A20"
-  patrol-orange-muted-day: "#D98569"
+  link-night: "#F0C040"
+  link-day: "#7E5C00"
+  link-hover-night: "#F5D76A"
+  link-hover-day: "#6B4E00"
+  # Brand amber (the LX plate yellow): primary action, focus ring, today marker, "You are here".
+  # The hue splits at the paper line. Night: one value (#F0C040) carries fill, ring, marks, and
+  # links. Day: the fill is the plate yellow over dark ink; everything drawn on paper (ring,
+  # marker strokes, links) uses the ink amber, because plate yellow on map paper is 2.07:1 and
+  # cannot mark anything. border-focus-day and link-day are that ink amber; muted-day holds the
+  # same value because the rail-toned pane leaves no lighter step that still clears 4.5:1.
+  brand-amber-night: "#F0C040"
+  brand-amber-day: "#D4A017"
+  brand-amber-hover-night: "#F5D76A"
+  brand-amber-hover-day: "#C79412"
+  brand-amber-ink-night: "#10161B"
+  brand-amber-ink-day: "#17222B"
+  brand-amber-muted-night: "#C99B3C"
+  brand-amber-muted-day: "#7E5C00"
   # Tinted state grounds
   danger-subtle-night: "rgba(210, 55, 47, 0.14)"
   danger-subtle-day: "rgba(176, 42, 34, 0.10)"
@@ -67,8 +72,8 @@ colors:
   warning-subtle-day: "rgba(154, 100, 16, 0.12)"
   success-subtle-night: "rgba(46, 158, 79, 0.14)"
   success-subtle-day: "rgba(31, 122, 58, 0.10)"
-  accent-subtle-night: "rgba(228, 87, 46, 0.14)"
-  accent-subtle-day: "rgba(199, 67, 30, 0.10)"
+  accent-subtle-night: "rgba(240, 192, 64, 0.14)"
+  accent-subtle-day: "rgba(212, 160, 23, 0.10)"
   # Difficulty ribbons: priority encoding. Fills are identical at both times of day.
   run-lowest: "#2E9E4F"
   run-normal: "#2F74D0"
@@ -312,19 +317,19 @@ components:
 
 **Creative North Star: "The Tuned CRT"**
 
-The North Star is carried as tuned, warm, human precision: instruments calibrated by hand until they read true. Its literal CRT reading is the incumbent rut (the amber CRT/HUD workspace this world replaced) and is excluded from every surface. The world that expresses it is the Trail Map: the tracker reads as one surveyed mountain at two times of day. The default is the floodlit night map, a cold slate field with lit ribbons and crisp signage plates; the switch gives the printed day map, warm map paper with the same ribbons and the same plates. The day map is a translation of the same mountain, never an inversion.
+The North Star is carried as tuned, warm, human precision: instruments calibrated by hand until they read true. Its literal CRT reading — the amber-on-black HUD workspace this world replaced — is still refused as a *look*: no monochrome amber field, no glowing terminal furniture, no amber on everything. The amber itself was never the rut, and it returns on purpose: the brand's own LX-plate yellow is the map's one action colour, a single lit plate on a cold slate field. The world that expresses it is the Trail Map: the tracker reads as one surveyed mountain at two times of day. The default is the floodlit night map, a cold slate field with lit ribbons and crisp signage plates; the switch gives the printed day map, warm map paper with the same ribbons and the same plates. The day map is a translation of the same mountain, never an inversion.
 
 The world lends type, palette, density, and one signature move. It never supplies layout, navigation model, or controls: nav is nav, buttons are buttons, tables sort with standard headers. A working screen must read as a tracker of its category first. The voice is warm, playful, and tactile, and it lives in the display layers only. Every control and state keeps its plain name (`New task`, `Blocked`, `Needs attention`); metaphor display names sit beside plain truth (`Trail profile`, with the plain sub-line `Milestones and sprint progress`). The ornament budget is spent entirely in the signature panel; lists and forms stay bare.
 
 Density is the working loop. The dashboard holds six regions inside a 1440x900 viewport at trail-report density, lists run at 36px rows on desktop and 44px on touch, and every count is a tabular figure. Panels sit flat on the ground; only overlays lift. Motion is a surveyed redraw, never ambient: lines draw once per mount and stop.
 
-**Dial: ENERGY 2 / RHYTHM 2 / MOTION 1.** A working tool speaks clearly and stays quiet: signage plates label regions, patrol orange marks the one live action, the six dashboard regions differ in shape (strip, panorama, meters, rows) without competing for the eye, and motion exists only to mark a state change.
+**Dial: ENERGY 2 / RHYTHM 2 / MOTION 1.** A working tool speaks clearly and stays quiet: signage plates label regions, brand amber marks the one live action, the six dashboard regions differ in shape (strip, panorama, meters, rows) without competing for the eye, and motion exists only to mark a state change.
 
 **Key Characteristics:**
 - One mountain, two times of day: floodlit night map by default, printed day map on switch, same furniture in both.
 - Three type voices with strict jobs: Signage caps for plates and labels, Guide for all readable copy, Surveyor tabular figures for every number.
 - Difficulty ribbons encode priority and nothing else, always doubled by their rank numeral and the configured priority name.
-- Patrol orange is the only action colour: primary buttons, focus ring, today marker, and the "You are here" post.
+- Brand amber is the only action colour: primary buttons, focus ring, today marker, and the "You are here" post; at day the hue splits at the paper line into the plate-yellow fill and the ink-amber marks and links.
 - Trail-report density: 36px desktop rows, 44px touch rows, 4px spacing scale, whole-cell repack.
 - Hybrid elevation: flat bordered panels everywhere, one shadow layer reserved for lifted overlays.
 - Motion draws once (180 to 260ms linear) and snaps to final state under reduced motion.
@@ -336,7 +341,8 @@ Density is the working loop. The dashboard holds six regions inside a 1440x900 v
 The palette is the Trail Map's own furniture at two times of day: cold floodlit slate at night, warm map paper by day, with saturated trail colours doing real work. Full token values live in the frontmatter; the groups below explain where each colour earns its place.
 
 ### Primary
-- **Patrol Orange** (night / day): the only action colour in the system. Primary buttons, the global focus ring, the today marker on the Trail Profile, the "You are here" post, and the traced-row tint all come from this one hue. Its rarity is the point: if two things are orange, one of them is wrong.
+- **Brand Amber** (night `#F0C040` / day fill `#D4A017`): the only action colour in the system — the same yellow as the LX plate in the rail. Primary buttons, the global focus ring, the today marker on the Trail Profile, the "You are here" post, and the traced-row tint all come from this one hue. At night one value carries every amber job: fill, ring, marks, and links. By day the hue splits at the paper line: the fill is the plate yellow carrying dark ink (a yellow plate always reads with dark ink, never white — white on `#D4A017` is 2.27:1), while everything drawn on paper — focus ring, marker strokes, links — wears the ink amber `#7E5C00`, because plate yellow on map paper is 2.07:1 and cannot mark anything. The day primary button carries a 1px ink-amber rim: the fill alone finds only 1.87:1 against the rail, and the Same-Mountain Rule already says only paper, ink, and rim change with the light. Its rarity is the point: if two things wear the amber, one of them is wrong.
+- **What stays out of the amber.** Sun gold (`#E8A33D`, warning and a lift-line series hue) keeps its jobs: warning must stay far from danger red because the two are read side by side (`approaching` next to `exceeded`), and gold is the only warm state hue that clears that gap. The retired patrol orange is earned back by nothing — as text it cannot clear AA on the night panel without lightening into the salmon register that danger ink already owns, and the Job-Colour Rule forbids a second warm action hue. Danger keeps red; the orange simply leaves the palette.
 
 ### Secondary
 - **Difficulty Ribbons** (lowest green, normal blue, high red, highest black, with their ink and rim): priority encoding and only that. A ribbon's tone follows the project's own configured priority names in rank order, with position 0 as the highest rank (black). The fills are identical at both times of day; only the rim flips so the black chip keeps an edge on paper.
@@ -346,7 +352,7 @@ The palette is the Trail Map's own furniture at two times of day: cold floodlit 
 
 ### Neutral
 - **Map Furniture** (ground, rail, panel, column, input, overlay): the app field, the nav rail and top bar, cards and panels, board columns and profile fill, form fields, and scrims. Night values are the floodlit slate family; day values are the paper family. Panels are lighter than ground at night and lighter than paper by day, so a card always reads as a plate laid on the map.
-- **Ink** (primary, secondary, muted, inverse, plus danger, warning, and success ink): body text is snow-white at night and deep slate ink by day, never pure white. Secondary ink carries meta and labels, muted ink carries sub-lines and timestamps, inverse ink rides on filled controls.
+- **Ink** (primary, secondary, muted, inverse, plus danger, warning, and success ink): body text is snow-white at night and deep slate ink by day, never pure white. Secondary ink carries meta and labels, muted ink carries sub-lines and timestamps, inverse ink rides on filled chrome that is not the accent — the amber fill always carries its own accent ink (`#10161B` night, `#17222B` day).
 - **Borders** (default, subtle, strong, focus, input): 1px hairlines do all the separating work that shadows would do in another system. Strong borders mark the active nav plate and hovered rows.
 
 ### State and Stamp Ink
@@ -420,13 +426,13 @@ Density is trail-report density. List rows are 36px on desktop and never below 4
 
 ## Elevation & Depth
 
-This is a hybrid system: surfaces sit flat on the ground and overlays lift. Panels, cards, rows, plates, and the trail report carry a 1px border and no shadow at all. One shadow layer is reserved for things that genuinely float above the map: dialogs, slideovers, popovers, and a card being dragged. Toasts and tooltips read as elevated surfaces through their own token families, not through extra shadow depth. Focus is not elevation: the global focus rule paints a 2px patrol-orange outline with 2px offset and suppresses any focus shadow.
+This is a hybrid system: surfaces sit flat on the ground and overlays lift. Panels, cards, rows, plates, and the trail report carry a 1px border and no shadow at all. One shadow layer is reserved for things that genuinely float above the map: dialogs, slideovers, popovers, and a card being dragged. Toasts and tooltips read as elevated surfaces through their own token families, not through extra shadow depth. Focus is not elevation: the global focus rule paints a 2px brand-amber outline with 2px offset and suppresses any focus shadow.
 
 ### Shadow Vocabulary
 - **Small** (`box-shadow: 0 1px 2px rgba(4, 7, 10, 0.5)`): resting shadow for small lifted chrome.
 - **Medium** (`box-shadow: 0 6px 16px rgba(4, 7, 10, 0.55)`): popovers and menus.
 - **Large** (`box-shadow: 0 16px 40px rgba(4, 7, 10, 0.65)`): dialogs and modal surfaces.
-- **Drag** (`box-shadow: 0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(228, 87, 46, 0.35)`): a card in transit, with a patrol-orange rim so the dragged object stays identifiable.
+- **Drag** (`box-shadow: 0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(240, 192, 64, 0.35)`): a card in transit, with a brand-amber rim so the dragged object stays identifiable.
 - **Slideover** (`box-shadow: -6px 0 28px rgba(4, 7, 10, 0.6)`): the task slideover edge.
 - Day-map values trade the black cast for a slate cast at the same geometry; full values are in the sidecar.
 
@@ -461,23 +467,23 @@ The form language is printed map furniture. Section panels and the profile card 
 - **Character:** today's conditions on one row, plain labels over real numbers.
 - **Shape:** a full-width panel (10px radius, 1px border, 44px minimum height) of items separated by 1px subtle dividers, each item a plate label above its value; the first item flexes, the action link sits right.
 - **Content:** `Trail report` (sync stamp plus repo and issue in figures), `Column WIP` (`02 approaching`, `01 exceeded` with danger ink when non-zero), `Needs attention` (20px count), `Target` (milestone name plus due text, danger ink when overdue), `Tasks` (3-digit count), and one action link (`Open board`, `Link repo`, or `Retry read`).
-- **States:** loading (skeleton value blocks with a visually hidden `Reading the map` label) · synced (blue `synced` stamp) · degraded (amber `out of sync` stamp with the out-of-sync issue number) · read failure (red `read failed` stamp with `GitHub state unknown` and a `Retry read` button) · no repo (`No repo linked` plus `Link repo`) · no columns (`No columns yet`) · no milestone (`No active milestone`) · long content (values truncate with ellipsis inside the strip).
+- **States:** loading (skeleton value blocks with a visually hidden `Reading the map` label) · synced (blue `synced` stamp) · degraded (sun-gold `out of sync` stamp with the out-of-sync issue number) · read failure (red `read failed` stamp with `GitHub state unknown` and a `Retry read` button) · no repo (`No repo linked` plus `Link repo`) · no columns (`No columns yet`) · no milestone (`No active milestone`) · long content (values truncate with ellipsis inside the strip).
 
 ### Trail Profile (the signature)
 - **Character:** milestone progress drawn as a mountain panorama, the same grammar the Milestones page renders at full scale.
-- **Shape:** a full-width panel card with a head (`Trail profile` plate plus the guide-word sub-line `Milestones and sprint progress,` and the live span) over a self-scrolling SVG panorama: ridge and axis hairlines, ridge fill in the column tone at 0.55 opacity, peak lines with dots and labels (11px) and target dates (10px), sprint runs as 6px strokes in the lift-line series hues with a 2px progress overlay, station posts at task states, gate bars at `blocked-by` dependencies carrying the blocking key, a `Done` valley label, and the today marker with its patrol-orange `You are here` post.
+- **Shape:** a full-width panel card with a head (`Trail profile` plate plus the guide-word sub-line `Milestones and sprint progress,` and the live span) over a self-scrolling SVG panorama: ridge and axis hairlines, ridge fill in the column tone at 0.55 opacity, peak lines with dots and labels (11px) and target dates (10px), sprint runs as 6px strokes in the lift-line series hues with a 2px progress overlay, station posts at task states, gate bars at `blocked-by` dependencies carrying the blocking key, a `Done` valley label, and the today marker with its brand-amber `You are here` post.
 - **Motion:** run lines draw once per mount (220ms linear, inside the world's 180 to 260ms band) from their own measured dash length; nothing loops or breathes.
 - **States:** loading (dashed skeleton ridge, `Reading the map…`) · empty (`No peaks on the map yet`) · error (plain inline error `Milestones could not be read for this project.` plus `Retry`) · long content (3 or more milestones scroll horizontally with today pinned) · tracing (see Route Trace).
 - **Copy:** `You are here`, `Done`, `Target`, `no date`.
 
 ### Route Trace (the named signature interaction)
 - **Behavior:** hovering or keyboard-focusing a task row or activity entry draws that task's full descent on the Trail Profile: start dot at its milestone peak, ribbon down its sprint run, a station post at every `blocked-by` dependency (a closed lift renders as a gate bar with the blocking key), end post at the `Done` valley. The draw is 180ms linear per mount and snaps instantly under reduced motion. Blur or `Escape` clears it; clicking still opens the standard task slideover and never replaces the control.
-- **States:** the traced source row takes the accent-subtle fill with a patrol-orange border; a task with no route shows the plain void `This task has no route on the map` with the explanation `It sits in a lane with no sprint, so there is nothing to trace.`
+- **States:** the traced source row takes the accent-subtle fill with a brand-amber border; a task with no route shows the plain void `This task has no route on the map` with the explanation `It sits in a lane with no sprint, so there is nothing to trace.`
 
 ### Needs Attention Rows
 - **Character:** dense trail rows: ribbon, route key, title, column, assignee keycaps.
 - **Shape:** 36px minimum rows (44px on touch) in a 38px ribbon column plus body; 13px title in Guide, 11px meta in muted Guide; 2px gaps between rows.
-- **States:** hover and focus-visible (card-hover fill, strong border) · active (card-active fill) · traced (accent-subtle fill, patrol-orange border) · loading (30px skeleton rows) · empty (`All clear, nothing needs patrol`) · error (danger void) · long content (the list scrolls with the column head sticky).
+- **States:** hover and focus-visible (card-hover fill, strong border) · active (card-active fill) · traced (accent-subtle fill, brand-amber border) · loading (30px skeleton rows) · empty (`All clear, nothing needs patrol`) · error (danger void) · long content (the list scrolls with the column head sticky).
 - **Copy:** `Urgent work and issues GitHub has closed`, `All clear, nothing needs patrol`.
 
 ### Column WIP Meters
@@ -506,9 +512,9 @@ The form language is printed map furniture. Section panels and the profile card 
 
 ### Buttons
 - **Shape:** 6px plate radius, Guide 13px labels, 36px base height (32px small, 44px large), 0 14px padding (0 10px small).
-- **Primary:** filled with the patrol-orange focus tone and inverse ink (the same orange as the focus ring), hover shifting to the light link-hover tone with a 100ms background and border transition. Used for `New task` and the primary action of a region.
+- **Primary:** filled with the brand-amber fill (`--lx-accent`) and the accent ink (`--lx-accent-ink`) — dark ink at both times of day, never the inverse ink — hover lifting one tonal step to the accent hover tone (`--lx-accent-hover`, 100ms background and border transition). By day the plate carries a 1px rim in the mark amber (`--lx-border-focus`) so the yellow is findable on paper. Used for `New task` and the primary action of a region.
 - **Ghost:** transparent with a default hairline border, secondary ink, hover filling the card-hover tone. Used for `Open board`, `Link repo`, `Retry read`, `Retry`.
-- **Focus:** the global rule (2px patrol-orange outline, 2px offset). **Disabled:** muted ink on transparent, no hover fill. **Loading:** the label stays plain and a skeleton or `Reading the map` register carries the wait.
+- **Focus:** the global rule (2px brand-amber outline, 2px offset). **Disabled:** muted ink on transparent, no hover fill. **Loading:** the label stays plain and a skeleton or `Reading the map` register carries the wait.
 
 ### Void Plates and Skeletons
 - **Void plate:** dashed 1px hairline, 6px radius, 16px padding, transparent ground, 13px Guide copy with a Signage plate title. The error variant takes a solid danger border with the danger-subtle ground and primary ink.
@@ -516,7 +522,7 @@ The form language is printed map furniture. Section panels and the profile card 
 - **Copy:** `No peaks on the map yet`, `All clear, nothing needs patrol`, `No columns yet`, `Nothing has moved yet`, `No repo linked`, `No active milestone`, `The profile did not load`, `Project not found`, `Failed to load board`, `Reading the map…`.
 
 ### State Matrix
-- **Rows, links, meters, movement entries:** default (flat, transparent or panel fill) · hover (card-hover fill, strong border) · focus-visible (global 2px patrol-orange ring) · active (card-active fill) · disabled (muted ink, no fill) · loading (skeleton blocks) · error (danger void) · empty (dashed void with plain copy) · long content (internal scroll capped to whole cells, sticky heads where the list scrolls).
+- **Rows, links, meters, movement entries:** default (flat, transparent or panel fill) · hover (card-hover fill, strong border) · focus-visible (global 2px brand-amber ring) · active (card-active fill) · disabled (muted ink, no fill) · loading (skeleton blocks) · error (danger void) · empty (dashed void with plain copy) · long content (internal scroll capped to whole cells, sticky heads where the list scrolls).
 - **Buttons:** default · hover (tonal shift) · focus-visible (global ring) · active (pressed fill) · disabled (muted) · loading (plain label plus skeleton register).
 - **Stamps and ribbons:** static encodings with fixed states only (`synced` / `degraded` / `failed`; four ribbon tones), never animated.
 
@@ -530,7 +536,7 @@ The form language is printed map furniture. Section panels and the profile card 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** keep every colour on its job: ribbon for priority, series hue for identity, state hue for meaning, patrol orange for action and position.
+- **Do** keep every colour on its job: ribbon for priority, series hue for identity, state hue for meaning, brand amber for action and position.
 - **Do** double every ribbon with its rank numeral on the chip and the project's configured priority name in the accessible label.
 - **Do** set every count, key, date, and time in the Surveyor voice with tabular figures.
 - **Do** hold list density at 36px desktop rows and 44px touch rows on the 4px scale, and cap scrollers to whole rows measured from the rendered row height.

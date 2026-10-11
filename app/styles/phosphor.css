@@ -28,12 +28,12 @@
   --lx-surface-input: #0D141A;
   --lx-surface-overlay: rgba(8, 12, 16, 0.78);
   --lx-surface-tooltip: #22303B;
-  --lx-surface-selected: rgba(228, 87, 46, 0.12);
+  --lx-surface-selected: rgba(240, 192, 64, 0.12);
 
   --lx-border-default: #26333D;
   --lx-border-subtle: #1B242C;
   --lx-border-strong: #3E505D;
-  --lx-border-focus: #E4572E;
+  --lx-border-focus: #F0C040;
   --lx-border-input: #43565F;
   --lx-border-input-hover: #5A6E78;
 
@@ -42,27 +42,31 @@
   --lx-text-tertiary: #8DA0AC;
   --lx-text-muted: #7E929F;
   --lx-text-inverse: #0B1014;
-  --lx-text-link: #F0866A;
-  --lx-text-link-hover: #F6A88F;
+  --lx-text-link: #F2CE6B;
+  --lx-text-link-hover: #F7DD9A;
   --lx-text-danger: #FF9C8F;
   --lx-text-warning: #E8A33D;
   --lx-text-success: #8FD9A8;
 
-  /* Patrol orange: primary action, focus ring, "You are here", today marker */
-  --lx-accent: #E4572E;
-  --lx-accent-hover: #F06A42;
+  /* Patrol amber: primary action, focus ring, "You are here", today marker */
+  --lx-accent: #F0C040;
+  --lx-accent-hover: #F6CF66;
   --lx-accent-ink: #10161B;
-  --lx-accent-muted: #8A3A20;
+  --lx-accent-muted: #8A6A16;
+  /* The fill the primary actions paint: the accent itself at night, a deeper
+     amber on the day map, so the ink that rides it stays readable in both. */
+  --lx-accent-fill: var(--lx-accent);
+  --lx-accent-fill-hover: var(--lx-accent-hover);
 
   --lx-bg-danger-subtle: rgba(210, 55, 47, 0.14);
   --lx-bg-warning-subtle: rgba(232, 163, 61, 0.14);
   --lx-bg-success-subtle: rgba(46, 158, 79, 0.14);
-  --lx-bg-accent-subtle: rgba(228, 87, 46, 0.14);
+  --lx-bg-accent-subtle: rgba(240, 192, 64, 0.14);
 
   --lx-shadow-sm: 0 1px 2px rgba(4, 7, 10, 0.5);
   --lx-shadow-md: 0 6px 16px rgba(4, 7, 10, 0.55);
   --lx-shadow-lg: 0 16px 40px rgba(4, 7, 10, 0.65);
-  --lx-shadow-drag: 0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(228, 87, 46, 0.35);
+  --lx-shadow-drag: 0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(240, 192, 64, 0.35);
   --lx-shadow-slideover: -6px 0 28px rgba(4, 7, 10, 0.6);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
@@ -172,12 +176,12 @@
   --lx-surface-input: #FFFFFF;
   --lx-surface-overlay: rgba(23, 34, 43, 0.38);
   --lx-surface-tooltip: #17222B;
-  --lx-surface-selected: rgba(199, 67, 30, 0.12);
+  --lx-surface-selected: rgba(212, 160, 23, 0.14);
 
   --lx-border-default: #D5CFC1;
   --lx-border-subtle: #E4DED1;
   --lx-border-strong: #A9A192;
-  --lx-border-focus: #C7431E;
+  --lx-border-focus: #8A6A16;
   --lx-border-input: #8C8577;
   /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
   --lx-border-input-hover: #5A6B76;
@@ -191,26 +195,31 @@
   --lx-text-tertiary: #6C7C86;
   --lx-text-muted: #5F707B;
   --lx-text-inverse: #FBFAF6;
-  --lx-text-link: #9E3A1B;
-  --lx-text-link-hover: #84300F;
+  --lx-text-link: #7A5E14;
+  --lx-text-link-hover: #5F4A10;
   --lx-text-danger: #8E2018;
   --lx-text-warning: #7A4E0C;
   --lx-text-success: #14572B;
 
-  --lx-accent: #C7431E;
-  --lx-accent-hover: #AD3616;
-  --lx-accent-ink: #FBFAF6;
-  --lx-accent-muted: #D98569;
+  /* Patrol amber on the day map: a deeper mark ink for strokes and borders
+     (readable on paper) and a lighter fill for primary actions, where the ink
+     that rides it is dark. */
+  --lx-accent: #8A6A16;
+  --lx-accent-hover: #6F5410;
+  --lx-accent-ink: #17222B;
+  --lx-accent-muted: #9A7413;
+  --lx-accent-fill: #D4A017;
+  --lx-accent-fill-hover: #BE8C0F;
 
   --lx-bg-danger-subtle: rgba(176, 42, 34, 0.10);
   --lx-bg-warning-subtle: rgba(154, 100, 16, 0.12);
   --lx-bg-success-subtle: rgba(31, 122, 58, 0.10);
-  --lx-bg-accent-subtle: rgba(199, 67, 30, 0.10);
+  --lx-bg-accent-subtle: rgba(212, 160, 23, 0.16);
 
   --lx-shadow-sm: 0 1px 2px rgba(23, 34, 43, 0.10);
   --lx-shadow-md: 0 6px 16px rgba(23, 34, 43, 0.12);
   --lx-shadow-lg: 0 16px 40px rgba(23, 34, 43, 0.16);
-  --lx-shadow-drag: 0 10px 28px rgba(23, 34, 43, 0.18), 0 0 0 1px rgba(199, 67, 30, 0.35);
+  --lx-shadow-drag: 0 10px 28px rgba(23, 34, 43, 0.18), 0 0 0 1px rgba(212, 160, 23, 0.35);
   --lx-shadow-slideover: -6px 0 28px rgba(23, 34, 43, 0.14);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
@@ -2163,11 +2172,11 @@
       border-color 100ms;
   }
   .btn-primary {
-    background: var(--lx-border-focus);
-    color: var(--lx-text-inverse);
+    background: var(--lx-accent-fill);
+    color: var(--lx-accent-ink);
   }
   .btn-primary:hover {
-    background: var(--lx-text-link-hover);
+    background: var(--lx-accent-fill-hover);
   }
   /* Pressed/selected toggle button (e.g. a provider preset, the attach trigger
      while its menu is open). */
@@ -7224,12 +7233,27 @@
 .pane-search {
   position: relative;
 }
+/* The wiki's search is a trigger button (it opens the search surface), so the
+   whole field has to be the button. The markup's utility classes (h-8, px-3,
+   …) are not defined in this app, so the box is filled and padded here. */
+.pane-search > * {
+  height: 100%;
+}
 .pane-search .prop-input,
 .pane-search .relative > button {
   height: 100%;
+  width: 100%;
+  padding: 0 10px;
   background: transparent;
   border: 0;
   border-radius: 6px;
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  color: var(--lx-text-secondary);
+  text-align: left;
+}
+.pane-search .relative > button:hover {
+  color: var(--lx-text-primary);
 }
 .pane-search .prop-input:focus {
   outline: none;
