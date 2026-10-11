@@ -2,7 +2,6 @@ import type { Editor } from "@tiptap/core";
 import { Download, Paperclip, Image as ImageIcon, X } from "lucide-react";
 import type { TipTapDoc } from "../../../shared/types";
 import { useDeleteAttachment, useSession, useWikiAttachments } from "../../lib/queries";
-import { renderDoc } from "../tiptap-render";
 import { WikiEditor } from "./WikiEditor";
 
 function formatAttachmentSize(bytes: number): string {
@@ -27,7 +26,7 @@ function WikiAttachmentsSection({ slug, pageSlug }: { slug: string; pageSlug: st
   if (rows.length === 0) return null;
 
   return (
-    <div style={{ padding: "8px 12px", borderTop: "1px solid var(--lx-border-subtle)" }}>
+    <div style={{ padding: "8px 12px" }}>
       <div className="flex items-center gap-2 mb-2">
         <Paperclip size={12} strokeWidth={1.5} className="text-lx-text-muted" />
         <span className="prop-label">Attachments</span>
@@ -108,70 +107,50 @@ interface WikiEditSplitProps {
   onReviewStateChange: (active: boolean, accepted: boolean) => void;
 }
 
-export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving, isDirty, lastSavedAt, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
+// The page's editing lane: one pane — the rich editor (whose toolbar carries
+// the Editor/Preview toggle) over the page's attachments and save status. The
+// preview is not a second pane here: the toggle turns this pane itself into the
+// rendered document, exactly as the task description does.
+export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving, isDirty, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
   return (
-    <div className="flex flex-1 overflow-hidden" style={{ borderTop: "1px solid var(--lx-border-subtle)" }}>
-      {/* Left: Preview */}
+    <div className="editor-pane flex flex-1 flex-col overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div
-          style={{
-            padding: "4px 8px",
-            borderBottom: "1px solid var(--lx-border-subtle)",
-            background: "var(--lx-bg-surface)",
-          }}
-        >
-          <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Preview</span>
-        </div>
-        <div
-          className="wiki-prose wiki-edit-preview flex-1 overflow-y-auto"
-          style={{ padding: "16px 20px", background: "var(--lx-bg-page)" }}
-        >
-          {renderDoc(previewContent, "wiki", slug)}
-        </div>
+        {editor && (
+          <WikiEditor
+            editor={editor}
+            slug={slug}
+            previewContent={previewContent}
+            runtime={{ slug, documentType: "wiki", documentId: pageSlug }}
+            onReviewStateChange={onReviewStateChange}
+          />
+        )}
       </div>
-
-      {/* Right: Editor */}
+      <WikiAttachmentsSection slug={slug} pageSlug={pageSlug} />
       <div
-        className="flex flex-1 flex-col overflow-hidden"
-        style={{ borderLeft: "1px solid var(--lx-border-subtle)" }}
+        className="flex items-center justify-between"
+        style={{
+          padding: "8px 12px",
+          borderTop: "1px solid var(--lx-border-subtle)",
+          background: "var(--lx-surface-elevated)",
+        }}
       >
-        <div
-          style={{
-            padding: "4px 8px",
-            borderBottom: "1px solid var(--lx-border-subtle)",
-            background: "var(--lx-bg-surface)",
-          }}
-        >
-          <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Editor</span>
-        </div>
-        {editor && <WikiEditor editor={editor} runtime={{ slug, documentType: "wiki", documentId: pageSlug }} onReviewStateChange={onReviewStateChange} />}
-        <WikiAttachmentsSection slug={slug} pageSlug={pageSlug} />
-        <div
-          className="flex items-center justify-between"
-          style={{
-            padding: "8px 12px",
-            borderTop: "1px solid var(--lx-border-subtle)",
-            background: "var(--lx-bg-surface)",
-          }}
-        >
-          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-            {isDirty ? null : (
-              <>
-                {lastSavedLabel}
-                {!isSaving && updatedByName ? ` by ${updatedByName}` : ""}
-              </>
-            )}
-          </span>
-          {isSaving ? (
-            <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Saving…</span>
-          ) : (
-            isDirty && (
-              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
-                Unsaved changes
-              </span>
-            )
+        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+          {isDirty ? null : (
+            <>
+              {lastSavedLabel}
+              {!isSaving && updatedByName ? ` by ${updatedByName}` : ""}
+            </>
           )}
-        </div>
+        </span>
+        {isSaving ? (
+          <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Saving…</span>
+        ) : (
+          isDirty && (
+            <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
+              Unsaved changes
+            </span>
+          )
+        )}
       </div>
     </div>
   );

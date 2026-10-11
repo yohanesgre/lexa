@@ -89,6 +89,37 @@ const NAV_ITEMS: { key: NavKey; label: string; icon: typeof LayoutDashboard }[] 
   { key: "wiki", label: "Wiki", icon: BookOpen },
 ];
 
+// The navigation itself: the rail's links. The phone menu renders this same
+// block, so the drawer is the rail's primitive (`.nav-link` / `.nav-label` /
+// the lucide glyph) at touch geometry, never a second navigation.
+function NavLinks({ targets, activeByKey, assistantEnabled }: {
+  targets: Record<NavKey, NavTarget>;
+  activeByKey: Record<NavKey, boolean>;
+  assistantEnabled: boolean;
+}) {
+  return (
+    <div className="nav-links">
+      {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+        <NavLink
+          key={key}
+          {...linkProps(targets[key])}
+          active={activeByKey[key]}
+          exact={key !== "wiki"}
+        >
+          <Icon aria-hidden="true" focusable="false" />
+          <span className="nav-label">{label}</span>
+        </NavLink>
+      ))}
+      {assistantEnabled && (
+        <NavLink {...linkProps(targets.chat)} active={activeByKey.chat}>
+          <MessagesSquare aria-hidden="true" focusable="false" />
+          <span className="nav-label">Chat</span>
+        </NavLink>
+      )}
+    </div>
+  );
+}
+
 // The brand mark, copied verbatim from docs/brand/lexa-mark.svg: the LX
 // monogram on its own plate. It is the one colour in the app outside the
 // palette, because identity is the brand's job, not the world's.
@@ -148,14 +179,15 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
 }) {
   return (
     <div className="app-nav-menu-project">
+      {/* The selected project is the app's own field: same ground, edge and
+          focus as every other input. */}
       <button
         type="button"
         className="app-nav-menu-project-toggle"
         aria-expanded={projectListOpen}
         onClick={onToggleList}
       >
-        <span className="app-nav-menu-project-label">Project</span>
-        <span className="app-nav-menu-project-name">
+        <span className="font-medium">
           {projects.find((p) => p.slug === selectedSlug)?.name ?? selectedSlug}
         </span>
         <ChevronIcon />
@@ -166,7 +198,8 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
             <button
               key={p.id}
               type="button"
-              className={cn("app-nav-menu-link", p.slug === selectedSlug && "active")}
+              className={cn("app-nav-menu-project-row", p.slug === selectedSlug && "active")}
+              aria-current={p.slug === selectedSlug ? "true" : undefined}
               onClick={() => onPickProject(p.slug)}
             >
               {p.name}
@@ -194,36 +227,6 @@ function MobileProjectMenu({ projects, selectedSlug, selectedProjectId, projectL
         </div>
       )}
     </div>
-  );
-}
-
-function MobileMenuLinks({ targets, assistantEnabled }: { targets: Record<NavKey, NavTarget>; assistantEnabled: boolean }) {
-  return (
-    <>
-      <Link {...linkProps(targets.dashboard)} className="app-nav-menu-link" activeOptions={{ exact: true }}>
-        Dashboard
-      </Link>
-      <Link {...linkProps(targets.board)} className="app-nav-menu-link">
-        Board
-      </Link>
-      <Link {...linkProps(targets.tasks)} className="app-nav-menu-link">
-        Tasks
-      </Link>
-      <Link {...linkProps(targets.milestones)} className="app-nav-menu-link">
-        Milestones
-      </Link>
-      <Link {...linkProps(targets.swimlanes)} className="app-nav-menu-link">
-        Swimlanes
-      </Link>
-      <Link {...linkProps(targets.wiki)} className="app-nav-menu-link">
-        Wiki
-      </Link>
-      {assistantEnabled && (
-        <Link {...linkProps(targets.chat)} className="app-nav-menu-link">
-          Chat
-        </Link>
-      )}
-    </>
   );
 }
 
@@ -348,25 +351,7 @@ export function AppShell() {
       </header>
 
       <nav className="app-nav" data-open={rail.open ? "true" : "false"}>
-        <div className="nav-links">
-          {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
-            <NavLink
-              key={key}
-              {...linkProps(targets[key])}
-              active={activeByKey[key]}
-              exact={key !== "wiki"}
-            >
-              <Icon aria-hidden="true" focusable="false" />
-              <span className="nav-label">{label}</span>
-            </NavLink>
-          ))}
-          {assistantEnabled && (
-            <NavLink {...linkProps(targets.chat)} active={activeByKey.chat}>
-              <MessagesSquare aria-hidden="true" focusable="false" />
-              <span className="nav-label">Chat</span>
-            </NavLink>
-          )}
-        </div>
+        <NavLinks targets={targets} activeByKey={activeByKey} assistantEnabled={assistantEnabled} />
       </nav>
 
       <div className="app-frame">
@@ -396,7 +381,7 @@ export function AppShell() {
             }}
           />
         )}
-        <MobileMenuLinks targets={targets} assistantEnabled={assistantEnabled} />
+        <NavLinks targets={targets} activeByKey={activeByKey} assistantEnabled={assistantEnabled} />
       </div>
       {menuOpen && (
         <button

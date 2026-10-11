@@ -86,7 +86,7 @@ export function MilestoneSelector({ milestones, value, onChange, slug }: Milesto
             No milestone
             <span className="ms-count">loose sprints + Backlog</span>
           </button>
-          <div className="menu-separator" />
+          {milestones.length > 0 && <div className="menu-separator" />}
           {milestones.map((m) => (
             <button
               key={m.id}
@@ -102,7 +102,7 @@ export function MilestoneSelector({ milestones, value, onChange, slug }: Milesto
               </span>
             </button>
           ))}
-          <div className="menu-separator" />
+          {milestones.length > 0 && <div className="menu-separator" />}
           <Link
             to="/$slug/milestones"
             params={{ slug }}
