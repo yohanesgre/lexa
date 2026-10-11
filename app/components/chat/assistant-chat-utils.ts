@@ -53,15 +53,21 @@ export interface ChatTurn {
 // back to the marker-only waiting indicator.
 export function chipFromPendingApproval(raw: unknown, batchId: string): ApprovalChip | null {
   if (!raw || typeof raw !== "object") return null;
-  const a = raw as { approvalId?: unknown; seq?: unknown; name?: unknown; detail?: unknown; diff?: unknown; status?: unknown };
+  const a = raw as { approvalId?: unknown; seq?: unknown; name?: unknown; detail?: unknown; diff?: unknown; status?: unknown; executionError?: unknown };
   if (typeof a.approvalId !== "string" || a.approvalId === "") return null;
   if (typeof a.name !== "string" || a.name === "") return null;
   if (typeof a.seq !== "number" || !Number.isFinite(a.seq)) return null;
   if (!a.diff || typeof a.diff !== "object") return null;
+  // An approved row whose execution failed carries "CODE: message" — render the
+  // `failed` terminal state (the schema has no `failed` row status).
+  const executionError = typeof a.executionError === "string" && a.executionError !== "" ? a.executionError : undefined;
   // A reconciled status (another tab decided this approval) renders the chip
   // terminal instead of pending.
-  const state: ApprovalChip["state"] =
-    a.status === "approved" || a.status === "rejected" || a.status === "expired" ? a.status : "pending";
+  const state: ApprovalChip["state"] = executionError
+    ? "failed"
+    : a.status === "approved" || a.status === "rejected" || a.status === "expired"
+      ? a.status
+      : "pending";
   return {
     approvalId: a.approvalId,
     batchId,
@@ -70,7 +76,17 @@ export function chipFromPendingApproval(raw: unknown, batchId: string): Approval
     ...(typeof a.detail === "string" && a.detail !== "" ? { detail: a.detail } : {}),
     diff: a.diff as AssistantWriteDiff,
     state,
+    ...(executionError ? { error: parseApprovalExecutionError(executionError) } : {}),
   };
+}
+
+// Approval execution failures are persisted as "CODE: message"
+// (server/assistant/write-execution.ts). Split at the first colon so the chip
+// renders the code and the human message as it does for a stream error.
+export function parseApprovalExecutionError(raw: string): { code: string; message: string } {
+  const idx = raw.indexOf(":");
+  if (idx < 0) return { code: raw.trim() || "ASSISTANT_WRITE_FAILED", message: "" };
+  return { code: raw.slice(0, idx).trim() || "ASSISTANT_WRITE_FAILED", message: raw.slice(idx + 1).trim() };
 }
 
 // D3 (W7b/WS2): the persisted pending-batch carrier is a

@@ -528,6 +528,7 @@ export function snapshotFromSegment(segment: AgentSegment, options: AgentSnapsho
     reasoningMs: segment.reasoningMs,
     pending: segment.pending,
     suspendedBatchId: segment.suspendedBatchId,
+    approvalResults: [],
     error: snapshotError,
     usage: options.usage ?? null,
     hasIngress: segment.hasIngress,

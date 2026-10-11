@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { List } from "lucide-react";
 import { OutlinePanel } from "./OutlinePanel";
-import { useScrollSpy } from "../../lib/use-scroll-spy";
 import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 import { lockScroll } from "../../lib/scroll-lock";
 import { useMobilePanel } from "../../lib/viewport";
@@ -12,10 +11,14 @@ const MOBILE_PANEL_ID = "wiki-outline-sheet-mobile";
 
 interface OutlinePillProps {
   headings: HeadingOutline[];
+  activeId: string;
+  onSelect: (id: string) => void;
 }
 
-export function OutlinePill({ headings }: OutlinePillProps) {
-  const { activeId, scrollTo } = useScrollSpy(headings);
+// The compact affordance: the capsule that opens the popover (desktop/tablet)
+// or the bottom sheet (phone). The container query on .wiki-read-shell hides it
+// wherever the persistent rail is shown instead.
+export function OutlinePill({ headings, activeId, onSelect }: OutlinePillProps) {
   const [open, setOpen] = useState(false);
   const isMobile = useMobilePanel();
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -51,10 +54,17 @@ export function OutlinePill({ headings }: OutlinePillProps) {
     if (!isMobile) setOpen(false);
   }, [isMobile]);
 
-  // A short page has nothing to navigate: the pill earns its place once the
-  // document carries three or more sections.
-  const sections = headings.filter((heading) => heading.level >= 2);
-  if (sections.length < 3) return null;
+  // The rail takes the pill's place once the lane fits it; a resize across that
+  // line hides the dock in CSS, so the open panel has to close with it or its
+  // scroll lock would outlive the sheet.
+  useEffect(() => {
+    function closeWhenRailShows() {
+      const dock = dockRef.current;
+      if (dock && getComputedStyle(dock).display === "none") setOpen(false);
+    }
+    window.addEventListener("resize", closeWhenRailShows);
+    return () => window.removeEventListener("resize", closeWhenRailShows);
+  }, []);
 
   const current = headings.find((heading) => heading.id === activeId) ?? headings[0];
 
@@ -80,7 +90,7 @@ export function OutlinePill({ headings }: OutlinePillProps) {
           panelId={panelId}
           panelRef={panelRef}
           onSelect={(id) => {
-            scrollTo(id);
+            onSelect(id);
             setOpen(false);
           }}
           onClose={() => setOpen(false)}

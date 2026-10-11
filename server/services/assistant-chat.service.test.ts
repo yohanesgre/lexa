@@ -516,6 +516,27 @@ describe("carried — approval carrier continuation split and reconcile", () => 
       },
     ]);
   });
+
+  // D3: an approved row whose execution failed carries "CODE: message" in
+  // `assistant_pending_writes.execution_error`; the transcript read must
+  // reconcile it onto the carrier so a reloaded chip renders `failed` instead
+  // of a clean `approved`.
+  it("reconcileApprovalCarriers carries an execution failure onto the carrier", () => {
+    const carrier = {
+      role: "assistant",
+      parts: [
+        {
+          type: ASSISTANT_APPROVAL_DATA_PART,
+          data: { batchId: "b1", approvals: [{ approvalId: "w1", seq: 0, name: "create_task", status: "approved", diff: DIFF }] },
+        },
+      ],
+    };
+    const reconciled = reconcileApprovalCarriers([carrier], [
+      { id: "w1", batchId: "b1", status: "approved", seq: 0, name: "create_task", diff: DIFF, executionError: "ASSISTANT_WRITE_FAILED: nope" },
+    ]);
+
+    expect(approvalCarriersOf(reconciled[0])[0]?.approvals[0]?.executionError).toBe("ASSISTANT_WRITE_FAILED: nope");
+  });
 });
 
 describe("carried — continuation boundary text probes (LX-124)", () => {

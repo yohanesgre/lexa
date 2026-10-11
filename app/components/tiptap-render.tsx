@@ -120,7 +120,8 @@ export function renderInline(
   keyPrefix: string,
   variant: "task" | "wiki" = "task",
   slug?: string,
-  share?: ShareRenderContext
+  share?: ShareRenderContext,
+  headingIds?: Map<TTNode, string>
 ): ReactNode {
   if (!nodes) return null;
   return withKeys(nodes, (node) => `${keyPrefix}/${node.type === "text" ? `t:${node.text ?? ""}` : node.type}`).map(({ item: node, key: nodeKey }) => {
@@ -163,7 +164,7 @@ export function renderInline(
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
       return <img key={nodeKey} src={src} alt={alt} loading="lazy" />;
     }
-    return renderNode(node, nodeKey, variant, slug, share);
+    return renderNode(node, nodeKey, variant, slug, share, headingIds);
   });
 }
 
@@ -174,10 +175,11 @@ function renderBlocks(
   keyPrefix: string,
   variant: "task" | "wiki",
   slug?: string,
-  share?: ShareRenderContext
+  share?: ShareRenderContext,
+  headingIds?: Map<TTNode, string>
 ): ReactNode {
   return withKeys(nodes ?? [], (node) => node.type).map(({ item: node, key }) =>
-    renderNode(node, `${keyPrefix}/b/${key}`, variant, slug, share)
+    renderNode(node, `${keyPrefix}/b/${key}`, variant, slug, share, headingIds)
   );
 }
 
@@ -186,14 +188,15 @@ export function renderNode(
   key: string,
   variant: "task" | "wiki" = "task",
   slug?: string,
-  share?: ShareRenderContext
+  share?: ShareRenderContext,
+  headingIds?: Map<TTNode, string>
 ): ReactNode {
   const isWiki = variant === "wiki";
   switch (node.type) {
     case "paragraph":
       return (
         <p key={key} className={isWiki ? undefined : "td-p"}>
-          {renderInline(node.content, key, variant, slug, share)}
+          {renderInline(node.content, key, variant, slug, share, headingIds)}
         </p>
       );
     case "heading": {
@@ -207,31 +210,31 @@ export function renderNode(
             ? "td-h2"
             : "td-h3";
       const headingText = collectText(node);
-      const id = slugifyHeading(headingText);
+      const id = headingIds?.get(node) ?? slugifyHeading(headingText);
       return (
-        <Tag key={key} className={cls} id={id}>
-          {renderInline(node.content, key, variant, slug, share)}
+        <Tag key={key} className={cls} id={id} tabIndex={isWiki ? -1 : undefined}>
+          {renderInline(node.content, key, variant, slug, share, headingIds)}
         </Tag>
       );
     }
     case "bulletList":
       return (
         <ul key={key} className={isWiki ? undefined : "td-ul"}>
-          {renderInline(node.content, key, variant, slug, share)}
+          {renderInline(node.content, key, variant, slug, share, headingIds)}
         </ul>
       );
     case "orderedList":
       return (
         <ol key={key} className={isWiki ? undefined : "td-ol"}>
-          {renderInline(node.content, key, variant, slug, share)}
+          {renderInline(node.content, key, variant, slug, share, headingIds)}
         </ol>
       );
     case "listItem":
-      return <li key={key}>{renderInline(node.content, key, variant, slug, share)}</li>;
+      return <li key={key}>{renderInline(node.content, key, variant, slug, share, headingIds)}</li>;
     case "taskList":
       return (
         <ul key={key} className="checklist">
-          {renderInline(node.content, key, variant, slug, share)}
+          {renderInline(node.content, key, variant, slug, share, headingIds)}
         </ul>
       );
     case "taskItem": {
@@ -239,7 +242,7 @@ export function renderNode(
       return (
         <li key={key} className={cn(checked && "checked")}>
           <span className={cn("checkbox", checked && "checked")} />
-          <span>{renderInline(node.content, key, variant, slug, share)}</span>
+          <span>{renderInline(node.content, key, variant, slug, share, headingIds)}</span>
         </li>
       );
     }
@@ -252,7 +255,7 @@ export function renderNode(
     case "blockquote":
       return (
         <blockquote key={key} className={isWiki ? undefined : "td-quote"}>
-          {renderInline(node.content, key, variant, slug, share)}
+          {renderInline(node.content, key, variant, slug, share, headingIds)}
         </blockquote>
       );
     case "horizontalRule":
@@ -261,17 +264,17 @@ export function renderNode(
       return (
         <div key={key} className={isWiki ? "table-wrap" : "td-table-wrap"}>
           <table className={isWiki ? undefined : "td-table"}>
-            {renderInline(node.content, key, variant, slug, share)}
+            {renderInline(node.content, key, variant, slug, share, headingIds)}
           </table>
         </div>
       );
     case "tableRow":
-      return <tr key={key}>{renderInline(node.content, key, variant, slug, share)}</tr>;
+      return <tr key={key}>{renderInline(node.content, key, variant, slug, share, headingIds)}</tr>;
     case "tableHeader": {
       const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
       return (
         <th key={key} align={align}>
-          {renderBlocks(node.content, key, variant, slug, share)}
+          {renderBlocks(node.content, key, variant, slug, share, headingIds)}
         </th>
       );
     }
@@ -279,7 +282,7 @@ export function renderNode(
       const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
       return (
         <td key={key} align={align}>
-          {renderBlocks(node.content, key, variant, slug, share)}
+          {renderBlocks(node.content, key, variant, slug, share, headingIds)}
         </td>
       );
     }
@@ -300,7 +303,7 @@ export function renderNode(
       );
     }
     default:
-      return node.content ? <div key={key}>{renderInline(node.content, key, variant, slug, share)}</div> : null;
+      return node.content ? <div key={key}>{renderInline(node.content, key, variant, slug, share, headingIds)}</div> : null;
   }
 }
 
@@ -322,30 +325,52 @@ export interface HeadingOutline {
   id: string;
 }
 
-export function extractHeadings(node: TTNode): HeadingOutline[] {
-  const results: HeadingOutline[] = [];
-  const seen = new Map<string, number>();
+export interface HeadingPlan {
+  /** every heading in the document, in document order, with its unique id */
+  headings: HeadingOutline[];
+  /** the same ids keyed by node, so the renderer emits them */
+  ids: Map<TTNode, string>;
+}
+
+// A heading's id is its slug, stepped with a -2/-3 suffix until it is unique on
+// the page. The walk reserves ids in document order, so the renderer and the
+// outline agree on every one of them.
+function uniqueHeadingId(base: string, used: Set<string>): string {
+  const root = base || "section";
+  let id = root;
+  let n = 1;
+  while (used.has(id)) {
+    n += 1;
+    id = `${root}-${n}`;
+  }
+  used.add(id);
+  return id;
+}
+
+// One pass over the document names every heading. `reserved` carries slugs the
+// page mints outside the document — the wiki read view renders the page title
+// as an h1, so a document heading that repeats the title takes the suffix.
+export function planHeadings(node: TTNode | undefined, reserved: Iterable<string> = []): HeadingPlan {
+  const used = new Set(reserved);
+  const headings: HeadingOutline[] = [];
+  const ids = new Map<TTNode, string>();
   function walk(n: TTNode) {
     if (n.type === "heading") {
       const level = Number(n.attrs?.level ?? 1);
       const text = collectText(n);
-      let id = slugifyHeading(text);
-      const count = seen.get(id) ?? 0;
-      if (count > 0) {
-        id = `${id}-${count + 1}`;
-      }
-      seen.set(id, count + 1);
-      results.push({ level, text, id });
+      const id = uniqueHeadingId(slugifyHeading(text), used);
+      ids.set(n, id);
+      headings.push({ level, text, id });
     }
     for (const child of n.content ?? []) {
       walk(child);
     }
   }
-  walk(node);
-  return results;
+  if (node) walk(node);
+  return { headings, ids };
 }
 
-export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slug?: string, share?: ShareRenderContext): ReactNode {
+export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slug?: string, share?: ShareRenderContext, headingIds?: Map<TTNode, string>): ReactNode {
   const nodes = doc.content as TTNode[];
   if (!hasText(nodes)) {
     return variant === "task" ? (
@@ -354,11 +379,12 @@ export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slu
       <p className="italic text-lx-text-muted">This page is empty.</p>
     );
   }
+  const ids = headingIds ?? planHeadings(doc.content as unknown as TTNode).ids;
   const visibleNodes = nodes.filter((node) => {
     if (node.type === "heading") return hasText(node.content ?? []);
     return true;
   });
   return withKeys(visibleNodes, (node) => node.type).map(({ item: node, key }) =>
-    renderNode(node, `n/${key}`, variant, slug, share)
+    renderNode(node, `n/${key}`, variant, slug, share, ids)
   );
 }

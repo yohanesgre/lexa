@@ -48,6 +48,8 @@ const ERROR_ROW_STYLE: React.CSSProperties = {
   background: "var(--lx-bg-danger-subtle)",
 };
 const ERROR_TEXT_STYLE: React.CSSProperties = { fontSize: 12, lineHeight: "16px", color: "var(--lx-text-danger)", flex: 1, minWidth: 0 };
+// One held message per thread; a second Queue press would silently replace it.
+const QUEUE_TAKEN_MESSAGE = "A message is already queued — send or cancel it before queueing another.";
 
 export interface ChatUploadRequest {
   chatId: string;
@@ -460,6 +462,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   skills,
   streaming,
   streamStatus,
+  hasIngress,
   busy409,
   suspendedLock,
   suspendCount,
@@ -482,6 +485,9 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   skills?: LexaSkill[] | undefined;
   streaming: boolean;
   streamStatus?: AssistantStreamStatus | undefined;
+  // True once a content frame has landed. Gates the pre-ingress failure path:
+  // a failure before any content restores the draft and chips (D1).
+  hasIngress?: boolean | undefined;
   busy409: boolean;
   suspendedLock: boolean;
   suspendCount: number;
@@ -498,7 +504,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   // a `.deck-rail` sibling, never inside it).
   railHint?: ReactNode | undefined;
   queued?: { text: string; heldReason?: "stopped" | "failed"; flushing?: boolean } | null | undefined;
-  onQueue?: ((text: string) => void) | undefined;
+  onQueue?: ((text: string) => boolean | void) | undefined;
   onUnqueue?: (() => void) | undefined;
   seed?: { text: string; nonce: number } | null | undefined;
   initialAttachments?: ComposerAttachment[] | undefined;
@@ -509,6 +515,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() => initialAttachments ?? []);
   const [rejections, setRejections] = useState<ComposerRejection[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
+  const [queueWarning, setQueueWarning] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const mention = useMentionTokens({ slug, value: draft, onChange: setDraft, skills });
   // Combobox wiring: the textarea owns focus, the popup is its listbox, and the
@@ -696,12 +703,20 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     mention.close();
     setRejections([]);
     setWarning(null);
+    setQueueWarning(null);
   }, [draft, streaming, suspendedLock, hasExtractionFailure, onSend, readyRefs, attachments, mention]);
 
   const handleQueue = useCallback(() => {
     const msg = draft.trim();
     if (!msg || busy409) return;
-    onQueue?.(msg);
+    // A second queued message would overwrite the held one (one entry per
+    // chat) — refuse and keep the draft so nothing the user typed is
+    // discarded without notice (D8).
+    if (onQueue?.(msg) === false) {
+      setQueueWarning(QUEUE_TAKEN_MESSAGE);
+      return;
+    }
+    setQueueWarning(null);
     setDraft("");
     mention.close();
   }, [draft, busy409, onQueue, mention]);
@@ -717,6 +732,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     sentTextRef.current = queued.text;
     setAttachments((prev) => prev.filter((a) => !sentIdsRef.current.includes(a.id)));
     onUnqueue?.();
+    setQueueWarning(null);
     setRejections([]);
     setWarning(null);
   }, [queued, streaming, suspendedLock, hasExtractionFailure, onSend, readyRefs, attachments, onUnqueue]);
@@ -726,8 +742,15 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     if (!queued || queued.flushing) return;
     setDraft(queued.text);
     onUnqueue?.();
+    setQueueWarning(null);
     composerRef.current?.focus();
   }, [queued, onUnqueue]);
+
+  // The refusal notice belongs to the held message; drop it once the queue is
+  // empty (sent, cancelled, or flushed).
+  useEffect(() => {
+    if (!queued) setQueueWarning(null);
+  }, [queued]);
 
   const reviewApprovals = useCallback(() => {
     const scrollRoot = document.querySelector(".chat-scroll") ?? document;
@@ -783,21 +806,39 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     sentAttachmentsRef.current = [];
   }, [sendError]);
 
-  // Any other terminal status clears the chips that rode the accepted send.
-  // Safety net: the accepted send already cleared them, but a late-mounted
-  // composer or a resumed send must still settle.
+  // A terminal status settles the chips that rode the accepted send. A failure
+  // BEFORE the first content frame (`hasIngress` false) refused the send in
+  // practice — restore the draft and re-materialize the chips so the user's
+  // input survives and they can retry or edit (D1). A failure AFTER content
+  // arrived sent a real message (it is in the transcript), so only the chips
+  // settle.
   useEffect(() => {
     const status = streamStatus ?? (streaming ? "streaming" : "idle");
     if (status !== "done" && status !== "error" && status !== "aborted") return;
     if (sendError?.code === "ATTACHMENT_EXTRACTION_FAILED") return;
     if (sendError?.code === "ASSISTANT_TASK_ACTIVE") return;
+    if (!hasIngress && status === "error") {
+      const sent = sentAttachmentsRef.current;
+      if (sent.length > 0) {
+        setAttachments((prev) => {
+          const present = new Set(prev.map((a) => a.id));
+          const restored = sent.filter((a) => !present.has(a.id)).map(withFreshPreview);
+          return restored.length > 0 ? [...prev, ...restored] : prev;
+        });
+      }
+      if (sentTextRef.current) setDraft((prev) => (prev.trim() ? prev : sentTextRef.current!));
+      sentIdsRef.current = [];
+      sentAttachmentsRef.current = [];
+      setWarning(null);
+      return;
+    }
     if (sentIdsRef.current.length === 0) return;
     const ids = sentIdsRef.current;
     sentIdsRef.current = [];
     sentAttachmentsRef.current = [];
     setAttachments((prev) => prev.filter((a) => !ids.includes(a.id)));
     setWarning(null);
-  }, [streamStatus, streaming, sendError]);
+  }, [streamStatus, streaming, sendError, hasIngress]);
 
   const canSend = draft.trim().length > 0 && !streaming && !suspendedLock && !hasExtractionFailure;
   const canQueue = draft.trim().length > 0 && !busy409;
@@ -824,6 +865,15 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
         </div>
       )}
       {railHint}
+      {queueWarning && (
+        <div style={ERROR_ROW_STYLE} role="alert">
+          <AlertCircle size={14} strokeWidth={1.5} style={{ color: "var(--lx-text-danger)", flexShrink: 0 }} />
+          <span style={ERROR_TEXT_STYLE}>{queueWarning}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => setQueueWarning(null)} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, color: "var(--lx-text-muted)", flexShrink: 0 }}>
+            ✕
+          </button>
+        </div>
+      )}
       {queued && (
         <div className="deck-queued" role="status" aria-live="polite">
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>

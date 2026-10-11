@@ -2,14 +2,11 @@ import type { AssistantWriteDiff } from "../../../shared/assistant";
 
 // Pure helpers for Assistant approval diff rendering.
 
-export const DIFF_CAP = 2000;
-
+// The approval card renders the whole change — text blocks scroll rather than
+// truncate — so this is a plain count of what is shown, never a "used / limit"
+// meter (the old `N / 2,000 chars` read like a limit being hit).
 export function chars(n: number): string {
-  return `${n.toLocaleString("en-US")} / ${DIFF_CAP.toLocaleString("en-US")} chars`;
-}
-
-export function cap(text: string): string {
-  return text.length > DIFF_CAP ? `${text.slice(0, DIFF_CAP)}…` : text;
+  return `${n.toLocaleString("en-US")} characters`;
 }
 
 export function targetFor(diff: AssistantWriteDiff): string {

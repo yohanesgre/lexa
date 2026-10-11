@@ -82,6 +82,14 @@ export interface AssistantPendingChip {
   state?: "pending" | "approved" | "rejected" | "expired";
 }
 
+// One `approval_result` frame (resume streams only): the execution outcome of a
+// decided row. `failed` carries "CODE: message" from the write executor.
+export interface AssistantApprovalResult {
+  approvalId: string;
+  status: "applied" | "failed" | "denied";
+  error?: string | undefined;
+}
+
 // Chronological reply timeline (assistant-chat.html): one entry per content
 // element in FRAME ARRIVAL ORDER — reasoning bursts, tool calls and text
 // deltas interleave exactly as the model emitted them. Consecutive delta
@@ -118,6 +126,10 @@ export interface AssistantStreamSnapshot {
   pending: AssistantPendingChip[];
   // Set by the terminal `suspended` frame — the batch awaiting decisions.
   suspendedBatchId: string | null;
+  // Per-approval execution outcomes from `approval_result` frames (resume
+  // streams only). A `failed` entry patches the decided chip to its `failed`
+  // terminal state — the wire's only signal that an approved write did not run.
+  approvalResults: AssistantApprovalResult[];
   error: { code: string; message: string; details?: unknown } | null;
   usage: { in: number; out: number } | null;
   hasIngress: boolean;
@@ -134,6 +146,7 @@ const IDLE: AssistantStreamSnapshot = Object.freeze({
   reasoningMs: null,
   pending: [],
   suspendedBatchId: null,
+  approvalResults: [],
   error: null,
   usage: null,
   hasIngress: false,
@@ -237,9 +250,14 @@ class AssistantStreamSession {
           }),
         catch: (e) => e as Error,
       });
-      res = await Effect.runPromise(fetchEffect);
+      // A server that never sends response headers must not hang the composer:
+      // bound the pre-header window with the same budget as the pre-ingress
+      // frame window, then cancel the request (D11).
+      res = await Effect.runPromise(Effect.timeout(fetchEffect, Duration.millis(ASSISTANT_PRE_INGRESS_TIMEOUT_MS)));
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
+      const tag = e !== null && typeof e === "object" && "_tag" in e ? e._tag : undefined;
+      if (tag === "TimeoutException") this.controller.abort();
       this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "Could not reach the server." } });
       this.reportResume(false);
       return;
@@ -287,6 +305,11 @@ class AssistantStreamSession {
     let burstStart = 0;
     let pending: AssistantPendingChip[] = this.snapshot.status === "idle" ? [] : [...this.snapshot.pending];
     let hasIngress = this.snapshot.hasIngress ?? false;
+    // Wall clock of the last PARSED frame. The server heartbeats a `: ping`
+    // comment every 15s, which resets a per-read timeout but carries no frame —
+    // so the stall bound must be measured from the last real frame, not the
+    // last byte (D11).
+    let lastFrameAt = performance.now();
 
     const closeBurst = (): Partial<AssistantStreamSnapshot> => {
       reasoningActive = false;
@@ -300,6 +323,7 @@ class AssistantStreamSession {
     };
 
     const handleFrame = (frame: StreamFrame) => {
+      lastFrameAt = performance.now();
       frames.push(frame);
       if (frame.type === "reasoning") {
         if (frame.delta.length > 0) {
@@ -378,6 +402,25 @@ class AssistantStreamSession {
           hasIngress = true;
           this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message }, ...burstPatch, hasIngress });
           break;
+        case "notice":
+          // Non-terminal diagnostic (recoverable in-turn skip). Record it; the
+          // turn keeps running to its real terminal frame — never a failure.
+          this.emit({ frames: [...frames], ...burstPatch, hasIngress });
+          break;
+        case "approval_result": {
+          const result: AssistantApprovalResult = {
+            approvalId: frame.approvalId,
+            status: frame.status,
+            ...(frame.error !== undefined ? { error: frame.error } : {}),
+          };
+          this.emit({
+            frames: [...frames],
+            approvalResults: [...this.snapshot.approvalResults.filter((r) => r.approvalId !== result.approvalId), result],
+            ...burstPatch,
+            hasIngress,
+          });
+          break;
+        }
         case "done": {
           if (frame.text && frame.text.trim().length > 0) hasIngress = true;
           text = frame.text;
@@ -394,7 +437,13 @@ class AssistantStreamSession {
       const chunkIterable = {
         [Symbol.asyncIterator]: async function* (): AsyncGenerator<Uint8Array> {
           while (true) {
-            const timeoutMs = hasIngress ? ASSISTANT_STALL_TIMEOUT_MS : ASSISTANT_PRE_INGRESS_TIMEOUT_MS;
+            // Frame-based stall bound: measured from the last parsed frame, so
+            // the 15s `: ping` heartbeat (which resolves reader.read() but emits
+            // no frame) cannot keep a dead turn alive forever.
+            const budget = hasIngress ? ASSISTANT_STALL_TIMEOUT_MS : ASSISTANT_PRE_INGRESS_TIMEOUT_MS;
+            const idle = performance.now() - lastFrameAt;
+            if (idle >= budget) throw Object.assign(new Error("stall"), { name: "StallTimeout" });
+            const timeoutMs = Math.max(500, budget - idle);
             const readEffect = Effect.tryPromise({
               try: () => reader.read(),
               catch: (e) => e as Error,

@@ -25,6 +25,10 @@ interface ThreadsSidebarProps {
   onNewChat: () => void;
   open?: boolean | undefined;
   onClose?: () => void;
+  // The list read failed — render the design's danger void with Retry instead
+  // of the empty state (D4; DESIGN.md surface-pane states).
+  error?: boolean | undefined;
+  onRetry?: (() => void) | undefined;
 }
 
 // Escape and the scrim dismiss the drawer only; at ≥1024px the pane is docked
@@ -69,6 +73,8 @@ export function ThreadsSidebar({
   onNewChat,
   open = true,
   onClose,
+  error = false,
+  onRetry,
 }: ThreadsSidebarProps) {
   // Drawer Esc-dismiss (<1024px). Thread actions — including the delete
   // dialog's own Escape handling — live in the header, not this pane.
@@ -159,7 +165,14 @@ export function ThreadsSidebar({
         </div>
 
         <div className="threads-sidebar-list">
-          {threads.length === 0 ? (
+          {error ? (
+            <div className="pane-error">
+              <span className="pane-void-title">Threads could not be read.</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
+                Retry
+              </button>
+            </div>
+          ) : threads.length === 0 ? (
             <div className="pane-void">
               <span>{searching ? "No chats match your search" : "No threads yet — start a conversation"}</span>
             </div>

@@ -2159,6 +2159,11 @@ POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not Ev
                                "name":"create_task","detail":"…",
                                "diff":{…AssistantWriteDiff…}}
     event: error  data: {"code":"ASSISTANT_GENERATION_FAILED","message":"…"}
+    event: notice data: {"code":"ASSISTANT_TOOL_ARGS_INVALID","message":"…"}
+                                  (non-terminal diagnostic: a recoverable in-turn
+                                   skip — truncated/invalid tool args, the
+                                   write-hallucination guard. The stream continues
+                                   to its one terminal frame.)
     event: done   data: {"taskId":"…","text":"…","usage":{"in":n,"out":n}}
     event: suspended data: {"batchId":"…"}
     event: approval_result data: {"approvalId":"…","status":"applied"|"failed"|"denied",

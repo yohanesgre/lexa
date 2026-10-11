@@ -23,7 +23,7 @@ function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, settingsPan
     <>
       <div
         className="flex items-center justify-between"
-        style={{ padding: "12px 16px", borderBottom: "1px solid var(--lx-border-subtle)" }}
+        style={{ padding: "12px var(--lx-space-6)", borderBottom: "1px solid var(--lx-border-subtle)" }}
       >
         <div className="flex items-center gap-2">
           <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
@@ -40,7 +40,9 @@ function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, settingsPan
         </div>
       </div>
 
-      <div style={{ padding: "12px 16px 0" }}>
+      {/* The input's own 12px padding plus this 12px inset put the typed title
+          on the editor content's 24px guide (--lx-space-6). */}
+      <div style={{ padding: "var(--lx-space-3) var(--lx-space-3) 0" }}>
         <input
           className="wiki-title-input"
           aria-label="Page title"
@@ -105,8 +107,9 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
   }, [isEditing, onDone]);
 
   return (
-    <div className="wiki-content wiki-edit-workspace">
-      <div className="wiki-edit-main flex flex-col" style={{ padding: 0, overflow: "hidden" }}>
+    <main className="page-frame wiki-edit-frame">
+      <div className="wiki-edit-workspace">
+        <div className="wiki-edit-main flex flex-col" style={{ padding: 0, overflow: "hidden" }}>
         <EditHeader
           breadcrumb={breadcrumb}
           title={title}
@@ -144,7 +147,8 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
           updatedByName={lastSavedPage.updatedByName}
           onReviewStateChange={handleReviewStateChange}
         />
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

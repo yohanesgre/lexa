@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { chars, cap } from "./assistant-diff-utils";
+import { chars } from "./assistant-diff-utils";
 
 // Shared diff primitives for Assistant approval chips — transcribed from
 // wireframes/src/assistant-write-approvals.html.
@@ -63,7 +63,17 @@ export function TextBlock({ label, text, tone }: { label: string; text: string; 
         <span className="approval-blocklabel">{label}</span>
         <span className="approval-blocklabel">{chars(text.length)}</span>
       </div>
-      <p className={tone === "before" ? "diff-before" : "diff-after"}>{cap(text)}</p>
+      {/* The whole text, scrollable rather than cut: a long wiki page is
+          reviewable in place. The count above is the real length. */}
+      <div
+        className="approval-textblock-scroll"
+        tabIndex={0}
+        role="group"
+        aria-label={`${label} text`}
+        style={{ maxHeight: "min(42vh, 320px)", overflowY: "auto", overscrollBehavior: "contain", scrollbarWidth: "thin" }}
+      >
+        <p className={tone === "before" ? "diff-before" : "diff-after"}>{text}</p>
+      </div>
     </div>
   );
 }

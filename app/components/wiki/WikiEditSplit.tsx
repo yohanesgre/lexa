@@ -26,7 +26,7 @@ function WikiAttachmentsSection({ slug, pageSlug }: { slug: string; pageSlug: st
   if (rows.length === 0) return null;
 
   return (
-    <div style={{ padding: "8px 12px" }}>
+    <div style={{ padding: "8px var(--lx-space-6)" }}>
       <div className="flex items-center gap-2 mb-2">
         <Paperclip size={12} strokeWidth={1.5} className="text-lx-text-muted" />
         <span className="prop-label">Attachments</span>
@@ -129,7 +129,7 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
       <div
         className="flex items-center justify-between"
         style={{
-          padding: "8px 12px",
+          padding: "8px var(--lx-space-6)",
           borderTop: "1px solid var(--lx-border-subtle)",
           background: "var(--lx-surface-elevated)",
         }}

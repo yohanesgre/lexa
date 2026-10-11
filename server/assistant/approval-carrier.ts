@@ -146,6 +146,7 @@ export function approvalCarriersOf(message: unknown): AssistantApprovalCarrier[]
       const seq = readSeq(entry.seq) ?? parsed.length;
       const detail = readString(entry, "detail");
       const proposedByRunId = readString(entry, "proposedByRunId");
+      const executionError = readString(entry, "executionError");
       const status = entry.status;
       parsed.push({
         approvalId,
@@ -154,6 +155,7 @@ export function approvalCarriersOf(message: unknown): AssistantApprovalCarrier[]
         ...(detail ? { detail } : {}),
         ...(entry.diff !== undefined ? { diff: entry.diff as AssistantWriteDiff } : {}),
         ...(proposedByRunId ? { proposedByRunId } : {}),
+        ...(executionError ? { executionError } : {}),
         ...(status === "pending" || status === "approved" || status === "rejected" || status === "expired"
           ? { status }
           : {}),
@@ -283,6 +285,9 @@ export interface CarrierDecisionRow {
   name?: string | undefined;
   diff?: unknown;
   proposedByRunId?: string | undefined;
+  // "CODE: message" from assistant_pending_writes.execution_error; reconciled
+  // onto the carrier so a reloaded chip renders the `failed` terminal state.
+  executionError?: string | undefined;
 }
 
 /**
@@ -331,6 +336,7 @@ export function reconcileApprovalCarriers(
             status: row.status,
             ...(row.diff !== undefined ? { diff: row.diff } : {}),
             ...(row.proposedByRunId ? { proposedByRunId: row.proposedByRunId } : {}),
+            ...(row.executionError ? { executionError: row.executionError } : {}),
           }));
         messageTouched = true;
         return { ...raw, data: { ...data, approvals: rebuilt } };
@@ -351,6 +357,7 @@ export function reconcileApprovalCarriers(
         if ((a as { proposedByRunId?: unknown }).proposedByRunId === undefined && row.proposedByRunId) {
           patch.proposedByRunId = row.proposedByRunId;
         }
+        if (a.executionError === undefined && row.executionError) patch.executionError = row.executionError;
         if (Object.keys(patch).length === 0) return a;
         changed = true;
         return { ...a, ...patch };
