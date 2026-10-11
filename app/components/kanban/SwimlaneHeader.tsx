@@ -203,6 +203,7 @@ function SwimlaneMeta({ lane, count, collapsed, board }: { lane: Swimlane; count
             textTransform: "uppercase",
             letterSpacing: "0.04em",
             color: "var(--lx-text-muted)",
+            whiteSpace: "nowrap",
           }}
         >
           system lane
@@ -311,7 +312,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
         ) : (
           <button
             type="button"
-            className="flex flex-1 min-w-0 items-center cursor-pointer text-left bg-transparent border-0 p-0"
+            className="swimlane-header-main flex flex-1 min-w-0 items-center cursor-pointer text-left bg-transparent border-0 p-0"
             aria-label={collapsed ? "Expand swimlane" : "Collapse swimlane"}
             onClick={onToggle}
           >

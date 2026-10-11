@@ -218,7 +218,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
   if (!board) return <div className="board-error">Project not found</div>;
 
   return (
-    <div className="board-page">
+    <main className="board-page">
       <KanbanBoard
         board={board}
         showArchived={showArchived}
@@ -260,6 +260,6 @@ export function BoardPage({ slug, search }: BoardPageProps) {
           onCreate={handleCreate}
         />
       )}
-    </div>
+    </main>
   );
 }
