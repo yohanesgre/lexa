@@ -65,7 +65,7 @@ export function MilestoneSelector({ milestones, value, onChange, slug }: Milesto
   );
 
   return (
-    <div className="ms-selector" style={{ marginLeft: 8 }}>
+    <div className="ms-selector">
       <details
         ref={detailsRef}
         className="ms-selector-details"
