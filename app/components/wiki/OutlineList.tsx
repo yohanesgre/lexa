@@ -22,6 +22,7 @@ export function OutlineList({ headings, activeId, onSelect }: OutlineListProps) 
           <a
             key={heading.id}
             href={`#${heading.id}`}
+            title={heading.text}
             className={cn("wiki-outline-row", levelClass(heading.level), isActive && "is-active")}
             aria-current={isActive ? "true" : undefined}
             onClick={(event) => {

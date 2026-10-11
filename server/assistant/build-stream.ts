@@ -226,6 +226,9 @@ export interface PendingApprovalDecisionRow {
   seq?: number;
   name?: string;
   diff?: unknown;
+  // "CODE: message" from assistant_pending_writes.execution_error — surfaced on
+  // the rebuilt chip as the `failed` terminal state.
+  executionError?: string;
 }
 
 // Reconcile a persisted pendingBatch marker with live decision rows so a
@@ -258,6 +261,7 @@ export function reconcilePendingBatchStatuses(
       if ((a as { seq?: unknown }).seq === undefined && typeof row.seq === "number") patch.seq = row.seq;
       if ((a as { name?: unknown }).name === undefined && typeof row.name === "string") patch.name = row.name;
       if ((a as { diff?: unknown }).diff === undefined && row.diff !== undefined) patch.diff = row.diff;
+      if (row.executionError && a !== null && typeof a === "object" && !("executionError" in a)) patch.executionError = row.executionError;
       if (Object.keys(patch).length === 0) return a;
       changed = true;
       return { ...(a as object), ...patch };
@@ -676,14 +680,14 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                       if (streamedArgs === undefined) {
                         toolRounds += 1;
                         if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
-                        push({ type: "error", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
+                        push({ type: "notice", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
                         continue;
                       }
                     }
                     if (isWrite && streamedArgs === undefined) {
                       toolRounds += 1;
                       if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
-                      push({ type: "error", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments invalid, skipping ${name || "tool"}` });
+                      push({ type: "notice", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments invalid, skipping ${name || "tool"}` });
                       continue;
                     }
                   }
@@ -696,13 +700,13 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                   if (!isBare && !isUnparseableNonTruncated) {
                     toolRounds += 1;
                     if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
-                    push({ type: "error", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
+                    push({ type: "notice", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
                     continue;
                   }
                   if (isUnparseableNonTruncated && isWrite) {
                     toolRounds += 1;
                     if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
-                    push({ type: "error", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments invalid, skipping ${name || "tool"}` });
+                    push({ type: "notice", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments invalid, skipping ${name || "tool"}` });
                     continue;
                   }
                 }
@@ -711,7 +715,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                   if (Object.keys(rec).length === 0 && !ZERO_ARG_TOOLS.has(name) && !name.startsWith("mcp__")) {
                     toolRounds += 1;
                     if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
-                    push({ type: "error", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
+                    push({ type: "notice", code: "ASSISTANT_TOOL_ARGS_INVALID", message: `Tool arguments truncated, skipping ${name || "tool"}` });
                     continue;
                   }
                   if ("limit" in rec) { const raw = rec.limit; const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN; rec.limit = Number.isFinite(n) && Number.isInteger(n) && n >= 1 && n <= 10 ? n : 10; }
@@ -804,7 +808,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                   process.stderr.write(line + "\n");
                 } catch {}
                 push({
-                  type: "error",
+                  type: "notice",
                   code: "ASSISTANT_WRITE_HALLUCINATION_GUARD",
                   message: `Replaced ${reason}; write tool not called`,
                 });

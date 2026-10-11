@@ -279,6 +279,8 @@ export function ChatTranscriptArea({
   renderRunCard,
   resumeProgress = null,
   onRetryResume,
+  readError = false,
+  onRetryRead,
 }: {
   turns: ChatTurn[];
   // Thread id: folds into every row key so per-row local state cannot leak
@@ -317,6 +319,10 @@ export function ChatTranscriptArea({
   // proposal bubble and the continuation bubble's slot.
   resumeProgress?: ResumeProgress | null | undefined;
   onRetryResume?: (() => void) | undefined;
+  // The transcript read failed (non-404) and cleared the turns — render the
+  // danger void with Retry instead of a blank thread (D4b).
+  readError?: boolean | undefined;
+  onRetryRead?: (() => void) | undefined;
 }) {
   const lastAssistantPos = turns.findLastIndex((turn) => turn.role === "assistant");
   return (
@@ -324,6 +330,14 @@ export function ChatTranscriptArea({
       <div className="chat-header-scrim" aria-hidden="true" />
       <div ref={scrollRef} className="chat-scroll" onScroll={onScroll}>
         <div className="chat-column" role="log" aria-live={streaming ? "off" : "polite"} aria-busy={streaming || pendingReply}>
+          {readError && turns.length === 0 && (
+            <div className="pane-error">
+              <span className="pane-void-title">This chat could not be read.</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onRetryRead}>
+                Retry
+              </button>
+            </div>
+          )}
           {turns.map((turn, pos) =>
             turn.role === "user" ? (
               <UserTurnBubble
@@ -380,6 +394,7 @@ export function ChatComposerArea({
   streaming,
   streamStatus,
   sendError,
+  hasIngress = false,
   suspendedLock,
   suspendCount,
   attachDisabled,
@@ -407,6 +422,9 @@ export function ChatComposerArea({
   streaming: boolean;
   streamStatus?: AssistantStreamStatus | undefined;
   sendError?: { code: string; details?: unknown } | null | undefined;
+  // True once a content frame has landed — gates the pre-ingress failure path
+  // (D1: restore the draft and chips).
+  hasIngress?: boolean | undefined;
   suspendedLock: boolean;
   suspendCount: number;
   attachDisabled: boolean;
@@ -425,7 +443,7 @@ export function ChatComposerArea({
   onAbort: () => void;
   landing?: boolean | undefined;
   queued?: QueuedMessage | null | undefined;
-  onQueue?: ((text: string) => void) | undefined;
+  onQueue?: ((text: string) => boolean | void) | undefined;
   onUnqueue?: (() => void) | undefined;
   seed?: { text: string; nonce: number } | null | undefined;
   ensureChatId?: (() => string) | undefined;
@@ -459,6 +477,7 @@ export function ChatComposerArea({
           attachDisabled={attachDisabled}
           attachmentsEnabled={attachmentsEnabled}
           sendError={sendError}
+          hasIngress={hasIngress}
           onSend={onSend}
           onAbort={onAbort}
           queued={queued}

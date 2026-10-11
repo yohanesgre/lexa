@@ -259,10 +259,16 @@ export function applyChipPatch(
   approvalId: string,
   patch: Partial<ApprovalChip> & { state: ApprovalChip["state"] }
 ): ChatTurn[] {
-  return (prev ?? []).map((t) => {
+  const arr = prev ?? [];
+  let touched = false;
+  const out = arr.map((t) => {
     if (!t.batch || !t.batch.chips.some((c) => c.approvalId === approvalId)) return t;
+    touched = true;
     return { ...t, batch: { ...t.batch, chips: t.batch.chips.map((c) => (c.approvalId === approvalId ? { ...c, ...patch } : c)) } };
   });
+  // Identity when nothing matched — keeps a repeated application (e.g. a stream
+  // approval_result re-render) from churning the turn array.
+  return touched ? out : arr;
 }
 
 export function pendingChipTargets(chips: ApprovalChip[]): ApprovalChip[] {

@@ -25,6 +25,7 @@ import {
   nextTurnsAfterStreamError,
   pendingChipsOf,
   pendingChipTargets,
+  previousUserTurn,
   resolveResendTarget,
   resumableBatchId,
   suspendTurnFrame,
@@ -34,6 +35,7 @@ import {
   truncateTurns,
   threadEntry,
 } from "./assistant-chat-logic";
+import { parseApprovalExecutionError } from "./assistant-chat-utils";
 
 // Session-scoped hooks for the Assistant chat page. These own the refs and
 // effects that were inline in AssistantChatPage; the page stays an assembler.
@@ -183,7 +185,10 @@ function settleStreamFrame(args: {
       setTurns((prev) => mergeBatchChips(prev, batchId, chips));
     }
   }
-  if (stream.status === "error" && stream.hasIngress) {
+  // A terminal error freezes into the transcript whether or not content
+  // arrived: a pre-ingress send failure (fetch reject, non-2xx, pre-first-token
+  // stall) must render a real failed turn with Retry, not vanish (D1).
+  if (stream.status === "error") {
     const key = `${stream.error?.code ?? "ASSISTANT_GENERATION_FAILED"}:${stream.text}:${stream.error?.message ?? ""}`;
     if (frozeErrorRef.current !== key) {
       frozeErrorRef.current = key;
@@ -439,6 +444,26 @@ export function useStreamFrameFreeze(args: {
   useEffect(() => {
     if (stream.status === "connecting" || stream.status === "streaming") frozeErrorRef.current = null;
   }, [stream.status]);
+
+  // An `approval_result` frame reports the execution outcome of a decided row
+  // (resume streams only). A failed row patches its chip to the `failed`
+  // terminal state with the "CODE: message" error — the only signal that an
+  // approved write did not run (D3). Applied from session memory; the reload
+  // path carries `executionError` through the transcript carrier instead.
+  useEffect(() => {
+    const failed = stream.approvalResults.filter((r) => r.status === "failed");
+    if (failed.length === 0) return;
+    setTurns((prev) => {
+      let next = prev;
+      for (const r of failed) {
+        next = applyChipPatch(next, r.approvalId, {
+          state: "failed",
+          error: parseApprovalExecutionError(r.error ?? "ASSISTANT_WRITE_FAILED"),
+        });
+      }
+      return next;
+    });
+  }, [stream.approvalResults, setTurns]);
 
   return { resumeProgress, retryResume };
 }
@@ -705,11 +730,19 @@ export function useTurnResend(args: {
 
   // Retry on a failed/stopped bubble resends ITS triggering user message
   // (with its original attachment refs — D6) from that point without
-  // duplicating the failed turn.
+  // duplicating the failed turn. A pre-ingress failure (fetch reject / non-2xx
+  // / stall before the thread's write landed) leaves the prompt optimistic and
+  // unmappable — resend it as a fresh send rather than dropping it behind a
+  // toast (D1).
   const handleRetryTurn = (assistantTurn: ChatTurn) => {
     if (streaming) return;
     const resolved = resolveResendTarget({ turns, target: assistantTurn, rawMessages, mode: "retry" });
     if (!resolved) {
+      const user = previousUserTurn(turns, assistantTurn);
+      if (user && user.role === "user" && user.rawIndex === -1) {
+        startStream(user.text, user.attachments ?? []);
+        return;
+      }
       resendFailed();
       return;
     }

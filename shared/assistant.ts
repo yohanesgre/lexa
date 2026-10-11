@@ -337,6 +337,10 @@ export type StreamFrame =
       diff: AssistantWriteDiff;
     }
   | { type: "error"; code: string; message: string }
+  // Non-terminal diagnostic (recoverable in-turn skips: truncated/invalid tool
+  // args, the write-hallucination guard). The stream continues; a terminal
+  // frame (`error`|`done`|`suspended`) still follows — exactly one of them.
+  | { type: "notice"; code: string; message: string }
   | { type: "approval_result"; approvalId: string; status: "applied" | "failed" | "denied"; error?: string; partial?: ApprovalPartial }
   | { type: "done"; taskId?: string; chatId?: string; text: string; usage: { in: number; out: number } }
   | { type: "suspended"; batchId: string };
@@ -357,6 +361,9 @@ export interface PendingBatchApproval {
   // Live decision status, reconciled by the transcript read so another tab's
   // decisions surface on fetch. Absent → treated as pending.
   status?: "pending" | "approved" | "rejected" | "expired";
+  // Execution failure for an approved row ("CODE: message"). Present → the
+  // rebuilt chip renders `failed` (the row status stays "approved").
+  executionError?: string;
 }
 
 export interface PendingBatchMarker {
@@ -397,6 +404,9 @@ export interface AssistantApprovalCarrierApproval {
   // Live decision status, reconciled by the transcript read so another tab's
   // decisions surface on fetch. Absent → treated as pending.
   status?: "pending" | "approved" | "rejected" | "expired";
+  // Execution failure for an approved row ("CODE: message"), reconciled from
+  // `assistant_pending_writes.execution_error`. Absent → no failure recorded.
+  executionError?: string;
 }
 
 export interface AssistantApprovalCarrier {

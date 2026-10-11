@@ -324,6 +324,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             name: r.tool_name,
             ...(diff !== undefined ? { diff } : {}),
             ...(r.proposed_by_run_id ? { proposedByRunId: r.proposed_by_run_id } : {}),
+            ...(r.execution_error ? { executionError: r.execution_error } : {}),
           };
         });
         const legacyReconciled = reconcilePendingBatchStatuses(messages, decisionRows);

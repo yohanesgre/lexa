@@ -2715,28 +2715,85 @@
      the surface pane; its geometry lives in the shared pane block, and the
      height reads the cap band token (52px on phones). */
   .wiki-layout {
+    --lx-measure-wiki: 80ch;
+    --lx-outline-gap: 56px;
+    --lx-outline-rail-w: 220px;
     display: flex;
     height: calc(100svh - var(--lx-shell-band-h));
     overflow: hidden;
   }
 
-  /* Read-mode navigation — OutlinePill + OutlinePanel (ported from
-     wireframes.css "Wiki outline"). A floating pill shows the scroll-spy
-     current section and opens a popover on desktop or the shared bottom sheet
-     on mobile. Pill hidden when the page has no h2+ section. */
-  .wiki-read-area {
-    flex: 1;
-    min-width: 0;
-    overflow-y: auto;
-    padding: 32px 48px;
+  /* The document column and the section navigator are one block centred in the
+     lane: column (the reading measure) + gap + rail. The lane is the query
+     container, so the rail recedes to the pill wherever it cannot fit — the
+     pages pane open on a narrow desktop, the tablet and phone bands. */
+  .wiki-read-shell {
+    container: wiki-lane / inline-size;
   }
 
-  /* Pill lane — below the natural-gutter width the read area reserves the
-     pill's footprint so the measure centres clear of it. Scoped to the
-     outline-rendering modifier so a title-only page keeps its natural
-     gutters (DESIGN_SYSTEM §5.8a). */
-  @media (min-width: 768px) and (max-width: 1479px) {
-    .wiki-read-area--outline { padding-right: 236px; }
+  /* The reading type, so the 80ch measure resolves at 15px Guide (720px) the
+     way the prose's 75ch did. */
+  .wiki-doc-layout {
+    display: block;
+    font-size: 15px;
+  }
+
+  .wiki-doc-column {
+    max-width: var(--lx-measure-wiki);
+    margin-inline: auto;
+  }
+
+  /* The rail sticks beside the document and keeps its own scroll for a long
+     outline. It parks 24px below the cap band — the spec's 72px from the
+     viewport; the sticky inset is measured from the scrollport's content box,
+     which the lane's 32px top padding already sits under the band, hence the
+     third term. */
+  .wiki-outline-rail {
+    display: none;
+    position: sticky;
+    top: calc(72px - var(--lx-shell-band-h) - 32px);
+    align-self: start;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+  }
+
+  /* The plate names the span in view, on the first row's text guide. */
+  .wiki-rail-plate {
+    padding: 0 8px 8px;
+    margin: 0 8px;
+    font-family: var(--lx-font-display);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--lx-text-muted);
+  }
+
+  @container wiki-lane (min-width: 996px) {
+    .wiki-doc-layout--rail {
+      display: grid;
+      grid-template-columns:
+        minmax(0, var(--lx-measure-wiki))
+        var(--lx-outline-gap)
+        var(--lx-outline-rail-w);
+      justify-content: center;
+      align-items: start;
+    }
+
+    .wiki-doc-layout--rail .wiki-doc-column {
+      max-width: none;
+      margin-inline: 0;
+    }
+
+    .wiki-doc-layout--rail .wiki-outline-rail {
+      grid-column: 3;
+      display: block;
+    }
+
+    .wiki-outline-dock {
+      display: none;
+    }
   }
 
   .wiki-outline-dock {
@@ -2807,21 +2864,24 @@
     overflow-y: auto;
   }
 
-  /* Shared OutlineList rows: 16px indent per heading level (h1 = level 0). */
+  /* Shared OutlineList rows — the wiki tree's own row geometry (8px side
+     inset, 6px radius, 16px indent per heading level below h2), used by the
+     rail and by the pill's panel. */
   .wiki-outline-row {
     display: flex;
     align-items: center;
     height: 32px;
-    padding: 0 10px;
+    margin: 0 8px;
+    padding: 0 8px;
     border-left: 2px solid transparent;
-    border-radius: 4px;
+    border-radius: 6px;
     font-family: var(--lx-font-body);
     font-size: 13px;
-    line-height: 18px;
+    line-height: 17px;
     font-weight: 400;
     color: var(--lx-text-secondary);
     text-decoration: none;
-    transition: background 100ms, color 100ms;
+    transition: background 120ms linear, color 120ms linear;
   }
 
   .wiki-outline-row:hover {
@@ -2829,21 +2889,22 @@
     color: var(--lx-text-primary);
   }
 
+  /* The active entry copies .tree-item.active: the selected fill, the 2px
+     focus edge and the 6px left margin land its text on the inactive rows'
+     guide. */
   .wiki-outline-row.is-active {
     background: var(--lx-surface-selected);
     color: var(--lx-text-primary);
     font-weight: 500;
     border-left-color: var(--lx-border-focus);
+    border-radius: 0 6px 6px 0;
+    margin-left: 6px;
   }
 
-  /* Active row keeps its text aligned with the inactive rows (the 2px left
-     border is owned by CSS, mirroring .tree-item.active). */
-  .wiki-outline-row.is-active { padding-left: 8px; }
+  .wiki-outline-row--l2 { padding-left: 24px; }
+  .wiki-outline-row--l3 { padding-left: 40px; }
   .wiki-outline-row.is-active.wiki-outline-row--l2 { padding-left: 24px; }
   .wiki-outline-row.is-active.wiki-outline-row--l3 { padding-left: 40px; }
-
-  .wiki-outline-row--l2 { padding-left: 26px; }
-  .wiki-outline-row--l3 { padding-left: 42px; }
 
   .wiki-outline-row-label {
     overflow: hidden;
@@ -2959,12 +3020,18 @@
     padding: 32px 48px;
   }
 
-  /* The masthead (breadcrumb, title row, actions) spans the read area's inner
-     width; the body caps at the 75ch measure and centres in the lane left
-     after the outline reserve (The Reading-Measure Rule). The body hangs off
-     renderDoc's unclassed wrapper div, so one measure serves every block —
-     headings and paragraphs share the same column instead of each scaling its
-     own `ch`. */
+  /* The wiki read view pulls the lane's side padding in from 48px to 24px so
+     the document gets more of the window (owner direction; the phone's 20px
+     rhythm still comes from the .wiki-content rule below 768px). Declared
+     after .wiki-content so it wins the tie on equal specificity. */
+  .wiki-read-area {
+    padding: 32px 24px;
+  }
+
+  /* The masthead (breadcrumb, title row, actions) sits on the document
+     column's edge; the body hangs off renderDoc's unclassed wrapper div, so
+     one measure serves every block — headings and paragraphs share the same
+     column instead of each scaling its own `ch`. */
   .wiki-prose {
     font-size: 15px;
     line-height: 26px;
@@ -2974,6 +3041,24 @@
   .wiki-prose > div:not([class]) {
     max-width: var(--lx-measure-body);
     margin-inline: auto;
+  }
+
+  /* In the read view the measure belongs to the document column, so the body's
+     own cap comes off there: title, body, sources and footer share one column
+     edge (§5 / D1 of the wiki design review). The share view and the edit
+     preview keep the body cap. */
+  .wiki-doc-column .wiki-prose > div:not([class]) {
+    max-width: none;
+    margin-inline: 0;
+  }
+
+  /* Heading anchors land on the reading line rather than under the cap band. */
+  .wiki-prose h1,
+  .wiki-prose h2,
+  .wiki-prose h3,
+  .wiki-prose h4,
+  .wiki-prose h5 {
+    scroll-margin-top: calc(96px - var(--lx-shell-band-h));
   }
 
   .wiki-prose h1 {
@@ -4494,9 +4579,20 @@
   }
 
   /* ---- Wiki edit workspace ---- */
+  /* The edit view wears the app's page frame, so it carries the same insets as
+     every other surface; the workspace below it keeps the full-height contract
+     (the lane caps its own height, so nothing scrolls at page level). */
+  .wiki-edit-frame {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
   .wiki-edit-workspace {
     display: flex;
-    padding: 0;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
 
@@ -7993,6 +8089,11 @@
   .wiki-prose table {
     display: block;
     overflow-x: auto;
+  }
+  /* The rail is desktop furniture; on touch the same rows ride the sheet, at
+     the 44px floor. */
+  .wiki-outline-row {
+    height: 44px;
   }
 }
 

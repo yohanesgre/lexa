@@ -1,14 +1,20 @@
 import { useMemo, useState } from "react";
 import { Pencil, Share2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
-import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
+import { renderDoc, planHeadings, slugifyHeading, type HeadingOutline, type TTNode } from "../tiptap-render";
 import { OutlinePill } from "./OutlinePill";
+import { OutlineRail } from "./OutlineRail";
+import { useScrollSpy } from "../../lib/use-scroll-spy";
 import { SourcesSection } from "../document/SourcesSection";
 import { formatRelative } from "./wiki-format";
 import { ShareDialog } from "./ShareDialog";
 import { WikiEditWorkspace } from "./WikiEditWorkspace";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
+
+// Stable identity: a page with no navigator must not re-render its document on
+// every scroll frame.
+const NO_SECTIONS: HeadingOutline[] = [];
 
 function buildAncestors(pages: WikiPageMeta[], page: WikiPage): WikiPageMeta[] {
   const byId = new Map(pages.map((p) => [p.id, p]));
@@ -29,57 +35,69 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, headings, onEdit, onShare, slug, pageSlug }: {
+function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedByName, headings, headingIds, onEdit, onShare, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
+  titleId: string;
   content: TipTapDoc | undefined;
   updatedAt: string;
   updatedByName: string | null;
-  headings: { level: number; text: string; id: string }[];
+  headings: HeadingOutline[];
+  headingIds: Map<TTNode, string>;
   onEdit: () => void;
   onShare: () => void;
   slug: string;
   pageSlug: string;
 }) {
-  const hasOutline = headings.some((heading) => heading.level >= 2);
+  // A short page has nothing to navigate: three sections earn the navigator.
+  const hasNav = headings.length >= 3;
+  const { activeId, scrollTo } = useScrollSpy(hasNav ? headings : NO_SECTIONS);
   return (
-    <>
-      <div
-        className={`wiki-content wiki-read-area${hasOutline ? " wiki-read-area--outline" : ""}`}
-      >
-        <div className="wiki-prose">
-          <div className="text-xs text-lx-text-muted font-body" style={{ marginBottom: 4 }}>
-            {breadcrumb}
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <h1 id={slugifyHeading(title)} style={{ minWidth: 0 }}>{title}</h1>
-            <span className="flex items-center gap-2 flex-shrink-0">
-              <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
-                <Pencil size={13} strokeWidth={1.5} />
-                Edit
-              </button>
-              <button type="button" className="btn btn-ghost-accent" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onShare}>
-                <Share2 size={13} strokeWidth={1.5} />
-                Share
-              </button>
-            </span>
-          </div>
-          <div>{renderDoc(content ?? emptyDoc, "wiki", slug)}</div>
-          <SourcesSection
-            slug={slug}
-            documentType="wiki"
-            documentId={pageSlug}
-            className="mt-8 pt-4 border-t border-lx-border-subtle"
-          />
-          <div className="mt-8 pt-4 border-t border-lx-border-subtle">
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              Last edited {formatRelative(updatedAt)}{updatedByName ? ` by ${updatedByName}` : ""}
-            </span>
-          </div>
+    <main className="wiki-content wiki-read-area">
+      <div className="wiki-read-shell">
+        <div className={`wiki-doc-layout${hasNav ? " wiki-doc-layout--rail" : ""}`}>
+          <article className="wiki-doc-column">
+            <div className="wiki-prose">
+              <div className="text-xs text-lx-text-muted font-body" style={{ marginBottom: 4 }}>
+                {breadcrumb}
+              </div>
+              {/* The actions ride the title's row while the column has room for
+                  both; a long title takes its own line and the pair drops
+                  below it, still flush to the column's right edge (flex
+                  line-breaking makes that decision off the real title width,
+                  so no breakpoint or threshold carries it). */}
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h1 id={titleId} style={{ minWidth: 0 }}>{title}</h1>
+                <span className="flex items-center gap-2 flex-shrink-0 ml-auto">
+                  <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
+                    <Pencil size={13} strokeWidth={1.5} />
+                    Edit
+                  </button>
+                  <button type="button" className="btn btn-ghost-accent" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onShare}>
+                    <Share2 size={13} strokeWidth={1.5} />
+                    Share
+                  </button>
+                </span>
+              </div>
+              <div>{renderDoc(content ?? emptyDoc, "wiki", slug, undefined, headingIds)}</div>
+              <SourcesSection
+                slug={slug}
+                documentType="wiki"
+                documentId={pageSlug}
+                className="mt-8 pt-4 border-t border-lx-border-subtle"
+              />
+              <div className="mt-8 pt-4 border-t border-lx-border-subtle">
+                <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+                  Last edited {formatRelative(updatedAt)}{updatedByName ? ` by ${updatedByName}` : ""}
+                </span>
+              </div>
+            </div>
+          </article>
+          {hasNav && <OutlineRail headings={headings} activeId={activeId} onSelect={scrollTo} />}
         </div>
+        {hasNav && <OutlinePill headings={headings} activeId={activeId} onSelect={scrollTo} />}
       </div>
-      <OutlinePill headings={headings} />
-    </>
+    </main>
   );
 }
 
@@ -91,24 +109,29 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     .map((a) => a.title)
     .join(" / ");
 
-  // Stable identity so useScrollSpy's observer is not torn down and rebuilt on
-  // every render of the viewer.
-  const headings = useMemo(() => {
-    const rawHeadings = extractHeadings(page.content as unknown as import("../tiptap-render").TTNode);
-    return [
-      { level: 1, text: page.title, id: slugifyHeading(page.title) },
-      ...rawHeadings.filter((h) => h.level >= 2),
-    ];
-  }, [page.content, page.title]);
+  // Stable identities so useScrollSpy's listener is not torn down and rebuilt
+  // on every render of the viewer. The title is rendered as the page's own h1,
+  // so its slug is reserved here: a heading repeating it takes the -2 suffix.
+  const titleId = slugifyHeading(page.title);
+  const plan = useMemo(
+    () => planHeadings(page.content as unknown as TTNode, [titleId]),
+    [page.content, titleId]
+  );
+  const sections = useMemo(
+    () => plan.headings.filter((heading) => heading.level >= 2),
+    [plan]
+  );
 
   const readView = (
     <WikiReadView
       breadcrumb={breadcrumb}
       title={page.title}
+      titleId={titleId}
       content={page.content}
       updatedAt={page.updatedAt}
       updatedByName={page.updatedByName}
-      headings={headings}
+      headings={sections}
+      headingIds={plan.ids}
       onEdit={() => setIsEditing(true)}
       onShare={() => setShareOpen(true)}
       slug={slug}

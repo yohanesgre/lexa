@@ -1462,8 +1462,11 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   delete subtask guard on one task does not abort the rest; zero applied →
   error). Placement on the provider tools nudges `refs` for many tasks.
   Diffs are server-computed plain-text projections (`AssistantWriteDiff` in
-  `shared/assistant.ts`, TipTap-aware text extraction, capped) — what the
-  approver sees; raw args ride the row for execution. Bulk reuses the existing
+  `shared/assistant.ts`, TipTap-aware text extraction) — what the approver
+  sees; raw args ride the row for execution. The text-bearing kinds (wiki
+  edit before/after, wiki create + comment body) carry the **full** text — the
+  approval card scrolls it, never shows a truncated change — while short
+  labels/titles stay capped (`…`). Bulk reuses the existing
   diff type with summary strings (`taskRef: "52 tasks"`, `taskTitle` = first
   up-to-3 keys), so the approval chip target copy stays text, not a new kind.
 - **Approval protocol (ask mode):** when a turn queued write proposals, the stream ends
@@ -1494,7 +1497,10 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
 - **SSE bridge** (`sseHttpResponse` in `server/api/http.ts`): encodes
   StreamFrames as `event:`/`data:` pairs over a raw `HttpServerResponse.stream`
   (bypasses the JSON encoder) with a 15s `: ping` heartbeat comment. Exactly
-  one terminal frame (`error`|`done`|`suspended`). Disconnect→abort: the request signal
+  one terminal frame (`error`|`done`|`suspended`); recoverable in-turn skips
+  (truncated/invalid tool args, the write-hallucination guard) ride a
+  non-terminal `notice` frame instead, so `error` always means the turn ended.
+  Disconnect→abort: the request signal
   is wired into the service's `Map<taskId|chatId, AbortController>`; abort
   discards the partial message and cancels/fails via `AssistantTaskService`.
 - **Reasoning frames:** `REASONING_MESSAGE_CONTENT` chunks from reasoning

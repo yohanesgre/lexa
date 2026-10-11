@@ -653,6 +653,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         onNewChat={startNewChat}
         open={sidebarOpen}
         onClose={toggleSidebar}
+        error={listQuery.isError}
+        onRetry={() => void listQuery.refetch()}
       />
       <main className="chat-shell">
       <ChatHeader
@@ -696,6 +698,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             seed={seed}
             streamStatus={stream.status}
             sendError={stream.error}
+            hasIngress={stream.hasIngress}
             attachmentsEnabled={attachmentsEnabled}
             ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}
@@ -734,6 +737,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             renderRunCard={renderRunCard}
             resumeProgress={resumeProgress}
             onRetryResume={retryResume}
+            readError={!!transcript.error && !isThreadNotFound(transcript.error)}
+            onRetryRead={() => void transcript.refetch()}
           />
 
           <ChatComposerArea
@@ -760,6 +765,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             seed={seed}
             streamStatus={stream.status}
             sendError={stream.error}
+            hasIngress={stream.hasIngress}
             attachmentsEnabled={attachmentsEnabled}
             ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}

@@ -6,7 +6,6 @@ import type { ApprovalPartial, AssistantWriteDiff } from "../../shared/assistant
 import { ASSISTANT_WRITE_DENIED_ERROR } from "../../shared/assistant";
 
 const DIFF_TEXT_CAP = 2000;
-const COMMENT_BODYTEXT_CAP = 2000;
 const COMMENT_BODY_BYTES = 64 * 1024;
 
 import {
@@ -110,8 +109,11 @@ export function buildWikiEditDiff(page: { slug: string; title: string; text: str
     type: "wiki_edit",
     slug: page.slug,
     title: next.title ?? page.title,
-    beforeText: cap(page.text),
-    afterText: cap(extractText(next.content)),
+    // Full text, never a truncated preview: the approval card must show the
+    // whole change the user is approving. `args` already holds the whole
+    // proposal; the diff is display, so it must not lie about it.
+    beforeText: page.text,
+    afterText: extractText(next.content),
   };
 }
 
@@ -654,7 +656,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         type: "comment",
         taskRef: task.value.key,
         taskTitle: task.value.title,
-        bodyText: cap(extractText(args.body), COMMENT_BODYTEXT_CAP),
+        bodyText: extractText(args.body),
       };
       const r = await record(deps, {
         name: "add_comment",
@@ -686,7 +688,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         type: "wiki_create",
         slug: args.slug,
         title: args.title,
-        bodyText: cap(extractText(args.content)),
+        bodyText: extractText(args.content),
       };
       const r = await record(deps, { name: "create_wiki_page", args, diff, detail: `Create page "${cap(args.title, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };

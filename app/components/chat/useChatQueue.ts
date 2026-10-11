@@ -60,9 +60,14 @@ export function useChatQueue({ chatId, streamStatus, send }: {
     }
   }, [streamStatus, chatId, byChat]);
 
-  const enqueue = useCallback((text: string) => {
+  const enqueue = useCallback((text: string): boolean => {
+    // One held message per thread: refuse a second rather than silently
+    // replace the existing entry — a message the user typed must never be
+    // discarded without notice (D8).
+    if (byChat[chatId]) return false;
     setByChat((prev) => ({ ...prev, [chatId]: { text } }));
-  }, [chatId]);
+    return true;
+  }, [byChat, chatId]);
 
   const unqueue = useCallback(() => {
     setByChat((prev) => {
