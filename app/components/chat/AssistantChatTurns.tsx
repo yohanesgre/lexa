@@ -21,7 +21,7 @@ type Stream = ReturnType<typeof useAssistantStream>;
 export function ChatProviderMissingPanel({ projectId }: { projectId: string | undefined }) {
   return (
     <div className="chat-scroll">
-      <div className="card-panel" style={{ maxWidth: 760, margin: "0 auto" }}>
+      <div className="card-panel chat-void">
         <div className="empty-state" style={{ padding: "32px 20px" }}>
           <div className="empty-state-icon">
             <AssistantFlameIcon size={24} />
@@ -166,7 +166,7 @@ export function UserTurnBubble({
         <UserTurnEditor draft={editDraft} onDraftChange={onEditDraftChange} onCommit={onCommitEdit} onCancel={onCancelEdit} style={{ width: "100%", resize: "vertical", background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-focus)", borderRadius: 6, padding: "8px 10px", fontSize: 13, lineHeight: "18px", fontFamily: "var(--lx-font-body)", color: "var(--lx-text-primary)" }} />
       ) : (
         <>
-          <div className="text-sm text-lx-text-primary" style={{ lineHeight: "20px" }}>{renderTokenized(turn.text, slug)}</div>
+          <div className="bubble-user-text text-sm text-lx-text-primary" style={{ lineHeight: "20px" }}>{renderTokenized(turn.text, slug)}</div>
           {attachments.length > 0 && (
             <div style={{ display: "flex", alignItems: "flex-end", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
               {attachments.map((att, j) => (

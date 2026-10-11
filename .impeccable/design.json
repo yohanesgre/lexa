@@ -26,8 +26,8 @@
       "border-subtle-day": { "role": "neutral", "displayName": "Paper Border Subtle", "canonical": "#E4DED1", "tonalRamp": ["#8C8577", "#A9A192", "#D5CFC1", "#E4DED1"] },
       "border-strong-night": { "role": "neutral", "displayName": "Night Border Strong", "canonical": "#3E505D", "tonalRamp": ["#1B242C", "#26333D", "#3E505D", "#43565F", "#5A6E78"] },
       "border-strong-day": { "role": "neutral", "displayName": "Paper Border Strong", "canonical": "#A9A192", "tonalRamp": ["#8C8577", "#A9A192", "#D5CFC1", "#E4DED1"] },
-      "border-focus-night": { "role": "primary", "displayName": "Patrol Orange Focus Border", "canonical": "#E4572E", "tonalRamp": ["#8A3A20", "#E4572E", "#F06A42"] },
-      "border-focus-day": { "role": "primary", "displayName": "Day Focus Border", "canonical": "#C7431E", "tonalRamp": ["#AD3616", "#C7431E", "#D98569"] },
+      "border-focus-night": { "role": "primary", "displayName": "Brand Amber Focus Border", "canonical": "#F0C040", "tonalRamp": ["#C99B3C", "#F0C040", "#F5D76A"] },
+      "border-focus-day": { "role": "primary", "displayName": "Day Ink-Amber Focus Border", "canonical": "#7E5C00", "tonalRamp": ["#6B4E00", "#7E5C00", "#C79412", "#D4A017"] },
       "border-input-night": { "role": "neutral", "displayName": "Night Input Border", "canonical": "#43565F", "tonalRamp": ["#1B242C", "#26333D", "#3E505D", "#43565F", "#5A6E78"] },
       "border-input-day": { "role": "neutral", "displayName": "Paper Input Border", "canonical": "#8C8577", "tonalRamp": ["#8C8577", "#A9A192", "#D5CFC1", "#E4DED1"] },
       "border-input-hover-night": { "role": "neutral", "displayName": "Night Input Border Hover", "canonical": "#5A6E78", "tonalRamp": ["#1B242C", "#26333D", "#3E505D", "#43565F", "#5A6E78"] },
@@ -46,26 +46,26 @@
       "ink-warning-day": { "role": "state", "displayName": "Warning Day Ink", "canonical": "#7A4E0C", "tonalRamp": ["#7A4E0C"] },
       "ink-success-night": { "role": "state", "displayName": "Success Ink", "canonical": "#8FD9A8", "tonalRamp": ["#8FD9A8"] },
       "ink-success-day": { "role": "state", "displayName": "Success Day Ink", "canonical": "#14572B", "tonalRamp": ["#14572B"] },
-      "link-night": { "role": "neutral", "displayName": "Link Ink", "canonical": "#F0866A", "tonalRamp": ["#F0866A", "#F6A88F"] },
-      "link-day": { "role": "neutral", "displayName": "Link Day Ink", "canonical": "#9E3A1B", "tonalRamp": ["#84300F", "#9E3A1B"] },
-      "link-hover-night": { "role": "neutral", "displayName": "Link Hover Ink", "canonical": "#F6A88F", "tonalRamp": ["#F0866A", "#F6A88F"] },
-      "link-hover-day": { "role": "neutral", "displayName": "Link Hover Day Ink", "canonical": "#84300F", "tonalRamp": ["#84300F", "#9E3A1B"] },
-      "patrol-orange-night": { "role": "primary", "displayName": "Patrol Orange", "canonical": "#E4572E", "tonalRamp": ["#8A3A20", "#E4572E", "#F06A42"] },
-      "patrol-orange-day": { "role": "primary", "displayName": "Patrol Orange Day", "canonical": "#C7431E", "tonalRamp": ["#AD3616", "#C7431E", "#D98569"] },
-      "patrol-orange-hover-night": { "role": "primary", "displayName": "Patrol Orange Hover", "canonical": "#F06A42", "tonalRamp": ["#8A3A20", "#E4572E", "#F06A42"] },
-      "patrol-orange-hover-day": { "role": "primary", "displayName": "Patrol Orange Hover Day", "canonical": "#AD3616", "tonalRamp": ["#AD3616", "#C7431E", "#D98569"] },
-      "patrol-orange-ink-night": { "role": "primary", "displayName": "Patrol Orange Ink", "canonical": "#10161B", "tonalRamp": ["#10161B"] },
-      "patrol-orange-ink-day": { "role": "primary", "displayName": "Patrol Orange Ink Day", "canonical": "#FBFAF6", "tonalRamp": ["#FBFAF6"] },
-      "patrol-orange-muted-night": { "role": "primary", "displayName": "Patrol Orange Muted", "canonical": "#8A3A20", "tonalRamp": ["#8A3A20", "#E4572E", "#F06A42"] },
-      "patrol-orange-muted-day": { "role": "primary", "displayName": "Patrol Orange Muted Day", "canonical": "#D98569", "tonalRamp": ["#AD3616", "#C7431E", "#D98569"] },
+      "link-night": { "role": "neutral", "displayName": "Link Ink", "canonical": "#F0C040", "tonalRamp": ["#F0C040", "#F5D76A"] },
+      "link-day": { "role": "neutral", "displayName": "Link Day Ink (ink amber)", "canonical": "#7E5C00", "tonalRamp": ["#6B4E00", "#7E5C00"] },
+      "link-hover-night": { "role": "neutral", "displayName": "Link Hover Ink", "canonical": "#F5D76A", "tonalRamp": ["#F0C040", "#F5D76A"] },
+      "link-hover-day": { "role": "neutral", "displayName": "Link Hover Day Ink", "canonical": "#6B4E00", "tonalRamp": ["#6B4E00", "#7E5C00"] },
+      "brand-amber-night": { "role": "primary", "displayName": "Brand Amber", "canonical": "#F0C040", "tonalRamp": ["#C99B3C", "#F0C040", "#F5D76A"] },
+      "brand-amber-day": { "role": "primary", "displayName": "Brand Amber Day Fill", "canonical": "#D4A017", "tonalRamp": ["#6B4E00", "#7E5C00", "#C79412", "#D4A017"] },
+      "brand-amber-hover-night": { "role": "primary", "displayName": "Brand Amber Hover", "canonical": "#F5D76A", "tonalRamp": ["#C99B3C", "#F0C040", "#F5D76A"] },
+      "brand-amber-hover-day": { "role": "primary", "displayName": "Brand Amber Hover Day", "canonical": "#C79412", "tonalRamp": ["#6B4E00", "#7E5C00", "#C79412", "#D4A017"] },
+      "brand-amber-ink-night": { "role": "primary", "displayName": "Brand Amber Ink", "canonical": "#10161B", "tonalRamp": ["#10161B"] },
+      "brand-amber-ink-day": { "role": "primary", "displayName": "Brand Amber Ink Day", "canonical": "#17222B", "tonalRamp": ["#17222B"] },
+      "brand-amber-muted-night": { "role": "primary", "displayName": "Brand Amber Muted", "canonical": "#C99B3C", "tonalRamp": ["#C99B3C", "#F0C040", "#F5D76A"] },
+      "brand-amber-muted-day": { "role": "primary", "displayName": "Brand Amber Muted Day (ink amber)", "canonical": "#7E5C00", "tonalRamp": ["#6B4E00", "#7E5C00"] },
       "danger-subtle-night": { "role": "state", "displayName": "Danger Ground", "canonical": "rgba(210, 55, 47, 0.14)", "tonalRamp": ["rgba(210, 55, 47, 0.14)"] },
       "danger-subtle-day": { "role": "state", "displayName": "Danger Ground Day", "canonical": "rgba(176, 42, 34, 0.10)", "tonalRamp": ["rgba(176, 42, 34, 0.10)"] },
       "warning-subtle-night": { "role": "state", "displayName": "Warning Ground", "canonical": "rgba(232, 163, 61, 0.14)", "tonalRamp": ["rgba(232, 163, 61, 0.14)"] },
       "warning-subtle-day": { "role": "state", "displayName": "Warning Ground Day", "canonical": "rgba(154, 100, 16, 0.12)", "tonalRamp": ["rgba(154, 100, 16, 0.12)"] },
       "success-subtle-night": { "role": "state", "displayName": "Success Ground", "canonical": "rgba(46, 158, 79, 0.14)", "tonalRamp": ["rgba(46, 158, 79, 0.14)"] },
       "success-subtle-day": { "role": "state", "displayName": "Success Ground Day", "canonical": "rgba(31, 122, 58, 0.10)", "tonalRamp": ["rgba(31, 122, 58, 0.10)"] },
-      "accent-subtle-night": { "role": "primary", "displayName": "Traced Row Ground", "canonical": "rgba(228, 87, 46, 0.14)", "tonalRamp": ["rgba(228, 87, 46, 0.14)"] },
-      "accent-subtle-day": { "role": "primary", "displayName": "Traced Row Ground Day", "canonical": "rgba(199, 67, 30, 0.10)", "tonalRamp": ["rgba(199, 67, 30, 0.10)"] },
+      "accent-subtle-night": { "role": "primary", "displayName": "Traced Row Ground", "canonical": "rgba(240, 192, 64, 0.14)", "tonalRamp": ["rgba(240, 192, 64, 0.14)"] },
+      "accent-subtle-day": { "role": "primary", "displayName": "Traced Row Ground Day", "canonical": "rgba(212, 160, 23, 0.10)", "tonalRamp": ["rgba(212, 160, 23, 0.10)"] },
       "run-lowest": { "role": "secondary", "displayName": "Ribbon Lowest (Green Run)", "canonical": "#2E9E4F", "tonalRamp": ["#2E9E4F"] },
       "run-normal": { "role": "secondary", "displayName": "Ribbon Normal (Blue Run)", "canonical": "#2F74D0", "tonalRamp": ["#2F74D0"] },
       "run-high": { "role": "secondary", "displayName": "Ribbon High (Red Run)", "canonical": "#D2372F", "tonalRamp": ["#D2372F"] },
@@ -98,7 +98,7 @@
       "status-info-night": { "role": "state", "displayName": "Info State", "canonical": "#35B7C8", "tonalRamp": ["#35B7C8"] },
       "status-info-day": { "role": "state", "displayName": "Info State Day", "canonical": "#1D7C88", "tonalRamp": ["#1D7C88"] }
     },
-    "colorMetaNote": "tonalRamp carries values that exist in app/styles/phosphor.css only. Where the build defines a tonal family (night and day surfaces, borders, ink, patrol orange) the ramp is that family ordered dark to light; where a hue ships as a single value the ramp is that value alone. No ramp step is synthesized.",
+    "colorMetaNote": "tonalRamp carries values that exist in app/styles/phosphor.css only. Where the build defines a tonal family (night and day surfaces, borders, ink, brand amber) the ramp is that family ordered dark to light; where a hue ships as a single value the ramp is that value alone. No ramp step is synthesized.",
     "typographyMeta": {
       "signage": { "displayName": "Signage", "purpose": "Confident grotesque caps for plates, labels, nav, and trail names. Always uppercase with open tracking." },
       "guide": { "displayName": "Guide", "purpose": "Warm humanist sans for all readable copy: body, forms, row titles, void copy. The warm, playful, tactile voice lives here." },
@@ -120,10 +120,10 @@
       { "name": "shadow-sm", "value": "0 1px 2px rgba(4, 7, 10, 0.5)", "dayValue": "0 1px 2px rgba(23, 34, 43, 0.10)", "purpose": "Resting shadow for small lifted chrome." },
       { "name": "shadow-md", "value": "0 6px 16px rgba(4, 7, 10, 0.55)", "dayValue": "0 6px 16px rgba(23, 34, 43, 0.12)", "purpose": "Popovers and menus." },
       { "name": "shadow-lg", "value": "0 16px 40px rgba(4, 7, 10, 0.65)", "dayValue": "0 16px 40px rgba(23, 34, 43, 0.16)", "purpose": "Dialogs and modal surfaces." },
-      { "name": "shadow-drag", "value": "0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(228, 87, 46, 0.35)", "dayValue": "0 10px 28px rgba(23, 34, 43, 0.18), 0 0 0 1px rgba(199, 67, 30, 0.35)", "purpose": "A card in transit, with a patrol-orange rim so the dragged object stays identifiable." },
+      { "name": "shadow-drag", "value": "0 10px 28px rgba(4, 7, 10, 0.7), 0 0 0 1px rgba(240, 192, 64, 0.35)", "dayValue": "0 10px 28px rgba(23, 34, 43, 0.18), 0 0 0 1px rgba(212, 160, 23, 0.35)", "purpose": "A card in transit, with a brand-amber rim so the dragged object stays identifiable." },
       { "name": "shadow-slideover", "value": "-6px 0 28px rgba(4, 7, 10, 0.6)", "dayValue": "-6px 0 28px rgba(23, 34, 43, 0.14)", "purpose": "The task slideover edge." },
-      { "name": "focus-ring", "value": "0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus)", "dayValue": "0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus)", "purpose": "The one global focus treatment: 2px patrol-orange ring with 2px offset." },
-      { "name": "focus-glow", "value": "0 0 12px rgba(228, 87, 46, 0.22)", "dayValue": "0 0 12px rgba(199, 67, 30, 0.16)", "purpose": "Optional patrol-orange glow on accent focus targets." }
+      { "name": "focus-ring", "value": "0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus)", "dayValue": "0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus)", "purpose": "The one global focus treatment: 2px brand-amber ring with 2px offset." },
+      { "name": "focus-glow", "value": "0 0 12px rgba(240, 192, 64, 0.22)", "dayValue": "0 0 12px rgba(212, 160, 23, 0.16)", "purpose": "Optional brand-amber glow on accent focus targets." }
     ],
     "motion": [
       { "name": "trace-draw", "value": "180ms linear", "purpose": "Route Trace draws the task descent once per mount via stroke-dashoffset from the measured path length." },
@@ -156,7 +156,7 @@
         "border": "#D5CFC1",
         "border-subtle": "#E4DED1",
         "border-strong": "#A9A192",
-        "border-focus": "#C7431E",
+        "border-focus": "#7E5C00",
         "border-input": "#8C8577",
         "border-input-hover": "#5A6B76",
         "ink": "#17222B",
@@ -166,16 +166,16 @@
         "ink-danger": "#8E2018",
         "ink-warning": "#7A4E0C",
         "ink-success": "#14572B",
-        "link": "#9E3A1B",
-        "link-hover": "#84300F",
-        "patrol-orange": "#C7431E",
-        "patrol-orange-hover": "#AD3616",
-        "patrol-orange-ink": "#FBFAF6",
-        "patrol-orange-muted": "#D98569",
+        "link": "#7E5C00",
+        "link-hover": "#6B4E00",
+        "brand-amber": "#D4A017",
+        "brand-amber-hover": "#C79412",
+        "brand-amber-ink": "#17222B",
+        "brand-amber-muted": "#7E5C00",
         "danger-subtle": "rgba(176, 42, 34, 0.10)",
         "warning-subtle": "rgba(154, 100, 16, 0.12)",
         "success-subtle": "rgba(31, 122, 58, 0.10)",
-        "accent-subtle": "rgba(199, 67, 30, 0.10)",
+        "accent-subtle": "rgba(212, 160, 23, 0.10)",
         "run-rim": "rgba(11, 11, 12, 0.55)",
         "stamp-sync": "#1F5FA8",
         "stamp-fail": "#8E2018",
@@ -227,7 +227,7 @@
       "refersTo": "trail-row",
       "description": "Dense trail row (needs attention, recent movement): 36px desktop / 44px touch, ribbon column plus body, hover and active fills, traced state for Route Trace.",
       "html": "<a class='ds-row' href='#'><span class='ds-row-ribbon'></span><span class='ds-row-body'><span class='ds-row-title'>Critical crash on dashboard load</span><span class='ds-row-meta'><span class='ds-key'>KEY-123</span> · In Progress</span></span></a>",
-      "css": ".ds-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 10px; min-height: var(--lx-row-h, 36px); padding: 4px 10px; border: 1px solid transparent; border-radius: var(--lx-radius-plate, 6px); background: transparent; color: inherit; text-decoration: none; transition: background 120ms linear; } .ds-row:hover, .ds-row:focus-visible { background: var(--lx-surface-card-hover, #1F2C36); border-color: var(--lx-border-strong, #3E505D); } .ds-row:focus-visible { outline: 2px solid var(--lx-border-focus, #E4572E); outline-offset: 2px; } .ds-row:active { background: var(--lx-surface-card-active, #26343F); } .ds-row.is-traced { background: var(--lx-bg-accent-subtle, rgba(228, 87, 46, 0.14)); border-color: var(--lx-accent, #E4572E); } .ds-row-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; } .ds-row-title { font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 13px; line-height: 17px; color: var(--lx-text-primary, #EAF2F6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-row-meta { font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 11px; line-height: 15px; color: var(--lx-text-muted, #7E929F); } .ds-key { font-family: var(--lx-font-surveyor, 'JetBrains Mono', monospace); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: var(--lx-text-secondary, #9FB2BE); }"
+      "css": ".ds-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 10px; min-height: var(--lx-row-h, 36px); padding: 4px 10px; border: 1px solid transparent; border-radius: var(--lx-radius-plate, 6px); background: transparent; color: inherit; text-decoration: none; transition: background 120ms linear; } .ds-row:hover, .ds-row:focus-visible { background: var(--lx-surface-card-hover, #1F2C36); border-color: var(--lx-border-strong, #3E505D); } .ds-row:focus-visible { outline: 2px solid var(--lx-border-focus, #F0C040); outline-offset: 2px; } .ds-row:active { background: var(--lx-surface-card-active, #26343F); } .ds-row.is-traced { background: var(--lx-bg-accent-subtle, rgba(240, 192, 64, 0.14)); border-color: var(--lx-accent, #F0C040); } .ds-row-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; } .ds-row-title { font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 13px; line-height: 17px; color: var(--lx-text-primary, #EAF2F6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-row-meta { font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 11px; line-height: 15px; color: var(--lx-text-muted, #7E929F); } .ds-key { font-family: var(--lx-font-surveyor, 'JetBrains Mono', monospace); font-size: 11px; font-weight: 500; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: var(--lx-text-secondary, #9FB2BE); }"
     },
     {
       "name": "WIP Meter",
@@ -235,7 +235,7 @@
       "refersTo": "wip-meter",
       "description": "Column capacity meter: fill exactly proportional to counts against the limit, limit ruled at the track end, state hue on top (ok meadow, approaching warning, exceeded danger).",
       "html": "<div class='ds-meter' data-state='exceeded'><span class='ds-meter-name'>In Progress</span><span class='ds-meter-count'>5/4</span><span class='ds-meter-state'>exceeded</span><span class='ds-meter-track'><span class='ds-meter-fill'></span><span class='ds-meter-limit'></span></span></div>",
-      "css": ".ds-meter { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 3px 10px; padding: 4px 10px; border: 1px solid transparent; border-radius: var(--lx-radius-plate, 6px); } .ds-meter:hover, .ds-meter:focus-visible { background: var(--lx-surface-card-hover, #1F2C36); border-color: var(--lx-border-strong, #3E505D); } .ds-meter:focus-visible { outline: 2px solid var(--lx-border-focus, #E4572E); outline-offset: 2px; } .ds-meter-name { font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 13px; color: var(--lx-text-primary, #EAF2F6); } .ds-meter-count { font-family: var(--lx-font-surveyor, 'JetBrains Mono', monospace); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--lx-text-primary, #EAF2F6); } .ds-meter-state { font-family: var(--lx-font-surveyor, 'JetBrains Mono', monospace); font-size: 10px; color: var(--lx-text-muted, #7E929F); } .ds-meter[data-state='approaching'] .ds-meter-state { color: var(--lx-text-warning, #E8A33D); } .ds-meter[data-state='exceeded'] .ds-meter-state { color: var(--lx-text-danger, #FF9C8F); } .ds-meter-track { grid-column: 1 / -1; position: relative; height: 8px; border-radius: 4px; background: var(--lx-surface-input, #0D141A); overflow: hidden; } .ds-meter-fill { display: block; height: 100%; width: 100%; background: var(--lx-series-meadow, #2E9E4F); } .ds-meter[data-state='approaching'] .ds-meter-fill { background: var(--lx-status-warning, #E8A33D); } .ds-meter[data-state='exceeded'] .ds-meter-fill { background: var(--lx-status-danger, #D2372F); } .ds-meter-limit { position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: var(--lx-border-strong, #3E505D); }"
+      "css": ".ds-meter { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 3px 10px; padding: 4px 10px; border: 1px solid transparent; border-radius: var(--lx-radius-plate, 6px); } .ds-meter:hover, .ds-meter:focus-visible { background: var(--lx-surface-card-hover, #1F2C36); border-color: var(--lx-border-strong, #3E505D); } .ds-meter:focus-visible { outline: 2px solid var(--lx-border-focus, #F0C040); outline-offset: 2px; } .ds-meter-name { font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 13px; color: var(--lx-text-primary, #EAF2F6); } .ds-meter-count { font-family: var(--lx-font-surveyor, 'JetBrains Mono', monospace); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--lx-text-primary, #EAF2F6); } .ds-meter-state { font-family: var(--lx-font-surveyor, 'JetBrains Mono', monospace); font-size: 10px; color: var(--lx-text-muted, #7E929F); } .ds-meter[data-state='approaching'] .ds-meter-state { color: var(--lx-text-warning, #E8A33D); } .ds-meter[data-state='exceeded'] .ds-meter-state { color: var(--lx-text-danger, #FF9C8F); } .ds-meter-track { grid-column: 1 / -1; position: relative; height: 8px; border-radius: 4px; background: var(--lx-surface-input, #0D141A); overflow: hidden; } .ds-meter-fill { display: block; height: 100%; width: 100%; background: var(--lx-series-meadow, #2E9E4F); } .ds-meter[data-state='approaching'] .ds-meter-fill { background: var(--lx-status-warning, #E8A33D); } .ds-meter[data-state='exceeded'] .ds-meter-fill { background: var(--lx-status-danger, #D2372F); } .ds-meter-limit { position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: var(--lx-border-strong, #3E505D); }"
     },
     {
       "name": "Void Plate",
@@ -249,9 +249,9 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The only filled action: patrol-orange ground with inverse ink, 6px plate radius, 36px base height. Used for New task and a region's primary action.",
+      "description": "The only filled action: brand-amber ground with the accent ink (dark ink at both times of day, never the inverse ink), 6px plate radius, 36px base height. By day the plate carries a 1px mark-amber rim so the yellow is findable on paper. Used for New task and a region's primary action.",
       "html": "<button class='ds-btn ds-btn-primary'>NEW TASK</button><button class='ds-btn ds-btn-primary' disabled>NEW TASK</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: var(--lx-radius-plate, 6px); border: 1px solid transparent; font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 13px; font-weight: 500; cursor: pointer; transition: background 100ms, border-color 100ms; } .ds-btn-primary { background: var(--lx-border-focus, #E4572E); color: var(--lx-text-inverse, #0B1014); } .ds-btn-primary:hover { background: var(--lx-text-link-hover, #F6A88F); } .ds-btn-primary:focus-visible { outline: 2px solid var(--lx-border-focus, #E4572E); outline-offset: 2px; } .ds-btn-primary:active { background: var(--lx-accent-hover, #F06A42); } .ds-btn-primary:disabled { background: transparent; color: var(--lx-text-muted, #7E929F); border-color: var(--lx-border-default, #26333D); cursor: default; }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: var(--lx-radius-plate, 6px); border: 1px solid transparent; font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 13px; font-weight: 500; cursor: pointer; transition: background 100ms, border-color 100ms; } .ds-btn-primary { background: var(--lx-accent, #F0C040); color: var(--lx-accent-ink, #10161B); } .ds-btn-primary:hover { background: var(--lx-accent-hover, #F5D76A); } .ds-btn-primary:focus-visible { outline: 2px solid var(--lx-border-focus, #F0C040); outline-offset: 2px; } .ds-btn-primary:active { background: var(--lx-accent-hover, #F5D76A); } .ds-btn-primary:disabled { background: transparent; color: var(--lx-text-muted, #7E929F); border-color: var(--lx-border-default, #26333D); cursor: default; }"
     },
     {
       "name": "Ghost Button",
@@ -259,7 +259,7 @@
       "refersTo": "button-ghost-sm",
       "description": "Secondary action with a hairline border: Open board, Link repo, Retry read, Retry. Small size at 32px.",
       "html": "<button class='ds-btn ds-btn-ghost'>OPEN BOARD</button><button class='ds-btn ds-btn-ghost'>RETRY READ</button>",
-      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: var(--lx-radius-plate, 6px); font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 12px; font-weight: 500; cursor: pointer; transition: background 100ms, border-color 100ms; } .ds-btn-ghost { background: transparent; color: var(--lx-text-secondary, #9FB2BE); border: 1px solid var(--lx-border-default, #26333D); } .ds-btn-ghost:hover { background: var(--lx-surface-card-hover, #1F2C36); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--lx-border-focus, #E4572E); outline-offset: 2px; } .ds-btn-ghost:active { background: var(--lx-surface-card-active, #26343F); }"
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: var(--lx-radius-plate, 6px); font-family: var(--lx-font-guide, 'IBM Plex Sans', sans-serif); font-size: 12px; font-weight: 500; cursor: pointer; transition: background 100ms, border-color 100ms; } .ds-btn-ghost { background: transparent; color: var(--lx-text-secondary, #9FB2BE); border: 1px solid var(--lx-border-default, #26333D); } .ds-btn-ghost:hover { background: var(--lx-surface-card-hover, #1F2C36); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--lx-border-focus, #F0C040); outline-offset: 2px; } .ds-btn-ghost:active { background: var(--lx-surface-card-active, #26343F); }"
     },
     {
       "name": "Nav Link",
@@ -267,7 +267,7 @@
       "refersTo": "nav-link",
       "description": "Rail navigation as a signage plate: 36px row, hover fill, active fill with strong border. Labels leave the layout in the collapsed rail but stay in the accessible name.",
       "html": "<a class='ds-nav-link' href='#'>BOARD</a><a class='ds-nav-link is-active' href='#' aria-current='page'>DASHBOARD</a>",
-      "css": ".ds-nav-link { display: flex; align-items: center; gap: 10px; height: var(--lx-row-h, 36px); padding: 0 10px; border: 1px solid transparent; border-radius: var(--lx-radius-plate, 6px); background: transparent; font-family: var(--lx-font-signage, 'Space Grotesk', sans-serif); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--lx-text-secondary, #9FB2BE); text-decoration: none; transition: background 120ms linear, color 120ms linear; } .ds-nav-link:hover { background: var(--lx-surface-card-hover, #1F2C36); color: var(--lx-text-primary, #EAF2F6); } .ds-nav-link:active { background: var(--lx-surface-card-active, #26343F); } .ds-nav-link.is-active { background: var(--lx-surface-card-active, #26343F); border-color: var(--lx-border-strong, #3E505D); color: var(--lx-text-primary, #EAF2F6); } .ds-nav-link:focus-visible { outline: 2px solid var(--lx-border-focus, #E4572E); outline-offset: 2px; }"
+      "css": ".ds-nav-link { display: flex; align-items: center; gap: 10px; height: var(--lx-row-h, 36px); padding: 0 10px; border: 1px solid transparent; border-radius: var(--lx-radius-plate, 6px); background: transparent; font-family: var(--lx-font-signage, 'Space Grotesk', sans-serif); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--lx-text-secondary, #9FB2BE); text-decoration: none; transition: background 120ms linear, color 120ms linear; } .ds-nav-link:hover { background: var(--lx-surface-card-hover, #1F2C36); color: var(--lx-text-primary, #EAF2F6); } .ds-nav-link:active { background: var(--lx-surface-card-active, #26343F); } .ds-nav-link.is-active { background: var(--lx-surface-card-active, #26343F); border-color: var(--lx-border-strong, #3E505D); color: var(--lx-text-primary, #EAF2F6); } .ds-nav-link:focus-visible { outline: 2px solid var(--lx-border-focus, #F0C040); outline-offset: 2px; }"
     },
     {
       "name": "Keycap",
@@ -280,12 +280,12 @@
   ],
   "narrative": {
     "northStar": "The Tuned CRT",
-    "overview": "The North Star is carried as tuned, warm, human precision: instruments calibrated by hand until they read true. Its literal CRT reading is the incumbent rut (the amber CRT/HUD workspace this world replaced) and is excluded from every surface. The world that expresses it is the Trail Map: the tracker reads as one surveyed mountain at two times of day. The default is the floodlit night map, a cold slate field with lit ribbons and crisp signage plates; the switch gives the printed day map, warm map paper with the same ribbons and the same plates. The day map is a translation of the same mountain, never an inversion.\n\nThe world lends type, palette, density, and one signature move. It never supplies layout, navigation model, or controls: nav is nav, buttons are buttons, tables sort with standard headers. A working screen must read as a tracker of its category first. The voice is warm, playful, and tactile, and it lives in the display layers only. Every control and state keeps its plain name (New task, Blocked, Needs attention); metaphor display names sit beside plain truth (Trail profile, with the plain sub-line Milestones and sprint progress). The ornament budget is spent entirely in the signature panel; lists and forms stay bare.\n\nDensity is the working loop. The dashboard holds six regions inside a 1440x900 viewport at trail-report density, lists run at 36px rows on desktop and 44px on touch, and every count is a tabular figure. Panels sit flat on the ground; only overlays lift. Motion is a surveyed redraw, never ambient: lines draw once per mount and stop.",
+    "overview": "The North Star is carried as tuned, warm, human precision: instruments calibrated by hand until they read true. Its literal CRT reading — the amber-on-black HUD workspace this world replaced — is still refused as a *look*: no monochrome amber field, no glowing terminal furniture, no amber on everything. The amber itself was never the rut, and it returns on purpose: the brand's own LX-plate yellow is the map's one action colour, a single lit plate on a cold slate field. The world that expresses it is the Trail Map: the tracker reads as one surveyed mountain at two times of day. The default is the floodlit night map, a cold slate field with lit ribbons and crisp signage plates; the switch gives the printed day map, warm map paper with the same ribbons and the same plates. The day map is a translation of the same mountain, never an inversion.\n\nThe world lends type, palette, density, and one signature move. It never supplies layout, navigation model, or controls: nav is nav, buttons are buttons, tables sort with standard headers. A working screen must read as a tracker of its category first. The voice is warm, playful, and tactile, and it lives in the display layers only. Every control and state keeps its plain name (New task, Blocked, Needs attention); metaphor display names sit beside plain truth (Trail profile, with the plain sub-line Milestones and sprint progress). The ornament budget is spent entirely in the signature panel; lists and forms stay bare.\n\nDensity is the working loop. The dashboard holds six regions inside a 1440x900 viewport at trail-report density, lists run at 36px rows on desktop and 44px on touch, and every count is a tabular figure. Panels sit flat on the ground; only overlays lift. Motion is a surveyed redraw, never ambient: lines draw once per mount and stop.",
     "keyCharacteristics": [
       "One mountain, two times of day: floodlit night map by default, printed day map on switch, same furniture in both.",
       "Three type voices with strict jobs: Signage caps for plates and labels, Guide for all readable copy, Surveyor tabular figures for every number.",
       "Difficulty ribbons encode priority and nothing else, always doubled by their rank numeral and the configured priority name.",
-      "Patrol orange is the only action colour: primary buttons, focus ring, today marker, and the \"You are here\" post.",
+      "Brand amber is the only action colour: primary buttons, focus ring, today marker, and the \"You are here\" post; at day the hue splits at the paper line into the plate-yellow fill and the ink-amber marks and links.",
       "Trail-report density: 36px desktop rows, 44px touch rows, 4px spacing scale, whole-cell repack.",
       "Hybrid elevation: flat bordered panels everywhere, one shadow layer reserved for lifted overlays.",
       "Motion draws once (180 to 260ms linear) and snaps to final state under reduced motion."
@@ -308,7 +308,7 @@
       { "name": "The Surveyed-Redraw Rule", "body": "Motion is a redraw of surveyed lines, once per mount: 180ms for the Route Trace, 220ms for the profile runs, both linear, both inside the 180 to 260ms band. Nothing loops, breathes, or eases in ambiently except the loading skeleton pulse, and reduced motion snaps every draw to its final state.", "section": "components" }
     ],
     "dos": [
-      "Do keep every colour on its job: ribbon for priority, series hue for identity, state hue for meaning, patrol orange for action and position.",
+      "Do keep every colour on its job: ribbon for priority, series hue for identity, state hue for meaning, brand amber for action and position.",
       "Do double every ribbon with its rank numeral on the chip and the project's configured priority name in the accessible label.",
       "Do set every count, key, date, and time in the Surveyor voice with tabular figures.",
       "Do hold list density at 36px desktop rows and 44px touch rows on the 4px scale, and cap scrollers to whole rows measured from the rendered row height.",

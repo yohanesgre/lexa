@@ -1,15 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeft, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useSearchWikiPages } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
 import { WikiSearchBox } from "./WikiSearchBox";
 import { WikiSearchResults } from "./WikiSearchResults";
 import { TreeItem } from "./WikiTreeItem";
 import { buildTree, type WikiNode } from "./wiki-tree";
-
-function padCount(n: number): string {
-  return String(n).padStart(3, "0");
-}
 
 function buildPagesById(pages: WikiPageMeta[]): Map<string, WikiPageMeta> {
   return new Map(pages.map((p) => [p.id, p]));
@@ -180,7 +176,7 @@ function SidebarList({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto pt-2">
+    <div className="pane-list">
       {state === "loading" && <div className="px-4 text-xs text-lx-text-muted">Loading pages…</div>}
       {state === "error" && (
         <div className="px-3">
@@ -198,9 +194,7 @@ function SidebarList({
 
       {state === "empty" && (
         <div className="px-4 mb-3">
-          <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">
-            {padCount(0)} Pages
-          </span>
+          <span className="text-xs text-lx-text-secondary">No pages yet</span>
         </div>
       )}
 
@@ -251,7 +245,7 @@ export function WikiPageSidebar({
   onContextMenu,
   onContextMenuKeyboard,
   onNewPage,
-  onClose,
+  open,
   expanded,
   onToggleExpand,
   query,
@@ -272,7 +266,7 @@ export function WikiPageSidebar({
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
   onContextMenuKeyboard: (element: HTMLElement, page: WikiPageMeta) => void;
   onNewPage: (defaultParentId: string | null) => void;
-  onClose: () => void;
+  open: boolean;
   expanded: Set<string>;
   onToggleExpand: (id: string) => void;
   query: string;
@@ -309,30 +303,23 @@ export function WikiPageSidebar({
         : "loading";
 
   return (
-    <aside ref={panelRef} id="wiki-sidebar" className="wiki-sidebar wiki-sidebar-open">
-      <div className="sidebar-header">
-        {state === "empty" ? (
-          <div style={{ flex: 1 }} />
-        ) : (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <WikiSearchBox
-              query={query}
-              focused={searchFocused}
-              onQueryChange={onQueryChange}
-              onFocusedChange={onSearchFocusedChange}
-            />
-          </div>
-        )}
-        <button
-          type="button"
-          className="sidebar-toggle w-8 h-8 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
-          onClick={onClose}
-          aria-label="Collapse sidebar"
-          aria-expanded={true}
-          aria-controls="wiki-sidebar"
-          title="Collapse sidebar"
-        >
-          <PanelLeft size={14} strokeWidth={1.5} />
+    <aside ref={panelRef} id="wiki-pane" className={`wiki-sidebar${open ? " open" : ""}`} aria-label="Pages">
+      <div className="pane-top">
+        <div className="pane-head">
+          <span className="pane-head-label">Pages</span>
+          <span className="pane-head-count">{String(pages?.length ?? 0).padStart(3, "0")}</span>
+        </div>
+        <div className="pane-search">
+          <WikiSearchBox
+            query={query}
+            focused={searchFocused}
+            onQueryChange={onQueryChange}
+            onFocusedChange={onSearchFocusedChange}
+          />
+        </div>
+        <button type="button" className="btn btn-ghost pane-action" onClick={() => onNewPage(null)}>
+          <Plus size={13} strokeWidth={1.5} aria-hidden="true" />
+          New page
         </button>
       </div>
 
@@ -356,18 +343,6 @@ export function WikiPageSidebar({
         onNavigate={onNavigate}
         onRetryList={onRetryPages}
       />
-
-      <div className="px-3 mt-2">
-        <button
-          type="button"
-          className="add-task-btn"
-          style={{ justifyContent: "flex-start", paddingLeft: "12px" }}
-          onClick={() => onNewPage(null)}
-        >
-          <Plus size={14} strokeWidth={1.5} />
-          New page
-        </button>
-      </div>
     </aside>
   );
 }

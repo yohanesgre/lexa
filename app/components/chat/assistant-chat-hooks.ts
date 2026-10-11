@@ -1,54 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { hasMatchMedia, matchMedia } from "../../lib/viewport";
 import { lastApprovalBatch, type ChatTurn } from "./assistant-chat-utils";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
 
 // Small self-contained hooks for the Assistant chat page. The page-level
 // stream/turn orchestration stays in AssistantChatPage.
-
-// Sidebar visibility — the collapse control lives INSIDE the sidebar
-// (assistant-chat.html, mirroring the wiki sidebar): ≥900px it swaps the
-// docked column for a 36px restore rail, <900px the rail button opens the
-// overlay drawer. The collapsed choice persists globally in localStorage
-// lexa-chat-sidebar ("0" = collapsed); hydrated client-side (SSR-safe —
-// no window access during render).
-export function useChatSidebar() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  useEffect(() => {
-    try {
-      if (window.localStorage.getItem("lexa-chat-sidebar") === "0") setSidebarOpen(false);
-      // On mobile the overlay would obscure the chat — default to closed
-      // unless the user explicitly opened it on this device.
-      else if (matchMedia("(max-width: 899.98px)") && window.localStorage.getItem("lexa-chat-sidebar") !== "1") {
-        setSidebarOpen(false);
-      }
-    } catch {
-      // non-fatal
-    }
-  }, []);
-  const toggleSidebar = useCallback(() => {
-    const next = !sidebarOpen;
-    setSidebarOpen(next);
-    try {
-      window.localStorage.setItem("lexa-chat-sidebar", next ? "1" : "0");
-    } catch {
-      // non-fatal
-    }
-  }, [sidebarOpen]);
-  // The top nav's "PanelLeft" button dispatches this event on mobile.
-  // We toggle the threads sidebar. Desktop behavior is unchanged (the
-  // collapsed rail remains the entry point there).
-  useEffect(() => {
-    function handleToggle() {
-      if (hasMatchMedia() && matchMedia("(max-width: 899.98px)")) {
-        setSidebarOpen((v) => !v);
-      }
-    }
-    window.addEventListener("lexa:toggle-threads-sidebar", handleToggle);
-    return () => window.removeEventListener("lexa:toggle-threads-sidebar", handleToggle);
-  }, []);
-  return { sidebarOpen, setSidebarOpen, toggleSidebar };
-}
 
 // Floating-composer clearance (assistant-chat.html): the docked composer is
 // pinned over the transcript, so the app measures its height and writes

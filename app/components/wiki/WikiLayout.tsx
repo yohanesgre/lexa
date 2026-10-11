@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { PanelLeft } from "lucide-react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { useOverlayFocusTrap, useSidebarState } from "../../lib/sidebar-state";
 import { useWikiPages, useDeleteWikiPage } from "../../lib/queries";
@@ -136,24 +135,6 @@ function useWikiPageContextMenu(
   return { menu, open, openAt, close, addChild, rename, move, remove };
 }
 
-function SidebarRail({ onExpand }: { onExpand: () => void }) {
-  return (
-    <aside id="wiki-sidebar" className="wiki-sidebar wiki-sidebar-rail">
-      <button
-        type="button"
-        className="sidebar-toggle w-8 h-8 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
-        onClick={onExpand}
-        aria-label="Expand sidebar"
-        aria-expanded={false}
-        aria-controls="wiki-sidebar"
-        title="Expand sidebar"
-      >
-        <PanelLeft size={14} strokeWidth={1.5} />
-      </button>
-    </aside>
-  );
-}
-
 export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) {
   const navigate = useNavigate();
   const { data: pages, isLoading, error, refetch: refetchPages } = useWikiPages(slug);
@@ -221,17 +202,23 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     onDelete: (page) => setDeleteConfirm(page),
   });
 
-  // Unified sidebar mechanic: desktop intent persists in localStorage, mobile
-  // open is ephemeral, and the 768px breakpoint is live in both directions.
+  // The page tree is a surface pane: docked or absent, toggled by the cap
+  // band's labelled `Pages` control (same `lexa:pane-wiki` key). Desktop intent
+  // persists; the below-1024px drawer open is ephemeral.
   const { open, toggle, overlayActive } = useSidebarState({
-    storageKey: "lexa.wiki.sidebar",
+    storageKey: "lexa:pane-wiki",
     defaultOpen: true,
+    breakpoint: 1024,
+    alwaysOpenAbove: 1024,
+    storageValues: { open: "open", closed: "closed" },
+    surface: "wiki",
+    toggleEvent: "lexa:toggle-wiki-sidebar",
   });
   const panelRef = useRef<HTMLElement | null>(null);
   useOverlayFocusTrap(overlayActive, panelRef);
 
-  // Tree + search state lives here so collapsing to the rail (which unmounts
-  // the sidebar) never discards the user's expand choices or query.
+  // Tree + search state lives here so closing the pane (which hides it) never
+  // discards the user's expand choices or query.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set((pages ?? []).map((p) => p.id)));
   const expandedInit = useRef((pages?.length ?? 0) > 0);
   const [wikiQuery, setWikiQuery] = useState("");
@@ -258,12 +245,8 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     if (overlayActive) toggle();
   }, [overlayActive, toggle]);
 
-  // The top nav's "PanelLeft" button dispatches this event. One toggle flips
-  // the active viewport's flag; the trigger's visibility stays CSS-only.
-  useEffect(() => {
-    window.addEventListener("lexa:toggle-wiki-sidebar", toggle);
-    return () => window.removeEventListener("lexa:toggle-wiki-sidebar", toggle);
-  }, [toggle]);
+  // The top nav's pane toggle dispatches `lexa:toggle-wiki-sidebar`; the
+  // hook above listens for it (the trigger's visibility stays CSS-only).
 
   // Esc dismisses the overlay while it is open; desktop never traps Escape.
   useEffect(() => {
@@ -283,31 +266,27 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
 
   return (
     <div className="wiki-layout">
-      {!open ? (
-        <SidebarRail onExpand={toggle} />
-      ) : (
-        <WikiPageSidebar
-          panelRef={panelRef}
-          slug={slug}
-          activePageSlug={activePageSlug}
-          pages={pages}
-          isLoading={isLoading}
-          error={error}
-          onRetryPages={refetchPages}
-          contextMenuPageId={contextMenu.menu?.pageId ?? null}
-          onContextMenu={contextMenu.open}
-          onContextMenuKeyboard={contextMenu.openAt}
-          onNewPage={openNewPage}
-          onClose={toggle}
-          expanded={expanded}
-          onToggleExpand={toggleExpanded}
-          query={wikiQuery}
-          onQueryChange={setWikiQuery}
-          searchFocused={wikiSearchFocused}
-          onSearchFocusedChange={setWikiSearchFocused}
-          onNavigate={closeOnMobile}
-        />
-      )}
+      <WikiPageSidebar
+        panelRef={panelRef}
+        slug={slug}
+        activePageSlug={activePageSlug}
+        pages={pages}
+        isLoading={isLoading}
+        error={error}
+        onRetryPages={refetchPages}
+        contextMenuPageId={contextMenu.menu?.pageId ?? null}
+        onContextMenu={contextMenu.open}
+        onContextMenuKeyboard={contextMenu.openAt}
+        onNewPage={openNewPage}
+        open={open}
+        expanded={expanded}
+        onToggleExpand={toggleExpanded}
+        query={wikiQuery}
+        onQueryChange={setWikiQuery}
+        searchFocused={wikiSearchFocused}
+        onSearchFocusedChange={setWikiSearchFocused}
+        onNavigate={closeOnMobile}
+      />
       {overlayActive && (
         <button
           type="button"

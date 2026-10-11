@@ -1,4 +1,4 @@
-// Unified collapse/expand state for every wiki sidebar.
+// Unified collapse/expand state for every wiki sidebar and surface pane.
 //
 // SSR (and the hydration render) always renders every panel CLOSED — a
 // hydration gate keeps `open`/`overlayActive` false until the client store is
@@ -8,13 +8,26 @@
 // breakpoint is a live `matchMedia` subscription (both directions), not a
 // mount snapshot.
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { hasMatchMedia } from "./viewport";
 
 export interface UseSidebarStateOptions {
   storageKey: string;
   defaultOpen: boolean;
   breakpoint?: number;
+  /** Persisted strings for the two states (default `"true"` / `"false"`). The
+   *  surface panes store `"open"` / `"closed"` so the cap band's pane toggle
+   *  reads the same value it writes. */
+  storageValues?: { open: string; closed: string } | undefined;
+  /** Pane name (`threads` / `wiki`). When set, every open-state change
+   *  dispatches `lexa:pane-state` with `{ surface, open }`, which is how the
+   *  cap band's toggle keeps its `aria-expanded` in sync. */
+  surface?: string | undefined;
+  /** Window event that toggles this state — the cap band's pane toggle. */
+  toggleEvent?: string | undefined;
+  /** Above this width the state is always open and cannot be closed: the
+   *  surface panes are part of the shell on big screens, drawers below it. */
+  alwaysOpenAbove?: number | undefined;
 }
 
 export interface SidebarState {
@@ -65,22 +78,22 @@ function notifyStorage(key: string): void {
   storageListeners.get(key)?.forEach((listener) => listener());
 }
 
-function readStoredOpen(key: string): boolean | null {
+function readStoredOpen(key: string, values: { open: string; closed: string }): boolean | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(key);
-    if (raw === "true") return true;
-    if (raw === "false") return false;
+    if (raw === values.open) return true;
+    if (raw === values.closed) return false;
   } catch {
     // Private-mode / disabled storage — fall back to the panel default.
   }
   return null;
 }
 
-function writeStoredOpen(key: string, value: boolean): void {
+function writeStoredOpen(key: string, value: boolean, values: { open: string; closed: string }): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(key, value ? "true" : "false");
+    window.localStorage.setItem(key, value ? values.open : values.closed);
   } catch {
     // Ignore write failures; the in-memory store still updates.
   }
@@ -91,7 +104,17 @@ export function useSidebarState({
   storageKey,
   defaultOpen,
   breakpoint = 768,
+  storageValues,
+  surface,
+  toggleEvent,
+  alwaysOpenAbove,
 }: UseSidebarStateOptions): SidebarState {
+  // Primitive values, so the store callbacks below stay referentially stable
+  // across renders even though the option is an object literal at every call.
+  const openValue = storageValues?.open ?? "true";
+  const closedValue = storageValues?.closed ?? "false";
+  const values = useMemo(() => ({ open: openValue, closed: closedValue }), [openValue, closedValue]);
+
   const query = `(min-width: ${breakpoint}px)`;
   const subscribeMediaForQuery = useCallback(
     (onChange: () => void) => subscribeMedia(query, onChange),
@@ -104,13 +127,23 @@ export function useSidebarState({
     () => true
   );
 
+  // Above `alwaysOpenAbove` the state is open by construction (the surface
+  // panes are part of the shell there, not a drawer).
+  const forcedQuery = `(min-width: ${alwaysOpenAbove ?? 999999}px)`;
+  const subscribeForced = useCallback(
+    (onChange: () => void) => subscribeMedia(forcedQuery, onChange),
+    [forcedQuery]
+  );
+  const getForcedSnapshot = useCallback(() => mediaSnapshot(forcedQuery), [forcedQuery]);
+  const forcedOpen = useSyncExternalStore(subscribeForced, getForcedSnapshot, () => false);
+
   const subscribeStorageForKey = useCallback(
     (onChange: () => void) => subscribeStorage(storageKey, onChange),
     [storageKey]
   );
   const getStorageSnapshot = useCallback(
-    () => readStoredOpen(storageKey) ?? defaultOpen,
-    [storageKey, defaultOpen]
+    () => readStoredOpen(storageKey, values) ?? defaultOpen,
+    [storageKey, defaultOpen, values]
   );
   const getStorageServerSnapshot = useCallback(() => defaultOpen, [defaultOpen]);
   const desktopOpen = useSyncExternalStore(
@@ -137,16 +170,31 @@ export function useSidebarState({
   }, [isDesktop]);
 
   const setDesktopOpen = useCallback(
-    (value: boolean) => writeStoredOpen(storageKey, value),
-    [storageKey]
+    (value: boolean) => writeStoredOpen(storageKey, value, values),
+    [storageKey, values]
   );
 
   const toggle = useCallback(() => {
+    if (forcedOpen) return;
     if (isDesktop) setDesktopOpen(!desktopOpen);
     else setMobileOpen((value) => !value);
-  }, [isDesktop, desktopOpen, setDesktopOpen]);
+  }, [forcedOpen, isDesktop, desktopOpen, setDesktopOpen]);
 
-  const open = hydrated && (isDesktop ? desktopOpen : mobileOpen);
+  const open = hydrated && (forcedOpen ? true : isDesktop ? desktopOpen : mobileOpen);
+
+  // The cap band's pane toggle is a separate component from the pane it opens
+  // (it lives in the shell), so the pane publishes each state change instead of
+  // the toggle guessing from storage.
+  useEffect(() => {
+    if (!surface) return;
+    window.dispatchEvent(new CustomEvent("lexa:pane-state", { detail: { surface, open } }));
+  }, [surface, open]);
+
+  useEffect(() => {
+    if (!toggleEvent) return;
+    window.addEventListener(toggleEvent, toggle);
+    return () => window.removeEventListener(toggleEvent, toggle);
+  }, [toggleEvent, toggle]);
 
   return {
     open,
