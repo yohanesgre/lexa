@@ -1,5 +1,6 @@
-<!-- Wireframe-first: any UI change must be reflected in wireframes/ (submodule) and
-     rebuilt with `bash wireframes/build.sh` BEFORE implementation. -->
+<!-- Design system first: `DESIGN.md` (normative tokens) + `.impeccable/design.json` are the authority
+     for visual decisions, and any UI change carries a change spec (regions, states, copy, components)
+     before implementation. Run `impeccable context` and the request's playbook before editing. -->
 
 ## Summary
 
@@ -16,7 +17,8 @@ fixes #
 
 ## Screenshots and Media (if UI changed)
 
-<!-- Before/after. Skip section if backend-only. -->
+<!-- Before/after at desktop (1440) and mobile (390), captured with agent-browser.
+     Skip section if backend-only. -->
 
 ## How to test
 
@@ -29,7 +31,9 @@ fixes #
 - [ ] `vitest run` passes
 - [ ] Migration SQL added + tested against an existing `data/lexa.db` (if schema changed)
 - [ ] Docs updated if schema/API/GitHub-sync contract changed (SCHEMA.md, API.md, docs/GITHUB_SETUP.md)
-- [ ] Wireframes updated and rebuilt if UI changed
+- [ ] `DESIGN.md` honoured (tokens, and the `impeccable` flow: `context` -> playbook -> `craft-floor` -> `detect`)
+- [ ] Change spec in the plan or PR: regions, states matrix (empty/loading/error/partial/denied), real copy, components/tokens used
+- [ ] antislop Delivery Gate run, PASS/FAIL evidence in `status/<plan>/report.md`
 - [ ] Tests added for service/API changes (if applicable)
 - [ ] No unrelated changes
 - [ ] AI assistance disclosed (if used)
