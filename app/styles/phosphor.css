@@ -9315,14 +9315,14 @@ select.prop-input,
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
-  padding: 12px;
+  padding: 16px;
 }
 .tm-section-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .tm-section-head > div {
   min-width: 0;
@@ -10307,9 +10307,16 @@ select.prop-input,
   flex-direction: column;
   min-height: 0;
 }
-/* Long-content state: only the movement strip caps, and it caps at a whole
-   row boundary (--tm-move-cap is measured from the rendered row height). Every
-   WIP meter and every attention row stays visible. */
+/* Long-content state: the attention card stretches to the column-wip card
+   beside it and its list scrolls inside that box; the movement strip caps at a
+   whole row boundary (--tm-move-cap is measured from the rendered row
+   height). */
+.tm-dash-grid > .tm-section .tm-rows,
+.tm-dash > .tm-section .tm-rows {
+  max-height: var(--tm-attn-cap, none);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .tm-dash > .tm-section .tm-moves {
   max-height: var(--tm-move-cap, 148px);
   overflow-y: auto;
@@ -10341,8 +10348,8 @@ select.prop-input,
 .tm-dash-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
+  column-gap: 16px;
+  row-gap: 24px;
 }
 
 /* Trailhead plates (the projects picker). */

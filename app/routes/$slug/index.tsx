@@ -1,12 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Gauge, Plus, Settings } from "lucide-react";
+import { Gauge, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useDashboard, useBoard, useMilestones, useCreateProject } from "../../lib/queries";
+import { useDashboard, useBoard, useMilestones } from "../../lib/queries";
 import { getDashboard, getBoard, listMilestones } from "../../lib/api";
 import { cn } from "../../components/ui/cn";
 import { DashboardSkeleton } from "../../components/DashboardSkeleton";
 import { ProjectDescription } from "../../components/ProjectDescription";
-import { CreateProjectModal } from "../../components/CreateProjectModal";
 import { formatDueChip, parseDateOnly } from "../../lib/dates";
 import { formatRelative } from "../../lib/relative-time";
 import type {
@@ -276,16 +275,7 @@ function TrailReport({
         <button type="button" className="btn btn-ghost btn-sm tm-report-link" onClick={onRetry}>
           Retry read
         </button>
-      ) : repos.length === 0 ? (
-        <Link to="/settings/project/$projectId" params={{ projectId }} className="btn btn-ghost btn-sm tm-report-link">
-          Link repo
-        </Link>
-      ) : (
-        <Link to="/$slug/board" params={{ slug }} className="btn btn-ghost btn-sm tm-report-link">
-          Open board
-          <ArrowRight size={14} strokeWidth={1.5} aria-hidden="true" />
-        </Link>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -1004,9 +994,32 @@ function ProjectDashboard() {
   const { data: dashboard, isLoading, isError: dashboardFailed, refetch: refetchDashboard } = useDashboard();
   const board = useBoard(slug);
   const { data: milestones = [], isError: milestonesFailed, refetch: refetchMilestones } = useMilestones(slug);
-  const createProject = useCreateProject();
-  const [showCreate, setShowCreate] = useState(false);
   const [traced, setTraced] = useState<string | null>(null);
+  const paneGridRef = useRef<HTMLDivElement>(null);
+  const [attentionCap, setAttentionCap] = useState<number | null>(null);
+
+  // The attention card mirrors the column-wip card's height and scrolls its own
+  // list inside it, so the taller of the two never stretches the pair.
+  useEffect(() => {
+    const grid = paneGridRef.current;
+    if (!grid) return;
+    const measure = () => {
+      const attention = grid.querySelector<HTMLElement>('[aria-label="Needs attention"]');
+      const wip = grid.querySelector<HTMLElement>('[aria-label="Column WIP"]');
+      const head = attention?.querySelector<HTMLElement>(".tm-section-head");
+      if (!attention || !wip || !head) return;
+      const styles = getComputedStyle(attention);
+      const pad = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      const margin = parseFloat(getComputedStyle(head).marginBottom) || 0;
+      const room = wip.getBoundingClientRect().height - head.getBoundingClientRect().height - margin - pad;
+      if (room > 0) setAttentionCap(Math.round(room));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [board.data]);
 
   // Escape clears the Route Trace, wherever focus sits.
   useEffect(() => {
@@ -1092,10 +1105,6 @@ function ProjectDashboard() {
               <Settings size={14} strokeWidth={1.5} aria-hidden="true" />
               Project settings
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCreate(true)}>
-              <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
-              New Project
-            </button>
           </div>
         </div>
 
@@ -1177,7 +1186,11 @@ function ProjectDashboard() {
               tracedId={traced}
             />
 
-            <div className="tm-dash-grid">
+            <div
+              className="tm-dash-grid"
+              ref={paneGridRef}
+              style={attentionCap === null ? undefined : ({ "--tm-attn-cap": `${attentionCap}px` } as CSSProperties)}
+            >
               <NeedsAttention
                 rows={attention}
                 priorities={priorities}
@@ -1206,17 +1219,6 @@ function ProjectDashboard() {
           </>
         )}
       </div>
-
-      <CreateProjectModal
-        open={showCreate}
-        pending={createProject.isPending}
-        onClose={() => setShowCreate(false)}
-        onSubmit={(input) => {
-          createProject.mutate(input, {
-            onSuccess: () => setShowCreate(false),
-          });
-        }}
-      />
     </main>
   );
 }
