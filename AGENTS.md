@@ -27,7 +27,7 @@ this repo, this file wins:
 
 ## Git Workflow — single trunk (local auto-enforce)
 
-Trunk `main` — never commit directly. Every task: `main` → new branch → work → PR → merge to `main`. Before any git mutation (branch/worktree, checkout -b, add, commit, push, merge/rebase/cherry-pick, tag `v*`/`cli-v*`) load the `git-workflow` skill and follow guardrails verbatim. No commit/push/merge without explicit user ask; gate (`tsc --noEmit` + `vitest run` + `check:invariants` + secrets check) must be green. Quick gate: `bash scripts/verify-gate.sh`.
+Trunk `main` — never commit directly. Every task: `main` → new branch → work → PR → merge to `main`. Before any git mutation (branch/worktree, checkout -b, add, commit, push, merge/rebase/cherry-pick, tag `v*`/`cli-v*`) load the `git-workflow` skill and follow guardrails verbatim. The owner's standing ask covers the whole lane: commit on the branch, push, open the PR, and enable **auto-merge** (`gh pr merge --auto --squash`) so it lands on `main` itself; do not stop to ask for a merge decision, and never commit directly to `main`. The gate (`tsc --noEmit` + `vitest run` + `check:invariants` + secrets check) must be green before the PR. Quick gate: `bash scripts/verify-gate.sh`.
 
 You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
 
