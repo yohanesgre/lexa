@@ -23,7 +23,7 @@ export function AssistantCallsTable() {
   return (
     <section className="card-panel mt-4" style={{ overflow: "hidden", padding: 0 }}>
       <div style={{ padding: "16px 16px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 className="font-display text-base weight-500 color-primary">Recent calls</h2>
+        <h2 className="font-display text-base font-medium text-lx-text-primary">Recent calls</h2>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="settings-table">
@@ -42,7 +42,7 @@ export function AssistantCallsTable() {
             {isLoading ? (
               <tr>
                 <td colSpan={7} style={{ textAlign: "center", padding: "14px 12px" }}>
-                  <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>Loading calls…</div>
+                  <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>Loading calls…</div>
                 </td>
               </tr>
             ) : isError ? (
@@ -55,7 +55,7 @@ export function AssistantCallsTable() {
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={7} style={{ textAlign: "center", padding: "14px 12px" }}>
-                  <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No calls yet</div>
+                  <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>No calls yet</div>
                 </td>
               </tr>
             ) : rows.map((c) => {
@@ -63,17 +63,17 @@ export function AssistantCallsTable() {
               const tokens = (c.usageIn ?? 0) + (c.usageOut ?? 0);
               return (
                 <tr key={c.id}>
-                  <td className="font-mono text-xs color-secondary">{formatTimestamp(c.createdAt)}</td>
-                  <td className="font-mono text-xs color-primary">{c.model}</td>
+                  <td className="font-mono text-xs text-lx-text-secondary">{formatTimestamp(c.createdAt)}</td>
+                  <td className="font-mono text-xs text-lx-text-primary">{c.model}</td>
                   <td>
                     <span className="status-chip" style={{ cursor: "default" }}>
                       <span className="status-dot" style={{ background: ok ? "var(--lx-text-success)" : "var(--lx-text-danger)" }} />
                       {ok ? "ok" : "error"}
                     </span>
                   </td>
-                  <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{c.latencyMs != null ? `${c.latencyMs.toLocaleString()} ms` : "—"}</td>
-                  <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{tokens.toLocaleString()}</td>
-                  <td className="font-mono text-xs color-primary" style={{ textAlign: "right" }}>${((c.costCents ?? 0) / 100).toFixed(3)}</td>
+                  <td className="font-mono text-xs text-lx-text-secondary" style={{ textAlign: "right" }}>{c.latencyMs != null ? `${c.latencyMs.toLocaleString()} ms` : "—"}</td>
+                  <td className="font-mono text-xs text-lx-text-secondary" style={{ textAlign: "right" }}>{tokens.toLocaleString()}</td>
+                  <td className="font-mono text-xs text-lx-text-primary" style={{ textAlign: "right" }}>${((c.costCents ?? 0) / 100).toFixed(3)}</td>
                   <td className="font-mono text-xs" style={{ color: c.errorCode ? "var(--lx-text-danger)" : "var(--lx-text-muted)" }}>{c.errorCode ?? "—"}</td>
                 </tr>
               );

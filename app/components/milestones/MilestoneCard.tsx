@@ -27,7 +27,7 @@ export function MilestoneCard({ slug, milestone }: MilestoneCardProps) {
         <div className="flex items-center gap-3">
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="flex items-center gap-2">
-              <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 Active milestone
               </span>
               {due ? (

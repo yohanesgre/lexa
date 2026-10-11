@@ -20,28 +20,28 @@ export function UsageKpiCards({ summary }: { summary: AssistantUsageSummary | nu
       <div className="kpi-card">
         <div className="kpi-label">Total tokens</div>
         <div className="kpi-value">{summary.totalTokens.toLocaleString()}</div>
-        <div className="text-xs color-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
+        <div className="text-xs text-lx-text-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
           prompt {summary.promptTokens.toLocaleString()} · completion {summary.completionTokens.toLocaleString()}
         </div>
       </div>
       <div className="kpi-card">
         <div className="kpi-label">Cost</div>
         <div className="kpi-value">${summary.totalCostUsd.toFixed(2)}</div>
-        <div className="text-xs color-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
+        <div className="text-xs text-lx-text-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
           USD · derived from model prices
         </div>
       </div>
       <div className="kpi-card">
         <div className="kpi-label">Avg latency</div>
         <div className="kpi-value">{summary.avgLatencyMs !== null ? `${summary.avgLatencyMs.toLocaleString()} ms` : "—"}</div>
-        <div className="text-xs color-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
+        <div className="text-xs text-lx-text-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
           p50 {summary.p50LatencyMs != null ? summary.p50LatencyMs.toLocaleString() : "—"} · p95 {summary.p95LatencyMs != null ? summary.p95LatencyMs.toLocaleString() : "—"} ms
         </div>
       </div>
       <div className="kpi-card">
         <div className="kpi-label">Error rate</div>
         <div className={`kpi-value ${errorClass}`}>{errorPct} %</div>
-        <div className="text-xs color-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
+        <div className="text-xs text-lx-text-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
           {summary.errorCalls} / {summary.totalCalls} calls
         </div>
       </div>

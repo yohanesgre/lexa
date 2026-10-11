@@ -68,7 +68,7 @@ export function AssistantShell() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-0">Assistant</h1>
-          <div className="font-micro text-2xs color-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          <div className="font-micro text-2xs text-lx-text-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
             Control panel — providers, agents, usage, runs, and per-project bindings
           </div>
         </div>

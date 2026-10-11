@@ -105,7 +105,7 @@ export function PriceEditor({
     return (
       <section className="card-panel card-panel--elevated mt-4">
         <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>
-          <h2 className="font-display text-base weight-500 color-primary">Model prices</h2>
+          <h2 className="font-display text-base font-medium text-lx-text-primary">Model prices</h2>
           <PriceSyncButton />
         </div>
         <div className="text-sm" style={{ color: "var(--lx-text-danger)" }}>Failed to load prices</div>
@@ -116,10 +116,10 @@ export function PriceEditor({
   return (
     <section className="card-panel card-panel--elevated mt-4">
       <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>
-        <h2 className="font-display text-base weight-500 color-primary">Model prices</h2>
+        <h2 className="font-display text-base font-medium text-lx-text-primary">Model prices</h2>
         <PriceSyncButton />
       </div>
-      <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>
+      <p className="text-sm text-lx-text-secondary mb-3" style={{ maxWidth: 640 }}>
         Per-model per-token prices used to derive cost in the summary and per-model table. Prices are stored as USD per 1M tokens (input / output / cached read / cached write). Editing writes immediately; new prices apply to future usage.
       </p>
       {isError ? <div className="text-sm mb-2" style={{ color: "var(--lx-text-danger)" }}>Failed to load prices</div> : null}
@@ -128,10 +128,10 @@ export function PriceEditor({
           <thead>
             <tr>
               <th style={{ width: "auto" }}>Model</th>
-              <th style={{ width: 130 }}>input <span className="font-micro text-2xs color-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
-              <th style={{ width: 130 }}>output <span className="font-micro text-2xs color-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
-              <th style={{ width: 130 }}>cached read <span className="font-micro text-2xs color-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
-              <th style={{ width: 130 }}>cached write <span className="font-micro text-2xs color-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
+              <th style={{ width: 130 }}>input <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
+              <th style={{ width: 130 }}>output <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
+              <th style={{ width: 130 }}>cached read <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
+              <th style={{ width: 130 }}>cached write <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "none", letterSpacing: 0 }}>$/1M</span></th>
               <th style={{ width: 120, textAlign: "right" }}></th>
             </tr>
           </thead>
@@ -139,14 +139,14 @@ export function PriceEditor({
             {isLoading ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
-                  <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>Loading prices…</div>
+                  <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>Loading prices…</div>
                 </td>
               </tr>
             ) : models.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
-                  <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No models yet</div>
-                  <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>Prices appear after the first gateway call. Save to add one manually.</div>
+                  <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>No models yet</div>
+                  <div className="font-micro text-2xs text-lx-text-muted" style={{ marginTop: 4 }}>Prices appear after the first gateway call. Save to add one manually.</div>
                 </td>
               </tr>
             ) : models.map((model) => {
@@ -159,7 +159,7 @@ export function PriceEditor({
               };
               return (
                 <tr key={model}>
-                  <td className="font-mono text-xs weight-500 color-primary">{model}</td>
+                  <td className="font-mono text-xs font-medium text-lx-text-primary">{model}</td>
                   <td>
                     <input className="prop-input font-mono" aria-label={`prompt_price for ${model}`} value={e.prompt_price} onChange={setField("prompt_price")} readOnly={pricesErrored} style={{ width: 120, height: 28, fontSize: 12, textAlign: "right" }} />
                   </td>
@@ -187,7 +187,7 @@ export function PriceEditor({
       <div className="card-panel mt-3" style={{ background: "var(--lx-bg-accent-subtle)", borderColor: "rgba(240,192,64,0.18)", padding: "12px 14px" }}>
         <div className="flex items-center gap-2">
           <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-warning)" strokeWidth={1.5}><circle cx={12} cy={12} r={10} /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>
-          <span className="text-sm weight-500" style={{ color: "var(--lx-text-warning)" }}>Price change affects future cost only — past usage keeps the price it was recorded with.</span>
+          <span className="text-sm font-medium" style={{ color: "var(--lx-text-warning)" }}>Price change affects future cost only — past usage keeps the price it was recorded with.</span>
         </div>
       </div>
     </section>

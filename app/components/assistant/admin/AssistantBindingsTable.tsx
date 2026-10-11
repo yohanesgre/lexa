@@ -14,9 +14,9 @@ export function AssistantBindingsTable() {
     <section className="card-panel" style={{ overflow: "hidden", padding: 0 }}>
       <div style={{ padding: "16px 16px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 className="font-display text-base weight-500 color-primary">Project bindings</h2>
+          <h2 className="font-display text-base font-medium text-lx-text-primary">Project bindings</h2>
           {!isLoading && !isError ? (
-            <div className="text-xs color-secondary mt-1">
+            <div className="text-xs text-lx-text-secondary mt-1">
               {rows.length} project{rows.length === 1 ? "" : "s"} · {configured} configured · {rows.length - configured} not configured
             </div>
           ) : null}
@@ -28,7 +28,7 @@ export function AssistantBindingsTable() {
       </div>
 
       {isLoading ? (
-        <div className="px-4 py-6 text-sm color-muted text-center">Loading bindings…</div>
+        <div className="px-4 py-6 text-sm text-lx-text-muted text-center">Loading bindings…</div>
       ) : isError ? (
         <div className="px-4 py-6 text-center">
           <div className="font-mono text-xs" style={{ color: "var(--lx-text-danger)" }}>Failed to load bindings.</div>
@@ -37,8 +37,8 @@ export function AssistantBindingsTable() {
       ) : rows.length === 0 ? (
         <div className="p-4">
           <div className="empty-box">
-            <div className="text-sm weight-500 color-primary">No projects yet</div>
-            <p className="text-xs color-secondary" style={{ maxWidth: 360 }}>Create a project to configure its Assistant bindings.</p>
+            <div className="text-sm font-medium text-lx-text-primary">No projects yet</div>
+            <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 360 }}>Create a project to configure its Assistant bindings.</p>
           </div>
         </div>
       ) : (
@@ -63,20 +63,20 @@ export function AssistantBindingsTable() {
                 return (
                   <tr key={r.projectId}>
                     <td>
-                      <span className="text-sm weight-500 color-primary">{r.projectName}</span>{" "}
-                      <span className="font-mono text-2xs color-muted">{r.projectSlug}</span>
+                      <span className="text-sm font-medium text-lx-text-primary">{r.projectName}</span>{" "}
+                      <span className="font-mono text-2xs text-lx-text-muted">{r.projectSlug}</span>
                     </td>
                     {unconfigured ? (
-                      <td colSpan={3} className="text-xs color-muted" style={{ fontStyle: "italic" }}>Not configured — no provider, model, or fallback chain set</td>
+                      <td colSpan={3} className="text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>Not configured — no provider, model, or fallback chain set</td>
                     ) : (
                       <>
-                        <td className="text-xs color-secondary">{r.providerLabel ?? "—"}</td>
-                        <td className="font-mono text-xs color-primary">{r.modelLabel ?? "—"}</td>
-                        <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{r.fallbackCount}</td>
+                        <td className="text-xs text-lx-text-secondary">{r.providerLabel ?? "—"}</td>
+                        <td className="font-mono text-xs text-lx-text-primary">{r.modelLabel ?? "—"}</td>
+                        <td className="font-mono text-xs text-lx-text-secondary" style={{ textAlign: "right" }}>{r.fallbackCount}</td>
                       </>
                     )}
-                    <td className={`font-mono text-xs ${unconfigured ? "color-muted" : "color-secondary"}`} style={{ textAlign: "right" }}>{unconfigured ? "—" : r.writeToolsCount}</td>
-                    <td className={`font-mono text-xs ${unconfigured ? "color-muted" : "color-secondary"}`} style={{ textAlign: "right" }}>{unconfigured ? "—" : r.memoryCount}</td>
+                    <td className={`font-mono text-xs ${unconfigured ? "text-lx-text-muted" : "text-lx-text-secondary"}`} style={{ textAlign: "right" }}>{unconfigured ? "—" : r.writeToolsCount}</td>
+                    <td className={`font-mono text-xs ${unconfigured ? "text-lx-text-muted" : "text-lx-text-secondary"}`} style={{ textAlign: "right" }}>{unconfigured ? "—" : r.memoryCount}</td>
                     <td>
                       {r.hasSearchKey ? (
                         <span className="health-status health-status--ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true"><circle cx={12} cy={12} r={10} /><path d="m9 12 2 2 4-4" /></svg>Configured</span>
@@ -84,7 +84,7 @@ export function AssistantBindingsTable() {
                         <span className="health-status health-status--muted"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true"><circle cx={12} cy={12} r={10} /><path d="M12 7v5l3 2" /></svg>Not set</span>
                       )}
                     </td>
-                    <td className={`text-xs ${unconfigured ? "color-muted" : "color-secondary"}`}>{unconfigured || !r.updatedAt ? "—" : formatRelative(r.updatedAt)}</td>
+                    <td className={`text-xs ${unconfigured ? "text-lx-text-muted" : "text-lx-text-secondary"}`}>{unconfigured || !r.updatedAt ? "—" : formatRelative(r.updatedAt)}</td>
                     <td style={{ textAlign: "right" }}>
                       <Link
                         to="/settings/project/$projectId"

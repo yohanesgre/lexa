@@ -244,8 +244,8 @@ export function GatewayHealthSection() {
       return (
         <div className="empty-box">
           <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg>
-          <div className="text-sm weight-500 color-primary mt-1">No providers configured</div>
-          <p className="text-xs color-secondary" style={{ maxWidth: 360 }}>Add a provider to start monitoring Assistant health.</p>
+          <div className="text-sm font-medium text-lx-text-primary mt-1">No providers configured</div>
+          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 360 }}>Add a provider to start monitoring Assistant health.</p>
           <Link to="/admin/assistant/providers" className="btn btn-primary btn-sm mt-1" style={{ textDecoration: "none" }}>Add provider</Link>
         </div>
       );
@@ -266,7 +266,7 @@ export function GatewayHealthSection() {
     <section className="card-panel mt-4" id="gateway-health">
       <div className="flex items-center justify-between mb-2" style={{ flexWrap: "wrap", gap: 8 }}>
         <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-          <h2 className="font-display text-lg weight-500 color-primary">Gateway health</h2>
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Gateway health</h2>
           {headerPill}
         </div>
         <button

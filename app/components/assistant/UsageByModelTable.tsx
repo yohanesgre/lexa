@@ -10,7 +10,7 @@ function LoadingRow() {
   return (
     <tr>
       <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
-        <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic", marginBottom: 8 }}>Loading usage…</div>
+        <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic", marginBottom: 8 }}>Loading usage…</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 360, margin: "0 auto" }}>
           <div style={{ height: 8, borderRadius: 4, background: "var(--lx-bg-subtle)", opacity: 0.9, animation: "pulse 1.2s ease-in-out infinite" }} />
           <div style={{ height: 8, borderRadius: 4, background: "var(--lx-bg-subtle)", opacity: 0.6, width: "85%", margin: "0 auto", animation: "pulse 1.2s ease-in-out infinite" }} />
@@ -40,24 +40,24 @@ function ModelRow({ row }: { row: AssistantByModelRow }) {
   if (zeroCalls) {
     return (
       <tr>
-        <td className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>{row.model}</td>
-        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>—</td>
-        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>—</td>
-        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>—</td>
-        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>0</td>
+        <td className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>{row.model}</td>
+        <td className="font-mono text-xs text-lx-text-muted" style={{ textAlign: "right" }}>—</td>
+        <td className="font-mono text-xs text-lx-text-muted" style={{ textAlign: "right" }}>—</td>
+        <td className="font-mono text-xs text-lx-text-muted" style={{ textAlign: "right" }}>—</td>
+        <td className="font-mono text-xs text-lx-text-muted" style={{ textAlign: "right" }}>0</td>
         <td style={{ textAlign: "right" }}>
-          <span className="font-mono text-xs color-muted">—</span>
+          <span className="font-mono text-xs text-lx-text-muted">—</span>
         </td>
       </tr>
     );
   }
   return (
     <tr>
-      <td className="font-mono text-xs weight-500 color-primary">{row.model}</td>
-      <td className="font-mono text-xs color-primary" style={{ textAlign: "right" }}>{row.tokens.toLocaleString()}</td>
-      <td className="font-mono text-xs color-primary" style={{ textAlign: "right" }}>${row.costUsd.toFixed(2)}</td>
-      <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{row.avgLatencyMs !== null ? `${row.avgLatencyMs} ms` : "—"}</td>
-      <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{row.calls}</td>
+      <td className="font-mono text-xs font-medium text-lx-text-primary">{row.model}</td>
+      <td className="font-mono text-xs text-lx-text-primary" style={{ textAlign: "right" }}>{row.tokens.toLocaleString()}</td>
+      <td className="font-mono text-xs text-lx-text-primary" style={{ textAlign: "right" }}>${row.costUsd.toFixed(2)}</td>
+      <td className="font-mono text-xs text-lx-text-secondary" style={{ textAlign: "right" }}>{row.avgLatencyMs !== null ? `${row.avgLatencyMs} ms` : "—"}</td>
+      <td className="font-mono text-xs text-lx-text-secondary" style={{ textAlign: "right" }}>{row.calls}</td>
       <td style={{ textAlign: "right" }}>
         <span className="font-mono text-xs" style={{ color: errorColor(row.errorRate) }}>{(row.errorRate * 100).toFixed(1)}%</span>
       </td>
@@ -69,17 +69,17 @@ function EmptyRow({ showHint, hasFilters, onRetry }: { showHint: boolean; hasFil
   return (
     <tr>
       <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
-        <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No usage for this window</div>
+        <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>No usage for this window</div>
         {hasFilters ? (
           onRetry ? (
             <button className="btn btn-ghost btn-sm" style={{ marginTop: 6 }} onClick={onRetry}>
               Clear filters
             </button>
           ) : (
-            <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>Try clearing filters</div>
+            <div className="font-micro text-2xs text-lx-text-muted" style={{ marginTop: 4 }}>Try clearing filters</div>
           )
         ) : showHint ? (
-          <div className="font-micro text-2xs color-muted" style={{ marginTop: 4 }}>No calls yet — send an Assistant request.</div>
+          <div className="font-micro text-2xs text-lx-text-muted" style={{ marginTop: 4 }}>No calls yet — send an Assistant request.</div>
         ) : null}
       </td>
     </tr>
@@ -123,7 +123,7 @@ export function UsageByModelTable({
   return (
     <section className="card-panel mt-4" style={{ overflow: "hidden", padding: 0 }}>
       <div style={{ padding: "16px 16px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 className="font-display text-base weight-500 color-primary">Usage by model</h2>
+        <h2 className="font-display text-base font-medium text-lx-text-primary">Usage by model</h2>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="settings-table settings-table--assistant-usage" style={{ width: "100%", tableLayout: "fixed" as const }}>

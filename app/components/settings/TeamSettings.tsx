@@ -99,7 +99,7 @@ function TeamSwitcher({ teams, activeTeamId, onSelect }: { teams: Team[]; active
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button type="button" className="nav-pill" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="weight-500" style={{ fontWeight: 500 }}>{active?.name ?? "Select team"}</span>
+        <span className="font-medium" style={{ fontWeight: 500 }}>{active?.name ?? "Select team"}</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}><path d="M6 9l6 6 6-6" /></svg>
       </button>
       {open && (

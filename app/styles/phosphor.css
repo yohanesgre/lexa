@@ -67,6 +67,11 @@
   --lx-status-danger: #FF4444;
   --lx-status-warning: #F0C040;
   --lx-status-success: #4ADE80;
+  --lx-status-info: #22D3EE;
+  /* Accent family: backs the @theme --color-lx-accent* aliases (dark values). */
+  --lx-accent: #F0C040;
+  --lx-accent-hover: #F5D76A;
+  --lx-accent-muted: #8A7020;
 
   --lx-font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
   --lx-font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -101,6 +106,8 @@
   --lx-status-danger: #DC2626;
   --lx-status-warning: #D4A017;
   --lx-status-success: #16A34A;
+  --lx-status-info: #0891B2;
+  --lx-accent: #D4A017;
 
   --lx-text-primary: #1A1714;
   --lx-text-secondary: #5C554F;
@@ -195,14 +202,14 @@
   --color-lx-text-warning: var(--lx-text-warning);
   --color-lx-text-success: var(--lx-text-success);
 
-  --color-lx-accent: #F0C040;
-  --color-lx-accent-hover: #F5D76A;
-  --color-lx-accent-muted: #8A7020;
+  --color-lx-accent: var(--lx-accent);
+  --color-lx-accent-hover: var(--lx-accent-hover);
+  --color-lx-accent-muted: var(--lx-accent-muted);
 
-  --color-lx-status-success: #4ADE80;
-  --color-lx-status-warning: #F0C040;
-  --color-lx-status-danger: #FF4444;
-  --color-lx-status-info: #22D3EE;
+  --color-lx-status-success: var(--lx-status-success);
+  --color-lx-status-warning: var(--lx-status-warning);
+  --color-lx-status-danger: var(--lx-status-danger);
+  --color-lx-status-info: var(--lx-status-info);
 
   --color-lx-badge-feature: var(--lx-badge-feature);
   --color-lx-badge-bug: var(--lx-badge-bug);
