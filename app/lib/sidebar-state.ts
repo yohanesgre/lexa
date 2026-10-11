@@ -25,9 +25,6 @@ export interface UseSidebarStateOptions {
   surface?: string | undefined;
   /** Window event that toggles this state — the cap band's pane toggle. */
   toggleEvent?: string | undefined;
-  /** Above this width the state is always open and cannot be closed: the
-   *  surface panes are part of the shell on big screens, drawers below it. */
-  alwaysOpenAbove?: number | undefined;
 }
 
 export interface SidebarState {
@@ -107,7 +104,6 @@ export function useSidebarState({
   storageValues,
   surface,
   toggleEvent,
-  alwaysOpenAbove,
 }: UseSidebarStateOptions): SidebarState {
   // Primitive values, so the store callbacks below stay referentially stable
   // across renders even though the option is an object literal at every call.
@@ -126,16 +122,6 @@ export function useSidebarState({
     getMediaSnapshot,
     () => true
   );
-
-  // Above `alwaysOpenAbove` the state is open by construction (the surface
-  // panes are part of the shell there, not a drawer).
-  const forcedQuery = `(min-width: ${alwaysOpenAbove ?? 999999}px)`;
-  const subscribeForced = useCallback(
-    (onChange: () => void) => subscribeMedia(forcedQuery, onChange),
-    [forcedQuery]
-  );
-  const getForcedSnapshot = useCallback(() => mediaSnapshot(forcedQuery), [forcedQuery]);
-  const forcedOpen = useSyncExternalStore(subscribeForced, getForcedSnapshot, () => false);
 
   const subscribeStorageForKey = useCallback(
     (onChange: () => void) => subscribeStorage(storageKey, onChange),
@@ -175,12 +161,11 @@ export function useSidebarState({
   );
 
   const toggle = useCallback(() => {
-    if (forcedOpen) return;
     if (isDesktop) setDesktopOpen(!desktopOpen);
     else setMobileOpen((value) => !value);
-  }, [forcedOpen, isDesktop, desktopOpen, setDesktopOpen]);
+  }, [isDesktop, desktopOpen, setDesktopOpen]);
 
-  const open = hydrated && (forcedOpen ? true : isDesktop ? desktopOpen : mobileOpen);
+  const open = hydrated && (isDesktop ? desktopOpen : mobileOpen);
 
   // The cap band's pane toggle is a separate component from the pane it opens
   // (it lives in the shell), so the pane publishes each state change instead of

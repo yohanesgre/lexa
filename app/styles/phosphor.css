@@ -1159,13 +1159,14 @@
   .board-page {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: calc(100svh - var(--lx-shell-band-h));
     overflow: hidden;
   }
   .board-area {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
   .board-header {
@@ -2650,7 +2651,7 @@
      height reads the cap band token (52px on phones). */
   .wiki-layout {
     display: flex;
-    height: calc(100dvh - var(--lx-shell-band-h));
+    height: calc(100svh - var(--lx-shell-band-h));
     overflow: hidden;
   }
 
@@ -6436,7 +6437,7 @@
    on phones, so no literal band height is pinned here. */
 .chat-layout {
   display: flex;
-  height: calc(100dvh - var(--lx-shell-band-h));
+  height: calc(100svh - var(--lx-shell-band-h));
   min-height: 0;
   /* The transcript column (The Reading-Measure Rule): 860px ≥1440px, 760px at
      1024–1439px, the full lane below. The freed pane width becomes symmetric
@@ -6649,6 +6650,15 @@
 @media (max-width: 767.98px) {
   .chat-header { padding: 12px 12px 0; }
   .chat-header-title { font-size: 16px; }
+  /* Touch: the header's icon controls take the 44px target and a real gap, so
+     pin / rename / delete are not a 32px cluster two pixels apart. */
+  .chat-header-actions { gap: 8px; }
+  .chat-header-actions .icon-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 /* Top fade — the mirror of the composer's bottom scrim: scrolled ink dissolves
    under the header instead of clipping at its edge. */
@@ -7774,10 +7784,10 @@
   width: 16px;
   height: 16px;
 }
-/* The cap band's pane toggle is the drawer's only open/close control below
-   1024px (the panes carry no collapse of their own). Above it the pane is part
-   of the shell and cannot be closed, so the control leaves the band. */
-@media (min-width: 768px) and (max-width: 1023.98px) {
+/* The cap band's pane toggle is the pane's only open/close control (the panes
+   carry no collapse of their own), so it is visible at every width from the
+   tablet band up — and on phones, icon-only. */
+@media (min-width: 768px) {
   .nav-sidebar-toggle {
     display: inline-flex;
   }
@@ -9373,7 +9383,7 @@ html {
   display: grid;
   grid-template-columns: var(--lx-rail-current) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
-  min-height: 100dvh;
+  min-height: 100svh;
   background: var(--lx-surface-ground);
   --lx-rail-current: var(--lx-rail-w);
 }
@@ -9446,7 +9456,7 @@ html {
   top: var(--lx-shell-band-h);
   align-self: start;
   width: var(--lx-rail-current);
-  height: calc(100dvh - var(--lx-shell-band-h));
+  height: calc(100svh - var(--lx-shell-band-h));
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -9608,7 +9618,7 @@ html {
   gap: 12px;
   flex: 1;
   min-width: 0;
-  padding: 0 24px;
+  padding: 0 16px;
 }
 .app-topbar-title {
   display: flex;
@@ -10316,9 +10326,11 @@ html {
   .app-nav .nav-links {
     display: flex;
   }
-  /* Chrome shares the page frame's content guide at every width. */
+  /* The chrome sits closer to the window edge than the page body does: the
+     owner wants the title and the account cluster at the edge, not inset like
+     the content column. */
   .app-topbar-inner {
-    padding: 0 16px;
+    padding: 0 12px;
   }
   .tm-dash-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -10420,6 +10432,15 @@ html {
   }
   .app-content {
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+  /* Full-height surfaces size themselves from the viewport, so the page-level
+     safe-area padding would push them 12px past it and scroll the document
+     (a stray page scrollbar on the chat, wiki and board). Their own chrome
+     already respects the inset. */
+  .app-content:has(> .chat-layout),
+  .app-content:has(> .wiki-layout),
+  .app-content:has(> .board-page) {
+    padding-bottom: 0;
   }
   .page-frame {
     padding: 14px 12px;
