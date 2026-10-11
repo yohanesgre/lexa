@@ -306,6 +306,8 @@ The world lends type, palette, density, and one signature move. It never supplie
 
 Density is the working loop. The dashboard holds six regions inside a 1440x900 viewport at trail-report density, lists run at 36px rows on desktop and 44px on touch, and every count is a tabular figure. Panels sit flat on the ground; only overlays lift. Motion is a surveyed redraw, never ambient: lines draw once per mount and stop.
 
+**Dial: ENERGY 2 / RHYTHM 2 / MOTION 1.** A working tool speaks clearly and stays quiet: signage plates label regions, patrol orange marks the one live action, the six dashboard regions differ in shape (strip, panorama, meters, rows) without competing for the eye, and motion exists only to mark a state change.
+
 **Key Characteristics:**
 - One mountain, two times of day: floodlit night map by default, printed day map on switch, same furniture in both.
 - Three type voices with strict jobs: Signage caps for plates and labels, Guide for all readable copy, Surveyor tabular figures for every number.
@@ -379,7 +381,7 @@ Note on the build record: the direction called for a Signage replacement pass th
 
 ## Layout
 
-The shell is a two-part grid: a sticky left rail and a content frame. The rail is 200px open and 48px collapsed on desktop, 168px in the mid band (768px to 1023.98px), and gone below 768px where a labelled `MENU` control opens the navigation as a full-screen panel with a scrim (never a bare hamburger hiding the only routes). The top bar is 48px minimum (52px on phones) and holds the project name with its slug, search, the theme toggle, the user keycap, and the primary action top-right.
+The shell is a two-part grid: a sticky left rail and a content frame. The rail is 200px open and 48px collapsed on desktop, 168px in the mid band (768px to 1023.98px), and gone below 768px where a labelled `MENU` control opens the navigation as a full-screen panel with a scrim (never a bare hamburger hiding the only routes). The top bar is 48px minimum (52px on phones) and holds the project name with its slug, the theme toggle, the user keycap, and the primary action top-right. The rail carries navigation and nothing else — no account cluster at its bottom — so the theme toggle and the user keycap stay within reach at every width, desktop and phone alike. Chrome pills (project switcher, theme, user keycap) run at row height, not at the compact in-page pill size: their label, value and chevron need the room.
 
 The page frame pads 10px 24px 16px on desktop and 14px 12px on phones. The dashboard grid is `minmax(0, 1.35fr) minmax(0, 1fr)`: Needs attention left, Column WIP right, collapsing to one column below 1024px. The first viewport at 1440x900 holds all six regions in contract order: shell (rail and top bar), trail report strip, trail profile panel, needs attention, column WIP meters, recent movement. On phones the order is trail report, profile as a pinned horizontal strip, needs attention, then WIP meters.
 

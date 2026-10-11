@@ -313,13 +313,6 @@ export function AppShell() {
             </NavLink>
           )}
         </div>
-        <div className="nav-spacer" />
-        <div className="app-rail-foot">
-          <div className="nav-right">
-            <ThemeToggle />
-            <UserMenu />
-          </div>
-        </div>
       </nav>
 
       <div className="app-frame">
@@ -344,8 +337,6 @@ export function AppShell() {
             <ProjectSwitcher routeType={routeType} />
           </div>
           <div className="nav-right">
-            {/* The rail carries theme + account above 768px; on a phone this
-                cluster is the only way to reach them. */}
             <div className="app-topbar-account">
               <ThemeToggle />
               <UserMenu />

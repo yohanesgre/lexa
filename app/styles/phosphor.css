@@ -7666,17 +7666,6 @@
   .app-nav.app-nav-menu-open + .app-nav-backdrop {
     display: block;
   }
-
-  /* The user menu (avatar + dropdown) in the nav-right — give it room.
-     On mobile the project switcher + runtime status are dropped: not enough
-     room in 375px. User menu + hamburger stay. */
-  .nav-right > :not(.user-menu) {
-    display: none;
-  }
-  .nav-right {
-    gap: 4px;
-    margin-left: auto;
-  }
 }
 
 /* ---- 2. Page frame ----
@@ -8302,11 +8291,6 @@
   }
   .app-nav.app-nav-menu-open + .app-nav-backdrop {
     display: block;
-  }
-  /* Right cluster: drop project switcher and runtime on tablet too, keep
-     theme + user. */
-  .nav-right > :not(.user-menu):not(.nav-pill) {
-    display: none;
   }
 }
 
@@ -9384,15 +9368,7 @@ html {
   align-items: center;
   min-width: 0;
 }
-.app-rail-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--lx-border-subtle);
-}
-.app-nav[data-open="false"] .nav-label,
-.app-nav[data-open="false"] .app-rail-foot .user-name {
+.app-nav[data-open="false"] .nav-label {
   /* Collapsed rail: the label leaves the layout but stays in the accessible
      name, so the icon-only plate is still announced. */
   position: absolute;
@@ -9406,12 +9382,6 @@ html {
 .app-nav[data-open="false"] .nav-link {
   justify-content: center;
   padding: 0;
-}
-.app-nav[data-open="false"] .app-rail-foot {
-  align-items: center;
-}
-.app-nav[data-open="false"] .nav-right {
-  flex-direction: column;
 }
 
 /* Nav links as signage plates. */
@@ -9499,8 +9469,23 @@ html {
   align-items: center;
   gap: 8px;
 }
+/* Top bar pills run at row height, not the compact 28px chrome size: the
+   label, the value and the chevron need room (the layered .nav-pill base
+   stays compact for in-page users such as the team switcher). */
+.app-topbar .nav-pill {
+  height: var(--lx-row-h);
+  min-width: var(--lx-row-h);
+  padding: 0 12px;
+  gap: 8px;
+}
+.app-topbar .nav-pill svg {
+  width: 14px;
+  height: 14px;
+}
 .app-topbar-account {
-  display: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .nav-pill-icon {
   padding: 0;
@@ -9509,8 +9494,8 @@ html {
   height: 32px;
 }
 .app-topbar .nav-pill-icon {
-  width: var(--lx-row-h-touch);
-  height: var(--lx-row-h-touch);
+  width: var(--lx-row-h);
+  height: var(--lx-row-h);
 }
 .app-topbar .nav-spacer,
 .app-nav .nav-spacer {
@@ -10226,10 +10211,9 @@ html {
   .app-topbar-switcher {
     display: none;
   }
-  .app-topbar-account {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  .app-topbar .nav-pill-icon {
+    width: var(--lx-row-h-touch);
+    height: var(--lx-row-h-touch);
   }
   .app-shell:not(.is-menu-open) .app-nav-menu,
   .app-shell:not(.is-menu-open) .app-nav-backdrop {
