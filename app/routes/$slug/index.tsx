@@ -319,12 +319,12 @@ interface ProfileGeometry {
 
 const RUN_TONES: Run["tone"][] = ["glacier", "gold", "plum", "meadow"];
 
-function buildProfile(milestones: Milestone[], board: Board | undefined): ProfileGeometry {
-  const height = 240;
+function buildProfile(milestones: Milestone[], board: Board | undefined, plotWidth: number): ProfileGeometry {
+  const height = 200;
   const padX = 28;
-  const valleyY = height - 44;
-  const ridgeTop = 34;
-  const basinY = valleyY - 60;
+  const valleyY = height - 40;
+  const ridgeTop = 28;
+  const basinY = valleyY - 46;
   const minRun = 64;
 
   const now = Date.now();
@@ -339,7 +339,10 @@ function buildProfile(milestones: Milestone[], board: Board | undefined): Profil
   const t0 = Math.min(now - 14 * DAY, ...(starts.length > 0 ? starts : [now - 14 * DAY]));
   const t1 = Math.max(now + 7 * DAY, ...(ends.length > 0 ? ends : [now + 7 * DAY]));
 
-  const width = Math.max(880, 200 + milestones.length * 210);
+  // The plot spans the card: the drawing gets the real width when the card is
+  // wider than the projection needs, so no region is dead space and the last
+  // peak/sprint labels have room.
+  const width = Math.max(plotWidth, 200 + milestones.length * 210);
   const xAt = (value: number) => padX + ((value - t0) / (t1 - t0 || 1)) * (width - 2 * padX);
 
   const ordered = [...milestones].sort((a, b) => {
@@ -361,7 +364,9 @@ function buildProfile(milestones: Milestone[], board: Board | undefined): Profil
       x: dueMs === null ? padX + (index + 1) * ((width - 2 * padX) / (ordered.length + 1)) : xAt(dueMs),
       y: basinY - rankY * (basinY - ridgeTop),
       dateLabel: milestone.dueAt
-        ? parseDateOnly(milestone.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        ? parseDateOnly(milestone.dueAt)
+            .toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            .replace(" ", "\u00A0")
         : "no target date",
     };
   });
@@ -410,7 +415,11 @@ function buildProfile(milestones: Milestone[], board: Board | undefined): Profil
     });
   }
 
-  const label = (value: number) => new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const label = (value: number) =>
+    new Date(value)
+      .toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      // Non-breaking space: a date never orphans its day onto the next line.
+      .replace(" ", "\u00A0");
 
   return {
     width,
@@ -488,21 +497,38 @@ function buildTrace(taskId: string, board: Board | undefined, geometry: ProfileG
 function TrailProfile({
   slug,
   milestones,
-  geometry,
+  board,
   loading,
   milestonesFailed,
   onRetry,
-  trace,
+  tracedId,
 }: {
   slug: string;
   milestones: Milestone[];
-  geometry: ProfileGeometry;
+  board: Board | undefined;
   loading: boolean;
   milestonesFailed: boolean;
   onRetry: () => void;
-  trace: TraceGeometry | null;
+  tracedId: string | null;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const [plotWidth, setPlotWidth] = useState(0);
+
+  // The panorama takes the card's real width, so the plot never stops short of
+  // its frame and the last labels have room inside it.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const measure = () => setPlotWidth(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loading, milestonesFailed, milestones.length]);
+
+  const geometry = useMemo(() => buildProfile(milestones, board, plotWidth), [milestones, board, plotWidth]);
+  const trace = tracedId ? buildTrace(tracedId, board, geometry) : null;
   const todayX = geometry.todayX;
 
   // Whole-cell repack: the strip opens pinned at today, on desktop and phone.
@@ -666,10 +692,13 @@ function TrailProfile({
                 style={{ "--tm-trace-len": String(trace.length) } as CSSProperties}
               />
               <circle className="tm-trace-head" cx={trace.points[0]!.x} cy={trace.points[0]!.y} r={5} />
+              {/* The trace label sits on the opposite side of the peak from the
+                  milestone's own label, so the two never overlap. */}
               <text
                 className="tm-trace-label"
-                x={trace.points[0]!.x + 9}
-                y={Math.max(14, trace.points[0]!.y - 20)}
+                x={trace.points[0]!.x + (trace.points[0]!.x > geometry.width - 150 ? 9 : -9)}
+                y={Math.max(12, trace.points[0]!.y - 22)}
+                textAnchor={trace.points[0]!.x > geometry.width - 150 ? "start" : "end"}
               >
                 {trace.label}
               </text>
@@ -685,13 +714,20 @@ function TrailProfile({
           )}
         </svg>
       </div>
+      {tracedId && !trace && (
+        <div className="tm-profile-body">
+          <div className="tm-void">
+            <span className="tm-void-title">This task has no route on the map</span>
+            <span>It sits in a lane with no sprint, so there is nothing to trace.</span>
+          </div>
+        </div>
+      )}
       <p className="tm-visually-hidden" aria-live="polite">
         {trace ? trace.summary : ""}
       </p>
     </section>
   );
 }
-
 // ── Region 4: Needs attention.
 function NeedsAttention({
   rows,
@@ -936,8 +972,6 @@ function ProjectDashboard() {
   }, [traced]);
 
   const liveMilestones = useMemo(() => milestones.filter((m) => !m.archivedAt), [milestones]);
-  const geometry = useMemo(() => buildProfile(liveMilestones, board.data), [liveMilestones, board.data]);
-  const trace = traced ? buildTrace(traced, board.data, geometry) : null;
   const priorities = board.data?.fieldConfig.priorities ?? [];
   const meters = useMemo(() => metersFor(board.data?.columns ?? [], board.data?.tasks ?? []), [board.data]);
   const moves = useMemo(() => (board.data ? movesFor(board.data, 6) : []), [board.data]);
@@ -1036,11 +1070,11 @@ function ProjectDashboard() {
             <TrailProfile
               slug={slug}
               milestones={liveMilestones}
-              geometry={geometry}
+              board={board.data}
               loading
               milestonesFailed={false}
               onRetry={() => void refetchMilestones()}
-              trace={null}
+              tracedId={null}
             />
             <div className="tm-dash-grid">
               <NeedsAttention
@@ -1088,19 +1122,12 @@ function ProjectDashboard() {
             <TrailProfile
               slug={slug}
               milestones={liveMilestones}
-              geometry={geometry}
+              board={board.data}
               loading={false}
               milestonesFailed={milestonesFailed}
               onRetry={() => void refetchMilestones()}
-              trace={trace}
+              tracedId={traced}
             />
-
-            {traced && !trace && (
-              <div className="tm-void">
-                <span className="tm-void-title">This task has no route on the map</span>
-                <span>It sits in a lane with no sprint, so there is nothing to trace.</span>
-              </div>
-            )}
 
             <div className="tm-dash-grid">
               <NeedsAttention
@@ -1115,8 +1142,6 @@ function ProjectDashboard() {
               <WipMeters slug={slug} meters={meters} loading={false} />
             </div>
 
-            <ProjectDescription description={health.project.description || board.data.project.description || ""} />
-
             <RecentMovement
               rows={moves}
               priorities={priorities}
@@ -1126,6 +1151,10 @@ function ProjectDashboard() {
               onTraceEnd={() => setTraced(null)}
               onOpen={openTask}
             />
+
+            {/* Kept, but after the six acceptance regions so the contract's
+                order reads down the page. */}
+            <ProjectDescription description={health.project.description || board.data.project.description || ""} />
           </>
         )}
       </div>

@@ -9124,14 +9124,14 @@ html {
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
-  padding: 12px;
+  padding: 10px;
 }
 .tm-section-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .tm-section-head > div {
   min-width: 0;
@@ -9144,9 +9144,9 @@ html {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 30px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: 9px;
   border: 1px solid var(--lx-run-rim);
   font-family: var(--lx-font-surveyor);
   font-size: 11px;
@@ -9160,10 +9160,10 @@ html {
 .tm-ribbon[data-tone="high"] { background: var(--lx-run-high); color: var(--lx-run-high-ink); }
 .tm-ribbon[data-tone="highest"] { background: var(--lx-run-highest); color: var(--lx-run-highest-ink); }
 .tm-ribbon-lg {
-  width: 22px;
+  width: 38px;
   height: 22px;
   font-size: 13px;
-  border-radius: 5px;
+  border-radius: 11px;
 }
 
 /* ---- Route key: KEY-123 in the surveyor voice ---- */
@@ -9225,7 +9225,7 @@ html {
   color: var(--lx-text-primary);
 }
 .tm-skel-row {
-  height: 36px;
+  height: 30px;
   border-radius: var(--lx-radius-plate);
 }
 .tm-skel-value {
@@ -9272,6 +9272,7 @@ html {
 .page-frame {
   width: 100%;
   min-width: 0;
+  padding: 20px 24px 24px;
 }
 
 /* The rail: 200px open, 48px collapsed, 168px in the mid band. */
@@ -9535,9 +9536,8 @@ html {
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
-  min-height: 56px;
+  min-height: 52px;
   overflow: hidden;
-  margin-bottom: 12px;
 }
 .tm-report-item {
   display: flex;
@@ -9590,14 +9590,13 @@ html {
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
   overflow: hidden;
-  margin-bottom: 12px;
 }
 .tm-profile-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px 6px;
+  padding: 10px 14px 4px;
 }
 .tm-profile-head > div {
   min-width: 0;
@@ -9611,7 +9610,7 @@ html {
 .tm-profile-scroll {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 4px 10px;
+  padding: 0 4px 8px;
 }
 .tm-profile svg {
   display: block;
@@ -9752,7 +9751,7 @@ html {
 }
 .tm-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: var(--lx-row-h);
@@ -9862,8 +9861,8 @@ html {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 4px 10px;
-  padding: 7px 10px;
+  gap: 3px 10px;
+  padding: 4px 10px;
   border: 1px solid transparent;
   border-radius: var(--lx-radius-plate);
   color: inherit;
@@ -9950,8 +9949,8 @@ html {
   grid-template-columns: 78px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  min-height: 32px;
-  padding: 3px 10px;
+  min-height: 30px;
+  padding: 1px 10px;
   border-radius: var(--lx-radius-plate);
   border: 1px solid transparent;
   background: transparent;
@@ -10031,7 +10030,27 @@ html {
 .tm-dash {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+/* Long-content state, drawn before layout: the three list regions cap their
+   height and scroll inside the card, so the six regions of the first viewport
+   stay in one screen at 1440x900 with real content (4 attention rows, 5 WIP
+   meters, 6 movement rows) instead of the page running long. */
+.tm-dash-grid > .tm-section,
+.tm-dash > .tm-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tm-rows,
+.tm-meters,
+.tm-moves {
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.tm-dash > .tm-section .tm-moves {
+  max-height: 116px;
 }
 .tm-dash-head {
   display: flex;
@@ -10248,9 +10267,13 @@ html {
     text-align: left;
   }
   .app-nav-menu-project-toggle svg {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     flex-shrink: 0;
+  }
+  /* The chevron keeps a 44x44 press box around it inside the toggle. */
+  .app-nav-menu-project-toggle {
+    min-height: var(--lx-row-h-touch);
   }
   .app-nav-menu-project-label {
     font-family: var(--lx-font-signage);
@@ -10343,6 +10366,13 @@ html {
   .tm-section {
     padding: 10px;
   }
+  /* Page-head controls are taps too. */
+  .tm-dash-head .btn,
+  .tm-dash-head .btn-sm {
+    min-height: var(--lx-row-h-touch);
+    height: auto;
+    padding: 0 12px;
+  }
   .tm-dash-head h1 {
     font-size: 17px;
     line-height: 22px;
@@ -10370,9 +10400,9 @@ html {
     display: none;
   }
   .app-topbar .nav-pill-icon {
-    width: 40px;
-    min-width: 40px;
-    height: 40px;
+    width: var(--lx-row-h-touch);
+    min-width: var(--lx-row-h-touch);
+    height: var(--lx-row-h-touch);
   }
   .app-topbar-account {
     gap: 4px;
