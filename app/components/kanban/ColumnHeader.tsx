@@ -90,9 +90,9 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
 
   return (
     <>
-      <div className="column-strip" style={{ background: column.color || "transparent" }} />
       <div className={cn("column-header", taskCount > 0 && "has-cards")}>
         <div className="flex items-center">
+          <div className="column-strip" style={{ background: column.color || "transparent" }} />
           <span className={cn("column-name", dimmed && "opacity-60")}>{column.name}</span>
           <span className={cn("column-count", dimmed && "opacity-60")}>{pad(taskCount)}</span>
         </div>

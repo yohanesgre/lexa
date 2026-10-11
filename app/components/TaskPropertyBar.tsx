@@ -45,6 +45,11 @@ type OptionItem = { id: string; label: string; color: string };
 // Known option colors map to the PHOSPHOR token classes (phosphor.css); custom
 // colors fall back to a data-driven inline color.
 const PRIORITY_BADGE_CLASS: Record<string, string> = {
+  "#C0392B": "pb-urgent",
+  "#B8862F": "pb-high",
+  "#4A6E8A": "pb-medium",
+  "#5F574B": "pb-low",
+  // Legacy pre-palette hexes still resolve, so old rows keep their badges.
   "#FF4444": "pb-urgent",
   "#F0C040": "pb-high",
   "#22D3EE": "pb-medium",
@@ -52,6 +57,10 @@ const PRIORITY_BADGE_CLASS: Record<string, string> = {
 };
 
 const PRIORITY_DOT_CLASS: Record<string, string> = {
+  "#C0392B": "priority-urgent",
+  "#B8862F": "priority-high",
+  "#4A6E8A": "priority-medium",
+  "#5F574B": "priority-low",
   "#FF4444": "priority-urgent",
   "#F0C040": "priority-high",
   "#22D3EE": "priority-medium",
@@ -59,6 +68,10 @@ const PRIORITY_DOT_CLASS: Record<string, string> = {
 };
 
 const TYPE_BADGE_CLASS: Record<string, string> = {
+  "#4E7C4A": "type-feature",
+  "#C0392B": "type-bug",
+  "#4A6E8A": "type-task",
+  "#A05A7A": "type-asset",
   "#4ADE80": "type-feature",
   "#FF4444": "type-bug",
   "#22D3EE": "type-task",

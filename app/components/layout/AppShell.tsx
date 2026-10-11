@@ -239,6 +239,7 @@ export function AppShell() {
   // assistant surface is absent. Suppressed on bare pages (no session).
   const { enabled: assistantEnabled } = useAssistantEnabled({ enabled: !isBare });
   const selectedProjectId = projects.find((p) => p.slug === selectedSlug)?.id;
+  const selectedProjectName = projects.find((p) => p.slug === selectedSlug)?.name ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectListOpen, setProjectListOpen] = useState(false);
 
@@ -333,7 +334,7 @@ export function AppShell() {
           {(routeType === "wiki" || routeType === "chat") && <PaneToggleButton routeType={routeType} />}
           <div className="app-topbar-title">
             <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
-            {selectedSlug && <span className="app-topbar-slug">{selectedSlug}</span>}
+            {selectedProjectName && <span className="app-topbar-project">{selectedProjectName}</span>}
           </div>
           <div className="nav-spacer" />
           <div className="app-topbar-switcher">

@@ -194,9 +194,9 @@ function TrailReport({
   const readingLabel = <span className="tm-visually-hidden">Reading the map</span>;
 
   return (
-    <section className="tm-report" aria-label="Trail report" aria-busy={loading}>
+    <section className="tm-report" aria-label="Status report" aria-busy={loading}>
       <div className="tm-report-item">
-        <span className="tm-plate">Trail report</span>
+        <span className="tm-plate">Status report</span>
         <span className="tm-report-value">
           {loading ? (
             <>
@@ -549,21 +549,22 @@ function TrailProfile({
   const head = (
     <div className="tm-profile-head">
       <div>
-        <h2 className="tm-plate-lg">Trail profile</h2>
+        <h2 className="tm-plate-lg">Timeline</h2>
         <p className="tm-sub">
           <span className="tm-sub-part">Milestones and sprint progress,{"\u00A0"}</span>
           <span className="tm-sub-part">{geometry.spanLabel}</span>
         </p>
       </div>
       <span className="tm-profile-note tm-figure">
-        {milestones.length} {milestones.length === 1 ? "peak" : "peaks"} · {geometry.runs.length} runs
+        {milestones.length} {milestones.length === 1 ? "milestone" : "milestones"} · {geometry.runs.length}{" "}
+        {geometry.runs.length === 1 ? "sprint" : "sprints"}
       </span>
     </div>
   );
 
   if (loading) {
     return (
-      <section className="tm-profile" aria-label="Trail profile" aria-busy="true">
+      <section className="tm-profile" aria-label="Timeline" aria-busy="true">
         {head}
         <div className="tm-profile-body" aria-hidden="true">
           {/* Skeleton ridge lines: the map draws before it answers. */}
@@ -580,7 +581,7 @@ function TrailProfile({
 
   if (milestonesFailed) {
     return (
-      <section className="tm-profile" aria-label="Trail profile">
+      <section className="tm-profile" aria-label="Timeline">
         {head}
         <div className="tm-profile-body">
           <div className="tm-void" data-tone="error">
@@ -597,12 +598,12 @@ function TrailProfile({
 
   if (milestones.length === 0) {
     return (
-      <section className="tm-profile" aria-label="Trail profile">
+      <section className="tm-profile" aria-label="Timeline">
         {head}
         <div className="tm-profile-body">
           <div className="tm-void">
-            <span className="tm-void-title">No peaks on the map yet</span>
-            <span>A milestone sets the target; its sprints become the runs down to Done.</span>
+            <span className="tm-void-title">No milestones yet</span>
+            <span>A milestone sets the target; its sprints run down to Done.</span>
             <Link to="/$slug/milestones" params={{ slug }} className="btn btn-ghost btn-sm">
               Add milestone
             </Link>
@@ -618,7 +619,7 @@ function TrailProfile({
     : "";
 
   return (
-    <section className="tm-profile" aria-label="Trail profile" data-tracing={trace ? "true" : "false"}>
+    <section className="tm-profile" aria-label="Timeline" data-tracing={trace ? "true" : "false"}>
       {head}
       <div className="tm-profile-scroll" ref={scrollerRef}>
         <svg
@@ -626,7 +627,7 @@ function TrailProfile({
           height={geometry.height}
           viewBox={`0 0 ${geometry.width} ${geometry.height}`}
           role="img"
-          aria-label={`Trail profile: ${milestones.length} milestone peaks, ${geometry.runs.length} sprint runs, today ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+          aria-label={`Timeline: ${milestones.length} ${milestones.length === 1 ? "milestone" : "milestones"}, ${geometry.runs.length} ${geometry.runs.length === 1 ? "sprint" : "sprints"}, today ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
         >
           <rect className="tm-valley" x={0} y={valley} width={geometry.width} height={geometry.height - valley} />
           <line className="tm-profile-axis" x1={0} y1={valley} x2={geometry.width} y2={valley} />
@@ -700,7 +701,7 @@ function TrailProfile({
 
           <line className="tm-today" x1={geometry.todayX} y1={20} x2={geometry.todayX} y2={geometry.height - 6} />
           <text className="tm-today-flag" x={geometry.todayX + 6} y={30}>
-            You are here
+            Today
           </text>
 
           {/* Route Trace: the hovered or focused task's own descent */}
@@ -901,7 +902,7 @@ function WipMeters({ slug, meters, loading }: { slug: string; meters: ColumnMete
   );
 }
 
-// ── Region 6: Recent movement.
+// ── Region 6: Recent activity.
 function RecentMovement({
   rows,
   priorities,
@@ -942,10 +943,10 @@ function RecentMovement({
   }, [rows.length]);
 
   return (
-    <section className="tm-section" aria-label="Recent movement" aria-busy={loading}>
+    <section className="tm-section" aria-label="Recent activity" aria-busy={loading}>
       <div className="tm-section-head">
         <div>
-          <h2 className="tm-plate-lg">Recent movement</h2>
+          <h2 className="tm-plate-lg">Recent activity</h2>
           <p className="tm-sub">Newest board changes first · the strip scrolls for more</p>
         </div>
       </div>
@@ -1080,7 +1081,6 @@ function ProjectDashboard() {
       <div className="tm-dash">
         <div className="tm-dash-head">
           <h1>{health.project.name}</h1>
-          <span className="tm-plate">Dashboard</span>
           <span className="nav-spacer" />
           <div className="tm-dash-actions">
             <button
