@@ -135,6 +135,13 @@ The delta shape and the state-matrix form: `templates/minimal-wireframe.html`.
 
 Mechanics:
 
+- Surfaces render with `wireframes/src/wireframe.css` — a schematic skin (layout + box model
+  only). No PHOSPHOR in a surface: no colour, type, radius, shadow, motion, **no icons**, no
+  inline `style="…"`. An icon is a design-system decision: name it in an annotation instead.
+  `wireframes/src/wireframes.css` + `wireframes/src/design-system.html` are the PHOSPHOR
+  reference that feeds the app's `docs/design-system.html` — never strip or restyle them, and
+  leave the partials they include byte-exact.
+
 - `git submodule update --init wireframes` first — no frontend work before the submodule is
   present.
 - Edit `wireframes/src/**` only (`dist/` is generated) → `bash wireframes/build.sh`.
