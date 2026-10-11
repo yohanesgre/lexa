@@ -42,21 +42,17 @@
   --lx-text-tertiary: #8DA0AC;
   --lx-text-muted: #7E929F;
   --lx-text-inverse: #0B1014;
-  --lx-text-link: #F2CE6B;
-  --lx-text-link-hover: #F7DD9A;
+  --lx-text-link: #F0C040;
+  --lx-text-link-hover: #F5D76A;
   --lx-text-danger: #FF9C8F;
   --lx-text-warning: #E8A33D;
   --lx-text-success: #8FD9A8;
 
   /* Patrol amber: primary action, focus ring, "You are here", today marker */
   --lx-accent: #F0C040;
-  --lx-accent-hover: #F6CF66;
+  --lx-accent-hover: #F5D76A;
   --lx-accent-ink: #10161B;
-  --lx-accent-muted: #8A6A16;
-  /* The fill the primary actions paint: the accent itself at night, a deeper
-     amber on the day map, so the ink that rides it stays readable in both. */
-  --lx-accent-fill: var(--lx-accent);
-  --lx-accent-fill-hover: var(--lx-accent-hover);
+  --lx-accent-muted: #C99B3C;
 
   --lx-bg-danger-subtle: rgba(210, 55, 47, 0.14);
   --lx-bg-warning-subtle: rgba(232, 163, 61, 0.14);
@@ -176,12 +172,12 @@
   --lx-surface-input: #FFFFFF;
   --lx-surface-overlay: rgba(23, 34, 43, 0.38);
   --lx-surface-tooltip: #17222B;
-  --lx-surface-selected: rgba(212, 160, 23, 0.14);
+  --lx-surface-selected: rgba(212, 160, 23, 0.12);
 
   --lx-border-default: #D5CFC1;
   --lx-border-subtle: #E4DED1;
   --lx-border-strong: #A9A192;
-  --lx-border-focus: #8A6A16;
+  --lx-border-focus: #7E5C00;
   --lx-border-input: #8C8577;
   /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
   --lx-border-input-hover: #5A6B76;
@@ -195,26 +191,24 @@
   --lx-text-tertiary: #6C7C86;
   --lx-text-muted: #5F707B;
   --lx-text-inverse: #FBFAF6;
-  --lx-text-link: #7A5E14;
-  --lx-text-link-hover: #5F4A10;
+  --lx-text-link: #7E5C00;
+  --lx-text-link-hover: #6B4E00;
   --lx-text-danger: #8E2018;
   --lx-text-warning: #7A4E0C;
   --lx-text-success: #14572B;
 
-  /* Patrol amber on the day map: a deeper mark ink for strokes and borders
-     (readable on paper) and a lighter fill for primary actions, where the ink
-     that rides it is dark. */
-  --lx-accent: #8A6A16;
-  --lx-accent-hover: #6F5410;
+  /* Brand amber on the day map. The fill is the plate yellow carrying dark ink;
+     the mark (ring, strokes, borders, links, caret) is the ink amber, because
+     one amber cannot be both readable on paper and a plate that reads as one. */
+  --lx-accent: #D4A017;
+  --lx-accent-hover: #C79412;
   --lx-accent-ink: #17222B;
-  --lx-accent-muted: #9A7413;
-  --lx-accent-fill: #D4A017;
-  --lx-accent-fill-hover: #BE8C0F;
+  --lx-accent-muted: #7E5C00;
 
   --lx-bg-danger-subtle: rgba(176, 42, 34, 0.10);
   --lx-bg-warning-subtle: rgba(154, 100, 16, 0.12);
   --lx-bg-success-subtle: rgba(31, 122, 58, 0.10);
-  --lx-bg-accent-subtle: rgba(212, 160, 23, 0.16);
+  --lx-bg-accent-subtle: rgba(212, 160, 23, 0.10);
 
   --lx-shadow-sm: 0 1px 2px rgba(23, 34, 43, 0.10);
   --lx-shadow-md: 0 6px 16px rgba(23, 34, 43, 0.12);
@@ -2172,11 +2166,16 @@
       border-color 100ms;
   }
   .btn-primary {
-    background: var(--lx-accent-fill);
+    background: var(--lx-accent);
     color: var(--lx-accent-ink);
   }
   .btn-primary:hover {
-    background: var(--lx-accent-fill-hover);
+    background: var(--lx-accent-hover);
+  }
+  /* Day map: the plate yellow alone cannot separate a button from paper
+     (1.87:1 vs the rail), so the day primary carries a 1px mark rim. */
+  [data-theme="light"] .btn-primary {
+    border-color: var(--lx-border-focus);
   }
   /* Pressed/selected toggle button (e.g. a provider preset, the attach trigger
      while its menu is open). */
@@ -9152,7 +9151,7 @@
   color: var(--lx-accent-ink);
 }
 html {
-  caret-color: var(--lx-accent);
+  caret-color: var(--lx-border-focus);
   background: var(--lx-surface-ground);
 }
 /* No native scrollbar arrow buttons anywhere: they are ~15px controls that no
@@ -9818,11 +9817,11 @@ html {
   fill: var(--lx-text-danger);
 }
 .tm-today {
-  stroke: var(--lx-accent);
+  stroke: var(--lx-border-focus);
   stroke-width: 2;
 }
 .tm-today-flag {
-  fill: var(--lx-accent);
+  fill: var(--lx-border-focus);
   font-family: var(--lx-font-signage);
   font-size: 10px;
   font-weight: 700;
@@ -9844,13 +9843,13 @@ html {
 /* Route Trace, the named interaction: 180ms linear draw per mount. */
 .tm-trace {
   fill: none;
-  stroke: var(--lx-accent);
+  stroke: var(--lx-border-focus);
   stroke-width: 2;
   stroke-linejoin: round;
   animation: tm-trace-draw 180ms linear both;
 }
 .tm-trace-head {
-  fill: var(--lx-accent);
+  fill: var(--lx-border-focus);
 }
 .tm-trace-label {
   font-family: var(--lx-font-signage);
@@ -9904,7 +9903,7 @@ html {
 }
 .tm-row.is-traced {
   background: var(--lx-bg-accent-subtle);
-  border-color: var(--lx-accent);
+  border-color: var(--lx-border-focus);
 }
 .tm-row-ribbon {
   display: inline-flex;
@@ -10098,7 +10097,7 @@ html {
 }
 .tm-move.is-traced {
   background: var(--lx-bg-accent-subtle);
-  border-color: var(--lx-accent);
+  border-color: var(--lx-border-focus);
 }
 .tm-move-time {
   font-family: var(--lx-font-surveyor);
