@@ -428,7 +428,7 @@ function buildProfile(milestones: Milestone[], board: Board | undefined, plotWid
     peaks,
     runs,
     todayX: Math.min(width - padX, Math.max(padX, xAt(now))),
-    spanLabel: `${label(t0)} – ${label(t1)}`,
+    spanLabel: `${label(t0)} · ${label(t1)}`,
   };
 }
 
@@ -542,7 +542,10 @@ function TrailProfile({
     <div className="tm-profile-head">
       <div>
         <h2 className="tm-plate-lg">Trail profile</h2>
-        <p className="tm-sub">Milestones and sprint progress · {geometry.spanLabel}</p>
+        <p className="tm-sub">
+          <span className="tm-sub-part">Milestones and sprint progress</span>
+          <span className="tm-sub-part tm-sub-range">· {geometry.spanLabel}</span>
+        </p>
       </div>
       <span className="tm-profile-note tm-figure">
         {milestones.length} {milestones.length === 1 ? "peak" : "peaks"} · {geometry.runs.length} runs
@@ -898,12 +901,34 @@ function RecentMovement({
   onTraceEnd: () => void;
   onOpen: (id: string) => void;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [rowCap, setRowCap] = useState<number | null>(null);
+
+  // The strip caps at three whole rows; the cap is measured from the rendered
+  // row so it can never slice one in half.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const measure = () => {
+      const first = el.querySelector<HTMLElement>(".tm-move");
+      if (!first) return;
+      const rowHeight = first.getBoundingClientRect().height;
+      const gap = 2;
+      if (rowHeight > 0) setRowCap(Math.round((rowHeight + gap) * 3 - gap));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [rows.length]);
+
   return (
     <section className="tm-section" aria-label="Recent movement" aria-busy={loading}>
       <div className="tm-section-head">
         <div>
           <h2 className="tm-plate-lg">Recent movement</h2>
-          <p className="tm-sub">Newest board changes first, three rows on a phone</p>
+          <p className="tm-sub">Newest board changes first · the strip scrolls for more</p>
         </div>
       </div>
       {loading ? (
@@ -918,7 +943,11 @@ function RecentMovement({
           <span>Task edits and GitHub stamps show up here.</span>
         </div>
       ) : (
-        <div className="tm-moves">
+        <div
+          className="tm-moves"
+          ref={listRef}
+          style={rowCap === null ? undefined : ({ "--tm-move-cap": `${rowCap}px` } as CSSProperties)}
+        >
           {rows.map((row, index) => (
             <button
               key={row.id}

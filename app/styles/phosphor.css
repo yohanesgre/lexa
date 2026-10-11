@@ -9079,8 +9079,14 @@
 }
 html {
   caret-color: var(--lx-accent);
-  scrollbar-color: var(--lx-scrollbar-thumb) var(--lx-scrollbar-track);
   background: var(--lx-surface-ground);
+}
+/* No native scrollbar arrow buttons anywhere: they are ~15px controls that no
+   touch rule can reach. The authored bar below is the only affordance. */
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 /* One global focus rule: 2px patrol-orange ring, 2px offset. */
 :focus-visible {
@@ -9115,6 +9121,14 @@ html {
   color: var(--lx-text-muted);
   margin: 0;
 }
+/* Sub-line parts wrap as whole units: a separator never strands at a line end. */
+.tm-sub-part {
+  display: inline-block;
+  white-space: nowrap;
+}
+.tm-sub-range {
+  margin-left: 6px;
+}
 .tm-figure {
   font-family: var(--lx-font-surveyor);
   font-variant-numeric: tabular-nums;
@@ -9124,14 +9138,14 @@ html {
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
-  padding: 10px;
+  padding: 8px;
 }
 .tm-section-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .tm-section-head > div {
   min-width: 0;
@@ -9144,9 +9158,9 @@ html {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 18px;
-  border-radius: 9px;
+  width: 34px;
+  height: 16px;
+  border-radius: 8px;
   border: 1px solid var(--lx-run-rim);
   font-family: var(--lx-font-surveyor);
   font-size: 11px;
@@ -9160,10 +9174,10 @@ html {
 .tm-ribbon[data-tone="high"] { background: var(--lx-run-high); color: var(--lx-run-high-ink); }
 .tm-ribbon[data-tone="highest"] { background: var(--lx-run-highest); color: var(--lx-run-highest-ink); }
 .tm-ribbon-lg {
-  width: 38px;
-  height: 22px;
+  width: 46px;
+  height: 20px;
   font-size: 13px;
-  border-radius: 11px;
+  border-radius: 10px;
 }
 
 /* ---- Route key: KEY-123 in the surveyor voice ---- */
@@ -9272,7 +9286,7 @@ html {
 .page-frame {
   width: 100%;
   min-width: 0;
-  padding: 20px 24px 24px;
+  padding: 10px 24px 16px;
 }
 
 /* The rail: 200px open, 48px collapsed, 168px in the mid band. */
@@ -9536,16 +9550,16 @@ html {
   background: var(--lx-surface-panel);
   border: 1px solid var(--lx-border-default);
   border-radius: var(--lx-radius-panel);
-  min-height: 52px;
+  min-height: 44px;
   overflow: hidden;
 }
 .tm-report-item {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  padding: 8px 14px;
+  padding: 6px 14px;
   border-right: 1px solid var(--lx-border-subtle);
 }
 .tm-report-item:last-child {
@@ -9610,7 +9624,7 @@ html {
 .tm-profile-scroll {
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 4px 8px;
+  padding: 0 0 6px;
 }
 .tm-profile svg {
   display: block;
@@ -9751,7 +9765,7 @@ html {
 }
 .tm-row {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: var(--lx-row-h);
@@ -9999,6 +10013,14 @@ html {
   white-space: nowrap;
 }
 
+/* Flex columns must not shrink their rows: a capped list scrolls, it never
+   squeezes a row into a shorter box than its content. */
+.tm-rows > *,
+.tm-meters > *,
+.tm-moves > * {
+  flex-shrink: 0;
+}
+
 /* ---- Utility classes this world adds ---- */
 .tm-visually-hidden {
   position: absolute;
@@ -10030,7 +10052,7 @@ html {
 .tm-dash {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 /* Long-content state, drawn before layout: the three list regions cap their
    height and scroll inside the card, so the six regions of the first viewport
@@ -10042,15 +10064,15 @@ html {
   flex-direction: column;
   min-height: 0;
 }
-.tm-rows,
-.tm-meters,
-.tm-moves {
-  max-height: 168px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.tm-dash > .tm-section .tm-moves {
-  max-height: 116px;
+/* Long-content state: only the movement strip caps, and it caps at a whole
+   row boundary (--tm-move-cap is measured from the rendered row height). Every
+   WIP meter and every attention row stays visible. */
+@media (min-width: 768px) {
+  .tm-dash > .tm-section .tm-moves {
+    max-height: var(--tm-move-cap, 148px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 .tm-dash-head {
   display: flex;
