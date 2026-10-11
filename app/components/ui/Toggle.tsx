@@ -23,7 +23,7 @@ export function Toggle({ checked, onChange, label, ariaLabel, disabled, classNam
         disabled={disabled}
         onClick={() => onChange(!checked)}
       />
-      {label != null && <span id={labelId} className="text-sm color-secondary">{label}</span>}
+      {label != null && <span id={labelId} className="text-sm text-lx-text-secondary">{label}</span>}
     </div>
   );
 }

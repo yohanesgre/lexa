@@ -38,22 +38,22 @@ export function AssistantRunsTable() {
   const documentCell = (r: AssistantRunRow) => {
     const project = projectById.get(r.projectId);
     const prefix = (
-      <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+      <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
         {runKindLabel(r)}
       </span>
     );
     const label = <>{prefix} · {r.documentTitle || "—"}</>;
     const target = runDocumentTarget(r);
-    if (!project || !target) return <span className="text-xs color-primary">{label}</span>;
+    if (!project || !target) return <span className="text-xs text-lx-text-primary">{label}</span>;
     if (target.kind === "task") {
       return (
-        <Link to="/$slug/tasks/$taskId" params={{ slug: project.slug, taskId: target.value }} className="text-xs color-primary" style={{ textDecoration: "none" }}>
+        <Link to="/$slug/tasks/$taskId" params={{ slug: project.slug, taskId: target.value }} className="text-xs text-lx-text-primary" style={{ textDecoration: "none" }}>
           {label}
         </Link>
       );
     }
     return (
-      <Link to="/$slug/wiki/$pageSlug" params={{ slug: project.slug, pageSlug: target.value }} className="text-xs color-primary" style={{ textDecoration: "none" }}>
+      <Link to="/$slug/wiki/$pageSlug" params={{ slug: project.slug, pageSlug: target.value }} className="text-xs text-lx-text-primary" style={{ textDecoration: "none" }}>
         {label}
       </Link>
     );
@@ -63,9 +63,9 @@ export function AssistantRunsTable() {
     <section className="card-panel" style={{ overflow: "hidden", padding: 0 }}>
       <div style={{ padding: "16px 16px 12px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 className="font-display text-base weight-500 color-primary">Recent runs</h2>
+          <h2 className="font-display text-base font-medium text-lx-text-primary">Recent runs</h2>
           {counts ? (
-            <div className="text-xs color-secondary mt-1">
+            <div className="text-xs text-lx-text-secondary mt-1">
               {total.toLocaleString()} runs · {counts.completed.toLocaleString()} done · {counts.failed.toLocaleString()} failed · {counts.running.toLocaleString()} running · {counts.queued.toLocaleString()} queued
               {counts.cancelled > 0 ? ` · ${counts.cancelled.toLocaleString()} cancelled` : ""}
             </div>
@@ -78,7 +78,7 @@ export function AssistantRunsTable() {
       </div>
 
       <div style={{ padding: "0 16px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Status</span>
+        <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Status</span>
         {STATUS_FILTERS.map((f) => {
           const active = status === f.value;
           return (
@@ -139,7 +139,7 @@ export function AssistantRunsTable() {
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={8} style={{ textAlign: "center", padding: "14px 12px" }}>
-                  <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No runs for these filters</div>
+                  <div className="font-mono text-xs text-lx-text-muted" style={{ fontStyle: "italic" }}>No runs for these filters</div>
                 </td>
               </tr>
             ) : (
@@ -149,13 +149,13 @@ export function AssistantRunsTable() {
                 return (
                   <Fragment key={r.id}>
                     <tr>
-                      <td className="font-mono text-xs color-secondary">{formatTimestamp(r.createdAt)}</td>
-                      <td className="text-xs weight-500 color-primary">{projectById.get(r.projectId)?.name ?? "—"}</td>
+                      <td className="font-mono text-xs text-lx-text-secondary">{formatTimestamp(r.createdAt)}</td>
+                      <td className="text-xs font-medium text-lx-text-primary">{projectById.get(r.projectId)?.name ?? "—"}</td>
                       <td>{documentCell(r)}</td>
-                      <td className="text-xs color-secondary">{r.agentName || "—"}</td>
-                      <td className="text-xs color-secondary">{r.skillName || "—"}</td>
+                      <td className="text-xs text-lx-text-secondary">{r.agentName || "—"}</td>
+                      <td className="text-xs text-lx-text-secondary">{r.skillName || "—"}</td>
                       <td><RunStatusChip status={r.status} /></td>
-                      <td className="font-mono text-xs color-secondary" style={{ textAlign: "right" }}>{formatDuration(r.startedAt, r.finishedAt)}</td>
+                      <td className="font-mono text-xs text-lx-text-secondary" style={{ textAlign: "right" }}>{formatDuration(r.startedAt, r.finishedAt)}</td>
                       <td style={{ textAlign: "right" }}>
                         {expandable ? (
                           <button
@@ -189,7 +189,7 @@ export function AssistantRunsTable() {
       </div>
 
       <div style={{ padding: "12px 16px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: "1px solid var(--lx-border-subtle)" }}>
-        <span className="text-xs color-secondary">Showing {rows.length} of {total.toLocaleString()} runs · newest first</span>
+        <span className="text-xs text-lx-text-secondary">Showing {rows.length} of {total.toLocaleString()} runs · newest first</span>
         <div className="flex items-center gap-2">
           <button type="button" className="btn btn-ghost btn-sm" disabled={cursorStack.length <= 1} onClick={() => setCursorStack((s) => s.slice(0, -1))}>Previous</button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={!data?.nextCursor} onClick={() => data?.nextCursor && setCursorStack((s) => [...s, data.nextCursor])}>Load more</button>

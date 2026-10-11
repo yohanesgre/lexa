@@ -45,7 +45,7 @@ export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 9999, background: "var(--lx-bg-success-subtle)", color: "var(--lx-text-success)", margin: "0 auto 12px" }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M20 6L9 17l-5-5" /></svg>
         </div>
-        <div className="text-sm weight-500 mb-1" style={{ fontWeight: 500 }}>Password set — sign in with your new password</div>
+        <div className="text-sm font-medium mb-1" style={{ fontWeight: 500 }}>Password set — sign in with your new password</div>
         <p className="text-xs text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Your account is ready — no session was started, so sign in to continue.</p>
         <button className="btn btn-primary w-full" style={{ height: 36 }} onClick={() => navigate({ to: "/login" })}>
           Sign in

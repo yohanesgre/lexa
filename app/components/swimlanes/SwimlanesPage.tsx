@@ -358,8 +358,8 @@ export function SwimlanesPage({ slug }: { slug: string }) {
       <div>
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="font-display text-2xl weight-600 color-primary">Swimlanes</h1>
-            <div className="font-micro text-2xs color-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            <h1 className="font-display text-2xl font-semibold text-lx-text-primary">Swimlanes</h1>
+            <div className="font-micro text-2xs text-lx-text-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
               {board.project.name} · {activeLaneCount(lanes)} sprints · Backlog system · {archivedLanes.length} archived
             </div>
           </div>
@@ -431,7 +431,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
 
         {(stateFilter === "archived" ? filtered.length > 0 : archivedLanes.length > 0) && (
           <div className="tasks-state-block" style={{ marginTop: 24 }}>
-            <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+            <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
               Archived lanes
             </div>
             <div className="sl-grid">

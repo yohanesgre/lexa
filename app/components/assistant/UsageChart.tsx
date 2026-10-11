@@ -188,7 +188,7 @@ export function UsageChart({
   return (
     <section className="card-panel mt-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-base weight-500 color-primary">Usage by day</h2>
+        <h2 className="font-display text-base font-medium text-lx-text-primary">Usage by day</h2>
       </div>
       <div className="chart-shell" ref={shellRef}>
         <canvas
@@ -202,7 +202,7 @@ export function UsageChart({
         />
         {overlay ? (
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: showRetry ? "auto" : "none", padding: 12 }}>
-            <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", opacity: isLoading ? 0.9 : 0.85, fontStyle: isLoading ? "italic" : undefined }}>
+            <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", opacity: isLoading ? 0.9 : 0.85, fontStyle: isLoading ? "italic" : undefined }}>
               {overlay}
             </div>
             {showRetry && onRetry ? (
@@ -235,7 +235,7 @@ export function UsageChart({
           <span style={{ width: 10, height: 3, background: "var(--lx-border-focus)", borderRadius: 2, display: "inline-block" }} />
           cost
         </span>
-        <span className="font-micro text-2xs color-muted" style={{ marginLeft: 8 }}>
+        <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: 8 }}>
           Hover shows day tooltip: tokens · cost · latency · calls · error_rate
         </span>
       </div>

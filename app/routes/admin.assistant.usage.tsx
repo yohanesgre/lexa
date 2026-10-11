@@ -51,7 +51,7 @@ function AssistantUsageRoute() {
 
       <section className="card-panel mt-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-display text-base weight-500 color-primary">Filters</h2>
+          <h2 className="font-display text-base font-medium text-lx-text-primary">Filters</h2>
         </div>
         <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
           <div className="field" style={{ marginBottom: 0 }}>
