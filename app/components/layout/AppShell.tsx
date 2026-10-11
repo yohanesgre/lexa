@@ -299,6 +299,21 @@ export function AppShell() {
             <LexaMark />
             <span className="nav-label">Lexa</span>
           </Link>
+          {rail.isDesktop && (
+            <button
+              type="button"
+              className="app-rail-toggle"
+              aria-label={rail.open ? "Collapse navigation" : "Expand navigation"}
+              aria-expanded={rail.open}
+              onClick={rail.toggle}
+            >
+              {rail.open ? (
+                <PanelLeftClose aria-hidden="true" focusable="false" />
+              ) : (
+                <PanelLeft aria-hidden="true" focusable="false" />
+              )}
+            </button>
+          )}
         </div>
         <div className="app-topbar-inner">
           <button
@@ -347,23 +362,6 @@ export function AppShell() {
             </NavLink>
           )}
         </div>
-        <div className="nav-spacer" />
-        {rail.isDesktop && (
-          <button
-            type="button"
-            className="app-rail-toggle"
-            aria-label={rail.open ? "Collapse navigation" : "Expand navigation"}
-            aria-expanded={rail.open}
-            onClick={rail.toggle}
-          >
-            {rail.open ? (
-              <PanelLeftClose aria-hidden="true" focusable="false" />
-            ) : (
-              <PanelLeft aria-hidden="true" focusable="false" />
-            )}
-            <span className="nav-label">{rail.open ? "Collapse" : "Expand"}</span>
-          </button>
-        )}
       </nav>
 
       <div className="app-frame">

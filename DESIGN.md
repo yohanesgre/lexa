@@ -202,6 +202,18 @@ spacing:
   space-6: "24px"
   row-h: "36px"
   row-h-touch: "44px"
+layout:
+  # Shell geometry: the cap band, the rail, the surface pane, the reading measure.
+  shell-band-h: "48px"
+  shell-band-h-phone: "56px"
+  rail-w: "200px"
+  rail-w-mid: "168px"
+  rail-w-collapsed: "48px"
+  pane-w: "260px"
+  pane-w-wide: "280px"
+  pane-drawer-w: "288px"
+  transcript-w: "860px"
+  measure-body: "75ch"
 components:
   signage-plate:
     textColor: "{colors.ink-secondary-night}"
@@ -381,15 +393,23 @@ Note on the build record: the direction called for a Signage replacement pass th
 
 ## Layout
 
-The shell is a two-part grid: a sticky left rail and a content frame. The rail is 200px open and 48px collapsed on desktop, 168px in the mid band (768px to 1023.98px), and gone below 768px where a labelled `MENU` control opens the navigation as a full-screen panel with a scrim (never a bare hamburger hiding the only routes). The rail carries navigation and nothing else — no account cluster at its bottom — and its head carries the brand: the LX monogram (`docs/brand/lexa-mark.svg`, inlined through the `--lx-brand-plate` / `--lx-brand-ink` tokens) beside the signage wordmark. The brand plate is the one colour in the app that is not the world's: identity is the brand's job, and the mark ships its own plate (the deeper day plate on the light theme, as the favicon does).
+The shell is one frame built from a cap band and a two-part grid below it. The cap band is 48px tall (56px on phones) and spans the whole window: its left cell is the brand cell (rail width), its right segment is the top-bar row, and its bottom hairline runs the full window width while the rail's right hairline begins beneath the band — the two hairlines meet in a T at (rail width, band height) and never cross (The One Band Rule). Below the band: a sticky left rail and a content frame. The rail is 200px open and 48px collapsed on desktop, 168px in the mid band (768px to 1023.98px), and gone below 768px where a labelled `MENU` control opens the navigation as a full-screen panel with a scrim (never a bare hamburger hiding the only routes). One navigation affordance per band: the labelled menu is phone-only and the mid band keeps the rail. The rail carries navigation and nothing else — no account cluster at its bottom. The brand cell carries the lockup — the LX monogram (`docs/brand/lexa-mark.svg`, inlined through the `--lx-brand-plate` / `--lx-brand-ink` tokens) 8px from the signage wordmark — and, at the cell's right edge, the rail's collapse control: icon-only at 32px, the sidebar's own top-right, where a reader looks for it. Collapsed, the cell is that control alone, centred with 8px clearance, and the mark returns when the rail opens. The brand plate is the one colour in the app that is not the world's: identity is the brand's job, and the mark ships its own plate (the deeper day plate on the light theme, as the favicon does).
 
-The top bar is 48px minimum (52px on phones) and holds the project name with its slug, the project switcher, the theme toggle and the user keycap — **no primary action of its own**: creating work belongs to the surface that owns it (each board column's add, the tasks list's `New task`), so a screen shows one patrol-orange action, the one it means. Chrome pills (project switcher, theme, user keycap) run at row height, not at the compact in-page pill size: their label, value and chevron need the room. The chrome rides the frame's own inline gutter (24px desktop, 16px tablet, 12px phone) and stays at the window's edges — the narrow content column is a reading measure for the page body, never a cage the top bar is pulled into.
+The top bar is the cap band's right segment (48px minimum, 56px on phones) and holds the pane toggle on chat and wiki below 1024px only (labelled `Threads` / `Pages`, icon-only below 768px), the project name with its slug, the project switcher, the theme toggle and the user keycap — **no primary action of its own**: creating work belongs to the surface that owns it (each board column's add, the tasks list's `New task`), so a screen shows one patrol-amber action, the one it means. Chrome pills run **one step below the row** (32px on desktop, 44px on touch): at row height they filled the band and read as pressing its edges. The chrome rides the frame's own inline gutter (24px desktop, 16px tablet, 12px phone) and stays at the window's edges — the narrow content column is a reading measure for the page body, never a cage the top bar is pulled into.
+
+On chat and wiki a second column joins the left system instead of standing beside it: the threads pane and the wiki page tree dock under the cap band against the rail as one rail-toned block — one subtle hairline between nav group and pane, one default hairline at the system's outer edge — at 280px (≥1440px) or 260px (1024–1439px), or as a 288px drawer beneath the band below 1024px (The One Left System Rule). The pane shares the rail's row geometry: 36px rows (44px touch), 8px symmetric side insets, 4px gaps. No collapsed stub band exists. Above 1024px the pane is part of the shell and is always shown; the band's labelled `Threads` / `Pages` control exists only below that width, where it owns the drawer's open and close. The content lane keeps its reading measure at 75ch for prose and message text (wiki prose, chat bubbles) while code, diffs, tables and the profile panorama may span their column; freed width becomes symmetric air and masthead width, never longer body lines (The Reading-Measure Rule).
 
 The page frame pads 10px 24px 16px on desktop and 14px 12px on phones; `page-frame-narrow` caps the *body* at `--lx-content-max` (1200px) for reading and form-heavy surfaces — a measure for the page body, never a shell width. The dashboard grid is `minmax(0, 1.35fr) minmax(0, 1fr)`: Needs attention left, Column WIP right, collapsing to one column below 1024px. The first viewport at 1440x900 holds all six regions in contract order: shell (rail and top bar), trail report strip, trail profile panel, needs attention, column WIP meters, recent movement. On phones the order is trail report, profile as a pinned horizontal strip, needs attention, then WIP meters.
 
 Density is trail-report density. List rows are 36px on desktop and never below 44px on touch. The spacing scale is 4px with steps 4, 8, 12, 16, and 24. Interactive targets are at least 32px on desktop and 44px on touch. The horizontal scrollers (report strip, profile panorama) scroll inside their own cards so a wide panorama never widens the page. Mobile chrome respects `env(safe-area-inset-bottom)`, and nothing overflows horizontally at 390px or 1440px.
 
 ### Named Rules
+**The One Band Rule.** The cap band is one 48px band (56px on phones) across the whole window: the brand cell and the top-bar row share its rail tone and its midline, its bottom hairline runs the full window width, and the rail's right hairline starts below the band so the borders meet in a T at (rail width, band height) and never cross. The brand cell carries the lockup plus the rail's collapse control at its right edge — icon-only, the sidebar's own top-right — and collapsed the cell is that control alone.
+
+**The One Left System Rule.** On chat and wiki the rail and the surface pane (threads, page tree) form one rail-toned left system below the cap band: a subtle hairline divides nav group from pane, one default hairline runs the system's outer edge, the pane shares the rail's row geometry (36px rows, 8px symmetric insets, 4px gaps), and no collapsed stub band exists — the pane is always shown at ≥1024px (280px ≥1440px, 260px below) and a 288px drawer beneath the band under it, where the top bar's `Threads` / `Pages` control owns open and close.
+
+**The Reading-Measure Rule.** Readable text caps at 75ch (wiki prose, chat message text); code, diffs, tables and the profile panorama may span their column; the slack beside a measure is symmetric designed air, and the measure never stretches to fill it.
+
 **The Whole-Cell Repack Rule.** Every cap and grid repacks in whole cells. A scroller is capped to whole rows measured from the rendered row height (the movement strip reads its cap from the DOM, so it lands on three 40px rows or five 30px rows, never a half row), and a card is never cut.
 
 **The Guide-Word Rule.** Every panel head names the span in view. The Trail Profile sub-line reads `Milestones and sprint progress,` followed by the live date span (`Sep 27 to Nov 21`), and it recomputes as content passes.
@@ -425,11 +445,17 @@ The form language is printed map furniture. Section panels and the profile card 
 - **Use:** trail-report labels, region heads with their plain sub-line beneath, rail links, mobile menu links.
 
 ### App Rail and Top Bar
-- **Style:** the rail is a flat rail-coloured column (200px open, 48px collapsed, 168px in the mid band) with 36px nav rows as signage plates. The top bar is rail-coloured with a 1px bottom hairline.
+- **Style:** the cap band is one 48px rail-coloured strip across the window (52px on phones): the brand cell (rail width — 200px open, 48px collapsed, 168px mid band) at left, the top-bar row at right, one full-width 1px bottom hairline under both, and the rail's right hairline beginning below the band (The One Band Rule). The rail below carries 36px nav rows as signage plates at 4px gaps and one foot row: the collapse control.
 - **Default / hover / active:** links rest in secondary ink on transparent; hover fills the card-hover tone and lifts the text to primary ink; the active link takes the card-active fill with a strong 1px border. Pressed states use the card-active fill.
-- **Collapsed rail:** labels leave the layout but stay in the accessible name, so the icon-only plate is still announced.
-- **Mobile:** below 768px the rail is replaced by a labelled `MENU` control (44px target) opening a full-screen nav panel over a scrim; menu links are 44px minimum rows in large-plate caps.
-- **Copy:** `Dashboard`, `Board`, `Tasks`, `Milestones`, `Wiki`, `Chat`, `Settings`, `New task`, `MENU`, `Theme`.
+- **Collapsed rail:** labels leave the layout but stay in the accessible name, so the icon-only plate is still announced. The brand cell carries the 24px mark alone (12px clearance each side) and the foot control becomes a 40px-wide icon plate whose glyph sits ≥12px from both rail edges; no resting ink comes within 8px of a rail edge.
+- **Mobile:** below 768px the rail is replaced by a labelled `MENU` control (44px target) opening a full-height nav panel over a scrim; menu links are 44px minimum rows in large-plate caps, and the panel head is the brand row (mark plus `Lexa`) above the project switcher block. In the mid band (768–1023.98px) the 168px rail with labelled links is the only navigation — the labelled menu is phone-only.
+- **Copy:** `Dashboard`, `Board`, `Tasks`, `Milestones`, `Swimlanes`, `Wiki`, `Chat`, `Menu`, `Threads`, `Pages`, `Collapse`, `Expand`, `Theme`, `Project`, `Project settings`, `Create new project`.
+
+### Surface Pane (Threads and Page Tree)
+- **Character:** on chat and wiki a second column of the same left system — the threads list and the wiki page tree join the rail instead of standing beside it (The One Left System Rule).
+- **Shape:** rail-toned (`--lx-surface-elevated`), 280px wide at ≥1440px and 260px at 1024–1439px, docked under the cap band; a 1px subtle hairline divides it from the nav group and one 1px default hairline marks the left system's outer edge. Below 1024px it becomes a 288px drawer beneath the band over the overlay scrim. Interior shares the rail's row geometry: 8px symmetric side insets, 4px gaps, 36px rows (44px touch), a 36px head row (`THREADS` / `PAGES` plate plus a surveyor-micro count), then control rows (`New chat` ghost button and search on chat; search and `New page` on wiki) and the scrolling row list.
+- **States:** docked · drawer (Escape, scrim, and the top bar's `Threads` / `Pages` toggle close it) · closed (no stub band; the content lane takes the width) · loading (30px skeleton rows) · empty (`No threads yet — start a conversation`, `No pages yet`) · search-no-match (`No threads match` / `No pages match` with `Clear search`) · error (danger void `Threads could not be read.` / `Pages could not be read.` with `Retry`) · long content (internal scroll, ellipsised titles, 16px tree indent per level).
+- **Copy:** `THREADS`, `PAGES`, `New chat`, `Search threads…`, `New page`, `Clear search`, `Retry`.
 
 ### Trail Report Strip
 - **Character:** today's conditions on one row, plain labels over real numbers.

@@ -18,7 +18,8 @@ import { isNarrowViewport } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { ThreadsSidebar } from "./ThreadsSidebar";
 import type { AssistantReasoningEffort, AssistantToolPermissionMode } from "../../../shared/assistant";
-import { useChatSidebar, useChatAutoScroll } from "./assistant-chat-hooks";
+import { useChatAutoScroll } from "./assistant-chat-hooks";
+import { useSidebarState } from "../../lib/sidebar-state";
 import { useChatQueue } from "./useChatQueue";
 import { ChatLanding } from "./ChatLanding";
 import {
@@ -91,10 +92,18 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   );
   const { projects, projectFromList, projectError, project, resolved, projectId, settings, settingsLoading } =
     useChatProjectQueries({ slug });
-  // Sidebar visibility — the collapse control lives INSIDE the sidebar
-  // (assistant-chat.html, mirroring the wiki sidebar); persists in localStorage
-  // lexa-chat-sidebar.
-  const { sidebarOpen, setSidebarOpen, toggleSidebar } = useChatSidebar();
+  // The threads pane: docked or absent, toggled by the cap band's labelled
+  // `Threads` control (which reads the same `lexa:pane-threads` key). Desktop
+  // intent persists; the below-1024px drawer open is ephemeral.
+  const { open: sidebarOpen, toggle: toggleSidebar } = useSidebarState({
+    storageKey: "lexa:pane-threads",
+    defaultOpen: true,
+    breakpoint: 1024,
+    alwaysOpenAbove: 1024,
+    storageValues: { open: "open", closed: "closed" },
+    surface: "threads",
+    toggleEvent: "lexa:toggle-threads-sidebar",
+  });
 
   // Invalid slug (deleted project / stale bookmark): fall back to the first
   // available workspace project instead of rendering a dead shell. Waits for
@@ -644,8 +653,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         onSelect={selectThread}
         onNewChat={startNewChat}
         open={sidebarOpen}
-        onToggle={toggleSidebar}
-        onClose={() => setSidebarOpen(false)}
+        onClose={toggleSidebar}
       />
       <main className="chat-shell">
       <ChatHeader

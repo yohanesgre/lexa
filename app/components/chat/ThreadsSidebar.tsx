@@ -1,20 +1,21 @@
 import { useEffect, useMemo, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Plus } from "lucide-react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { matchMedia } from "../../lib/viewport";
 import type { AssistantChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 
-// Transcribed from assistant-chat.html (Threads sidebar): persistent left
-// column — collapse control + "New chat" pinned top (wiki arrangement), search
-// below, thread rows ordered pinned-first then most-recent, active row
-// accent-tinted. Rows are NAVIGATION-ONLY: a click opens the thread and the
-// pin glyph shows the pinned state; pin/rename/delete live in the chat header.
-// Searching splits into Pinned/Recent sections with client-side snippet
-// bolding over the server-filtered (?q=) snippet. Collapsed (`open=false`)
-// swaps the column for a 36px icon rail whose panel button restores it — the
-// wiki sidebar's exact affordance, at every viewport width. Below 900px the
-// expanded column is an overlay drawer — `open` toggles it, backdrop/Esc
-// dismiss.
+// The chat surface pane (The One Left System Rule): docked under the cap band
+// against the rail at ≥1024px (280px ≥1440, 260px below), a 288px drawer under
+// the band over the scrim below that. It is docked or absent — no collapsed
+// stub band — and the cap band's labelled `Threads` toggle owns open/close, so
+// the pane carries no collapse control of its own. Interior shares the rail's
+// row geometry: 8px symmetric insets, 4px gaps, a 36px head row (`THREADS` +
+// count), a 36px `New chat` ghost button, a 36px search field, then the rows.
+// Rows are NAVIGATION-ONLY: a click opens the thread and the pin glyph shows
+// the pinned state; pin/rename/delete live in the chat header. Searching splits
+// into Pinned/Recent sections with client-side snippet bolding over the
+// server-filtered (?q=) snippet.
 interface ThreadsSidebarProps {
   threads: AssistantChatThreadSummary[];
   activeChatId: string;
@@ -23,14 +24,13 @@ interface ThreadsSidebarProps {
   onSelect: (chatId: string) => void;
   onNewChat: () => void;
   open?: boolean | undefined;
-  onToggle?: () => void;
   onClose?: () => void;
 }
 
-// Drawer dismissal is a <900px affordance — desktop collapse is owned by the
-// sidebar's own collapse control. Safe under jsdom (no matchMedia → desktop).
-function isMobileViewport(): boolean {
-  return matchMedia("(max-width: 899.98px)");
+// Escape and the scrim dismiss the drawer only; at ≥1024px the pane is docked
+// and clicking a row never closes it. Safe under jsdom (no matchMedia → docked).
+function isDrawerViewport(): boolean {
+  return matchMedia("(max-width: 1023.98px)");
 }
 
 function PinIcon() {
@@ -68,15 +68,14 @@ export function ThreadsSidebar({
   onSelect,
   onNewChat,
   open = true,
-  onToggle,
   onClose,
 }: ThreadsSidebarProps) {
-  // Drawer Esc-dismiss (<900px). Thread actions — including the delete
-  // dialog's own Escape handling — live in the header, not this sidebar.
+  // Drawer Esc-dismiss (<1024px). Thread actions — including the delete
+  // dialog's own Escape handling — live in the header, not this pane.
   useEffect(() => {
     if (!open || !onClose) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && isMobileViewport()) onClose?.();
+      if (event.key === "Escape" && isDrawerViewport()) onClose?.();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -99,13 +98,13 @@ export function ThreadsSidebar({
           tabIndex={0}
           onClick={() => {
             onSelect(thread.chatId);
-            if (isMobileViewport()) onClose?.();
+            if (isDrawerViewport()) onClose?.();
           }}
           onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => {
             if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
               if (e.key === " ") e.preventDefault();
               onSelect(thread.chatId);
-              if (isMobileViewport()) onClose?.();
+              if (isDrawerViewport()) onClose?.();
             }
           }}
         >
@@ -132,76 +131,48 @@ export function ThreadsSidebar({
     );
   };
 
-  // Scroll lock: plain function called from an effect (not a hook — rules
-  // of hooks). The lock itself is gated on open + mobile viewport.
-  useEffect(() => lockScroll(open && isMobileViewport()), [open]);
-
-  // Collapsed: 36px icon rail with the restore control — wiki sidebar's
-  // exact affordance (WikiLayout.tsx), kept at every viewport width so
-  // re-expansion never depends on a control outside the sidebar.
-  if (!open) {
-    return (
-      <aside className="threads-sidebar collapsed" aria-label="Threads">
-        <button
-          type="button"
-          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
-          onClick={onToggle}
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-        </button>
-      </aside>
-    );
-  }
+  // Body scroll locks only while the drawer covers the chat.
+  useEffect(() => lockScroll(open && isDrawerViewport()), [open]);
 
   return (
     <>
       {open && <button type="button" className="threads-sidebar-backdrop" aria-label="Close threads" onClick={() => onClose?.()} />}
-      <aside className={`threads-sidebar ${open ? "open" : "collapsed"}`} aria-label="Threads">
-      <div className="threads-sidebar-header">
-        {/* Collapse control lives INSIDE the sidebar (top of header) — mirrors wiki.html */}
-        <div className="flex items-center gap-2">
-          <button type="button" className="btn btn-ghost-accent btn-sm" style={{ flex: 1, justifyContent: "center" }} onClick={onNewChat}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14m-7-7h14" /></svg>
+      <aside id="threads-pane" className={`threads-sidebar${open ? " open" : ""}`} aria-label="Threads">
+        <div className="pane-top">
+          <div className="pane-head">
+            <span className="pane-head-label">Threads</span>
+            <span className="pane-head-count">{String(threads.length).padStart(3, "0")}</span>
+          </div>
+          <button type="button" className="btn btn-ghost pane-action" onClick={onNewChat}>
+            <Plus size={13} strokeWidth={1.5} aria-hidden="true" />
             New chat
           </button>
-          <button
-            type="button"
-            className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
-            onClick={onToggle}
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-          </button>
+          <input
+            className="threads-search pane-search-input"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search threads…"
+            aria-label="Search threads"
+          />
         </div>
-        <input
-          className="threads-search w-full"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search threads…"
-          aria-label="Search threads"
-        />
-      </div>
 
-      <div className="threads-sidebar-list">
-        {threads.length === 0 ? (
-          <div className="empty-box" style={{ margin: 8, border: "none", background: "transparent", padding: "24px 16px" }}>
-            <span className="text-xs text-lx-text-secondary">{searching ? "No chats match your search" : "No threads yet — start a conversation"}</span>
-          </div>
-        ) : searching ? (
-          <>
-            {pinned.length > 0 && <div className="dropdown-label">Pinned</div>}
-            {pinned.map(renderRow)}
-            {pinned.length > 0 && recent.length > 0 && <div className="dropdown-label" style={{ marginTop: 6 }}>Recent</div>}
-            {recent.map(renderRow)}
-          </>
-        ) : (
-          threads.map(renderRow)
-        )}
-      </div>
-    </aside>
+        <div className="threads-sidebar-list">
+          {threads.length === 0 ? (
+            <div className="empty-box" style={{ margin: 8, border: "none", background: "transparent", padding: "24px 16px" }}>
+              <span className="text-xs text-lx-text-secondary">{searching ? "No chats match your search" : "No threads yet — start a conversation"}</span>
+            </div>
+          ) : searching ? (
+            <>
+              {pinned.length > 0 && <div className="dropdown-label">Pinned</div>}
+              {pinned.map(renderRow)}
+              {pinned.length > 0 && recent.length > 0 && <div className="dropdown-label" style={{ marginTop: 6 }}>Recent</div>}
+              {recent.map(renderRow)}
+            </>
+          ) : (
+            threads.map(renderRow)
+          )}
+        </div>
+      </aside>
     </>
   );
 }

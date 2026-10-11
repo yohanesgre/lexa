@@ -138,7 +138,7 @@
   /* Shell geometry (DESIGN.md `layout:`): the cap band, the rail, the surface
      pane, the chat transcript column and the reading measure. */
   --lx-shell-band-h: 48px;
-  --lx-shell-band-h-phone: 52px;
+  --lx-shell-band-h-phone: 56px;
   --lx-rail-w: 200px;
   --lx-rail-w-mid: 168px;
   --lx-rail-w-collapsed: 48px;
@@ -2637,35 +2637,13 @@
     background: var(--lx-text-inverse);
   }
 
-  /* Wiki layout + tree + prose (ported from wireframes.css) */
+  /* Wiki layout + tree + prose (ported from wireframes.css). The page tree is
+     the surface pane; its geometry lives in the shared pane block, and the
+     height reads the cap band token (52px on phones). */
   .wiki-layout {
     display: flex;
-    height: calc(100vh - 48px);
+    height: calc(100dvh - var(--lx-shell-band-h));
     overflow: hidden;
-  }
-
-  .wiki-sidebar {
-    width: 260px;
-    flex-shrink: 0;
-    background: var(--lx-surface-elevated);
-    border-right: 1px solid var(--lx-border-default);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .wiki-sidebar.wiki-sidebar-rail {
-    width: 36px;
-    min-width: 36px;
-    padding: 12px 0;
-    align-items: center;
-  }
-
-  .wiki-sidebar-backdrop {
-    display: none;
-    border: 0;
-    padding: 0;
-    cursor: pointer;
   }
 
   /* Read-mode navigation — OutlinePill + OutlinePanel (ported from
@@ -2887,8 +2865,8 @@
   /* Keyboard focus-visible ring — one shared pattern mirroring
      .card-tile:focus-visible: outline:none + --lx-focus-ring. Applies to the
      wiki tree rows, outline pill/rows, panel + sheet controls, search results,
-     context-menu items and the sidebar collapse/expand toggle buttons. Mouse
-     clicks never show the ring. */
+     context-menu items and the pane's controls. Mouse clicks never show the
+     ring. */
   .tree-item:focus-visible,
   .wiki-outline-pill:focus-visible,
   .wiki-outline-row:focus-visible,
@@ -2896,20 +2874,9 @@
   .menu .menu-item:focus-visible,
   .wiki-sidebar button:focus-visible,
   .wiki-popover button:focus-visible,
-  .wiki-sheet button:focus-visible,
-  .sidebar-toggle:focus-visible {
+  .wiki-sheet button:focus-visible {
     outline: none;
     box-shadow: var(--lx-focus-ring);
-  }
-
-  .sidebar-header {
-    height: 48px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px;
-    border-bottom: 1px solid var(--lx-border-subtle);
   }
 
   .wiki-content {
@@ -2918,19 +2885,21 @@
     padding: 32px 48px;
   }
 
+  /* The masthead (breadcrumb, title row, actions) spans the read area's inner
+     width; the body caps at the 75ch measure and centres in the lane left
+     after the outline reserve (The Reading-Measure Rule). The body hangs off
+     renderDoc's unclassed wrapper div, so one measure serves every block —
+     headings and paragraphs share the same column instead of each scaling its
+     own `ch`. */
   .wiki-prose {
-    max-width: 720px;
-    margin: 0 auto;
     font-size: 15px;
     line-height: 26px;
     color: var(--lx-text-primary);
   }
 
-  @media (min-width: 1025px) {
-    .wiki-prose {
-      max-width: none;
-      margin: 0;
-    }
+  .wiki-prose > div:not([class]) {
+    max-width: var(--lx-measure-body);
+    margin-inline: auto;
   }
 
   .wiki-prose h1 {
@@ -3060,12 +3029,12 @@
   .tree-item {
     display: flex;
     align-items: center;
-    height: 32px;
-    padding: 0 12px;
+    height: 36px;
+    padding: 0 8px;
     color: var(--lx-text-secondary);
     font-size: 13px;
     font-family: var(--lx-font-body);
-    border-radius: 4px;
+    border-radius: 6px;
     margin: 0 8px;
     cursor: pointer;
     transition: background 100ms;
@@ -3083,20 +3052,23 @@
     text-decoration: none;
   }
 
+  /* 16px indent per level; the active row's 2px focus edge + 6px left margin
+     land its text on the same guide as the inactive rows (6 + 2 + the same
+     padding), so the pairs below carry the inactive values verbatim. */
   .tree-indent-1 {
-    padding-left: 28px;
+    padding-left: 24px;
   }
   .tree-indent-2 {
-    padding-left: 44px;
+    padding-left: 40px;
   }
   .tree-indent-3 {
-    padding-left: 60px;
+    padding-left: 56px;
   }
   .tree-indent-4 {
-    padding-left: 76px;
+    padding-left: 72px;
   }
   .tree-indent-5 {
-    padding-left: 92px;
+    padding-left: 88px;
   }
 
   .tree-item.active {
@@ -3104,25 +3076,25 @@
     font-weight: 500;
     background: var(--lx-surface-selected);
     border-left: 2px solid var(--lx-border-focus);
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 6px 6px 0;
     margin-left: 6px;
-    padding-left: 10px;
+    padding-left: 8px;
   }
 
   .tree-item.active.tree-indent-1 {
-    padding-left: 26px;
+    padding-left: 24px;
   }
   .tree-item.active.tree-indent-2 {
-    padding-left: 42px;
+    padding-left: 40px;
   }
   .tree-item.active.tree-indent-3 {
-    padding-left: 58px;
+    padding-left: 56px;
   }
   .tree-item.active.tree-indent-4 {
-    padding-left: 74px;
+    padding-left: 72px;
   }
   .tree-item.active.tree-indent-5 {
-    padding-left: 90px;
+    padding-left: 88px;
   }
 
   .tree-item .chevron-small {
@@ -6452,10 +6424,26 @@
 }
 
 /* ---- Assistant Chat (assistant-chat.html) — page-scoped layout glue ---- */
+/* Full height below the cap band; the band token is 48px on desktop and 52px
+   on phones, so no literal band height is pinned here. */
 .chat-layout {
   display: flex;
-  height: calc(100vh - 48px);
+  height: calc(100dvh - var(--lx-shell-band-h));
   min-height: 0;
+  /* The transcript column (The Reading-Measure Rule): 860px ≥1440px, 760px at
+     1024–1439px, the full lane below. The freed pane width becomes symmetric
+     air, never longer lines. */
+  --lx-transcript-current: var(--lx-transcript-w);
+}
+@media (max-width: 1439.98px) {
+  .chat-layout {
+    --lx-transcript-current: 760px;
+  }
+}
+@media (max-width: 1023.98px) {
+  .chat-layout {
+    --lx-transcript-current: 100%;
+  }
 }
 .chat-shell {
   flex: 1;
@@ -6536,11 +6524,16 @@
   width: 100%;
 }
 .chat-column {
-  max-width: 760px;
+  max-width: var(--lx-transcript-current);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+/* Void plates centre in the column at the column's width. */
+.chat-void {
+  max-width: var(--lx-transcript-current);
+  margin: 0 auto;
 }
 .chat-column--approvals {
   max-width: 720px;
@@ -6572,13 +6565,29 @@
   padding: 10px 14px;
   overflow: hidden;
 }
+/* The Reading-Measure Rule: message text caps at 75ch while code, diffs,
+   tables and approval cards keep the column. A text segment that carries a
+   fenced block or a table spans it too — wide artifacts are what earn the
+   desktop width. */
+.bubble-user-text,
+.bubble-md {
+  max-width: var(--lx-measure-body);
+}
+.bubble-md:has(> pre, > table) {
+  max-width: 100%;
+}
 /* Thread-led header — the thread's own title (inline rename) over
-   `{project} · updated {relative}`; pin / rename / delete live here only. */
+   `{project} · updated {relative}`; pin / rename / delete live here only.
+   It spans the transcript column (the 48px is this row's own 24px side
+   padding, so its content aligns with `.chat-column`), never the window. */
 .chat-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  max-width: calc(var(--lx-transcript-current) + 48px);
+  margin: 0 auto;
   padding: 16px 24px 0;
 }
 .chat-header-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -7132,59 +7141,137 @@
   padding: 12px 24px 20px;
 }
 .chat-composer-inner {
-  max-width: 760px;
+  max-width: var(--lx-transcript-current);
   margin: 0 auto;
 }
 
-/* ---- Assistant chat — Threads sidebar (assistant-chat.html) ---- */
-.threads-sidebar {
-  width: 260px;
+/* ---- Surface pane: chat threads / wiki page tree (The One Left System Rule)
+   ----
+   One rail-toned left system below the cap band: the pane's ground is the rail
+   tone, the divider between the rail's nav group and the pane is 1px subtle
+   (the rail's own right hairline, switched by the shell's `:has()` rule
+   below), and the pane's right edge is the single 1px default hairline at the
+   whole system's outer edge. Docked 280px ≥1440px, 260px at 1024–1439px; a
+   288px drawer below 1024px whose top is the band height. No collapsed stub
+   band — open/close belongs to the cap band's labelled `Threads` / `Pages`
+   control. The interior shares the rail's row geometry: 8px symmetric insets,
+   4px gaps, 36px rows (44px on touch widths). */
+.threads-sidebar,
+.wiki-sidebar {
+  width: var(--lx-pane-w);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  padding: var(--lx-space-2) 0;
   background: var(--lx-surface-elevated);
   border-right: 1px solid var(--lx-border-default);
   overflow: hidden;
 }
-.threads-sidebar-header {
+@media (min-width: 1440px) {
+  .threads-sidebar,
+  .wiki-sidebar {
+    width: var(--lx-pane-w-wide);
+  }
+}
+.pane-top {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid var(--lx-border-subtle);
+  gap: var(--lx-space-1);
+  padding: 0 var(--lx-space-2);
   flex-shrink: 0;
 }
-.threads-search {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-family: var(--lx-font-body);
-  color: var(--lx-text-primary);
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lx-space-2);
+  height: var(--lx-row-h);
+}
+.pane-head-label {
+  font-family: var(--lx-font-signage);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--lx-text-secondary);
+}
+.pane-head-count {
+  font-family: var(--lx-font-surveyor);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lx-text-muted);
+}
+/* Action rows span the pane's inner width (pane − 16px). */
+.pane-action {
+  width: 100%;
+}
+.threads-search,
+.pane-search {
+  width: 100%;
+  height: var(--lx-row-h);
   background: var(--lx-surface-input);
   border: 1px solid var(--lx-border-input);
   border-radius: 6px;
 }
-.threads-search::placeholder {
+.threads-search {
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+}
+/* The wiki search field's own wrapper carries the chrome so its unfocused
+   (button) and focused (input) states read as one field. */
+.pane-search {
+  position: relative;
+}
+.pane-search .prop-input,
+.pane-search .relative > button {
+  height: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+.pane-search .prop-input:focus {
+  outline: none;
+  border: 0;
+  box-shadow: none;
+}
+.pane-search:focus-within {
+  border-color: var(--lx-border-focus);
+}
+.threads-search::placeholder,
+.pane-search .prop-input::placeholder {
   color: var(--lx-text-muted);
 }
 .threads-search:focus {
   outline: none;
   border-color: var(--lx-border-focus);
 }
-.threads-sidebar-list {
+/* The row list is the pane's only scroll region. */
+.threads-sidebar-list,
+.pane-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--lx-space-1);
+}
+.threads-sidebar-list {
+  padding: 0 var(--lx-space-2);
+}
+.pane-list > [role="tree"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lx-space-1);
 }
 .thread-row {
   position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
+  min-height: var(--lx-row-h);
+  padding: 2px 8px;
   border-radius: 6px;
 }
 .thread-row-main {
@@ -7231,44 +7318,86 @@
   border-radius: 2px;
   padding: 0 2px;
 }
-.threads-sidebar-backdrop {
+.threads-sidebar-backdrop,
+.wiki-sidebar-backdrop {
   display: none;
 }
-/* Collapsed: 36px icon rail carrying the restore control (mirrors the wiki
-   sidebar). Kept at every viewport width so re-expansion never depends on a
-   control outside the sidebar. */
-.threads-sidebar.collapsed {
-  width: 36px;
-  min-width: 36px;
-  padding: 8px 0;
-  align-items: center;
+/* Phones carry the taller cap band, so the band token itself resolves to 52px
+   there — every full-height region and drawer top derived from it follows
+   (the layout heights and the drawer's `top`, never a literal 48px). */
+@media (max-width: 767.98px) {
+  .app-shell {
+    --lx-shell-band-h: var(--lx-shell-band-h-phone);
+  }
 }
-@media (max-width: 899.98px) {
-  .threads-sidebar {
+/* Docked or absent. A closed pane leaves the layout entirely — there is no
+   collapsed stub band — and while one is docked the rail's right hairline
+   turns subtle: the one default hairline down the left side is the pane's
+   outer edge. */
+@media (min-width: 1024px) {
+  .threads-sidebar:not(.open),
+  .wiki-sidebar:not(.open) {
+    display: none;
+  }
+  .app-shell:has(.threads-sidebar.open) .app-nav,
+  .app-shell:has(.wiki-sidebar.open) .app-nav {
+    border-right-color: var(--lx-border-subtle);
+  }
+}
+/* Drawer: 288px under the cap band, over the scrim. Escape, scrim tap and the
+   cap band's toggle close it; the body scroll lock lives in the pane's JS. */
+@media (max-width: 1023.98px) {
+  .threads-sidebar,
+  .wiki-sidebar {
     position: fixed;
-    top: 48px;
+    top: var(--lx-shell-band-h);
     bottom: 0;
     left: 0;
+    width: var(--lx-pane-drawer-w);
     z-index: 70;
     transform: translateX(-100%);
-    transition: transform 160ms ease;
+    transition: transform 180ms linear;
     box-shadow: var(--lx-shadow-slideover);
+    visibility: hidden;
   }
-  .threads-sidebar.open {
+  .threads-sidebar.open,
+  .wiki-sidebar.open {
     transform: none;
+    visibility: visible;
   }
-  .threads-sidebar.collapsed {
-    transform: none;
-  }
-  .threads-sidebar-backdrop {
+  .threads-sidebar-backdrop,
+  .wiki-sidebar-backdrop {
     display: block;
     position: fixed;
-    top: 48px;
+    top: var(--lx-shell-band-h);
     right: 0;
     bottom: 0;
     left: 0;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
     background: var(--lx-surface-overlay);
     z-index: 65;
+  }
+}
+/* Touch widths: every pane row grows to the touch floor. */
+@media (max-width: 767.98px) {
+  .pane-head,
+  .pane-action,
+  .threads-search,
+  .pane-search,
+  .thread-row,
+  .tree-item {
+    height: var(--lx-row-h-touch);
+  }
+  .thread-row {
+    min-height: var(--lx-row-h-touch);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .threads-sidebar,
+  .wiki-sidebar {
+    transition: none;
   }
 }
 
@@ -7557,13 +7686,20 @@
   display: none;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  gap: 8px;
+  width: auto;
+  height: 36px;
+  padding: 0 10px;
   border: 0;
   background: transparent;
   color: var(--lx-text-secondary);
-  border-radius: 6px;
+  border-radius: var(--lx-radius-plate);
   cursor: pointer;
+  font-family: var(--lx-font-signage);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
 }
@@ -7573,8 +7709,16 @@
   background: var(--lx-surface-card-hover);
 }
 .nav-sidebar-toggle svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
+}
+/* The cap band's pane toggle is the drawer's only open/close control below
+   1024px (the panes carry no collapse of their own). Above it the pane is part
+   of the shell and cannot be closed, so the control leaves the band. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .nav-sidebar-toggle {
+    display: inline-flex;
+  }
 }
 
 /* Slide-down panel rendered inside the nav. Hidden by default; opened by
@@ -7684,19 +7828,14 @@
 }
 
 /* ---- 3. Wiki layout ----
-   Per wireframes/src/wiki-mobile.html: below 768px the 260px sidebar
-   becomes a full-screen overlay with a scrim instead of a 36px rail. We
-   keep the existing collapsed-rail behavior for tablet+ (1024px+), and
-   replace it with a true overlay on mobile. */
+   The page tree is the surface pane: below 1024px it is the 288px drawer
+   defined in the shared pane block, and the read area takes the full lane.
+   Here only the read area's own mobile rhythm lives. */
 @media (max-width: 767.98px) {
-  .wiki-layout {
-    height: calc(100vh - 48px);
-  }
   .wiki-content {
     padding: 20px;
   }
   .wiki-prose {
-    max-width: none;
     font-size: 15px;
     line-height: 24px;
   }
@@ -7720,44 +7859,6 @@
   .wiki-prose table {
     display: block;
     overflow-x: auto;
-  }
-
-  /* Sidebar: position fixed, full width, slide in/out, with scrim.
-     The existing component sets a 36px rail when collapsed; on mobile we
-     override that to a true overlay. The component also keeps the rail
-     visible at < 768px via matchMedia — we force the rail off-screen when
-     the menu is closed and full-width when opened. */
-  .wiki-sidebar {
-    position: fixed !important;
-    top: 48px !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    width: min(320px, 86vw) !important;
-    min-width: 0 !important;
-    padding: 0 !important;
-    align-items: stretch !important;
-    z-index: 60;
-    transition: transform 200ms var(--lx-ease-out);
-    box-shadow: var(--lx-shadow-lg);
-  }
-  /* Rail (collapsed): hidden on mobile. The top nav exposes a context-
-     sensitive toggle button (left of the Lexa brand) instead. */
-  .wiki-sidebar.wiki-sidebar-rail {
-    display: none !important;
-  }
-  /* Open sidebar: slide in. */
-  .wiki-sidebar.wiki-sidebar-open {
-    transform: translateX(0);
-  }
-  .wiki-sidebar-backdrop {
-    display: block;
-    position: fixed;
-    top: 48px;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: var(--lx-surface-overlay);
-    z-index: 55;
   }
 }
 
@@ -8226,21 +8327,6 @@
   }
 }
 
-/* ---- 20. Threads sidebar collapsed on mobile ----
-   Collapsed rail stays visible at every viewport as the drawer trigger
-   (mirrors the wiki rail). The earlier rule at 6492 keeps it as a 36px
-   overlay rail; this block only adjusts the chat shell padding. */
-@media (max-width: 899.98px) {
-  .threads-sidebar.collapsed {
-    display: flex !important;
-    transform: none;
-  }
-  .chat-layout > .chat-shell,
-  .chat-layout > main.chat-shell {
-    padding-left: 0;
-  }
-}
-
 /* Settings table — ensure horizontal scroll on mobile. The table has
    min-width so columns don't squeeze; the .card-panel wrapper is the
    scroll container. */
@@ -8265,9 +8351,6 @@
     display: none;
   }
   .app-nav .nav-hamburger {
-    display: inline-flex;
-  }
-  .app-nav .nav-sidebar-toggle {
     display: inline-flex;
   }
   .app-nav .app-nav-menu {
@@ -8323,29 +8406,9 @@
 }
 
 /* ---- 23. Mobile refinements ----
-   The top-nav sidebar toggle duplicates the in-header collapse button on
-   the wiki page tree and Assistant threads sidebars. On mobile we hide the
-   in-header button (the nav has the toggle) — desktop keeps it.
-   Also: shrink the nav sidebar toggle to match the brand. */
-@media (max-width: 1023.98px) {
-  /* The Collapse sidebar button inside wiki + threads sidebars. */
-  .wiki-sidebar .sidebar-header button[aria-label="Collapse sidebar"],
-  .threads-sidebar .threads-sidebar-header button[aria-label="Collapse sidebar"] {
-    display: none !important;
-  }
-  /* The X "Close threads" backdrop button — keep (it's the dimmer, not
-     a duplicate control). */
-
-  /* Smaller nav sidebar toggle. */
-  .nav-sidebar-toggle {
-    width: 32px;
-    height: 32px;
-  }
-  .nav-sidebar-toggle svg {
-    width: 16px;
-    height: 16px;
-  }
-}
+   The nav's pane toggle rides the top bar; the panes themselves carry no
+   collapse control, so nothing in them needs hiding. The toggle's own size
+   steps are the band chrome's business (36px desktop, 44px on phones). */
 
 /* ---- 24. Chat composer on mobile: compact + elevated ----
    The desktop composer has 12px/24px/20px padding and shares the page
@@ -9274,9 +9337,19 @@ html {
 .app-band-brand {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   width: var(--lx-rail-current);
   padding: 0 8px;
   flex-shrink: 0;
+}
+/* Collapsed: the cell is the panel toggle alone, centred with 8px clearance;
+   the mark returns when the rail expands. */
+.app-shell[data-rail-open="false"] .app-band-brand {
+  justify-content: center;
+}
+.app-shell[data-rail-open="false"] .app-band-brand .nav-brand {
+  display: none;
 }
 .app-frame {
   grid-column: 2;
@@ -9365,19 +9438,14 @@ html {
   width: 16px;
   height: 16px;
 }
-/* The rail foot: the collapse control is the rail's last row — a nav-link row
-   with a label — and the brand cell (in the cap band) never carries a control. */
+/* The collapse control sits in the cap band's brand cell — the sidebar's own
+   top-right — icon-only at 32x32 so it never crowds the wordmark. */
 .app-rail-toggle {
-  justify-content: flex-start;
-  gap: 10px;
-  height: var(--lx-row-h);
-  padding: 0 10px;
-  font-size: 12px;
-}
-.app-nav[data-open="false"] .app-rail-toggle {
-  justify-content: center;
-  width: 40px;
+  width: 32px;
+  height: 32px;
   padding: 0;
+  justify-content: center;
+  flex-shrink: 0;
 }
 .nav-hamburger {
   display: none; /* desktop rail owns navigation; shown below 768px */
@@ -9385,6 +9453,7 @@ html {
 .app-band-brand .nav-brand {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
   height: var(--lx-row-h);
   padding: 0 8px;
   border-radius: var(--lx-radius-plate);
@@ -9419,17 +9488,6 @@ html {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-/* Collapsed: the brand cell is the mark alone, centred with 12px to each edge
-   (24px mark + 12 + 12 = the 48px rail). */
-.app-shell[data-rail-open="false"] .app-band-brand {
-  padding: 0;
-  justify-content: center;
-}
-.app-shell[data-rail-open="false"] .app-band-brand .nav-brand {
-  width: 100%;
-  padding: 0;
-  justify-content: center;
 }
 .app-nav[data-open="false"] .nav-link {
   justify-content: center;
@@ -9485,7 +9543,7 @@ html {
 .app-topbar-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex: 1;
   min-width: 0;
   padding: 0 24px;
@@ -9514,18 +9572,18 @@ html {
   color: var(--lx-text-muted);
   white-space: nowrap;
 }
-/* Top bar pills run at row height, not the compact 28px chrome size: the
-   label, the value and the chevron need room (the layered .nav-pill base
-   stays compact for in-page users such as the team switcher). */
+/* Top bar pills run a size below the row: at row height they filled the 48px
+   band and read as pressing its edges. 32px is the desktop target floor, with
+   8px of air above and below in the band (44px on touch widths). */
 .app-topbar-inner .nav-pill {
-  height: var(--lx-row-h);
-  min-width: var(--lx-row-h);
-  padding: 0 12px;
-  gap: 8px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 10px;
+  gap: 6px;
 }
 .app-topbar-inner .nav-pill svg {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
 }
 .app-topbar-account {
   display: flex;
@@ -9539,8 +9597,8 @@ html {
   height: 32px;
 }
 .app-topbar-inner .nav-pill-icon {
-  width: var(--lx-row-h);
-  height: var(--lx-row-h);
+  width: 32px;
+  height: 32px;
 }
 .app-topbar-inner .nav-spacer,
 .app-nav .nav-spacer {
@@ -10270,7 +10328,16 @@ html {
   }
   .app-topbar-inner {
     padding: 0 12px;
-    gap: 12px;
+    gap: 8px;
+  }
+  /* Phone: the pane toggle is a 44px icon target and drops its label. */
+  .nav-sidebar-toggle {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  .nav-sidebar-toggle .nav-label {
+    display: none;
   }
   .app-nav-menu-brand {
     display: flex;
@@ -10426,7 +10493,7 @@ html {
   .app-topbar-inner .nav-pill {
     min-width: var(--lx-row-h-touch);
     height: var(--lx-row-h-touch);
-    padding: 0 10px;
+    padding: 0 8px;
   }
   .app-topbar-inner .nav-hamburger {
     width: auto;
