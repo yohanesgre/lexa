@@ -4,7 +4,7 @@ import { useSession, useSignOut, useTeams } from "../../lib/queries";
 import { useAssistantEnabled } from "../../lib/assistant-enabled";
 
 // Top-right profile menu (app-nav right cluster). Identity header + role-
-// scoped settings entries + Log out. The old Settings nav link is gone — all
+// scoped settings entries + Log out. The old Settings nav link is gone, all
 // settings entry points live here (and in the project switcher).
 //
 // Entry visibility is role-driven: User settings → everyone · Team settings →
@@ -47,9 +47,11 @@ export function UserMenu() {
 
   const isSuperadmin = user.role === "superadmin";
   // GET /api/teams: own teams for team admins, all teams for superadmin,
-  // empty (or 403) for plain members — any team row = admin authority.
+  // empty (or 403) for plain members, any team row = admin authority.
   const isTeamAdmin = isSuperadmin || (teams && teams.length > 0);
   const roleLabel = isSuperadmin ? "superadmin" : isTeamAdmin ? "team admin" : "member";
+  // Map keycaps: the real role always rides the accessible name.
+  const roleDisplay = isSuperadmin ? "Lift Ops" : isTeamAdmin ? "Patrol" : "Rider";
   const initial = user.name?.[0]?.toUpperCase() ?? "?";
 
   const handleSignOut = () => {
@@ -64,12 +66,13 @@ export function UserMenu() {
         type="button"
         aria-expanded={open}
         aria-haspopup="menu"
+        aria-label={`${user.name}, ${roleDisplay} (${roleLabel})`}
         className="nav-pill"
         style={{ gap: 8, padding: "0 8px 0 6px" }}
         onClick={() => setOpen((v) => !v)}
       >
         <div className="avatar" style={{ width: 20, height: 20, fontSize: 10 }}>{initial}</div>
-        <span className="font-medium" style={{ lineHeight: 1, fontWeight: 500 }}>{user.name}</span>
+        <span className="user-name font-medium" style={{ lineHeight: 1, fontWeight: 500 }}>{user.name}</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -83,7 +86,7 @@ export function UserMenu() {
               <div className="text-sm font-semibold" style={{ lineHeight: 1.2, fontWeight: 600 }}>{user.name}</div>
               <div className="text-xs text-lx-text-muted" style={{ lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
             </div>
-            <span style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11, flexShrink: 0 }}>{roleLabel}</span>
+            <span style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11, flexShrink: 0 }} title={roleLabel}>{roleDisplay}</span>
           </div>
           <div className="dropdown-separator" />
           <Link to="/settings/me" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>

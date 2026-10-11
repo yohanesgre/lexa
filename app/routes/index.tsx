@@ -14,7 +14,7 @@ export const Route = createFileRoute("/")({
   ssr:false,
   loader: async ({ context }) => {
     // Prefetch the dashboard so the first paint renders content instead of
-    // skeletons — the same key/queryFn the component's useDashboard reads.
+    // skeletons, the same key/queryFn the component's useDashboard reads.
     await context.queryClient.prefetchQuery({
       queryKey: ["dashboard"],
       queryFn: () => getDashboard(),
@@ -44,7 +44,7 @@ function Home() {
       .catch(() => {});
   }, [navigate]);
 
-  // Switcher "Create new project" lands on /?new=1 — open the modal and clear
+  // Switcher "Create new project" lands on /?new=1, open the modal and clear
   // the param so the URL stays clean.
   useEffect(() => {
     if (!search.new) return;
@@ -64,8 +64,10 @@ function Home() {
 
   return (
     <main className="page-frame page-frame-narrow">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="font-display text-2xl font-semibold text-lx-text-primary">Projects</h1>
+      <div className="tm-dash-head">
+        <h1>Projects</h1>
+        <span className="tm-plate">Trailheads</span>
+        <span className="nav-spacer" />
         <div className="flex items-center gap-3">
           <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
             <Plus size={14} strokeWidth={1.5} />
@@ -77,7 +79,7 @@ function Home() {
       {needsSetup && (
         <div className="flex items-center justify-between bg-lx-surface-elevated border border-lx-border-warning rounded-md px-4 py-2.5 mb-4">
           <div className="text-sm text-lx-text-secondary">
-            <span className="font-medium text-lx-text-primary">Setup incomplete</span> — no admin email is configured.
+            <span className="font-medium text-lx-text-primary">Setup incomplete</span>, no admin email is configured.
           </div>
           <Link to="/setup" className="btn btn-ghost !h-7 !px-3 text-xs">
             Finish setup
@@ -88,23 +90,19 @@ function Home() {
       {createProject.error && <div className="dashboard-error">{(createProject.error as Error).message}</div>}
 
       {isEmpty ? (
-        <div className="bg-lx-surface-column border border-lx-border-subtle rounded-lg mt-4 flex" style={{ minHeight: 480 }}>
-          <div className="empty-state flex-1">
-            <div className="empty-state-icon">
-              <LayoutGrid size={24} strokeWidth={1.5} />
-            </div>
-            <h2 className="font-display text-lg font-medium text-lx-text-primary mt-3">No projects yet</h2>
-            <p className="text-sm text-lx-text-secondary mt-1" style={{ maxWidth: 300 }}>
-              Create your first project to start tracking tasks, columns, and wiki pages — with optional two-way GitHub sync.
-            </p>
-            <button type="button" className="btn btn-primary mt-4" onClick={() => setShowCreate(true)}>
-              <Plus size={14} strokeWidth={1.5} />
-              New Project
-            </button>
-          </div>
+        <div className="tm-void" style={{ marginTop: 12, minHeight: 300, justifyContent: "center" }}>
+          <span className="tm-void-title">No projects yet</span>
+          <LayoutGrid size={24} strokeWidth={1.5} aria-hidden="true" />
+          <span style={{ maxWidth: 360 }}>
+            Create your first project to start tracking tasks, columns, and wiki pages, with optional two-way GitHub sync.
+          </span>
+          <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <Plus size={14} strokeWidth={1.5} aria-hidden="true" />
+            New Project
+          </button>
         </div>
       ) : (
-        <div className="project-cards mt-2">
+        <div className="project-cards mt-4">
           {dashboard?.projects.map((entry) => (
             <Link
               key={entry.project.id}
@@ -116,6 +114,13 @@ function Home() {
               <span className="project-card-name">
                 <span className={`health-dot health-dot-${entry.health}`} />
                 {entry.project.name}
+              </span>
+              <span className="tm-row-meta">
+                <span className="tm-figure">{entry.project.key}</span>
+                <span>·</span>
+                <span>{String(entry.taskCount).padStart(3, "0")} tasks</span>
+                <span>·</span>
+                <span>{entry.health}</span>
               </span>
               {entry.project.description ? (
                 <span className="project-card-desc">{entry.project.description}</span>

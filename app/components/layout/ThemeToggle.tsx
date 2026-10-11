@@ -8,13 +8,12 @@ export function ThemeToggle() {
     return (
       <button
         type="button"
-        className="nav-pill"
+        className="nav-pill nav-pill-icon"
         aria-label="Theme"
         aria-pressed="false"
         title="Light theme"
         suppressHydrationWarning
         onClick={toggleTheme}
-        style={{ width: 32, height: 32, padding: 0, justifyContent: "center" }}
       >
         <Moon size={14} strokeWidth={1.5} />
       </button>
@@ -23,13 +22,12 @@ export function ThemeToggle() {
   return (
     <button
       type="button"
-      className="nav-pill"
+      className="nav-pill nav-pill-icon"
       aria-label="Theme"
       aria-pressed={isLight}
       title={isLight ? "Dark theme" : "Light theme"}
       suppressHydrationWarning
       onClick={toggleTheme}
-      style={{ width: 32, height: 32, padding: 0, justifyContent: "center" }}
     >
       {isLight ? <Sun size={14} strokeWidth={1.5} /> : <Moon size={14} strokeWidth={1.5} />}
     </button>
