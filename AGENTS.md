@@ -51,7 +51,7 @@ All work tracking uses one folder per plan under `status/` (the global `work-pla
 
 ## Document authority (read in this order before touching code)
 
-0. `docs/design-system.html` — PHOSPHOR primitives: tokens + canonical component markup. **Before any UI work, open this file and copy primitive markup from it verbatim — never hand-write a primitive.** For primitive work it precedes the surface wireframes; for composite/surface work read it first, then the relevant `wireframes/src/*.html`.
+0. `docs/design-system.html` — PHOSPHOR primitives: tokens + canonical component markup. **Before any UI work, open this file and copy primitive markup from it verbatim — never hand-write a primitive.** For primitive work it precedes the surface wireframes; for composite/surface work read it first, then the relevant `wireframes/src/*.html`. The operating procedure for UI/UX work is `.agents/skills/frontend-workflow/SKILL.md` — load it first.
 1. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
 2. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
 3. `docs/API.md` — REST contract. Endpoint shapes are exact.
@@ -79,6 +79,8 @@ This retains the wireframe-first flow on any clone: `wireframes/src/` is the des
 
 **Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. If code and wireframes drift, the wireframe is the source of truth.
 
+**Scope, not existence, scales with uncertainty:** a copy or token change edits the existing wireframe file; a new state on an existing surface draws that state (plus its annotation); a new surface, navigation change, or genuinely competing structure draws the full surface with its void states (empty/loading/partial/error/denied) before any React. Skipping the wireframe step is never permitted — only its scope is negotiable. Throwaway prototypes are not wireframes; if one is ever justified it lives in `.tmp/`, never in `artifacts/` or `wireframes/`.
+
 **Delegation sequencing rule (non-negotiable):** When UI/UX work is divided across multiple agents, the wireframe lane MUST complete (edit `wireframes/src/`, run `bash wireframes/build.sh`, pass its gate) BEFORE any React implementation lane is dispatched. Never run wireframe work and frontend implementation in parallel — parallel lanes drift from the wireframe's actual classes, structure, and copy even when the spec looks fully pinned. React implementation transcribes the completed wireframe, including porting any new wireframe CSS classes into the app stylesheet (`app/styles/phosphor.css`) — wireframe classes do not exist in the app until ported.
 
 Every UI task brief to @designer/@fixer must include: "Consult `docs/design-system.html` first; copy primitive markup verbatim."
@@ -101,6 +103,17 @@ The wireframes are static HTML/CSS previews with no JavaScript. Implement intera
 ### For @designer: wireframe-first execution
 
 When asked to implement frontend, do NOT design or invent. Read the relevant wireframe HTML file, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
+
+## Frontend design workflow
+
+The operating procedure for UI/UX work is `.agents/skills/frontend-workflow/SKILL.md` — load it before any design change, wireframe edit, or frontend implementation. It is binding. The points below are the ones that must survive compaction.
+
+- **Roles.** `@designer` owns direction, wireframe structure, and visual review, and runs on the design-model tier; `@swe` transcribes the wireframe into React and runs on the implementation tier. Neither edits the other's files. A design decision the specs cannot settle escalates to `@designer` as a `task` handoff: screenshot path or preview URL + intended direction + acceptance criteria + a numbered list of unresolved problems, asking for **prioritized corrections, not a redesign**. If the design model cannot be invoked, never claim a review that did not happen — produce the handoff artifact and name the outstanding review in the report.
+- **No escalation for the obvious.** A spacing, responsive, or styling fix that follows from the wireframe and the design system is implemented directly; the design model is not consulted for it.
+- **Quality filter (anti-slop).** For UI work load `~/.agents/skills/antislop/SKILL.md` plus the sub-skill matching the touch (`antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`). It is a filter, not the direction — PHOSPHOR and the wireframe are the direction; a deliberate pattern stays when the reason is written down. Its Delivery Gate is mandatory: after significant visual changes, append its one-line-per-item PASS/FAIL block with evidence to `status/<plan>/report.md`, and fix a FAIL before delivering.
+- **Verification composition** (all of it, not a substitute for any part): wireframe build when `wireframes/src` changed → `bash scripts/verify-gate.sh` → agent-browser against the running app (`bun run dev`, :5173) covering the affected screen's void states and at least mobile + desktop → lane tests. Snapshot-first when the model lacks vision; hand any image to `@vision`, never to a text-only model.
+- **No parallel design docs.** Direction lives in `wireframes/DESIGN_SYSTEM.md`, primitives in `docs/design-system.html`, and this file is the router. Do not add a `DESIGN.md`, `PRODUCT.md`, or per-feature design spec — a second source of truth is the failure this section exists to prevent.
+- **Efficiency.** One wireframe and one meaningful revision by default; never generate a preview nobody will inspect; during refinement fix the three highest-impact issues instead of rewriting the interface; when fixes stop converging, escalate.
 
 ## Non-negotiable rules
 
@@ -307,6 +320,14 @@ Key facts:
   `./.agents/skills/lexa-cli/SKILL.md`). Load it before any CLI work.
   lexa-cli is operate-only — no deploy commands (removed in cli-v2026.2.0;
   self-hosting goes through `scripts/install.sh`).
+- **Frontend design workflow:** the `frontend-workflow` skill
+  (`.agents/skills/frontend-workflow/SKILL.md`, committed with this repo) — the operating
+  procedure for any UI/UX change: authority order, wireframe scope scaling, design-vs-
+  implementation roles, escalation handoff, verification composition, delivery criteria.
+- **Anti-slop filter:** `~/.agents/skills/antislop/SKILL.md` plus the sub-skill matching the
+  touch (`antislop-ui`, `antislop-human`, `antislop-layoutmobile`, `antislop-copywriting`).
+  A filter over the design, never the design itself; its Delivery Gate report belongs in
+  `status/<plan>/report.md`. Mode-2 audit artifacts go to `anti-slop/` (gitignored).
 - **Browser automation:** the `agent-browser` skill (auto-discovered; at
   `~/.agents/skills/agent-browser/SKILL.md`). Load it before any browser
   work. If the active model lacks vision, the skill defaults to snapshot-
