@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Lexa">
+  <title>Lexa LX mark</title>
+  <rect width="64" height="64" rx="14" fill="#F0C040"/>
+  <g fill="none" stroke="#0C0B09" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 16 V48 H26"/>
+    <path d="M29 16 L53 48 M53 16 L29 48"/>
+  </g>
+</svg>
