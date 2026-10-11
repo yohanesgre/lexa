@@ -78,7 +78,13 @@ export function AssistantShell() {
         {TABS.map((t) => {
           const active = t.exact ? pathname === t.to : pathname.startsWith(t.to);
           return (
-            <Link key={t.to} to={t.to} className={active ? "ms-tab active" : "ms-tab"} style={{ textDecoration: "none" }}>
+            <Link
+              key={t.to}
+              to={t.to}
+              className={active ? "ms-tab active" : "ms-tab"}
+              activeProps={{ className: "" }}
+              style={{ textDecoration: "none" }}
+            >
               {t.label}
             </Link>
           );
