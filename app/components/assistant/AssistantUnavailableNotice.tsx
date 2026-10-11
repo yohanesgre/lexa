@@ -48,8 +48,8 @@ export function AssistantUnavailableNotice({ variant = "page", title, body }: As
       }
     >
       <NoticeIcon />
-      <div className="text-base weight-500 color-primary">{heading}</div>
-      <p className="text-sm color-secondary mt-2" style={{ maxWidth: isSettings ? 440 : 420, lineHeight: "20px" }}>
+      <div className="text-base font-medium text-lx-text-primary">{heading}</div>
+      <p className="text-sm text-lx-text-secondary mt-2" style={{ maxWidth: isSettings ? 440 : 420, lineHeight: "20px" }}>
         {copy}
       </p>
     </div>

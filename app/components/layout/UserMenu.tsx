@@ -69,7 +69,7 @@ export function UserMenu() {
         onClick={() => setOpen((v) => !v)}
       >
         <div className="avatar" style={{ width: 20, height: 20, fontSize: 10 }}>{initial}</div>
-        <span className="weight-500" style={{ lineHeight: 1, fontWeight: 500 }}>{user.name}</span>
+        <span className="font-medium" style={{ lineHeight: 1, fontWeight: 500 }}>{user.name}</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
@@ -80,7 +80,7 @@ export function UserMenu() {
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
             <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{initial}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="text-sm weight-600" style={{ lineHeight: 1.2, fontWeight: 600 }}>{user.name}</div>
+              <div className="text-sm font-semibold" style={{ lineHeight: 1.2, fontWeight: 600 }}>{user.name}</div>
               <div className="text-xs text-lx-text-muted" style={{ lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
             </div>
             <span style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11, flexShrink: 0 }}>{roleLabel}</span>
@@ -88,27 +88,27 @@ export function UserMenu() {
           <div className="dropdown-separator" />
           <Link to="/settings/me" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
-            <span className="text-sm color-secondary">User settings</span>
+            <span className="text-sm text-lx-text-secondary">User settings</span>
             
           </Link>
           {isTeamAdmin && (
             <Link to="/settings/team" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-              <span className="text-sm color-secondary">Team settings</span>
+              <span className="text-sm text-lx-text-secondary">Team settings</span>
               
             </Link>
           )}
           {isSuperadmin && (
             <Link to="/settings/workspace" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>
-              <span className="text-sm color-secondary">Workspace settings</span>
+              <span className="text-sm text-lx-text-secondary">Workspace settings</span>
               
             </Link>
           )}
           {isSuperadmin && assistantEnabled && (
             <Link to="/admin/assistant" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg>
-              <span className="text-sm color-secondary">Assistant</span>
+              <span className="text-sm text-lx-text-secondary">Assistant</span>
               
             </Link>
           )}

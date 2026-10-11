@@ -161,8 +161,8 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
     <main className="page-frame page-frame-narrow">
       <div className="flex items-center justify-between mb-2">
         <div>
-          <h1 className="font-display text-2xl weight-600 color-primary">Milestones</h1>
-          <div className="font-micro text-2xs color-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          <h1 className="font-display text-2xl font-semibold text-lx-text-primary">Milestones</h1>
+          <div className="font-micro text-2xs text-lx-text-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
             {board?.project.name ?? slug} · {active.length} active · {archived.length} archived
           </div>
         </div>
@@ -216,7 +216,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
 
           {archived.length > 0 && (
             <>
-              <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "20px 0 8px" }}>
+              <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "20px 0 8px" }}>
                 Archived milestones
               </div>
               <div className="milestone-grid">
@@ -484,7 +484,7 @@ function CompleteMilestoneDialog({ milestone, remainingCount, sprints, onCancel,
             </button>
           </div>
           <div className="modal-body">
-            <p className="text-sm color-secondary" style={{ lineHeight: "20px" }}>
+            <p className="text-sm text-lx-text-secondary" style={{ lineHeight: "20px" }}>
               This archives the milestone and its{" "}
               <b>{remainingCount} remaining {remainingCount === 1 ? "sprint" : "sprints"}</b>
               {sprints.length > 0 && (

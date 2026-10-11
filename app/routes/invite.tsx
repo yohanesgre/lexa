@@ -122,7 +122,7 @@ function InviteAcceptForm({ token }: { token: string }) {
   if (createdEmail) {
     return (
       <div className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)", textAlign: "center" }}>
-        <div className="text-sm weight-500 mb-1" style={{ fontWeight: 500 }}>Account created</div>
+        <div className="text-sm font-medium mb-1" style={{ fontWeight: 500 }}>Account created</div>
         <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Sign in as {createdEmail} to continue.</p>
         <button className="btn btn-primary w-full" style={{ height: 36 }} onClick={() => void navigate({ to: "/login" })}>
           Continue to login

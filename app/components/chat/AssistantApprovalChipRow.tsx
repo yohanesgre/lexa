@@ -101,7 +101,7 @@ export function ApprovalChipRow({
     <div className={`approval-chip${STATE_CLASS[chip.state]}`}>
       <div className="flex items-center gap-2">
         <span className="approval-tool">{chip.name}</span>
-        <span className="color-muted text-xs text-lx-text-muted">·</span>
+        <span className="text-lx-text-muted text-xs text-lx-text-muted">·</span>
         <span className="approval-target">{targetFor(chip.diff)}</span>
         {terminal && (
           <span className={`approval-status ${STATE_COLOR[terminal]}`} style={{ marginLeft: "auto" }}>

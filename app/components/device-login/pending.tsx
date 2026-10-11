@@ -37,9 +37,9 @@ export function PendingVariant({ clientName, code, expiresAt, busy, onApprove, o
       <IconFrame tone="neutral">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
       </IconFrame>
-      <div className="text-sm weight-500 mb-1" style={{ textAlign: "center", fontSize: 15 }}>Approve this device?</div>
+      <div className="text-sm font-medium mb-1" style={{ textAlign: "center", fontSize: 15 }}>Approve this device?</div>
       <div style={{ textAlign: "center", marginBottom: 12 }}>
-        <div className="font-mono text-base weight-500">{clientName}</div>
+        <div className="font-mono text-base font-medium">{clientName}</div>
         <div className="text-xs text-lx-text-muted" style={{ marginTop: 4 }}>
           code <span className="chip font-mono text-xs" style={{ background: "var(--lx-surface-input)" }}>{code}</span> · {expiresInLabel(expiresAt, now)}
         </div>
