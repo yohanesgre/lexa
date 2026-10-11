@@ -104,19 +104,31 @@ function LexaMark() {
   );
 }
 
-function SidebarToggleButton({ routeType }: { routeType: RouteType }) {
+function PaneToggleButton({ routeType }: { routeType: RouteType }) {
   const isWiki = routeType === "wiki";
+  const paneName = isWiki ? "Pages" : "Threads";
+  const [open, setOpen] = useState(() => {
+    if (typeof localStorage === "undefined") return true;
+    return localStorage.getItem(isWiki ? "lexa:pane-wiki" : "lexa:pane-threads") !== "closed";
+  });
+  useEffect(() => {
+    const onChange = (e: Event) => setOpen(Boolean((e as CustomEvent<{ open?: boolean }>).detail?.open));
+    window.addEventListener("lexa:pane-state", onChange);
+    return () => window.removeEventListener("lexa:pane-state", onChange);
+  }, []);
   return (
     <button
       type="button"
       className="nav-sidebar-toggle"
-      aria-label={isWiki ? "Open page tree" : "Open threads"}
+      aria-label={paneName}
+      aria-expanded={open}
+      aria-controls={isWiki ? "wiki-pane" : "threads-pane"}
       onClick={() => {
-        const event = isWiki ? "lexa:toggle-wiki-sidebar" : "lexa:toggle-threads-sidebar";
-        window.dispatchEvent(new CustomEvent(event));
+        window.dispatchEvent(new CustomEvent(isWiki ? "lexa:toggle-wiki-sidebar" : "lexa:toggle-threads-sidebar"));
       }}
     >
-      <PanelLeft />
+      <PanelLeft aria-hidden="true" focusable="false" />
+      <span className="nav-label">{paneName}</span>
     </button>
   );
 }
@@ -280,25 +292,42 @@ export function AppShell() {
   }
 
   return (
-    <div className={cn("app-shell", menuOpen && "is-menu-open")}>
-      <nav className="app-nav" data-open={rail.open ? "true" : "false"}>
-        <div className="app-rail-head">
+    <div className={cn("app-shell", menuOpen && "is-menu-open")} data-rail-open={rail.open ? "true" : "false"}>
+      <header className="app-band">
+        <div className="app-band-brand">
           <Link to="/" className={routeType === "home" ? "nav-brand active" : "nav-brand"}>
             <LexaMark />
             <span className="nav-label">Lexa</span>
           </Link>
-          {rail.isDesktop && (
-            <button
-              type="button"
-              className="app-rail-toggle"
-              aria-label={rail.open ? "Collapse navigation" : "Expand navigation"}
-              aria-expanded={rail.open}
-              onClick={rail.toggle}
-            >
-              {rail.open ? <PanelLeftClose /> : <PanelLeft />}
-            </button>
-          )}
         </div>
+        <div className="app-topbar-inner">
+          <button
+            type="button"
+            className="nav-hamburger"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            {menuOpen ? <X aria-hidden="true" focusable="false" /> : <Menu aria-hidden="true" focusable="false" />}
+            <span>Menu</span>
+          </button>
+          {(routeType === "wiki" || routeType === "chat") && <PaneToggleButton routeType={routeType} />}
+          <div className="app-topbar-title">
+            <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
+            {selectedSlug && <span className="app-topbar-slug">{selectedSlug}</span>}
+          </div>
+          <div className="nav-spacer" />
+          <div className="app-topbar-switcher">
+            <ProjectSwitcher routeType={routeType} />
+          </div>
+          <div className="app-topbar-account">
+            <ThemeToggle />
+            <UserMenu />
+          </div>
+        </div>
+      </header>
+
+      <nav className="app-nav" data-open={rail.open ? "true" : "false"}>
         <div className="nav-links">
           {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
             <NavLink
@@ -318,43 +347,36 @@ export function AppShell() {
             </NavLink>
           )}
         </div>
+        <div className="nav-spacer" />
+        {rail.isDesktop && (
+          <button
+            type="button"
+            className="app-rail-toggle"
+            aria-label={rail.open ? "Collapse navigation" : "Expand navigation"}
+            aria-expanded={rail.open}
+            onClick={rail.toggle}
+          >
+            {rail.open ? (
+              <PanelLeftClose aria-hidden="true" focusable="false" />
+            ) : (
+              <PanelLeft aria-hidden="true" focusable="false" />
+            )}
+            <span className="nav-label">{rail.open ? "Collapse" : "Expand"}</span>
+          </button>
+        )}
       </nav>
 
       <div className="app-frame">
-        <header className="app-topbar">
-          <div className="app-topbar-inner">
-            <button
-              type="button"
-              className="nav-hamburger"
-              aria-label={menuOpen ? "Close menu" : "Open menu"}
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((v) => !v)}
-            >
-              {menuOpen ? <X aria-hidden="true" focusable="false" /> : <Menu aria-hidden="true" focusable="false" />}
-              <span>Menu</span>
-            </button>
-            {(routeType === "wiki" || routeType === "chat") && <SidebarToggleButton routeType={routeType} />}
-            <div className="app-topbar-title">
-              <span className="app-topbar-name">{VIEW_LABEL[routeType]}</span>
-              {selectedSlug && <span className="app-topbar-slug">{selectedSlug}</span>}
-            </div>
-            <div className="nav-spacer" />
-            <div className="app-topbar-switcher">
-              <ProjectSwitcher routeType={routeType} />
-            </div>
-            <div className="app-topbar-account">
-              <ThemeToggle />
-              <UserMenu />
-            </div>
-          </div>
-        </header>
-
         <div className="app-content">
           <Outlet />
         </div>
       </div>
 
       <div className="app-nav-menu" role="menu" aria-hidden={!menuOpen}>
+        <div className="app-nav-menu-brand">
+          <LexaMark />
+          <span className="nav-label">Lexa</span>
+        </div>
         {selectedSlug && (
           <MobileProjectMenu
             projects={projects}

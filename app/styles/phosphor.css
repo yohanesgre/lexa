@@ -135,6 +135,18 @@
      so it keeps its own plate and ink. */
   --lx-brand-plate: #F0C040;
   --lx-brand-ink: #0C0B09;
+  /* Shell geometry (DESIGN.md `layout:`): the cap band, the rail, the surface
+     pane, the chat transcript column and the reading measure. */
+  --lx-shell-band-h: 48px;
+  --lx-shell-band-h-phone: 52px;
+  --lx-rail-w: 200px;
+  --lx-rail-w-mid: 168px;
+  --lx-rail-w-collapsed: 48px;
+  --lx-pane-w: 260px;
+  --lx-pane-w-wide: 280px;
+  --lx-pane-drawer-w: 288px;
+  --lx-transcript-w: 860px;
+  --lx-measure-body: 75ch;
 
   --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
@@ -9234,11 +9246,41 @@ html {
    ========================================================= */
 .app-shell {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  min-height: 100vh;
+  grid-template-columns: var(--lx-rail-current) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100dvh;
   background: var(--lx-surface-ground);
+  --lx-rail-current: var(--lx-rail-w);
+}
+.app-shell[data-rail-open="false"] {
+  --lx-rail-current: var(--lx-rail-w-collapsed);
+}
+/* The cap band: one band across the whole window. Its left cell is the brand
+   cell (rail width), its right segment is the top-bar row; its bottom hairline
+   runs the full window and the rail's right hairline starts beneath it, so the
+   two meet in a T at (rail width, band height) and never cross. */
+.app-band {
+  grid-column: 1 / span 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  display: flex;
+  align-items: stretch;
+  min-height: var(--lx-shell-band-h);
+  background: var(--lx-surface-rail);
+  border-bottom: 1px solid var(--lx-border-default);
+}
+.app-band-brand {
+  display: flex;
+  align-items: center;
+  width: var(--lx-rail-current);
+  padding: 0 8px;
+  flex-shrink: 0;
 }
 .app-frame {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -9263,12 +9305,13 @@ html {
 
 /* The rail: 200px open, 48px collapsed, 168px in the mid band. */
 .app-nav {
+  grid-column: 1;
+  grid-row: 2;
   position: sticky;
-  top: 0;
+  top: var(--lx-shell-band-h);
   align-self: start;
-  width: 200px;
-  height: 100vh;
-  height: 100dvh;
+  width: var(--lx-rail-current);
+  height: calc(100dvh - var(--lx-shell-band-h));
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -9276,25 +9319,16 @@ html {
   padding: 8px;
   background: var(--lx-surface-rail);
   border-right: 1px solid var(--lx-border-default);
-  overflow: hidden auto;
+  overflow: hidden;
   z-index: 30;
 }
 .app-nav[data-open="false"] {
-  width: 48px;
   padding: 8px 4px;
 }
-.app-rail-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 32px;
-}
-.app-rail-head .nav-brand {
-  flex: 1;
-  min-width: 0;
-}
-.app-nav[data-open="false"] .app-rail-head {
-  flex-direction: column;
+/* The links are the rail's only scroll region; the foot control stays put. */
+.app-nav .nav-links {
+  overflow-y: auto;
+  min-height: 0;
 }
 .app-rail-toggle,
 .nav-hamburger {
@@ -9331,13 +9365,27 @@ html {
   width: 16px;
   height: 16px;
 }
+/* The rail foot: the collapse control is the rail's last row — a nav-link row
+   with a label — and the brand cell (in the cap band) never carries a control. */
+.app-rail-toggle {
+  justify-content: flex-start;
+  gap: 10px;
+  height: var(--lx-row-h);
+  padding: 0 10px;
+  font-size: 12px;
+}
+.app-nav[data-open="false"] .app-rail-toggle {
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+}
 .nav-hamburger {
   display: none; /* desktop rail owns navigation; shown below 768px */
 }
-.app-nav .nav-brand {
+.app-band-brand .nav-brand {
   display: inline-flex;
   align-items: center;
-  height: 32px;
+  height: var(--lx-row-h);
   padding: 0 8px;
   border-radius: var(--lx-radius-plate);
   font-family: var(--lx-font-signage);
@@ -9348,10 +9396,10 @@ html {
   color: var(--lx-text-primary);
   text-decoration: none;
 }
-.app-nav .nav-brand:hover {
+.app-band-brand .nav-brand:hover {
   background: var(--lx-surface-card-hover);
 }
-.app-nav .nav-brand.active {
+.app-band-brand .nav-brand.active {
   color: var(--lx-text-primary);
   text-decoration: none;
 }
@@ -9360,7 +9408,8 @@ html {
   align-items: center;
   min-width: 0;
 }
-.app-nav[data-open="false"] .nav-label {
+.app-nav[data-open="false"] .nav-label,
+.app-shell[data-rail-open="false"] .app-band-brand .nav-label {
   /* Collapsed rail: the label leaves the layout but stays in the accessible
      name, so the icon-only plate is still announced. */
   position: absolute;
@@ -9370,6 +9419,17 @@ html {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+/* Collapsed: the brand cell is the mark alone, centred with 12px to each edge
+   (24px mark + 12 + 12 = the 48px rail). */
+.app-shell[data-rail-open="false"] .app-band-brand {
+  padding: 0;
+  justify-content: center;
+}
+.app-shell[data-rail-open="false"] .app-band-brand .nav-brand {
+  width: 100%;
+  padding: 0;
+  justify-content: center;
 }
 .app-nav[data-open="false"] .nav-link {
   justify-content: center;
@@ -9419,25 +9479,15 @@ html {
   color: var(--lx-text-primary);
 }
 
-/* Top bar. */
-.app-topbar {
-  position: sticky;
-  top: 0;
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  min-height: 48px;
-  background: var(--lx-surface-rail);
-  border-bottom: 1px solid var(--lx-border-default);
-}
-/* The chrome rides the frame's own inline gutter, at the window's edges: the
-   narrow content column is a reading measure for the page body, not a cage the
-   top bar gets pulled into. */
+/* The band's right segment: the top-bar row. It rides the frame's own inline
+   gutter at the window's edges — the narrow content column is a reading
+   measure for the page body, not a cage the chrome gets pulled into. */
 .app-topbar-inner {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 0 24px;
 }
 .app-topbar-title {
@@ -9467,13 +9517,13 @@ html {
 /* Top bar pills run at row height, not the compact 28px chrome size: the
    label, the value and the chevron need room (the layered .nav-pill base
    stays compact for in-page users such as the team switcher). */
-.app-topbar .nav-pill {
+.app-topbar-inner .nav-pill {
   height: var(--lx-row-h);
   min-width: var(--lx-row-h);
   padding: 0 12px;
   gap: 8px;
 }
-.app-topbar .nav-pill svg {
+.app-topbar-inner .nav-pill svg {
   width: 14px;
   height: 14px;
 }
@@ -9488,11 +9538,11 @@ html {
   width: 32px;
   height: 32px;
 }
-.app-topbar .nav-pill-icon {
+.app-topbar-inner .nav-pill-icon {
   width: var(--lx-row-h);
   height: var(--lx-row-h);
 }
-.app-topbar .nav-spacer,
+.app-topbar-inner .nav-spacer,
 .app-nav .nav-spacer {
   flex: 1;
 }
@@ -10135,14 +10185,14 @@ html {
    phone <768 (labelled menu, strips, stacked order).
    ========================================================= */
 @media (min-width: 768px) and (max-width: 1023.98px) {
-  .app-nav {
-    width: 168px;
+  .app-shell {
+    --lx-rail-current: var(--lx-rail-w-mid);
   }
-  .app-nav[data-open="false"] {
-    width: 48px;
+  .app-shell[data-rail-open="false"] {
+    --lx-rail-current: var(--lx-rail-w-collapsed);
   }
-  /* The rail owns navigation at this width; the old tablet band hid the
-     nav row behind a hamburger and dropped the primary action. */
+  /* The rail owns navigation at this width; the labelled MENU control and its
+     panel are phone-only, so exactly one nav affordance exists per band. */
   .app-nav .nav-links {
     display: flex;
   }
@@ -10207,12 +10257,34 @@ html {
   .nav-hamburger {
     display: inline-flex;
   }
-  .app-topbar {
-    min-height: 52px;
+  /* Phone: no rail column in the grid, the band grows to the phone height, and
+     the brand lives in the menu panel's head instead of the band. */
+  .app-shell {
+    --lx-rail-current: 0px;
+  }
+  .app-band {
+    min-height: var(--lx-shell-band-h-phone);
+  }
+  .app-band-brand {
+    display: none;
   }
   .app-topbar-inner {
     padding: 0 12px;
     gap: 12px;
+  }
+  .app-nav-menu-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: var(--lx-row-h);
+    padding: 0 8px;
+    margin-bottom: 4px;
+    font-family: var(--lx-font-signage);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--lx-text-primary);
   }
   .app-topbar-name {
     font-size: 12px;
@@ -10255,7 +10327,7 @@ html {
   .app-topbar-switcher {
     display: none;
   }
-  .app-topbar .nav-pill-icon {
+  .app-topbar-inner .nav-pill-icon {
     width: var(--lx-row-h-touch);
     height: var(--lx-row-h-touch);
   }
@@ -10351,20 +10423,20 @@ html {
     margin-top: 6px;
   }
   /* Touch targets: every chrome control gets 44px and real spacing. */
-  .app-topbar .nav-pill {
+  .app-topbar-inner .nav-pill {
     min-width: var(--lx-row-h-touch);
     height: var(--lx-row-h-touch);
     padding: 0 10px;
   }
-  .app-topbar .nav-hamburger {
+  .app-topbar-inner .nav-hamburger {
     width: auto;
     height: auto;
     min-width: var(--lx-row-h-touch);
     min-height: var(--lx-row-h-touch);
     padding: 0 12px;
   }
-  .app-topbar .btn,
-  .app-topbar .btn-sm {
+  .app-topbar-inner .btn,
+  .app-topbar-inner .btn-sm {
     min-height: var(--lx-row-h-touch);
     height: auto;
     padding: 0 12px;
@@ -10447,14 +10519,14 @@ html {
 /* Very narrow phones: the top bar keeps its controls and drops the account
    name, so the chrome never crowds the content column. */
 @media (max-width: 479.98px) {
-  .app-topbar .user-name {
+  .app-topbar-inner .user-name {
     display: none;
   }
   /* One fact in the chrome at this width: the project, not the view name. */
   .app-topbar-name {
     display: none;
   }
-  .app-topbar .nav-pill-icon {
+  .app-topbar-inner .nav-pill-icon {
     width: var(--lx-row-h-touch);
     min-width: var(--lx-row-h-touch);
     height: var(--lx-row-h-touch);
