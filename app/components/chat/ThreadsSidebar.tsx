@@ -143,17 +143,19 @@ export function ThreadsSidebar({
             <span className="pane-head-label">Threads</span>
             <span className="pane-head-count">{String(threads.length).padStart(3, "0")}</span>
           </div>
+          <div className="pane-search">
+            <input
+              className="threads-search pane-search-input"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search threads…"
+              aria-label="Search threads"
+            />
+          </div>
           <button type="button" className="btn btn-ghost pane-action" onClick={onNewChat}>
             <Plus size={13} strokeWidth={1.5} aria-hidden="true" />
             New chat
           </button>
-          <input
-            className="threads-search pane-search-input"
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search threads…"
-            aria-label="Search threads"
-          />
         </div>
 
         <div className="threads-sidebar-list">

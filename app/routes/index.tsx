@@ -66,7 +66,6 @@ function Home() {
     <main className="page-frame">
       <div className="tm-dash-head">
         <h1>Projects</h1>
-        <span className="tm-plate">Trailheads</span>
         <span className="nav-spacer" />
         <div className="flex items-center gap-3">
           <button type="button" className="btn btn-primary" onClick={() => setShowCreate(true)}>

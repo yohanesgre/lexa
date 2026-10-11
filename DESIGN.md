@@ -3,38 +3,39 @@ name: Lexa
 description: "Self-hosted project tracker drawn as one surveyed mountain: a floodlit night map by default, a printed day map on switch, trail-signage type, and difficulty ribbons that carry priority and nothing else."
 colors:
   # Map furniture: ground (app field) / rail (nav and top bar) / panel (cards) / column (board columns, profile fill)
-  # Day map = the survey sheet: the night slate lifted to daylight, cool stock, never warm paper.
+  # Day map = the drafting sheet: the night slate lifted to daylight, a cool grey sheet with white
+  # plates raised off it, never warm paper.
   ground-night: "#10161B"
-  ground-day: "#F2F5F7"
+  ground-day: "#E2E9EE"
   rail-night: "#0B1014"
-  rail-day: "#E1E7EB"
+  rail-day: "#CFDAE3"
   panel-night: "#18222B"
-  panel-day: "#FAFBFC"
+  panel-day: "#FFFFFF"
   column-night: "#141C24"
-  column-day: "#EAEFF2"
+  column-day: "#F0F5F8"
   card-hover-night: "#1F2C36"
-  card-hover-day: "#D2DBE2"
+  card-hover-day: "#E8EFF4"
   card-active-night: "#26343F"
-  card-active-day: "#CCD5DD"
+  card-active-day: "#DBE5EB"
   input-night: "#0D141A"
   input-day: "#FFFFFF"
   overlay-night: "rgba(8, 12, 16, 0.78)"
   overlay-day: "rgba(23, 34, 43, 0.42)"
   # Borders — two line weights on the day map: the pencil hairline (border, border-subtle,
-  # separators) and the inked line (border-strong, border-input, both #5F6A72: state marks
+  # separators) and the inked line (border-strong, border-input, both #5A6672: state marks
   # and field boundaries clear 3:1 on every day surface and state fill).
   border-night: "#26333D"
-  border-day: "#C7CFD5"
+  border-day: "#C9D3DA"
   border-subtle-night: "#1B242C"
-  border-subtle-day: "#DDE3E8"
+  border-subtle-day: "#DFE6EB"
   border-strong-night: "#3E505D"
-  border-strong-day: "#5F6A72"
+  border-strong-day: "#5A6672"
   border-focus-night: "#F0C040"
   border-focus-day: "#7E5C00"
   border-input-night: "#43565F"
-  border-input-day: "#5F6A72"
+  border-input-day: "#5A6672"
   border-input-hover-night: "#5A6E78"
-  border-input-hover-day: "#3B4750"
+  border-input-hover-day: "#46525C"
   # Ink — the day ramp is a slate ladder: secondary and muted are pulled darker than the
   # old map so both clear 4.5:1 on the state fills (the pressed step is the binding host).
   ink-night: "#EAF2F6"
@@ -86,9 +87,9 @@ colors:
   scrollbar-track-night: "ground-night (alias — --lx-scrollbar-track: var(--lx-surface-ground))"
   scrollbar-track-day: "ground-day (alias — --lx-scrollbar-track: var(--lx-surface-ground))"
   scrollbar-thumb-night: "#26333D"
-  scrollbar-thumb-day: "#7E8890"
+  scrollbar-thumb-day: "#76818C"
   scrollbar-thumb-hover-night: "#3E505D"
-  scrollbar-thumb-hover-day: "#5F6B74"
+  scrollbar-thumb-hover-day: "#5C6873"
   # Difficulty ribbons: priority encoding. Fills are identical at both times of day.
   run-lowest: "#2E9E4F"
   run-normal: "#2F74D0"
@@ -332,7 +333,7 @@ components:
 
 **Creative North Star: "The Tuned CRT"**
 
-The North Star is carried as tuned, warm, human precision: instruments calibrated by hand until they read true. Its literal CRT reading — the amber-on-black HUD workspace this world replaced — is still refused as a *look*: no monochrome amber field, no glowing terminal furniture, no amber on everything. The amber itself was never the rut, and it returns on purpose: the brand's own LX-plate yellow is the map's one action colour, a single lit plate on a cold slate field. The world that expresses it is the Trail Map: the tracker reads as one surveyed mountain at two times of day. The default is the floodlit night map, a cold slate field with lit ribbons and crisp signage plates; the switch gives the printed day map, the night slate lifted to daylight — cool survey stock with the same ribbons and the same plates. The day map is a translation of the same mountain, never an inversion.
+The North Star is carried as tuned, warm, human precision: instruments calibrated by hand until they read true. Its literal CRT reading — the amber-on-black HUD workspace this world replaced — is still refused as a *look*: no monochrome amber field, no glowing terminal furniture, no amber on everything. The amber itself was never the rut, and it returns on purpose: the brand's own LX-plate yellow is the map's one action colour, a single lit plate on a cold slate field. The world that expresses it is the Trail Map: the tracker reads as one surveyed mountain at two times of day. The default is the floodlit night map, a cold slate field with lit ribbons and crisp signage plates; the switch gives the printed day map, the night slate lifted to daylight — cool drafting stock with the same ribbons and the same plates. The day map is a translation of the same mountain, never an inversion.
 
 The world lends type, palette, density, and one signature move. It never supplies layout, navigation model, or controls: nav is nav, buttons are buttons, tables sort with standard headers. A working screen must read as a tracker of its category first. The voice is warm, playful, and tactile, and it lives in the display layers only. Every control and state keeps its plain name (`New task`, `Blocked`, `Needs attention`); metaphor display names sit beside plain truth (`Trail profile`, with the plain sub-line `Milestones and sprint progress`). The ornament budget is spent entirely in the signature panel; lists and forms stay bare.
 
@@ -353,7 +354,7 @@ Density is the working loop. The dashboard holds six regions inside a 1440x900 v
 
 ## Colors
 
-The palette is the Trail Map's own furniture at two times of day: cold floodlit slate at night, cool survey stock by day, with saturated trail colours doing real work. Full token values live in the frontmatter; the groups below explain where each colour earns its place. The day map's identity is one line: **the night slate lifted to daylight — a fresh survey sheet, cool stock, plates outlined in pencil and states inked, the amber plate the only warm mark on it.** It replaces the old warm map paper deliberately: the beige family was amber-adjacent, so the one action colour had no neutral field to be one against; its ladder sat within 1.02 to 1.09:1 in a single hue (the hover fill was literally the ground colour, 1.00:1); and the world's ink is slate-hued, which reads dirty on warm stock. The night family is slate-hued already — the beige day map was the hue inversion; the cool sheet is the honest translation.
+The palette is the Trail Map's own furniture at two times of day: cold floodlit slate at night, cool drafting stock by day, with saturated trail colours doing real work. Full token values live in the frontmatter; the groups below explain where each colour earns its place. The day map's identity is one line: **the night slate lifted to daylight — a fresh drafting sheet, cool stock, plates outlined in pencil and states inked, the amber plate the only warm mark on it.** It replaces the old warm map paper deliberately: the beige family was amber-adjacent, so the one action colour had no neutral field to be one against; its ladder sat within 1.02 to 1.09:1 in a single hue (the hover fill was literally the ground colour, 1.00:1); and the world's ink is slate-hued, which reads dirty on warm stock. The night family is slate-hued already — the beige day map was the hue inversion; the cool sheet is the honest translation.
 
 ### Primary
 - **Brand Amber** (night `#F0C040` / day fill `#D4A017`): the only action colour in the system — the same yellow as the LX plate in the rail. Primary buttons, the global focus ring, the today marker on the Trail Profile, the "You are here" post, and the traced-row tint all come from this one hue. At night one value carries every amber job: fill, ring, marks, and links. By day the hue splits at the paper line: the fill is the plate yellow carrying dark ink (a yellow plate always reads with dark ink, never white — white on `#D4A017` is 2.38:1), while everything drawn on the sheet — focus ring, marker strokes, links — wears the ink amber `#7E5C00`, because plate yellow on the survey stock is 1.60 to 2.38:1 and cannot mark anything. The day primary button always carries a 1px ink-amber rim: at day the fill cannot define its own edge against any surface (1.60 to 2.38:1), so the rim is mandatory everywhere on the day map, and its own edge against the sheet passes 4.64:1 and up; the Same-Mountain Rule already says only paper, ink, and rim change with the light. One named miss rides with the owner-approved marks value: ink-amber marks on the two state fills read 4.38:1 (hover) and 4.13:1 (pressed) against a 4.5 bar — the nearest passing value is a one-notch deeper ink amber `#745400`, whose cost is losing the approved `#7E5C00` and warming the rim away from the plate fill (2.59:1 to 2.71:1, both internal to the button); every resting surface passes 4.92:1 and up, and marks on state fills are transient. Its rarity is the point: if two things wear the amber, one of them is wrong.
@@ -366,9 +367,9 @@ The palette is the Trail Map's own furniture at two times of day: cold floodlit 
 - **Lift-Line Series Hues** (glacier cyan, sun gold, plum, meadow green, slate): per-project and data-series identity only. Sprint runs on the Trail Profile wear these, and so do data series elsewhere. They never carry state and never carry priority.
 
 ### Neutral
-- **Map Furniture** (ground, rail, panel, column, input, overlay): the app field, the nav rail and top bar, cards and panels, board columns and profile fill, form fields, and scrims. Night values are the floodlit slate family; day values are the daylight slate family — the printed survey sheet, the same hue family lifted, never a warm paper substitute. Panels are lighter than ground at both times of day, so a card always reads as a plate laid on the map; the rail is the darkest chrome at both times of day, the frame sunk into the map. The day ladder runs rail `#E1E7EB`, ground `#F2F5F7`, column `#EAEFF2`, panel `#FAFBFC`, input `#FFFFFF` — the input is the map's blank: cut dark into the slate at night, printed white on the sheet by day. The two state fills live below the rail line (hover `#D2DBE2`, pressed `#CCD5DD`), so a hovered or pressed row reads on every host, board columns included (1.06 to 1.49:1 against the surfaces it sits on): the cursor casts shadow on the day map where it throws light on the night map. State steps are tonal, not graphic — the state is carried by its fill step plus the inked border, never by fill alone.
+- **Map Furniture** (ground, rail, panel, column, input, overlay): the app field, the nav rail and top bar, cards and panels, board columns and profile fill, form fields, and scrims. Night values are the floodlit slate family; day values are the daylight slate family — the drafting sheet, the same hue family lifted, never a warm paper substitute. Panels are lighter than ground at both times of day, so a card always reads as a plate laid on the map; the rail is the darkest chrome at both times of day, the frame sunk into the map. The day ladder runs rail `#CFDAE3`, ground `#E2E9EE`, column `#F0F5F8`, panel `#FFFFFF`, with the input the same white as the panel — the input is the map's blank: cut dark into the slate at night, printed white on the sheet by day. The steps are measured, not implied: the panel stands 1.23:1 off the ground (a 24% luminance step), the rail 1.16:1 below it, the column 1.12:1 above it, a hover fill 1.16:1 off the panel and a pressed fill 1.10:1 below that — where the warm day family it replaced sat at 1.06:1 (7%) across the board and rested on hairlines alone. The two state fills live below the rail line (hover `#E8EFF4`, pressed `#DBE5EB`), so a hovered or pressed row reads on every host, board columns included (1.06 to 1.16:1 against the surfaces it sits on): the cursor casts shadow on the day map where it throws light on the night map. State steps are tonal, not graphic — the state is carried by its fill step plus the inked border, never by fill alone.
 - **Ink** (primary, secondary, muted, inverse, plus danger, warning, and success ink): body text is snow-white at night and deep slate ink by day, never pure white. Secondary ink carries meta and labels, muted ink carries sub-lines and timestamps, inverse ink rides on filled chrome that is not the accent — the amber fill always carries its own accent ink (`#10161B` night, `#17222B` day). The day ramp is a slate ladder (`#17222B` / `#3B4750` / `#4B5963`): secondary and muted are pulled darker than the old map because the pressed state fill is the binding host — every ink of the ramp clears 4.5:1 on every day surface and state fill, a row pressed while traced included — and the quiet register of a sub-line rides its size and place, not a whisper tone.
-- **Borders** (default, subtle, strong, focus, input): 1px hairlines do all the separating work that shadows would do in another system. The day map draws two line weights: the pencil hairline (default, subtle) for separators and plate outlines — quiet by design at 1.04 to 1.58:1, the Same-Mountain parity with the night hairlines at 1.2 to 1.7:1 — and the inked line (strong, input, both `#5F6A72`) for everything that must be seen: hovered and active plates, field boundaries, and the pressed row's edge, 3.55 to 5.54:1 on every day surface and state fill. The pencil hairline is a named exception to the 3:1 hairline bar (it separates, it never identifies; its nearest passing value is the inked line itself, whose cost is a boxed-wireframe board and the end of the two-weight vocabulary). Strong borders mark the active nav plate and hovered rows.
+- **Borders** (default, subtle, strong, focus, input): 1px hairlines do all the separating work that shadows would do in another system. The day map draws two line weights: the pencil hairline (default, subtle) for separators and plate outlines — quiet by design at 1.03 to 1.52:1, the Same-Mountain parity with the night hairlines at 1.2 to 1.7:1 — and the inked line (strong, input, both `#5A6672`) for everything that must be seen: hovered and active plates, field boundaries, and the pressed row's edge, 4.79 to 5.87:1 on every day surface and state fill. The pencil hairline is a named exception to the 3:1 hairline bar (it separates, it never identifies; its nearest passing value is the inked line itself, whose cost is a boxed-wireframe board and the end of the two-weight vocabulary). Strong borders mark the active nav plate and hovered rows.
 
 ### State and Stamp Ink
 - **State Hues** (danger, warning, success, info) and their tinted grounds: meaning only. They fire for WIP approaching or exceeded, sync degraded or failed, and overdue dates, and nowhere else.

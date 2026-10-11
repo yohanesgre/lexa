@@ -17,6 +17,13 @@
   --lx-surface-ground: #10161B;
   --lx-surface-rail: #0B1014;
   --lx-surface-panel: #18222B;
+  /* The cap band: rail tone at night, its own (lighter) tone on the day map. */
+  --lx-surface-band: var(--lx-surface-rail);
+  /* Chrome rows (rail links, pane rows) step against the chrome itself, not
+     against a content panel: the same values at night, deeper tans on the
+     light chrome, where the content's subtle hover would vanish. */
+  --lx-surface-chrome-hover: var(--lx-surface-card-hover);
+  --lx-surface-chrome-active: var(--lx-surface-card-active);
 
   --lx-surface-app: var(--lx-surface-ground);
   --lx-surface-elevated: var(--lx-surface-rail);
@@ -73,11 +80,11 @@
   --lx-scrollbar-thumb-hover: #3E505D;
 
   /* Difficulty ribbons — priority encoding, rank numeral always doubled */
-  --lx-run-lowest: #2E9E4F;
+  --lx-run-lowest: #1F7A3A;
   --lx-run-normal: #2F74D0;
   --lx-run-high: #D2372F;
   --lx-run-highest: #0B0B0C;
-  --lx-run-lowest-ink: #0B0B0C;
+  --lx-run-lowest-ink: #FFFFFF;
   --lx-run-normal-ink: #FFFFFF;
   --lx-run-high-ink: #FFFFFF;
   --lx-run-highest-ink: #FFFFFF;
@@ -152,58 +159,68 @@
   --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
 }
 
-/* ---- Semantic tokens: LIGHT — the survey sheet ----
-   The night slate lifted to daylight: cool stock, pencil hairlines, the same
-   ribbons and plates, and the amber plate the only warm mark on the sheet. The
-   day map is a translation of the same mountain, never an inversion. */
+/* ---- Semantic tokens: LIGHT — the warm day map ----
+   The same mountain at the other time of day: warm stock underfoot, off-white
+   plates laid on it, warm ink in the type, and the amber the only saturated
+   note. The ladder steps down from the plate to the stock to the rail, so
+   hierarchy does not rest on the hairlines alone; warm ink on warm stock is
+   deliberate — a cool ink reads dirty on this field. The day map is a
+   translation of the night map, never an inversion. */
 [data-theme="light"] {
-  --lx-surface-ground: #F2F5F7;
-  --lx-surface-rail: #E1E7EB;
-  --lx-surface-panel: #FAFBFC;
+  --lx-surface-ground: #F2EDE2;
+  --lx-surface-rail: #F7F3E9;
+  /* The cap band, the rail and the surface panes share one chrome tone: the
+     frame reads as a single printed border around the sheet. */
+  --lx-surface-band: #F7F3E9;
+  /* Warmed and deepened against the light chrome, so a hovered or active rail
+     row reads there. */
+  --lx-surface-chrome-hover: #DCD3BE;
+  --lx-surface-chrome-active: #D2C8B0;
+  --lx-surface-panel: #FDFBF7;
   /* The day map's brand plate: the favicon's own light-scheme tile. */
   --lx-brand-plate: #D4A017;
 
   --lx-surface-app: var(--lx-surface-ground);
   --lx-surface-elevated: var(--lx-surface-rail);
-  --lx-surface-column: #EAEFF2;
+  --lx-surface-column: #EDE7D9;
   --lx-surface-card: var(--lx-surface-panel);
-  --lx-surface-card-hover: #D2DBE2;
-  --lx-surface-card-active: #CCD5DD;
+  --lx-surface-card-hover: #EDE7DA;
+  --lx-surface-card-active: #E3DBC8;
   --lx-surface-card-dragging: var(--lx-surface-panel);
   --lx-surface-input: #FFFFFF;
-  --lx-surface-overlay: rgba(23, 34, 43, 0.42);
-  --lx-surface-tooltip: #17222B;
-  --lx-surface-selected: rgba(212, 160, 23, 0.12);
+  --lx-surface-overlay: rgba(42, 36, 27, 0.42);
+  --lx-surface-tooltip: #2A241B;
+  --lx-surface-selected: rgba(212, 160, 23, 0.14);
 
-  --lx-border-default: #C7CFD5;
-  --lx-border-subtle: #DDE3E8;
-  --lx-border-strong: #5F6A72;
+  --lx-border-default: #C2B79E;
+  --lx-border-subtle: #CFC4AC;
+  --lx-border-strong: #5E5343;
   --lx-border-focus: #7E5C00;
-  --lx-border-input: #5F6A72;
+  --lx-border-input: #5E5343;
   /* Intentionally the same literal as --lx-text-secondary (light block), per the wireframe. */
-  --lx-border-input-hover: #3B4750;
+  --lx-border-input-hover: #443C30;
   --lx-status-danger: #B02A22;
   --lx-status-warning: #9A6410;
   --lx-status-success: #1F7A3A;
   --lx-status-info: #1D7C88;
 
-  --lx-text-primary: #17222B;
-  --lx-text-secondary: #3B4750;
-  --lx-text-tertiary: #46535D;
-  --lx-text-muted: #4B5963;
-  --lx-text-inverse: #FBFAF6;
+  --lx-text-primary: #2A241B;
+  --lx-text-secondary: #544B3C;
+  --lx-text-tertiary: #635A49;
+  --lx-text-muted: #615846;
+  --lx-text-inverse: #FDFBF7;
   --lx-text-link: #7E5C00;
   --lx-text-link-hover: #6B4E00;
   --lx-text-danger: #8E2018;
   --lx-text-warning: #7A4E0C;
   --lx-text-success: #14572B;
 
-  /* Brand amber on the day map. The fill is the plate yellow carrying dark ink;
-     the mark (ring, strokes, borders, links, caret) is the ink amber, because
-     one amber cannot be both readable on paper and a plate that reads as one. */
-  --lx-accent: #D4A017;
-  --lx-accent-hover: #C79412;
-  --lx-accent-ink: #17222B;
+  /* Brand amber on the day map, warm stock. The primary action is the deep
+     amber carrying a light label (the plate yellow at #D4A017 cannot hold a
+     light label: 2.27:1); the marks, ring and links keep the ink amber. */
+  --lx-accent: #8A5A0A;
+  --lx-accent-hover: #93600C;
+  --lx-accent-ink: #FFF9EC;
   --lx-accent-muted: #7E5C00;
 
   --lx-bg-danger-subtle: rgba(176, 42, 34, 0.10);
@@ -211,18 +228,18 @@
   --lx-bg-success-subtle: rgba(31, 122, 58, 0.10);
   --lx-bg-accent-subtle: rgba(212, 160, 23, 0.10);
 
-  --lx-shadow-sm: 0 1px 2px rgba(23, 34, 43, 0.10);
-  --lx-shadow-md: 0 6px 16px rgba(23, 34, 43, 0.12);
-  --lx-shadow-lg: 0 16px 40px rgba(23, 34, 43, 0.16);
-  --lx-shadow-drag: 0 10px 28px rgba(23, 34, 43, 0.18), 0 0 0 1px rgba(212, 160, 23, 0.35);
-  --lx-shadow-slideover: -6px 0 28px rgba(23, 34, 43, 0.14);
+  --lx-shadow-sm: 0 1px 2px rgba(42, 36, 27, 0.10);
+  --lx-shadow-md: 0 6px 16px rgba(42, 36, 27, 0.12);
+  --lx-shadow-lg: 0 16px 40px rgba(42, 36, 27, 0.16);
+  --lx-shadow-drag: 0 10px 28px rgba(42, 36, 27, 0.18), 0 0 0 1px rgba(138, 90, 10, 0.35);
+  --lx-shadow-slideover: -6px 0 28px rgba(42, 36, 27, 0.14);
 
   --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
-  --lx-focus-glow: 0 0 12px rgba(212, 160, 23, 0.16);
+  --lx-focus-glow: 0 0 12px rgba(212, 160, 23, 0.18);
 
   --lx-scrollbar-track: var(--lx-surface-ground);
-  --lx-scrollbar-thumb: #7E8890;
-  --lx-scrollbar-thumb-hover: #5F6B74;
+  --lx-scrollbar-thumb: #857B6B;
+  --lx-scrollbar-thumb-hover: #6E6555;
 
   /* Ribbons stay the same saturated fills in both map times of day; only the
      rim flips so the black chip keeps an edge on paper. */
@@ -948,8 +965,10 @@
     position: relative;
   }
   .column-strip {
-    height: 3px;
-    border-radius: 8px 8px 0 0;
+    width: 4px;
+    height: 14px;
+    margin-right: 8px;
+    border-radius: 2px;
     flex-shrink: 0;
   }
   .column-header {
@@ -3050,7 +3069,7 @@
     transition: background 100ms;
   }
   .tree-item:hover {
-    background: var(--lx-surface-card-hover);
+    background: var(--lx-surface-chrome-hover);
   }
 
   .tree-item-link {
@@ -7260,6 +7279,7 @@
   height: 100%;
 }
 .pane-search .prop-input,
+.pane-search .pane-search-input,
 .pane-search .relative > button {
   height: 100%;
   width: 100%;
@@ -7271,6 +7291,9 @@
   font-size: 13px;
   color: var(--lx-text-secondary);
   text-align: left;
+}
+.pane-search .pane-search-input::placeholder {
+  color: var(--lx-text-muted);
 }
 .pane-search .relative > button:hover {
   color: var(--lx-text-primary);
@@ -7328,7 +7351,7 @@
   cursor: pointer;
 }
 .thread-row:hover {
-  background: var(--lx-surface-card-hover);
+  background: var(--lx-surface-chrome-hover);
 }
 .thread-row.active {
   background: var(--lx-bg-accent-subtle);
@@ -9214,6 +9237,23 @@ html {
   caret-color: var(--lx-border-focus);
   background: var(--lx-surface-ground);
 }
+
+/* Selects: the native arrow hugs the border, so the app draws its own chevron
+   with room to breathe, in the theme's own ink. */
+select.prop-input,
+.column-header select,
+.tasks-select {
+  appearance: none;
+  padding-right: 28px;
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239FB2BE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+[data-theme="light"] select.prop-input,
+[data-theme="light"] .column-header select,
+[data-theme="light"] .tasks-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235E5343' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
 /* No native scrollbar arrow buttons anywhere: they are ~15px controls that no
    touch rule can reach. The authored bar below is the only affordance. */
 ::-webkit-scrollbar-button {
@@ -9414,7 +9454,7 @@ html {
   display: flex;
   align-items: stretch;
   min-height: var(--lx-shell-band-h);
-  background: var(--lx-surface-rail);
+  background: var(--lx-surface-band);
   border-bottom: 1px solid var(--lx-border-default);
 }
 .app-band-brand {
@@ -9608,14 +9648,14 @@ html {
   flex-shrink: 0;
 }
 .app-nav .nav-link:hover {
-  background: var(--lx-surface-card-hover);
+  background: var(--lx-surface-chrome-hover);
   color: var(--lx-text-primary);
 }
 .app-nav .nav-link:active {
-  background: var(--lx-surface-card-active);
+  background: var(--lx-surface-chrome-active);
 }
 .app-nav .nav-link.active {
-  background: var(--lx-surface-card-active);
+  background: var(--lx-surface-chrome-active);
   border-color: var(--lx-border-strong);
   color: var(--lx-text-primary);
 }
@@ -9648,12 +9688,18 @@ html {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.app-topbar-slug {
-  font-family: var(--lx-font-surveyor);
-  font-size: 11px;
-  letter-spacing: 0.02em;
+/* The project's own name: hidden on desktop, where the view name and the
+   project switcher already say where you are; on phones it is the chrome's one
+   fact. */
+.app-topbar-project {
+  display: none;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--lx-text-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Top bar pills run a size below the row: at row height they filled the 48px
    band and read as pressing its edges. 32px is the desktop target floor, with
@@ -10400,6 +10446,9 @@ html {
   }
   .nav-hamburger {
     display: inline-flex;
+    /* The mobile Menu control reads as a labelled control, not a boxed button:
+       its tap area and focus ring stay, the outline does not. */
+    border-color: transparent;
   }
   /* Phone: no rail column in the grid, the band grows to the phone height, and
      the brand lives in the menu panel's head instead of the band. The rail's
@@ -10442,8 +10491,12 @@ html {
     text-transform: uppercase;
     color: var(--lx-text-primary);
   }
+  /* One fact in the chrome on a phone: the project, not the view name. */
   .app-topbar-name {
-    font-size: 12px;
+    display: none;
+  }
+  .app-topbar-project {
+    display: inline-flex;
   }
   .app-content {
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
@@ -10685,10 +10738,6 @@ html {
    name, so the chrome never crowds the content column. */
 @media (max-width: 479.98px) {
   .app-topbar-inner .user-name {
-    display: none;
-  }
-  /* One fact in the chrome at this width: the project, not the view name. */
-  .app-topbar-name {
     display: none;
   }
   .app-topbar-inner .nav-pill-icon {

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Pin } from "lucide-react";
 import { formatRelative } from "../../lib/relative-time";
 import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
@@ -220,7 +221,7 @@ export function ChatHeader({
             disabled={actionsDisabled}
             onClick={onPinToggle}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M12 17v5m-5-9.5A5.5 5.5 0 1 1 17 12.5" /><path d="M12 17a5 5 0 1 0-5-5" /></svg>
+            <Pin size={14} strokeWidth={1.5} aria-hidden="true" />
           </button>
           <button
             type="button"
