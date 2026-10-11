@@ -994,7 +994,7 @@ function ProjectDashboard() {
   const { data: dashboard, isLoading, isError: dashboardFailed, refetch: refetchDashboard } = useDashboard();
   const board = useBoard(slug);
   const { data: milestones = [], isError: milestonesFailed, refetch: refetchMilestones } = useMilestones(slug);
-  const [traced, setTraced] = useState<string | null>(null);
+  const [traced, setTraced] = useState<{ id: string; from: "attention" | "movement" } | null>(null);
   const paneGridRef = useRef<HTMLDivElement>(null);
   const [attentionCap, setAttentionCap] = useState<number | null>(null);
 
@@ -1139,7 +1139,7 @@ function ProjectDashboard() {
                 priorities={priorities}
                 traceId={null}
                 loading
-                onTrace={setTraced}
+                onTrace={(id: string) => setTraced({ id, from: "attention" })}
                 onTraceEnd={() => setTraced(null)}
                 onOpen={openTask}
               />
@@ -1150,7 +1150,7 @@ function ProjectDashboard() {
               priorities={priorities}
               traceId={null}
               loading
-              onTrace={setTraced}
+              onTrace={(id: string) => setTraced({ id, from: "movement" })}
               onTraceEnd={() => setTraced(null)}
               onOpen={openTask}
             />
@@ -1183,7 +1183,7 @@ function ProjectDashboard() {
               loading={false}
               milestonesFailed={milestonesFailed}
               onRetry={() => void refetchMilestones()}
-              tracedId={traced}
+              tracedId={traced?.id ?? null}
             />
 
             <div
@@ -1194,9 +1194,9 @@ function ProjectDashboard() {
               <NeedsAttention
                 rows={attention}
                 priorities={priorities}
-                traceId={traced}
+                traceId={traced?.from === "attention" ? traced.id : null}
                 loading={false}
-                onTrace={setTraced}
+                onTrace={(id: string) => setTraced({ id, from: "attention" })}
                 onTraceEnd={() => setTraced(null)}
                 onOpen={openTask}
               />
@@ -1206,9 +1206,9 @@ function ProjectDashboard() {
             <RecentMovement
               rows={moves}
               priorities={priorities}
-              traceId={traced}
+              traceId={traced?.from === "movement" ? traced.id : null}
               loading={false}
-              onTrace={setTraced}
+              onTrace={(id: string) => setTraced({ id, from: "movement" })}
               onTraceEnd={() => setTraced(null)}
               onOpen={openTask}
             />

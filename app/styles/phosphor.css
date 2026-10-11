@@ -3,8 +3,10 @@
 
 /* =========================================================
    Lexa — PHOSPHOR design tokens
-   Transcribed from wireframes/DESIGN_SYSTEM.md §2/§3/§6/§8 and ported
-   from wireframes/wireframes.css (class-for-class).
+   The world is defined by DESIGN.md (root): its frontmatter is the
+   normative token record and this sheet is the single place those tokens
+   are declared for the app. The retired wireframes/ archive is not a
+   source — it is no longer part of this repository.
    ========================================================= */
 
 /* ---- Semantic tokens: DARK (default) — the floodlit night map ----
@@ -1840,8 +1842,8 @@
   .editor-content {
     display: flex;
     flex-direction: column;
-    padding: 12px;
-    background: var(--lx-surface-input);
+    padding: var(--lx-space-6);
+    background: transparent;
     border-radius: 0 0 6px 6px;
     min-height: 120px;
   }
@@ -2024,9 +2026,56 @@
   }
   .wiki-toolbar-row {
     display: flex;
-    gap: 2px;
+    gap: 12px;
     flex-wrap: wrap;
     align-items: center;
+  }
+  /* Toolbar groups are separated by a wider gap, never a divider (the reference
+     arrangement): each cluster keeps its own tight 2px rhythm. */
+  .toolbar-cluster {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: wrap;
+  }
+
+  /* ---- Editor / preview view (task description + wiki editing) ----
+     The editor keeps the rich-text surface and its toolbar as the box's top
+     row; the toggle in that toolbar turns the same pane into the rendered
+     document (components/tiptap-render). One pane on both surfaces. */
+  .editor-view-toggle {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  /* The editor's commands live in a fieldset so a surface showing the preview
+     can disable them as one group without hiding the controls. */
+  .toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: wrap;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .toolbar-group:disabled {
+    opacity: 0.5;
+  }
+  .editor-preview {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--lx-space-6);
+    background: transparent;
+    border-radius: 0 0 6px 6px;
+  }
+  .wiki-edit-preview {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--lx-space-6);
   }
 
   .wiki-title-input {
@@ -2193,11 +2242,6 @@
   }
   .btn-primary:hover {
     background: var(--lx-accent-hover);
-  }
-  /* Day map: the plate yellow alone cannot separate a button from paper
-     (1.87:1 vs the rail), so the day primary carries a 1px mark rim. */
-  [data-theme="light"] .btn-primary {
-    border-color: var(--lx-border-focus);
   }
   /* Pressed/selected toggle button (e.g. a provider preset, the attach trigger
      while its menu is open). */
@@ -4955,14 +4999,11 @@
     background: var(--lx-surface-input);
     transition: border-color 100ms, box-shadow 100ms;
   }
-  .composer:focus-within {
-    border-color: var(--lx-border-focus);
-  }
-  /* Editable elements always match :focus-visible (even mouse) — the
-     container's :focus-within signal replaces the element-level glow */
+  /* Editable elements always match :focus-visible (even mouse). The owner
+     asked for no border and no ring on a focused text area: the caret is the
+     only signal. */
   .composer-editor:focus-visible {
-    outline: 2px solid var(--lx-border-focus);
-    outline-offset: -2px;
+    outline: none;
     box-shadow: none;
   }
   .composer-toolbar {
@@ -5035,16 +5076,31 @@
     flex-wrap: wrap;
   }
 
-  .tasks-search {
+  /* The field's wrapper carries the leading glyph: an inline icon in
+     currentColor (the pane search's pattern) instead of a background image,
+     so it stays theme-aware. */
+  .tasks-search-field {
+    position: relative;
+    display: flex;
     flex: 1;
     min-width: 200px;
+  }
+
+  .tasks-search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--lx-text-muted);
+    pointer-events: none;
+  }
+
+  .tasks-search {
+    flex: 1;
+    width: 100%;
     height: var(--lx-row-h);
     padding: 0 10px 0 30px;
     background: var(--lx-surface-input);
-    /* A leading glyph, the way the app's selects carry their chevron. */
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%239FB2BE' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.6-3.6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: left 10px center;
     border: 1px solid var(--lx-border-input);
     border-radius: 4px;
     color: var(--lx-text-primary);
@@ -6316,7 +6372,9 @@
 }
 .sl-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  /* min() keeps the track from forcing a 520px column (and horizontal
+     overflow) on a phone, where the grid's inner width is below 520px. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
   gap: 6px;
   align-items: stretch;
 }
@@ -6427,6 +6485,23 @@
   padding: 4px 6px;
 }
 .sl-link-btn:hover { background: var(--lx-surface-card-hover); text-decoration: underline; }
+
+/* ---- Swimlanes list, phone ----
+   The group head lets its meta drop to its own line when the meta cannot sit
+   beside the title (content-driven, so a head that fits is untouched); the row
+   actions carry the phone's 44px touch floor. */
+@media (max-width: 767.98px) {
+  .sl-group-title {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .sl-row-actions .btn,
+  .sl-row-actions .sl-link-btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--lx-row-h-touch);
+  }
+}
 
 /* ---- Attachments panel (task-detail-attachments wireframe) ---- */
 .attachments-dropzone {
@@ -7769,11 +7844,11 @@
    Touch targets ≥ 44px on mobile. No raw hex — PHOSPHOR tokens only.
    ========================================================= */
 
-/* ---- 1. Mobile nav (hamburger + slide-down panel) ----
+/* ---- 1. Mobile nav (hamburger + menu panel) ----
    On mobile we hide the inline nav-links (no room for 7 items) and reveal a
-   hamburger button. Tapping it toggles .app-nav-menu-open on <nav> and
-   slides the panel in from the top. The panel covers the page but the nav
-   bar stays visible so the user can dismiss it. */
+   labelled hamburger button. Tapping it sets .is-menu-open on the shell and
+   reveals the full-height menu panel under the band; the band stays visible
+   so the user can dismiss it. */
 .nav-hamburger {
   display: none;
   align-items: center;
@@ -7838,9 +7913,8 @@
   }
 }
 
-/* Slide-down panel rendered inside the nav. Hidden by default; opened by
-   .app-nav.app-nav-menu-open. Position: fixed so it doesn't push the page
-   down — sits over content. */
+/* The phone menu panel is built by the phone block at the end of this sheet
+   (the stretch below 768px); at every other width it stays out of the flow. */
 .app-nav-menu {
   display: none;
 }
@@ -7867,63 +7941,6 @@
      area clickable. The icon-only mark is implicit via the .nav-brand box. */
   .nav-brand {
     flex: 0 0 auto;
-  }
-
-  /* Slide-down menu (always present in DOM, only visible when opened) */
-  .app-nav-menu {
-    display: none;
-    position: fixed;
-    top: 48px;
-    left: 0;
-    right: 0;
-    background: var(--lx-surface-elevated);
-    border-bottom: 1px solid var(--lx-border-default);
-    box-shadow: var(--lx-shadow-md);
-    transform: translateY(-12px);
-    opacity: 0;
-    transition: transform 200ms var(--lx-ease-out), opacity 200ms var(--lx-ease-out);
-    z-index: 45;
-    max-height: calc(100vh - 48px);
-    overflow-y: auto;
-    padding: 8px 0 12px;
-  }
-  .app-nav.app-nav-menu-open .app-nav-menu {
-    display: block;
-    transform: translateY(0);
-    opacity: 1;
-  }
-  .app-nav-menu-link {
-    display: flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 0 16px;
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--lx-text-secondary);
-    text-decoration: none;
-    border-left: 2px solid transparent;
-  }
-  .app-nav-menu-link:hover,
-  .app-nav-menu-link.active {
-    color: var(--lx-text-primary);
-    background: var(--lx-surface-card-hover);
-    border-left-color: var(--lx-border-focus);
-  }
-  .app-nav-menu-divider {
-    height: 1px;
-    background: var(--lx-border-subtle);
-    margin: 8px 0;
-  }
-  /* Backdrop dismisses the menu. */
-  .app-nav-backdrop {
-    display: none;
-    position: fixed;
-    inset: 48px 0 0 0;
-    background: var(--lx-surface-overlay);
-    z-index: 44;
-  }
-  .app-nav.app-nav-menu-open + .app-nav-backdrop {
-    display: block;
   }
 }
 
@@ -8076,10 +8093,9 @@
     flex-wrap: wrap;
     gap: 8px;
   }
-  .tasks-search {
+  .tasks-search-field {
     min-width: 0;
-    width: 100%;
-    flex-basis: 100%;
+    grid-column: 1 / -1;
   }
   .tasks-filter {
     width: 100%;
@@ -8094,8 +8110,8 @@
   }
   .tasks-archive-toggle {
     grid-column: 1 / -1;
-    width: 100%;
-    justify-content: center;
+    width: auto;
+    justify-self: start;
   }
   .tasks-search,
   .tasks-select,
@@ -8470,36 +8486,11 @@
   .app-nav .nav-hamburger {
     display: inline-flex;
   }
-  .app-nav .app-nav-menu {
-    display: block;
-    position: fixed;
-    top: 48px;
-    left: 0;
-    right: 0;
-    background: var(--lx-surface-elevated);
-    border-bottom: 1px solid var(--lx-border-default);
-    box-shadow: var(--lx-shadow-md);
-    transform: translateY(-12px);
-    opacity: 0;
-    transition: transform 200ms var(--lx-ease-out), opacity 200ms var(--lx-ease-out);
-    z-index: 45;
-    max-height: calc(100vh - 48px);
-    overflow-y: auto;
-    padding: 8px 0 12px;
-  }
-  .app-nav.app-nav-menu-open .app-nav-menu {
-    display: block;
-    transform: translateY(0);
-    opacity: 1;
-  }
-  .app-nav.app-nav-menu-open + .app-nav-backdrop {
-    display: block;
-  }
 }
 
 /* ---- 22. Wiki edit page on mobile ----
-   The edit view is a 2-column split (preview | editor). On mobile the split
-   (WikiEditSplit) becomes a vertical stack. */
+   One pane, so the only phone-specific need is the view toggle's tap target
+   (the toolbar wraps on its own). */
 @media (max-width: 767.98px) {
   .wiki-edit-workspace {
     flex-direction: column;
@@ -8508,17 +8499,14 @@
     padding: 0;
     min-height: 0;
   }
-  /* Stack the preview/editor split on mobile. */
-  .wiki-edit-workspace .flex.flex-1.overflow-hidden {
-    flex-direction: column !important;
-  }
-  .wiki-edit-workspace .flex.flex-1.overflow-hidden > .flex.flex-1.flex-col {
-    min-height: 200px;
-  }
   .wiki-edit-preview {
     max-width: none;
     margin: 0;
     text-align: left;
+  }
+  .editor-view-toggle .tab-btn {
+    height: 44px;
+    padding: 0 16px;
   }
 }
 
@@ -8536,12 +8524,13 @@
    - Tighten message bubble padding
    - Add the collapsible skills panel styles */
 @media (max-width: 767.98px) {
-  /* Composer container — elevated card with safe-area-aware padding. */
+  /* Composer container — docked, not a card: what sits behind it is the
+     scrim's own ground, so the transcript reads as scrolling under the bar. */
   .chat-composer {
     padding: 8px 12px 12px;
-    background: var(--lx-surface-elevated);
-    border-top: 1px solid var(--lx-border-default);
-    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
+    background: transparent;
+    border-top: none;
+    box-shadow: none;
     /* Sit above the iOS home indicator. */
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
@@ -8667,167 +8656,12 @@
   }
 }
 
-/* ---- 31. Project switcher in the mobile nav menu ----
-   At the top of the slide-down menu, show a "Project: <name> ▾" toggle
-   that expands to a list of projects. Mirrors the desktop ProjectSwitcher
-   but as an inline panel inside the menu. */
-.app-nav-menu-project {
-  border-bottom: 1px solid var(--lx-border-subtle);
-  margin: 0 0 4px;
-  padding: 0;
-}
-.app-nav-menu-project-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: 44px;
-  padding: 0 16px;
-  background: transparent;
-  border: 0;
-  border-left: 2px solid transparent;
-  font: inherit;
-  font-size: 13px;
-  color: var(--lx-text-primary);
-  cursor: pointer;
-  text-align: left;
-  -webkit-tap-highlight-color: transparent;
-}
-.app-nav-menu-project-toggle:hover,
-.app-nav-menu-project-toggle:active {
-  background: var(--lx-surface-card-hover);
-}
-.app-nav-menu-project-label {
-  font-family: var(--lx-font-micro);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--lx-text-muted);
-  min-width: 50px;
-}
-.app-nav-menu-project-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: 600;
-  color: var(--lx-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.app-nav-menu-project-list {
-  background: var(--lx-surface-elevated);
-  max-height: 200px;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--lx-border-subtle);
-}
-.app-nav-menu-project-list .app-nav-menu-link {
-  padding-left: 32px;
-  font-size: 13px;
-  font-weight: 400;
-}
-.app-nav-menu-project-list .app-nav-menu-link.active {
-  color: var(--lx-text-link);
-  background: rgba(240, 192, 64, 0.2);
-  border-left-color: var(--lx-border-focus);
-}
 .rotate-180 {
   transform: rotate(180deg);
 }
 
-/* Fix: project list items need full-width bg. The .app-nav-menu-project
-   container is a block element but the inner list is also block by
-   default; the actual issue is that .app-nav-menu-project-list was
-   inheriting the parent's content width when it should be 100% of the
-   menu (which is already full viewport width via the .app-nav-menu
-   fixed positioning). */
-.app-nav-menu-project,
-.app-nav-menu-project-list {
-  display: block;
-  width: 100%;
-}
 
-/* Project list items must fill the row width — without this they
-   collapse to content + padding. */
-.app-nav-menu-project-list .app-nav-menu-link {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-
-
-/* ---- 32. Tablet menu: link display + flex column layout ----
-   On tablet (768-1023px) the menu is shown via hamburger but the
-   `.app-nav-menu-link { display: flex }` rule lives in the mobile media
-   query (max-width: 767.98px) and doesn't apply. Without it, links fall
-   back to inline-block and shrink to content width — producing the
-   right-aligned cluster seen in the screenshot. The project list and
-   separators also need the same column treatment. */
-@media (min-width: 768px) and (max-width: 1023.98px) {
-  .app-nav .app-nav-menu {
-    display: flex;
-    flex-direction: column;
-  }
-  .app-nav .app-nav-menu-link,
-  .app-nav .app-nav-menu-project-toggle,
-  .app-nav .app-nav-menu-project-list .app-nav-menu-link {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .app-nav .app-nav-menu-divider {
-    width: 100%;
-  }
-  .app-nav .app-nav-menu-project,
-  .app-nav .app-nav-menu-project-list {
-    display: block;
-    width: 100%;
-  }
-}
-
-/* ---- 33. Action items in the nav menu (Project settings, Create new project) ----
-   The action items inside the project selector need the same visual
-   treatment as a regular menu link (row height, padding, hover state) but
-   must NEVER be styled as "active" — they're not navigation destinations
-   that the user is currently on in the nav sense. Project settings and
-   Create new project both use this class. */
-.app-nav-menu-action {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 16px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--lx-text-secondary);
-  text-decoration: none;
-  border-left: 2px solid transparent;
-  width: 100%;
-  box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent;
-}
-.app-nav-menu-action:hover,
-.app-nav-menu-action:active {
-  color: var(--lx-text-primary);
-  background: var(--lx-surface-card-hover);
-  border-left-color: var(--lx-border-focus);
-}
-/* Belt + suspenders: TanStack Router may still try to mark the link
-   active via data-status="active" or an .active class. Strip any active
-   treatment this class might inherit. */
-.app-nav-menu-action.active,
-.app-nav-menu-action[data-status="active"] {
-  color: var(--lx-text-secondary) !important;
-  background: transparent !important;
-  border-left-color: transparent !important;
-}
-.app-nav-menu-action.active:hover,
-.app-nav-menu-action[data-status="active"]:hover {
-  color: var(--lx-text-primary) !important;
-  background: var(--lx-surface-card-hover) !important;
-  border-left-color: var(--lx-border-focus) !important;
-}
-
-/* ---- 34. Hover-scroll-lock for open nav menus ----
+/* ---- 32. Hover-scroll-lock for open nav menus ----
    When the user's pointer is over an open nav surface (hamburger menu,
    wiki sidebar overlay, chat threads overlay, project selector list,
    any other dropdown), prevent the page underneath from scrolling. The
@@ -8841,65 +8675,14 @@
   touch-action: none;
 }
 
-/* ---- 35. Nav menu link padding on tablet ----
-   The base .app-nav-menu-link padding (0 16px) lives in the mobile media
-   query (max-width: 767.98px). On tablet the menu items inherit no
-   padding from the base rule and end up flush against the left edge of
-   the menu — matches the visual when the menu opens at 800-1023px. The
-   project toggle + project list rows also need the same horizontal
-   padding for visual consistency. */
-@media (min-width: 768px) and (max-width: 1023.98px) {
-  .app-nav .app-nav-menu-link,
-  .app-nav .app-nav-menu-action,
-  .app-nav .app-nav-menu-project-toggle {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-  .app-nav .app-nav-menu-project-list .app-nav-menu-link,
-  .app-nav .app-nav-menu-project-list .app-nav-menu-action {
-    padding-left: 32px;
-  }
-}
-
-/* ---- 36. Nav menu link base styles (applies at all viewports) ----
-   The base .app-nav-menu-link styles (color, border-left, padding,
-   font-size) live inside the mobile media query. On tablet the menu
-   items fall back to a default text color and lose the left-border
-   active indicator. Move the base styles to top-level so they apply
-   whenever the menu is rendered (mobile, tablet, or in the future). */
-.app-nav-menu-link {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  padding: 0 16px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--lx-text-secondary);
-  text-decoration: none;
-  border-left: 2px solid transparent;
-}
-.app-nav-menu-link:hover,
-.app-nav-menu-link.active {
-  color: var(--lx-text-primary);
-  background: var(--lx-surface-card-hover);
-  border-left-color: var(--lx-border-focus);
-}
-
-/* ---- 37. Nav backdrop on tablet ----
-   The .app-nav-backdrop display rules live in the mobile media query.
-   On tablet (768-1023px) the menu is shown via hamburger but the
-   backdrop is hidden — the page content under the menu isn't dimmed.
-   Promote the backdrop rules to top-level (and the menu-open variant)
-   so they apply at every viewport where the menu is shown. */
+/* The backdrop is a phone-only surface; the rule keeps it out of the layout
+   at every other width (the phone block turns it on). */
 .app-nav-backdrop {
   display: none;
   position: fixed;
   inset: 48px 0 0 0;
   background: var(--lx-surface-overlay);
   z-index: 44;
-}
-.app-nav.app-nav-menu-open + .app-nav-backdrop {
-  display: block;
 }
 
   /* Admin — Assistant Usage & Health (wireframes/src/admin-assistant-usage.html) */
@@ -9040,11 +8823,10 @@
    panel; inside the Deck it must collapse to the textarea's rows so locked
    decks (busy-409) actually shrink to one row. */
 .chat-deck .composer-editor { min-height: 0; }
-/* The deck's message surface keeps the app's 2px ring but draws it inside the
-   box: the global offset-2px version spills past the deck's container. */
+/* The deck's message surface carries no focus chrome either: the caret is the
+   signal, and the global 2px ring would spill past the deck's container. */
 .chat-deck .composer-editor:focus-visible {
-  outline: 2px solid var(--lx-border-focus);
-  outline-offset: -2px;
+  outline: none;
   box-shadow: none;
 }
 .deck-action { min-width: 0; }
@@ -9272,9 +9054,6 @@ select.prop-input,
 [data-theme="light"] .tasks-select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235E5343' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 }
-[data-theme="light"] .tasks-search {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%235E5343' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.6-3.6'/%3E%3C/svg%3E");
-}
 /* No native scrollbar arrow buttons anywhere: they are ~15px controls that no
    touch rule can reach. The authored bar below is the only affordance. */
 ::-webkit-scrollbar-button {
@@ -9282,7 +9061,8 @@ select.prop-input,
   width: 0;
   height: 0;
 }
-/* One global focus rule: 2px patrol-orange ring, 2px offset. */
+/* One global focus rule: a 2px ring in the focus colour (--lx-border-focus),
+   2px outside the box. */
 :focus-visible {
   outline: 2px solid var(--lx-border-focus);
   outline-offset: 2px;
@@ -9755,22 +9535,11 @@ select.prop-input,
   flex: 1;
 }
 
-/* Mobile menu panel (below 768px the rail is gone, this replaces it). */
+/* Mobile menu panel (below 768px the rail is gone, this replaces it).
+   The panel's skin (the rail's nav plates at touch height, the top bar's
+   project pill) lives in the phone block at the end of the sheet. */
 .app-nav-menu {
   display: none;
-}
-.app-nav-menu-project {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--lx-border-subtle);
-}
-.app-nav-menu-divider {
-  height: 1px;
-  background: var(--lx-border-subtle);
-  margin: 4px 0;
 }
 .app-nav-backdrop {
   display: none;
@@ -10562,22 +10331,18 @@ select.prop-input,
      glyph: the button reads "Menu". */
   .app-nav-menu {
     position: fixed;
-    top: 52px;
+    /* The band's own height token: a literal here leaves a sliver of the
+       band's hairline showing under the panel. */
+    top: var(--lx-shell-band-h-phone);
     left: 0;
     right: 0;
     bottom: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--lx-space-1);
     padding: 10px 12px calc(24px + env(safe-area-inset-bottom));
     background: var(--lx-surface-rail);
     border-top: 1px solid var(--lx-border-default);
-    border-bottom: none;
-    box-shadow: none;
-    transform: none;
-    opacity: 1;
-    transition: none;
-    max-height: none;
     overflow-y: auto;
     overscroll-behavior: contain;
     z-index: 40;
@@ -10597,95 +10362,171 @@ select.prop-input,
   .app-nav-backdrop {
     display: block;
     position: fixed;
-    inset: 52px 0 0 0;
+    inset: var(--lx-shell-band-h-phone) 0 0 0;
     border: none;
     padding: 0;
     background: var(--lx-surface-overlay);
     z-index: 35;
     cursor: pointer;
   }
-  .app-nav-menu-link,
-  .app-nav-menu-action {
+  /* The panel is the rail's own object, not a second navigation: the same
+     `.nav-link` plate and `.nav-label` signage scale the rail uses, restated
+     at touch height. The rail's rules are scoped to `.app-nav`, so the skin
+     is repeated here rather than inherited. Keep the two in step. */
+  .app-nav-menu .nav-links {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: stretch;
+  }
+  /* The panel is the scroll region, so nothing inside it may shrink: a
+     shrunken child overflows itself and the panel loses the tail of its
+     scroll range (and its bottom padding with it). */
+  .app-nav-menu-brand,
+  .app-nav-menu-project,
+  .app-nav-menu .nav-links {
+    flex: 0 0 auto;
+  }
+  .app-nav-menu .nav-link {
     display: flex;
     align-items: center;
+    gap: 10px;
     min-height: var(--lx-row-h-touch);
-    padding: 0 12px;
+    padding: 0 10px;
     border: 1px solid transparent;
     border-radius: var(--lx-radius-plate);
+    background: transparent;
     font-family: var(--lx-font-signage);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--lx-text-secondary);
     text-decoration: none;
-    background: transparent;
+    transition: background 120ms linear, color 120ms linear;
+  }
+  .app-nav-menu .nav-link svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .app-nav-menu .nav-link:hover {
+    background: var(--lx-surface-chrome-hover);
+    color: var(--lx-text-primary);
+  }
+  .app-nav-menu .nav-link:active {
+    background: var(--lx-surface-chrome-active);
+  }
+  .app-nav-menu .nav-link.active {
+    background: var(--lx-surface-chrome-active);
+    border-color: var(--lx-border-strong);
+    color: var(--lx-text-primary);
+  }
+  /* The project block is its own surface: the app's panel on the drawer's
+     rail ground, holding the app's field. */
+  .app-nav-menu-project {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--lx-space-1);
     width: 100%;
-    text-align: left;
-    cursor: pointer;
+    padding: var(--lx-space-2);
+    background: var(--lx-surface-panel);
+    border: 1px solid var(--lx-border-default);
+    border-radius: var(--lx-radius-panel);
   }
-  .app-nav-menu-link:hover,
-  .app-nav-menu-action:hover,
-  .app-nav-menu-link.active {
-    background: var(--lx-surface-card-hover);
-    color: var(--lx-text-primary);
-  }
-  .app-nav-menu-link:active,
-  .app-nav-menu-action:active {
-    background: var(--lx-surface-card-active);
-    color: var(--lx-text-primary);
-  }
+  /* The selected project is a field: the same ground, edge, radius and focus
+     as every other input in the app, at the touch height and full width. */
   .app-nav-menu-project-toggle {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: var(--lx-row-h-touch);
-    padding: 0 12px;
+    gap: var(--lx-space-2);
     width: 100%;
-    border: 1px solid var(--lx-border-default);
-    border-radius: var(--lx-radius-plate);
-    background: var(--lx-surface-input);
-    color: var(--lx-text-primary);
-    cursor: pointer;
-    text-align: left;
-  }
-  .app-nav-menu-project-toggle svg {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-  }
-  /* The chevron keeps a 44x44 press box around it inside the toggle. */
-  .app-nav-menu-project-toggle {
     min-height: var(--lx-row-h-touch);
-  }
-  .app-nav-menu-project-label {
-    font-family: var(--lx-font-signage);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--lx-text-muted);
-  }
-  .app-nav-menu-project-name {
-    flex: 1;
-    min-width: 0;
+    padding: 0 10px;
+    background: var(--lx-surface-input);
+    border: 1px solid var(--lx-border-input);
+    border-radius: var(--lx-radius-plate);
+    color: var(--lx-text-primary);
     font-family: var(--lx-font-guide);
     font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .app-nav-menu-project-toggle:hover {
+    border-color: var(--lx-border-input-hover);
+  }
+  .app-nav-menu-project-toggle:focus-visible {
+    border-color: var(--lx-border-focus);
+    box-shadow: var(--lx-focus-ring);
+  }
+  .app-nav-menu-project-toggle > span {
+    min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .app-nav-menu-project-toggle svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    margin-left: auto;
+    color: var(--lx-text-muted);
   }
   .app-nav-menu-project-list {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    margin-top: 6px;
+    width: 100%;
+  }
+  .app-nav-menu-project-row,
+  .app-nav-menu-action {
+    display: block;
+    width: 100%;
+    min-height: var(--lx-row-h-touch);
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--lx-radius-plate);
+    background: transparent;
+    font-family: var(--lx-font-guide);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: var(--lx-row-h-touch);
+    color: var(--lx-text-primary);
+    text-align: left;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .app-nav-menu-project-row:hover,
+  .app-nav-menu-action:hover {
+    background: var(--lx-surface-card-hover);
+  }
+  .app-nav-menu-project-row.active {
+    background: var(--lx-surface-selected);
+  }
+  .app-nav-menu-divider {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--lx-border-subtle);
   }
   /* Touch targets: every chrome control gets 44px and real spacing. */
   .app-topbar-inner .nav-pill {
     min-width: var(--lx-row-h-touch);
     height: var(--lx-row-h-touch);
     padding: 0 8px;
+  }
+  /* The account controls read like the phone band's Menu control: the 44px tap
+     area and the focus ring stay, the outline and resting plate drop. Hover and
+     the open state (aria-expanded) keep the plate, so the state signal stays. */
+  .app-topbar-account .nav-pill:not(:hover):not([aria-expanded="true"]) {
+    border-color: transparent;
+    background: transparent;
   }
   .app-topbar-inner .nav-hamburger {
     width: auto;

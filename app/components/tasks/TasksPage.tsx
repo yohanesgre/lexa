@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { Search } from "lucide-react";
 import {
   useBoard,
   useTask,
@@ -781,14 +782,17 @@ function TasksFilterBar({ filters, showArchived, columns, swimlanes, fieldConfig
   const { query, columnId, typeId, priorityId, assignee, swimlaneId, sortKey } = filters;
   return (
     <div className="tasks-filter">
-      <input
-        className="tasks-search"
-        type="search"
-        placeholder="Search tasks…"
-        aria-label="Search tasks"
-        value={query}
-        onChange={(e) => onFilterChange({ query: e.target.value })}
-      />
+      <div className="tasks-search-field">
+        <Search size={13} strokeWidth={2} className="tasks-search-icon" aria-hidden="true" />
+        <input
+          className="tasks-search"
+          type="search"
+          placeholder="Search tasks…"
+          aria-label="Search tasks"
+          value={query}
+          onChange={(e) => onFilterChange({ query: e.target.value })}
+        />
+      </div>
       <select className="tasks-select" value={columnId} onChange={(e) => onFilterChange({ columnId: e.target.value })} aria-label="Column filter">
         <option value="">All columns</option>
         {columns.map((c) => (

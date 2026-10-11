@@ -67,10 +67,6 @@ function ToolbarButton({
   );
 }
 
-function ToolbarSeparator() {
-  return <span className="toolbar-sep" role="separator" aria-hidden="true" />;
-}
-
 function setLink(editor: NonNullable<ReturnType<typeof useEditor>>) {
   const previous = editor.getAttributes("link").href as string | undefined;
   const url = window.prompt("Link URL", previous ?? "");
@@ -106,6 +102,8 @@ export function Toolbar({
   appliedTaskId,
   rejectedTaskId,
   onReview,
+  disabled = false,
+  children,
 }: {
   editor: NonNullable<ReturnType<typeof useEditor>>;
   headingLevel: number;
@@ -117,6 +115,12 @@ export function Toolbar({
   appliedTaskId: string | null;
   rejectedTaskId: string | null;
   onReview?: (text: string, identity: AssistantReviewIdentity) => void;
+  // A surface showing the rendered preview instead of the editor body disables
+  // the commands (they would edit a document nobody can see) while keeping the
+  // controls — and whatever the surface passes as `children`, its view toggle —
+  // visible and operable.
+  disabled?: boolean;
+  children?: React.ReactNode;
 }) {
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeAnchor, setRuntimeAnchor] = useState<DOMRect | null>(null);
@@ -126,76 +130,89 @@ export function Toolbar({
     <>
       <div className="editor-toolbar wiki-toolbar-host">
         <div className="wiki-toolbar-row">
-        <ToolbarButton command={() => editor.chain().focus().undo().run()} isActive={false} title="Undo" disabled={!editor.can().undo()}>
-          <i className="ph ph-arrow-arc-left" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().redo().run()} isActive={false} title="Redo" disabled={!editor.can().redo()}>
-          <i className="ph ph-arrow-arc-right" />
-        </ToolbarButton>
-        <ToolbarSeparator />
-        <ToolbarButton command={() => editor.chain().focus().toggleBold().run()} isActive={editor.isActive("bold")} title="Bold">
-          <i className="ph ph-text-b" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleItalic().run()} isActive={editor.isActive("italic")} title="Italic">
-          <i className="ph ph-text-italic" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleUnderline().run()} isActive={editor.isActive("underline")} title="Underline">
-          <i className="ph ph-text-underline" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleStrike().run()} isActive={editor.isActive("strike")} title="Strikethrough">
-          <i className="ph ph-text-strikethrough" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleHighlight().run()} isActive={editor.isActive("highlight")} title="Highlight">
-          <i className="ph ph-highlighter-circle" />
-        </ToolbarButton>
-        <ToolbarSeparator />
-        <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} isActive={headingLevel === 2} title="Heading 2">
-          <i className="ph ph-text-h-two" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} isActive={headingLevel === 3} title="Heading 3">
-          <i className="ph ph-text-h-three" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 4 }).run()} isActive={headingLevel === 4} title="Heading 4">
-          <i className="ph ph-text-h-four" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 5 }).run()} isActive={headingLevel === 5} title="Heading 5">
-          <i className="ph ph-text-h-five" />
-        </ToolbarButton>
-        <ToolbarSeparator />
-        <ToolbarButton command={() => editor.chain().focus().toggleBulletList().run()} isActive={editor.isActive("bulletList")} title="Bullet list">
-          <i className="ph ph-list-bullets" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleOrderedList().run()} isActive={editor.isActive("orderedList")} title="Ordered list">
-          <i className="ph ph-list-numbers" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleTaskList().run()} isActive={editor.isActive("taskList")} title="Task list">
-          <i className="ph ph-list-checks" />
-        </ToolbarButton>
-        <ToolbarSeparator />
-        <ToolbarButton command={() => editor.chain().focus().toggleBlockquote().run()} isActive={editor.isActive("blockquote")} title="Blockquote">
-          <i className="ph ph-quotes" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().toggleCodeBlock().run()} isActive={editor.isActive("codeBlock")} title="Code block">
-          <i className="ph ph-code-block" />
-        </ToolbarButton>
-        <ToolbarButton command={() => editor.chain().focus().setHorizontalRule().run()} isActive={false} title="Horizontal rule">
-          <i className="ph ph-minus" />
-        </ToolbarButton>
-        <ToolbarButton
-          command={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
-          isActive={editor.isActive("table")}
-          title="Insert table"
-        >
-          <i className="ph ph-table" />
-        </ToolbarButton>
-        <ToolbarSeparator />
-        <ToolbarButton command={() => setLink(editor)} isActive={editor.isActive("link")} title="Link">
-          <i className="ph ph-link" />
-        </ToolbarButton>
-        <ToolbarButton command={() => setImage(editor)} isActive={false} title="Image">
-          <i className="ph ph-image" />
-        </ToolbarButton>
-        <ToolbarSeparator />
+        <fieldset className="toolbar-group" disabled={disabled}>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} title="Heading 2" isActive={headingLevel === 2}>
+            <i className="ph ph-text-h-two" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} title="Heading 3" isActive={headingLevel === 3}>
+            <i className="ph ph-text-h-three" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 4 }).run()} title="Heading 4" isActive={headingLevel === 4}>
+            <i className="ph ph-text-h-four" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 5 }).run()} title="Heading 5" isActive={headingLevel === 5}>
+            <i className="ph ph-text-h-five" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().toggleBold().run()} title="Bold" isActive={editor.isActive("bold")}>
+            <i className="ph ph-text-b" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleItalic().run()} title="Italic" isActive={editor.isActive("italic")}>
+            <i className="ph ph-text-italic" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleUnderline().run()} title="Underline" isActive={editor.isActive("underline")}>
+            <i className="ph ph-text-underline" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().toggleBulletList().run()} title="Bullet list" isActive={editor.isActive("bulletList")}>
+            <i className="ph ph-list-bullets" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleOrderedList().run()} title="Ordered list" isActive={editor.isActive("orderedList")}>
+            <i className="ph ph-list-numbers" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleTaskList().run()} title="Task list" isActive={editor.isActive("taskList")}>
+            <i className="ph ph-list-checks" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().toggleHighlight().run()} title="Highlight" isActive={editor.isActive("highlight")}>
+            <i className="ph ph-highlighter-circle" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => setImage(editor)} isActive={false} title="Image">
+            <i className="ph ph-image" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().toggleStrike().run()} title="Strikethrough" isActive={editor.isActive("strike")}>
+            <i className="ph ph-text-strikethrough" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().toggleCodeBlock().run()} title="Code block" isActive={editor.isActive("codeBlock")}>
+            <i className="ph ph-code-block" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().toggleBlockquote().run()} title="Blockquote" isActive={editor.isActive("blockquote")}>
+            <i className="ph ph-quotes" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().setHorizontalRule().run()} isActive={false} title="Horizontal rule">
+            <i className="ph ph-minus" />
+          </ToolbarButton>
+          <ToolbarButton
+            command={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+            isActive={editor.isActive("table")}
+            title="Insert table"
+          >
+            <i className="ph ph-table" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => setLink(editor)} title="Link" isActive={editor.isActive("link")}>
+            <i className="ph ph-link" />
+          </ToolbarButton>
+        </span>
+        <span className="toolbar-cluster">
+          <ToolbarButton command={() => editor.chain().focus().undo().run()} isActive={false} title="Undo" disabled={!editor.can().undo()}>
+            <i className="ph ph-arrow-arc-left" />
+          </ToolbarButton>
+          <ToolbarButton command={() => editor.chain().focus().redo().run()} isActive={false} title="Redo" disabled={!editor.can().redo()}>
+            <i className="ph ph-arrow-arc-right" />
+          </ToolbarButton>
+        </span>
         <button
           ref={runtimeBtnRef}
           type="button"
@@ -212,6 +229,8 @@ export function Toolbar({
           <Flame size={16} strokeWidth={1.5} />
           Assistant
         </button>
+        </fieldset>
+        {children}
       </div>
       </div>
       {runtime && runtimeOpen && (

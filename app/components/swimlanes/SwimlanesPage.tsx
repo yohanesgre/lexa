@@ -356,11 +356,14 @@ export function SwimlanesPage({ slug }: { slug: string }) {
   return (
     <main className="page-frame">
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
           <div>
             <h1 className="font-display text-2xl font-semibold text-lx-text-primary">Swimlanes</h1>
             <div className="font-micro text-2xs text-lx-text-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              {board.project.name} · {activeLaneCount(lanes)} sprints · Backlog system · {archivedLanes.length} archived
+              <span className="tm-sub-part">{board.project.name} ·</span>{" "}
+              <span className="tm-sub-part">{activeLaneCount(lanes)} sprints ·</span>{" "}
+              <span className="tm-sub-part">Backlog system ·</span>{" "}
+              <span className="tm-sub-part">{archivedLanes.length} archived</span>
             </div>
           </div>
           {isAdmin && (

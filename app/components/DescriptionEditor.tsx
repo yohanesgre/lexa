@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
 import { Check, X } from "lucide-react";
@@ -9,6 +9,8 @@ import { cn } from "./ui/cn";
 import { TextEditor, Toolbar } from "./TextEditor";
 import { AssistantReviewSurface } from "./assistant/AssistantReviewSurface";
 import { useAssistantReview } from "../lib/useAssistantReview";
+import { EditorViewToggle, type EditorView } from "./editor/EditorViewToggle";
+import { renderDoc } from "./tiptap-render";
 
 interface DescriptionEditorProps {
   initialContent: TipTapDoc;
@@ -37,6 +39,10 @@ export function DescriptionEditor({
   attachments,
   onReviewStateChange,
 }: DescriptionEditorProps) {
+  const [view, setView] = useState<EditorView>("editor");
+  // The document as the preview renders it — the same edit stream the editor
+  // writes, so the preview never lags the toolbar or the save payload.
+  const [previewDoc, setPreviewDoc] = useState<TipTapDoc>(initialContent);
   const onBlurRef = useRef(onBlur);
   const onChangeRef = useRef(onChange);
   const onDoneRef = useRef(onDone);
@@ -92,7 +98,9 @@ export function DescriptionEditor({
     content: initialContent as unknown as JSONContent,
     editable,
     onUpdate: ({ editor: nextEditor }) => {
-      onChangeRef.current?.(nextEditor.getJSON() as unknown as TipTapDoc);
+      const next = nextEditor.getJSON() as unknown as TipTapDoc;
+      setPreviewDoc(next);
+      onChangeRef.current?.(next);
     },
     onBlur: ({ editor: ed }) => {
       onBlurRef.current?.(ed.getJSON() as unknown as TipTapDoc);
@@ -145,8 +153,26 @@ export function DescriptionEditor({
     onDoneRef.current?.(editor.getJSON() as unknown as TipTapDoc);
   };
 
+  // The toggle lives in the editor's toolbar (the slideover is too narrow to
+  // split) and switches the body between the editor and the rendered
+  // document. In preview the editor body stays mounted but hidden — one
+  // document, so the Assistant, the review flow and the save path keep
+  // working — and the toolbar's commands are disabled rather than editing a
+  // document nobody can see.
   const toolbar = (
-    <Toolbar editor={editor} headingLevel={headingLevel} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
+    <Toolbar editor={editor} headingLevel={headingLevel} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} disabled={view === "preview"}>
+      <EditorViewToggle view={view} onChange={setView} />
+    </Toolbar>
+  );
+  const body = (
+    <>
+      <div className={cn(view === "preview" && "hidden")}>
+        <EditorContent editor={editor} className="editor-content" />
+      </div>
+      {view === "preview" && (
+        <div className="editor-preview td-prose">{renderDoc(previewDoc, "task", runtime?.slug ?? attachments?.slug)}</div>
+      )}
+    </>
   );
   const reviewSurface = review ? (
     <AssistantReviewSurface skillName={review.skillName} agentName={review.agentName} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
@@ -183,7 +209,7 @@ export function DescriptionEditor({
           {toolbar}
         </div>
         {reviewSurface}
-        <EditorContent editor={editor} className="editor-content" />
+        {body}
       </div>
     );
   }
@@ -201,7 +227,7 @@ export function DescriptionEditor({
       <div className={cn("editor-wrapper", review && "is-reviewing")}>
         {toolbar}
         {reviewSurface}
-        <EditorContent editor={editor} className="editor-content" />
+        {body}
       </div>
     </div>
   );
