@@ -9126,9 +9126,6 @@ html {
   display: inline-block;
   white-space: nowrap;
 }
-.tm-sub-range {
-  margin-left: 6px;
-}
 .tm-figure {
   font-family: var(--lx-font-surveyor);
   font-variant-numeric: tabular-nums;
@@ -10360,7 +10357,14 @@ html {
     align-items: center;
   }
 
-  /* Trail profile: horizontal strip pinned at today. */
+  /* Trail profile: a phone keeps the sub-line whole, with the peaks/runs note
+     on its own row instead of squeezing the copy into two lines. */
+  .tm-profile-head {
+    flex-wrap: wrap;
+  }
+  .tm-profile-note {
+    margin-left: auto;
+  }
   .tm-profile-scroll {
     padding-bottom: 12px;
   }

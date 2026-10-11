@@ -428,7 +428,7 @@ function buildProfile(milestones: Milestone[], board: Board | undefined, plotWid
     peaks,
     runs,
     todayX: Math.min(width - padX, Math.max(padX, xAt(now))),
-    spanLabel: `${label(t0)} · ${label(t1)}`,
+    spanLabel: `${label(t0)} to ${label(t1)}`,
   };
 }
 
@@ -543,8 +543,8 @@ function TrailProfile({
       <div>
         <h2 className="tm-plate-lg">Trail profile</h2>
         <p className="tm-sub">
-          <span className="tm-sub-part">Milestones and sprint progress</span>
-          <span className="tm-sub-part tm-sub-range">· {geometry.spanLabel}</span>
+          <span className="tm-sub-part">Milestones and sprint progress,{"\u00A0"}</span>
+          <span className="tm-sub-part">{geometry.spanLabel}</span>
         </p>
       </div>
       <span className="tm-profile-note tm-figure">
