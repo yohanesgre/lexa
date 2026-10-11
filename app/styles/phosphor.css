@@ -9664,6 +9664,12 @@ html {
   fill: none;
   stroke-width: 6;
   stroke-linecap: round;
+  /* Surveyed redraw, never ambient: each run draws once per mount. */
+  animation: tm-run-draw 220ms linear both;
+}
+@keyframes tm-run-draw {
+  from { stroke-dashoffset: var(--tm-run-len, 200); }
+  to { stroke-dashoffset: 0; }
 }
 .tm-run[data-tone="glacier"] { stroke: var(--lx-series-glacier); }
 .tm-run[data-tone="gold"] { stroke: var(--lx-series-gold); }
@@ -9747,7 +9753,8 @@ html {
   to { stroke-dashoffset: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .tm-trace {
+  .tm-trace,
+  .tm-run {
     animation: none;
   }
 }
@@ -10064,12 +10071,10 @@ html {
 /* Long-content state: only the movement strip caps, and it caps at a whole
    row boundary (--tm-move-cap is measured from the rendered row height). Every
    WIP meter and every attention row stays visible. */
-@media (min-width: 768px) {
-  .tm-dash > .tm-section .tm-moves {
-    max-height: var(--tm-move-cap, 148px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
+.tm-dash > .tm-section .tm-moves {
+  max-height: var(--tm-move-cap, 148px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .tm-dash-head {
   display: flex;
@@ -10384,10 +10389,6 @@ html {
   }
   .tm-move {
     grid-template-columns: 62px minmax(0, 1fr);
-  }
-  /* Recent movement collapses to 3 rows on a phone. */
-  .tm-move[data-overflow="true"] {
-    display: none;
   }
   .tm-section {
     padding: 10px;

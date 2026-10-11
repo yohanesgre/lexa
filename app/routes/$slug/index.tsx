@@ -190,7 +190,6 @@ function TrailReport({
   const exceeded = meters.filter((m) => m.state === "exceeded").length;
   const attention = urgentCount + outOfSync.length;
   const due = milestone?.dueAt ? formatDueChip(milestone.dueAt) : null;
-  const syncState = failed ? "failed" : outOfSync.length > 0 ? "degraded" : "synced";
   const reading = <span className="skeleton tm-skel-value" aria-hidden="true" />;
   const readingLabel = <span className="tm-visually-hidden">Reading the map</span>;
 
@@ -204,12 +203,21 @@ function TrailReport({
               {reading}
               {readingLabel}
             </>
+          ) : failed ? (
+            // The workspace read failed, so the sync state is unknown. This
+            // stamp reports the read, never a GitHub state the client never saw.
+            <>
+              <span className="tm-stamp" data-state="failed">
+                read failed
+              </span>
+              <span className="tm-sub">GitHub state unknown</span>
+            </>
           ) : repos.length === 0 ? (
             <span className="tm-sub">No repo linked</span>
           ) : (
             <>
-              <span className="tm-stamp" data-state={syncState}>
-                {failed ? "not synced" : outOfSync.length > 0 ? "out of sync" : "synced"}
+              <span className="tm-stamp" data-state={outOfSync.length > 0 ? "degraded" : "synced"}>
+                {outOfSync.length > 0 ? "out of sync" : "synced"}
               </span>
               <span className="tm-figure">
                 {repos.join(" · ")}
@@ -266,7 +274,7 @@ function TrailReport({
 
       {loading ? null : failed ? (
         <button type="button" className="btn btn-ghost btn-sm tm-report-link" onClick={onRetry}>
-          Retry
+          Retry read
         </button>
       ) : repos.length === 0 ? (
         <Link to="/settings/project/$projectId" params={{ projectId }} className="btn btn-ghost btn-sm tm-report-link">
@@ -631,9 +639,19 @@ function TrailProfile({
             const fraction = run.total > 0 ? Math.min(1, run.done / run.total) : 0;
             const px = run.x0 + (run.x1 - run.x0) * fraction;
             const py = run.y0 + (run.y1 - run.y0) * fraction;
+            const length = Math.ceil(Math.hypot(run.x1 - run.x0, run.y1 - run.y0));
             return (
               <g key={run.id}>
-                <line className="tm-run" data-tone={run.tone} x1={run.x0} y1={run.y0} x2={run.x1} y2={run.y1} />
+                <line
+                  className="tm-run"
+                  data-tone={run.tone}
+                  x1={run.x0}
+                  y1={run.y0}
+                  x2={run.x1}
+                  y2={run.y1}
+                  strokeDasharray={length}
+                  style={{ "--tm-run-len": String(length) } as CSSProperties}
+                />
                 {fraction > 0 && <line className="tm-run-progress" x1={run.x0} y1={run.y0} x2={px} y2={py} />}
                 <circle
                   className={cn("tm-post", run.total > 0 && run.done >= run.total && "tm-post-done")}
@@ -948,12 +966,11 @@ function RecentMovement({
           ref={listRef}
           style={rowCap === null ? undefined : ({ "--tm-move-cap": `${rowCap}px` } as CSSProperties)}
         >
-          {rows.map((row, index) => (
+          {rows.map((row) => (
             <button
               key={row.id}
               type="button"
               className={cn("tm-move", traceId === row.id && "is-traced")}
-              data-overflow={index >= 3 ? "true" : "false"}
               onClick={() => onOpen(row.id)}
               onMouseEnter={() => onTrace(row.id)}
               onMouseLeave={onTraceEnd}

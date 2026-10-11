@@ -127,14 +127,16 @@ export function BoardPage({ slug, search }: BoardPageProps) {
   };
 
   // ?new=1 (the shell's "New task"): open the create slideover on the board's
-  // first column, then drop the param so a reload does not reopen it.
+  // first column, then drop the param so a reload does not reopen it. A board
+  // with no column or no swimlane has nowhere to put a task: the param is
+  // cleared and the board's own setup empty state (board-grid.tsx) is the
+  // disclosure, so the primary action never lands on a URL that does nothing.
   const wantsCreate = search.new === true;
   useEffect(() => {
     if (!wantsCreate || !board) return;
     const column = board.columns[0];
     const swimlane = board.swimlanes[0];
-    if (!column || !swimlane) return;
-    setCreateTarget({ columnId: column.id, swimlaneId: swimlane.id });
+    if (column && swimlane) setCreateTarget({ columnId: column.id, swimlaneId: swimlane.id });
     navigate({ search: { ...search, new: undefined }, replace: true } as never);
   }, [wantsCreate, board, navigate]);
 
