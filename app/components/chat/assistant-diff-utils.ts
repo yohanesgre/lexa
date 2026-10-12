@@ -9,6 +9,17 @@ export function chars(n: number): string {
   return `${n.toLocaleString("en-US")} characters`;
 }
 
+// A one-line stand-in for a long body (a description, a page draft) so an
+// approval chip names what it will write without inlining the whole text. The
+// full body is what the write itself shows once applied.
+export function bodySummary(text: string): string {
+  const lines = text.split("\n").filter((line) => line.trim() !== "");
+  const head = lines[0] ?? "";
+  const shown = head.length > 110 ? `${head.slice(0, 110)}…` : head;
+  if (lines.length <= 1) return shown;
+  return `${shown} · +${lines.length - 1} more ${lines.length - 1 === 1 ? "line" : "lines"}`;
+}
+
 export function targetFor(diff: AssistantWriteDiff): string {
   switch (diff.type) {
     case "task_create":
