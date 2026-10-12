@@ -396,7 +396,11 @@ export interface PendingBatchMarker {
 // `PendingBatchMarker` used, so the P4b adapter's `chipsFromDataPart` reads it
 // unchanged and a reload mid-suspension rebuilds the decidable chips.
 export const ASSISTANT_APPROVAL_DATA_PART = "data-assistant-approval";
-
+// A sent attachment in the parts shape: `{ data: { storageKey, mimeType, name } }`.
+// The legacy read path writes `image-ref` / `document-ref` into `content`
+// (`assistant-chat.service.ts`), and only this part survives to the client — so
+// the converter and the client reader must agree on one name.
+export const ASSISTANT_ATTACHMENT_DATA_PART = "data-attachment";
 // LX-124 continuation boundary (ADR-0003 §B.3): a zero-text assistant message
 // whose only part is this data part marks the seam between a decided proposal
 // bubble and the resume continuation's own bubble. The resume clone otherwise

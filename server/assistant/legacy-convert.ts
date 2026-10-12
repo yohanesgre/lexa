@@ -23,7 +23,7 @@
 // A message always carries at least one part so it survives DO persistence.
 
 import type { UIMessage } from "ai";
-import { ASSISTANT_APPROVAL_DATA_PART, type Citation } from "../../shared/assistant";
+import { ASSISTANT_APPROVAL_DATA_PART, ASSISTANT_ATTACHMENT_DATA_PART, type Citation } from "../../shared/assistant";
 
 export interface LegacyStoredMessage {
   role?: unknown;
@@ -74,6 +74,31 @@ function textParts(content: unknown): string[] {
     return out;
   }
   return [];
+}
+
+// `content`-shaped rows carry sent attachments as `image-ref` / `document-ref`
+// (what the chat send writes — `assistant-chat.service.ts`), but the client only
+// reads the `data-attachment` part. The converter used to map text and tools and
+// drop these, so a reload showed the user's message without its file — the chip
+// vanished from the bubble even though the model had read the document.
+function attachmentPartsOf(content: unknown): ConvertedUIMessage["parts"] {
+  if (!Array.isArray(content)) return [];
+  const out: ConvertedUIMessage["parts"] = [];
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) continue;
+    const p = part as { type?: unknown; storageKey?: unknown; mimeType?: unknown; name?: unknown };
+    if (p.type !== "image-ref" && p.type !== "document-ref") continue;
+    if (typeof p.storageKey !== "string") continue;
+    out.push({
+      type: ASSISTANT_ATTACHMENT_DATA_PART,
+      data: {
+        storageKey: p.storageKey,
+        mimeType: typeof p.mimeType === "string" ? p.mimeType : p.type === "image-ref" ? "image/png" : "text/plain",
+        name: typeof p.name === "string" ? p.name : "",
+      },
+    } as unknown as ConvertedUIMessage["parts"][number]);
+  }
+  return out;
 }
 
 // Persisted reasoning (build-stream): the accumulated reasoning text and its
@@ -174,6 +199,7 @@ export function convertLegacyMessage(message: LegacyStoredMessage, index: number
   if (!isConvertibleRole(message.role)) return null;
 
   const parts: ConvertedUIMessage["parts"] = textParts(message.content).map((text) => ({ type: "text", text }));
+  parts.push(...attachmentPartsOf(message.content));
   // Reasoning precedes the answer in arrival order; unshift keeps the interleave
   // the fold rebuilds from parts.
   const reasoning = reasoningPartOf(message);
