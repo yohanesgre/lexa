@@ -761,13 +761,11 @@ export function useChatThreadActions(args: {
   chatId: string;
   applyChatId: (id: string) => void;
   setChatId: (id: string) => void;
-  streaming: boolean;
-  abort: () => void;
   clearThreadParam: () => void;
   stripThreadParam: () => void;
   openThreadParam: (threadId: string) => void;
 }) {
-  const { projectId, chatId, applyChatId, setChatId, streaming, abort, clearThreadParam, stripThreadParam, openThreadParam } = args;
+  const { projectId, chatId, applyChatId, setChatId, clearThreadParam, stripThreadParam, openThreadParam } = args;
   const renameChat = useRenameAssistantChat(projectId);
   const deleteChat = useDeleteAssistantChat(projectId);
   const metaChat = useUpdateAssistantChatMeta(projectId);
@@ -790,27 +788,25 @@ export function useChatThreadActions(args: {
   );
   const selectThread = useCallback(
     (id: string) => {
-      if (streaming) abort();
-      // Apply immediately (state + last-visited) — the deep link alone only
-      // changes the URL and would leave the transcript on the old thread.
+      // Switching threads DETACHES; it does not cancel. The run keeps going
+      // server-side (the chat supervisor outlives the client — ADR-0006) and the
+      // transcript catches up from D1 when the user comes back. On the
+      // in-process tier the module-level stream session keeps reading, so the
+      // turn also completes there.
       applyChatId(id);
       openThreadParam(id);
     },
-    [streaming, abort, applyChatId, openThreadParam]
+    [applyChatId, openThreadParam]
   );
   const startNewChat = useCallback(() => {
-    if (streaming) abort();
-    // "New chat" clears to the fresh landing purely client-side: the next send
-    // mints the uuid (useChatStartStream). The ?thread= param is stripped with
-    // replaceState (no router navigation → no ssr:false route-loader flash) so a
-    // remount/reload cannot re-open the thread the user left; navigating here
-    // would re-run the loader and flash the shell.
+    // Same contract as selectThread: starting a new chat detaches from the
+    // running turn instead of killing it.
     try {
       window.localStorage.removeItem(`lexa-chat-last:${projectId}`);
     } catch {}
     stripThreadParam();
     setChatId("");
-  }, [streaming, abort, projectId, setChatId, stripThreadParam]);
+  }, [projectId, setChatId, stripThreadParam]);
   return { handlePinToggle, handleRename, handleDelete, selectThread, startNewChat };
 }
 

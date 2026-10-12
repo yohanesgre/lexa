@@ -589,15 +589,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   });
 
   // Thread switching (History rows / New chat): deep-link via ?thread=.
-  // Mid-stream switch aborts the running stream — v1 accepted trade-off.
+  // A mid-stream switch DETACHES — the run keeps going server-side and the
+  // transcript catches up from D1 (ADR-0006); Stop remains the explicit cancel.
   const handleAbort = useCallback(() => stream.abort(), [stream]);
   const { handlePinToggle, handleRename, handleDelete, selectThread, startNewChat } = useChatThreadActions({
     projectId,
     chatId,
     applyChatId,
     setChatId,
-    streaming,
-    abort: handleAbort,
     clearThreadParam,
     stripThreadParam,
     openThreadParam,
