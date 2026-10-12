@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, MoreHorizontal } from "lucide-react";
 import type { WikiPageMeta } from "../../../shared/types";
 import { cn } from "../ui/cn";
 import type { WikiNode } from "./wiki-tree";
@@ -33,6 +34,7 @@ export function TreeItem({
   expanded,
   onToggle,
   onContextMenu,
+  onOpenPageMenu,
   contextMenuPageId,
   onNavigate,
   tabbableId,
@@ -45,18 +47,22 @@ export function TreeItem({
   expanded: Set<string>;
   onToggle: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
+  onOpenPageMenu: (element: HTMLElement, page: WikiPageMeta) => void;
   contextMenuPageId: string | null;
   onNavigate?: (() => void) | undefined;
   tabbableId: string | null;
   onFocus: (id: string) => void;
 }) {
+  const rowRef = useRef<HTMLDivElement | null>(null);
   const isActive = node.slug === activeSlug;
   const isExpanded = expanded.has(node.id);
   const hasChildren = node.children.length > 0;
+  const menuOpen = contextMenuPageId === node.id;
 
   return (
     <>
       <div
+        ref={rowRef}
         role="treeitem"
         data-node-id={node.id}
         aria-level={level + 1}
@@ -70,7 +76,7 @@ export function TreeItem({
           "tree-item",
           indentClass(level),
           isActive && "active",
-          contextMenuPageId === node.id && "bg-lx-surface-card-hover"
+          menuOpen && "bg-lx-surface-card-hover"
         )}
       >
         {hasChildren ? (
@@ -95,6 +101,23 @@ export function TreeItem({
           <PageIcon className="text-lx-text-muted mr-1.5 shrink-0" />
           <span className="truncate">{node.title}</span>
         </Link>
+        {/* Not tabbable, like the chevron: a treeitem owns the row's focus and
+            the keyboard opens this same menu with the Context-Menu key or
+            Shift+F10. Touch and pointer users get the visible trigger. */}
+        <button
+          type="button"
+          tabIndex={-1}
+          className={cn("tree-item-menu icon-btn", menuOpen && "active")}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`Page actions for ${node.title}`}
+          onClick={() => {
+            const row = rowRef.current;
+            if (row) onOpenPageMenu(row, node);
+          }}
+        >
+          <MoreHorizontal size={14} strokeWidth={2} />
+        </button>
       </div>
       {isExpanded &&
         node.children.map((child) => (
@@ -107,6 +130,7 @@ export function TreeItem({
             expanded={expanded}
             onToggle={onToggle}
             onContextMenu={onContextMenu}
+            onOpenPageMenu={onOpenPageMenu}
             contextMenuPageId={contextMenuPageId}
             onNavigate={onNavigate}
             tabbableId={tabbableId}

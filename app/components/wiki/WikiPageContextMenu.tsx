@@ -76,7 +76,7 @@ export function WikiPageContextMenu({ anchor, onAddChild, onRename, onMove, onDe
     <div
       id="wiki-page-context-menu"
       ref={menuRef}
-      className="menu"
+      className="menu wiki-page-menu"
       style={{ position: "fixed", left: position.left, top: position.top }}
       role="menu"
       aria-label="Page actions"

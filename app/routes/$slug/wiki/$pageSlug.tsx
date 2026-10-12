@@ -29,7 +29,7 @@ function WikiPagePage() {
 
   return (
     <WikiLayout slug={slug} activePageSlug={pageSlug}>
-      {(pages, _ctx) => {
+      {(pages, ctx) => {
         if (isLoading) return <div className="text-lx-text-muted">Loading page…</div>;
         if (error) {
           if ((error as Error & { code?: string }).code === "PAGE_NOT_FOUND") {
@@ -38,7 +38,15 @@ function WikiPagePage() {
           return <div className="text-lx-text-danger">Failed to load page: {(error as Error).message}</div>;
         }
         if (!page) return <div className="text-lx-text-muted">Page not found.</div>;
-        return <WikiPageViewer key={page.slug} slug={slug} page={page} pages={pages} />;
+        return (
+          <WikiPageViewer
+            key={page.slug}
+            slug={slug}
+            page={page}
+            pages={pages}
+            onDelete={() => ctx.requestDeletePage(page)}
+          />
+        );
       }}
     </WikiLayout>
   );

@@ -3304,6 +3304,36 @@
     transition: transform 150ms var(--lx-ease-out);
   }
 
+  /* Row actions ride the row and reveal on hover, the way the column and
+     swimlane headers do; focus on the row reveals them too, since the row is
+     what carries the page's action menu. Touch has no hover to reveal them, so
+     there they stay visible, sized by `.icon-btn`'s mobile rule like every
+     other row control. */
+  .tree-item .tree-item-menu {
+    opacity: 0;
+    margin-left: 4px;
+  }
+
+  .tree-item:hover .tree-item-menu,
+  .tree-item:focus-within .tree-item-menu,
+  .tree-item .tree-item-menu.active {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .tree-item .tree-item-menu {
+      opacity: 1;
+    }
+  }
+
+  /* The page-actions menu is a floating popover inside the mobile drawer, so it
+     paints above the drawer (70) and its backdrop (65) while staying under the
+     confirm dialogs (80). Scoped with `.menu` because the primitive's own
+     `z-index: 30` sits earlier in this layer. */
+  .menu.wiki-page-menu {
+    z-index: 75;
+  }
+
   .search-result {
     display: block;
     padding: 8px 12px;
