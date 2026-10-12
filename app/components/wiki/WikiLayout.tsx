@@ -12,6 +12,7 @@ import { WikiDeletePageDialog } from "./WikiDeletePageDialog";
 
 interface WikiLayoutContext {
   openNewPage: () => void;
+  requestDeletePage: (page: WikiPageMeta) => void;
 }
 
 interface WikiLayoutProps {
@@ -154,11 +155,20 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
   });
   const [deleteConfirm, setDeleteConfirm] = useState<WikiPageMeta | null>(null);
   const pendingFocusNodeIdRef = useRef<string | null>(null);
+  // Which control raised the confirm dialog. A tree origin returns focus to the
+  // row that takes the deleted row's place; a page origin deletes the page being
+  // read, so the route navigates away and the sidebar is not the landing spot.
+  const deleteOriginRef = useRef<"tree" | "page">("tree");
 
   const openNewPage = useCallback(
     (defaultParentId: string | null) => setNewPageModal({ isOpen: true, defaultParentId }),
     []
   );
+
+  const requestDeletePage = useCallback((page: WikiPageMeta) => {
+    deleteOriginRef.current = "page";
+    setDeleteConfirm(page);
+  }, []);
 
   const deleteHasChildren = useMemo(
     () => (deleteConfirm ? (pages ?? []).some((p) => p.parentId === deleteConfirm.id) : false),
@@ -169,7 +179,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     if (!deleteConfirm) return;
     if (deleteHasChildren) return;
     // Capture the fallback focus target while the deleted row still exists.
-    const neighborId = neighborTreeItemId(deleteConfirm.id);
+    const neighborId = deleteOriginRef.current === "tree" ? neighborTreeItemId(deleteConfirm.id) : null;
     try {
       await deletePage.mutateAsync(deleteConfirm.slug);
     } catch {
@@ -199,7 +209,10 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     onAddChild: (pageId) => openNewPage(pageId),
     onRename: (page) => setRenameModal({ isOpen: true, page }),
     onMove: (page) => setMoveModal({ isOpen: true, page }),
-    onDelete: (page) => setDeleteConfirm(page),
+    onDelete: (page) => {
+      deleteOriginRef.current = "tree";
+      setDeleteConfirm(page);
+    },
   });
 
   // The page tree is a surface pane: docked or absent, toggled by the cap
@@ -275,7 +288,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
         onRetryPages={refetchPages}
         contextMenuPageId={contextMenu.menu?.pageId ?? null}
         onContextMenu={contextMenu.open}
-        onContextMenuKeyboard={contextMenu.openAt}
+        onOpenPageMenu={contextMenu.openAt}
         onNewPage={openNewPage}
         open={open}
         expanded={expanded}
@@ -343,7 +356,10 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
       )}
 
       {pages
-        ? children(pages, { openNewPage: () => openNewPage(null) })
+        ? children(pages, {
+            openNewPage: () => openNewPage(null),
+            requestDeletePage,
+          })
         : null}
     </div>
   );

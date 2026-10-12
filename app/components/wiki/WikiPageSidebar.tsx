@@ -60,7 +60,7 @@ function SidebarList({
   expanded,
   onToggle,
   onContextMenu,
-  onContextMenuKeyboard,
+  onOpenPageMenu,
   contextMenuPageId,
   onNavigate,
   onRetryList,
@@ -79,7 +79,7 @@ function SidebarList({
   expanded: Set<string>;
   onToggle: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
-  onContextMenuKeyboard: (element: HTMLElement, page: WikiPageMeta) => void;
+  onOpenPageMenu: (element: HTMLElement, page: WikiPageMeta) => void;
   contextMenuPageId: string | null;
   onNavigate?: (() => void) | undefined;
   onRetryList: () => void;
@@ -115,7 +115,7 @@ function SidebarList({
     if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
       event.preventDefault();
       const page = findNodeById(tree, target.dataset.nodeId ?? null);
-      if (page) onContextMenuKeyboard(target, page);
+      if (page) onOpenPageMenu(target, page);
       return;
     }
     switch (event.key) {
@@ -218,6 +218,7 @@ function SidebarList({
               expanded={expanded}
               onToggle={onToggle}
               onContextMenu={onContextMenu}
+              onOpenPageMenu={onOpenPageMenu}
               contextMenuPageId={contextMenuPageId}
               onNavigate={onNavigate}
               tabbableId={tabbableId}
@@ -238,7 +239,7 @@ export function WikiPageSidebar({
   error,
   contextMenuPageId,
   onContextMenu,
-  onContextMenuKeyboard,
+  onOpenPageMenu,
   onNewPage,
   open,
   expanded,
@@ -259,7 +260,7 @@ export function WikiPageSidebar({
   onRetryPages: () => void;
   contextMenuPageId: string | null;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
-  onContextMenuKeyboard: (element: HTMLElement, page: WikiPageMeta) => void;
+  onOpenPageMenu: (element: HTMLElement, page: WikiPageMeta) => void;
   onNewPage: (defaultParentId: string | null) => void;
   open: boolean;
   expanded: Set<string>;
@@ -333,7 +334,7 @@ export function WikiPageSidebar({
         expanded={expanded}
         onToggle={onToggleExpand}
         onContextMenu={onContextMenu}
-        onContextMenuKeyboard={onContextMenuKeyboard}
+        onOpenPageMenu={onOpenPageMenu}
         contextMenuPageId={contextMenuPageId}
         onNavigate={onNavigate}
         onRetryList={onRetryPages}

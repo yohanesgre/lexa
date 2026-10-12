@@ -7,6 +7,20 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Added
+
+- **A wiki page can be deleted from the page itself, and its page-actions menu has a visible trigger.**
+  `DELETE /api/projects/:slug/wiki/:pageSlug` and its confirm dialog existed, but in the UI the action
+  was reachable only by right-clicking a sidebar tree row (or focusing one and pressing the Context-Menu
+  key / Shift+F10). The wiki page's own action row now carries Edit / Share / **Delete** (`btn-danger`,
+  the primitive the task footer already uses for the same action), and every tree row carries a "…"
+  trigger opening that same menu (Add child page / Rename / Move / Delete); right-click and the keyboard
+  paths keep working, and the trigger stays visible where there is no hover to reveal it. Focus returns
+  to the surviving neighbor row after a tree-origin delete, while a delete from the page itself navigates
+  to the wiki root instead of pulling focus into the sidebar. Fixed alongside: that menu was painted
+  underneath the mobile drawer (z-index 30 against the drawer's 70), so on a phone its items could not be
+  reached at all; it now stacks above the drawer (75) and below the confirm dialogs (80).
+
 ### Changed
 
 - **Test suite trimmed to the invariant/contract floor** — 321 files / 3,820 tests / 66.7k LOC cut to

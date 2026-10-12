@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pencil, Share2 } from "lucide-react";
+import { Pencil, Share2, Trash2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { renderDoc, planHeadings, slugifyHeading, type HeadingOutline, type TTNode } from "../tiptap-render";
 import { OutlinePill } from "./OutlinePill";
@@ -33,9 +33,10 @@ interface WikiPageViewerProps {
   slug: string;
   page: WikiPage;
   pages: WikiPageMeta[];
+  onDelete: () => void;
 }
 
-function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedByName, headings, headingIds, onEdit, onShare, slug, pageSlug }: {
+function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedByName, headings, headingIds, onEdit, onShare, onDelete, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
   titleId: string;
@@ -46,6 +47,7 @@ function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedB
   headingIds: Map<TTNode, string>;
   onEdit: () => void;
   onShare: () => void;
+  onDelete: () => void;
   slug: string;
   pageSlug: string;
 }) {
@@ -77,6 +79,10 @@ function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedB
                     <Share2 size={13} strokeWidth={1.5} />
                     Share
                   </button>
+                  <button type="button" className="btn btn-danger" onClick={onDelete}>
+                    <Trash2 size={13} strokeWidth={1.5} />
+                    Delete
+                  </button>
                 </span>
               </div>
               <div>{renderDoc(content ?? emptyDoc, "wiki", slug, undefined, headingIds)}</div>
@@ -101,7 +107,7 @@ function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedB
   );
 }
 
-export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
+export function WikiPageViewer({ slug, page, pages, onDelete }: WikiPageViewerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -134,6 +140,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       headingIds={plan.ids}
       onEdit={() => setIsEditing(true)}
       onShare={() => setShareOpen(true)}
+      onDelete={onDelete}
       slug={slug}
       pageSlug={page.slug}
     />
