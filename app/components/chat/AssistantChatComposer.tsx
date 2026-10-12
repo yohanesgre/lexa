@@ -197,7 +197,12 @@ function AttachControl({
   onPickText: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  // Whether to PAINT the focus position. A row is focused on open so Enter works,
+  // but a mouse-opened menu must not read as "one of these is selected" — the ring
+  // appears for a keyboard-opened menu and as soon as ↑/↓ is used.
+  const [showFocus, setShowFocus] = useState(false);
+  const openedByKeyboardRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const imageRef = useRef<HTMLInputElement>(null);
@@ -220,11 +225,13 @@ function AttachControl({
     };
   }, [open]);
 
-  // Open focuses the first enabled row; ↑/↓ cycle the enabled rows, Enter
-  // activates the focused row (native button activation).
+  // Open focuses the first enabled row so Enter activates it (native button
+  // activation) — but the focus position is only PAINTED for a keyboard-opened
+  // menu or after ↑/↓, so a mouse-opened menu shows no "selected" row.
   useEffect(() => {
     if (!open) return;
     setFocusedIndex(firstEnabled);
+    setShowFocus(openedByKeyboardRef.current);
     rowRefs.current[firstEnabled]?.focus();
   }, [open, firstEnabled]);
 
@@ -235,6 +242,7 @@ function AttachControl({
     const nextPos = pos < 0 ? (delta > 0 ? 0 : enabled.length - 1) : (pos + delta + enabled.length) % enabled.length;
     const next = enabled[nextPos]!;
     setFocusedIndex(next);
+    setShowFocus(true);
     rowRefs.current[next]?.focus();
   };
 
@@ -258,7 +266,12 @@ function AttachControl({
         aria-label="Attach files"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          // `detail === 0` is a keyboard activation (Enter/Space on the button),
+          // the one case that wants a visible focus position immediately.
+          openedByKeyboardRef.current = e.detail === 0;
+          setOpen((v) => !v);
+        }}
       >
         <Paperclip size={14} strokeWidth={1.5} />
       </button>
@@ -301,7 +314,7 @@ function AttachControl({
             }}
             type="button"
             role="menuitem"
-            className={focusedIndex === 0 ? "dropdown-item focused" : "dropdown-item"}
+            className={focusedIndex === 0 && showFocus ? "dropdown-item focused" : "dropdown-item"}
             disabled={imageDisabled}
             title={imageDisabled ? ATTACH_DISABLED_TITLE_GLOBAL : undefined}
             aria-disabled={imageDisabled}
@@ -320,7 +333,7 @@ function AttachControl({
             }}
             type="button"
             role="menuitem"
-            className={focusedIndex === 1 ? "dropdown-item focused" : "dropdown-item"}
+            className={focusedIndex === 1 && showFocus ? "dropdown-item focused" : "dropdown-item"}
             onClick={() => pick(documentRef.current!)}
           >
             <FileText size={16} strokeWidth={1.5} />
