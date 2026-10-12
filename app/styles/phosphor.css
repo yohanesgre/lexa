@@ -9214,6 +9214,17 @@ select.prop-input,
   outline-offset: 2px;
   box-shadow: none;
 }
+/* Full-pane editors are the one exception: a ring drawn two pixels outside a
+   surface the user is typing into reads as a border on the page itself, and the
+   owner has asked for no highlight on them at all. The caret is the signal.
+   This must stay outside @layer components — an unlayered rule beats a layered
+   one whatever the specificity, which is why the .md-source rule inside the
+   layer could never win. */
+.md-source:focus-visible,
+.chat-deck .composer-editor:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 
 /* ---- Signage plates: section heads and controls wear the same label ---- */
 .tm-plate {
