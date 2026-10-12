@@ -56,6 +56,7 @@ import {
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
+import { AssistantGeneratedPanel } from "./AssistantGeneratedPanel";
 import { AssistantRunCard } from "./AssistantRunCard";
 import type { ChatAttachment } from "../../lib/api";
 import type { ChatAttachmentRef } from "../../lib/assistant-image";
@@ -588,6 +589,42 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     startStream,
   });
 
+  // Generated-content sidebar (ADR-0006 follow-on). A designed mobile state, not
+  // a squeezed column (antislop-layoutmobile): ≥1280px it is an in-flow column
+  // whose visibility persists like the shell's panes; below that it is a drawer
+  // that always starts closed, so the header's far-right toggle is the way in.
+  const [detailOpen, setDetailOpen] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+    if (!window.matchMedia("(min-width: 1280px)").matches) return false;
+    try {
+      return window.localStorage.getItem("lexa:pane-generated") !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const toggleDetail = useCallback(() => {
+    setDetailOpen((open) => {
+      const next = !open;
+      // The stored preference describes the desktop column; the mobile drawer is
+      // transient, so a thumb tap must not change what desktop opens with.
+      if (typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1280px)").matches) {
+        try {
+          window.localStorage.setItem("lexa:pane-generated", next ? "open" : "closed");
+        } catch {}
+      }
+      return next;
+    });
+  }, []);
+  // The drawer is an overlay, so Escape closes it (the panes' convention).
+  useEffect(() => {
+    if (!detailOpen || typeof window.matchMedia !== "function" || window.matchMedia("(min-width: 1280px)").matches) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDetailOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailOpen]);
+
   // Thread switching (History rows / New chat): deep-link via ?thread=.
   // A mid-stream switch DETACHES — the run keeps going server-side and the
   // transcript catches up from D1 (ADR-0006); Stop remains the explicit cancel.
@@ -641,6 +678,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const { editingPos, editDraft, setEditDraft, beginEdit, cancelEdit, commitEdit } = useChatEditing({ chatId, turns, onEditSave: handleEditSave });
 
+  // The sidebar follows the newest write of the current turn: live chips until
+  // the turn suspends, then the frozen batch's chips (they leave stream.pending).
+  const generatedChip = stream.pending.at(-1) ?? turns?.findLast((t) => t.batch)?.batch?.chips.at(-1) ?? null;
+
   return (
     <div className="chat-layout">
       <ThreadsSidebar
@@ -655,7 +696,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         error={listQuery.isError}
         onRetry={() => void listQuery.refetch()}
       />
-      <main className="chat-shell">
+      <main className={detailOpen ? "chat-shell chat-detail-open" : "chat-shell"}>
+      <div className="chat-column">
       <ChatHeader
         landing={isLanding}
         loading={listQuery.isLoading || transcript.isLoading}
@@ -667,6 +709,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         onRename={(next) => void handleRename(chatId, next)}
         onPinToggle={() => void handlePinToggle(chatId, !(activeThread?.pinned ?? false))}
         onDelete={() => handleDelete(chatId)}
+        detailOpen={detailOpen}
+        onToggleDetail={toggleDetail}
       />
 
       {providerMissing ? (
@@ -709,10 +753,6 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             turns={turns ?? []}
             chatId={chatId}
             slug={slug}
-            // ADR-0006 follow-on: the sidebar auto-follows the newest write of
-            // the current turn — live chips before suspension, and the frozen
-            // batch's chips once the turn suspends (they leave `stream.pending`).
-            generatedChip={stream.pending.at(-1) ?? turns?.findLast((t) => t.batch)?.batch?.chips.at(-1) ?? null}
             streaming={streaming}
             pendingReply={pendingAssistant}
             renderText={renderText}
@@ -775,6 +815,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
           />
         </>
       )}
+      </div>
+      <AssistantGeneratedPanel chip={generatedChip} onClose={() => setDetailOpen(false)} />
     </main>
     </div>
   );
