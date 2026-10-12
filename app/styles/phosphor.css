@@ -4041,6 +4041,18 @@
     fill: none;
     flex-shrink: 0;
   }
+  /* Trailing meta on a dropdown row (design-system.html `.dropdown-shortcut`).
+     Undefined here until now, so the attach menu's format hint rendered as bare
+     inline text crowding its label. `nowrap` + `flex-shrink: 0` keep a long hint
+     on one line instead of squeezing it into the label. */
+  .dropdown-shortcut {
+    margin-left: auto;
+    font-family: var(--lx-font-mono);
+    font-size: 11px;
+    color: var(--lx-text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
   .dropdown-separator {
     height: 1px;
     background: var(--lx-border-subtle);
