@@ -317,7 +317,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         // serves the turn. It outlives the client request, so a dropped fetch
         // must NOT cancel the run — Stop posts /assistant/chat/:chatId/cancel.
         if (supervisorEnabled(env)) {
-          return yield* forwardChatToSupervisor(env, { chatId: request.chatId, userId: identity.userId, request });
+          return yield* forwardChatToSupervisor(env, { chatId: request.chatId, userId: identity.userId, fromIndex: req.payload.replayFrom, request });
         }
         const service = yield* AssistantService;
         const frames = yield* service.runChatStream(request.chatId, identity.userId, request);

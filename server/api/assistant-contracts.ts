@@ -117,6 +117,10 @@ const AssistantChatStreamInput = Schema.Struct({
   agentId: Schema.optional(Schema.String),
   attachments: Schema.optional(Schema.Array(AssistantAttachmentRef)),
   fromIndex: Schema.optional(Schema.Number),
+  // ADR-0006: how many stream frames the caller already rendered for this turn,
+  // so a supervised re-send replays only the tail. Supervisor-only — the
+  // in-process path ignores it.
+  replayFrom: Schema.optional(Schema.Number),
   reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
   // Turn-start WRITE permission (D2/D5/D6). Absent → the thread's sticky value.
   permissionMode: Schema.optional(AssistantToolPermissionModeSchema),

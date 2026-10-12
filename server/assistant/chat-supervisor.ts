@@ -156,9 +156,11 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
     };
     this.#run = run;
     // Driven off the client request: the run keeps going when the caller goes
-    // away, which is the whole point of the supervisor.
+    // away, which is the whole point of the supervisor. A NEW run always starts
+    // its buffer at 0 — `fromIndex` is meaningful only on an attach to an
+    // existing run, so a caller that guesses wrong cannot skip frames.
     this.ctx.waitUntil(this.#pump(run, stream));
-    return this.#sse(this.#tail(run, payload.fromIndex ?? 0));
+    return this.#sse(this.#tail(run, 0));
   }
 
   async #cancel(): Promise<Response> {
