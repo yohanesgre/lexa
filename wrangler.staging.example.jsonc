@@ -24,25 +24,14 @@
 // - `wrangler … create` auto-appends the resource to the wrangler config in the
 //   current directory; if that is the root wrangler.jsonc, remove the appended
 //   blocks before building (a duplicate binding name fails the build).
-// - This path uses wrangler's `_cf` migration journal. Do not point it at a
+// - This path uses Wrangler's `d1_migrations` journal. Do not point it at a
 //   database that scripts/workers-install.ts migrated (`_migrations` journal).
 // - `bun run db:migrations:apply` / `bun run deploy:workers` ignore this file
 //   and hit the root config — don't use them for staging.
 // - Superadmin is created by the web /setup wizard after first deploy.
-// - Upgrading from a DO-era deployment: the assistant Durable Object
-//   (`LexaAssistantAgent`, ADR-0005) is gone from the code, so a deployment
-//   that already owns it MUST carry the delete-class migration or the deploy
-//   fails with CF error 10064 ("New version of script does not export class
-//   'LexaAssistantAgent' which is depended on by existing Durable Objects").
-//   Add this frozen two-tag history to the config before deploying (the tag
-//   after the prior's highest is `v2` when the history is exactly `v1`):
-//     "migrations": [
-//       { "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] },
-//       { "tag": "v2", "deleted_classes": ["LexaAssistantAgent"] }
-//     ]
-//   A fresh clone has no prior DO — leave `migrations` out entirely; emitting
-//   `new_sqlite_classes` for a class the script no longer exports fails with CF
-//   error 10070.
+// - Keep Durable Object migration history v1/v2 verbatim and append v3 for the
+//   chat supervisor class. The CHAT_DO binding provisions the class; supervised
+//   chat stays off until backend gates pass and LXK_CHAT_SUPERVISOR=1 is opted in.
 // - `LXK_PUBLIC_URL` is required for browser sign-in. Set it to the deployed
 //   URL (workers.dev or a custom domain). Unset, it falls back to
 //   `http://localhost:5173` for the Better Auth baseURL + trustedOrigins, and
@@ -87,6 +76,19 @@
       "binding": "KV",
       "id": "<KV_NAMESPACE_ID>"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_DO",
+        "class_name": "LexaChatSupervisor"
+      }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["LexaAssistantAgent"] },
+    { "tag": "v2", "deleted_classes": ["LexaAssistantAgent"] },
+    { "tag": "v3", "new_sqlite_classes": ["LexaChatSupervisor"] }
   ],
   "triggers": {
     "crons": ["*/15 * * * *"]

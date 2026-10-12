@@ -876,10 +876,39 @@ export interface DeployConfigInput {
   priorConfig: Record<string, unknown> | null;
 }
 
+const INSTALLER_OWNED_VAR_NAMES: Record<string, true> = {
+  LXK_ENV: true,
+  LXK_PUBLIC_URL: true,
+  LXK_VERSION: true,
+};
+
+const SECRET_VAR_NAMES: Record<string, true> = {
+  CF_API_TOKEN: true,
+  CLOUDFLARE_API_TOKEN: true,
+  CRON_SECRET: true,
+  LXK_SECRETS_MASTER_KEY: true,
+  LXK_SECRETS_MASTER_KEY_PREV: true,
+  LXK_API_KEY: true,
+  LXK_S3_SECRET_ACCESS_KEY: true,
+  GITHUB_PRIVATE_KEY: true,
+  GITHUB_WEBHOOK_SECRET: true,
+};
+
 export function buildDeployConfig(
   input: DeployConfigInput,
 ): Record<string, unknown> {
   const { manifest, rootConfig } = input;
+  const priorVars = input.priorConfig?.vars;
+  const preservedVars =
+    typeof priorVars === "object" && priorVars !== null && !Array.isArray(priorVars)
+      ? Object.fromEntries(
+          Object.entries(priorVars).filter(
+            ([key]) =>
+              !Object.hasOwn(INSTALLER_OWNED_VAR_NAMES, key) &&
+              !Object.hasOwn(SECRET_VAR_NAMES, key),
+          ),
+        )
+      : {};
   // ADR-0005's legacy removal first (it may append a delete tag), then ADR-0006's
   // supervisor create on top of whatever history results.
   const migrations = buildChatSupervisorMigrations(buildDoRemovalMigrations(input.priorConfig ?? {}) ?? []);
@@ -892,10 +921,13 @@ export function buildDeployConfig(
     ...(manifest.no_bundle ? { no_bundle: true } : {}),
     ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
     assets: { directory: "./assets", binding: "ASSETS" },
-    vars: resolveDeployVars({
-      version: input.version,
-      publicUrl: input.publicUrl,
-    }),
+    vars: {
+      ...preservedVars,
+      ...resolveDeployVars({
+        version: input.version,
+        publicUrl: input.publicUrl,
+      }),
+    },
     d1_databases: [
       { binding: "DB", database_name: input.d1Name, database_id: input.d1Id },
     ],
