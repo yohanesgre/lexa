@@ -709,6 +709,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             turns={turns ?? []}
             chatId={chatId}
             slug={slug}
+            // ADR-0006 follow-on: the sidebar auto-follows the newest write of
+            // the current turn — live chips before suspension, and the frozen
+            // batch's chips once the turn suspends (they leave `stream.pending`).
+            generatedChip={stream.pending.at(-1) ?? turns?.findLast((t) => t.batch)?.batch?.chips.at(-1) ?? null}
             streaming={streaming}
             pendingReply={pendingAssistant}
             renderText={renderText}
