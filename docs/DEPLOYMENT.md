@@ -17,8 +17,9 @@ clone). The first superadmin is provisioned **only** by the web `/setup` wizard
 
 Cloudflare Workers (D1 + R2 + KV) is the deploy target. The installer ships the
 prebuilt Worker bundle; there is no VPS process or tunnel. The **AI Assistant**
-runs in-process on both flavors over SSE (ADR-0005; the ADR-0003
-`@cloudflare/ai-chat` Durable Object tier is retired). See
+runs in-process on TanStack AI over SSE on both flavors (ADR-0005). Workers may
+opt into the separate ADR-0006 chat supervisor with `CHAT_DO` deployed and
+`LXK_CHAT_SUPERVISOR=1`; otherwise chat remains request-bound. See
 `docs/RELEASING.md` for the release policy.
 
 The canonical config file is **`.env.toml`**. It is structured TOML where the
@@ -141,8 +142,12 @@ bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local
   `workers-install.ts` generates: worker `lexa-staging`, D1 `lexa-staging`, R2
   `lexa-staging-blobs`, KV, `main`/`assets` from the built `dist/`, `no_bundle`
   plus the ESModule rule, and the observability block from the root
-  `wrangler.jsonc`. (ADR-0005 W6 removed the assistant Durable Object + its
-  self service binding, the `ai` binding, and the `*/15` cron from the config.)
+  `wrangler.jsonc`. The retired assistant executor and bound `env.AI` provider
+  path are not used. The `*/15` cron is retained for prune/retention only; it
+  does not create snapshots or run assistant schedules. The optional chat
+  supervisor requires the `CHAT_DO` binding and its Durable Object class
+  migration plus `LXK_CHAT_SUPERVISOR=1`; the flag is off unless explicitly
+  opted in. This binding/class migration does not modify D1 tables or journals.
   Fill `<ACCOUNT_ID>` (multi-account tokens only),
   `<D1_DATABASE_ID>`, `<KV_NAMESPACE_ID>`, and `<PUBLIC_URL>` in the copied
   file.
@@ -166,9 +171,11 @@ Rules:
 - Never deploy staging with the root `wrangler.jsonc` — it names the prod
   worker and prod resources. Never run `bun run db:migrations:apply` or
   `bun run deploy:workers` for staging; both ignore the staging config.
-- One method per database: this path writes wrangler's `d1_migrations` journal.
-  A database migrated by `install.sh workers` (`_migrations`) must keep using
-  that method, and vice versa — mixing the two double-applies migrations.
+- This staging Wrangler path writes Wrangler's `d1_migrations` journal. A
+  database migrated by `install.sh workers` uses the installer `_migrations`
+  journal and must keep using that method, and vice versa. Never mix the
+  journals, edit either journal/table manually, or use one method to "repair"
+  the other.
 - The filled `wrangler.staging.local.jsonc` carries account and resource ids —
   gitignored, never committed.
 - `wrangler … create` auto-appends the new resource to the wrangler config in
@@ -249,16 +256,17 @@ For an in-place update of an existing custody dir from the headless CLI
 [`docs/CLOUDFLARE_WORKERS.md`](CLOUDFLARE_WORKERS.md#upgrading-a-workers-deployment-lx-worker-upgrade)
 §Upgrading a Workers deployment.
 
-**Upgrading from a DO-era deployment (ADR-0005).** The assistant Durable Object
-(`LexaAssistantAgent`) is retired and no longer exported by the script. A
-deployment that already owns the class must carry the delete-class migration or
-the deploy fails with CF error 10064 ("New version of script does not export
-class 'LexaAssistantAgent' which is depended on by existing Durable Objects").
-Re-running `install.sh` from the new tag and `lx worker upgrade` both read the
-prior deploy config and append the delete-class tag automatically (the tag after
-the prior's highest — `<next after the prior's highest, e.g. v2>` when the
-history is exactly `v1`). A hand-managed config (e.g. a filled
-`wrangler.staging.local.jsonc`) must add it by hand:
+**Historical LexaAssistantAgent removal (ADR-0005).** The former assistant
+executor Durable Object (`LexaAssistantAgent`) is retired and no longer exported
+by the script. A deployment that already owns the class must carry the delete-
+class migration or the deploy fails with CF error 10064 ("New version of script
+does not export class 'LexaAssistantAgent' which is depended on by existing
+Durable Objects"). Re-running `install.sh` from the new tag and `lx worker
+upgrade` both read the prior deploy config and append the delete-class tag
+automatically (the tag after the prior's highest — `<next after the prior's
+highest, e.g. v2>` when the history is exactly `v1`). Hand-managed configs
+must add that legacy deletion when required. The historical old-class-only
+sequence was:
 
 ```jsonc
 "migrations": [
@@ -267,9 +275,18 @@ history is exactly `v1`). A hand-managed config (e.g. a filled
 ]
 ```
 
-The repo `wrangler.jsonc` carries this frozen two-tag history. A fresh install
-emits no `migrations` — the installer and `lx worker upgrade` add none for a
-config that never owned the DO.
+The repository root `wrangler.jsonc` retains the old-class history (`v1`
+creates `LexaAssistantAgent`, `v2` deletes it) and adds `v3` to create
+`LexaChatSupervisor`. Current installer/CLI config generation always provisions
+the `CHAT_DO` binding and appends a supervisor create-class migration when the
+current class has not already been created: a fresh generated config gets `v1`;
+the old `LexaAssistantAgent` `v1`/`v2` history gets the supervisor create at
+`v3`. Repeated upgrades preserve applied history and do not duplicate the
+supervisor create. The binding alone is inert; runtime supervision still
+requires `LXK_CHAT_SUPERVISOR=1`. Durable Object class tags are separate from
+D1 SQL migrations and do not change D1 tables or journals. Keep Wrangler
+`d1_migrations` and installer `_migrations` separate; do not edit either
+journal/table manually.
 
 ## Sample data
 
@@ -295,7 +312,7 @@ boot and never overwrites a variable already set in the real environment.
 | `LXK_ASSISTANT_REPO_CAP` | hand-set (only to override the default repo-content cap) | no — assistant-only (Workers) |
 | `LXK_TRUSTED_PROXY_CIDRS` | hand-set (Bun/dev only — inert on Workers, which trusts the edge's `cf-connecting-ip`; set only when a non-loopback proxy fronts the API) | no |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
-| `LXK_SECRETS_MASTER_KEY` | minted by the installer and pushed/custodied in `cf-workers/.env.toml`; preserved across install-script re-runs | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) and the assistant's internal HMAC derivation |
+| `LXK_SECRETS_MASTER_KEY` | minted by the installer and pushed/custodied in `cf-workers/.env.toml`; preserved across install-script re-runs | **required** — the server fails closed without it (Better Auth's session-signing secret derives from it); it also gates managed-secret storage (MCP token, provider key, Jev API key) |
 
 ## Full variable reference
 
@@ -307,7 +324,7 @@ boot and never overwrites a variable already set in the real environment.
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. Workers installs auto-prune the leftover Worker secret after a successful deploy (manual fallback: `wrangler secret delete LXK_API_KEY --name lexa --config deploy-lexa/wrangler.lexa.json`). |
 | `LXK_ASSISTANT_REPO_CAP` | cap on source-role repos used as assistant grounding context (default 3) |
-| `LXK_RUNTIME_DAEMON_TOKEN` | REMOVED (agent-runtime tier deleted, migration `0008`) — no longer read; leaving it set is harmless, remove it at your convenience |
+| `LXK_CHAT_SUPERVISOR` | opt-in Workers chat supervision; requires the `CHAT_DO` binding; only `1` enables it, unset/other values leave the default request-bound path |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_SECRETS_MASTER_KEY` | **required** — the server fails closed without it: Better Auth's session-signing secret is derived from it (`lexa-better-auth:<key>`), so a missing key throws at auth construction with a `bun run setup` hint. It is also **required to store a managed secret** — an MCP client token, an LLM provider API key, or the Jev API key. The master key lives only in the server environment. Base64 of **exactly 32 bytes** (base64url is accepted too; `openssl rand -base64 32`). Set it in the server environment, never in the database, never in a response or a log, and never commit it. Rotating: set `LXK_SECRETS_MASTER_KEY_PREV` to the **old** value, `LXK_SECRETS_MASTER_KEY` to the **new** one, restart — managed-secret rows stay readable through the PREV slot (no outage, no rewrap step), but **all sessions are invalidated** (the session-signing secret derives from the active key, so users sign in again). Remove PREV once every row is re-entered. |
 | `LXK_SECRETS_MASTER_KEY_PREV` | **optional, read-only** — the previous `LXK_SECRETS_MASTER_KEY`, same 32-byte base64 shape. It is the rotation *read* path only: rows encrypted under the old slot (`key_id = 'prev'`) keep resolving, and any secret entered while it is set is encrypted under the **active** key. Remove it once every row is re-entered (an unfinished rotation is a warning, not a break). |
@@ -549,7 +566,7 @@ legal). See `docs/ARCHITECTURE.md` §Managed-only MCP client secrets.
 5. **`LXK_SECRETS_MASTER_KEY` is preserved across re-runs**, so upgrades do not
    clobber the key.
 
-## Upgrading across the agent-runtime removal (2026-09-26)
+## Upgrading across the agent-runtime removal (2026-09-26) — historical; superseded by ADR-0005
 
 The coding-agent ("agent-runtime") tier was deleted end to end — migration
 `0008_remove_agent_runtimes.sql` drops `machines`, `runtimes`,
