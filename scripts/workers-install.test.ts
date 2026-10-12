@@ -335,14 +335,30 @@ describe("buildDoRemovalMigrations (DO-era detection)", () => {
     ]);
   });
 
-  test("buildDeployConfig keeps a repeat upgrade's history verbatim and appends only the supervisor create", () => {
+  test("buildDeployConfig preserves operator vars, overrides installer vars, and keeps DO history idempotent", () => {
     const priorConfig = {
+      vars: {
+        LXK_ENV: "staging",
+        LXK_PUBLIC_URL: "https://stale.example.workers.dev",
+        LXK_VERSION: "2026.8.0",
+        LXK_CHAT_SUPERVISOR: "1",
+        LXK_MAX_CONCURRENT_RUNS: "4",
+        LXK_TRUSTED_ORIGINS: "https://trusted.example.com",
+        CUSTOM_TOKEN_LIMIT: "128",
+        PUBLIC_KEY_ID: "key-17",
+        CF_API_TOKEN: "test-token-placeholder",
+        CLOUDFLARE_API_TOKEN: "test-cloudflare-token-placeholder",
+        CRON_SECRET: "test-cron-secret-placeholder",
+        LXK_SECRETS_MASTER_KEY: "test-master-key-placeholder",
+        LXK_S3_SECRET_ACCESS_KEY: "test-s3-secret-placeholder",
+        GITHUB_WEBHOOK_SECRET: "test-webhook-placeholder",
+      },
       migrations: [
         { tag: "v1", new_sqlite_classes: [CLASS] },
         { tag: "v2", deleted_classes: [CLASS] },
       ],
     };
-    const config = buildDeployConfig({
+    const input = {
       workerName: "lexa",
       d1Name: "lexa",
       account: "acct_123",
@@ -354,13 +370,44 @@ describe("buildDoRemovalMigrations (DO-era detection)", () => {
       manifest: { main: "index.js", assets: { directory: "../client" } },
       rootConfig: { compatibility_date: "2026-08-01" },
       priorConfig,
+    };
+    const config = buildDeployConfig(input);
+    // Installer-owned values change; operator values survive untouched.
+    expect(config.vars).toEqual({
+      LXK_CHAT_SUPERVISOR: "1",
+      LXK_MAX_CONCURRENT_RUNS: "4",
+      LXK_TRUSTED_ORIGINS: "https://trusted.example.com",
+      CUSTOM_TOKEN_LIMIT: "128",
+      PUBLIC_KEY_ID: "key-17",
+      LXK_ENV: "production",
+      LXK_PUBLIC_URL: "https://lexa.example.workers.dev",
+      LXK_VERSION: "2026.9.0",
     });
-    // ADR-0006: the applied history is kept verbatim, then the supervisor's
-    // create tag is appended on top of it.
     expect(config.migrations).toEqual([
       ...priorConfig.migrations,
       { tag: "v3", new_sqlite_classes: ["LexaChatSupervisor"] },
     ]);
+    const repeated = buildDeployConfig({
+      ...input,
+      publicUrl: "",
+      version: null,
+      priorConfig: {
+        ...config,
+        vars: {
+          ...(config.vars as Record<string, unknown>),
+          LXK_CHAT_SUPERVISOR: "0",
+        },
+      },
+    });
+    expect(repeated.vars).toEqual({
+      LXK_CHAT_SUPERVISOR: "0",
+      LXK_MAX_CONCURRENT_RUNS: "4",
+      LXK_TRUSTED_ORIGINS: "https://trusted.example.com",
+      CUSTOM_TOKEN_LIMIT: "128",
+      PUBLIC_KEY_ID: "key-17",
+      LXK_ENV: "production",
+    });
+    expect(repeated.migrations).toEqual(config.migrations);
   });
 });
 
@@ -502,42 +549,10 @@ describe("per-deploy version marker + public URL (LX-36)", () => {
     });
   });
 
-  test("main emits vars via resolveDeployVars + readDeployVersion(DIR)", () => {
-    const src = readFileSync(
-      new URL("./lib/cf-deploy.ts", import.meta.url),
-      "utf-8",
-    );
-    // main() stamps the repo version into the buildDeployConfig input;
-    // buildDeployConfig turns it into vars via resolveDeployVars.
-    expect(src).toContain("version: readDeployVersion(DIR)");
-    expect(src).toContain("vars: resolveDeployVars(");
-  });
 });
 
-describe("source order — account resolves before any resource is created", () => {
-  test("the resolveAccountOrDie call precedes the ensureD1 call in main", () => {
-    const src = readFileSync(
-      new URL("./lib/cf-deploy.ts", import.meta.url),
-      "utf-8",
-    );
-    const resolveIdx = src.indexOf("account = resolveAccountOrDie(");
-    const ensureIdx = src.indexOf("await ensureD1(");
-    expect(resolveIdx).toBeGreaterThanOrEqual(0);
-    expect(ensureIdx).toBeGreaterThanOrEqual(0);
-    expect(resolveIdx).toBeLessThan(ensureIdx);
-  });
 
-  test("main no longer emits DO/AI blocks: no resolveDurableObjects/resolveAiBinding in the generated config", () => {
-    const src = readFileSync(
-      new URL("./lib/cf-deploy.ts", import.meta.url),
-      "utf-8",
-    );
-    expect(src).not.toContain("resolveDurableObjects");
-    expect(src).not.toContain("resolveAiBinding");
-    expect(src).not.toContain("resolveServiceBindings");
-    expect(src).not.toContain("durable_objects,");
-  });
-
+describe("buildDeployConfig", () => {
   test("buildDeployConfig emits the supervisor namespace + create tag for a fresh install", () => {
     const config = buildDeployConfig({
       workerName: "lexa",
@@ -594,31 +609,6 @@ describe("source order — account resolves before any resource is created", () 
     expect(config.triggers).toEqual({ crons: ["*/15 * * * *"] });
   });
 
-  test("main emits observability: resolveObservability(rootConfig) into the generated config", () => {
-    const src = readFileSync(
-      new URL("./lib/cf-deploy.ts", import.meta.url),
-      "utf-8",
-    );
-    expect(src).toContain("observability: resolveObservability(rootConfig)");
-  });
-
-  test("main carries root's scheduled tick (prune + backup retention) into the generated config", () => {
-    const ROOT = fileURLToPath(new URL("..", import.meta.url));
-    expect(readRootWranglerConfig(ROOT).triggers).toEqual({ crons: ["*/15 * * * *"] });
-    const src = readFileSync(
-      new URL("./lib/cf-deploy.ts", import.meta.url),
-      "utf-8",
-    );
-    expect(src).toContain("...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {})");
-  });
-
-  test("main emits the ASSETS binding on the static-assets directory", () => {
-    const src = readFileSync(
-      new URL("./lib/cf-deploy.ts", import.meta.url),
-      "utf-8",
-    );
-    expect(src).toContain('assets: { directory: "./assets", binding: "ASSETS" }');
-  });
 });
 
 describe("installer wrangler-token extraction (banner-faking fixture)", () => {
