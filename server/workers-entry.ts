@@ -33,6 +33,7 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import type {
   D1Database,
+  DurableObjectNamespace,
   ExecutionContext,
   ExportedHandler,
   KVNamespace,
@@ -55,8 +56,7 @@ import { createWorkersApiHandler } from "./api/assistant-api";
 import { createAuth, handleAuthSurface } from "./auth";
 import { resolveMaxApiBody } from "./api/limits";
 import { syncRateLimitFromDbAsync } from "./api/rate-limit";
-import { DEFAULT_MAX_UPLOAD_MB } from "./storage/config";
-import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "./storage/config";
+import { r2StorageConfig, type R2Bucket as NarrowR2Bucket } from "./storage/config";
 import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
@@ -86,6 +86,10 @@ export interface WorkersEnv {
   LXK_SECRETS_MASTER_KEY_PREV?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
+  // ADR-0006: the chat supervisor DO namespace + its transport opt-in. The
+  // supervisor engages only when both are present (see streamAssistantChat).
+  CHAT_DO?: DurableObjectNamespace;
+  LXK_CHAT_SUPERVISOR?: string;
 }
 
 type BaseLayers = Layer.Layer<Db | RuntimeEnvTag>;
@@ -195,20 +199,6 @@ type BetterAuthApi = {
   handler: (req: Request) => Promise<Response>;
 };
 
-function r2StorageConfig(runtimeEnv: RuntimeEnv, blob: R2Bucket | undefined): StorageConfigShape {
-  const parsed = Number(runtimeEnv.LXK_MAX_UPLOAD_MB);
-  const maxUploadBytes = Math.round(
-    (Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024
-  );
-  return {
-    driver: "r2",
-    fsRoot: "",
-    s3: null,
-    r2: blob ? { binding: blob as unknown as NarrowR2Bucket, bucketName: "lexa-blobs" } : null,
-    maxUploadBytes,
-  };
-}
-
 // The full API stack (better-auth + service graph + web handler) is
 // isolate-stable: bindings and env vars don't change within an isolate.
 // Rebuilding it per request costs tens of ms of CPU — far over the free
@@ -250,7 +240,7 @@ async function handleApi(
     const handler = createWorkersApiHandler({
       driver,
       runtimeEnv,
-      storage: r2StorageConfig(runtimeEnv, blob),
+      storage: r2StorageConfig(runtimeEnv, blob as unknown as NarrowR2Bucket | undefined),
       authHooks: {
         createUser: (input) =>
           lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
@@ -578,3 +568,7 @@ const handler: ExportedHandler<WorkersEnv> = {
 };
 
 export default handler;
+
+// ADR-0006: a Durable Object class must be a named export of the worker script.
+// The supervisor engages only when `CHAT_DO` is bound and `LXK_CHAT_SUPERVISOR=1`.
+export { LexaChatSupervisor } from "./assistant/chat-supervisor";

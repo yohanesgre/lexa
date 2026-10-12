@@ -106,6 +106,26 @@ const UPLOAD_PATH_RE = /^\/api\/projects\/[^/]+\/(tasks\/[^/]+|wiki\/pages\/[^/]
 // from the task/wiki path even though both raise the body cap.
 const CHAT_UPLOAD_PATH_RE = /^\/api\/projects\/[^/]+\/assistant\/chat\/[^/]+\/attachments$/;
 
+// The Workers storage shape: always the R2 binding driver (no fs, no S3 creds),
+// so `resolveStorageConfig`'s dbDir is not part of it. Shared by the Worker
+// entry and the assistant's chat supervisor DO.
+export function r2StorageConfig(
+  env: { LXK_MAX_UPLOAD_MB?: string | undefined },
+  blob: R2Bucket | undefined
+): StorageConfigShape {
+  const parsed = Number(env.LXK_MAX_UPLOAD_MB);
+  const maxUploadBytes = Math.round(
+    (Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024
+  );
+  return {
+    driver: "r2",
+    fsRoot: "",
+    s3: null,
+    r2: blob ? { binding: blob, bucketName: "lexa-blobs" } : null,
+    maxUploadBytes,
+  };
+}
+
 export function isAttachmentUploadPath(path: string): boolean {
   return UPLOAD_PATH_RE.test(path);
 }

@@ -59,11 +59,12 @@ import { syncModelPrices } from "../assistant/price-sync";
 import { createSchedule, deleteSchedule, getSchedule, listSchedules, updateSchedule } from "../scheduled/schedules";
 import { getAssistantRunById } from "../assistant/run-registry";
 import { convertStoredMessages, type LegacyStoredMessage } from "../assistant/legacy-convert";
+import type { ChatSupervisorRunPayload } from "../assistant/chat-supervisor";
 import { AuthorizationService } from "../services/authorization.service";
 import { AttachmentService } from "../services/attachment.service";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, type StorageConfigShape } from "../storage/config";
-import { RuntimeEnvLive, storageEnvFrom, type RuntimeEnv } from "../runtime-env";
+import { currentEnv, RuntimeEnvLive, storageEnvFrom, type RuntimeEnv } from "../runtime-env";
 import { getEnv } from "../env";
 import { ApiAuthHooks, type ApiAuthHooksShape } from "./auth-hooks";
 import {
@@ -80,7 +81,7 @@ import {
   requireProjectAdminById,
 } from "./http";
 import type { AssistantTaskStatus } from "../../shared/types";
-import type { StreamFrame } from "../../shared/assistant";
+import type { AssistantChatStreamRequest, StreamFrame } from "../../shared/assistant";
 
 // ADR-0005 W4: the DO thread RPC is gone from every live path — chat resume,
 // delegated-run abort, transcript read, and thread reset/destroy all run
@@ -301,8 +302,8 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
         yield* requireProjectReadById(req.payload.projectId);
-        const service = yield* AssistantService;
-        const frames = yield* service.runChatStream(req.payload.chatId, identity.userId, {
+        const env = yield* currentEnv;
+        const request: AssistantChatStreamRequest = {
           projectId: req.payload.projectId,
           chatId: req.payload.chatId,
           message: req.payload.message,
@@ -311,9 +312,34 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           ...(req.payload.fromIndex !== undefined ? { fromIndex: req.payload.fromIndex } : {}),
           ...(req.payload.reasoningEffort !== undefined ? { reasoningEffort: req.payload.reasoningEffort } : {}),
           ...(req.payload.permissionMode !== undefined ? { permissionMode: req.payload.permissionMode } : {}),
-        });
+        };
+        // ADR-0006: with the supervisor bound and enabled the Durable Object
+        // serves the turn. It outlives the client request, so a dropped fetch
+        // must NOT cancel the run — Stop posts /assistant/chat/:chatId/cancel.
+        if (supervisorEnabled(env)) {
+          return yield* forwardChatToSupervisor(env, { chatId: request.chatId, userId: identity.userId, request });
+        }
+        const service = yield* AssistantService;
+        const frames = yield* service.runChatStream(request.chatId, identity.userId, request);
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.payload.chatId));
         return sseHttpResponse(frames);
+      }))
+    )
+    .handle("cancelAssistantChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const threadRepo = yield* AssistantThreadRepo;
+        const thread = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+        );
+        yield* requireProjectReadById(thread.projectId);
+        const env = yield* currentEnv;
+        // ADR-0006: under the supervisor a client disconnect no longer cancels
+        // the run, so Stop calls this instead of relying on the dropped fetch.
+        if (supervisorEnabled(env)) return { ok: yield* cancelSupervisorRun(env, req.path.chatId) };
+        const service = yield* AssistantService;
+        return { ok: service.abortChat(req.path.chatId) };
       }))
     )
     .handle("decideAssistantApproval", (req) =>
@@ -505,6 +531,62 @@ function chatExportHttpResponse(t: { title: string | null; messages: unknown[]; 
   return HttpServerResponse.raw(markdown, {
     contentType: "text/markdown; charset=utf-8",
     headers: { "Content-Disposition": `attachment; filename="${sanitized}-${day}.md"` },
+  });
+}
+
+// ─── ADR-0006 chat supervisor transport ─────────────────────────────────
+// Engages only when the Durable Object namespace is bound AND
+// LXK_CHAT_SUPERVISOR=1; absent either, every path stays in-process.
+function supervisorEnabled(env: RuntimeEnv): boolean {
+  return env.LXK_CHAT_SUPERVISOR === "1" && env.CHAT_DO !== undefined;
+}
+
+function forwardChatToSupervisor(
+  env: RuntimeEnv,
+  payload: ChatSupervisorRunPayload
+): Effect.Effect<HttpServerResponse.HttpServerResponse, AssistantGenerationFailed> {
+  return Effect.tryPromise({
+    try: async () => {
+      const namespace = env.CHAT_DO;
+      if (!namespace) throw new Error("chat supervisor namespace missing");
+      const response = await namespace.get(namespace.idFromName(payload.chatId)).fetch("https://chat-supervisor/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      // `DurableObjectStub.fetch` is typed against `@cloudflare/workers-types`
+      // `Response`; @effect/platform wants the DOM one. Structurally identical
+      // at runtime — only the library surface differs, so bridge the two.
+      const webResponse = response as unknown as Response;
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/event-stream") || !response.body) {
+        // A JSON error (409 busy, PROVIDER_NOT_CONFIGURED, …) or an empty body is
+        // fully buffered, so the plain web bridge is exact.
+        return HttpServerResponse.fromWeb(webResponse);
+      }
+      // Streaming: hand the DO's byte stream to the SAME bridge the in-process
+      // path uses (`sseHttpResponse`). `fromWeb` does not carry a DO's streaming
+      // body through this HTTP layer — the client saw the stream die mid-turn.
+      const body = response.body as unknown as ReadableStream<Uint8Array>;
+      return HttpServerResponse.stream(
+        Stream.fromReadableStream(() => body, () => new AssistantGenerationFailed({ message: "chat supervisor stream failed" })),
+        { contentType: "text/event-stream", headers: { "Cache-Control": "no-cache" } }
+      );
+    },
+    catch: () => new AssistantGenerationFailed({ message: "chat supervisor unreachable" }),
+  });
+}
+
+function cancelSupervisorRun(env: RuntimeEnv, chatId: string): Effect.Effect<boolean, AssistantGenerationFailed> {
+  return Effect.tryPromise({
+    try: async () => {
+      const namespace = env.CHAT_DO;
+      if (!namespace) throw new Error("chat supervisor namespace missing");
+      const response = await namespace.get(namespace.idFromName(chatId)).fetch("https://chat-supervisor/cancel", { method: "POST" });
+      const body: unknown = await response.json();
+      return typeof body === "object" && body !== null && "ok" in body && body.ok === true;
+    },
+    catch: () => new AssistantGenerationFailed({ message: "chat supervisor unreachable" }),
   });
 }
 

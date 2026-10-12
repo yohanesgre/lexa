@@ -220,6 +220,14 @@ class AssistantStreamSession {
 
   abort() {
     if (this.snapshot.status === "connecting" || this.snapshot.status === "streaming") {
+      // Stop must reach the server: under the supervisor transport (ADR-0006) a
+      // client disconnect no longer cancels the run, so signal it explicitly.
+      // Harmless on the in-process path — the aborted fetch already cancels it,
+      // and the route answers `{ ok: false }` when nothing is active.
+      const chatId = this.key.startsWith("assistant-chat:") ? this.key.slice("assistant-chat:".length) : "";
+      if (chatId.length > 0) {
+        void fetch(`/api/assistant/chat/${encodeURIComponent(chatId)}/cancel`, { method: "POST" }).catch(() => {});
+      }
       this.controller.abort();
       // Server discards the partial message; keep accumulated preview until
       // the caller resets, matching the popover's Stop semantics.
