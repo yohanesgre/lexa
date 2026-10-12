@@ -257,6 +257,29 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 > `assistant_threads`. The DO modules were deleted in W6; the superseded
 > paragraphs below describe the retired DO design.
 
+> **ADR-0006 (accepted 2026-10-12) adds a Workers-only chat *supervisor* DO —
+> it does not reverse ADR-0005's executor decision.** The engine stays TanStack
+> AI, in-process and D1-canonical; `@cloudflare/ai-chat` and the `agents` SDK
+> are explicitly **excluded** (they were the unreliable part). A hand-written
+> `LexaChatSupervisor` Durable Object (`server/assistant/chat-supervisor.ts`)
+> owns exactly four things for a chat lane: a **single-writer mutex** (one turn
+> per chat, across isolates), a **producer that outlives the client request**
+> (started with the DO's `ctx.waitUntil`, so a reload/tab-close/network drop no
+> longer kills the turn), an **indexed frame buffer** (a reconnecting client
+> replays from `?fromIndex=N` instead of falling back to a D1 transcript read),
+> and an **abort flag** the producer polls (so Stop reaches the tool loop).
+> The Bun flavor is unchanged (no DO runtime) and keeps the in-process path;
+> the supervisor engages only when the `CHAT_DO` binding is present **and**
+> `LXK_CHAT_SUPERVISOR=1`, so the default transport is untouched until the owner
+> flips the flag. D1 `assistant_threads` remains the only canonical store.
+>
+> **Status (2026-10-12): decision accepted, implementation NOT yet landed.**
+> Nothing in the tree implements this yet — no `CHAT_DO` binding, no
+> `LexaChatSupervisor` class, no `v3` migration, no route dispatch. The slice
+> breakdown (code surface + deploy surface + verification) is tracked in the
+> local plan `status/chat-supervisor-do/`; ADR-0005's in-process SSE tier
+> remains the shipped transport until that lands.
+
 Lexa has exactly **one** AI execution tier: the **Assistant**. In the tier
 described below it runs in the server process — server-side TanStack AI `chat()`
 (`server/assistant/provider.ts`), per-project provider settings
