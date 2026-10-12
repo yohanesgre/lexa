@@ -13,9 +13,10 @@ import type { AssistantRunRow, AssistantRunStatus } from "../../shared/assistant
 
 export type RunCardState = "dispatching" | "running" | "done" | "failed" | "stopped";
 
-// Runner step cap (server/assistant/tool-caps.ts MAX_RUNNER_STEPS). Duplicated
-// here as a plain number so the app bundle never pulls the server/`ai` runtime
-// in just to render the progress denominator.
+// Display denominator for the run card's step progress. The delegated runner
+// that enforced this cap is retired (no `runner.ts`, no `spawn_run` producer),
+// so this is a rendering constant for legacy `assistant_runs` rows only — the
+// server owns no matching limit (M3 removed the stale MAX_RUNNER_STEPS export).
 export const RUNNER_STEPS_CAP = 16;
 
 // The safe, fixed sentence the failed card renders — upstream bodies are never

@@ -25,8 +25,22 @@ All notable changes to Lexa are documented here. Format based on
   900 cases / 27k LOC) warns when exceeded. The agent-facing rule — name the criterion, one test per
   effect at the tier where it lives, banned patterns — is in `AGENTS.md` and `scripts/checks.md`.
 
-## [2026.11.1] - 2026-10-11
+### Fixed
 
+- **Assistant turns were unbounded in wall clock and output** — one provider request ran 506s and emitted
+  28,519 output tokens with no reply text. Added three limits, each documented where its contract lives
+  (`docs/LAYERS.md` → assistant stream limits, `docs/API.md` → the chat-stream body): a total-turn budget
+  (ASSISTANT_TURN_BUDGET_MS = 300,000 — measured once for the whole turn, where every previous bound reset
+  per chunk), an output ceiling (ASSISTANT_MAX_OUTPUT_TOKENS = 8192, sent as `max_tokens` /
+  `max_output_tokens` through the existing `modelOptions` merge), and a 20s ceiling on local DB-backed tool
+  calls. A turn that trips one ends as a visible failed turn (Retry offered, composer unlocked, partial
+  output persisted) — never a silent cut. Also: the composer's EFFORT pick now demonstrably reaches the
+  request body, Stop no longer waits out the gateway retry backoff, a reloaded transcript shows the tool
+  calls a turn ran (the persisted `toolLog` maps to tool parts on read), the model-turn loop is pinned to a
+  Lexa-owned cap instead of the SDK default, and the unused `MAX_RUNNER_STEPS` / `runnerStopWhen()` exports
+  are deleted.
+
+## [2026.11.1] - 2026-10-11
 ### Fixed
 
 - **Repeat Workers upgrades no longer append a redundant assistant

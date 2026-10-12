@@ -81,6 +81,7 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
     handleStartEditing,
     handleCancel,
     handleSave,
+    handleMarkdownChange,
     handleSelectRevision,
     handleClosePreview,
     handleRestore,
@@ -140,6 +141,8 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
           slug={slug}
           pageSlug={page.slug}
           previewContent={previewContent}
+          editable={isEditing && historyPreviewId === null && !isSaving}
+          onDocChange={handleMarkdownChange}
           isSaving={isSaving}
           isDirty={isDirty}
           lastSavedAt={lastSavedAt}

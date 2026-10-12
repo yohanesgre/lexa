@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { TipTapDoc } from "../../shared/types";
+import { withToolTimeout } from "./tool-caps";
 import { buildWikiEditDiff } from "./write-tools";
 
 // Criterion: the approval-display contract (docs/LAYERS.md → write tools, "the
@@ -11,6 +12,26 @@ import { buildWikiEditDiff } from "./write-tools";
 const doc = (...text: string[]): TipTapDoc => ({
   type: "doc",
   content: text.map((t) => ({ type: "paragraph", content: [{ type: "text", text: t }] })),
+});
+
+describe("withToolTimeout (M5 per-call ceiling)", () => {
+  it("rejects a call that outlives the ceiling, passes a fast one through untouched", async () => {
+    vi.useFakeTimers();
+    try {
+      const slow = withToolTimeout(
+        { name: "read_wiki_page", execute: () => new Promise<{ ok: boolean }>((resolve) => setTimeout(() => resolve({ ok: true }), 5000)) },
+        20
+      );
+      const timedOut = expect(slow.execute()).rejects.toThrow("read_wiki_page timed out after 20ms");
+      await vi.advanceTimersByTimeAsync(50);
+      await timedOut;
+
+      const fast = withToolTimeout({ name: "get_board_structure", execute: async () => ({ ok: 1 }) }, 20);
+      await expect(fast.execute()).resolves.toEqual({ ok: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("buildWikiEditDiff", () => {

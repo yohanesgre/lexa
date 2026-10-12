@@ -255,9 +255,10 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       const metadata = ((msg.metadata ?? {}) as { ts?: unknown; citations?: unknown; error?: unknown; stopped?: unknown });
       const carrier = carrierBatchOf(parts);
       // A run can be spawned with no assistant text of its own — the card must
-      // still render, so a spawn ref keeps an otherwise-empty turn alive.
+      // still render, so a spawn ref keeps an otherwise-empty turn alive. Same
+      // for a turn whose only record is the tool calls it ran.
       const spawnedRuns = msg.role === "assistant" ? extractSpawnedRuns([msg]) : [];
-      if (!text && !imageCount && !metadata.error && metadata.stopped !== true && !carrier && spawnedRuns.length === 0) continue;
+      if (!text && !imageCount && !metadata.error && metadata.stopped !== true && !carrier && spawnedRuns.length === 0 && !(segment && segment.tools.length > 0)) continue;
       const citations =
         msg.role === "assistant"
           ? safeCitations([
@@ -265,12 +266,12 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
               ...(segment?.citations ?? []).map((c) => ({ url: c.url, title: c.title })),
             ])
           : [];
-      // Reload-visible reasoning fold: a persisted reasoning part + metadata
-      // duration rebuild the done-fold activity a live stream would have frozen
-      // in session memory. Tool parts stay session-memory-only, so this only
-      // attaches when reasoning is actually present.
+      // Reload-visible process fold: a persisted reasoning part + metadata
+      // duration — or a persisted tool log (its `tool-<name>` parts) — rebuild
+      // the done-fold activity a live stream would have frozen in session
+      // memory, so a transcript-loaded turn shows the tools it ran.
       const activity =
-        segment && msg.role === "assistant" && (segment.reasoningText !== "" || segment.reasoningMs !== null)
+        segment && msg.role === "assistant" && (segment.reasoningText !== "" || segment.reasoningMs !== null || segment.tools.length > 0)
           ? { items: segment.items, tools: segment.tools, reasoningMs: segment.reasoningMs }
           : undefined;
       const err = isErrorMeta(metadata.error);

@@ -29,13 +29,13 @@ import { AuthorizationService } from "./authorization.service";
 import { extractText } from "../../shared/tiptap-text";
 import { buildSkillPromptParts, lastUserText, resolveMentionContextEffect, type MentionResolverDeps } from "../assistant/context";
 import type { TipTapDoc } from "../../shared/types";
-import type { AssistantChatStreamRequest, AssistantToolPermissionMode, StreamFrame } from "../../shared/assistant";
+import type { AssistantChatStreamRequest, AssistantReasoningEffort, AssistantToolPermissionMode, Citation, StreamFrame } from "../../shared/assistant";
 import { resolveAssistantToolPermissionMode } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, findNewestPendingBatch, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
 import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim";
 import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
 import { collectResumeResults } from "../assistant/resume-results";
-import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForEffort, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
+import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForTurn, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
@@ -424,14 +424,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           ? { type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType }
           : { type: "document-ref", storageKey: a.storageKey, mimeType: a.mimeType, name: a.name });
         const userContent: string | unknown[] = refs.length > 0 ? [{ type: "text", content: req.message }, ...refs] : req.message;
-        let citations: import("../../shared/assistant").Citation[] = [];
+        let citations: Citation[] = [];
         let chatWriteDrain: (() => QueuedProposal[]) | undefined;
-        const baseModelOptions = modelOptionsForEffort(
-          resolveReasoningEffort(
-            (settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort,
-            req.reasoningEffort
-          )
-        );
+        // `getSettingsOrFail` hands back the decoded settings view, not the raw
+        // row; the reasoning-effort column is read off the row shape.
+        const settingsEffort = (settingsRow as unknown as { reasoning_effort: AssistantReasoningEffort | null }).reasoning_effort;
+        const baseModelOptions = modelOptionsForTurn(resolveReasoningEffort(settingsEffort, req.reasoningEffort), config.kind);
         const modelOptions = modelOptionsWithWriteIntent(baseModelOptions, req.message, enabledWriteTools);
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const mcp = yield* loadAssistantMcp(req.projectId, allowlist);
@@ -514,10 +512,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, thread.permissionMode);
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
-        let citations: import("../../shared/assistant").Citation[] = [];
+        const config = configFromRow(settingsRow);
+        const settingsEffort = (settingsRow as unknown as { reasoning_effort: AssistantReasoningEffort | null }).reasoning_effort;
+        let citations: Citation[] = [];
         return buildStream({
-          keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
-          systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
+          keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
+          systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsEffort), config.kind),
           userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, writeMode: thread.permissionMode,
           tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
           toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),

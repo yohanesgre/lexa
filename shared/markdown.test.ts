@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "./markdown";
-import type { TipTapDoc } from "./types";
+import { carryNonMarkdownContent, docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "./markdown";
+import type { TipTapDoc, TipTapMark, TipTapNode } from "./types";
 
 function rd(md: string): string {
   return docToMarkdown(markdownToDoc(md));
@@ -131,5 +131,74 @@ describe("mention nodes", () => {
     const md2 = docToMarkdown(pulled, opts);
     expect(md2).toBe(md1);
     expect(normalizeMarkdownForEcho(md2)).toBe(normalizeMarkdownForEcho(md1));
+  });
+});
+
+// The editor's Markdown pane authors the document as text (docToMarkdown →
+// edit → markdownToDoc), so this direction is a data-integrity contract: a
+// construct the pane cannot write back must be either exact or carried over.
+describe("Markdown pane round trip", () => {
+  const render = { baseUrl: "", projectSlug: "demo" };
+  const parse = { mentions: { projectSlug: "demo", baseUrl: "" } };
+  const para = (content: TipTapNode[]): TipTapDoc => ({
+    type: "doc",
+    content: [{ type: "paragraph", content }],
+  });
+  const text = (value: string, marks?: TipTapMark[]): TipTapNode =>
+    marks ? { type: "text", text: value, marks } : { type: "text", text: value };
+
+  it("keeps document-route mentions, entity mentions and attachment srcs", () => {
+    const doc = para([
+      text("see "),
+      { type: "mention", attrs: { refType: "task", refId: UUID, label: "LEX-42" } },
+      text(" and "),
+      { type: "mention", attrs: { refType: "milestone", refId: "m1", label: "Q3 Launch" } },
+      text(" "),
+      { type: "image", attrs: { src: `/api/attachments/${UUID}`, alt: "shot" } },
+    ]);
+    // Root-relative deep links: the text is host-agnostic and the attachment
+    // src is not absolutized, so both come back unchanged.
+    expect(docToMarkdown(doc, render)).toBe(
+      `see [LEX-42](/demo/tasks?task=${UUID}) and Q3 Launch ![shot](/api/attachments/${UUID})`
+    );
+    const back = carryNonMarkdownContent(doc, markdownToDoc(docToMarkdown(doc, render), parse));
+    expect(back).toEqual(doc);
+  });
+
+  it("carries the marks and nodes Markdown has no syntax for", () => {
+    const doc = para([
+      text("hot", [{ type: "highlight" }]),
+      text(" "),
+      text("link", [{ type: "underline" }]),
+    ]);
+    const edited = para([text("hot "), text("link too")]);
+    expect(carryNonMarkdownContent(doc, edited)).toEqual(
+      para([
+        text("hot", [{ type: "highlight" }]),
+        text(" "),
+        text("link", [{ type: "underline" }]),
+        text(" too"),
+      ])
+    );
+    // Nothing to carry: the document comes back untouched, by identity.
+    const plain = para([text("other")]);
+    expect(carryNonMarkdownContent(plain, edited)).toBe(edited);
+  });
+
+  it("keeps a code block inside a list item and emphasis with boundary whitespace", () => {
+    const list = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            { type: "listItem", content: [{ type: "paragraph", content: [text("a")] }, { type: "codeBlock", content: [text("x = 1")] }] },
+          ],
+        },
+      ],
+    } as TipTapDoc;
+    expect(markdownToDoc(docToMarkdown(list))).toEqual(list);
+    const bold = para([text("bold ", [{ type: "bold" }]), text("rest")]);
+    expect(docToMarkdown(bold)).toBe("**bold** rest");
   });
 });

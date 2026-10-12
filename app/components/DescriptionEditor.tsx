@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
 import { Check, X } from "lucide-react";
@@ -6,10 +6,11 @@ import type { TipTapDoc } from "../../shared/types";
 import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import { cn } from "./ui/cn";
-import { TextEditor, Toolbar } from "./TextEditor";
+import { Toolbar } from "./TextEditor";
 import { AssistantReviewSurface } from "./assistant/AssistantReviewSurface";
 import { useAssistantReview } from "../lib/useAssistantReview";
 import { EditorViewToggle, type EditorView } from "./editor/EditorViewToggle";
+import { MarkdownEditorPane, type MarkdownTarget } from "./editor/MarkdownEditorPane";
 import { renderDoc } from "./tiptap-render";
 
 interface DescriptionEditorProps {
@@ -18,7 +19,6 @@ interface DescriptionEditorProps {
   onBlur?: (doc: TipTapDoc) => void;
   onDone?: (doc: TipTapDoc) => void;
   onCancel?: () => void;
-  placeholder?: string | undefined;
   editable?: boolean | undefined;
   runtime?: { slug: string; documentType: "task" | "wiki"; documentId: string } | undefined;
   // Paste/drop-to-embed uploads (attachments API). Absent in create mode —
@@ -27,22 +27,24 @@ interface DescriptionEditorProps {
   onReviewStateChange?: (active: boolean) => void;
 }
 
+// The task description editor. The Editor view is the document's Markdown
+// source (a plain-text coding area) with the toolbar acting on that source; the
+// Preview view is the same document through the read renderer. The document
+// stays TipTap JSON (invariant 7): a pane edit converts back through
+// shared/markdown.ts and is carried over the constructs Markdown cannot write
+// (see carryNonMarkdownContent), and the editor instance below stays the model
+// the Assistant, the review flow and the save path read.
 export function DescriptionEditor({
   initialContent,
   onChange,
   onBlur,
   onDone,
   onCancel,
-  placeholder,
   editable = true,
   runtime,
   attachments,
   onReviewStateChange,
 }: DescriptionEditorProps) {
-  const [view, setView] = useState<EditorView>("editor");
-  // The document as the preview renders it — the same edit stream the editor
-  // writes, so the preview never lags the toolbar or the save payload.
-  const [previewDoc, setPreviewDoc] = useState<TipTapDoc>(initialContent);
   const onBlurRef = useRef(onBlur);
   const onChangeRef = useRef(onChange);
   const onDoneRef = useRef(onDone);
@@ -53,13 +55,40 @@ export function DescriptionEditor({
     onDoneRef.current = onDone;
     onCancelRef.current = onCancel;
   });
+  const [view, setView] = useState<EditorView>("editor");
+  const [doc, setDoc] = useState<TipTapDoc>(initialContent);
+  const docRef = useRef(doc);
+  const targetRef = useRef<MarkdownTarget | null>(null);
+  const slug = runtime?.slug ?? attachments?.slug;
+
+  useEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+
+  const applyDoc = (next: TipTapDoc) => {
+    docRef.current = next;
+    setDoc(next);
+    editorRef.current?.commands.setContent(next as unknown as JSONContent, { emitUpdate: false });
+    onChangeRef.current?.(next);
+  };
+
+  // An accepted Assistant result replaces the document through the editor, so
+  // the pane takes the document back from there.
+  const adoptEditorDoc = () => {
+    const next = editorRef.current?.getJSON() as unknown as TipTapDoc | undefined;
+    if (!next) return;
+    docRef.current = next;
+    setDoc(next);
+    onChangeRef.current?.(next);
+  };
+
   // Runtime review end: persist whatever the doc holds now (the accepted
   // replacement) via the same save path as Done. Reject leaves the doc
   // untouched — stay in edit mode.
   const handleReviewStateChange = (active: boolean, accepted: boolean) => {
     onReviewStateChange?.(active);
-    if (!active && accepted && onDoneRef.current && editorRef.current) {
-      onDoneRef.current(editorRef.current.getJSON() as unknown as TipTapDoc);
+    if (!active && accepted && onDoneRef.current) {
+      onDoneRef.current(docRef.current);
     }
   };
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -97,49 +126,14 @@ export function DescriptionEditor({
     extensions,
     content: initialContent as unknown as JSONContent,
     editable,
-    onUpdate: ({ editor: nextEditor }) => {
-      const next = nextEditor.getJSON() as unknown as TipTapDoc;
-      setPreviewDoc(next);
-      onChangeRef.current?.(next);
-    },
-    onBlur: ({ editor: ed }) => {
-      onBlurRef.current?.(ed.getJSON() as unknown as TipTapDoc);
-    },
+    // The pane commits the document itself; this fires when something else
+    // replaced the editor document (an accepted Assistant result).
+    onUpdate: () => adoptEditorDoc(),
     onCreate: ({ editor: ed }) => {
       editorRef.current = ed;
     },
     editorProps: {
-      handleKeyDown: (_view, event) => {
-        // Enter (not during IME composition) finishes editing; Esc reverts.
-        if (event.key === "Enter" && !event.isComposing && !event.shiftKey) {
-          event.preventDefault();
-          const doc = editor?.getJSON() as unknown as TipTapDoc | undefined;
-          if (doc) onDoneRef.current?.(doc);
-          return true;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          onCancelRef.current?.();
-          return true;
-        }
-        return false;
-      },
       ...(embedsActive ? { handlePaste: embeds.handlePaste, handleDrop: embeds.handleDrop } : {}),
-      handleDOMEvents: {
-        // Returning true stops ProseMirror's focusEvents plugin, so the
-        // editor never reports a blur when focus moves within its own chrome
-        // (toolbar, done/cancel buttons) and onBlur doesn't exit edit mode.
-        // A blur with null relatedTarget (browser quirk when a selection is
-        // active, or prompt dialogs) is only kept when the pointer went down
-        // inside the chrome.
-        blur: (_view, event) => {
-          const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
-          if (related !== null) {
-            return wrapperRef.current?.contains(related) === true || related?.closest("[data-assistant-popover]") !== null;
-          }
-          return lastPointerDownInside.current;
-        },
-      },
     },
   });
 
@@ -147,36 +141,53 @@ export function DescriptionEditor({
 
   if (!editor) return null;
 
-  const headingLevel = (editor.getAttributes("heading").level as number | undefined) ?? 0;
-
   const handleDone = () => {
-    onDoneRef.current?.(editor.getJSON() as unknown as TipTapDoc);
+    onDoneRef.current?.(docRef.current);
   };
 
-  // The toggle lives in the editor's toolbar (the slideover is too narrow to
-  // split) and switches the body between the editor and the rendered
-  // document. In preview the editor body stays mounted but hidden — one
-  // document, so the Assistant, the review flow and the save path keep
-  // working — and the toolbar's commands are disabled rather than editing a
-  // document nobody can see.
+  // The pane's textarea is the field that takes focus now, so the
+  // exit-on-blur rule lives on the wrapper: a focus that leaves the editor and
+  // its chrome saves and closes, exactly as the editor body used to.
+  const handleWrapperBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const related = event.relatedTarget as HTMLElement | null;
+    if (related !== null) {
+      if (wrapperRef.current?.contains(related) === true || related.closest("[data-assistant-popover]") !== null) return;
+    } else if (lastPointerDownInside.current) {
+      return;
+    }
+    onBlurRef.current?.(docRef.current);
+  };
+
   const toolbar = (
-    <Toolbar editor={editor} headingLevel={headingLevel} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} disabled={view === "preview"}>
+    <Toolbar editor={editor} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} target={targetRef} disabled={view === "preview"}>
       <EditorViewToggle view={view} onChange={setView} />
     </Toolbar>
-  );
-  const body = (
-    <>
-      <div className={cn(view === "preview" && "hidden")}>
-        <EditorContent editor={editor} className="editor-content" />
-      </div>
-      {view === "preview" && (
-        <div className="editor-preview td-prose">{renderDoc(previewDoc, "task", runtime?.slug ?? attachments?.slug)}</div>
-      )}
-    </>
   );
   const reviewSurface = review ? (
     <AssistantReviewSurface skillName={review.skillName} agentName={review.agentName} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
   ) : null;
+  const body =
+    view === "editor" ? (
+      <MarkdownEditorPane
+        doc={doc}
+        slug={slug}
+        editable={editable && review === null}
+        onDocChange={applyDoc}
+        onEnter={onDone ? handleDone : undefined}
+        onEscape={onDone ? () => onCancelRef.current?.() : undefined}
+        targetRef={targetRef}
+        ariaLabel="Task description, Markdown"
+      />
+    ) : (
+      <div className="editor-preview td-prose">{renderDoc(doc, "task", slug)}</div>
+    );
+  // The editor instance stays mounted: it is the document model the Assistant
+  // popover and the review flow read, and every pane commit lands in it.
+  const model = (
+    <div hidden>
+      <EditorContent editor={editor} className="editor-content" />
+    </div>
+  );
   const exitControls = (
     <div className="flex items-center gap-2">
       <button
@@ -200,8 +211,8 @@ export function DescriptionEditor({
     </div>
   );
 
-  // Create mode (no onDone): legacy inset card — toolbar + document inside
-  // the bordered wrapper, unchanged from before the edit-mode restructure.
+  // Create mode (no onDone): legacy inset card — toolbar + document inside the
+  // bordered wrapper, unchanged from before the edit-mode restructure.
   if (!onDone) {
     return (
       <div className={cn("editor-wrapper", review && "is-reviewing")} ref={wrapperRef}>
@@ -210,6 +221,7 @@ export function DescriptionEditor({
         </div>
         {reviewSurface}
         {body}
+        {model}
       </div>
     );
   }
@@ -219,7 +231,7 @@ export function DescriptionEditor({
   // wrapper holding the toolbar and document. wrapperRef spans both so blur
   // inside the row never exits edit mode.
   return (
-    <div ref={wrapperRef}>
+    <div ref={wrapperRef} onBlur={handleWrapperBlur}>
       <div className="flex items-center justify-between" style={{ padding: "0 0 6px" }}>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Editing description</span>
         {exitControls}
@@ -228,6 +240,7 @@ export function DescriptionEditor({
         {toolbar}
         {reviewSurface}
         {body}
+        {model}
       </div>
     </div>
   );

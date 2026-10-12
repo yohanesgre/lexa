@@ -68,12 +68,12 @@ function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedB
                   so no breakpoint or threshold carries it). */}
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <h1 id={titleId} style={{ minWidth: 0 }}>{title}</h1>
-                <span className="flex items-center gap-2 flex-shrink-0 ml-auto">
-                  <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
+                <span className="wiki-title-actions flex items-center gap-2 flex-shrink-0 ml-auto">
+                  <button type="button" className="btn btn-ghost" onClick={onEdit}>
                     <Pencil size={13} strokeWidth={1.5} />
                     Edit
                   </button>
-                  <button type="button" className="btn btn-ghost-accent" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onShare}>
+                  <button type="button" className="btn btn-ghost-accent" onClick={onShare}>
                     <Share2 size={13} strokeWidth={1.5} />
                     Share
                   </button>

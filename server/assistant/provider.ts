@@ -5,13 +5,14 @@
  *         FATAL (terminal non-retriable or all-retries exhausted).
  * Enable DEBUG: LOG_LEVEL=debug or trace, or TANSTACK_AI_DEBUG=1 / true. Structured TanStack logs: TANSTACK_AI_JSON=1 (service tanstack-ai).
  */
-import { chat, type AnyTextAdapter, type DebugOption, type ModelMessage, type StreamChunk } from "@tanstack/ai";
+import { chat, maxIterations, type AnyTextAdapter, type DebugOption, type ModelMessage, type StreamChunk } from "@tanstack/ai";
 import { createOpenaiChat } from "@tanstack/ai-openai";
 import { openaiCompatibleText } from "@tanstack/ai-openai/compatible";
 import { createAnthropicChat } from "@tanstack/ai-anthropic";
 import type { ProviderKind } from "../../shared/assistant";
 import { ProviderAuthFailed, ProviderUnreachable, AssistantGenerationFailed } from "../api/errors";
 import type { CacheablePrompt } from "./prompt";
+import { MAX_MODEL_ITERATIONS } from "./tool-caps";
 import { getEnv } from "../env";
 
 export type AssistantLogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL";
@@ -328,6 +329,8 @@ export function streamChat(input: StreamChatInput): AsyncIterable<StreamChunk> {
     messages: filteredMessages,
     tools: input.tools as never,
     abortController: input.abortController,
+    // Lexa-owned model-turn cap (M3): never rely on the SDK's unpinned default.
+    agentLoopStrategy: maxIterations(MAX_MODEL_ITERATIONS),
     ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
     ...(debug !== undefined ? { debug } : {}),
   }) as AsyncIterable<StreamChunk>;

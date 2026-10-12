@@ -4,6 +4,7 @@ import { extractText } from "../../shared/tiptap-text";
 import type { TipTapDoc } from "../../shared/types";
 import type { ApprovalPartial, AssistantWriteDiff } from "../../shared/assistant";
 import { ASSISTANT_WRITE_DENIED_ERROR } from "../../shared/assistant";
+import { withToolTimeout } from "./tool-caps";
 
 const DIFF_TEXT_CAP = 2000;
 const COMMENT_BODY_BYTES = 64 * 1024;
@@ -952,5 +953,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
     })
   );
 
-  return tools;
+  // Local (DB-backed) tools like the read set: bound each in-flight call so a
+  // stuck proposal query cannot hold the turn open (M5).
+  return tools.map((t) => withToolTimeout(t));
 }

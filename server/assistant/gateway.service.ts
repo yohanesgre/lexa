@@ -68,14 +68,26 @@ function backoffMsFor(e: unknown, attempt: number): number {
   return Math.min(8000, base * Math.pow(2, attempt) + jitter);
 }
 
-async function sleepBackoff(e: unknown, attempt: number, metaExtra?: Record<string, unknown>): Promise<void> {
+async function sleepBackoff(e: unknown, attempt: number, metaExtra?: Record<string, unknown>, signal?: AbortSignal | undefined): Promise<void> {
   const ms = backoffMsFor(e, attempt);
   const status = extractStatusCode(e);
   const retryAfter = extractRetryAfter(e);
   const errorTag = (e as { _tag?: string })?._tag ?? null;
   gatewayLog("WARN", `assistant backoff ${ms}ms before retry`, { attempt: attempt + 1, backoffMs: ms, status, providerMessage: extractProviderMessage(e) ?? null, errorTag, retryAfter, base: status === 429 && retryAfter !== null ? Math.min(retryAfter, 8000) : status === 429 ? 400 : 800, ...(metaExtra ?? {}) });
-  gatewayLog("DEBUG", `assistant backoff debug`, { attempt: attempt + 1, backoffMs: ms, status, errorTag, retryAfter, abortSignalled: false });
-  await new Promise<void>((r) => setTimeout(r, ms));
+  gatewayLog("DEBUG", `assistant backoff debug`, { attempt: attempt + 1, backoffMs: ms, status, errorTag, retryAfter, abortSignalled: signal?.aborted === true });
+  // Stop must not wait the sleep out (M6): a pressed Stop during backoff
+  // resolves the wait immediately and the attempt loop's own abort check ends
+  // the stream. Without this the composer stayed busy for up to 8s after Stop.
+  if (signal?.aborted === true) return;
+  await new Promise<void>((resolve) => {
+    function finish(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    }
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }
 
 export interface GatewayStreamInput {
@@ -429,7 +441,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                 retriedSingleNetwork = true;
                 attemptConfigs.push(cfg);
                 gatewayLog("WARN", `assistant stream retrying next model after baseUrl failure`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, singleRetry: true, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, 0) });
-                if (!isRetriable(err)) { /* push still honors single retry candidate */ } else { await sleepBackoff(err, 0, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null }); }
+                if (!isRetriable(err)) { /* push still honors single retry candidate */ } else { await sleepBackoff(err, 0, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null }, abortSignal); }
                 continue;
               }
               if (i === attemptConfigs.length - 1) {
@@ -442,7 +454,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                 throw err;
               }
               if (!isRetriable(err)) throw err;
-              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null }, abortSignal);
               gatewayLog("WARN", `assistant stream retrying next model after baseUrl failure`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
               continue;
             }
@@ -570,7 +582,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                 retriedSingleNetwork = true;
                 attemptConfigs.push(cfg);
                 gatewayLog("WARN", `assistant stream retrying next model (single-config retry same provider)`, { projectId: input.projectId, attempt: i + 1, nextModel: cfg.model, nextProviderId: cfg.providerId ?? null, singleRetry: true, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, 0) });
-                await sleepBackoff(err, 0, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+                await sleepBackoff(err, 0, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null }, abortSignal);
                 continue;
               }
               if (i === attemptConfigs.length - 1) {
@@ -583,7 +595,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                 throw err;
               }
               if (!isRetriable(err)) throw err;
-              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null }, abortSignal);
               gatewayLog("WARN", `assistant stream retrying next model${isSingleRetry && i === 0 ? " (single-config retry same provider)" : ""}`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, nextProviderId: attemptConfigs[i + 1]?.providerId ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
             }
           }
@@ -785,7 +797,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               retriedSingleNetwork = true;
               attemptConfigs.push(cfg);
               yield* Effect.sync(() => gatewayLog("WARN", `assistant test retrying next model (single-config retry same provider)`, { projectId, attempt: i + 1, nextModel: cfg.model, nextProviderId: cfg.providerId ?? null, failuresSoFar: attempts.length, singleRetry: true, status: diag.status, errorTag: tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, 0) }));
-              yield* Effect.promise(() => sleepBackoff(err, 0, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }));
+              yield* Effect.promise(() => sleepBackoff(err, 0, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }, opts?.signal));
               continue;
             }
             if (i === attemptConfigs.length - 1) {
@@ -797,7 +809,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               }
               throw err as never;
             }
-            if (isRetriable(err)) yield* Effect.promise(() => sleepBackoff(err, i, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }));
+            if (isRetriable(err)) yield* Effect.promise(() => sleepBackoff(err, i, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }, opts?.signal));
             yield* Effect.sync(() => gatewayLog("WARN", `assistant test retrying next model${isSingleRetry && i === 0 ? " (single-config retry same provider)" : ""}`, { projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, nextProviderId: attemptConfigs[i + 1]?.providerId ?? null, failuresSoFar: attempts.length, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) }));
           }
         }

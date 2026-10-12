@@ -137,3 +137,26 @@ describe("convertStoredMessages (mixed D1 mirror rows)", () => {
     expect(out[2]).toEqual({ id: "legacy-2", role: "user", parts: [{ type: "text", text: "q1" }] });
   });
 });
+
+// A transcript-loaded turn must show the tools it ran (the persisted `toolLog`
+// carries them; before this mapping the read dropped it and every reloaded turn
+// rendered as pure thinking).
+describe("convertLegacyMessages tool log", () => {
+  it("rebuilds each persisted call as an input-available tool part, in log order", () => {
+    const converted = convertLegacyMessages([
+      { role: "assistant", content: "done", toolLog: [{ name: "search_wiki", detail: 'Searching wiki for "x"' }, { name: "read_wiki_page" }] },
+    ]);
+    expect(converted[0]?.parts).toEqual([
+      { type: "text", text: "done" },
+      { type: "tool-search_wiki", toolCallId: "legacy-0-tool-0", state: "input-available", input: { detail: 'Searching wiki for "x"' } },
+      { type: "tool-read_wiki_page", toolCallId: "legacy-0-tool-1", state: "input-available", input: {} },
+    ]);
+  });
+
+  it("reads the older `toolCalls` spelling and keeps the inverse sweep lossless", () => {
+    const converted = convertLegacyMessages([{ role: "assistant", content: "", toolCalls: [{ name: "edit_wiki_page", detail: "Editing page" }] }]);
+    expect(legacyFromUIMessages(converted)).toEqual([
+      { role: "assistant", content: "", toolLog: [{ name: "edit_wiki_page", detail: "Editing page" }] },
+    ]);
+  });
+});

@@ -4,7 +4,7 @@ import { isAssistantWriteTool, type QueuedProposal } from "./write-tools";
 import { approvalCarriersOf } from "./approval-carrier";
 import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/errors";
 import type { AssistantReasoningEffort, AssistantToolPermissionMode, StreamFrame, ApprovalPartial } from "../../shared/assistant";
-import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE } from "../../shared/assistant";
+import { ASSISTANT_STALL_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE, ASSISTANT_TURN_BUDGET_MS, ASSISTANT_TURN_BUDGET_MESSAGE, ASSISTANT_OUTPUT_TRUNCATED_MESSAGE } from "../../shared/assistant";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { hydrateImageParts, hydrateDocumentParts, replaceImageRefsWithPlaceholders, ASSISTANT_WRITE_INTENT_RE } from "../services/assistant-helpers";
 import { summaryWindow, SUMMARY_WINDOW } from "./summarize";
@@ -368,6 +368,9 @@ export interface StreamRunContext {
   modelOptions?: Record<string, unknown> | undefined;
   gatewayStream?: ((input: unknown) => AsyncIterable<StreamChunk>) | undefined;
   onDispose?: (() => Promise<void>) | undefined;
+  // Total-turn wall clock (M1). Defaults to `ASSISTANT_TURN_BUDGET_MS`; tests
+  // shorten it.
+  turnBudgetMs?: number | undefined;
 }
 
 export interface NormalizedRunUsage {
@@ -448,6 +451,16 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         let usageIn = 0;
         let usageOut = 0;
         let stalled = false;
+        // Total-turn wall clock (M1): armed once, for the whole turn — the stall
+        // watchdog below resets on EVERY chunk, so a provider that keeps
+        // trickling reasoning deltas never trips it and a turn could run eight
+        // minutes. This one is checked before each wait and bounds the wait too.
+        const turnDeadline = Date.now() + (ctx.turnBudgetMs ?? ASSISTANT_TURN_BUDGET_MS);
+        let turnBudgetExceeded = false;
+        // Finish reason of the LAST provider response of the turn (M2): the
+        // request carries `ASSISTANT_MAX_OUTPUT_TOKENS`, so `length` means the
+        // reply was cut at the ceiling.
+        let lastFinishReason: string | null = null;
         // Reasoning persistence (reload-visible thinking fold): accumulate the
         // reasoning text and its elapsed ms over the turn, mirroring the client's
         // burst timing (use-assistant-stream `closeBurst`). A burst closes on the
@@ -579,12 +592,21 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             const chunks = getStream(tools);
             const iterator = chunks[Symbol.asyncIterator]();
             for (;;) {
+              // Turn budget (M1): re-checked before every wait, and the wait
+              // itself is clamped to what is left, so the turn cannot outlive
+              // the deadline however many chunks keep arriving.
+              const budgetLeft = turnDeadline - Date.now();
+              if (budgetLeft <= 0) {
+                turnBudgetExceeded = true;
+                abort.abort();
+                throw new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE });
+              }
               const next = iterator.next();
               next.catch(() => {});
               let result: IteratorResult<StreamChunk>;
               let stallTimer: ReturnType<typeof setTimeout> | undefined;
               try {
-                result = await Promise.race([next, new Promise<never>((_, reject) => { stallTimer = setTimeout(() => { stalled = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_STALL_MESSAGE })); }, ASSISTANT_STALL_TIMEOUT_MS); })]);
+                result = await Promise.race([next, new Promise<never>((_, reject) => { stallTimer = setTimeout(() => { if (Date.now() >= turnDeadline) { turnBudgetExceeded = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE })); return; } stalled = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_STALL_MESSAGE })); }, Math.min(ASSISTANT_STALL_TIMEOUT_MS, budgetLeft)); })]);
               } finally { clearTimeout(stallTimer); }
               if (result.done) break;
               const chunk = result.value;
@@ -740,6 +762,10 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 if (writeMode === "ask" && isAssistantWriteTool(toolName)) { writeToolCallIds.push(id); if (!abort.signal.aborted) abort.abort(); }
               } else if (chunk.type === "RUN_FINISHED") {
                 didFinish = true;
+                // `finishReason` rides top-level on in-process chunks and under
+                // `metadata.tanstack` after the middleware pipe; read both.
+                const finishReason = (chunk as { finishReason?: unknown }).finishReason ?? (chunk as { metadata?: { tanstack?: { finishReason?: unknown } } }).metadata?.tanstack?.finishReason;
+                lastFinishReason = typeof finishReason === "string" ? finishReason : null;
                 const u = normalizeRunUsage((chunk as { usage?: unknown }).usage, { input: usageIn, output: usageOut, cached: 0, cacheWrite: 0 });
                 usageIn = u.input;
                 usageOut = u.output;
@@ -773,7 +799,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           // re-labeling a completed turn; `drained` empty distinguishes this
           // from the ask-mode write suspension, which also aborts but has
           // proposals to suspend.
-          if (drained.length === 0 && !didFinish && abort.signal.aborted && !stalled) {
+          if (drained.length === 0 && !didFinish && abort.signal.aborted && !stalled && !turnBudgetExceeded) {
             const citationsStop = ctx.getCitations();
             await persistTerminalTurn({ stopped: true, ...(citationsStop.length > 0 ? { citations: citationsStop } : {}), ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onCancel().catch(() => {});
@@ -868,6 +894,23 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             return;
           }
           if (stalled && drained.length > 0) { await suspendTurn(drained); return; }
+          // Output-cap truncation (M2): the turn's LAST provider response ended on
+          // `finish_reason: length`, so this reply was cut at the ceiling the
+          // request carried (`ASSISTANT_MAX_OUTPUT_TOKENS`). End it as a visible
+          // failed turn — the partial text stays in the transcript, Retry is
+          // offered — never as a `done` that hides the cut.
+          if (lastFinishReason === "length") {
+            const code = "ASSISTANT_GENERATION_FAILED";
+            const message = ASSISTANT_OUTPUT_TRUNCATED_MESSAGE;
+            const citationsTruncated = ctx.getCitations();
+            const extra: Record<string, unknown> = { error: { code, message } };
+            if (citationsTruncated.length > 0) extra.citations = citationsTruncated;
+            if (toolLog.length > 0) extra.toolLog = toolLog;
+            await persistTerminalTurn(extra).catch(() => {});
+            await ctx.onFail(message).catch(() => {});
+            push({ type: "error", code, message });
+            return;
+          }
           const citations = ctx.getCitations();
           const finalMessages = [...ctx.history, ...userEntries, { role: "assistant", content: text, ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...reasoningFields() }];
           let summary = ctx.historySummary();
@@ -911,6 +954,15 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             await persistTerminalTurn({ error: { code: "ASSISTANT_TOOL_BUDGET_EXCEEDED", message: `Assistant exceeded its tool budget (${e.rounds} rounds)` } }).catch(() => {});
             await ctx.onFail(`Assistant exceeded its tool budget (${e.rounds} rounds)`).catch(() => {});
             push({ type: "error", code: "ASSISTANT_TOOL_BUDGET_EXCEEDED", message: `Assistant exceeded its tool budget (${e.rounds} rounds)` });
+          } else if (turnBudgetExceeded) {
+            // Total-turn wall clock (M1). Checked before the client-abort branch
+            // below: the budget aborts the provider signal, so without this the
+            // turn would persist as a user STOP instead of a budget failure.
+            const code = "ASSISTANT_GENERATION_FAILED";
+            const message = ASSISTANT_TURN_BUDGET_MESSAGE;
+            await persistTerminalTurn({ error: { code, message }, ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
+            await ctx.onFail(message).catch(() => {});
+            push({ type: "error", code, message });
           } else if (abort.signal.aborted && !stalled) {
             // Explicit stop / disconnect: persist the partial turn as stopped even
             // when it carries only tool activity (a text-less tool loop), so the

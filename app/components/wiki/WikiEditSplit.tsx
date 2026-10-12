@@ -99,6 +99,8 @@ interface WikiEditSplitProps {
   slug: string;
   pageSlug: string;
   previewContent: TipTapDoc;
+  editable: boolean;
+  onDocChange: (doc: TipTapDoc) => void;
   isSaving: boolean;
   isDirty: boolean;
   lastSavedAt: Date | null;
@@ -111,7 +113,7 @@ interface WikiEditSplitProps {
 // the Editor/Preview toggle) over the page's attachments and save status. The
 // preview is not a second pane here: the toggle turns this pane itself into the
 // rendered document, exactly as the task description does.
-export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving, isDirty, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
+export function WikiEditSplit({ editor, slug, pageSlug, previewContent, editable, onDocChange, isSaving, isDirty, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
   return (
     <div className="editor-pane flex flex-1 flex-col overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -120,6 +122,8 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
             editor={editor}
             slug={slug}
             previewContent={previewContent}
+            editable={editable}
+            onDocChange={onDocChange}
             runtime={{ slug, documentType: "wiki", documentId: pageSlug }}
             onReviewStateChange={onReviewStateChange}
           />
