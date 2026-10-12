@@ -2,8 +2,12 @@ import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware,
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import * as Multipart from "@effect/platform/Multipart";
 import { Cause, Effect, Either, Layer, ManagedRuntime, Schema, Stream } from "effect";
-import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
+// Seed SQL is bundled as text (`?raw`) so the setup wizard's sample-data step
+// works without a filesystem (the Workers flavor). Bun, vite, and vitest all
+// resolve the `?raw` suffix to the file's text.
+import seedDevSql from "../../scripts/seed-dev.sql?raw";
+import seedMinimalSql from "../../scripts/seed-minimal.sql?raw";
 import { LoggerLayer } from "../logging/logger";
 import { Db, run, queryAll, batch, batchResults, requireRow, type BatchStmt, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
 import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
@@ -1593,6 +1597,43 @@ const splitSqlScript = (sql: string): string[] => {
   return stmts;
 };
 
+// Sample users are inserted by the seed SQL with no Better Auth account row, so
+// they cannot sign in. Provision a credential account (the documented dev
+// password) for every seeded `@lexa.local` user — the same step the Bun boot
+// seed runs (server/entry.ts `seedDevAccounts`), so wizard-seeded sample data is
+// loginable on both flavors. Idempotent and fail-soft: a hashing failure must
+// never fail the seed (the operator's superadmin is already loginable).
+function provisionSeedLogins(driver: DbDriver): Effect.Effect<void, never> {
+  return Effect.gen(function* () {
+    const missing = yield* queryAll<{ id: string }>(
+      driver,
+      `SELECT id FROM users WHERE email LIKE '%@lexa.local'
+         AND id NOT IN (SELECT userId FROM account WHERE providerId = 'credential')`
+    );
+    if (missing.length === 0) return;
+    const cryptoMod = yield* Effect.tryPromise(() => import("better-auth/crypto")).pipe(
+      Effect.catchAll(() => Effect.succeed(null))
+    );
+    if (!cryptoMod) return;
+    const password = yield* Effect.tryPromise(() => cryptoMod.hashPassword("password123")).pipe(
+      Effect.catchAll(() => Effect.succeed(null))
+    );
+    if (!password) return;
+    for (const row of missing) {
+      yield* run(
+        driver,
+        `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
+         VALUES (?, ?, 'credential', ?, ?, datetime('now'), datetime('now'))`,
+        crypto.randomUUID(),
+        row.id,
+        row.id,
+        password
+      );
+    }
+    yield* Effect.logInfo(`[setup] provisioned ${missing.length} dev login account(s) (password: password123)`);
+  }).pipe(Effect.catchAll(() => Effect.void));
+}
+
 const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
   handlers
     .handle("status", () =>
@@ -1632,27 +1673,22 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
         const db = yield* Db;
         const env = yield* currentEnv;
         if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
-        if (env.DB) return { seeded: false as const };
-        // No environment gate: sample data is offered in every environment.
-        const fs = yield* Effect.tryPromise(() => import("node:fs")).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        );
-        if (!fs) return { seeded: false as const };
-        // import.meta.dir is Bun-only; vitest runs this file on node.
-        const here = import.meta.dir ?? dirname(fileURLToPath(import.meta.url));
-        const seedFile = join(here, "../../scripts", req.payload.flavor === "minimal" ? "seed-minimal.sql" : "seed-dev.sql");
-        if (!fs.existsSync(seedFile)) return { seeded: false as const };
         const projectCount = yield* countRows(db, "SELECT COUNT(*) c FROM projects");
         if (projectCount > 0) return { seeded: false as const };
-        const sql = yield* Effect.tryPromise(() => Promise.resolve(fs.readFileSync(seedFile, "utf-8"))).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        );
-        if (sql === null) return { seeded: false as const };
+        // Seed SQL is bundled (`?raw`), never read from disk: the Workers flavor
+        // has no filesystem, and the seed step must behave identically on both
+        // flavors (ADR-0005 in-process tier parity). No environment gate:
+        // sample data is offered in every environment.
+        const sql = req.payload.flavor === "minimal" ? seedMinimalSql : seedDevSql;
         for (const stmt of splitSqlScript(sql)) yield* run(db, stmt);
         // Seeded tasks carry keys only if the SQL set them (minimal does);
         // backfill the rest so PREFIX-n identifiers are complete without a
         // restart (the boot-time backfill never runs after wizard seeding).
         yield* backfillTaskKeysDriver(db);
+        // The seed SQL inserts users with no Better Auth account row, so they
+        // cannot sign in; provision the credential accounts (same step the Bun
+        // boot seed does in server/entry.ts).
+        yield* provisionSeedLogins(db);
         return { seeded: true as const };
       }))
     )
