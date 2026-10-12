@@ -258,7 +258,10 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       // still render, so a spawn ref keeps an otherwise-empty turn alive. Same
       // for a turn whose only record is the tool calls it ran.
       const spawnedRuns = msg.role === "assistant" ? extractSpawnedRuns([msg]) : [];
-      if (!text && !imageCount && !metadata.error && metadata.stopped !== true && !carrier && spawnedRuns.length === 0 && !(segment && segment.tools.length > 0)) continue;
+      // Any attachment keeps the turn alive, not just images: a user message that
+      // is only a document (no text) was being dropped from the transcript, and
+      // with it the chip for the file they sent.
+      if (!text && attachments.length === 0 && !metadata.error && metadata.stopped !== true && !carrier && spawnedRuns.length === 0 && !(segment && segment.tools.length > 0)) continue;
       const citations =
         msg.role === "assistant"
           ? safeCitations([

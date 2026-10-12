@@ -535,19 +535,22 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   // Object URLs outlive the list when a send clears it or the composer
   // unmounts — revoke any URL that dropped out of the list, and all of them on
-  // unmount, so previews don't leak.
+  // unmount, so previews don't leak. A URL HANDED to a sent turn is exempt: the
+  // optimistic bubble renders it until the server row (and its serve URL) lands,
+  // and revoking on send blanked the thumbnail the user had just sent.
   const prevAttachmentsRef = useRef<ComposerAttachment[]>([]);
+  const handedOffUrlsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const currentUrls = new Set(attachments.map((a) => a.previewUrl).filter((u): u is string => !!u));
     for (const att of prevAttachmentsRef.current) {
-      if (att.previewUrl && !currentUrls.has(att.previewUrl) && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(att.previewUrl);
+      if (att.previewUrl && !currentUrls.has(att.previewUrl) && !handedOffUrlsRef.current.has(att.previewUrl) && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(att.previewUrl);
     }
     prevAttachmentsRef.current = attachments;
   }, [attachments]);
   useEffect(
     () => () => {
       for (const att of prevAttachmentsRef.current) {
-        if (att.previewUrl && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(att.previewUrl);
+        if (att.previewUrl && !handedOffUrlsRef.current.has(att.previewUrl) && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(att.previewUrl);
       }
     },
     []
@@ -676,13 +679,14 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
 
   const dismissRejection = useCallback((id: string) => setRejections((prev) => prev.filter((r) => r.id !== id)), []);
 
-  const readyRefs = useCallback(
-    (): ChatAttachmentRef[] =>
-      attachments
-        .filter((a) => a.status === "ready" && !!a.storageKey)
-        .map((a) => ({ storageKey: a.storageKey!, mimeType: a.mimeType, name: a.name, sizeBytes: a.size, ...(a.previewUrl ? { previewUrl: a.previewUrl } : {}) })),
-    [attachments]
-  );
+  const readyRefs = useCallback((): ChatAttachmentRef[] => {
+    const refs = attachments
+      .filter((a) => a.status === "ready" && !!a.storageKey)
+      .map((a) => ({ storageKey: a.storageKey!, mimeType: a.mimeType, name: a.name, sizeBytes: a.size, ...(a.previewUrl ? { previewUrl: a.previewUrl } : {}) }));
+    // Ownership of the blob URL passes to the sent turn — see handedOffUrlsRef.
+    for (const ref of refs) if (ref.previewUrl) handedOffUrlsRef.current.add(ref.previewUrl);
+    return refs;
+  }, [attachments]);
 
   const hasExtractionFailure = attachments.some((a) => a.status === "extraction-failed");
 
