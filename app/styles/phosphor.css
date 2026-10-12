@@ -6698,6 +6698,19 @@
   flex: 1;
   min-width: 0;
   display: flex;
+  /* Row: the chat column plus the generated-content sidebar. The sidebar sits
+     OUTSIDE the column so the header and its fade scrim never reach it. */
+  flex-direction: row;
+  position: relative;
+  /* Width of the generated-content sidebar. */
+  --chat-detail-w: 340px;
+}
+/* The chat itself: header, transcript, composer. Everything the sidebar must
+   not overlap. */
+.chat-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   position: relative;
 }
@@ -6706,15 +6719,10 @@
   flex: 1;
   min-height: 0;
   display: flex;
-  /* Row: the scroller plus the generated-content sidebar (rows below 1280px,
-     where the approval chip stays the only affordance). */
-  flex-direction: row;
+  flex-direction: column;
 }
 .chat-scroll {
   flex: 1;
-  /* Row item beside the generated-content sidebar: without this the scroller
-     refuses to shrink below its content and pushes the sidebar out. */
-  min-width: 0;
   overflow-y: auto;
   padding: 24px 24px 8px;
   /* Top clearance contract — the 48px .chat-header-scrim fades ink at the
@@ -6729,25 +6737,60 @@
    above the floating composer; the app writes the measured value on the shell,
    140px is the fallback floor. scroll-padding-bottom keeps the same footprint
    for scrollIntoView({ block: "center" }) on approval batches. */
-.chat-shell:has(> .chat-composer-float) > .chat-transcript > .chat-scroll {
+.chat-column:has(> .chat-composer-float) > .chat-transcript > .chat-scroll {
   padding-bottom: var(--chat-composer-clearance, 140px);
   scroll-padding-bottom: var(--chat-composer-clearance, 140px);
 }
 /* Generated-content sidebar. The approval chip has to fit the transcript column,
-   so it stays terse; this is where the write is actually read. Transparent to
-   layout below 1280px — the chip remains the affordance there. */
-.chat-detail {
+   so it stays terse; this is where the write is actually read. Two layouts, one
+   element — an in-flow right column from 1280px, a right drawer below it. */
+.chat-detail,
+.chat-detail-backdrop {
   display: none;
 }
+/* ≥1280px: an in-flow right column beside the chat column. */
 @media (min-width: 1280px) {
-  .chat-detail {
+  .chat-shell.chat-detail-open .chat-detail {
     display: flex;
     flex-direction: column;
-    flex: 0 0 340px;
-    width: 340px;
+    flex: 0 0 var(--chat-detail-w);
+    width: var(--chat-detail-w);
     min-height: 0;
     border-left: 1px solid var(--lx-border-subtle);
     background: var(--lx-surface-card);
+  }
+}
+/* <1280px (antislop-layoutmobile: a designed mobile state, not a squeezed
+   column): the panel is a right drawer over the chat, opened by the header's
+   far-right toggle, with a full-height backdrop BUTTON that closes it. Mirrors
+   the threads/wiki pane drawer, the app's established mobile pattern. */
+@media (max-width: 1279.98px) {
+  .chat-shell.chat-detail-open .chat-detail {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: var(--lx-shell-band-h);
+    right: 0;
+    bottom: 0;
+    left: auto;
+    width: min(var(--chat-detail-w), 88vw);
+    z-index: 70;
+    border-left: 1px solid var(--lx-border-subtle);
+    background: var(--lx-surface-card);
+    box-shadow: var(--lx-shadow-slideover);
+  }
+  .chat-shell.chat-detail-open .chat-detail-backdrop {
+    display: block;
+    position: fixed;
+    top: var(--lx-shell-band-h);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 65;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    background: var(--lx-surface-overlay);
   }
 }
 .chat-detail-head {
@@ -6763,6 +6806,9 @@
   min-height: 0;
   overflow-y: auto;
   padding: 16px;
+  /* The drawer is bottom-anchored: keep the last line off a phone's home
+     indicator (antislop-layoutmobile). */
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -6949,6 +6995,7 @@
 }
 .chat-header-actions .icon-btn:hover { color: var(--lx-text-primary); background: var(--lx-surface-card-hover); }
 .chat-header-actions .icon-btn.is-pinned { color: var(--lx-text-link); }
+.chat-header-actions .icon-btn[aria-pressed="true"] { color: var(--lx-text-link); }
 .chat-header-actions .icon-btn:disabled { color: var(--lx-text-muted); cursor: not-allowed; }
 @media (max-width: 767.98px) {
   .chat-header { padding: 12px 12px 0; }

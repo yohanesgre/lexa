@@ -1,10 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { Pin } from "lucide-react";
+import { PanelRight, Pin } from "lucide-react";
 import { formatRelative } from "../../lib/relative-time";
 import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
-import type { AssistantWriteDiff } from "../../../shared/assistant";
-import { AssistantGeneratedPanel } from "./AssistantGeneratedPanel";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
@@ -137,6 +135,10 @@ export interface ChatHeaderProps {
   onRename: (title: string) => void;
   onPinToggle: () => void;
   onDelete: () => void | Promise<unknown>;
+  // Generated-content sidebar visibility (persisted). The toggle is the only
+  // control for it; the sidebar is hidden below 1280px regardless.
+  detailOpen: boolean;
+  onToggleDetail: () => void;
 }
 
 export function ChatHeader({
@@ -150,6 +152,8 @@ export function ChatHeader({
   onRename,
   onPinToggle,
   onDelete,
+  detailOpen,
+  onToggleDetail,
 }: ChatHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -241,6 +245,17 @@ export function ChatHeader({
           <button type="button" ref={deleteRef} className="icon-btn" title="Delete thread" aria-label="Delete thread" disabled={actionsDisabled} onClick={() => setConfirmOpen(true)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
           </button>
+          {/* View control, not a thread action — kept at the far right. */}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-pressed={detailOpen}
+            title={detailOpen ? "Hide generated content" : "Show generated content"}
+            aria-label={detailOpen ? "Hide generated content" : "Show generated content"}
+            onClick={onToggleDetail}
+          >
+            <PanelRight size={14} strokeWidth={1.5} aria-hidden="true" />
+          </button>
         </div>
       )}
       {confirmOpen && (
@@ -283,17 +298,12 @@ export function ChatTranscriptArea({
   onRetryResume,
   readError = false,
   onRetryRead,
-  generatedChip = null,
 }: {
   turns: ChatTurn[];
   // Thread id: folds into every row key so per-row local state cannot leak
   // across a thread switch (the transcript component is not remounted).
   chatId: string;
   slug: string;
-  // The newest write the current turn proposed, for the detail sidebar
-  // (ADR-0006 follow-on). Live proposals carry `AssistantPendingChip`; a
-  // suspended turn carries frozen `ApprovalChip`s — both only need `diff`.
-  generatedChip?: { diff: AssistantWriteDiff } | null | undefined;
   streaming: boolean;
   // Send accepted but the transport has not taken over yet (deferred fresh-
   // thread write). Renders the same pre-first-token caret as `streaming` so a
@@ -390,7 +400,6 @@ export function ChatTranscriptArea({
         </div>
       </div>
       <ChatJumpButton atBottom={atBottom} onClick={onJump} />
-      <AssistantGeneratedPanel chip={generatedChip} />
     </div>
   );
 }
