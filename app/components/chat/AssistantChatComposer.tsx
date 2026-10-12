@@ -292,7 +292,7 @@ function AttachControl({
           role="menu"
           aria-label="Attach"
           onKeyDown={onMenuKeyDown}
-          style={{ position: "absolute", left: 10, bottom: "calc(100% + 6px)", width: 270, zIndex: 30 }}
+          style={{ position: "absolute", left: 10, bottom: "calc(100% + 6px)", width: 300, zIndex: 30 }}
         >
           <div className="dropdown-label">Attach</div>
           <button
@@ -312,7 +312,7 @@ function AttachControl({
           >
             <ImageIcon size={16} strokeWidth={1.5} />
             Attach image
-            <span className="dropdown-shortcut">png · jpeg · gif · webp</span>
+            <span className="dropdown-shortcut">png · jpg · gif · webp</span>
           </button>
           <button
             ref={(el) => {
