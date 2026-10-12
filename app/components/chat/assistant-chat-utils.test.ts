@@ -54,6 +54,18 @@ describe("renderTranscript persisted tool parts", () => {
   });
 });
 
+describe("renderTranscript user attachments", () => {
+  // The empty-turn guard counted images only, so a user message that was just a
+  // document vanished from the transcript — and with it the file chip.
+  it("keeps a document-only user turn and its attachment", () => {
+    const turns = renderTranscript([
+      { id: "u1", role: "user", parts: [{ type: "data-attachment", data: { storageKey: "k-1", mimeType: "text/plain", name: "notes.txt" } }] },
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]?.attachments).toEqual([{ storageKey: "k-1", mimeType: "text/plain", name: "notes.txt" }]);
+  });
+});
+
 describe("parseApprovalExecutionError", () => {
   it("splits CODE: message at the first colon", () => {
     expect(parseApprovalExecutionError("ASSISTANT_WRITE_FAILED: bad: thing")).toEqual({
