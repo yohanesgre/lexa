@@ -3,6 +3,8 @@ import { Pin } from "lucide-react";
 import { formatRelative } from "../../lib/relative-time";
 import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
+import type { AssistantWriteDiff } from "../../../shared/assistant";
+import { AssistantGeneratedPanel } from "./AssistantGeneratedPanel";
 import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
@@ -281,12 +283,17 @@ export function ChatTranscriptArea({
   onRetryResume,
   readError = false,
   onRetryRead,
+  generatedChip = null,
 }: {
   turns: ChatTurn[];
   // Thread id: folds into every row key so per-row local state cannot leak
   // across a thread switch (the transcript component is not remounted).
   chatId: string;
   slug: string;
+  // The newest write the current turn proposed, for the detail sidebar
+  // (ADR-0006 follow-on). Live proposals carry `AssistantPendingChip`; a
+  // suspended turn carries frozen `ApprovalChip`s — both only need `diff`.
+  generatedChip?: { diff: AssistantWriteDiff } | null | undefined;
   streaming: boolean;
   // Send accepted but the transport has not taken over yet (deferred fresh-
   // thread write). Renders the same pre-first-token caret as `streaming` so a
@@ -383,6 +390,7 @@ export function ChatTranscriptArea({
         </div>
       </div>
       <ChatJumpButton atBottom={atBottom} onClick={onJump} />
+      <AssistantGeneratedPanel chip={generatedChip} />
     </div>
   );
 }

@@ -4,7 +4,6 @@ import { diffText } from "../../../shared/diff";
 import { DiffView } from "../assistant/DiffView";
 import { DiffTable, FieldList, MovePills, TextBlock, ConfirmLine } from "./assistant-diff-parts";
 import { bodySummary } from "./assistant-diff-utils";
-import type { ApprovalChip } from "./AssistantApprovals";
 
 // Diff body dispatch (assistant-write-approvals.html): destructive/confirm
 // kinds render copy lines; structured kinds render fields/tables/pills. Bodies
@@ -112,17 +111,37 @@ const STRUCTURED_COPY: Partial<Record<AssistantWriteDiff["type"], (d: AssistantW
   },
 };
 
-function DiffBodyConfirm({ chip }: { chip: ApprovalChip }) {
+function DiffBodyConfirm({ chip }: { chip: { diff: AssistantWriteDiff } }) {
   const render = CONFIRM_COPY[chip.diff.type];
   return <ConfirmLine>{render ? render(chip.diff) : null}</ConfirmLine>;
 }
 
-function DiffBodyStructured({ chip }: { chip: ApprovalChip }) {
+function DiffBodyStructured({ chip }: { chip: { diff: AssistantWriteDiff } }) {
   const render = STRUCTURED_COPY[chip.diff.type];
   return <>{render ? render(chip.diff) : null}</>;
 }
 
-export function DiffBody({ chip }: { chip: ApprovalChip }) {
+// Panel variant: the detail sidebar shows the whole thing, so a create inlines
+// the description it deliberately summarises on the chip (the chip has to stay
+// one line; the sidebar is where the body is actually read).
+function DiffBodyTaskCreateFull({ diff }: { diff: AssistantWriteDiff }) {
+  const t = diff as DiffOf<"task_create">;
+  const { description, ...rest } = t.fields;
+  return (
+    <>
+      <FieldList
+        rows={[
+          { label: "Title", value: t.title, primary: true },
+          ...Object.entries(rest).map(([k, v]) => ({ label: k, value: v })),
+        ]}
+      />
+      {description != null ? <TextBlock label="Description" text={description} tone="after" /> : null}
+    </>
+  );
+}
+
+export function DiffBody({ chip, variant = "chip" }: { chip: { diff: AssistantWriteDiff }; variant?: "chip" | "panel" }) {
   if (CONFIRM_COPY[chip.diff.type]) return <DiffBodyConfirm chip={chip} />;
+  if (variant === "panel" && chip.diff.type === "task_create") return <DiffBodyTaskCreateFull diff={chip.diff} />;
   return <DiffBodyStructured chip={chip} />;
 }
