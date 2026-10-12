@@ -9,7 +9,7 @@
 // Workers path (which has a per-request `env` binding) on the same shape so
 // the HTTP layer can construct its per-request runtime from either input.
 
-import type { D1Database, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 
 // Every string slot of RuntimeEnv, in one place. `RuntimeEnv` is DERIVED from
 // this list, so adding a slot here is the only way to add one.
@@ -39,6 +39,8 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "LXK_ASSISTANT_REPO_CAP",
   // Chat attachments kill switch (only the exact value "1" disables).
   "LXK_DISABLE_CHAT_ATTACHMENTS",
+  // ADR-0006 chat supervisor transport opt-in (Workers only; exact "1" enables).
+  "LXK_CHAT_SUPERVISOR",
   // Bulk task actions kill switch (only the exact value "1" disables; both flavors).
   "LXK_DISABLE_TASKS_BULK",
   // Managed secrets — the envelope key pair shared by MCP tokens, provider API
@@ -67,6 +69,9 @@ export interface RuntimeEnv extends Partial<Record<RuntimeEnvStringKey, string |
   DB?: D1Database | undefined;
   BLOB?: R2Bucket | undefined;
   KV?: KVNamespace | undefined;
+  // ADR-0006: the chat supervisor Durable Object namespace (Workers-only). Its
+  // presence + LXK_CHAT_SUPERVISOR=1 selects the supervised chat transport.
+  CHAT_DO?: DurableObjectNamespace | undefined;
 }
 
 const RUNTIME_ENV_STRING_KEY_SET: ReadonlySet<string> = new Set(RUNTIME_ENV_STRING_KEYS);
@@ -127,6 +132,7 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_RATE_LIMIT_WINDOW_MS: source.LXK_RATE_LIMIT_WINDOW_MS,
     LXK_ASSISTANT_REPO_CAP: source.LXK_ASSISTANT_REPO_CAP,
     LXK_DISABLE_CHAT_ATTACHMENTS: source.LXK_DISABLE_CHAT_ATTACHMENTS,
+    LXK_CHAT_SUPERVISOR: source.LXK_CHAT_SUPERVISOR,
     LXK_DISABLE_TASKS_BULK: source.LXK_DISABLE_TASKS_BULK,
     LXK_SECRETS_MASTER_KEY: source.LXK_SECRETS_MASTER_KEY,
     LXK_SECRETS_MASTER_KEY_PREV: source.LXK_SECRETS_MASTER_KEY_PREV,
@@ -170,6 +176,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_RATE_LIMIT_WINDOW_MS: s("LXK_RATE_LIMIT_WINDOW_MS"),
     LXK_ASSISTANT_REPO_CAP: s("LXK_ASSISTANT_REPO_CAP"),
     LXK_DISABLE_CHAT_ATTACHMENTS: s("LXK_DISABLE_CHAT_ATTACHMENTS"),
+    LXK_CHAT_SUPERVISOR: s("LXK_CHAT_SUPERVISOR"),
     LXK_DISABLE_TASKS_BULK: s("LXK_DISABLE_TASKS_BULK"),
     LXK_SECRETS_MASTER_KEY: s("LXK_SECRETS_MASTER_KEY"),
     LXK_SECRETS_MASTER_KEY_PREV: s("LXK_SECRETS_MASTER_KEY_PREV"),
@@ -182,6 +189,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     DB: env.DB as D1Database | undefined,
     BLOB: env.BLOB as R2Bucket | undefined,
     KV: env.KV as KVNamespace | undefined,
+    CHAT_DO: env.CHAT_DO as DurableObjectNamespace | undefined,
     CRON_SECRET: s("CRON_SECRET"),
   };
 }

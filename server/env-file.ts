@@ -87,7 +87,7 @@ section(
 );
 section(["LXK_MAX_BODY_MB", "LXK_MAX_UPLOAD_MB", "LXK_RATE_LIMIT_MAX", "LXK_RATE_LIMIT_WINDOW_MS"], "limits");
 section(["LXK_DISABLE_TASKS_BULK"], "features");
-section(["LXK_ASSISTANT_REPO_CAP", "LXK_DISABLE_CHAT_ATTACHMENTS"], "assistant");
+section(["LXK_ASSISTANT_REPO_CAP", "LXK_DISABLE_CHAT_ATTACHMENTS", "LXK_CHAT_SUPERVISOR"], "assistant");
 section(["LXK_SECRETS_MASTER_KEY", "LXK_SECRETS_MASTER_KEY_PREV"], "secrets");
 section(["LOG_LEVEL", "TANSTACK_AI_DEBUG", "TANSTACK_AI_JSON"], "logging");
 section(["LXK_BACKUP_ENABLED", "LXK_BACKUP_RETENTION"], "backups");

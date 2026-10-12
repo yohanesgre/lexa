@@ -76,6 +76,17 @@
 			"id": "00000000000000000000000000000000"
 		}
 	],
+	// ADR-0006 chat supervisor Durable Object. The binding is inert on its own:
+	// the supervised chat transport engages only when `LXK_CHAT_SUPERVISOR=1`,
+	// so adding the binding changes no behavior.
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "CHAT_DO",
+				"class_name": "LexaChatSupervisor"
+			}
+		]
+	},
 	// Durable Object migration history (frozen). v1 records the original
 	// `LexaAssistantAgent` DO class; v2 deletes it now that the assistant DO
 	// stack is retired (ADR-0005). Both tags must stay: an existing prod
@@ -94,6 +105,14 @@
 			"tag": "v2",
 			"deleted_classes": [
 				"LexaAssistantAgent"
+			]
+		},
+		{
+			// ADR-0006: the supervisor DO. A new class needs its own create tag —
+			// the v1/v2 history above stays verbatim (CF error 10064 otherwise).
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"LexaChatSupervisor"
 			]
 		}
 	],
