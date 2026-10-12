@@ -7,7 +7,7 @@ import {
 } from "./legacy-convert";
 
 describe("convertLegacyMessages", () => {
-  it("maps a plain transcript and array content text parts, preserving order and dropping unmappable parts (image refs)", () => {
+  it("maps a plain transcript and array content text parts, preserving order and carrying sent attachments", () => {
     const legacy: LegacyStoredMessage[] = [
       { role: "user", content: "hello", ts: "2026-01-01T00:00:00.000Z" },
       { role: "assistant", content: "hi there", ts: "2026-01-01T00:00:01.000Z" },
@@ -41,9 +41,28 @@ describe("convertLegacyMessages", () => {
         parts: [
           { type: "text", text: "look at this" },
           { type: "text", text: "and this" },
+          { type: "data-attachment", data: { storageKey: "blob-1", mimeType: "image/png", name: "" } },
         ],
         metadata: { ts: "2026-01-01T00:00:02.000Z" },
       },
+    ]);
+  });
+
+  // The report this fixes: the API read dropped sent documents, so the user's
+  // bubble showed the text with no file chip while the model had read the PDF.
+  it("keeps a sent document as an attachment part", () => {
+    const legacy: LegacyStoredMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", content: "insert overview from pdf" },
+          { type: "document-ref", storageKey: "blob-pdf", mimeType: "application/pdf", name: "GDD.pdf" },
+        ],
+      },
+    ];
+    expect(convertLegacyMessages(legacy)[0]?.parts).toEqual([
+      { type: "text", text: "insert overview from pdf" },
+      { type: "data-attachment", data: { storageKey: "blob-pdf", mimeType: "application/pdf", name: "GDD.pdf" } },
     ]);
   });
 

@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { ASSISTANT_APPROVAL_DATA_PART, type AssistantWriteDiff } from "../../../shared/assistant";
+import { ASSISTANT_APPROVAL_DATA_PART, ASSISTANT_ATTACHMENT_DATA_PART, type AssistantWriteDiff } from "../../../shared/assistant";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
 import { segmentFromAssistantMessage } from "../../lib/assistant-agent-adapter";
@@ -244,7 +244,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
           text += part.text;
           continue;
         }
-        if (part.type === "data-attachment" && part.data && typeof part.data === "object") {
+        if (part.type === ASSISTANT_ATTACHMENT_DATA_PART && part.data && typeof part.data === "object") {
           const d = part.data as { storageKey?: unknown; mimeType?: unknown; name?: unknown };
           if (typeof d.storageKey !== "string") continue;
           const mimeType = typeof d.mimeType === "string" ? d.mimeType : "text/plain";
