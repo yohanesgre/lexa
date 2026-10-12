@@ -13,7 +13,7 @@ web
 ## Product Purpose
 
 Lexa is a self-hosted project-management tool: a Kanban board with swimlanes and WIP limits, rich
-tasks, a nested wiki, milestones, an AI Assistant (Cloudflare Workers deploys), team auth, and two-way GitHub issue sync.
+tasks, a nested wiki, milestones, an AI Assistant (Cloudflare Workers and local Bun flavours), team auth, and two-way GitHub issue sync.
 It exists so a small team owns its work data and its integration surface outright — deployed into
 its own account, operated by teammates and by scripts.
 
@@ -34,7 +34,8 @@ plus `lxk_` API keys — that external scripts and agents drive.
 - Self-hosted: `scripts/install.sh` provisions Cloudflare Workers (D1 + R2 + KV) and deploys the
   prebuilt Worker; local development runs the Bun + SQLite flavour (`bun run setup`, `bun run dev`
   → API :3000 + vite :5173, or `bun run dev:workers` for the Worker flavour on :5173).
-- Cloudflare Workers is the only deploy target, and the AI Assistant exists only there.
+- Cloudflare Workers is the only deploy target; the AI Assistant's in-process TanStack AI engine
+  is available on both the Workers and local Bun flavours (ADR-0005).
 - Teams are intra-server workspaces (Better Auth organizations); projects carry a `team_id`. A
   team-scoped project is never silently re-teamed.
 - Human auth is in-process email/password with cookie sessions — no Cloudflare Access, no public
@@ -57,7 +58,8 @@ operator CLI.
 Durable constraints (must survive future work):
 
 - Deploy target is Cloudflare Workers (D1 + R2 + KV) only; the locally-run flavour is Bun + SQLite.
-  The AI Assistant is Workers-only.
+  The AI Assistant is available on both flavours (ADR-0005); its optional chat supervisor is
+  Workers-only and opt-in (ADR-0006).
 - No public signup: the first superadmin comes from the setup wizard, everyone else from invites.
 - Exactly one Backlog per project; it can neither be archived nor deleted.
 - Ticket keys are immutable (`projects.key` + `tasks.number`, written once, never reused).
