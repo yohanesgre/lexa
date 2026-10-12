@@ -651,12 +651,13 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- ============================================================
 -- Assistant (in-process TanStack AI SSE tier — ADR-0005)
 -- ============================================================
--- Every `assistant_*` table below stays in the shared, flavor-agnostic
--- migration set. The assistant runs in-process on BOTH flavors (ADR-0005 W6;
--- the ADR-0003 `@cloudflare/ai-chat` Durable Object executor is retired). D1
--- `assistant_threads` is the SINGLE canonical message store — there is no DO
--- SQLite and no mirror. Both flavors report `assistant:true` from
--- `/api/capabilities`.
+-- migration set. The default assistant runs in-process on BOTH flavors
+-- (ADR-0005 W6); the retired ADR-0003 `@cloudflare/ai-chat` executor is gone.
+-- On Workers only, ADR-0006's optional CHAT_DO supervisor can coordinate a
+-- live chat turn when `LXK_CHAT_SUPERVISOR=1`; it is not the executor or a
+-- transcript store. D1 `assistant_threads` is the canonical transcript store;
+-- the supervisor's replay buffer is volatile and may be unavailable after
+-- eviction. Both flavors report `assistant:true` from `/api/capabilities`.
 -- ============================================================
 -- Assistant task queue (document Generate)
 -- ============================================================
@@ -1199,11 +1200,11 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- (user_id, project_id) so the one-role-per-(user, project) invariant is
 -- enforceable without a PK rebuild (D1 has no ALTER).
 -- 0019_workers_ai_provider_kind.sql widens the `kind` CHECK on both
--- `assistant_models` and `assistant_call_logs` to include `workers_ai` (keyless
--- Workers AI inference through the `env.AI` binding). SQLite cannot ALTER a
--- CHECK, so both tables are rebuilt create/copy/drop/rename with every row
--- copied verbatim; neither table has an inbound FK, so the rebuild is FK-safe
--- under D1's enforced foreign keys.
+-- `assistant_models` and `assistant_call_logs` to include `workers_ai`, which
+-- uses Cloudflare's account-scoped OpenAI-compatible HTTP endpoint (not the
+-- bound `env.AI` API). SQLite cannot ALTER a CHECK, so both tables are rebuilt
+-- create/copy/drop/rename with every row copied verbatim; neither table has an
+-- inbound FK, so the rebuild is FK-safe under D1's enforced foreign keys.
 -- 0023_assistant_call_log_rebuild.sql rebuilds `assistant_call_logs` once more
 -- to add `thread_key`, `run_id`, and a `purpose` column CHECK-pinned to
 -- ('turn','runner','preflight','summary') with DEFAULT 'turn'. Rows and the

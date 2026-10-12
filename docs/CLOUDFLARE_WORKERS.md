@@ -48,15 +48,12 @@ replaces the other; either or both can be live at any time.
    — see `docs/DEPLOYMENT.md` §Staging from a clone. The Bun
    flavor is frozen and installs from a source checkout. See `docs/DEPLOYMENT.md`
    for the deploy flow. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
-8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup
-   (`webhook_events` older than 7 days, `device_login_requests` past
-   `expires_at` — same SQL as the Bun host's `setInterval` prune — plus R2
-   backup retention). ADR-0005 W6 **removed the `*/15` cron trigger** from
-   `wrangler.jsonc` (`triggers.crons` is gone), so the handler fires only if an
-   operator re-adds a trigger in the dashboard; the code is retained. The Bun
-   path keeps its `setInterval`. `wrangler.jsonc` enables observability, and
-   the installer transcribes that observability block from the root
-   `wrangler.jsonc` into the per-deploy config.
+8. **Cron + observability:** the `*/15` Workers `scheduled` trigger runs
+   housekeeping prune/retention only: expired `webhook_events` and
+   `device_login_requests`, plus retention of existing R2 backups. It does not
+   create snapshots/backups or execute assistant schedules. The Bun path keeps
+   its `setInterval` prune. `wrangler.jsonc` enables observability, and the
+   installer transcribes that observability block from the root config.
 9. **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for the
    14 architectural invariants listed in `AGENTS.md` and fails any PR that introduces
    a violation. This is the durable record of the invariants for future contributors.
@@ -289,9 +286,14 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   old `lexa-cli deploy` flow is gone (removed in cli-v2026.2.0).
 - The AI path runs **in-process on both flavors** over SSE (ADR-0005 W6; the
   ADR-0003 `@cloudflare/ai-chat` `AIChatAgent` Durable Object tier and the
-  pre-ADR agent-runtime tier are retired). The assistant exists on Bun and
-  Workers alike — no external runner to host; outbound subrequest budget
-  50/request free, 1000 paid.
+  pre-ADR agent-runtime tier are retired). On Workers only, ADR-0006's
+  `CHAT_DO` chat supervisor is opt-in and engages only when the binding is
+  deployed and `LXK_CHAT_SUPERVISOR=1`. It coordinates authorized same-active-
+  turn replay; a different turn receives 409. It does not queue or fan out
+  messages. Replay frames are volatile and not guaranteed after eviction; D1
+  `assistant_threads` remains the canonical transcript store.
+  The assistant exists on Bun and Workers alike — no external runner to host;
+  outbound subrequest budget 50/request free, 1000 paid.
 
 ## Object storage (R2)
 
@@ -315,12 +317,12 @@ Fits the agreed `Lexa/Storage` design (fs + s3 drivers):
 
 ## Assistant path via TanStack AI
 
-> This section is **superseded by ADR-0003 and then ADR-0005** (accepted
-> 2026-10-10): the assistant on both flavors is the **in-process TanStack AI
-> SSE tier**; the ADR-0003 `@cloudflare/ai-chat` `AIChatAgent` Durable Object
-> tier (one DO per conversation thread, WebSocket transport, DO SQLite canonical
-> + D1 `assistant_threads` mirror) is retired and its modules are deleted. The
-> TanStack AI tier described below is again the live design.
+> **Historical executor design, superseded by ADR-0005 and amended by
+> ADR-0006.** The assistant's default is the in-process TanStack AI SSE path on
+> both flavors. ADR-0006 adds only an opt-in Workers chat supervisor; it does
+> not restore the old `@cloudflare/ai-chat` executor, WebSocket transport, DO
+> SQLite transcript store, or D1 mirror. The legacy details below are retained
+> as history, not as a live contract.
 
 Current state (Aug 2026): `@tanstack/ai` 0.47.x, MIT, still 0.x (~24 minors in 3
 months; one wire-format break already shipped). Core is web-standard JS — workerd-
@@ -382,11 +384,12 @@ POST /api/assistant/tasks → queue → server-side chat():
 
 ## Assistant harness on Workers (ADR-0004)
 
-> **ADR-0005 supersedes this section for the executor.** The assistant is
-> **in-process on both flavors** over SSE; there is no DO runtime, no
-> `/api/internal/assistant/*` HMAC surface, and no facet delegation/schedules
-> dispatch. D1 `assistant_threads` is the single store. The bullets below
-> describe the retired DO harness.
+> **ADR-0005 supersedes this section's old executor.** The default assistant is
+> in-process on both flavors over SSE; there is no retired DO executor,
+> `/api/internal/assistant/*` HMAC surface, or facet delegation/schedule
+> dispatcher. ADR-0006 separately permits the opt-in Workers chat supervisor.
+> D1 `assistant_threads` remains the canonical transcript store. The bullets
+> below describe the retired ADR-0004 DO harness, not the live supervisor.
 
 The assistant **was** a Workers-only Durable Object runtime
 (`LexaAssistantAgent`, ADR-0003), now retired. The harness layer on top
@@ -399,19 +402,16 @@ The assistant **was** a Workers-only Durable Object runtime
   repo context, the Jev advisory, the thread summary, tool descriptors, and
   boolean flags. No key or allowlist value crosses to the DO; provider config
   stays a separate `GET provider-config` read.
-- **Runs + schedules.** Delegated runs are facet children of the thread DO; D1
-  `assistant_runs` is the durable registry and `assistant_schedules` is drained
-  by the existing `*/15` `scheduled` handler (migrations `0020`/`0021`). The
-  registry surfaces through `GET /api/admin/assistant/runs`; schedules have
-  per-project CRUD routes.
-- **`workers_ai` models (ADR-0005 D5/P5).** A model row with kind `workers_ai`
-  rides the OpenAI wire through Cloudflare's OpenAI-compatible endpoint
+- **Runs + schedules (historical ADR-0004 design, retired).** The old delegated
+  facet dispatch and `*/15` schedule drain are not active. Schedule records have
+  CRUD routes, but the current cron only prunes/retains data; it does not execute
+  assistant schedules.
+- **`workers_ai` models (current provider path; ADR-0005 D5/P5).** A model row
+  with kind `workers_ai` uses Cloudflare's OpenAI-compatible HTTP endpoint
   (`https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1`, Bearer CF API
-  token) via the shared `createOpenaiChatCompletions` adapter. The keyless
-  `env.AI` binding path is retired; a `workers_ai` provider row requires a
-  non-empty base URL + a stored CF API token (save-time validation). The
-  endpoint works locally too (it is a plain HTTPS call) — no binding, no
-  remote-only constraint.
+  token) through `openaiCompatibleText` in `server/assistant/provider.ts`.
+  It does not use a bound `env.AI` provider path; the row requires a non-empty
+  base URL and stored Cloudflare API token. The endpoint works locally too.
 - **Call-log attribution.** `assistant_call_logs` gains `thread_key`, `run_id`,
   and `purpose` (`turn|runner|preflight|summary`, default `turn`); cost is
   computed from the imported CF per-token prices when the caller sends none.
@@ -448,26 +448,30 @@ deploy dir back on failure. It is the CLI counterpart to re-running
 fresh-machine re-run (see `docs/DEPLOYMENT.md` §Upgrade), while
 `lx worker upgrade` updates an existing custody dir from the headless CLI.
 
-**DO-era upgrade (ADR-0005).** Deploying the removal build over a deployment
-that still owns the `LexaAssistantAgent` Durable Object fails with CF error
-10064 ("New version of script does not export class 'LexaAssistantAgent' which
-is depended on by existing Durable Objects") unless the config carries the
-delete-class migration. Both `lx worker upgrade` and a re-run of `install.sh`
-treat the class as still live only when the prior deploy config carries a
-`durable_objects` binding naming it OR the LAST migration entry that mentions it
-is a create (`new_sqlite_classes`/`new_classes`); the binding is dropped and
-`{ "tag": "<next after the prior's highest, e.g. v2>", "deleted_classes":
-["LexaAssistantAgent"] }` is appended. When there is no binding and the last
-mention is already `deleted_classes` (a repeat upgrade), the prior migration
-history is kept **verbatim** — no redundant tag — so Cloudflare never sees a
-delete for a class that is already gone. A config that never owned the DO gets
-no `migrations` block.
+**Historical `LexaAssistantAgent` removal (ADR-0005).** Deploying the removal
+build over a deployment that still owns the old class fails with CF error 10064
+unless config carries its delete-class migration. `install.sh` and
+`lx worker upgrade` append that deletion after the highest prior tag only while
+the old class is still live (a prior binding or a last migration entry that
+creates it). If the class was already deleted, the old applied history is kept
+verbatim with no redundant delete. This old-class removal check is distinct from
+the current supervisor class creation described below.
 
-**Manual repair for a pre-fix repeat upgrade.** An installer run before this
-rule could write a config carrying a redundant trailing `deleted_classes` tag
-and then fail its deploy (that tag was never applied). Remove the never-applied
-trailing tag from `deploy-<flavor>/wrangler.<flavor>.json` before retrying — the
-corrected builder then keeps the applied history verbatim.
+**Manual repair for a pre-fix old-class repeat upgrade.** An installer run
+before the old removal fix could write an unapplied trailing `deleted_classes`
+tag and fail. Remove that never-applied trailing tag from
+`deploy-<flavor>/wrangler.<flavor>.json` before retrying; the corrected builder
+then keeps applied history verbatim.
+
+**Current supervisor class (ADR-0006).** The root `wrangler.jsonc` preserves
+the historical `LexaAssistantAgent` v1 create/v2 delete entries and adds v3 to
+create `LexaChatSupervisor`. Installer and CLI-generated configs always emit
+the `CHAT_DO` binding and append a create-class tag when the supervisor has not
+already been created: a fresh config gets v1; a prior old-class v1/v2 history
+gets v3. Repeated upgrades preserve applied history without a duplicate create.
+The binding alone is inert; chat supervision requires `LXK_CHAT_SUPERVISOR=1`.
+These Durable Object class tags are separate from D1 SQL migrations and never
+modify D1 tables or migration journals.
 
 **Two different updates.** `lx upgrade` is **CLI self-update** — it replaces the
 `lx` binary from the newest `cli-v*` release asset. `lx worker upgrade` is the
@@ -482,13 +486,14 @@ credentials. It holds:
 
 - `cf-workers/deploy-<flavor>/wrangler.<flavor>.json` — the per-deploy config
   (account, D1/R2/KV ids, vars). The rebuild preserves these bindings verbatim —
-  the ids identify **live** resources and are never recreated. (ADR-0005 W6:
-  the assistant Durable Object binding and the `ai` binding are gone from the
-  config; a DO-era deployment instead gets a delete-class migration appended
-  while the class is live — without it the deploy fails with CF error 10064. A
-  repeat upgrade whose last class mention is already `deleted_classes` keeps its
-  migration history verbatim, no new tag. A never-DO config carries no
-  `migrations`.)
+  the ids identify **live** resources and are never recreated. The retired
+  `LexaAssistantAgent` binding is removed; generated configs now carry the
+  `CHAT_DO` binding, which is inert unless `LXK_CHAT_SUPERVISOR=1`. If the old
+  class is still live its deletion is recorded, then the `LexaChatSupervisor`
+  create tag is appended unless already present. Repeated upgrades preserve
+  applied history without duplicating either transition. The old bound `ai`
+  provider path is retired; Workers AI uses the account-scoped HTTP provider.
+  DO class tags do not alter D1 schema or D1 migration journals.
 - `cf-workers/deploy-<flavor>.bak` — the prior bundle backup (the rollback source).
 - `cf-workers/.cf-token` — the saved Cloudflare API token (0600).
 - `cf-workers/.env.toml` — `LXK_SECRETS_MASTER_KEY` custody (0600); a missing

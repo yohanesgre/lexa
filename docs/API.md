@@ -85,7 +85,7 @@ All non-2xx responses share one shape:
 | 502 | `ASSISTANT_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
 | 502 | `ASSISTANT_UNAVAILABLE` | **Retired (ADR-0005 W6)** — reserved in the catalog for wire compat; no live path emits it (the DO executor is gone) |
 | 429 | `PROVIDER_RATE_LIMITED` | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
-| 409 | `ASSISTANT_TASK_ACTIVE` | Enqueue race on an `assistant_tasks` row, or a second chat client sending on a live thread (ADR-0005 D6: the DO queueing was reverted to this 409) |
+| 409 | `ASSISTANT_TASK_ACTIVE` | Document-task enqueue/reset conflict, or chat turn conflict. With the opt-in Workers supervisor, only an authorized owner replaying the identical active turn may reconnect; a different turn on that chat receives 409. The default request-bound path does not queue or replay a disconnected request. |
 | 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row, or a thread that is missing / not owned / not project-readable (no existence oracle) |
 | 409 | `VISION_NOT_CONFIGURED` | Image attachments submitted while no vision model is configured for the project (`vision_model` unset and `primary_supports_images=0`). A configured `vision_model` enables image attach and routes images through the vision agent |
 | 400 | `SECRET_KEY_UNAVAILABLE` | A managed provider key or Jev key was submitted but `LXK_SECRETS_MASTER_KEY` is unset or malformed (an MCP token save is refused as `MCP_INVALID_TRANSPORT_CONFIG` instead) |
@@ -1597,18 +1597,22 @@ Notes:
 
 ### Assistant (AI assistant tier — in-process SSE on both flavors)
 
-> **ADR-0005 supersedes the Workers-only DO design (accepted 2026-10-10; W6
-> removal landed).**
-> The assistant runs **in-process on TanStack AI over SSE on both flavors** —
-> there is no WebSocket, no Worker gate, no `/api/assistant/agent/:threadKey`
-> route, and no `/api/internal/assistant/*` HMAC surface. `GET /api/capabilities`
-> reports `assistant: true` on either flavor when `LXK_SECRETS_MASTER_KEY` is set
-> (D7). The WS route described below is retained only as a historical record.
+> **ADR-0005 (accepted 2026-10-10) establishes the default assistant path.**
+> The assistant runs in-process on TanStack AI over SSE on both flavors.
+> On Workers, an operator may opt into the ADR-0006 chat supervisor by
+> deploying the `CHAT_DO` binding and setting `LXK_CHAT_SUPERVISOR=1`; the
+> supervisor is not the executor and does not change the default path. There is
+> no retired WebSocket route or `/api/internal/assistant/*` HMAC surface.
+> `GET /api/capabilities` reports `assistant: true` on either flavor when
+> `LXK_SECRETS_MASTER_KEY` is set. Historical WebSocket details are not a live
+> contract.
 
 Persistence is a **single canonical store**: D1 `assistant_threads` (one row per
 thread; `messages` JSON in the stored legacy shape, forward-converted to
-UIMessage parts on read). There is no DO SQLite, no mirror, and no
-migrate-on-read; `GET /api/assistant/chat/:chatId` reads D1 directly.
+UIMessage parts on read). There is no DO SQLite transcript store or mirror;
+`GET /api/assistant/chat/:chatId` reads D1 directly. Supervisor replay state is
+volatile: after its buffer is evicted or unavailable, the canonical transcript
+remains, but live-turn replay/continuation is not guaranteed.
 
 Per-project provider settings; keys are server-side only and never serialized
 (masked view). Settings mutations + test/models are superadmin (`403 FORBIDDEN`
@@ -1618,11 +1622,17 @@ additionally requires a session user (bare API key → `400 NO_USER_CONTEXT`).
 Visibility: Assistant task brief info (status, timestamps) is member-visible;
 the result text is admin-gated on the status endpoint.
 
-**Concurrency (ADR-0005 D6 — contract revert).** A second client sending on a
-live thread receives `409 ASSISTANT_TASK_ACTIVE` again: the in-process tier holds
-one run per thread (chat and document) and does not queue. The DO fan-out to
-multiple connected clients is gone. The code also covers enqueue races on
-`assistant_tasks` rows and thread reset while a run is claimed.
+**Concurrency (ADR-0005 / ADR-0006).** The default request-bound in-process
+path does not queue or replay chat requests; a concurrent conflicting turn
+receives `409 ASSISTANT_TASK_ACTIVE`. With the opt-in Workers supervisor, an
+authenticated owner may replay only the identical active turn in the same
+project/thread: identity includes the authenticated user and project plus the
+immutable execution-affecting request fields (`message`, `agentId`, attachments,
+transcript `fromIndex`, `reasoningEffort`, and `permissionMode`). The frame
+replay cursor `replayFrom` is excluded. A different turn while one is active
+receives `409 ASSISTANT_TASK_ACTIVE`; the supervisor does not queue messages or
+fan frames out to multiple clients. `ASSISTANT_TASK_ACTIVE` also covers
+races and thread reset while a run is claimed.
 
 ```
 REMOVED (ADR-0005 W4/W6): the assistant WebSocket transport and the internal
@@ -2014,9 +2024,10 @@ GET    /api/admin/assistant/runs?status=&kind=&projectId=&limit=&cursor=   (supe
 
 ### Assistant schedules
 
-Per-project cron/interval schedules that fire a `kind='schedule'` assistant run
-on the 15-minute Worker tick. Reads are member-gated (`requireProjectReadById`);
-writes are project-admin-gated (`requireProjectAdminById`). A schedule needs a
+Per-project cron/interval schedule records have CRUD contracts, but no assistant
+schedule executor is active: the `*/15` Worker cron is prune/retention only.
+Reads are member-gated (`requireProjectReadById`); writes are project-admin-gated
+(`requireProjectAdminById`). A schedule needs a
 valid five-field UTC cron expression OR a positive `intervalSeconds`; neither
 present (or both cleared by a PATCH) → 422 INVALID_ARGS, and a malformed cron
 that yields no occurrence is refused up front rather than stored. `createdBy`
@@ -2191,9 +2202,15 @@ DELETE /api/assistant/threads/:documentType/:documentId
 POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
-       fromIndex?: number,
+       fromIndex?: number, replayFrom?: number,
        reasoningEffort?: "minimal" | "low" | "medium" | "high",
        permissionMode?: "ask" | "auto" | "deny" }
+  `fromIndex` selects a transcript position: omitted or `messages.length` appends;
+  an earlier index truncates the transcript before appending the new message
+  (validated as described below). `replayFrom` is a distinct, supervisor-only
+  frame cursor: the number of frames already rendered for this active turn.
+  It controls replay position, not transcript truncation, and is ignored on the
+  default in-process path.
   `reasoningEffort` is the composer's per-message EFFORT pick. It overrides the
   project setting (`assistant_settings.reasoning_effort`) for this turn only and
   is merged, with the output ceiling below, into the provider request body
@@ -2228,10 +2245,13 @@ body { projectId*, chatId*, message*, agentId?,
   stale; the schema and the list/pin endpoints have always been multi-thread.
   Ownership is enforced (another user's chatId → 404 ASSISTANT_THREAD_NOT_FOUND).
   Direct synchronous SSE — same frames as the task stream minus taskId (frames
-  carry chatId). A second concurrent stream on the same chatId is **no longer a
-  409**: the DO serializes and queues the message and fans frames out to all
-  clients (intentional behavior change; `ASSISTANT_TASK_ACTIVE` remains only for
-  enqueue races on `assistant_tasks`).
+  carry chatId). The default request-bound path does not queue or replay a
+  disconnected request. With `CHAT_DO` deployed and `LXK_CHAT_SUPERVISOR=1`, an
+  authenticated owner may reconnect only to the identical active turn in the
+  same project/thread. Its immutable execution-affecting request fields define
+  identity, excluding the `replayFrom` frame cursor. A different turn receives
+  `409 ASSISTANT_TASK_ACTIVE`. No message queue or multi-client frame fan-out
+  is provided.
   attachments are chat-attachment refs (uploads above; cross-project keys →
   422). Images feed the vision path: a configured `vision_model` routes them
   through the vision agent (delegate; current phase, always wins). **Today** no
@@ -2297,10 +2317,9 @@ GET    /api/assistant/chat/:chatId
         summarizedCount, permissionMode, createdAt, updatedAt }
   | 404 ASSISTANT_THREAD_NOT_FOUND
   Transcript for reload/scrollback. `permissionMode` is the sticky per-thread
-  WRITE permission (`"ask" | "auto" | "deny"`; the D1 `assistant_threads.
-  permission_mode` column is canonical in the in-process tier, with the DO value
-  preferred while a DO is present; absent → `"ask"`) — the composer picker
-  hydrates from it on load (D2/D5). Persisted entries carry
+  WRITE permission (`"ask" | "auto" | "deny"`; the D1
+  `assistant_threads.permission_mode` column is canonical; absent → `"ask"`) —
+  the composer picker hydrates from it on load (D2/D5). Persisted entries carry
   optional meta:
   user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
   failure an `error` {code,message} block or a `stopped:true` marker (client
@@ -2325,18 +2344,23 @@ body { verdict*: "approve" | "reject" }
   executes/refuses without one (`auto`/`deny`).
 
 POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-stream)
-  body { batchId?: string }   (optional — LX-79 single-owner resume)
+  body { batchId?: string }   (optional; when supplied, selects exactly that
+                               batch and must identify this owner's thread batch)
 POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
-  Resumes a suspended turn: executes the approved rows of the batch in seq
-  order, then continues the provider turn with no new user message. Streams the
-  same frames as the respective stream endpoints (approval_result frames right
-  after start: applied|failed, `error` carries "CODE: message"; rejected rows
-  emit denied). ADR-0005: the in-process engine owns the resume on BOTH flavors
-  — no DO RPC, no 202 ack, no WebSocket. A resume claim
-  (`assistant_resume_claims`, migration 0028) makes a second resume a no-op
-  (LX-80 idempotency across tabs/retries); the claim is released when the batch
-  is still pending/missing and kept on executed/indeterminate.
-  | 404 ASSISTANT_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume)
+  Resumes the suspended batch: a supplied `batchId` selects exactly that batch;
+  if omitted (legacy clients), the newest transcript batch is discovered.
+  The selected batch must belong to the authenticated owner, project, and
+  thread. Resume executes approved rows in seq order, then continues the
+  provider turn with no new user message. Streams the same frames as the
+  respective stream endpoints (approval_result frames right after start:
+  applied|failed, `error` carries "CODE: message"; rejected rows emit denied).
+  The in-process engine owns resume on both flavors; the optional Workers
+  supervisor coordinates chat only. No retired DO executor, 202 ack, or
+  WebSocket is involved. A resume claim (`assistant_resume_claims`, migration
+  0029) prevents re-execution after a prior claim; duplicate claims no-op, the
+  claim is released when the selected batch is still pending/missing, and kept
+  after execution or an indeterminate outcome.
+  | 404 ASSISTANT_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume or supplied batch missing/foreign)
   | 409 ASSISTANT_TASK_ACTIVE | 409 APPROVALS_PENDING
 
 GET    /api/assistant/chats/:projectId?q=

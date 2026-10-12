@@ -1344,11 +1344,16 @@ the run intact, and Jev emits no `task_activity` of its own.
 > `delegation.ts`, `doc-run.ts`, `thread-rpc.ts`, `worker-tools.ts`) is
 > **deleted**. D1 `assistant_threads` is the single canonical store.
 
-- **Transport** — SSE via `server/api/assistant-api.ts`
+- **Transport** — default request-bound SSE via `server/api/assistant-api.ts`
   (`streamAssistantChat` / `streamAssistantTask` / resume / cancel), mounted on
   both flavors. The client owns the fetch in a module-level session store
   (`app/lib/use-assistant-stream.ts`), so in-app nav + tab switch keep a run;
-  reload / tab-close / network drop kill the turn (accepted class).
+  reload / tab-close / network drop end the default request-bound turn.
+  Workers may opt into the separate `CHAT_DO` supervisor only when the binding
+  is deployed and `LXK_CHAT_SUPERVISOR=1`; it permits only an authorized
+  owner's identical-active-turn replay, while a different turn receives 409.
+  Replay frames are volatile and unavailable after eviction; the canonical
+  transcript remains in `assistant_threads`.
 - **Engine** — `server/assistant/provider.ts` (the only `chat()` importer),
   `build-stream.ts` (`buildStream`, stall watchdog, write drain/suspend, resume
   note, incremental partial persist), `gateway.service.ts` (fallback walk ≤3,
@@ -1367,7 +1372,7 @@ the run intact, and Jev emits no `task_activity` of its own.
   `auto` → `executeAssistantWrite` in-loop (no pending row, no suspend), capped
   per turn; `deny` → local structured refusal. Emissions unchanged (every
   task-mutating execution calls the domain services with `viaAssistant`).
-- **Resume safety** — `assistant_resume_claims` (migration 0028) makes a second
+- **Resume safety** — `assistant_resume_claims` (migration 0029) makes a second
   resume a no-op; a disconnect aborts and persists the partial with `stopped`.
 - **Legacy conversion** — `server/assistant/legacy-convert.ts` still maps the
   stored legacy message shape to UIMessage parts on read (D4 parts-shaped
@@ -1412,8 +1417,10 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       // runStream(taskId) → ReadableStream<StreamFrame>: claimAssistantTask
       //   (conditional UPDATE queued→running), assemble prompt, stream chat(),
       //   persist at terminal points; cancel emits no log row.
-      // runChatStream(chatId, userId, req): no queue row; one
-      //   thread per (project, user); second concurrent stream → AssistantTaskActive.
+      // runChatStream(chatId, userId, req): no queue row; multiple
+      //   threads per project/user. Default request-bound requests do not queue
+      //   or replay; opt-in Workers supervisor permits only authorized,
+      //   identical-active-turn replay and returns 409 for a different turn.
       //   No skill is bound to the chat thread — skills are invoked per message
       //   (`$name`, ≤3, junction-bound at parse time), discovered via the
       //   bound-skill catalog and the read-only `get_skill` tool.
@@ -1486,21 +1493,26 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   via `POST /api/assistant/approvals/:id/decide` (order pinned: sweep → fetch →
   owner check hidden as NotFound → lazy TTL flip → already-decided guard →
   conditional decide). Resume (`POST /api/assistant/chat/:chatId/resume` /
-  `POST /api/assistant/threads/:documentType/:documentId/resume`) sweeps TTLs,
-  locates the suspended batch via `findPendingBatch` (newest-first scan of
-  the transcript, both marker shapes), refuses while approvals are
-  outstanding (`APPROVALS_PENDING`), executes approved rows in seq order as
-  the assistant actor (per-row domain failures recorded on the row via
-  `markExecutionError` — never abort the batch), emits one `approval_result`
-  frame per decided row right after the start frame (applied|failed with
-  "CODE: message" error for executed rows, denied for rejected rows), clears
-  the marker with `applyResumeResults`, and continues the stream from the
-  existing transcript (no fresh user entry). Approval TTL is 24h
+  `POST /api/assistant/threads/:documentType/:documentId/resume`) sweeps TTLs.
+  For chat, a supplied optional `batchId` selects exactly that batch and is
+  validated against the authenticated owner, project, and thread; missing or
+  foreign batches retain `APPROVAL_NOT_FOUND`, and unavailable threads retain
+  `ASSISTANT_THREAD_NOT_FOUND`. If omitted by a legacy client, the newest batch
+  is discovered from the transcript. Resume refuses
+  while approvals are outstanding (`APPROVALS_PENDING`), executes approved rows
+  in seq order as the assistant actor (per-row domain failures recorded on the
+  row via `markExecutionError` — never abort the batch), emits one
+  `approval_result` frame per decided row right after the start frame
+  (applied|failed with "CODE: message" error for executed rows, denied for
+  rejected rows), clears the selected batch marker with `applyResumeResults`,
+  and continues from the existing transcript (no fresh user entry). Duplicate
+  claims no-op; the claim is released if the batch remains pending or is missing
+  and kept after execution/indeterminate outcome. Approval TTL is 24h
   (`APPROVAL_TTL_HOURS`, SQL-format `expires_at`) enforced lazily on
   decide/resume/transcript reads — no timer. This propose → pending-row →
-  suspend path is ask mode only; in `auto` a write executes immediately and in
-  `deny` it is refused locally, so neither reaches the approval protocol (see
-  the DO runtime section above).
+  suspend path is ask mode only; in `auto` a write executes immediately, while
+  `deny` refuses it locally; neither reaches the approval protocol (see the
+  permission-mode contract above).
 - **SSE bridge** (`sseHttpResponse` in `server/api/http.ts`): encodes
   StreamFrames as `event:`/`data:` pairs over a raw `HttpServerResponse.stream`
   (bypasses the JSON encoder) with a 15s `: ping` heartbeat comment. Exactly
@@ -1717,10 +1729,10 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ProviderUnreachable` | 502 | provider network/timeout/DNS failure |
 | `AssistantGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream, or recovery exhausted |
 | `AssistantToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| `AssistantUnavailable` | 502 | DO unreachable, DO RPC failed, legacy import failed after retry, or an internal route failed — Workers only |
+| `AssistantUnavailable` | 502 | Retired DO/internal-route failure code; no live path emits it |
 | `ProviderRateLimited` | 429 | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
-| `AssistantTaskActive` | 409 | enqueue race on an `assistant_tasks` row, or thread reset while a run is claimed. A second chat client on a live thread no longer raises this — the DO serializes and queues |
-| `AssistantThreadNotFound` | 404 | missing thread row (`assistant_threads`), or the WS gate refusing a thread that is missing / not owned / not project-readable |
+| `AssistantTaskActive` | 409 | Document-task enqueue race or reset while claimed; chat conflict, including a different turn during an active supervised turn |
+| `AssistantThreadNotFound` | 404 | Missing thread row (`assistant_threads`) or thread not owned / not project-readable (hidden as NotFound) |
 | `VisionNotConfigured` | 409 | image attachments submitted while no vision model is configured (`vision_model` unset and `primary_supports_images=0`); a configured `vision_model` enables image attach and routes images through the vision agent. Also raised by the settings PUT when a submitted `visionModel` does not resolve to an enabled model of the project's provider |
 | `ApprovalNotFound` | 404 | unknown approval id, or not the pending row's owner (owner mismatch hidden as NotFound) |
 | `ApprovalExpired` | 409 | decide on a row past its 24h TTL — lazily flipped to `expired` first |

@@ -251,39 +251,27 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 
 > **ADR-0005 (accepted 2026-10-10; W6 removal landed) supersedes ADR-0003 for
 > the assistant executor.** Chat and document runs run **in-process** on
-> TanStack AI over SSE on **both flavors** (D7): no `AIChatAgent`, no WebSocket,
-> no DO SQLite, no `/api/internal/assistant/*` HMAC routes, no mirror, no
-> migrate-on-read, no facet delegation, no schedules. One canonical store: D1
-> `assistant_threads`. The DO modules were deleted in W6; the superseded
-> paragraphs below describe the retired DO design.
+> TanStack AI over SSE on **both flavors** (D7): no `AIChatAgent`, no
+> WebSocket executor, no DO-owned canonical transcript store, no
+> `/api/internal/assistant/*` HMAC routes, no D1 mirror/migrate-on-read, no
+> facet delegation, and no assistant schedule executor. D1
+> `assistant_threads` remains the canonical transcript store. W6 removed the
+> old executor modules; ADR-0006 later added the separate opt-in supervisor.
+> The historical paragraphs below describe the retired executor.
 
-> **ADR-0006 (accepted 2026-10-12) adds a Workers-only chat *supervisor* DO —
-> it does not reverse ADR-0005's executor decision.** The engine stays TanStack
-> AI, in-process and D1-canonical; `@cloudflare/ai-chat` and the `agents` SDK
-> are explicitly **excluded** (they were the unreliable part). A hand-written
-> `LexaChatSupervisor` Durable Object (`server/assistant/chat-supervisor.ts`)
-> owns exactly four things for a chat lane: a **single-writer mutex** (one turn
-> per chat, across isolates), a **producer that outlives the client request**
-> (started with the DO's `ctx.waitUntil`, so a reload/tab-close/network drop no
-> longer kills the turn), an **indexed frame buffer** (a reconnecting client
-> replays from `?fromIndex=N` instead of falling back to a D1 transcript read),
-> and an **abort flag** the producer polls (so Stop reaches the tool loop).
-> The Bun flavor is unchanged (no DO runtime) and keeps the in-process path;
-> the supervisor engages only when the `CHAT_DO` binding is present **and**
-> `LXK_CHAT_SUPERVISOR=1`, so the default transport is untouched until the owner
-> flips the flag. D1 `assistant_threads` remains the only canonical store.
->
-> **Status (2026-10-12): implemented and live-verified on workerd.**
-> `server/assistant/chat-supervisor.ts` ships the class; `wrangler.jsonc`, the
-> installer (`scripts/lib/cf-deploy.ts`) and `lx worker upgrade`
-> (`cli/src/worker.ts`) all bind `CHAT_DO` and emit its `new_sqlite_classes`
-> create tag (composed on top of ADR-0005's legacy delete tag, which stays
-> verbatim). Verified live with a real D1: a supervised turn streams, a turn
-> survives a hard page reload mid-stream and persists its complete output,
-> Stop aborts it, a second send is refused with 409 while a re-send of the same
-> turn attaches and replays (from `replayFrom`), and the flag-off path is
-> unchanged. The default transport stays in-process until
-> `LXK_CHAT_SUPERVISOR=1` is set on a deploy that carries the binding.
+> **ADR-0006 (accepted 2026-10-12) adds an opt-in Workers-only chat supervisor,
+> not a new executor.** TanStack AI remains the in-process engine and
+> `assistant_threads` remains the canonical transcript store. `@cloudflare/ai-chat`
+> and the `agents` SDK are excluded. The `CHAT_DO` binding plus
+> `LXK_CHAT_SUPERVISOR=1` enables supervision; otherwise chat remains on the
+> default request-bound SSE path. The supervisor coordinates a single active
+> chat turn across isolates and lets an authorized owner replay only that same
+> active turn. A different turn while one is active receives 409; messages are
+> not queued and frames are not fanned out to multiple clients. The replay
+> buffer is volatile: eviction/unavailability can end replay, while the
+> canonical transcript remains in `assistant_threads`; continuation across
+> eviction or redeploy is not guaranteed. Bun remains on the default
+> request-bound path. No live-verification claim is made here.
 
 Lexa has exactly **one** AI execution tier: the **Assistant**. In the tier
 described below it runs in the server process — server-side TanStack AI `chat()`
@@ -291,12 +279,12 @@ described below it runs in the server process — server-side TanStack AI `chat(
 (`assistant_settings`, custom OpenAI-/Anthropic-compatible endpoints),
 server-side tools v1 (Exa web search, SSRF-guarded `fetch_url`, `read_s3_file`,
 PM reads), curated `project_memory` FTS5 facts, repo-content grounding from
-source-role repos, and a freeform chat surface on the same engine. Queue table
-`assistant_tasks` (`queued → running → completed|failed|cancelled`); thread
-state in `assistant_threads` (ModelMessage[] JSON, rolling summary). This
-in-process tier is once again the **only** executor (ADR-0005): both flavors
-serve the assistant over SSE, the DO executor is retired, and there is no
-external worker, claim loop, or heartbeat.
+source-role repos, and a freeform chat surface on the same engine. Document
+generation uses `assistant_tasks` (`queued → running → completed|failed|cancelled`);
+thread state lives in canonical `assistant_threads` (ModelMessage[] JSON, rolling
+summary). Both flavors expose the assistant over SSE. The optional Workers
+supervisor coordinates chat only; it is not an executor, queue, schedule runner,
+or external worker.
 
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.
@@ -314,18 +302,19 @@ factory.
 > everything outside the last-8-message window is condensed with one cheap
 > `generateText`; a failure skips the event and the next persist retries.
 >
-> Delegation and schedules were dropped (ADR-0005 D2/D3): no `LexaAssistantRunner`
-> facet, no `agents/agent-tools` dispatch, no `*/15` schedule drain. The D1
-> `assistant_runs` and `assistant_schedules` tables stay inert (no writers); the
-> admin run read page remains.
+> Delegation and scheduled execution were dropped (ADR-0005 D2/D3): no
+> `LexaAssistantRunner`, `agents/agent-tools` dispatch, or `*/15` schedule drain.
+> The `assistant_schedules` CRUD routes still create/update/delete schedule
+> records, but no active executor converts due records into `assistant_runs`;
+> the admin run read page remains.
 
-**`workers_ai` (ADR-0005 D5/P5).** A model row with kind `workers_ai` rides the
-**OpenAI wire** through Cloudflare's OpenAI-compatible endpoint
+**`workers_ai` (ADR-0005 D5/P5).** A model row with kind `workers_ai` uses the
+OpenAI-compatible HTTP endpoint
 (`https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1`, `Authorization:
-Bearer <CF API token>`) — the same `createOpenaiChatCompletions` adapter as
-`openai_compatible`. The keyless `env.AI` binding path died with the DO; a
-`workers_ai` provider row requires a non-empty base URL + a stored CF API token
-(save-time validation). The kind label is kept for schema/labels/prices.
+Bearer <CF API token>`) through `openaiCompatibleText` in
+`server/assistant/provider.ts`, not a bound `env.AI` provider path;
+a `workers_ai` provider row requires a non-empty base URL and stored Cloudflare
+API token (save-time validation). The kind label remains for schema/labels/prices.
 
 Call logs carry `thread_key`, `run_id`, and `purpose`
 (`turn|runner|preflight|summary`), and `cost_cents` is computed from the CF
@@ -845,8 +834,9 @@ replaying on D1:
   vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
   (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
-  `createAuth(env)` factory, `wrangler d1 migrations`, `scheduled` prune
-  (`webhook_events` >7 days + `device_login_requests` expired)+backup.
+  `createAuth(env)`, `wrangler d1 migrations`, scheduled `*/15` prune/retention
+  only (expired webhook/device-login records and backup retention; not snapshot
+  creation or assistant schedule execution).
   Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays;
   read-dependent sites fold the read into the batch SQL or carry an explicit
   read-compute-retry window.
@@ -859,9 +849,8 @@ replaying on D1:
   `dist/client/index.html`. Root is `ssr: true`; the authed/app routes declare
   `ssr: false` and stay client-only. Frozen at current features (ADR-0003):
   existing installs keep running, no new work lands there, and the assistant is
-  not part of this flavor. Development runs from a clone
-  (`bun install && bun run setup && bun run dev`); the release installer
-  (`scripts/install.sh workers`) targets Workers only — see docs/DEPLOYMENT.md.
+  available on this flavor via the default request-bound in-process SSE path.
+  Development runs from a clone
 
 Vite plugin chain emits two server bundles (Bun entry + Workers entry).
 Dispatch point: `curl -fsSL …/scripts/install.sh | bash -s -- workers` (the installer's only target).
