@@ -273,12 +273,17 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 > `LXK_CHAT_SUPERVISOR=1`, so the default transport is untouched until the owner
 > flips the flag. D1 `assistant_threads` remains the only canonical store.
 >
-> **Status (2026-10-12): decision accepted, implementation NOT yet landed.**
-> Nothing in the tree implements this yet — no `CHAT_DO` binding, no
-> `LexaChatSupervisor` class, no `v3` migration, no route dispatch. The slice
-> breakdown (code surface + deploy surface + verification) is tracked in the
-> local plan `status/chat-supervisor-do/`; ADR-0005's in-process SSE tier
-> remains the shipped transport until that lands.
+> **Status (2026-10-12): implemented and live-verified on workerd.**
+> `server/assistant/chat-supervisor.ts` ships the class; `wrangler.jsonc`, the
+> installer (`scripts/lib/cf-deploy.ts`) and `lx worker upgrade`
+> (`cli/src/worker.ts`) all bind `CHAT_DO` and emit its `new_sqlite_classes`
+> create tag (composed on top of ADR-0005's legacy delete tag, which stays
+> verbatim). Verified live with a real D1: a supervised turn streams, a turn
+> survives a hard page reload mid-stream and persists its complete output,
+> Stop aborts it, a second send is refused with 409 while a re-send of the same
+> turn attaches and replays (from `replayFrom`), and the flag-off path is
+> unchanged. The default transport stays in-process until
+> `LXK_CHAT_SUPERVISOR=1` is set on a deploy that carries the binding.
 
 Lexa has exactly **one** AI execution tier: the **Assistant**. In the tier
 described below it runs in the server process — server-side TanStack AI `chat()`

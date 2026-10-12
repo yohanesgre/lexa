@@ -37,6 +37,10 @@ import {
 import { cleanupIsolationDirs, freshLexaDir, runCli, type RunResult } from "./test-utils";
 
 const roots: string[] = [];
+
+// ADR-0006: every emitted deploy config carries the chat supervisor namespace.
+const SUPERVISOR_DO = { bindings: [{ name: "CHAT_DO", class_name: "LexaChatSupervisor" }] };
+
 afterEach(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
   roots.length = 0;
@@ -270,9 +274,10 @@ describe("worker upgrade state preservation", () => {
     expect(rebuilt.kv_namespaces).toEqual(prior.kv_namespaces);
     expect(rebuilt.vars?.CUSTOM_FLAG).toBe("keep-me");
     expect(rebuilt.vars?.LXK_VERSION).toBe("2.0.0");
-    // ADR-0005 W6: the assistant DO is retired — an upgrade drops the DO blocks.
-    expect(rebuilt.durable_objects).toBeUndefined();
-    expect(rebuilt.migrations).toBeUndefined();
+    // ADR-0006: the assistant DO stays retired, and the supervisor namespace is
+    // bound + its create tag emitted on every upgrade.
+    expect(rebuilt.durable_objects).toEqual(SUPERVISOR_DO);
+    expect(rebuilt.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaChatSupervisor"] }]);
     // Custody untouched, prior bundle retained.
     expect(readFileSync(cfToken, "utf-8")).toBe("saved-token\n");
     expect(readFileSync(envFile, "utf-8")).toBe('LXK_SECRETS_MASTER_KEY = "abc"\n');
@@ -360,7 +365,7 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
   };
   const BUNDLE = { main: "index.js", assets: { directory: "../client" } };
 
-  it("appends a delete-class migration and drops the binding for a DO-era prior config", async () => {
+  it("appends ADR-0005's delete-class tag and ADR-0006's supervisor binding + create for a DO-era prior config", async () => {
     const root = makeRoot();
     const prior = priorConfig({
       durable_objects: DO_BINDING,
@@ -373,14 +378,16 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
 
     expect(outcome.status).toBe("ok");
     const rebuilt = readDeployConfigFile(config.configPath)!;
-    expect(rebuilt.durable_objects).toBeUndefined();
+    // ADR-0005's delete-class tag, then ADR-0006's supervisor binding + create.
+    expect(rebuilt.durable_objects).toEqual(SUPERVISOR_DO);
     expect(rebuilt.migrations).toEqual([
       { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
       { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+      { tag: "v3", new_sqlite_classes: ["LexaChatSupervisor"] },
     ]);
   });
 
-  it("keeps a repeat upgrade's history verbatim, appends the next tag when deeper, and emits none for a never-DO config", () => {
+  it("keeps a repeat upgrade's history verbatim, appends the next tag when deeper, and emits the supervisor create for a never-DO config", () => {
     const repeat = priorConfig({
       migrations: [
         { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
@@ -399,8 +406,8 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
     expect(rebuiltRepeat.migrations).toEqual([
       { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
       { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+      { tag: "v3", new_sqlite_classes: ["LexaChatSupervisor"] },
     ]);
-    expect(rebuiltRepeat.migrations?.some((m) => (m as { tag?: string }).tag === "v3")).toBe(false);
 
     const deeper = priorConfig({
       durable_objects: DO_BINDING,
@@ -415,13 +422,17 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
       { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
       { tag: "v2", deleted_classes: ["SomeOtherClass"] },
       { tag: "v3", deleted_classes: ["LexaAssistantAgent"] },
+      { tag: "v4", new_sqlite_classes: ["LexaChatSupervisor"] },
     ]);
 
     // Binding-only prior: the DO class is detected without a migrations history.
     const bindingOnly = priorConfig({ durable_objects: DO_BINDING });
     expect(
       buildUpgradeConfig(bindingOnly, { version: "2.0.0", publicUrl: "https://lexa.example.workers.dev", bundle: BUNDLE }).migrations
-    ).toEqual([{ tag: "v1", deleted_classes: ["LexaAssistantAgent"] }]);
+    ).toEqual([
+      { tag: "v1", deleted_classes: ["LexaAssistantAgent"] },
+      { tag: "v2", new_sqlite_classes: ["LexaChatSupervisor"] },
+    ]);
 
     const never = priorConfig();
     expect(buildDoRemovalMigrations(never)).toBeUndefined();
@@ -430,8 +441,8 @@ describe("worker upgrade DO removal migration (ADR-0005)", () => {
       publicUrl: "https://lexa.example.workers.dev",
       bundle: BUNDLE,
     });
-    expect(rebuiltNever.migrations).toBeUndefined();
-    expect(rebuiltNever.durable_objects).toBeUndefined();
+    expect(rebuiltNever.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaChatSupervisor"] }]);
+    expect(rebuiltNever.durable_objects).toEqual(SUPERVISOR_DO);
   });
 });
 

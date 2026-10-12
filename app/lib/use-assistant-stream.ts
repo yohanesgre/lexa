@@ -535,10 +535,22 @@ function getSession(key: string): AssistantStreamSession | null {
   return sessions.get(key) ?? null;
 }
 
+// ADR-0006: after a mid-turn break the client re-attaches to the same turn, so
+// tell the supervisor how many frames were already rendered and let it replay
+// only the tail. The server ignores the hint for a fresh run, so a wrong guess
+// cannot skip frames. Non-chat streams and first sends pass through untouched.
+function withReplayFrom(body: unknown, url: string, prior: AssistantStreamSession | null): unknown {
+  const frames = prior?.getSnapshot().frames.length ?? 0;
+  if (frames <= 0 || prior?.getSnapshot().status !== "error") return body;
+  if (!url.endsWith("/assistant/chat/stream")) return body;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+  return { ...body, replayFrom: frames };
+}
+
 export function assistantSendForKey(key: string, url: string, body: unknown, onResult?: (result: ResumeResult) => void): void {
   const existing = sessions.get(key);
   if (existing && (existing.getSnapshot().status === "connecting" || existing.getSnapshot().status === "streaming")) return;
-  const next = new AssistantStreamSession(key, url, body, onResult);
+  const next = new AssistantStreamSession(key, url, withReplayFrom(body, url, existing ?? null), onResult);
   sessions.set(key, next);
   next.start();
 }

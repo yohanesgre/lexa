@@ -335,7 +335,7 @@ describe("buildDoRemovalMigrations (DO-era detection)", () => {
     ]);
   });
 
-  test("buildDeployConfig keeps a repeat upgrade's applied history verbatim (no v3)", () => {
+  test("buildDeployConfig keeps a repeat upgrade's history verbatim and appends only the supervisor create", () => {
     const priorConfig = {
       migrations: [
         { tag: "v1", new_sqlite_classes: [CLASS] },
@@ -355,9 +355,12 @@ describe("buildDoRemovalMigrations (DO-era detection)", () => {
       rootConfig: { compatibility_date: "2026-08-01" },
       priorConfig,
     });
-    expect(config.migrations).toEqual(priorConfig.migrations);
-    const migrations = config.migrations as Array<{ tag?: string }>;
-    expect(migrations.some((m) => m.tag === "v3")).toBe(false);
+    // ADR-0006: the applied history is kept verbatim, then the supervisor's
+    // create tag is appended on top of it.
+    expect(config.migrations).toEqual([
+      ...priorConfig.migrations,
+      { tag: "v3", new_sqlite_classes: ["LexaChatSupervisor"] },
+    ]);
   });
 });
 
@@ -535,7 +538,7 @@ describe("source order — account resolves before any resource is created", () 
     expect(src).not.toContain("durable_objects,");
   });
 
-  test("buildDeployConfig emits no DO migrations for a fresh install", () => {
+  test("buildDeployConfig emits the supervisor namespace + create tag for a fresh install", () => {
     const config = buildDeployConfig({
       workerName: "lexa",
       d1Name: "lexa",
@@ -552,8 +555,9 @@ describe("source order — account resolves before any resource is created", () 
       },
       priorConfig: null,
     });
-    expect(config.migrations).toBeUndefined();
-    expect(config.durable_objects).toBeUndefined();
+    // ADR-0006: every deploy carries the supervisor namespace + its create tag.
+    expect(config.durable_objects).toEqual({ bindings: [{ name: "CHAT_DO", class_name: "LexaChatSupervisor" }] });
+    expect(config.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaChatSupervisor"] }]);
     expect(config.triggers).toEqual({ crons: ["*/15 * * * *"] });
   });
 
@@ -581,10 +585,11 @@ describe("source order — account resolves before any resource is created", () 
         migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
       },
     });
-    expect(config.durable_objects).toBeUndefined();
+    expect(config.durable_objects).toEqual({ bindings: [{ name: "CHAT_DO", class_name: "LexaChatSupervisor" }] });
     expect(config.migrations).toEqual([
       { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },
       { tag: "v2", deleted_classes: ["LexaAssistantAgent"] },
+      { tag: "v3", new_sqlite_classes: ["LexaChatSupervisor"] },
     ]);
     expect(config.triggers).toEqual({ crons: ["*/15 * * * *"] });
   });

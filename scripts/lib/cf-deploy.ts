@@ -315,7 +315,7 @@ export function nextMigrationTag(migrations: unknown): string {
 // (`new_sqlite_classes`/`new_classes`) or a delete (`deleted_classes`), or null
 // when never mentioned. The LAST mention wins — a class created then deleted is
 // gone even though earlier entries still name it.
-function lastMigrationMention(migrations: unknown): "created" | "deleted" | null {
+function lastMigrationMention(migrations: unknown, className: string): "created" | "deleted" | null {
   if (!Array.isArray(migrations)) return null;
   let mention: "created" | "deleted" | null = null;
   for (const migration of migrations) {
@@ -324,10 +324,10 @@ function lastMigrationMention(migrations: unknown): "created" | "deleted" | null
     let createdHere = false;
     for (const key of ["new_sqlite_classes", "new_classes"]) {
       const list = record[key];
-      if (Array.isArray(list) && list.includes(ASSISTANT_DO_CLASS)) createdHere = true;
+      if (Array.isArray(list) && list.includes(className)) createdHere = true;
     }
     const deleted = record.deleted_classes;
-    const deletedHere = Array.isArray(deleted) && deleted.includes(ASSISTANT_DO_CLASS);
+    const deletedHere = Array.isArray(deleted) && deleted.includes(className);
     if (deletedHere) mention = "deleted";
     else if (createdHere) mention = "created";
   }
@@ -339,7 +339,7 @@ export function buildDoRemovalMigrations(
 ): Array<Record<string, unknown>> | undefined {
   const priorMigrations = Array.isArray(prior.migrations) ? prior.migrations : [];
   const bound = durableObjectClassNames(prior.durable_objects).includes(ASSISTANT_DO_CLASS);
-  const lastMention = lastMigrationMention(priorMigrations);
+  const lastMention = lastMigrationMention(priorMigrations, ASSISTANT_DO_CLASS);
   // Never mentioned anywhere: fresh install, no migration history.
   if (!bound && lastMention === null) return undefined;
   // Binding gone and the last mention is a delete: the class is ALREADY removed
@@ -349,6 +349,26 @@ export function buildDoRemovalMigrations(
     ...(priorMigrations as Array<Record<string, unknown>>),
     { tag: nextMigrationTag(priorMigrations), deleted_classes: [ASSISTANT_DO_CLASS] },
   ];
+}
+
+// ADR-0006: the chat supervisor DO. Every deploy needs the class created once —
+// the binding alone is not enough (Cloudflare rejects a script that binds a
+// class it does not export, CF error 10064). The create is appended only when
+// the history's LAST mention of the class is not already a create, so a repeat
+// upgrade keeps its applied history verbatim and no redundant tag is emitted.
+export const CHAT_SUPERVISOR_DO_CLASS = "LexaChatSupervisor";
+
+export function buildChatSupervisorMigrations(
+  migrations: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+  if (lastMigrationMention(migrations, CHAT_SUPERVISOR_DO_CLASS) === "created") return migrations;
+  return [...migrations, { tag: nextMigrationTag(migrations), new_sqlite_classes: [CHAT_SUPERVISOR_DO_CLASS] }];
+}
+
+// The supervisor namespace binding, emitted for every deploy. It is inert until
+// `LXK_CHAT_SUPERVISOR=1`, so binding it changes no behavior on its own.
+export function chatSupervisorDurableObjects(): Record<string, unknown> {
+  return { bindings: [{ name: "CHAT_DO", class_name: CHAT_SUPERVISOR_DO_CLASS }] };
 }
 
 // Root repo wrangler config — the per-deploy config mirrors
@@ -860,7 +880,9 @@ export function buildDeployConfig(
   input: DeployConfigInput,
 ): Record<string, unknown> {
   const { manifest, rootConfig } = input;
-  const migrations = buildDoRemovalMigrations(input.priorConfig ?? {});
+  // ADR-0005's legacy removal first (it may append a delete tag), then ADR-0006's
+  // supervisor create on top of whatever history results.
+  const migrations = buildChatSupervisorMigrations(buildDoRemovalMigrations(input.priorConfig ?? {}) ?? []);
   return {
     name: input.workerName,
     account_id: input.account,
@@ -879,10 +901,12 @@ export function buildDeployConfig(
     ],
     r2_buckets: [{ binding: "BLOB", bucket_name: input.r2Name }],
     kv_namespaces: [{ binding: "KV", id: input.kvId }],
-    // ADR-0005: a fresh install emits no `durable_objects`/`migrations`; a
-    // DO-era deployment gets the delete-class migration so Cloudflare accepts
-    // the version that drops `LexaAssistantAgent` (else CF error 10064).
-    ...(migrations !== undefined ? { migrations } : {}),
+    // ADR-0006: the chat supervisor namespace is bound on every deploy (inert
+    // until LXK_CHAT_SUPERVISOR=1). ADR-0005's legacy delete-class tag is still
+    // appended while a prior deploy owns `LexaAssistantAgent` (else CF error
+    // 10064), and the supervisor's create tag rides on top of that history.
+    durable_objects: chatSupervisorDurableObjects(),
+    ...(migrations.length > 0 ? { migrations } : {}),
     // Scheduled tick carried verbatim from root (prune + R2 backup retention
     // — the only pruner on Workers; ADR-0005 W6 keeps it while dropping the
     // assistant schedule drain).

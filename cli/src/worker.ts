@@ -40,7 +40,9 @@ import {
 import { readDeployedVersion, sameVersion, webTagToVersion } from "./version";
 import {
   MCP_SECRET_REFS_MIGRATION,
+  buildChatSupervisorMigrations,
   buildDoRemovalMigrations,
+  chatSupervisorDurableObjects,
   cfFetch,
   migrationOrderError,
   pendingMigrations,
@@ -58,7 +60,7 @@ export { MCP_SECRET_REFS_MIGRATION, migrationOrderError, pendingMigrations };
 
 // Re-export the shared DO-removal migration builder (defined in cf-deploy so the
 // installer and the CLI share one tag/scan implementation).
-export { buildDoRemovalMigrations };
+export { buildChatSupervisorMigrations, buildDoRemovalMigrations };
 
 // The custody layout carries no version marker before LX-36 — read it when
 // present, otherwise the plan prints "unknown".
@@ -460,10 +462,11 @@ export function buildUpgradeConfig(
   if (prior.d1_databases !== undefined) config.d1_databases = prior.d1_databases;
   if (prior.r2_buckets !== undefined) config.r2_buckets = prior.r2_buckets;
   if (prior.kv_namespaces !== undefined) config.kv_namespaces = prior.kv_namespaces;
-  // ADR-0005: drop the DO binding and append the delete-class migration for a
-  // DO-era deployment; a never-DO config carries no migrations at all.
-  const migrations = buildDoRemovalMigrations(prior);
-  if (migrations !== undefined) config.migrations = migrations;
+  // ADR-0005's legacy delete-class tag for a DO-era deployment, then ADR-0006's
+  // supervisor binding + create tag on top of whatever history results.
+  config.durable_objects = chatSupervisorDurableObjects();
+  const migrations = buildChatSupervisorMigrations(buildDoRemovalMigrations(prior) ?? []);
+  if (migrations.length > 0) config.migrations = migrations;
   if (triggers !== undefined) config.triggers = triggers;
   return config;
 }
