@@ -227,6 +227,44 @@ describe("AssistantGateway retry/backoff", () => {
     expect(res.chunks.some((c) => (c as { delta?: string }).delta === "retry-ok")).toBe(true);
   });
 
+  it("Stop during the backoff sleep does not sit out the delay (M6)", async () => {
+    vi.useFakeTimers();
+    try {
+      const spy = vi.spyOn(provider, "streamChat");
+      const ac = new AbortController();
+      spy.mockImplementation((() => (async function* () { throw new AssistantGenerationFailed({ message: "503 upstream", status: 503 } as never); })()) as never);
+      const gatewayLayer = AssistantGateway.Default.pipe(Layer.provide(stubProviders()), Layer.provide(stubModels()), Layer.provide(stubCallLog()), Layer.provide(stubSettings()), Layer.provide(memDbLayer()));
+      const program = Effect.gen(function* () {
+        const gw = yield* AssistantGateway;
+        const stream = gw.streamChat({
+          projectId: "p1",
+          systemPrompts: [],
+          messages: [{ role: "user", content: "hi" } as never],
+          abortController: ac,
+          fallbackConfigs: [
+            { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m1" },
+            { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m2" },
+          ],
+        });
+        // Stop lands INSIDE the retry backoff (the 503 attempt already failed).
+        setTimeout(() => ac.abort(), 50);
+        const startedAt = Date.now();
+        const chunks = yield* Effect.promise(() => collect(stream).catch(() => []));
+        return { chunks, calls: spy.mock.calls.length, elapsed: Date.now() - startedAt };
+      });
+      const pending = Effect.runPromise(program.pipe(Effect.provide(gatewayLayer))) as unknown as Promise<{ chunks: unknown[]; calls: number; elapsed: number }>;
+      await vi.advanceTimersByTimeAsync(2000);
+      const res = await pending;
+      // The 800ms+ backoff sleep is abandoned at the abort (~50ms), and the
+      // fallback config is never dispatched.
+      expect(res.elapsed).toBeLessThan(400);
+      expect(res.calls).toBe(1);
+      expect(res.chunks).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("FATAL emitted on all-models-failed terminal", async () => {
     const spy = vi.spyOn(provider, "streamChat");
     spy.mockImplementation((() => (async function* () { throw new AssistantGenerationFailed({ message: "500 Internal", status: 500 } as never); })()) as never);

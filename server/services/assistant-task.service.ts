@@ -40,7 +40,7 @@ import { buildStream, findPendingBatch, applyResumeResults, buildResumeResultsNo
 import type { StreamFrame } from "../../shared/assistant";
 import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim";
 import { collectResumeResults } from "../assistant/resume-results";
-import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForEffort, bytesToBase64, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
+import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForTurn, bytesToBase64, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import type { ProviderConfig } from "../assistant/provider";
 import type { TaskRef } from "../assistant/tools";
 
@@ -490,7 +490,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const userContent = buildUserMessage({ instruction, summary: verdict.summary, summarizedCount: verdict.summarizedCount }) as string;
         return buildStream({
           keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as object) } as never),
-          systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
+          systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsRow.reasoning_effort), config.kind),
           historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(task.projectId), imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: (text) => Effect.runPromise(completeTask(taskId, text)).then(() => {}).catch(() => {}),
@@ -532,6 +532,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           return yield* new AssistantTaskActive();
         }
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
+        const config = configFromRow(settingsRow);
         // Claim BEFORE any work so a retry / second tab cannot re-execute the
         // same approved writes. `duplicate` no-ops; only a missing claim table
         // proceeds without a claim (`unclaimed`).
@@ -595,8 +596,8 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const visionConfig = imageMode === "delegate" ? yield* visionConfigOf(settingsRow) : null;
         const tools = visionConfig !== null ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: documentId }, loadImageBase64: loadImageBase64For(thread.projectId), resolveMimeType: (key) => resolveMimeType(thread.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         return buildStream({
-          keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config: configFromRow(settingsRow), gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
-          systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/assistant").AssistantReasoningEffort | null }).reasoning_effort)),
+          keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
+          systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsRow.reasoning_effort), config.kind),
           userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),

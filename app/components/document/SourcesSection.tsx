@@ -174,11 +174,11 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
   };
 
   return (
-    <div className={cn(className)}>
+    <div className={cn("sources-section", className)}>
       <div className="flex items-center gap-2 mb-2">
         <BookOpen size={14} strokeWidth={1.5} className="text-lx-text-muted" />
         <span className="prop-label">Sources</span>
-        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">used by AI</span>
+        <span className="text-2xs text-lx-text-muted">What this page draws on</span>
       </div>
 
       {sources.map((s) => (
@@ -187,16 +187,16 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
 
       {sources.length === 0 && (
         <div className="text-xs text-lx-text-muted mb-2">
-          No sources yet. Type @ to pick a wiki page, or paste a URL — AI grounds its writing in these.
+          No sources yet. Type @ to pick a wiki page, or paste a URL. AI grounds its writing in these.
         </div>
       )}
 
       <div style={{ position: "relative" }}>
         <div className="flex items-center gap-2">
           <input
-            className="prop-input"
-            aria-label="Add source — type @ for a wiki page or paste a URL"
-            placeholder="Add source — type @ for a wiki page or paste a URL…"
+            className="prop-input flex-1 min-w-0"
+            aria-label="Add a source"
+            placeholder="Add a wiki page or URL…"
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
@@ -205,12 +205,10 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
             onFocus={() => setFocused(true)}
             onBlur={() => window.setTimeout(() => setFocused(false), 150)}
             onKeyDown={handleKeyDown}
-            style={{ flex: 1, height: 28, fontSize: 12, minWidth: 0 }}
           />
           <button
             type="button"
-            className="btn btn-ghost"
-            style={{ height: 26, padding: "0 8px", fontSize: 12, flexShrink: 0 }}
+            className="btn btn-ghost btn-sm shrink-0"
             onClick={handleAdd}
             disabled={!value.trim() || adding || (mention && wikiMatches.length === 0)}
           >

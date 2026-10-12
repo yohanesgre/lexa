@@ -1,5 +1,6 @@
 import { deriveChatTitle } from "../../shared/assistant";
-import type { Citation } from "../../shared/assistant";
+import type { AssistantReasoningEffort, Citation, ProviderKind } from "../../shared/assistant";
+import { ASSISTANT_MAX_OUTPUT_TOKENS } from "../../shared/assistant";
 import { skillToken } from "../../shared/skill-tokens";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
 import { InvalidArgs } from "../api/errors";
@@ -220,8 +221,24 @@ export async function replaceImageRefsWithPlaceholders(messages: unknown[]): Pro
   return out;
 }
 export function needsSummary(messages: unknown[]): boolean { if (messages.length > SUMMARY_THRESHOLD_MESSAGES) return true; try { return JSON.stringify(messages).length > SUMMARY_THRESHOLD_BYTES; } catch { return false; } }
-export function resolveReasoningEffort(rowEffort: import("../../shared/assistant").AssistantReasoningEffort | null, override?: import("../../shared/assistant").AssistantReasoningEffort | null): import("../../shared/assistant").AssistantReasoningEffort | null { return override ?? rowEffort ?? null; }
-export function modelOptionsForEffort(effort: import("../../shared/assistant").AssistantReasoningEffort | null): Record<string, unknown> | undefined { return effort === null ? undefined : { reasoning_effort: effort }; }
+export function resolveReasoningEffort(rowEffort: AssistantReasoningEffort | null, override?: AssistantReasoningEffort | null): AssistantReasoningEffort | null { return override ?? rowEffort ?? null; }
+
+// Per-request model options for every assistant turn (M2): the resolved
+// thinking effort — absent when neither the project setting nor the composer
+// pick set one — plus the documented output ceiling. Merged verbatim into the
+// provider request body by the adapter's `mapOptionsToRequest`, so the cap
+// reaches the wire on every lane (chat send, chat resume, task, wiki).
+// The ceiling key is per wire: the Responses API spells it `max_output_tokens`,
+// while chat completions and the Anthropic wire both use `max_tokens` (the
+// Anthropic adapter's mapCommonOptionsToAnthropic exempts that key from its
+// unknown-option drop list).
+export function modelOptionsForTurn(effort: AssistantReasoningEffort | null, kind: ProviderKind | string): Record<string, unknown> {
+  const key = kind === "openai_responses" ? "max_output_tokens" : "max_tokens";
+  return {
+    ...(effort !== null ? { reasoning_effort: effort } : {}),
+    [key]: ASSISTANT_MAX_OUTPUT_TOKENS,
+  };
+}
 
 export const ASSISTANT_HALLUCINATION_RE = /(sudah dibuat|berhasil dibuat|successfully created|has been created|created successfully)/i;
 // Single-sourced: `server/assistant/build-stream.ts` re-exports this as

@@ -50,6 +50,25 @@ export const ASSISTANT_PRE_INGRESS_TIMEOUT_MS = 30_000;
 export const ASSISTANT_STALL_TIMEOUT_MS = 90_000;
 export const ASSISTANT_STALL_MESSAGE = "stream stalled — no response from provider";
 
+// Total-turn wall clock (M1). Every other server bound is an IDLE bound that
+// resets on each chunk, so a provider that keeps trickling reasoning deltas can
+// hold a turn open indefinitely (`docs/LAYERS.md` → Assistant stream limits).
+// This one is measured once, from the turn's first frame: when it fires the
+// provider request is aborted and the turn ends through the same failed-turn
+// path the stall watchdog uses (persisted `error`, `error` frame, Retry).
+export const ASSISTANT_TURN_BUDGET_MS = 300_000;
+export const ASSISTANT_TURN_BUDGET_MESSAGE = "turn exceeded its 5-minute budget";
+
+// Per-provider-request output ceiling (M2): sent as `max_tokens` on the
+// OpenAI-compatible / Anthropic wires and `max_output_tokens` on the Responses
+// wire, through the existing `modelOptions` merge. A normal reply — including a
+// full page-sized wiki rewrite (the read toolset caps a page at
+// `WIKI_READ_CAP` = 8000 chars ≈ 2k tokens) — fits with ~3x headroom. The
+// unbounded default let one attempt emit 28,519 output tokens over 506 s.
+export const ASSISTANT_MAX_OUTPUT_TOKENS = 8192;
+export const ASSISTANT_OUTPUT_TRUNCATED_MESSAGE =
+  "the reply hit the output cap (8192 tokens) before finishing";
+
 // Canonical Assistant write-tool names, in approval-chip order. Single source
 // of truth for the settings checkbox list and the runtime registry: the DO-side
 // `server/assistant/write-tool-names.ts` re-exports this list, so the UI can

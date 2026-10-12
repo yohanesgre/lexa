@@ -22,7 +22,7 @@ import {
   type JevUsage,
 } from "./jev";
 
-import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS } from "./tool-caps";
+import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, withToolTimeout } from "./tool-caps";
 export { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS };
 
 const SNIPPET_CAP = 500;
@@ -601,7 +601,9 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
     tools.push(buildJevAssessTool({ config: deps.jevConfig, fetchImpl: deps.fetchImpl }));
   }
 
-  return tools;
+  // Every tool here is local (DB-backed): bound each in-flight call so a stuck
+  // query cannot hold the turn open (M5, tool-caps.LOCAL_TOOL_TIMEOUT_MS).
+  return tools.map((t) => withToolTimeout(t));
 }
 
 function summarizeTaskShape() {

@@ -937,6 +937,9 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
     // fresh normalizeBaseUrl + buildAdapter per attempt, isRetriable = ProviderAuthFailed
     // | ProviderUnreachable | AssistantGenerationFailed, call_logs insert per attempt
     // (done/error/aborted/suspended), cost via assistant_model_prices (OpenRouter fetch).
+    // Backoff sleep (400/800ms base ×2^attempt, ≤8s) is ABORT-AWARE: Stop during a
+    // retry wait resolves it immediately and the attempt loop's own abort check
+    // ends the stream (M6) — it never sits out the delay.
     // No cycles: gateway depends on repos + Sqlite only — never on AssistantService.
   }),
 }) {}
@@ -1368,7 +1371,11 @@ the run intact, and Jev emits no `task_activity` of its own.
   resume a no-op; a disconnect aborts and persists the partial with `stopped`.
 - **Legacy conversion** — `server/assistant/legacy-convert.ts` still maps the
   stored legacy message shape to UIMessage parts on read (D4 parts-shaped
-  contract).
+  contract): text, a persisted `reasoning` part + `reasoningMs`, the approval
+  carrier, and the display `toolLog` (or older `toolCalls`) log as
+  `tool-<name>` parts with `state: "input-available"` — the log records the CALL
+  only (no outcome was ever persisted), so a reloaded turn shows the tools it ran
+  without fabricating results.
 - **Capability** — `server/capabilities.ts` `capabilities(flavor, env)`;
   `assistant = hasSecretsMasterKey(env)` on **both** flavors.
 - **REST shell** — the assistant REST handlers live in
@@ -1523,6 +1530,34 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   watchdog's own abort is flagged (`stalled`) so it is never misclassified as
   a client abort. Wraps both consume calls (document + chat, with/without
   tools).
+- **Turn budget (M1):** `ASSISTANT_TURN_BUDGET_MS = 300_000` (shared) is armed
+  ONCE per `buildStream` turn, re-checked before every chunk wait and used to
+  clamp that wait — so no stream of arriving chunks can outlive it. Every other
+  server bound here is an IDLE bound that resets per chunk; the observed turn
+  streamed 506s of reasoning deltas and never tripped one. When it fires the
+  provider request is aborted and the turn ends down the ordinary failure path
+  (persisted `error` marker + `error` frame `ASSISTANT_GENERATION_FAILED`,
+  "turn exceeded its 5-minute budget"): failed bubble with Retry, composer
+  unlocked, draft and partial output intact. A turn that already queued write
+  proposals suspends for approval instead — same rule as the stall watchdog.
+  Overridden per turn by `StreamRunContext.turnBudgetMs` (tests).
+- **Output ceiling (M2):** every assistant model request carries
+  `ASSISTANT_MAX_OUTPUT_TOKENS = 8192` via `modelOptions` (`modelOptionsForTurn`
+  in `server/services/assistant-helpers.ts`) — `max_tokens` on the
+  chat-completions and Anthropic wires, `max_output_tokens` on the Responses
+  wire. A normal reply fits with ~3x headroom (a full page-sized wiki rewrite is
+  ~2k tokens: `WIKI_READ_CAP` = 8,000 chars); unbounded, one attempt emitted
+  28,519 output tokens over 506s. If the LAST provider response of the turn ends
+  on `finish_reason: length`, the turn ends as a visible failure
+  (`ASSISTANT_GENERATION_FAILED` + the truncation message) with the partial text
+  persisted — truncation is never silent.
+- **Local tool timeout (M5):** `LOCAL_TOOL_TIMEOUT_MS = 20_000` (`tool-caps.ts`,
+  `withToolTimeout`) bounds each DB-backed read/write tool's `execute`. Remote
+  tools already carry their own (MCP 30s, fetch_url / web_search 15s, vision
+  60s, Jev 10s); the local ones had none. The rejection reaches the model as a
+  tool error result and the turn keeps running; it does NOT abort the underlying
+  query (a synchronous SQLite read cannot be interrupted), so it bounds the
+  turn's wait, not the query.
 - **Client-facing error copy:** provider-tagged errors (`ProviderAuthFailed`,
   `ProviderUnreachable`, `AssistantGenerationFailed`) expose only
   `providerMessage` (≤500 chars) or a fixed generic string via

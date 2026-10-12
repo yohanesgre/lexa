@@ -15,8 +15,11 @@
 //     read renders it as stopped — ADR-0005 §Reliability.3).
 //   - `pendingBatch` → a `data-assistant-approval` carrier part (W7b/WS1) so a
 //     legacy thread's suspended approvals still rebuild on reload.
-//   - `toolLog` / `toolCalls` are NOT mapped (tool detail is session-memory-only
-//     by wireframe contract).
+//   - `toolLog` (and the older `toolCalls` spelling of the same display-log
+//     entries) → one `tool-<name>` part per call, `state: "input-available"`:
+//     the persisted log records the CALL only (its outcome was never written),
+//     so the parts carry no output and a reloaded turn shows the tools it ran
+//     instead of rendering as pure thinking.
 // A message always carries at least one part so it survives DO persistence.
 
 import type { UIMessage } from "ai";
@@ -142,6 +145,31 @@ function approvalCarrierPart(
   return { type: ASSISTANT_APPROVAL_DATA_PART, data: { batchId, approvals } } as unknown as ConvertedUIMessage["parts"][number];
 }
 
+// Display log → tool parts. `build-stream` appends one `{name, detail?}` entry
+// per call (the older threads use the colliding key `toolCalls` for the same
+// shape); wire-shaped entries (a `function.name` object) are skipped. The log is
+// written when the call's arguments complete, BEFORE execution, and no outcome
+// is ever recorded — so each part is `input-available` (a call, no result) and
+// never fabricates an output. `toolCallId` is derived from the message index so
+// a rebuilt turn's chips stay distinct across messages.
+function toolPartsOf(message: LegacyStoredMessage, index: number): ConvertedUIMessage["parts"] {
+  const raw = Array.isArray(message.toolLog) ? message.toolLog : Array.isArray(message.toolCalls) ? message.toolCalls : [];
+  const out: ConvertedUIMessage["parts"] = [];
+  raw.forEach((entry, position) => {
+    if (typeof entry !== "object" || entry === null) return;
+    const name = (entry as { name?: unknown }).name;
+    if (typeof name !== "string" || name.length === 0) return;
+    const detail = (entry as { detail?: unknown }).detail;
+    out.push({
+      type: `tool-${name}`,
+      toolCallId: `legacy-${index}-tool-${position}`,
+      state: "input-available",
+      input: typeof detail === "string" && detail !== "" ? { detail } : {},
+    } as unknown as ConvertedUIMessage["parts"][number]);
+  });
+  return out;
+}
+
 export function convertLegacyMessage(message: LegacyStoredMessage, index: number): ConvertedUIMessage | null {
   if (!isConvertibleRole(message.role)) return null;
 
@@ -150,6 +178,7 @@ export function convertLegacyMessage(message: LegacyStoredMessage, index: number
   // the fold rebuilds from parts.
   const reasoning = reasoningPartOf(message);
   if (reasoning) parts.unshift(reasoning);
+  parts.push(...toolPartsOf(message, index));
   if (parts.length === 0) parts.push({ type: "text", text: "" });
   const carrier = approvalCarrierPart(message.pendingBatch);
   if (carrier) parts.push(carrier);
@@ -215,8 +244,8 @@ export function convertStoredMessages(messages: readonly unknown[]): unknown[] {
  * Inverse of {@link convertLegacyMessages} for the P2 REST read path: the DO
  * canonical transcript is UIMessage-parts shaped, but the frontend still speaks
  * the legacy shape until P4 rewrites it (D3 lands the parts shape in P4). Only
- * the fields the forward conversion preserves are reconstructed; tool parts and
- * `id` are dropped (same lossiness as the import, ADR D8).
+ * the fields the forward conversion preserves are reconstructed: text, the
+ * display tool log (name + detail), and `id` is dropped (ADR D8).
  *
  * The `data-assistant-approval` carrier (W7b/WS1) is the one extension the
  * forward conversion emits, so it is reconstructed back into `pendingBatch` —
@@ -230,12 +259,18 @@ export function legacyFromUIMessages(messages: readonly unknown[]): LegacyStored
     const record = message as { role?: unknown; parts?: unknown; metadata?: unknown };
     if (!isConvertibleRole(record.role)) continue;
     const texts: string[] = [];
+    const toolLog: Array<{ name: string; detail?: string }> = [];
     let pendingBatch: { batchId: string; approvals: unknown[] } | null = null;
     if (Array.isArray(record.parts)) {
       for (const part of record.parts) {
         if (typeof part !== "object" || part === null) continue;
-        const p = part as { type?: unknown; text?: unknown; data?: unknown };
+        const p = part as { type?: unknown; text?: unknown; data?: unknown; input?: unknown };
         if (p.type === "text" && typeof p.text === "string") texts.push(p.text);
+        if (typeof p.type === "string" && p.type.startsWith("tool-")) {
+          const name = p.type.slice("tool-".length);
+          const detail = (typeof p.input === "object" && p.input !== null ? (p.input as { detail?: unknown }).detail : undefined);
+          if (name !== "") toolLog.push(typeof detail === "string" && detail !== "" ? { name, detail } : { name });
+        }
         if (p.type === ASSISTANT_APPROVAL_DATA_PART) {
           const data = (typeof p.data === "object" && p.data !== null ? p.data : null) as { batchId?: unknown; approvals?: unknown } | null;
           if (data && typeof data.batchId === "string" && data.batchId.length > 0) {
@@ -250,6 +285,7 @@ export function legacyFromUIMessages(messages: readonly unknown[]): LegacyStored
     if (Array.isArray(metadata.citations) && metadata.citations.length > 0) legacy.citations = metadata.citations;
     if (metadata.error) legacy.error = metadata.error;
     if (metadata.stopped === true) legacy.stopped = true;
+    if (toolLog.length > 0) legacy.toolLog = toolLog;
     if (pendingBatch !== null) legacy.pendingBatch = pendingBatch;
     out.push(legacy);
   }

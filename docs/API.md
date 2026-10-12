@@ -81,7 +81,7 @@ All non-2xx responses share one shape:
 | 409 | `PROVIDER_NOT_CONFIGURED` | Assistant generate/test/chat without saved provider settings for the project |
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
-| 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream, or a turn whose recovery was exhausted |
+| 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream, a turn whose recovery was exhausted, the 90s idle stall (ASSISTANT_STALL_TIMEOUT_MS), a turn past its total budget (ASSISTANT_TURN_BUDGET_MS), or a reply cut at the output ceiling (ASSISTANT_MAX_OUTPUT_TOKENS) |
 | 502 | `ASSISTANT_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
 | 502 | `ASSISTANT_UNAVAILABLE` | **Retired (ADR-0005 W6)** — reserved in the catalog for wire compat; no live path emits it (the DO executor is gone) |
 | 429 | `PROVIDER_RATE_LIMITED` | AI Gateway / Workers AI rate limit (including the guarded-model 20 rpm ceiling) |
@@ -2192,7 +2192,23 @@ POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
        fromIndex?: number,
+       reasoningEffort?: "minimal" | "low" | "medium" | "high",
        permissionMode?: "ask" | "auto" | "deny" }
+  `reasoningEffort` is the composer's per-message EFFORT pick. It overrides the
+  project setting (`assistant_settings.reasoning_effort`) for this turn only and
+  is merged, with the output ceiling below, into the provider request body
+  (`modelOptions` → the adapter's `mapOptionsToRequest`). Omitted → the project
+  setting; both unset → no `reasoning_effort` is sent at all.
+  Every turn carries an output ceiling: ASSISTANT_MAX_OUTPUT_TOKENS = 8192,
+  sent as `max_tokens` on the chat-completions / Anthropic wires and
+  `max_output_tokens` on the Responses wire. A reply cut at that ceiling ends the
+  turn as a visible failure (see the frames note below), never a silent `done`.
+  Every turn is also bounded by a total wall clock:
+  ASSISTANT_TURN_BUDGET_MS = 300_000 (5 min). The idle bound (see the frames
+  note) resets on every chunk, so a provider that keeps trickling reasoning
+  deltas can hold a turn open indefinitely; the turn budget is measured once for
+  the whole turn and ends it when it fires — the provider request is aborted and
+  the turn persists as a failed turn.
   `permissionMode` is the composer's per-thread WRITE-tool permission (ADR-0005
   §Port P1). Sent only when the page has an authoritative value; omitted → the
   thread's sticky `assistant_threads.permission_mode` (absent → `ask`). Captured

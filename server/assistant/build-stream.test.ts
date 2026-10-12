@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StreamChunk } from "@tanstack/ai";
-import type { StreamFrame } from "../../shared/assistant";
+import { ASSISTANT_OUTPUT_TRUNCATED_MESSAGE, ASSISTANT_TURN_BUDGET_MESSAGE, type StreamFrame } from "../../shared/assistant";
 import { buildStream, buildResumeResultsNote, findNewestPendingBatch, pendingBatchIdsNewestFirst, isWriteIntentClaim, normalizeProviderMessages, normalizeRunUsage, reconcilePendingBatchStatuses, sanitizeProviderMessages, WRITE_NOT_EXECUTED_COPY, type StreamRunContext } from "./build-stream";
 import { MAX_CHAT_TOOL_ROUNDS } from "./tools";
 import type { QueuedProposal } from "./write-tools";
@@ -100,6 +100,73 @@ describe("buildStream onDispose", () => {
     expect(disposed).toBe(1);
   });
 });
+describe("buildStream bounds (M1 turn budget, M2 output cap)", () => {
+  it("ends a trickling turn at the turn budget instead of streaming forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const persisted: Array<Array<Record<string, unknown>>> = [];
+      let failed = "";
+      // One reasoning delta, then the provider hangs. Every IDLE bound (the 90s
+      // stall) resets on each chunk, so only the turn-wide deadline can end a
+      // turn whose stream keeps producing — that is the defect this bound fixes.
+      const c = ctx(() =>
+        (async function* () {
+          yield { type: "REASONING_MESSAGE_CONTENT", delta: "think" } as unknown as StreamChunk;
+          await new Promise<never>(() => {});
+        })()
+      );
+      c.turnBudgetMs = 40;
+      c.persist = async (messages) => { persisted.push(messages as Array<Record<string, unknown>>); };
+      c.onFail = async (message) => { failed = message; };
+
+      const pending = drain(buildStream(c));
+      await vi.advanceTimersByTimeAsync(100);
+      const frames = await pending;
+      const terminal = frames.at(-1);
+      expect(terminal?.type).toBe("error");
+      expect((terminal as { code: string }).code).toBe("ASSISTANT_GENERATION_FAILED");
+      expect((terminal as { message: string }).message).toBe(ASSISTANT_TURN_BUDGET_MESSAGE);
+      expect(failed).toBe(ASSISTANT_TURN_BUDGET_MESSAGE);
+      const assistant = persisted.at(-1)!.at(-1)!;
+      expect(assistant.error).toEqual({ code: "ASSISTANT_GENERATION_FAILED", message: ASSISTANT_TURN_BUDGET_MESSAGE });
+      // The partial turn is still persisted — a bound never loses the turn.
+      expect(assistant.reasoning).toBe("think");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("persists a visible failure when the last provider response was cut at the output cap", async () => {
+    const persisted: Array<Array<Record<string, unknown>>> = [];
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "partial repl" } as unknown as StreamChunk;
+        yield { type: "RUN_FINISHED", finishReason: "length" } as unknown as StreamChunk;
+      })()
+    );
+    c.persist = async (messages) => { persisted.push(messages as Array<Record<string, unknown>>); };
+
+    const frames = await drain(buildStream(c));
+    const terminal = frames.at(-1);
+    expect(terminal?.type).toBe("error");
+    expect((terminal as { message: string }).message).toBe(ASSISTANT_OUTPUT_TRUNCATED_MESSAGE);
+    const assistant = persisted.at(-1)!.at(-1)!;
+    expect(assistant.content).toBe("partial repl");
+    expect(assistant.error).toEqual({ code: "ASSISTANT_GENERATION_FAILED", message: ASSISTANT_OUTPUT_TRUNCATED_MESSAGE });
+  });
+
+  it("keeps a turn that finished on `stop` on the done path", async () => {
+    const c = ctx(() =>
+      (async function* () {
+        yield { type: "TEXT_MESSAGE_CONTENT", delta: "complete reply" } as unknown as StreamChunk;
+        yield { type: "RUN_FINISHED", finishReason: "stop" } as unknown as StreamChunk;
+      })()
+    );
+    const frames = await drain(buildStream(c));
+    expect(frames.at(-1)?.type).toBe("done");
+  });
+});
+
 describe("buildStream provider-boundary sanitization", () => {
   it("never hands a legacy display toolCalls log to the provider", async () => {
     let seen: Array<Record<string, unknown>> | null = null;

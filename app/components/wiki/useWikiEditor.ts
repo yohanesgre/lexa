@@ -325,6 +325,19 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     markDirtyRef.current = markDirty;
   }, [markDirty]);
 
+  // The Markdown pane's commit path: the pane derives the document from its
+  // text (shared/markdown.ts) and hands it here. The editor model takes it
+  // first, so the save payload (manual and autosave), the preview and the
+  // Assistant all read one document, and the committed object itself carries
+  // into the preview state so the pane can tell its own commit apart from a
+  // replaced document.
+  const handleMarkdownChange = useCallback((next: TipTapDoc) => {
+    if (historyPreviewRef.current !== null) return;
+    editorRef.current?.commands.setContent(next as unknown as JSONContent, { emitUpdate: false });
+    setPreviewContent(next);
+    markDirtyRef.current?.();
+  }, []);
+
   const handleSelectRevision = async (revisionId: string) => {
     if (historyPreviewId === revisionId) return;
     try {
@@ -461,6 +474,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     handleStartEditing,
     handleCancel,
     handleSave,
+    handleMarkdownChange,
     handleSelectRevision,
     handleClosePreview,
     handleRestore,

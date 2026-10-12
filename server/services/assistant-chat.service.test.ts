@@ -36,7 +36,7 @@ import {
 } from "../assistant/approval-carrier";
 import { resolveMentionContext, firstUserText, lastUserText, type MentionResolverDeps } from "../assistant/context";
 import type { TipTapDoc } from "../../shared/types";
-import { ASSISTANT_APPROVAL_DATA_PART, type AssistantWriteDiff, type StreamFrame } from "../../shared/assistant";
+import { ASSISTANT_APPROVAL_DATA_PART, ASSISTANT_MAX_OUTPUT_TOKENS, type AssistantWriteDiff, type StreamFrame } from "../../shared/assistant";
 import type { UIMessage } from "ai";
 import type { RuntimeEnv } from "../env";
 
@@ -46,7 +46,7 @@ const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 // other export of the module stays real so the gateway's own resolution,
 // normalization and logging paths are exercised.
 const providerMock = vi.hoisted(() => ({
-  calls: [] as Array<{ systemPrompts: unknown; tools: unknown; messages: unknown }>,
+  calls: [] as Array<{ systemPrompts: unknown; tools: unknown; messages: unknown; modelOptions?: Record<string, unknown> | undefined }>,
 }));
 vi.mock("../assistant/provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../assistant/provider")>();
@@ -56,8 +56,8 @@ vi.mock("../assistant/provider", async (importOriginal) => {
     // these suites exercise Jev preflight/gateway resolution, not adapter
     // wiring, so the snapshot build is stubbed (streamChat is stubbed too).
     buildAdapter: () => ({}) as never,
-    streamChat: (input: { systemPrompts: unknown; tools?: unknown; messages?: unknown }) => {
-      providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [], messages: input.messages ?? [] });
+    streamChat: (input: { systemPrompts: unknown; tools?: unknown; messages?: unknown; modelOptions?: Record<string, unknown> | undefined }) => {
+      providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [], messages: input.messages ?? [], ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}) });
       return (async function* () {
         yield { type: "TEXT_MESSAGE_CONTENT", delta: "ok" };
         yield { type: "RUN_FINISHED", usage: { input: 1, output: 1 } };
@@ -735,5 +735,26 @@ describe("carried — write-tools scope, budget, bulk schema, auto dedupe", () =
     expect(first).toEqual({ ok: true, applied: true, result: { id: "t9" } });
     expect(second).toEqual(first);
     expect(applied).toHaveLength(1);
+  });
+});
+
+// M2 contract (docs/API.md `POST /api/assistant/chat/stream` body + docs/LAYERS.md
+// → Assistant stream limits): the composer's EFFORT pick and the documented
+// output ceiling both ride `modelOptions` verbatim into the provider request
+// body. The owner's 506s turn sent NEITHER — its project default was NULL and no
+// per-message effort was picked.
+describe("chat model options reach the provider request (M2)", () => {
+  it("sends the per-message effort override together with the output ceiling", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    await drain(await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "hello", reasoningEffort: "low" })));
+    expect(providerMock.calls.at(-1)?.modelOptions).toEqual({ reasoning_effort: "low", max_tokens: ASSISTANT_MAX_OUTPUT_TOKENS });
+  });
+
+  it("sends the ceiling alone when no effort is resolved anywhere", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    await drain(await runStream("c1", "hello"));
+    expect(providerMock.calls.at(-1)?.modelOptions).toEqual({ max_tokens: ASSISTANT_MAX_OUTPUT_TOKENS });
   });
 });

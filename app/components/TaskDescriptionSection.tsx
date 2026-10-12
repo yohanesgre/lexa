@@ -25,7 +25,6 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
     <DescriptionEditor
       initialContent={emptyDoc}
       onChange={setCreateDescription}
-      placeholder="Add a description..."
       runtime={slug ? { slug, documentType: "task", documentId: task?.id ?? "" } : undefined}
     />
     <div className="mt-4 border border-dashed border-lx-border-default rounded-md p-3 text-xs text-lx-text-muted font-body">

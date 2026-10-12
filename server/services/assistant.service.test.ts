@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { ASSISTANT_STALL_TIMEOUT_MS, type StreamFrame } from "../../shared/assistant";
+import { ASSISTANT_MAX_OUTPUT_TOKENS, ASSISTANT_STALL_TIMEOUT_MS, type StreamFrame } from "../../shared/assistant";
 import {
   applyResumeResults,
   buildStream,
   findPendingBatch,
-  modelOptionsForEffort,
+  modelOptionsForTurn,
   resolveChatTitle,
   resolveAssistantThread,
   resolveReasoningEffort,
@@ -467,8 +467,10 @@ describe("reasoning effort resolution", () => {
     expect(resolveReasoningEffort("high", "low")).toBe("low");
     expect(resolveReasoningEffort("medium", undefined)).toBe("medium");
     expect(resolveReasoningEffort(null, null)).toBeNull();
-    expect(modelOptionsForEffort(null)).toBeUndefined();
-    expect(modelOptionsForEffort("high")).toEqual({ reasoning_effort: "high" });
+    // M2: the output ceiling rides every turn; the key is per provider wire.
+    expect(modelOptionsForTurn(null, "openai_compatible")).toEqual({ max_tokens: ASSISTANT_MAX_OUTPUT_TOKENS });
+    expect(modelOptionsForTurn("high", "workers_ai")).toEqual({ reasoning_effort: "high", max_tokens: ASSISTANT_MAX_OUTPUT_TOKENS });
+    expect(modelOptionsForTurn(null, "openai_responses")).toEqual({ max_output_tokens: ASSISTANT_MAX_OUTPUT_TOKENS });
 
     providerMock.script = [{ type: "TEXT_MESSAGE_CONTENT", delta: "ok" }, { type: "RUN_FINISHED" }];
     providerMock.calls = [];
