@@ -3,15 +3,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Layer, Context } from "effect";
+import { Cause, Effect, Fiber, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
-import { Db, DbBunLive } from "../db/db";
+import { Db, type DbDriver } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig } from "../storage/config";
 import { RuntimeEnvLive, RuntimeEnvTag } from "../runtime-env";
 import { AssistantTaskService } from "./assistant-task.service";
+import { AssistantPendingWritesRepo } from "../repos/assistant-pending-writes.repo";
+import { TaskService } from "./task.service";
 import { AUTO_SKILL_INSTRUCTION } from "../assistant/prompt";
 import { encryptSecret, parseMasterKey } from "../assistant/secrets";
 // `loadTaskRepoContent` is best-effort but its requirements are resolved from
@@ -53,6 +56,9 @@ type FetchCall = { url: string; init: RequestInit };
 let dir: string;
 let db: Database;
 let service: AssistantTaskService;
+let pendingWritesRepo: AssistantPendingWritesRepo;
+let taskService: TaskService;
+let driver: DbDriver;
 let env: RuntimeEnv;
 let baseLayer: Layer.Layer<
   Sqlite | Db | Storage | StorageConfig | RuntimeEnvTag | ProjectReposRepo | TaskRepo | GitHubClient
@@ -140,9 +146,10 @@ INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_mo
   }
   env = opts.env ?? ({ LXK_SECRETS_MASTER_KEY: JEV_MASTER_KEY } as RuntimeEnv);
   const cfg = resolveStorageConfig({}, dir);
+  driver = createBunSqliteDriver(db);
   const dbLayer = Layer.mergeAll(
     Layer.succeed(Sqlite, db),
-    DbBunLive(db),
+    Layer.succeed(Db, driver),
     Layer.succeed(StorageConfig, cfg),
     Storage.Default.pipe(Layer.provide(Layer.succeed(StorageConfig, cfg))),
     RuntimeEnvLive(env),
@@ -150,8 +157,10 @@ INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_mo
   // `mergeAll` does not satisfy a member's own requirements, so the repo
   // registry, task repo and GitHub client are provided the db layer explicitly.
   baseLayer = Layer.mergeAll(dbLayer, ProjectReposRepo.Default, TaskRepo.Default, GitHubClient.Default).pipe(Layer.provide(dbLayer));
-  const ctx = Effect.runSync(Effect.scoped(Layer.build(AssistantTaskService.Default.pipe(Layer.provide(baseLayer)))));
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(Layer.mergeAll(AssistantTaskService.Default, AssistantPendingWritesRepo.Default, TaskService.Default).pipe(Layer.provide(baseLayer)))));
   service = Context.get(ctx, AssistantTaskService);
+  pendingWritesRepo = Context.get(ctx, AssistantPendingWritesRepo);
+  taskService = Context.get(ctx, TaskService);
 }
 
 // A service method runs in the CALLER's context, not the layer it was built in:
@@ -205,6 +214,28 @@ afterEach(() => {
   try { db?.close(); } catch {}
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
+
+  it("settles a claimed task and releases its controller when setup fails before streaming", async () => {
+    setup();
+    queueRun("at1");
+    db.exec("DELETE FROM assistant_settings WHERE project_id = 'p1'");
+
+    const outcome = await run(Effect.either(service.runStream("at1", { userId: "u1" })));
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag !== "Left") throw new Error("expected setup failure");
+    expect(outcome.left).toMatchObject({ _tag: "ProviderNotConfigured" });
+
+    expect(db.prepare("SELECT status FROM assistant_tasks WHERE id = 'at1'").get()).toMatchObject({ status: "failed" });
+    expect(service.activeTasks.size).toBe(0);
+    expect(service.activeDocuments.size).toBe(0);
+
+    db.exec("INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_model_id) VALUES ('p1', '[]', 'pv1', 'm1')");
+    stubFetch(() => Promise.resolve(jevResponse()));
+    queueRun("at2");
+    const frames = await drain(await runStream("at2"));
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(db.prepare("SELECT status FROM assistant_tasks WHERE id = 'at2'").get()).toMatchObject({ status: "completed" });
+  });
 
 describe("task preflight — new run", () => {
   it("sends one preflight over the task context, offers jev_assess + get_skill, and the advisory reaches the system prompt", async () => {
@@ -339,7 +370,8 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     expect(text).not.toContain("Polish the text.");
   });
 
-  it("applies an approved create_task on the task path and streams the follow-up (no Die)", async () => {
+  // Contract A4/A8: an explicit task batch beats a newer marker and reports the applied domain result.
+  it("applies the explicitly selected batch and streams the follow-up", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
     db.exec(`
@@ -350,17 +382,27 @@ INSERT INTO assistant_threads (document_type, document_id, project_id, owner_use
 INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
   VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"New task"}', '{"type":"task_create","title":"New task","fields":{}}', 'approved', '2099-01-01 00:00:00');
 `);
+    const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_id = 't1'").get() as { messages: string };
+    const messages = JSON.parse(saved.messages) as unknown[];
+    messages.push({ role: "assistant", content: "newer proposal", pendingBatch: { batchId: "b2", approvals: [] } });
+    db.prepare("UPDATE assistant_threads SET messages = ? WHERE document_id = 't1'").run(JSON.stringify(messages));
 
-    const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
+    const frames = await drain(await run(service.resumeThreadStream("task", "t1", "b1")));
     const applied = frames.filter((f) => f.type === "approval_result") as Array<{ status: string }>;
     expect(applied.map((f) => f.status)).toContain("applied");
     expect(frames.some((f) => f.type === "done")).toBe(true);
     expect(frames.some((f) => f.type === "error" && (f as { code?: string }).code === "ASSISTANT_GENERATION_FAILED")).toBe(false);
     const created = db.prepare("SELECT title FROM tasks WHERE project_id = 'p1'").all() as Array<{ title: string }>;
     expect(created.map((c) => c.title)).toContain("New task");
+    expect(db.prepare("SELECT batch_id FROM assistant_resume_claims ORDER BY batch_id").all()).toEqual([{ batch_id: "b1" }]);
     const handed = providerMock.calls[0]!.messages as Array<Record<string, unknown>>;
     const assistantHanded = handed.find((m) => m.role === "assistant")!;
     expect(assistantHanded.toolCalls).toBeUndefined();
+    const canonical = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { messages: string };
+    const canonicalMessages = JSON.parse(canonical.messages) as Array<Record<string, unknown>>;
+    expect(canonicalMessages.at(-1)).toMatchObject({
+      toolLog: [{ name: "create_task", detail: expect.stringMatching(/^applied: New task/) }],
+    });
   });
 });
 
@@ -373,6 +415,141 @@ INSERT INTO assistant_threads (document_type, document_id, project_id, owner_use
 `);
   };
 
+  const seedApprovedBatch = (): void => {
+    seedMarker();
+    db.exec(`
+INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
+INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
+UPDATE assistant_threads SET messages = '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","seq":0,"name":"create_task"}]}}]' WHERE document_type = 'task' AND document_id = 't1';
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"Recovered task"}', '{"type":"task_create","title":"Recovered task","fields":{}}', 'approved', '2099-01-01 00:00:00');
+`);
+  };
+
+  it("Stop settles the first approved document mutation without starting the second", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seedApprovedBatch();
+    db.exec(`INSERT INTO assistant_pending_writes
+      (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+      SELECT 'ap2', project_id, document_type, document_id, owner_user_id, batch_id, 1, tool_name,
+        '{"title":"Must not start"}', '{"type":"task_create","title":"Must not start","fields":{}}', status, expires_at
+      FROM assistant_pending_writes WHERE id = 'ap1'`);
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const batch = driver.batch.bind(driver);
+    let mutationBatches = 0;
+    const spy = vi.spyOn(driver, "batch").mockImplementation(async (stmts) => {
+      if (stmts.some((stmt) => /INSERT INTO tasks\b/i.test(stmt.sql))) {
+        mutationBatches += 1;
+        if (mutationBatches === 1) {
+          entered.resolve();
+          await finish.promise;
+        }
+      }
+      return batch(stmts);
+    });
+    try {
+      const resuming = run(service.resumeThreadStream("task", "t1", "b1"));
+      await entered.promise;
+      const controller = service.activeTasks.get("t1")!;
+      expect(service.abortStream("t1")).toBe(true);
+      expect(controller.signal.aborted).toBe(true);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Recovered task'").get()).toEqual({ n: 0 });
+      expect(service.activeTasks.get("t1")).toBe(controller);
+      finish.resolve();
+      const frames = await drain(await resuming);
+      expect(mutationBatches).toBe(1);
+      expect(db.prepare("SELECT title FROM tasks WHERE title IN ('Recovered task', 'Must not start')").all()).toEqual([{ title: "Recovered task" }]);
+      expect(frames.filter((frame) => frame.type === "approval_result")).toEqual([
+        { type: "approval_result", approvalId: "ap1", status: "applied" },
+        { type: "approval_result", approvalId: "ap2", status: "failed", error: "Assistant stopped" },
+      ]);
+      expect(db.prepare("SELECT batch_id FROM assistant_resume_claims WHERE batch_id = 'b1'").all()).toEqual([{ batch_id: "b1" }]);
+      expect(service.activeTasks.size).toBe(0);
+      expect(service.activeDocuments.size).toBe(0);
+      const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { messages: string };
+      const messages = JSON.parse(saved.messages) as Array<Record<string, unknown>>;
+      expect(messages.at(-1)).toMatchObject({
+        role: "assistant", content: "", stopped: true,
+        toolLog: [
+          { name: "create_task", detail: expect.stringMatching(/^applied: Recovered task/) },
+          { name: "create_task", detail: expect.stringMatching(/^failed: Must not start/) },
+        ],
+      });
+      expect(providerMock.calls).toHaveLength(0);
+      const replay = await run(Effect.either(service.resumeThreadStream("task", "t1", "b1")));
+      expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      expect(mutationBatches).toBe(1);
+      expect(db.prepare("SELECT title FROM tasks WHERE title IN ('Recovered task', 'Must not start')").all()).toEqual([{ title: "Recovered task" }]);
+      expect(db.prepare("SELECT batch_id FROM assistant_resume_claims WHERE batch_id = 'b1'").all()).toEqual([{ batch_id: "b1" }]);
+      queueRun("at-next");
+      expect((await drain(await runStream("at-next"))).some((frame) => frame.type === "done")).toBe(true);
+      expect(db.prepare("SELECT status FROM assistant_tasks WHERE id = 'at-next'").get()).toEqual({ status: "completed" });
+    } finally {
+      finish.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  it.each(["owned", "duplicate"] as const)("cleans up only its own asynchronous document claim INSERT after interruption (%s)", async (ownership) => {
+    setup();
+    seedApprovedBatch();
+    if (ownership === "duplicate") db.exec("INSERT INTO assistant_resume_claims (batch_id) VALUES ('b1')");
+    db.exec("INSERT INTO assistant_resume_claims (batch_id) VALUES ('another-invocation')");
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    const prepare = driver.prepare.bind(driver);
+    const spy = vi.spyOn(driver, "prepare").mockImplementation((sql) => {
+      const stmt = prepare(sql);
+      if (!/INSERT OR IGNORE INTO assistant_resume_claims\b/i.test(sql)) return stmt;
+      return {
+        ...stmt,
+        all: stmt.all.bind(stmt),
+        first: stmt.first.bind(stmt),
+        run: async (...params) => {
+          entered.resolve();
+          await finish.promise;
+          try { return await stmt.run(...params); }
+          finally { settled.resolve(); }
+        },
+      };
+    });
+    try {
+      const fiber = Effect.runFork(service.resumeThreadStream("task", "t1", "b1").pipe(Effect.provide(baseLayer)));
+      await entered.promise;
+      await Effect.runPromise(Fiber.interruptFork(fiber));
+      finish.resolve();
+      await settled.promise;
+      const exit = await Effect.runPromise(Fiber.await(fiber));
+      expect(exit._tag === "Failure" && Cause.isInterrupted(exit.cause)).toBe(true);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: ownership === "owned" ? 0 : 1 });
+      expect(db.prepare("SELECT batch_id FROM assistant_resume_claims WHERE batch_id = 'another-invocation'").get()).toEqual({ batch_id: "another-invocation" });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Recovered task'").get()).toEqual({ n: 0 });
+      expect(service.activeTasks.size).toBe(0);
+      expect(service.activeDocuments.size).toBe(0);
+      spy.mockRestore();
+      await drain(await run(service.resumeThreadStream("task", "t1", "b1")));
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Recovered task'").get()).toEqual({ n: ownership === "owned" ? 1 : 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: 1 });
+      if (ownership === "owned") {
+        const replay = await run(Effect.either(service.resumeThreadStream("task", "t1", "b1")));
+        expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      } else {
+        expect(await drain(await run(service.resumeThreadStream("task", "t1", "b1")))).toEqual([
+          { type: "done", text: "", usage: { in: 0, out: 0 } },
+        ]);
+      }
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Recovered task'").get()).toEqual({ n: ownership === "owned" ? 1 : 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: 1 });
+    } finally {
+      finish.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  // Contract A5: duplicate and empty resumes release the document lock for a later continuation.
   it("a duplicate resume claim settles with a terminal done frame (no re-execution)", async () => {
     setup();
     seedMarker();
@@ -382,6 +559,7 @@ INSERT INTO assistant_threads (document_type, document_id, project_id, owner_use
     // Settled, not empty: the client persists the duplicate instead of reading
     // an empty stream as a stall and retrying forever (parity with chat).
     expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
+    expect(await drain(await run(service.resumeThreadStream("task", "t1")))).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     // The pre-existing claim SURVIVES a duplicate resume (it is never released);
     // this is what distinguishes a duplicate from the marker-with-no-rows case.
@@ -389,15 +567,106 @@ INSERT INTO assistant_threads (document_type, document_id, project_id, owner_use
     expect(claims).toBe(1);
   });
 
+  // Contract A5: a missing approval row releases both the acquired claim and document lock.
   it("a marker with no rows settles with a terminal done frame and releases the claim", async () => {
     setup();
     seedMarker();
 
     const frames = await drain(await run(service.resumeThreadStream("task", "t1")));
     expect(frames).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
+    expect(await drain(await run(service.resumeThreadStream("task", "t1")))).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     const claims = (db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims").get() as { n: number }).n;
     expect(claims).toBe(0);
+  });
+  it("releases an interrupted pre-execution claim and retries the approved batch once", async () => {
+    setup();
+    db.exec(`
+INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
+INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","seq":0,"name":"create_task"}]}}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"Recovered task"}', '{"type":"task_create","title":"Recovered task","fields":{}}', 'approved', '2099-01-01 00:00:00');
+`);
+    const entered = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    const finishList: Array<() => void> = [];
+    const listByBatch = pendingWritesRepo.listByBatch.bind(pendingWritesRepo);
+    let calls = 0;
+    const spy = vi.spyOn(pendingWritesRepo, "listByBatch").mockImplementation((batchId) => {
+      if (calls >= entered.length) return listByBatch(batchId);
+      const index = calls++;
+      return Effect.async((resume) => {
+        entered[index]!.resolve();
+        finishList[index] = () => resume(listByBatch(batchId));
+      });
+    });
+
+    try {
+      const oldRequest = new AbortController();
+      const fiber = Effect.runFork(service.resumeThreadStream("task", "t1", "b1", oldRequest.signal).pipe(Effect.provide(baseLayer)));
+      await entered[0]!.promise;
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: 0 });
+      finishList[0]!();
+
+      const retry = Effect.runFork(service.resumeThreadStream("task", "t1", "b1").pipe(Effect.provide(baseLayer)));
+      await entered[1]!.promise;
+      const retryController = service.activeTasks.get("t1")!;
+      oldRequest.abort();
+      expect(retryController.signal.aborted).toBe(false);
+      finishList[1]!();
+      const frames = await drain(await Effect.runPromise(Fiber.join(retry)));
+      expect(frames.some((frame) => frame.type === "done")).toBe(true);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE project_id = 'p1' AND title = 'Recovered task'").get()).toEqual({ n: 1 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: 1 });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it("retains claim when approved mutation commits before resumed execution is interrupted", async () => {
+    setup();
+    db.exec(`
+INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
+INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Task', '#888', 0);
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, agent_id, skill_id, messages)
+  VALUES ('task', 't1', 'p1', 'u1', 'a1', 'sk1', '[{"role":"user","content":"go"},{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"b1","approvals":[{"approvalId":"ap1","seq":0,"name":"create_task"}]}}]');
+INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+  VALUES ('ap1', 'p1', 'task', 't1', 'u1', 'b1', 0, 'create_task', '{"title":"Committed before interruption"}', '{"type":"task_create","title":"Committed before interruption","fields":{}}', 'approved', '2099-01-01 00:00:00');
+`);
+    const entered = Promise.withResolvers<void>();
+    let finish!: () => void;
+    const create = taskService.create.bind(taskService);
+    const spy = vi.spyOn(taskService, "create").mockImplementation((...args) =>
+      create(...args).pipe(Effect.tap(() => Effect.async((resume) => {
+        entered.resolve();
+        finish = () => resume(Effect.succeed(undefined));
+      })))
+    );
+
+    try {
+      const fiber = Effect.runFork(service.resumeThreadStream("task", "t1", "b1").pipe(Effect.provide(baseLayer)));
+      await entered.promise;
+      await Effect.runPromise(Fiber.interruptFork(fiber));
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Committed before interruption'").get()).toEqual({ n: 1 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: 1 });
+      finish();
+      const exit = await Effect.runPromise(Fiber.await(fiber));
+      expect(exit._tag === "Failure" && Cause.isInterrupted(exit.cause)).toBe(true);
+      const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { messages: string };
+      const messages = JSON.parse(saved.messages) as Array<Record<string, unknown>>;
+      expect(messages.at(-1)).toMatchObject({
+        stopped: true,
+        toolLog: [{ name: "create_task", detail: expect.stringMatching(/^applied: Committed before interruption/) }],
+      });
+
+      const replay = await run(Effect.either(service.resumeThreadStream("task", "t1", "b1")));
+      expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Committed before interruption'").get()).toEqual({ n: 1 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM assistant_resume_claims WHERE batch_id = 'b1'").get()).toEqual({ n: 1 });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

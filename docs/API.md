@@ -2194,10 +2194,24 @@ POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not Ev
 POST   /api/assistant/tasks/:id/cancel
 → 200 { ok: true }
   Aborts an in-flight stream or cancels a queued task.
+  The acknowledgement does not roll back a local mutation that has already
+  begun. The stopped turn retains its run resources until owned writes settle,
+  then persists their outcomes and available partial reply. A cancelled old
+  request cannot abort a replacement run.
 
 DELETE /api/assistant/threads/:documentType/:documentId
 → 204 | 404 ASSISTANT_THREAD_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE
   Resets the document thread — next run starts fresh.
+
+POST   /api/assistant/chat/:chatId/cancel
+→ 200 { ok: boolean }
+  Stops the owned active producer, or the in-process resumed turn when no
+  supervisor producer is active. `ok: false` means no active run was found.
+  With the supervisor enabled, resumed approvals still run in-process; Stop
+  reaches that captured controller rather than requiring client disconnect.
+  Begun mutations settle and remain applied; later approved mutations do not
+  start after Stop. The stopped transcript preserves actual outcomes and any
+  partial reply. Stop is not rollback or permission to replay an executed batch.
 
 POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?,
@@ -2209,8 +2223,13 @@ body { projectId*, chatId*, message*, agentId?,
   an earlier index truncates the transcript before appending the new message
   (validated as described below). `replayFrom` is a distinct, supervisor-only
   frame cursor: the number of frames already rendered for this active turn.
-  It controls replay position, not transcript truncation, and is ignored on the
-  default in-process path.
+  It controls replay position, not transcript truncation. An explicit cursor
+  on the default in-process path receives `409 ASSISTANT_TASK_ACTIVE`, never
+  a new generation. Ordinary sends without a cursor keep the default behavior.
+  For a new user turn, `start` is emitted only after its canonical user entry
+  has committed. A history read after that frame can recover the accepted prompt
+  even before the provider emits text. Resumes without a new user entry do not
+  append a synthetic user message.
   `reasoningEffort` is the composer's per-message EFFORT pick. It overrides the
   project setting (`assistant_settings.reasoning_effort`) for this turn only and
   is merged, with the output ceiling below, into the provider request body
@@ -2324,6 +2343,12 @@ GET    /api/assistant/chat/:chatId
   user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
   failure an `error` {code,message} block or a `stopped:true` marker (client
   abort with partial text).
+  In-progress `partial:true` checkpoints are also projected as `stopped:true`
+  on read for crash recovery; that projection alone does not prove a supervised
+  producer is idle. Delivery recovery retains the exact accepted request in the
+  current browser route-history entry and uses explicit `replayFrom:0` after a
+  hard reload. It never turns a missing buffer into a new generation; canonical
+  history remains authoritative and completed replies retire the checkpoint.
 
 DELETE /api/assistant/chat/:chatId
 → 204 | 404 ASSISTANT_THREAD_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE
@@ -2347,6 +2372,7 @@ POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-strea
   body { batchId?: string }   (optional; when supplied, selects exactly that
                                batch and must identify this owner's thread batch)
 POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
+  body { batchId?: string }   (optional; bodyless legacy document resume is accepted)
   Resumes the suspended batch: a supplied `batchId` selects exactly that batch;
   if omitted (legacy clients), the newest transcript batch is discovered.
   The selected batch must belong to the authenticated owner, project, and

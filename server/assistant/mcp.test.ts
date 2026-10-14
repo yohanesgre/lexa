@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Effect, Exit } from "effect";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { type RuntimeEnv } from "../env";
 import {
+  acquireMcpToolset,
   buildMcpTools,
   isReadOnlyMcpTool,
   liveMcpClientFactory,
@@ -10,6 +12,7 @@ import {
   type McpClientHandle,
   type McpDiscoveredTool,
   type McpToolCallAudit,
+  type McpToolset,
 } from "./mcp";
 import { encryptSecret, secretsKeyringFromEnv, SECRET_DECRYPT_FAILED } from "./secrets";
 
@@ -230,6 +233,92 @@ describe("buildMcpTools", () => {
     const execute = (toolset.tools[0] as { execute: (args: unknown, ctx?: unknown) => Promise<unknown> }).execute;
     await expect(execute({}, undefined)).rejects.toMatchObject({ _tag: "McpToolCallFailed" });
     await toolset.close();
+  });
+
+  it("closes eventual discovery after interruption and transfers successful ownership through cancellation at handoff", async () => {
+    for (const phase of ["discovery", "handoff", "normal"] as const) {
+      const entered = Promise.withResolvers<void>();
+      const discovery = Promise.withResolvers<McpDiscoveredTool[]>();
+      const disposed = Promise.withResolvers<void>();
+      let closes = 0;
+      const client: McpClientHandle = {
+        tools: () => {
+          entered.resolve();
+          return discovery.promise;
+        },
+        close: async () => {
+          closes++;
+          disposed.resolve();
+        },
+      };
+      const abort = new AbortController();
+      let owned: McpToolset | undefined;
+      const completion = Effect.runPromiseExit(acquireMcpToolset(
+        () => buildMcpTools({
+          servers: [row({ id: "jev" })],
+          projectId: "p1",
+          env: {},
+          allowlist: null,
+          connector: factory({ jev: client }),
+        }),
+        (toolset) => {
+          owned = toolset;
+          if (phase === "handoff") abort.abort();
+        }
+      ), { signal: abort.signal });
+      await entered.promise;
+      if (phase === "discovery") {
+        abort.abort();
+        expect(Exit.isInterrupted(await completion)).toBe(true);
+        expect(closes).toBe(0);
+        expect(owned).toBe(undefined);
+        discovery.resolve([MCP_TOOL_FIXTURE]);
+        await disposed.promise;
+      } else {
+        discovery.resolve([MCP_TOOL_FIXTURE]);
+        const outcome = await completion;
+        if (phase === "normal") expect(Exit.isSuccess(outcome)).toBe(true);
+        expect(closes).toBe(0);
+        expect(owned?.tools.length).toBe(1);
+        await owned!.close();
+        await owned!.close();
+      }
+      expect(closes).toBe(1);
+    }
+  });
+
+  it("closes a factory handle arriving after discovery timeout, before or after toolset disposal", async () => {
+    for (const disposeFirst of [false, true]) {
+      const created = Promise.withResolvers<McpClientHandle>();
+      const disposed = Promise.withResolvers<void>();
+      let closes = 0;
+      let discoveries = 0;
+      const client: McpClientHandle = {
+        tools: async () => {
+          discoveries++;
+          return [MCP_TOOL_FIXTURE];
+        },
+        close: async () => {
+          closes++;
+          disposed.resolve();
+        },
+      };
+      const toolset = await buildMcpTools({
+        servers: [row({ id: "jev" })],
+        projectId: "p1",
+        env: {},
+        allowlist: null,
+        connector: { create: () => created.promise },
+        discoveryTimeoutMs: 5,
+      });
+      if (disposeFirst) await toolset.close();
+      created.resolve(client);
+      await disposed.promise;
+      await toolset.close();
+      expect(toolset.tools).toEqual([]);
+      expect(discoveries).toBe(0);
+      expect(closes).toBe(1);
+    }
   });
 });
 

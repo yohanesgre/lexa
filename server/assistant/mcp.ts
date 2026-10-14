@@ -255,6 +255,28 @@ export interface McpToolset {
   close: () => Promise<void>;
 }
 
+export function acquireMcpToolset(
+  acquire: () => Promise<McpToolset | undefined>,
+  register: (toolset: McpToolset | undefined) => void
+): Effect.Effect<McpToolset | undefined> {
+  return Effect.uninterruptibleMask((restore) => Effect.gen(function* () {
+    let interrupted = false;
+    let owned: McpToolset | undefined;
+    const toolset = yield* restore(Effect.promise(() => acquire().then((value) => {
+      // Promise settlement can outlive the fiber; retain ownership before resuming it.
+      if (interrupted) void value?.close().catch(() => {});
+      else owned = value;
+      return value;
+    }))).pipe(Effect.onInterrupt(() => Effect.sync(() => {
+      interrupted = true;
+      void owned?.close().catch(() => {});
+      owned = undefined;
+    })));
+    yield* Effect.sync(() => register(toolset));
+    return toolset;
+  }));
+}
+
 export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpToolset> {
   const factory = opts.connector ?? liveMcpClientFactory;
   const sink = opts.onToolCall ?? ((entry) => defaultMcpCallSink(entry, opts.projectId));
@@ -279,10 +301,19 @@ export async function buildMcpTools(opts: BuildMcpToolsOptions): Promise<McpTool
 
   const settled = await Promise.allSettled(
     connectable.map(async (row) => {
-      const client = await withTimeout(factory.create(row, { env: opts.env, allowlist: opts.allowlist }), discoveryTimeoutMs);
-      handles.push(client);
-      const discovered = await withTimeout(client.tools(), discoveryTimeoutMs);
-      return { row, discovered };
+      let accepting = true;
+      const pending = factory.create(row, { env: opts.env, allowlist: opts.allowlist }).then((client) => {
+        if (!accepting || closed) void client.close().catch(() => {});
+        else handles.push(client);
+        return client;
+      });
+      try {
+        const client = await withTimeout(pending, discoveryTimeoutMs);
+        const discovered = await withTimeout(client.tools(), discoveryTimeoutMs);
+        return { row, discovered };
+      } finally {
+        accepting = false;
+      }
     })
   );
 

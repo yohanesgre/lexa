@@ -35,6 +35,15 @@ function collect(stream: AsyncIterable<unknown>): Promise<unknown[]> {
     return out;
   })();
 }
+async function collectOutcome(stream: AsyncIterable<unknown>): Promise<{ chunks: unknown[]; failed: boolean }> {
+  const chunks: unknown[] = [];
+  try {
+    for await (const chunk of stream) chunks.push(chunk);
+    return { chunks, failed: false };
+  } catch {
+    return { chunks, failed: true };
+  }
+}
 
 describe("AssistantGateway retry/backoff", () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -296,5 +305,102 @@ describe("AssistantGateway retry/backoff", () => {
       process.stderr.write = origStderr;
       process.stdout.write = origStdout;
     }
+  });
+  // Contract A5: once answer text is visible, fallback must not merge another model attempt.
+  it("does not retry a failure after visible text", async () => {
+    const spy = vi.spyOn(provider, "streamChat");
+    spy.mockImplementation((() => (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "partial answer" } as unknown as never;
+      throw new AssistantGenerationFailed({ message: "503 upstream", status: 503 } as never);
+    })()) as never);
+    const gatewayLayer = AssistantGateway.Default.pipe(Layer.provide(stubProviders()), Layer.provide(stubModels()), Layer.provide(stubCallLog()), Layer.provide(stubSettings()), Layer.provide(memDbLayer()));
+    const result = await Effect.runPromise(Effect.gen(function* () {
+      const gw = yield* AssistantGateway;
+      return yield* Effect.promise(() => collectOutcome(gw.streamChat({
+        projectId: "p1",
+        systemPrompts: [],
+        messages: [{ role: "user", content: "hi" } as never],
+        fallbackConfigs: [
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m1" },
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m2" },
+        ],
+      })));
+    }).pipe(Effect.provide(gatewayLayer)));
+    expect(result.failed).toBe(true);
+    expect(result.chunks.some((chunk) => (chunk as { delta?: string }).delta === "partial answer")).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+  it("does not retry a failure after visible reasoning", async () => {
+    const spy = vi.spyOn(provider, "streamChat");
+    spy.mockImplementation((() => (async function* () {
+      yield { type: "REASONING_MESSAGE_CONTENT", delta: "visible thought" } as unknown as never;
+      throw new AssistantGenerationFailed({ message: "503 upstream", status: 503 } as never);
+    })()) as never);
+    const gatewayLayer = AssistantGateway.Default.pipe(Layer.provide(stubProviders()), Layer.provide(stubModels()), Layer.provide(stubCallLog()), Layer.provide(stubSettings()), Layer.provide(memDbLayer()));
+    const result = await Effect.runPromise(Effect.gen(function* () {
+      const gw = yield* AssistantGateway;
+      return yield* Effect.promise(() => collectOutcome(gw.streamChat({
+        projectId: "p1",
+        systemPrompts: [],
+        messages: [{ role: "user", content: "hi" } as never],
+        fallbackConfigs: [
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m1" },
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m2" },
+        ],
+      })));
+    }).pipe(Effect.provide(gatewayLayer)));
+    expect(result.failed).toBe(true);
+    expect(result.chunks.some((chunk) => chunk !== null && typeof chunk === "object" && "type" in chunk && chunk.type === "REASONING_MESSAGE_CONTENT")).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  // Contract A5: a tool boundary is observable even before answer text; retry cannot repeat tools.
+  it("does not retry a failure after a tool boundary", async () => {
+    const spy = vi.spyOn(provider, "streamChat");
+    spy.mockImplementation((() => (async function* () {
+      yield { type: "TOOL_CALL_START", toolCallId: "call-1", toolCallName: "create_task" } as unknown as never;
+      throw new AssistantGenerationFailed({ message: "503 upstream", status: 503 } as never);
+    })()) as never);
+    const gatewayLayer = AssistantGateway.Default.pipe(Layer.provide(stubProviders()), Layer.provide(stubModels()), Layer.provide(stubCallLog()), Layer.provide(stubSettings()), Layer.provide(memDbLayer()));
+    const result = await Effect.runPromise(Effect.gen(function* () {
+      const gw = yield* AssistantGateway;
+      return yield* Effect.promise(() => collectOutcome(gw.streamChat({
+        projectId: "p1",
+        systemPrompts: [],
+        messages: [{ role: "user", content: "create it" } as never],
+        fallbackConfigs: [
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m1" },
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m2" },
+        ],
+      })));
+    }).pipe(Effect.provide(gatewayLayer)));
+    expect(result.failed).toBe(true);
+    expect(result.chunks.some((chunk) => (chunk as { type?: string }).type === "TOOL_CALL_START")).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  // Contract A5: EOF without RUN_FINISHED is a failed generation, not a successful terminal result.
+  it("fails an EOF without RUN_FINISHED and retains visible partial text", async () => {
+    const spy = vi.spyOn(provider, "streamChat");
+    spy.mockImplementation((() => (async function* () {
+      yield { type: "TEXT_MESSAGE_CONTENT", delta: "partial answer" } as unknown as never;
+    })()) as never);
+    const gatewayLayer = AssistantGateway.Default.pipe(Layer.provide(stubProviders()), Layer.provide(stubModels()), Layer.provide(stubCallLog()), Layer.provide(stubSettings()), Layer.provide(memDbLayer()));
+    const result = await Effect.runPromise(Effect.gen(function* () {
+      const gw = yield* AssistantGateway;
+      return yield* Effect.promise(() => collectOutcome(gw.streamChat({
+        projectId: "p1",
+        systemPrompts: [],
+        messages: [{ role: "user", content: "hi" } as never],
+        fallbackConfigs: [
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m1" },
+          { kind: "openai_compatible", baseUrl: "https://a.com", apiKey: "sk", model: "m2" },
+        ],
+      })));
+    }).pipe(Effect.provide(gatewayLayer)));
+    expect(result.failed).toBe(true);
+    expect(result.chunks.some((chunk) => (chunk as { delta?: string }).delta === "partial answer")).toBe(true);
+    expect(result.chunks.some((chunk) => (chunk as { type?: string }).type === "RUN_FINISHED")).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

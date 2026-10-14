@@ -20,6 +20,8 @@ import {
   PROVIDER_WORKERS_AI_REQUIRES_KEY,
 } from "./assistant-providers.service";
 import {
+  buildAdapter,
+  streamChat,
   clientFacingErrorMessage,
   extractRetryAfter,
   isTransientUpstream,
@@ -172,6 +174,72 @@ describe("provider wire + retry helpers", () => {
 
   const jsonResponse = (status: number, body: unknown): Response =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+  it("retains required choice only on the initial tool request and omits it for continuation and tool-free entry", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let sideEffects = 0;
+    let toolRun = true;
+    vi.stubGlobal("fetch", (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(body);
+      if (!Array.isArray(body.tools) || body.tools.length === 0) {
+        if (body.tool_choice === "required") {
+          return jsonResponse(400, { error: { message: "Tools cannot be empty if tool choice is set to required" } });
+        }
+        return new Response('data: {"id":"c3","object":"chat.completion.chunk","created":3,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"No tool needed."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+      }
+      if (toolRun && requests.length === 1) {
+        if (body.tool_choice !== "required" || !Array.isArray(body.tools) || body.tools.length === 0) {
+          return jsonResponse(400, { error: { message: "First request must require an available tool" } });
+        }
+        return new Response('data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"record_action","arguments":"{\\"value\\":\\"done\\"}"}}]},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+      }
+      if (body.tool_choice === "required") {
+        return jsonResponse(400, { error: { message: "Continuation must not force another tool call" } });
+      }
+      return new Response('data: {"id":"c2","object":"chat.completion.chunk","created":2,"model":"test-model","choices":[{"index":0,"delta":{"role":"assistant","content":"Action complete."},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+    }) as typeof fetch);
+
+    const config: ProviderConfig = { kind: "openai_compatible", baseUrl: "https://provider.test/v1", apiKey: "test-key", model: "test-model" };
+    let text = "";
+    let terminal: string | undefined;
+    for await (const chunk of streamChat({
+      config,
+      systemPrompts: [],
+      messages: [{ role: "user", content: "Run action" }],
+      tools: [{
+        name: "record_action",
+        description: "Record one action",
+        inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false },
+        execute: ({ value }: { value: string }) => {
+          sideEffects += 1;
+          return `recorded ${value}`;
+        },
+      }],
+      modelOptions: { tool_choice: "required" },
+    })) {
+      if (chunk.type === "TEXT_MESSAGE_CONTENT") text += chunk.delta;
+      terminal = chunk.type;
+    }
+    expect(sideEffects).toBe(1);
+    expect(requests).toHaveLength(2);
+    expect(text).toBe("Action complete.");
+    expect(terminal).toBe("RUN_FINISHED");
+
+    requests.length = 0;
+    toolRun = false;
+    terminal = undefined;
+    for await (const chunk of streamChat({
+      config,
+      systemPrompts: [],
+      messages: [{ role: "user", content: "Reply without tools" }],
+      tools: [],
+      modelOptions: { tool_choice: "required" },
+    })) terminal = chunk.type;
+    expect(requests).toHaveLength(1);
+    expect(terminal).toBe("RUN_FINISHED");
+    expect(sideEffects).toBe(1);
+  });
 
   it("clientFacingErrorMessage exposes providerMessage but never raw for provider-tagged errors", () => {
     const msg = clientFacingErrorMessage({
