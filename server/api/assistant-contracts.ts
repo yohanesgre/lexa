@@ -117,9 +117,8 @@ const AssistantChatStreamInput = Schema.Struct({
   agentId: Schema.optional(Schema.String),
   attachments: Schema.optional(Schema.Array(AssistantAttachmentRef)),
   fromIndex: Schema.optional(Schema.Number),
-  // ADR-0006: how many stream frames the caller already rendered for this turn,
-  // so a supervised re-send replays only the tail. Supervisor-only — the
-  // in-process path ignores it.
+  // ADR-0006: explicit supervisor replay cursor. Without supervisor transport,
+  // the route refuses replay rather than treating it as a fresh generation.
   replayFrom: Schema.optional(Schema.Number),
   reasoningEffort: Schema.optional(Schema.NullOr(AssistantReasoningEffortSchema)),
   // Turn-start WRITE permission (D2/D5/D6). Absent → the thread's sticky value.
@@ -130,7 +129,7 @@ const AssistantChatPath = Schema.Struct({ chatId: Schema.String });
 
 // The client names the exact approval batch to execute (LX-79 single-owner
 // resume). Optional: an older client / the legacy walk omits it (null).
-const ResumeChatPayload = Schema.Struct({ batchId: Schema.optional(Schema.String) });
+export const ResumeChatPayload = Schema.Struct({ batchId: Schema.optional(Schema.String) });
 
 const AssistantChatTranscriptSchema = Schema.Struct({
   chatId: Schema.String,

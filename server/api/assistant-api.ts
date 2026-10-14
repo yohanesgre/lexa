@@ -9,7 +9,7 @@
 
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
-import { Cause, Effect, Either, Layer, Stream } from "effect";
+import { Cause, Effect, Either, Layer, Schema, Stream } from "effect";
 import { dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
 import { Db, queryAll, batch, RowNotFound, DbError, type BatchStmt, type DbDriver } from "../db/db";
@@ -80,6 +80,7 @@ import {
   requireProjectReadById,
   requireProjectAdminById,
 } from "./http";
+import { ResumeChatPayload } from "./assistant-contracts";
 import type { AssistantTaskStatus } from "../../shared/types";
 import type { AssistantChatStreamRequest, StreamFrame } from "../../shared/assistant";
 
@@ -266,8 +267,8 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           if (!access) return yield* new ProjectAccessDenied({ project: task.projectId, role: "member" });
         }
         const service = yield* AssistantService;
-        const frames = yield* service.runStream(req.path.id, { ...(identity.userId !== undefined && identity.userId !== null ? { userId: identity.userId } : {}) });
-        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.id));
+        const requestSignal = requestAbortSignal(yield* HttpServerRequest);
+        const frames = yield* service.runStream(req.path.id, { ...(identity.userId !== undefined && identity.userId !== null ? { userId: identity.userId } : {}), ...(requestSignal !== undefined ? { signal: requestSignal } : {}) });
         return sseHttpResponse(frames);
       }))
     )
@@ -303,6 +304,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         if (!identity.userId) return yield* new NoUserContext();
         yield* requireProjectReadById(req.payload.projectId);
         const env = yield* currentEnv;
+        if (req.payload.replayFrom !== undefined && !supervisorEnabled(env)) return yield* new AssistantTaskActive();
         const request: AssistantChatStreamRequest = {
           projectId: req.payload.projectId,
           chatId: req.payload.chatId,
@@ -320,8 +322,8 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           return yield* forwardChatToSupervisor(env, { chatId: request.chatId, userId: identity.userId, fromIndex: req.payload.replayFrom, request });
         }
         const service = yield* AssistantService;
-        const frames = yield* service.runChatStream(request.chatId, identity.userId, request);
-        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.payload.chatId));
+        const requestSignal = requestAbortSignal(yield* HttpServerRequest);
+        const frames = yield* service.runChatStream(request.chatId, identity.userId, request, requestSignal);
         return sseHttpResponse(frames);
       }))
     )
@@ -337,7 +339,7 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         const env = yield* currentEnv;
         // ADR-0006: under the supervisor a client disconnect no longer cancels
         // the run, so Stop calls this instead of relying on the dropped fetch.
-        if (supervisorEnabled(env)) return { ok: yield* cancelSupervisorRun(env, req.path.chatId) };
+        if (supervisorEnabled(env) && (yield* cancelSupervisorRun(env, req.path.chatId))) return { ok: true };
         const service = yield* AssistantService;
         return { ok: service.abortChat(req.path.chatId) };
       }))
@@ -362,8 +364,8 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
         // ADR-0005 W4: the in-process engine owns the resume on BOTH flavors
         // (claim + execute + continuation frames). The DO handoff is gone.
         const service = yield* AssistantService;
-        const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
-        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
+        const requestSignal = requestAbortSignal(yield* HttpServerRequest);
+        const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId, req.payload.batchId, requestSignal);
         return sseHttpResponse(frames);
       }))
     )
@@ -374,11 +376,18 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
           Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
         );
         yield* requireProjectReadById(thread.projectId);
-        const service = yield* AssistantService;
         // ADR-0005 W3: the in-process task lane owns the resume (claim +
-        // execute + continuation frames). No DO `resumeBatch` RPC.
-        const frames = yield* service.resumeThreadStream(req.path.documentType, req.path.documentId);
-        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.documentId));
+        // execute + continuation frames). Preserve bodyless legacy clients while
+        // decoding the already-documented optional batchId for newer callers.
+        const body = yield* req.request.text;
+        const resumePayload = body.trim() === ""
+          ? undefined
+          : yield* Schema.decodeUnknown(Schema.parseJson(ResumeChatPayload))(body).pipe(
+            Effect.mapError(() => new InvalidArgs({ reason: "invalid resume payload" }))
+          );
+        const service = yield* AssistantService;
+        const requestSignal = requestAbortSignal(yield* HttpServerRequest);
+        const frames = yield* service.resumeThreadStream(req.path.documentType, req.path.documentId, resumePayload?.batchId, requestSignal);
         return sseHttpResponse(frames);
       }))
     )
@@ -635,14 +644,9 @@ function sseHttpResponse(frames: ReadableStream<StreamFrame>): HttpServerRespons
   );
 }
 
-// Disconnect→abort (S5): the browser killing the fetch aborts the in-flight
-// generation via the service's AbortController registry.
-function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): void {
-  // `source` is the adapter's raw platform request (web Request here) — the
-  // typed surface doesn't expose the abort signal.
-  const signal = (request.source as { signal?: AbortSignal } | null | undefined)?.signal;
-  if (!signal) return;
-  signal.addEventListener("abort", () => abort());
+function requestAbortSignal(request: HttpServerRequest): AbortSignal | undefined {
+  // `source` is the adapter's raw platform request (web Request here); the typed surface omits its signal.
+  return (request.source as { signal?: AbortSignal } | null | undefined)?.signal;
 }
 
 // test/models take UNSAVED submitted values; an omitted apiKey falls back to

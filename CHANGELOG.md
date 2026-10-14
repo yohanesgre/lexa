@@ -41,14 +41,36 @@ All notable changes to Lexa are documented here. Format based on
 
 ### Fixed
 
+- **Assistant backend reliability:** turn cleanup releases only its own controller, including
+  interrupted preflight and no-op resume paths. The supervisor owns startup cancellation and
+  captures its producer controller; replay preserves the execution request rather than matching
+  text alone. Exact-batch resume claims prevent approved writes from executing twice.
+  Forced tool choice applies only to the initial tool-capable iteration, avoiding failed
+  continuations after a successful write. Fallback stops at visible text, reasoning or a tool
+  boundary; incomplete streams retain partial history and tool activity. Full task-description
+  diffs are no longer truncated at 2000 characters. Supervised preflight errors keep their catalog
+  status and filename details, and replay requests cannot regenerate on the default path.
+  Stop now retains ownership until begun local writes settle and records their
+  actual outcomes; it never promises rollback. Interrupted unused document
+  resume claims release safely, stale request listeners detach, and compaction
+  shares the remaining turn budget/cancellation while preserving full history.
+  Resumed approvals also gate every mutation after Stop, retain begun work and
+  canonical outcomes, and safely register asynchronous claim ownership. Stop
+  reaches in-process resumes even with supervision enabled. Interrupted MCP
+  discovery and timed-out connections close their eventual clients.
+  Settled rejected/expired batches clear orphan history markers, while a
+  pre-execution Stop keeps approved writes retryable; later transcript edits
+  preserve their prefix and complete instead of truncating then refusing.
+
 - **Assistant turns were unbounded in wall clock and output** — one provider request ran 506s and emitted
   28,519 output tokens with no reply text. Added three limits, each documented where its contract lives
   (`docs/LAYERS.md` → assistant stream limits, `docs/API.md` → the chat-stream body): a total-turn budget
   (ASSISTANT_TURN_BUDGET_MS = 300,000 — measured once for the whole turn, where every previous bound reset
   per chunk), an output ceiling (ASSISTANT_MAX_OUTPUT_TOKENS = 8192, sent as `max_tokens` /
   `max_output_tokens` through the existing `modelOptions` merge), and a 20s ceiling on local DB-backed tool
-  calls. A turn that trips one ends as a visible failed turn (Retry offered, composer unlocked, partial
-  output persisted) — never a silent cut. Also: the composer's EFFORT pick now demonstrably reaches the
+  calls. A turn that trips one ends as a visible failure (composer unlocked, partial output
+  persisted), never a silent cut; unsafe turn Retry is suppressed after known or indeterminate
+  writes. Also: the composer's EFFORT pick reaches the
   request body, Stop no longer waits out the gateway retry backoff, a reloaded transcript shows the tool
   calls a turn ran (the persisted `toolLog` maps to tool parts on read), the model-turn loop is pinned to a
   Lexa-owned cap instead of the SDK default, and the unused `MAX_RUNNER_STEPS` / `runnerStopWhen()` exports

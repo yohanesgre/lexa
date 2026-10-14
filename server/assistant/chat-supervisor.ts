@@ -19,7 +19,7 @@
 // reconnects after eviction falls back to the transcript read, as today.
 
 import { DurableObject } from "cloudflare:workers";
-import { Effect, Layer } from "effect";
+import { Effect, Either, Layer } from "effect";
 import type { D1Database } from "@cloudflare/workers-types";
 import { getEnvFromWorkers, type RuntimeEnv } from "../env";
 import { RuntimeEnvLive } from "../runtime-env";
@@ -31,7 +31,7 @@ import { buildBaseServiceLayerWithStorage } from "../api/http";
 import { LoggerLayer } from "../logging/logger";
 import { r2StorageConfig, type R2Bucket as NarrowR2Bucket } from "../storage/config";
 import { AssistantChatService } from "../services/assistant-chat.service";
-import { errorCodeMap, errorMessage, errorToStatus } from "../api/errors";
+import { errorResponse, errorToStatus } from "../api/errors";
 import type { AssistantChatStreamRequest, StreamFrame } from "../../shared/assistant";
 
 export interface ChatSupervisorEnv extends Record<string, unknown> {
@@ -50,13 +50,12 @@ export interface ChatSupervisorRunPayload {
 
 interface SupervisedRun {
   chatId: string;
-  // The exact user text of this turn. A re-POST carrying the same text is a
-  // reconnect of the SAME turn and attaches; different text is a genuine second
-  // send and is refused with 409.
-  message: string;
+  request: AssistantChatStreamRequest;
   frames: StreamFrame[];
   finished: boolean;
   waiters: Set<() => void>;
+  startupAbort: AbortController;
+  producerAbort: AbortController | null;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -98,11 +97,14 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
   #runtimeEnv: RuntimeEnv | null = null;
   #driver: DbDriver | null = null;
 
-  #runEffect<A, E>(effect: Effect.Effect<A, E, AssistantChatService>): Promise<A> {
+  #runEffect<A, E>(effect: Effect.Effect<A, E, AssistantChatService>, signal: AbortSignal): Promise<A> {
     const env = (this.#runtimeEnv ??= getEnvFromWorkers(this.env));
     if (!env.DB) return Promise.reject(new Error("LexaChatSupervisor requires the DB (D1) binding"));
     this.#driver ??= createD1Driver(d1DatabaseToD1Like(env.DB));
-    return Effect.runPromise(Effect.provide(effect, buildAssistantLayer(this.#driver, env)));
+    return Effect.runPromise(Effect.either(Effect.provide(effect, buildAssistantLayer(this.#driver, env))), { signal }).then((result) => {
+      if (Either.isLeft(result)) throw result.left;
+      return result.right;
+    });
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -123,38 +125,72 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
     }
 
     const active = this.#run;
-    if (active && !active.finished) {
-      // Same turn → this is a reconnect: replay the buffer and tail it. A
-      // different turn → refuse exactly as the in-process mutex does.
-      if (active.chatId === payload.chatId && active.message === payload.request.message) {
-        return this.#sse(this.#tail(active, payload.fromIndex ?? 0));
+    if (active) {
+      const expected = active.request;
+      const incoming = payload.request;
+      let sameTurn = active.chatId === payload.chatId
+        && expected.projectId === incoming.projectId
+        && expected.message === incoming.message
+        && expected.agentId === incoming.agentId
+        && expected.fromIndex === incoming.fromIndex
+        && expected.reasoningEffort === incoming.reasoningEffort
+        && expected.permissionMode === incoming.permissionMode;
+      const attachmentCount = expected.attachments?.length ?? 0;
+      if (attachmentCount !== (incoming.attachments?.length ?? 0)) sameTurn = false;
+      for (let i = 0; sameTurn && i < attachmentCount; i += 1) {
+        const left = expected.attachments![i]!;
+        const right = incoming.attachments![i]!;
+        if (left.storageKey !== right.storageKey || left.mimeType !== right.mimeType || left.name !== right.name) sameTurn = false;
       }
-      return jsonResponse({ error: { code: "ASSISTANT_TASK_ACTIVE", message: "another run is in progress" } }, 409);
+      if (sameTurn && payload.fromIndex !== undefined) {
+        return this.#sse(this.#tail(active, payload.fromIndex));
+      }
+      if (!active.finished) {
+        return jsonResponse({ error: { code: "ASSISTANT_TASK_ACTIVE", message: "another run is in progress" } }, 409);
+      }
     }
-
-    // Validation/authorization failures reject before any frame exists, so the
-    // HTTP status contract stays intact (the same tags the route maps).
-    let stream: ReadableStream<StreamFrame>;
-    try {
-      stream = await this.#runEffect(
-        Effect.gen(function* () {
-          const service = yield* AssistantChatService;
-          return yield* service.runChatStream(payload.chatId, payload.userId, payload.request);
-        })
-      );
-    } catch (error) {
-      const tag = errorTag(error);
-      return jsonResponse({ error: { code: errorCodeMap[tag] ?? "INTERNAL", message: errorMessage({ _tag: tag }) } }, errorToStatus({ _tag: tag }));
+    if (payload.fromIndex !== undefined) {
+      return jsonResponse({ error: { code: "ASSISTANT_GENERATION_FAILED", message: "live reply buffer unavailable; reload chat history" } }, 502);
     }
 
     const run: SupervisedRun = {
       chatId: payload.chatId,
-      message: payload.request.message,
+      request: payload.request,
       frames: [],
       finished: false,
       waiters: new Set(),
+      startupAbort: new AbortController(),
+      producerAbort: null,
     };
     this.#run = run;
+    // Validation/authorization failures reject before any frame exists, so the
+    // HTTP status contract stays intact (the same tags the route maps).
+    let stream: ReadableStream<StreamFrame>;
+    try {
+      const startup = this.#runEffect(
+        Effect.gen(function* () {
+          const service = yield* AssistantChatService;
+          const frames = yield* service.runChatStream(payload.chatId, payload.userId, payload.request);
+          run.producerAbort = service.activeChats.get(payload.chatId) ?? null;
+          return frames;
+        }),
+        run.startupAbort.signal,
+      );
+      this.ctx.waitUntil(startup.catch(() => {}));
+      stream = await startup;
+    } catch (error) {
+      const tag = errorTag(error);
+      const taggedError = typeof error === "object" && error !== null && "_tag" in error && typeof error._tag === "string"
+        ? (error as { _tag: string } & Record<string, unknown>)
+        : { _tag: tag };
+      const envelope = errorResponse(taggedError);
+      run.frames.push({ type: "error", code: envelope.error.code, message: envelope.error.message });
+      run.finished = true;
+      this.#wake(run);
+      if (this.#run === run) this.#run = null;
+      return jsonResponse(envelope, errorToStatus(taggedError));
+    }
+
     // Driven off the client request: the run keeps going when the caller goes
     // away, which is the whole point of the supervisor. A NEW run always starts
     // its buffer at 0 — `fromIndex` is meaningful only on an attach to an
@@ -163,20 +199,11 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
     return this.#sse(this.#tail(run, 0));
   }
 
-  async #cancel(): Promise<Response> {
+  #cancel(): Response {
     const run = this.#run;
     if (!run || run.finished) return jsonResponse({ ok: false, reason: "idle" }, 200);
-    const chatId = run.chatId;
-    try {
-      await this.#runEffect(
-        Effect.gen(function* () {
-          const service = yield* AssistantChatService;
-          return service.abortChat(chatId);
-        })
-      );
-    } catch (error) {
-      return jsonResponse({ ok: false, reason: errorText(error) }, 200);
-    }
+    run.startupAbort.abort();
+    run.producerAbort?.abort();
     return jsonResponse({ ok: true }, 200);
   }
 

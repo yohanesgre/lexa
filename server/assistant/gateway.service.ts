@@ -377,6 +377,10 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
         return yield* Effect.fail(notConfigured());
       });
 
+    const resolveProviderConfig = (projectId: string): Effect.Effect<ProviderConfig, ProviderNotConfigured | ProviderAuthFailed | DbError> =>
+      resolveFallback(projectId).pipe(
+        Effect.flatMap((configs) => configs[0] ? Effect.succeed(configs[0]) : Effect.fail(new ProviderNotConfigured({ projectId })))
+      );
     const streamChat = (input: GatewayStreamInput): AsyncIterable<StreamChunk> => {
       let filteredMessages = input.messages.filter(
         (m) => !(m.role === "user" && typeof (m as { content?: unknown }).content === "string" && String((m as { content: string }).content).trim() === "")
@@ -458,6 +462,9 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               gatewayLog("WARN", `assistant stream retrying next model after baseUrl failure`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
               continue;
             }
+            let visibleOutput = false;
+            let toolBoundaryObserved = false;
+            let terminal = false;
             try {
               void buildAdapter(input.sessionId !== undefined ? { ...cfg, sessionId: input.sessionId } : cfg);
               gatewayLog("DEBUG", "assistant stream dispatch config snapshot", { projectId: input.projectId, attempt: i + 1, total: attemptConfigs.length, providerId: cfg.providerId ?? null, model: cfg.model, kind: normalizeProviderKind(cfg.kind), baseUrl: safeBaseUrl(cfg.baseUrl, cfg.kind), apiKeyMask: maskApiKeyShort(cfg.apiKey) });
@@ -475,7 +482,10 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               let generatedText = "";
               let inToolCallLeak = false;
               for await (const chunk of iterable) {
-                if ((chunk as { type?: string }).type === "RUN_ERROR") {
+                const chunkType = (chunk as { type?: string }).type ?? "";
+                if (chunkType.startsWith("TOOL_CALL_")) toolBoundaryObserved = true;
+                if (chunk.type === "REASONING_MESSAGE_CONTENT" && chunk.delta !== "") visibleOutput = true;
+                if (chunkType === "RUN_ERROR") {
                   const c = chunk as Record<string, unknown>;
                   gatewayLog("ERROR", `assistant RUN_ERROR chunk received before translate`, { projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, code: c.code ?? null, message: String(c.message ?? "").slice(0, 500), rawEvent: c.rawEvent ?? null });
                   const e = Object.assign(new Error(String(c.message ?? "run error")), {
@@ -487,7 +497,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                   });
                   throw translateRunError(e, cfg);
                 }
-                if ((chunk as { type?: string }).type === "TEXT_MESSAGE_CONTENT") {
+                if (chunkType === "TEXT_MESSAGE_CONTENT") {
                   let d = (chunk as { delta?: string }).delta ?? "";
                   if (inToolCallLeak) {
                     const end = d.search(/<\/tool_call>/i);
@@ -508,13 +518,15 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                     });
                   }
                   generatedText += d;
+                  if (d !== "") visibleOutput = true;
                   if ((chunk as { delta?: string }).delta !== d) {
                     if (d === "") continue;
                     yield { ...chunk, delta: d } as StreamChunk;
                     continue;
                   }
                 }
-                if ((chunk as { type?: string }).type === "RUN_FINISHED") {
+                if (chunkType === "RUN_FINISHED") {
+                  terminal = true;
                   const u = normalizeRunUsage((chunk as { usage?: unknown }).usage, { input: usageIn, output: usageOut, cached: cachedIn, cacheWrite: cacheWriteIn });
                   usageIn = u.input;
                   usageOut = u.output;
@@ -523,6 +535,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
                 }
                 yield chunk;
               }
+              if (!terminal) throw new AssistantGenerationFailed({ message: "Provider stream ended without RUN_FINISHED" } as never);
               generatedText = stripToolCallXml(generatedText);
               {
                 let costCents = 0;
@@ -578,6 +591,7 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
               try { const l3 = (callLogRepo as never as Record<string, unknown>); const fn3 = (l3.log ?? l3.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn3) await Effect.runPromise(fn3.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "error", errorCode: (err as { _tag: string })._tag, latencyMs: Date.now() - start } as never).pipe(Effect.catchAll(() => Effect.void)));
               } catch {}
               if (abortSignal?.aborted) throw err;
+              if (terminal || visibleOutput || toolBoundaryObserved) throw err;
               if (isSingleConfig && !retriedSingleNetwork && isSingleRetryCandidate(err) && i === 0) {
                 retriedSingleNetwork = true;
                 attemptConfigs.push(cfg);
@@ -826,6 +840,6 @@ export class AssistantGateway extends Effect.Service<AssistantGateway>()("Lexa/A
         throw new AssistantGenerationFailed({ message: "all models failed", attempts } as never);
       });
 
-    return { resolveFallback, streamChat, testConnection } as const;
+    return { resolveFallback, resolveProviderConfig, streamChat, testConnection } as const;
   }),
 }) {}

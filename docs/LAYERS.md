@@ -1352,12 +1352,21 @@ the run intact, and Jev emits no `task_activity` of its own.
   Workers may opt into the separate `CHAT_DO` supervisor only when the binding
   is deployed and `LXK_CHAT_SUPERVISOR=1`; it permits only an authorized
   owner's identical-active-turn replay, while a different turn receives 409.
+  Replay must preserve the execution request: project, text, agent, ordered
+  attachment references, transcript fork index, reasoning effort and write mode.
   Replay frames are volatile and unavailable after eviction; the canonical
   transcript remains in `assistant_threads`.
+  The supervisor reserves a run before asynchronous setup and keeps that setup
+  alive with `waitUntil`; Stop interrupts its owned startup effect and captured
+  producer controller, never a later controller looked up by chat id.
+  A failed setup clears only that reservation.
 - **Engine** — `server/assistant/provider.ts` (the only `chat()` importer),
   `build-stream.ts` (`buildStream`, stall watchdog, write drain/suspend, resume
   note, incremental partial persist), `gateway.service.ts` (fallback walk ≤3,
   call logs, provider health).
+  A forced write-intent `tool_choice=required` applies only to the initial
+  tool-capable model iteration. Continuations and requests without tools omit
+  it; they may produce the final answer instead of forcing another tool call.
 - **Services** — `AssistantChatService` / `AssistantTaskService` behind the
   `Lexa/Assistant` facade; routes parse → call service → return (Effect-TS).
 - **Tools** — `tools.ts` (reads), `write-tools.ts` (proposal validation/diff),
@@ -1372,15 +1381,52 @@ the run intact, and Jev emits no `task_activity` of its own.
   `auto` → `executeAssistantWrite` in-loop (no pending row, no suspend), capped
   per turn; `deny` → local structured refusal. Emissions unchanged (every
   task-mutating execution calls the domain services with `viaAssistant`).
+  Unconfirmed execution is indeterminate, not proof of no changes. Terminal
+  transcripts retain the existing tool-call log on success and failure.
+  Full task-description diffs retain the complete text rather than a 2000-character preview.
 - **Resume safety** — `assistant_resume_claims` (migration 0029) makes a second
-  resume a no-op; a disconnect aborts and persists the partial with `stopped`.
+  exact-batch resume a no-op. Pending/missing batches release the claim; executed
+  or indeterminate outcomes retain it. Acquisition and registration of newly
+  owned chat/document claims are interruption-safe; unused claims release if
+  setup is interrupted or defects before approved execution begins.
+  Duplicate claims owned by another attempt and claims with begun execution are
+  never released by that cleanup. A default-path disconnect, or explicit Stop
+  on either transport, persists the available partial reply with `stopped`.
+  Resumed execution checks the captured controller after pre-execution reads
+  and before each domain mutation, including bulk items. Begun mutations and
+  outcome collection settle before releasing the run; later rows do not start
+  after Stop. Confirmed resumed outcomes and partial counts persist in the
+  existing display tool log. Interrupted unknown outcomes remain indeterminate.
+  Logical batch settlement is independent of mutation ownership: fully
+  rejected/expired acknowledgements resolve their history markers so later
+  transcript edits do not encounter orphan approvals. Only cancellation before
+  any approved mutation began preserves an approved marker for a safe resume.
+- **Run cleanup** — setup failures, terminal streams and non-executable resumes
+  release their captured controller and per-run resources. Cleanup from a prior
+  run cannot remove the controller of a newer run for the same chat/document.
+  Setup cleanup uses an uninterruptible failure finalizer, covering typed
+  failures, defects and interruption without replacing the original cause.
+  Default request-abort listeners capture that run's controller and detach on
+  settlement; an old request cannot abort a replacement run.
+  Cancellation blocks new local writes but does not abandon a pending database
+  insert or domain mutation. The turn retains its ownership until those actual
+  promises settle, drains late Ask proposals and records Auto outcomes before
+  terminal persistence/disposal. A Stop acknowledgement is not rollback.
+  MCP acquisition registers ownership before handing the toolset to its run.
+  Interrupted discovery and timed-out factory connections close clients that
+  arrive late without blocking a replacement run on the pending acquisition.
+  Registry lookup and summary completion during history compaction share the
+  captured cancellation signal and remaining turn budget. Failed, interrupted
+  or timed-out compaction keeps the full history and settles the already
+  produced reply without replacing it with a fabricated summary.
 - **Legacy conversion** — `server/assistant/legacy-convert.ts` still maps the
   stored legacy message shape to UIMessage parts on read (D4 parts-shaped
   contract): text, a persisted `reasoning` part + `reasoningMs`, the approval
   carrier, and the display `toolLog` (or older `toolCalls`) log as
-  `tool-<name>` parts with `state: "input-available"` — the log records the CALL
-  only (no outcome was ever persisted), so a reloaded turn shows the tools it ran
-  without fabricating results.
+  `tool-<name>` parts with `state: "input-available"`. Legacy call-only logs do
+  not prove an applied outcome. Newly recorded resumed outcomes include their
+  actual applied/failed/denied/expired status and partial counts in `detail`;
+  conversion preserves that detail without inventing an SDK execution state.
 - **Capability** — `server/capabilities.ts` `capabilities(flavor, env)`;
   `assistant = hasSecretsMasterKey(env)` on **both** flavors.
 - **REST shell** — the assistant REST handlers live in

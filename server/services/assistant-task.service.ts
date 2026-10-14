@@ -1,14 +1,14 @@
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { buildAssistantTools, MAX_TOOL_ROUNDS, type BoundSkill } from "../assistant/tools";
 import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
-import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
+import { acquireMcpToolset, buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, IDENTITY, buildUserMessage } from "../assistant/prompt";
 import { buildSkillPromptParts } from "../assistant/context";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
-import { AssistantThreadRepo, type AssistantThread } from "../repos/assistant-thread.repo";
-import { AssistantPendingWritesRepo } from "../repos/assistant-pending-writes.repo";
+import { AssistantThreadRepo } from "../repos/assistant-thread.repo";
+import { AssistantPendingWritesRepo, type AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { AssistantTaskRepo } from "../repos/assistant-task.repo";
 import { AssistantCatalogRepo } from "../repos/assistant-catalog.repo";
@@ -21,7 +21,7 @@ import { AssistantJevService } from "./assistant-jev.service";
 import { loadTaskRepoContent } from "./assistant-repo-content";
 import { AssistantGateway } from "../assistant/gateway.service";
 import { ProviderNotConfigured, AgentNotFound, SkillNotFound, VisionNotConfigured, InvalidArgs, AssistantTaskActive, AssistantTaskNotFound, TaskNotFound, WikiPageNotFound, AssistantThreadNotFound, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
-import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
+import { buildAssistantWriteTools, createWriteRecorder, createLocalWriteTracker, parseWriteTools, type AssistantWriteToolDeps, type LocalWriteTracker, type QueuedProposal } from "../assistant/write-tools";
 import { executeAssistantWrite } from "../assistant/write-execution";
 import { AuthorizationService } from "./authorization.service";
 import { TaskService } from "./task.service";
@@ -36,14 +36,22 @@ import * as msg from "../activity-messages";
 import type { TipTapDoc, Task, WikiPage, Actor, AssistantTask, ActivityType } from "../../shared/types";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import { AssistantProvidersService } from "./assistant-providers.service";
-import { buildStream, findPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
+import { buildStream, findPendingBatches, findNewestPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
+import { carrierBatchIds } from "../assistant/approval-carrier";
 import type { StreamFrame } from "../../shared/assistant";
 import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim";
-import { collectResumeResults } from "../assistant/resume-results";
+import { collectResumeResults, resumeOutcomeLog, stoppedResumeEntry, targetOf, type ResumeResult } from "../assistant/resume-results";
 import { resolveAssistantThread, needsSummary, assertAttachmentCaps, DOC_IMAGE_CAPS, resolveReasoningEffort, modelOptionsForTurn, bytesToBase64, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import type { ProviderConfig } from "../assistant/provider";
 import type { TaskRef } from "../assistant/tools";
 
+function bindRequestAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {
+  if (!signal) return () => {};
+  const abort = () => controller.abort();
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  return () => signal.removeEventListener("abort", abort);
+}
 const activeTasks = new Map<string, AbortController>();
 
 // Per-document single-run lock (ADR-0005 D6, W3). Keyed by
@@ -112,7 +120,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
 
     // Read-only MCP tools for this project: globally + project enabled servers,
     // discovered fail-open. Undefined when the project has none.
-    const loadAssistantMcp = (projectId: string, allowlist: string | null): Effect.Effect<McpToolset | undefined> =>
+    const loadAssistantMcp = (projectId: string, allowlist: string | null, register: (toolset: McpToolset | undefined) => void): Effect.Effect<McpToolset | undefined> =>
       Effect.gen(function* () {
         const env = yield* currentEnv;
         const servers = yield* Effect.tryPromise({
@@ -120,7 +128,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           catch: () => new DbError({ message: "failed to load enabled MCP servers" }),
         }).pipe(Effect.catchAll(() => Effect.succeed([] as McpServerRowWithSecret[])));
         if (servers.length === 0) return undefined;
-        return yield* Effect.promise(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined));
+        return yield* acquireMcpToolset(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined), register);
       });
 
     // Assistant runs are unattended — the actor is the agent itself. Agent name
@@ -266,8 +274,9 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       },
     });
     const assistantActor = (ownerUserId: string): Actor => ({ kind: "agent", label: "assistant", userId: ownerUserId });
-    const makeWriteDeps = (projectId: string, recorder: ReturnType<typeof createWriteRecorder>): AssistantWriteToolDeps => ({
+    const makeWriteDeps = (projectId: string, recorder: ReturnType<typeof createWriteRecorder>, localWriteTracker: LocalWriteTracker): AssistantWriteToolDeps => ({
       projectId,
+      localWriteTracker,
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
         if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
@@ -281,26 +290,16 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       countSprints: async (milestoneId) => { const r = await dbFirst<{ c: number }>(`SELECT COUNT(*) AS c FROM swimlanes WHERE milestone_id = ? AND kind = 'sprint' AND archived_at IS NULL`, milestoneId); return r?.c ?? 0; },
       record: recorder.record,
     });
-    const buildWriteToolset = (settingsRow: AssistantSettingsRow, turn: { projectId: string; documentType: "task" | "wiki" | "chat"; documentId: string; ownerUserId: string }): { tools: unknown[]; drain: (() => QueuedProposal[]) | undefined } => {
+    const buildWriteToolset = (settingsRow: AssistantSettingsRow, turn: { projectId: string; documentType: "task" | "wiki" | "chat"; documentId: string; ownerUserId: string }, localWriteTracker: LocalWriteTracker): { tools: unknown[]; drain: (() => QueuedProposal[]) | undefined } => {
       const enabled = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
       if (enabled.length === 0) return { tools: [], drain: undefined };
       const recorder = createWriteRecorder(turn, (row) => Effect.runPromise(pendingWritesRepo.insert({ id: row.id, project_id: row.projectId, document_type: row.documentType, document_id: row.documentId, owner_user_id: row.ownerUserId, batch_id: row.batchId, seq: row.seq, tool_name: row.toolName, args: row.args, diff: row.diff, expires_at: row.expiresAt })).then(() => {}));
-      const all = buildAssistantWriteTools(makeWriteDeps(turn.projectId, recorder)) as Array<{ name: string }>;
+      const all = buildAssistantWriteTools(makeWriteDeps(turn.projectId, recorder, localWriteTracker)) as Array<{ name: string }>;
       const enabledSet = new Set(enabled);
       const tools = all.filter((t) => enabledSet.has(t.name));
       return tools.length === 0 ? { tools: [], drain: undefined } : { tools, drain: () => recorder.drain() };
     };
     const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };
-    const prepareResume = (thread: AssistantThread) => Effect.gen(function* () {
-      yield* pendingWritesRepo.sweepExpired();
-      const batchId = findPendingBatch(thread.messages);
-      if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
-      const rows = yield* pendingWritesRepo.listByBatch(batchId);
-      const remaining = rows.filter((r) => r.status === "pending").length;
-      if (remaining > 0) return yield* new ApprovalsPending({ batchId, remaining });
-      const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row as never, ctx as never));
-      return { messages: applyResumeResults(thread.messages, [batchId]), results, resumeResultsNote: buildResumeResultsNote(noteLines) };
-    });
 
     // Terminal transitions. Local so the stream callbacks (onDone/onFail/
     // onCancel) and the public methods share one path; terminal activity
@@ -402,24 +401,26 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         if (tasks.some((t) => t.status === "running")) return yield* new AssistantTaskActive();
         yield* threadRepo.resetThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType, documentId })));
       }),
-      runStream: (taskId: string, opts?: { userId?: string }) => {
+      runStream: (taskId: string, opts?: { userId?: string; signal?: AbortSignal }) => {
         let docLock: { projectId: string; documentType: "task" | "wiki"; documentId: string; controller: AbortController } | null = null;
+        let mcp: McpToolset | undefined = undefined;
+        let detachRequestAbort = () => {};
         return Effect.gen(function* () {
         const task = yield* queueRepo.claimAssistantTask(taskId).pipe(Effect.catchTag("ConstraintViolation", () => new AssistantTaskActive()), Effect.catchTag("RowNotFound", () => new AssistantTaskNotFound({ id: taskId })));
         // Register the run's AbortController BEFORE the setup awaits so a Stop /
         // client disconnect during setup is not a no-op (buildStream reuses it
         // via `existing ?? new AbortController()`). Mirrors tryAcquireChat.
         const controller = new AbortController();
-        activeTasks.set(taskId, controller);
         // Per-document single-run lock (D6): the same controller is the lock, so
         // a second live run on this document thread is refused 409 rather than
         // racing the thread. The freshly-claimed row is settled failed so it
         // never sticks `running`.
         if (tryAcquireDocument(task.projectId, task.documentType, task.documentId, controller) === null) {
-          activeTasks.delete(taskId);
           yield* failTask(taskId, "ASSISTANT_TASK_ACTIVE").pipe(Effect.catchAll(() => Effect.succeed(null)));
           return yield* new AssistantTaskActive();
         }
+        activeTasks.set(taskId, controller);
+        detachRequestAbort = bindRequestAbort(opts?.signal, controller);
         docLock = { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, controller };
         const settingsRow = yield* getSettingsOrFail(task.projectId);
         const config = configFromRow(settingsRow);
@@ -482,14 +483,15 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
-        const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
-        const mcp = yield* loadAssistantMcp(task.projectId, allowlist);
+        const localWriteTracker = createLocalWriteTracker();
+        const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }, localWriteTracker) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
+        yield* loadAssistantMcp(task.projectId, allowlist, (toolset) => { mcp = toolset; });
         const mcpTools = mcp?.tools ?? [];
         const visionConfig = imageMode === "delegate" ? yield* visionConfigOf(settingsRow) : null;
         const tools = visionConfig !== null ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: task.documentId }, loadImageBase64: loadImageBase64For(task.projectId), resolveMimeType: (key) => resolveMimeType(task.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         const userContent = buildUserMessage({ instruction, summary: verdict.summary, summarizedCount: verdict.summarizedCount }) as string;
         return buildStream({
-          keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as object) } as never),
+          keyId: taskId, idField: "taskId", threadId: task.documentId, registry: activeTasks, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(task.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: task.projectId, ...input }), localWriteTracker,
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsRow.reasoning_effort), config.kind),
           historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(task.projectId), imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
@@ -498,15 +500,42 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
           onCancel: async () => { await Effect.runPromise(cancelTask(taskId)).catch(() => {}); },
           // Release the document lock when the stream settles (success, error,
           // or abort); buildStream already dropped the abort registry entry.
-          onDispose: async () => { try { if (mcp) await mcp.close(); } finally { releaseDocument(task.projectId, task.documentType, task.documentId, controller); } },
+          onDispose: async () => { try { if (mcp) await mcp.close(); } finally { detachRequestAbort(); releaseDocument(task.projectId, task.documentType, task.documentId, controller); } },
         });
-        }).pipe(Effect.tapError(() => Effect.sync(() => {
-          activeTasks.delete(taskId);
-          if (docLock !== null) releaseDocument(docLock.projectId, docLock.documentType, docLock.documentId, docLock.controller);
+        }).pipe(Effect.onError((cause) => Effect.promise(async () => {
+          detachRequestAbort();
+          try {
+            if (docLock !== null) {
+              const error = Cause.squash(cause);
+              const message = error instanceof Error ? error.message : String(error);
+              await Effect.runPromise(failTask(taskId, message)).catch(() => {});
+            }
+            if (mcp) await mcp.close();
+          } catch {}
+          finally {
+            if (docLock !== null) {
+              if (activeTasks.get(taskId) === docLock.controller) activeTasks.delete(taskId);
+              releaseDocument(docLock.projectId, docLock.documentType, docLock.documentId, docLock.controller);
+            }
+          }
         })));
       },
-      resumeThreadStream: (documentType: "task" | "wiki", documentId: string) => {
+      resumeThreadStream: (documentType: "task" | "wiki", documentId: string, requestedBatchId?: string, requestSignal?: AbortSignal) => {
         let docLock: { projectId: string; documentType: "task" | "wiki"; documentId: string; controller: AbortController } | null = null;
+        let mcp: McpToolset | undefined = undefined;
+        let detachRequestAbort = () => {};
+        let ownedClaim: string | undefined;
+        let executionStarted = false;
+        let executingRow: AssistantPendingWriteRow | undefined;
+        let progressResults: ResumeResult[] = [];
+        let progressLines: Parameters<typeof buildResumeResultsNote>[0] = [];
+        let persistResumeOutcome: ((stopped: boolean) => Promise<void>) | undefined;
+        const releaseUnusedClaim = () => Effect.uninterruptible(Effect.gen(function* () {
+          if (ownedClaim !== undefined && !executionStarted) {
+            yield* releaseResumeBatch(db, ownedClaim);
+            ownedClaim = undefined;
+          }
+        }));
         return Effect.gen(function* () {
         const thread = yield* threadRepo.loadThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType, documentId })));
         // Register the resume's AbortController before the setup awaits (a Stop
@@ -514,15 +543,16 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // per-document lock (D6). buildStream reuses this controller
         // (keyId = documentId).
         const controller = new AbortController();
-        activeTasks.set(documentId, controller);
-        const release = () => {
-          activeTasks.delete(documentId);
-          releaseDocument(thread.projectId, documentType, documentId, controller);
-        };
         if (tryAcquireDocument(thread.projectId, documentType, documentId, controller) === null) {
-          release();
           return yield* new AssistantTaskActive();
         }
+        activeTasks.set(documentId, controller);
+        detachRequestAbort = bindRequestAbort(requestSignal, controller);
+        const release = () => {
+          detachRequestAbort();
+          if (activeTasks.get(documentId) === controller) activeTasks.delete(documentId);
+          releaseDocument(thread.projectId, documentType, documentId, controller);
+        };
         docLock = { projectId: thread.projectId, documentType, documentId, controller };
         const tasks = yield* queueRepo.listTasksForDocument(thread.projectId, documentType, documentId);
         // A running row whose stream already died (lock released) is still a
@@ -536,33 +566,65 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         // Claim BEFORE any work so a retry / second tab cannot re-execute the
         // same approved writes. `duplicate` no-ops; only a missing claim table
         // proceeds without a claim (`unclaimed`).
-        const batchId = findPendingBatch(thread.messages);
+        const batchId = requestedBatchId ?? findNewestPendingBatch(thread.messages);
         if (batchId === null) {
           release();
           return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
         }
-        const claim = yield* claimResumeBatch(db, batchId);
+        if (requestedBatchId !== undefined && !findPendingBatches(thread.messages).includes(requestedBatchId) && !carrierBatchIds(thread.messages).includes(requestedBatchId)) {
+          release();
+          return yield* new ApprovalNotFound({ id: requestedBatchId });
+        }
+        const claim = yield* Effect.uninterruptible(Effect.gen(function* () {
+          const outcome = yield* claimResumeBatch(db, batchId);
+          if (outcome === "claimed") ownedClaim = batchId;
+          return outcome;
+        }));
         if (claim === "duplicate") {
           release();
           return emptyFrameStream();
         }
         // Marker with no rows: nothing to execute — release and settle WITHOUT
         // a provider turn (parity with the chat resume path).
-        const rows = yield* pendingWritesRepo.listByBatch(batchId);
+        const rowsResult = yield* Effect.either(pendingWritesRepo.listByBatch(batchId));
+        if (rowsResult._tag === "Left") {
+          yield* releaseUnusedClaim();
+          release();
+          return yield* Effect.fail(rowsResult.left);
+        }
+        const rows = rowsResult.right;
         if (rows.length === 0) {
-          yield* releaseResumeBatch(db, batchId);
+          yield* releaseUnusedClaim();
           release();
           return emptyFrameStream();
         }
-        const prepared = yield* Effect.either(prepareResume(thread));
-        if (prepared._tag === "Left") {
-          // Not executable (still pending / no marker): release so a later
-          // attempt can resume it, then surface the same error as before.
-          yield* releaseResumeBatch(db, batchId);
+        const remaining = rows.filter((r) => r.status === "pending").length;
+        if (remaining > 0) {
+          yield* releaseUnusedClaim();
           release();
-          return yield* Effect.fail(prepared.left);
+          return yield* new ApprovalsPending({ batchId, remaining });
         }
-        const { messages: history, results: approvalResults, resumeResultsNote } = prepared.right;
+        persistResumeOutcome = async (stopped) => {
+          const messages = executionStarted ? applyResumeResults(thread.messages, [batchId]) : thread.messages;
+          const indeterminate = executingRow !== undefined && !progressResults.some((result) => result.approvalId === executingRow!.id)
+            ? { tool: executingRow.tool_name, target: targetOf(executingRow) } : undefined;
+          const entry = stoppedResumeEntry(progressLines, indeterminate);
+          const { stopped: _stopped, ...outcomeEntry } = entry;
+          const terminal = stopped ? entry : { ...outcomeEntry, error: { code: "ASSISTANT_GENERATION_FAILED", message: "Assistant generation failed" } };
+          await Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages: [...messages, terminal], summary: thread.summary, summarizedCount: thread.summarizedCount }));
+        };
+        const { results: approvalResults, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row, {
+          ...ctx,
+          cancellation: { signal: controller.signal, onExecutionStarted: () => { executionStarted = true; executingRow = row; } },
+        } as never), {
+          signal: controller.signal,
+          onProgress: (collected, lines) => { progressResults = collected; progressLines = lines; },
+        });
+        yield* releaseUnusedClaim();
+        const history = controller.signal.aborted && !executionStarted && rows.some((row) => row.status === "approved")
+          ? thread.messages : applyResumeResults(thread.messages, [batchId]);
+        const resumeResultsNote = buildResumeResultsNote(noteLines);
+        const resumeToolLog = resumeOutcomeLog(noteLines);
         // Document-keyed thread: the agent is required; the skill is optional
         // (auto mode stores null, and skills are no longer thread-bound).
         if (!thread.agentId) return yield* new AgentNotFound({ id: "" });
@@ -590,25 +652,44 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
         const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
-        const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
-        const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
+        const localWriteTracker = createLocalWriteTracker();
+        const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }, localWriteTracker) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
+        yield* loadAssistantMcp(thread.projectId, allowlist, (toolset) => { mcp = toolset; });
         const mcpTools = mcp?.tools ?? [];
         const visionConfig = imageMode === "delegate" ? yield* visionConfigOf(settingsRow) : null;
         const tools = visionConfig !== null ? [...baseTools, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: documentId }, loadImageBase64: loadImageBase64For(thread.projectId), resolveMimeType: (key) => resolveMimeType(thread.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...baseTools, ...writeSet.tools, ...mcpTools];
         return buildStream({
-          keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
+          keyId: documentId, idField: "taskId", threadId: documentId, registry: activeTasks, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(thread.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: thread.projectId, ...input }), localWriteTracker,
           systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsRow.reasoning_effort), config.kind),
           userContent: "", skipUserEntry: true, approvalResults, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount,
-          persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages, summary, summarizedCount })).then(() => {}),
+          persist: (messages, summary, summarizedCount) => {
+            const tail = messages.at(-1) as { role?: string; toolLog?: Array<{ name: string; detail?: string }> } | undefined;
+            const canonical = resumeToolLog.length > 0 && tail?.role === "assistant"
+              ? [...messages.slice(0, -1), { ...tail, toolLog: [...resumeToolLog, ...(tail.toolLog ?? [])] }] : messages;
+            return Effect.runPromise(threadRepo.saveThread(documentType, documentId, { projectId: thread.projectId, agentId: thread.agentId, skillId: thread.skillId, messages: canonical, summary, summarizedCount })).then(() => {});
+          },
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
           // Release the document lock when the stream settles; buildStream
           // already dropped the abort registry entry.
           onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
         });
-        }).pipe(Effect.tapError(() => Effect.sync(() => {
-          activeTasks.delete(documentId);
-          if (docLock !== null) releaseDocument(docLock.projectId, docLock.documentType, docLock.documentId, docLock.controller);
-        })));
+        }).pipe(Effect.onError((cause) => Effect.uninterruptible(Effect.promise(async () => {
+          const stopped = docLock?.controller.signal.aborted === true || Cause.isInterrupted(cause);
+          docLock?.controller.abort();
+          try {
+            await Effect.runPromise(releaseUnusedClaim());
+            if (executionStarted && persistResumeOutcome) await persistResumeOutcome(stopped);
+          } finally {
+            try { if (mcp) await mcp.close(); } catch {}
+            finally {
+              detachRequestAbort();
+              if (docLock !== null) {
+                if (activeTasks.get(documentId) === docLock.controller) activeTasks.delete(documentId);
+                releaseDocument(docLock.projectId, docLock.documentType, docLock.documentId, docLock.controller);
+              }
+            }
+          }
+        }))));
       },
       decideApproval: (approvalId: string, userId: string, verdict: "approve" | "reject") => Effect.gen(function* () {
         yield* pendingWritesRepo.sweepExpired();
