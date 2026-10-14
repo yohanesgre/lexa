@@ -1,5 +1,5 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
-import type { AssistantWriteDiff, StreamFrame } from "../../shared/assistant";
+import type { ApprovalPartial, AssistantWriteDiff, StreamFrame } from "../../shared/assistant";
 import { ASSISTANT_PRE_INGRESS_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE, ASSISTANT_STALL_TIMEOUT_MS } from "../../shared/assistant";
 import { Duration, Effect, Schedule, Stream } from "effect";
 
@@ -82,12 +82,13 @@ export interface AssistantPendingChip {
   state?: "pending" | "approved" | "rejected" | "expired";
 }
 
-// One `approval_result` frame (resume streams only): the execution outcome of a
-// decided row. `failed` carries "CODE: message" from the write executor.
+// One `approval_result` frame from a resumed batch. It separates the approval
+// decision from actual execution and may report aggregate partial outcomes.
 export interface AssistantApprovalResult {
   approvalId: string;
   status: "applied" | "failed" | "denied";
   error?: string | undefined;
+  partial?: ApprovalPartial | undefined;
 }
 
 // Chronological reply timeline (assistant-chat.html): one entry per content
@@ -126,9 +127,9 @@ export interface AssistantStreamSnapshot {
   pending: AssistantPendingChip[];
   // Set by the terminal `suspended` frame — the batch awaiting decisions.
   suspendedBatchId: string | null;
-  // Per-approval execution outcomes from `approval_result` frames (resume
-  // streams only). A `failed` entry patches the decided chip to its `failed`
-  // terminal state — the wire's only signal that an approved write did not run.
+  // Per-approval execution outcomes from resumed batches. These are session
+  // metadata only; the current history contract does not persist successful or
+  // partial results.
   approvalResults: AssistantApprovalResult[];
   error: { code: string; message: string; details?: unknown } | null;
   usage: { in: number; out: number } | null;
@@ -179,20 +180,40 @@ function frameDetail(frame: StreamFrame): string | undefined {
 
 class AssistantStreamSession {
   private snapshot: AssistantStreamSnapshot = { ...IDLE, frames: [], tools: [] };
-  // Listeners receive `coalesce=true` for high-frequency content frames
-  // (delta/reasoning) so React-facing subscribers can batch them to one
-  // render per animation frame; every status-bearing frame notifies
-  // synchronously. Raw observers just ignore the argument.
   private listeners = new Set<(coalesce?: boolean) => void>();
   private resumeReported = false;
+  private deliveryInterrupted = false;
   readonly controller = new AbortController();
 
   constructor(
     readonly key: string,
     private readonly url: string,
     private readonly body: unknown,
-    private readonly onResult?: ((result: ResumeResult) => void) | undefined
-  ) {}
+    private readonly onResult?: ((result: ResumeResult) => void) | undefined,
+    initialSnapshot?: AssistantStreamSnapshot | undefined
+  ) {
+    if (initialSnapshot) this.snapshot = initialSnapshot;
+  }
+
+  canReconnect(): boolean {
+    const terminal = this.snapshot.frames.at(-1)?.type;
+    return this.snapshot.status === "error"
+      && this.deliveryInterrupted
+      && this.snapshot.error?.code === "ASSISTANT_GENERATION_FAILED"
+      && terminal !== "error" && terminal !== "done" && terminal !== "suspended"
+      && this.url.endsWith("/assistant/chat/stream");
+  }
+
+  reconnect(): AssistantStreamSession | null {
+    if (!this.canReconnect()) return null;
+    const body = withReplayFrom(this.body, this.url, this);
+    if (body === this.body) return null;
+    return new AssistantStreamSession(this.key, this.url, body, undefined, {
+      ...this.snapshot,
+      status: "connecting",
+      error: null,
+    });
+  }
 
   private get isResume(): boolean {
     return /\/resume$/.test(this.url);
@@ -229,8 +250,7 @@ class AssistantStreamSession {
         void fetch(`/api/assistant/chat/${encodeURIComponent(chatId)}/cancel`, { method: "POST" }).catch(() => {});
       }
       this.controller.abort();
-      // Server discards the partial message; keep accumulated preview until
-      // the caller resets, matching the popover's Stop semantics.
+      // Keep the local partial reply until canonical history settles.
       this.emit({ status: "aborted" });
     }
   }
@@ -263,7 +283,8 @@ class AssistantStreamSession {
       // frame window, then cancel the request (D11).
       res = await Effect.runPromise(Effect.timeout(fetchEffect, Duration.millis(ASSISTANT_PRE_INGRESS_TIMEOUT_MS)));
     } catch (e) {
-      if ((e as Error).name === "AbortError") return;
+      if (this.controller.signal.aborted) return;
+      this.deliveryInterrupted = true;
       const tag = e !== null && typeof e === "object" && "_tag" in e ? e._tag : undefined;
       if (tag === "TimeoutException") this.controller.abort();
       this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "Could not reach the server." } });
@@ -293,6 +314,7 @@ class AssistantStreamSession {
       return;
     }
     if (!res.body) {
+      this.deliveryInterrupted = true;
       this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: "Empty stream." } });
       this.reportResume(false);
       return;
@@ -302,10 +324,10 @@ class AssistantStreamSession {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const frames: StreamFrame[] = [];
+    const frames: StreamFrame[] = [...this.snapshot.frames];
     let tools = [...this.snapshot.tools];
     let items: AssistantTimelineItem[] = [...this.snapshot.items];
-    let text = "";
+    let text = this.snapshot.text;
     let toolSeq = tools.length;
     let reasoningText = this.snapshot.reasoningText;
     let reasoningActive = false;
@@ -420,6 +442,7 @@ class AssistantStreamSession {
             approvalId: frame.approvalId,
             status: frame.status,
             ...(frame.error !== undefined ? { error: frame.error } : {}),
+            ...(frame.partial !== undefined ? { partial: frame.partial } : {}),
           };
           this.emit({
             frames: [...frames],
@@ -508,13 +531,15 @@ class AssistantStreamSession {
       );
 
       if (this.snapshot.status === "streaming") {
+        this.deliveryInterrupted = true;
         this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: ASSISTANT_STALL_MESSAGE } });
       }
       // The continuation stream terminated: a non-error terminal (done /
       // suspended) means the resume ran; an error frame keeps it retryable.
       this.reportResume(this.snapshot.status !== "error");
     } catch (e) {
-      if ((e as Error).name === "AbortError") return;
+      if (this.controller.signal.aborted) return;
+      this.deliveryInterrupted = true;
       if ((e as Error).name === "StallTimeout") {
         this.emit({ status: "error", error: { code: "ASSISTANT_GENERATION_FAILED", message: ASSISTANT_STALL_MESSAGE } });
         this.reportResume(false);
@@ -535,13 +560,12 @@ function getSession(key: string): AssistantStreamSession | null {
   return sessions.get(key) ?? null;
 }
 
-// ADR-0006: after a mid-turn break the client re-attaches to the same turn, so
-// tell the supervisor how many frames were already rendered and let it replay
-// only the tail. The server ignores the hint for a fresh run, so a wrong guess
-// cannot skip frames. Non-chat streams and first sends pass through untouched.
+// A same-turn reconnect always carries the existing frame cursor, including
+// zero. The supervisor replays only the missing tail and never starts a new
+// generation when it has no retained run or buffer.
 function withReplayFrom(body: unknown, url: string, prior: AssistantStreamSession | null): unknown {
-  const frames = prior?.getSnapshot().frames.length ?? 0;
-  if (frames <= 0 || prior?.getSnapshot().status !== "error") return body;
+  const frames = prior?.getSnapshot().frames.length;
+  if (frames === undefined || prior?.getSnapshot().status !== "error") return body;
   if (!url.endsWith("/assistant/chat/stream")) return body;
   if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
   return { ...body, replayFrom: frames };
@@ -550,7 +574,7 @@ function withReplayFrom(body: unknown, url: string, prior: AssistantStreamSessio
 export function assistantSendForKey(key: string, url: string, body: unknown, onResult?: (result: ResumeResult) => void): void {
   const existing = sessions.get(key);
   if (existing && (existing.getSnapshot().status === "connecting" || existing.getSnapshot().status === "streaming")) return;
-  const next = new AssistantStreamSession(key, url, withReplayFrom(body, url, existing ?? null), onResult);
+  const next = new AssistantStreamSession(key, url, body, onResult);
   sessions.set(key, next);
   next.start();
 }
@@ -560,14 +584,11 @@ export function assistantGetSnapshot(key: string): AssistantStreamSnapshot {
 }
 
 export interface AssistantStream extends AssistantStreamSnapshot {
-  // `onResult` is only meaningful for an approval-resume POST (`/resume`): the
-  // caller learns the discriminated outcome and persists a success.
   send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => void;
+  reconnect: () => void;
+  canReconnect: () => boolean;
   abort: () => void;
-  // Clear the terminal state back to idle (Dismiss affordances).
   reset: () => void;
-  // Raw store surface — external observers (tests, devtools) can record
-  // every emitted snapshot without relying on React render batching.
   subscribe: (listener: (coalesce?: boolean) => void) => () => void;
   getSnapshot: () => AssistantStreamSnapshot;
 }
@@ -627,6 +648,16 @@ export function useAssistantStream(key: string | null): AssistantStream {
       const existing = sessions.get(key);
       if (existing && (existing.getSnapshot().status === "connecting" || existing.getSnapshot().status === "streaming")) return;
       const next = new AssistantStreamSession(key, url, body, onResult);
+      sessions.set(key, next);
+      setSessionEpoch((e) => e + 1);
+      next.start();
+    },
+    canReconnect: () => (key ? sessions.get(key)?.canReconnect() ?? false : false),
+    reconnect: () => {
+      if (!key) return;
+      const existing = sessions.get(key);
+      const next = existing?.reconnect();
+      if (!next) return;
       sessions.set(key, next);
       setSessionEpoch((e) => e + 1);
       next.start();

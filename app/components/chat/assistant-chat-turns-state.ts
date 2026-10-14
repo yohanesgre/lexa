@@ -221,9 +221,23 @@ function reconcileShorterTranscript(
   // frozen error turn from prev's suffix the server read replaced — a terminal
   // error read is run-scoped and does not carry the client's failure bubble (M2).
   const merged = [...prev.slice(0, lastUser), ...shiftRaw(serverTurns, offset)];
-  const present = new Set(merged.map(turnKey));
-  const reattach = prev.slice(lastUser + 1).filter((t) => !!t.error && !present.has(turnKey(t)));
-  return { turns: [...merged, ...reattach], raw: [...prevRaw, ...messages] };
+  for (const failed of prev.slice(lastUser + 1).filter((turn) => !!turn.error)) {
+    const tailIndex = merged.findLastIndex((turn) => turn.role === "assistant");
+    if (tailIndex < 0) {
+      merged.push(failed);
+      continue;
+    }
+    const serverTurn = merged[tailIndex]!;
+    const error = serverTurn.error ?? failed.error;
+    const activity = serverTurn.activity ?? failed.activity;
+    merged[tailIndex] = {
+      ...serverTurn,
+      text: serverTurn.text || failed.text,
+      ...(error ? { error } : {}),
+      ...(activity ? { activity } : {}),
+    };
+  }
+  return { turns: merged, raw: [...prevRaw, ...messages] };
 }
 
 // Union the server read's chips for every batch already present in the

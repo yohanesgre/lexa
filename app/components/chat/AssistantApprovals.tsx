@@ -24,6 +24,8 @@ export interface ApprovalChip {
   detail?: string | undefined;
   diff: AssistantWriteDiff;
   state: ApprovalChipState;
+  executionPartial?: { applied: number; failed: number } | undefined;
+  executionStatus?: "applied" | "failed" | "denied" | undefined;
   error?: { code: string; message: string };
 }
 
@@ -37,16 +39,14 @@ export function AssistantApprovalBatch({
   onDecide,
   onApproveAll,
   onRejectAll,
+  onActiveChipChange,
 }: {
   chips: ApprovalChip[];
   locked: boolean;
-  // Settle contract: when onDecide returns a thenable, the auto-advance arm's
-  // `resolved` flag flips once that thenable settles — a chip still pending
-  // afterwards (the non-terminal error/toast path) disarms instead of
-  // advancing. A plain `void` return leaves the arm unresolved.
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void | Promise<void>;
   onApproveAll: () => void | Promise<void>;
   onRejectAll: () => void | Promise<void>;
+  onActiveChipChange?: ((chip: ApprovalChip) => void) | undefined;
 }) {
   const ordered = chips.toSorted((a, b) => a.seq - b.seq);
   const total = ordered.length;
@@ -56,16 +56,30 @@ export function AssistantApprovalBatch({
   // Header keeps the proposal title and adds the decided/pending tally once any
   // card is decided (wireframe: title AND tally together).
   const tallyParts: string[] = [];
-  for (const key of ["approved", "rejected", "expired", "failed", "pending"] as const) {
-    const n = ordered.filter((c) => c.state === key).length;
-    if (n > 0) tallyParts.push(`${n} ${key}`);
+  const tallies: Array<[string, number]> = [
+    ["applied", ordered.filter((c) => c.executionStatus === "applied" && !(c.executionPartial?.failed)).length],
+    ["partially applied", ordered.filter((c) => c.executionStatus === "applied" && (c.executionPartial?.failed ?? 0) > 0).length],
+    ["failed", ordered.filter((c) => c.state === "failed").length],
+    ["not applied", ordered.filter((c) => c.executionStatus === "denied").length],
+    ["approved", ordered.filter((c) => c.state === "approved" && !c.executionStatus).length],
+    ["rejected", ordered.filter((c) => c.state === "rejected" && !c.executionStatus).length],
+    ["expired", ordered.filter((c) => c.state === "expired").length],
+    ["pending", pendingCount],
+  ];
+  for (const [label, count] of tallies) {
+    if (count > 0) tallyParts.push(`${count} ${label}`);
   }
 
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, chips.length - 1));
   const active = total === 0 ? 0 : Math.min(activeIndex, total - 1);
+  useEffect(() => {
+    const chip = ordered[active];
+    if (chip) onActiveChipChange?.(chip);
+  }, [ordered, active, onActiveChipChange]);
 
   const trackRef = useRef<HTMLDivElement>(null);
   const slideRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const activeRef = useRef(active);
 
   // Auto-advance arm (herald-write-approvals.html State 3b): set only when the
   // ACTIVE card's own Reject / Approve is pressed, keyed by that chip's
@@ -82,6 +96,7 @@ export function AssistantApprovalBatch({
   // never sees a stale `ordered` (writing the ref during render is forbidden).
   useLayoutEffect(() => {
     orderedRef.current = ordered;
+    activeRef.current = active;
   });
 
   // A smooth programmatic page emits a scroll frame per animation tick, so a
@@ -93,6 +108,27 @@ export function AssistantApprovalBatch({
   const scrollingRef = useRef(false);
   const settleTimerRef = useRef<number | null>(null);
   const scrollEndRef = useRef<(() => void) | null>(null);
+
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    if (!track || total < 2) return;
+    const align = () => {
+      const left = carouselTarget(activeRef.current, trackRelOffsets(), track.scrollWidth - track.clientWidth);
+      if (Math.abs(track.scrollLeft - left) < 1) return;
+      disarmSettle();
+      scrollingRef.current = false;
+      track.scrollTo({ left, behavior: "instant" });
+    };
+    align();
+    let width = track.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (width === track.clientWidth) return;
+      width = track.clientWidth;
+      align();
+    });
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [total]);
 
   function settleScroll() {
     const track = trackRef.current;
@@ -334,6 +370,7 @@ export function AssistantApprovalBatch({
                 aria-roledescription="slide"
                 aria-label={`${i + 1} of ${total}`}
                 tabIndex={-1}
+                onFocusCapture={() => goTo(i, false)}
               >
                 <ApprovalChipRow chip={chip} disabled={locked} onDecide={handleCardDecide} />
               </div>

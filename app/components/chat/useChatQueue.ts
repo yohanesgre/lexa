@@ -14,10 +14,12 @@ export type QueuedMessage = {
   flushing?: boolean;
 };
 
-export function useChatQueue({ chatId, streamStatus, send }: {
+export function useChatQueue({ chatId, streamStatus, hasIngress, send, canDispatch = true }: {
   chatId: string;
   streamStatus: AssistantStreamStatus;
+  hasIngress: boolean;
   send: (message: string, attachments: ChatAttachmentRef[]) => boolean;
+  canDispatch?: boolean;
 }) {
   const [byChat, setByChat] = useState<Record<string, QueuedMessage>>({});
   const sendRef = useRef(send);
@@ -27,29 +29,27 @@ export function useChatQueue({ chatId, streamStatus, send }: {
     const queued = byChat[chatId];
     if (!queued || queued.heldReason) return;
     if (queued.flushing) {
-      if (streamStatus === "aborted") {
-        setByChat((prev) => ({ ...prev, [chatId]: { ...queued, flushing: false, heldReason: "stopped" } }));
-      } else if (streamStatus === "error") {
-        setByChat((prev) => ({ ...prev, [chatId]: { ...queued, flushing: false, heldReason: "failed" } }));
-      } else if (streamStatus !== "done") {
+      if (hasIngress) {
         setByChat((prev) => {
+          if (prev[chatId] !== queued) return prev;
           const next = { ...prev };
           delete next[chatId];
           return next;
         });
+      } else if (streamStatus === "aborted" || streamStatus === "error") {
+        setByChat((prev) => prev[chatId] === queued
+          ? { ...prev, [chatId]: { ...queued, flushing: false, heldReason: streamStatus === "aborted" ? "stopped" : "failed" } }
+          : prev);
       }
       return;
     }
     if (streamStatus === "done") {
-      // A flush already refused for this entry pins `flushing` to false: retrying
-      // it under the same `done` would re-send a message the page keeps refusing
-      // and spin the effect. It stays held for edit / cancel / explicit send.
-      if (queued.flushing === false) return;
+      if (!canDispatch) return;
       setByChat((prev) => (prev[chatId] ? { ...prev, [chatId]: { ...queued, flushing: true } } : prev));
       if (sendRef.current(queued.text, []) === false) {
         // Refused flush: never report it as sent — clear flushing and keep the
         // entry so it can still be sent explicitly, cancelled, or edited.
-        setByChat((prev) => (prev[chatId] ? { ...prev, [chatId]: { ...queued, flushing: false } } : prev));
+        setByChat((prev) => (prev[chatId] ? { ...prev, [chatId]: { text: queued.text, heldReason: "failed" } } : prev));
       }
     } else if (streamStatus === "aborted" || streamStatus === "error") {
       setByChat((prev) =>
@@ -58,7 +58,7 @@ export function useChatQueue({ chatId, streamStatus, send }: {
           : prev
       );
     }
-  }, [streamStatus, chatId, byChat]);
+  }, [streamStatus, chatId, byChat, canDispatch, hasIngress]);
 
   const enqueue = useCallback((text: string): boolean => {
     // One held message per thread: refuse a second rather than silently

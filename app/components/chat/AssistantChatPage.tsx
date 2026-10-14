@@ -9,6 +9,9 @@ import {
   useCapabilities,
   useChatAttachments,
   useUploadChatAttachment,
+  useProjectMembers,
+  useTeams,
+  useSession,
 } from "../../lib/queries";
 import { useAssistantStream } from "../../lib/use-assistant-stream";
 import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
@@ -55,6 +58,7 @@ import {
 } from "./assistant-chat-session";
 import { ChatProviderMissingPanel } from "./AssistantChatTurns";
 import type { ChatUploadRequest } from "./AssistantChatComposer";
+import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatComposerArea, ChatHeader, ChatTranscriptArea } from "./AssistantChatShell";
 import { AssistantGeneratedPanel } from "./AssistantGeneratedPanel";
 import { AssistantRunCard } from "./AssistantRunCard";
@@ -93,6 +97,13 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   );
   const { projects, projectFromList, projectError, project, resolved, projectId, settings, settingsLoading } =
     useChatProjectQueries({ slug });
+  const { data: session } = useSession();
+  const { data: projectMembers } = useProjectMembers(slug);
+  const { data: administeredTeams } = useTeams();
+  const currentProjectRole = projectMembers?.find((member) => member.email === session?.user?.email)?.role;
+  const projectTeamId = (project as (typeof project & { teamId?: string | null }) | undefined)?.teamId ?? null;
+  const canManageProviderSettings = session?.user?.role === "superadmin" || Boolean(projectTeamId && administeredTeams?.some((team) => team.id === projectTeamId));
+  const isProjectMember = currentProjectRole === "member" && !canManageProviderSettings;
   // The threads pane: docked or absent, toggled by the cap band's labelled
   // `Threads` control (which reads the same `lexa:pane-threads` key). Desktop
   // intent persists; the below-1024px drawer open is ephemeral.
@@ -249,6 +260,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // `mintedChatId`.
   const [mintedChatId, setMintedChatId] = useState("");
   const [acceptedChatId, setAcceptedChatId] = useState("");
+  const [freshComposerRevision, setFreshComposerRevision] = useState(0);
   const transcriptEnabled = !!chatId && !(chatId === mintedChatId && !stream.hasIngress);
 
   // Transcript render on load (GET /api/assistant/chat/:chatId). A fresh uuid
@@ -323,6 +335,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     sendAccepted,
     transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
+  const handleReconnectTurn = useCallback(() => {
+    if (!stream.canReconnect()) return;
+    setTurns((prev) => {
+      const last = prev?.at(-1);
+      return prev && last?.role === "assistant" && last.error ? prev.slice(0, -1) : prev;
+    });
+    stream.reconnect();
+  }, [stream.canReconnect, stream.reconnect, setTurns]);
 
   // Delegated runs (ADR-0004): delegation is dropped in v1 (ADR-0005 D3), so
   // there are no live agent-tool frames — the durable rows come from
@@ -492,10 +512,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       // The send is accepted: the landing must dock for THIS chat even before
       // the stream status flips (the mint guard releases on first ingress).
       setAcceptedChatId(threadId);
-      // Clear the starter seed at acceptance, not via the turns>0 effect: the
-      // landing→dock remount would otherwise mount the docked composer with the
-      // stale seed and re-prefill the draft with the text just sent (A7). The
-      // turns>0 effect remains as the safety net for server-arriving turns.
+      // Consume the starter seed so a fresh composer cannot prefill an already-sent prompt.
       setSeed(null);
       // Carry an AUTHORITATIVE mode onto the (possibly just-minted) thread so
       // the picker stays in sync before its transcript is read back. A display
@@ -548,7 +565,8 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // Client-only one-message queue (assistant-chat-deck §3.3): a message typed
   // while the turn runs is held in page memory and flushed by the clean `done`
   // transition, or kept held after aborted/error until sent explicitly.
-  const { queued, enqueue, unqueue } = useChatQueue({ chatId, streamStatus: stream.status, send });
+  const [queuedDispatchReady, setQueuedDispatchReady] = useState(true);
+  const { queued, enqueue, unqueue } = useChatQueue({ chatId, streamStatus: stream.status, hasIngress: stream.hasIngress, send, canDispatch: queuedDispatchReady });
 
   // Zero-turn landing (assistant-chat-deck §3.5): hero + centered Deck + starter
   // chips, shown for a SETTLED, zero-turn chat with a provider configured — with
@@ -593,37 +611,22 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
   // a squeezed column (antislop-layoutmobile): ≥1280px it is an in-flow column
   // whose visibility persists like the shell's panes; below that it is a drawer
   // that always starts closed, so the header's far-right toggle is the way in.
-  const [detailOpen, setDetailOpen] = useState(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
-    if (!window.matchMedia("(min-width: 1280px)").matches) return false;
-    try {
-      return window.localStorage.getItem("lexa:pane-generated") !== "closed";
-    } catch {
-      return true;
-    }
+  const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
+  useEffect(() => setSelectedProposalId(null), [chatId]);
+  const { open: detailOpen, toggle: toggleDetail, overlayActive: detailOverlay } = useSidebarState({
+    storageKey: "lexa:pane-generated",
+    defaultOpen: true,
+    breakpoint: 1280,
+    storageValues: { open: "open", closed: "closed" },
   });
-  const toggleDetail = useCallback(() => {
-    setDetailOpen((open) => {
-      const next = !open;
-      // The stored preference describes the desktop column; the mobile drawer is
-      // transient, so a thumb tap must not change what desktop opens with.
-      if (typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1280px)").matches) {
-        try {
-          window.localStorage.setItem("lexa:pane-generated", next ? "open" : "closed");
-        } catch {}
-      }
-      return next;
-    });
-  }, []);
-  // The drawer is an overlay, so Escape closes it (the panes' convention).
   useEffect(() => {
-    if (!detailOpen || typeof window.matchMedia !== "function" || window.matchMedia("(min-width: 1280px)").matches) return;
+    if (!detailOverlay) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setDetailOpen(false);
+      if (event.key === "Escape") toggleDetail();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailOpen]);
+  }, [detailOverlay, toggleDetail]);
 
   // Thread switching (History rows / New chat): deep-link via ?thread=.
   // A mid-stream switch DETACHES — the run keeps going server-side and the
@@ -638,6 +641,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     stripThreadParam,
     openThreadParam,
   });
+  const handleNewChat = useCallback(() => {
+    setFreshComposerRevision((revision) => revision + 1);
+    startNewChat();
+  }, [startNewChat]);
 
   const activeThread = useMemo(
     () => threads.find((t) => t.chatId === chatId) ?? threadRowsRef.current.get(chatId) ?? null,
@@ -678,9 +685,18 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
 
   const { editingPos, editDraft, setEditDraft, beginEdit, cancelEdit, commitEdit } = useChatEditing({ chatId, turns, onEditSave: handleEditSave });
 
-  // The sidebar follows the newest write of the current turn: live chips until
-  // the turn suspends, then the frozen batch's chips (they leave stream.pending).
-  const generatedChip = stream.pending.at(-1) ?? turns?.findLast((t) => t.batch)?.batch?.chips.at(-1) ?? null;
+  // Generated content defaults to the newest live or frozen proposal. The
+  // active approval carousel card overrides that target across both layouts.
+  const generatedProposals = [
+    ...(turns ?? []).flatMap((turn) => turn.batch?.chips ?? []),
+    ...stream.pending,
+  ];
+  const generatedChip =
+    generatedProposals.find((chip) => chip.approvalId === selectedProposalId) ??
+    stream.pending.at(-1) ??
+    turns?.findLast((turn) => turn.batch)?.batch?.chips.at(-1) ??
+    null;
+  const handleActiveProposalChange = useCallback((chip: ApprovalChip) => setSelectedProposalId(chip.approvalId), []);
 
   return (
     <div className="chat-layout">
@@ -690,7 +706,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
         search={chatSearch}
         onSearchChange={setChatSearch}
         onSelect={selectThread}
-        onNewChat={startNewChat}
+        onNewChat={handleNewChat}
         open={sidebarOpen}
         onClose={toggleSidebar}
         error={listQuery.isError}
@@ -714,41 +730,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
       />
 
       {providerMissing ? (
-        <ChatProviderMissingPanel projectId={projectId} />
-      ) : isLanding ? (
-        <ChatLanding onPickStarter={(text) => setSeed({ text, nonce: Date.now() })}>
-          <ChatComposerArea
-            skills={assistantSkills}
-            busy409={busy409}
-            slug={slug}
-            streaming={streaming}
-            suspendedLock={suspendedLock}
-            suspendCount={suspendPendingCount}
-            attachDisabled={attachDisabled}
-            isMobileComposer={isMobileComposer}
-            effort={effort}
-            projectEffort={settings?.reasoningEffort}
-            onEffortChange={setEffort}
-            permissionMode={permissionMode}
-            onPermissionModeChange={setPermissionMode}
-            noWriteTools={noWriteTools}
-            onSend={send}
-            onAbort={handleAbort}
-            landing={isLanding}
-            queued={queued}
-            onQueue={(text) => enqueue(text)}
-            onUnqueue={unqueue}
-            seed={seed}
-            streamStatus={stream.status}
-            sendError={stream.error}
-            hasIngress={stream.hasIngress}
-            attachmentsEnabled={attachmentsEnabled}
-            ensureChatId={ensureChatId}
-            uploadAttachment={uploadAttachment}
-          />
-        </ChatLanding>
+        <ChatProviderMissingPanel
+          projectId={projectId}
+          canManageSettings={canManageProviderSettings}
+          isMember={isProjectMember}
+        />
       ) : (
-        <>
+        <ChatLanding landing={isLanding} onPickStarter={(text) => setSeed({ text, nonce: Date.now() })}>
+          {!isLanding && (
           <ChatTranscriptArea
             turns={turns ?? []}
             chatId={chatId}
@@ -763,6 +752,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             onApproveAll={handleApproveAll}
             onRejectAll={handleRejectAll}
             onRetryTurn={handleRetryTurn}
+            onReconnectTurn={handleReconnectTurn}
+            canManageProviderSettings={canManageProviderSettings}
+            isProjectMember={isProjectMember}
+            onActiveChipChange={handleActiveProposalChange}
             scrollRef={scrollRef}
             onScroll={handleTranscriptScroll}
             editingPos={editingPos}
@@ -783,8 +776,10 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             readError={!!transcript.error && !isThreadNotFound(transcript.error)}
             onRetryRead={() => void transcript.refetch()}
           />
+          )}
 
           <ChatComposerArea
+            key={chatId && chatId !== mintedChatId ? chatId : freshComposerRevision}
             skills={assistantSkills}
             busy409={busy409}
             slug={slug}
@@ -810,13 +805,14 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
             sendError={stream.error}
             hasIngress={stream.hasIngress}
             attachmentsEnabled={attachmentsEnabled}
-            ensureChatId={ensureChatId}
             uploadAttachment={uploadAttachment}
+            ensureChatId={ensureChatId}
+            onReadinessChange={setQueuedDispatchReady}
           />
-        </>
+        </ChatLanding>
       )}
       </div>
-      <AssistantGeneratedPanel chip={generatedChip} onClose={() => setDetailOpen(false)} />
+      <AssistantGeneratedPanel chip={generatedChip} overlayActive={detailOverlay} loading={transcript.isLoading} readError={!!transcript.error && !isThreadNotFound(transcript.error)} onClose={toggleDetail} />
     </main>
     </div>
   );

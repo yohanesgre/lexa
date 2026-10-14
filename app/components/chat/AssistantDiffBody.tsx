@@ -92,7 +92,7 @@ const STRUCTURED_COPY: Partial<Record<AssistantWriteDiff["type"], (d: AssistantW
       <FieldList
         rows={[
           { label: "Title", value: t.title, primary: true },
-          { label: "Parent page", value: t.slug },
+          { label: "Slug", value: t.slug },
         ]}
       />
     );
@@ -143,5 +143,8 @@ function DiffBodyTaskCreateFull({ diff }: { diff: AssistantWriteDiff }) {
 export function DiffBody({ chip, variant = "chip" }: { chip: { diff: AssistantWriteDiff }; variant?: "chip" | "panel" }) {
   if (CONFIRM_COPY[chip.diff.type]) return <DiffBodyConfirm chip={chip} />;
   if (variant === "panel" && chip.diff.type === "task_create") return <DiffBodyTaskCreateFull diff={chip.diff} />;
+  if (variant === "panel" && chip.diff.type === "wiki_create") {
+    return <><DiffBodyStructured chip={chip} /><TextBlock label="Content" text={chip.diff.bodyText} tone="after" /></>;
+  }
   return <DiffBodyStructured chip={chip} />;
 }

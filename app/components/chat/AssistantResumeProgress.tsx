@@ -47,7 +47,7 @@ export function AssistantResumeProgress({ progress, onRetry }: { progress: Resum
           <AlertIcon />
           <span>Resume failed.</span>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
-            Retry
+            Resume
           </button>
         </div>
       </div>
@@ -59,7 +59,7 @@ export function AssistantResumeProgress({ progress, onRetry }: { progress: Resum
         <ClockIcon />
         <span>Resume is taking longer than expected.</span>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
-          Retry
+          Resume
         </button>
       </div>
     </div>

@@ -1,13 +1,17 @@
 import type { UIMessage } from "ai";
-import { ASSISTANT_APPROVAL_DATA_PART, ASSISTANT_ATTACHMENT_DATA_PART, type AssistantWriteDiff } from "../../../shared/assistant";
+import { ASSISTANT_APPROVAL_DATA_PART, ASSISTANT_ATTACHMENT_DATA_PART, ASSISTANT_WRITE_TOOL_NAMES, type AssistantWriteDiff } from "../../../shared/assistant";
 import type { ApprovalChip } from "./AssistantApprovals";
 import type { AssistantTimelineItem, AssistantToolChip } from "../../lib/use-assistant-stream";
 import { segmentFromAssistantMessage } from "../../lib/assistant-agent-adapter";
 import { extractSpawnedRuns, type SpawnedRunRef } from "../../lib/assistant-run-adapter";
-import type { ChatAttachmentKind, ChatAttachmentRef } from "../../lib/assistant-image";
+import type { ChatAttachmentKind, ChatAttachmentRef, ComposerAttachment } from "../../lib/assistant-image";
 
 // Pure helpers + wire-shape types for Assistant chat (assistant-chat.html +
 // assistant-chat-upgrades.html).
+
+export function chatAttachmentsReady(attachments: readonly ComposerAttachment[]): boolean {
+  return attachments.every((attachment) => attachment.status === "ready" && typeof attachment.storageKey === "string" && attachment.storageKey.length > 0);
+}
 
 export interface CitationView {
   url: string;
@@ -120,6 +124,15 @@ export interface ActivityView {
   reasoningMs: number | null;
 }
 
+
+export function turnMayHaveAppliedWrite(turn: ChatTurn, activity = turn.activity): boolean {
+  if (turn.error?.code === "ASSISTANT_GENERATION_FAILED" || turn.error?.code === "ASSISTANT_TASK_ACTIVE") return true;
+  const approvedOrUnsettledWrite = turn.batch?.chips.some(
+    (chip) => chip.state === "approved" || chip.state === "failed" || chip.executionStatus === "applied" || chip.executionStatus === "failed"
+  );
+  return !!approvedOrUnsettledWrite || !!activity?.tools.some((tool) => ASSISTANT_WRITE_TOOL_NAMES.some((name) => name === tool.name));
+}
+
 // HTTPS-ONLY: http:// sources never render as chips (mixed-content +
 // spoofing discipline) — they stay out of the chip row entirely.
 export function safeCitations(raw: unknown): CitationView[] {
@@ -153,10 +166,12 @@ export function guidanceFor(code: string): ErrorGuidance {
 }
 
 export const GUIDANCE_BODY: Record<string, string> = {
-  PROVIDER_AUTH_FAILED: "The provider rejected the configured API key. Nothing was added to the thread.",
+  PROVIDER_AUTH_FAILED: "The provider rejected the configured API key.",
+  ASSISTANT_GENERATION_FAILED: "The reply failed. Reload chat history to check saved output.",
+  ASSISTANT_TASK_ACTIVE: "This request could not start or replay. Reload chat history before trying another send.",
   ASSISTANT_TOOL_BUDGET_EXCEEDED:
     "The reply hit its tool-call budget before finishing. Narrow the ask or raise the budget in project settings to let Assistant go further.",
-  PROVIDER_UNREACHABLE: "The provider closed the stream unexpectedly (rate limit or outage). Nothing was added to the thread.",
+  PROVIDER_UNREACHABLE: "The provider closed the stream unexpectedly (rate limit or outage).",
 };
 
 // Split stored text on ``` fences → plain / fenced segments. Fenced bodies

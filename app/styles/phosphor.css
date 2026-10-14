@@ -6780,7 +6780,7 @@
    above the floating composer; the app writes the measured value on the shell,
    140px is the fallback floor. scroll-padding-bottom keeps the same footprint
    for scrollIntoView({ block: "center" }) on approval batches. */
-.chat-column:has(> .chat-composer-float) > .chat-transcript > .chat-scroll {
+.chat-column:has(> .contents > .chat-composer-float) > .contents > .chat-transcript > .chat-scroll {
   padding-bottom: var(--chat-composer-clearance, 140px);
   scroll-padding-bottom: var(--chat-composer-clearance, 140px);
 }
@@ -7056,6 +7056,11 @@
      and a void's action takes the touch target. */
   .chat-scroll { padding: 12px 12px 8px; }
   .empty-state .btn { min-height: var(--lx-row-h-touch); }
+  .chat-shell button, .chat-shell a.chip {
+    min-width: var(--lx-row-h-touch);
+    min-height: var(--lx-row-h-touch);
+  }
+  .chat-shell .chat-composer .deck-action .btn { min-height: var(--lx-row-h-touch); }
 }
 /* Top fade — the mirror of the composer's bottom scrim: scrolled ink dissolves
    under the header instead of clipping at its edge. */
@@ -7076,6 +7081,9 @@
   letter-spacing: 0.05em;
   color: var(--lx-text-muted);
   margin-bottom: 6px;
+}
+.bubble-user .bubble-meta {
+  color: var(--lx-text-secondary);
 }
 /* Streaming-only assistant bubble caret — mounted/unmounted with the
    streaming turn, so it never renders on done/error turns. */
@@ -9116,6 +9124,10 @@
    panel; inside the Deck it must collapse to the textarea's rows so locked
    decks (busy-409) actually shrink to one row. */
 .chat-deck .composer-editor { min-height: 0; }
+.chat-deck .composer-editor::placeholder {
+  color: var(--lx-text-muted);
+  opacity: 1;
+}
 /* The deck's message surface carries no focus chrome either: the caret is the
    signal, and the global 2px ring would spill past the deck's container. */
 .chat-deck .composer-editor:focus-visible {
@@ -9123,6 +9135,7 @@
   box-shadow: none;
 }
 .deck-action { min-width: 0; }
+.deck-action .btn { flex-shrink: 0; white-space: nowrap; }
 .deck-summary-chip {
   display: inline-flex;
   align-items: center;
@@ -9243,10 +9256,13 @@
 /* ---- Assistant chat landing (zero-turn new chat) ---- */
 .chat-landing {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   padding: 24px 18px;
   gap: 4px;
 }
@@ -9261,7 +9277,7 @@
   color: var(--lx-text-link);
   margin-bottom: 8px;
 }
-.chat-landing-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+.chat-landing-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 6px; max-width: 100%; }
 .chat-landing-chip {
   height: 28px;
   display: inline-flex;
@@ -9283,6 +9299,11 @@
 @media (max-width: 767px) {
   .chat-landing-title { font-size: 16px; }
   .chat-landing { padding: 16px 12px; }
+  .chat-landing-chip {
+    height: auto;
+    max-width: 100%;
+    white-space: normal;
+  }
 }
 
 /* Delegated run card (ADR-0004; herald-chat.html + herald-chat-upgrades.html +
@@ -10934,4 +10955,20 @@ select.prop-input,
   .app-topbar-account {
     gap: 4px;
   }
+}
+
+@media (max-width: 259.98px) {
+  .app-shell:has(.chat-layout) .app-topbar-inner {
+    padding: 0 4px;
+    gap: 0;
+  }
+  .app-shell:has(.chat-layout) .app-topbar-account { gap: 0; }
+  .app-shell:has(.chat-layout) .user-menu > .nav-pill {
+    width: var(--lx-row-h-touch);
+    padding: 0;
+    gap: 4px;
+    justify-content: center;
+  }
+  .chat-layout .deck-action { flex-wrap: wrap; }
+  .chat-layout .deck-status { overflow-wrap: anywhere; }
 }
