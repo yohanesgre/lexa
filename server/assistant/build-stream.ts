@@ -655,8 +655,12 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           push({ type: "suspended", batchId: drained[0]!.batchId });
         };
         try {
+          if (userEntries.length > 0) {
+            await enqueuePersist(() => ctx.persist([...ctx.history, ...userEntries], ctx.historySummary(), ctx.historySummarizedCount()));
+          }
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
           for (const r of ctx.approvalResults ?? []) push({ type: "approval_result", approvalId: r.approvalId, status: r.status, ...(r.error !== undefined ? { error: r.error } : {}), ...(r.partial !== undefined ? { partial: r.partial } : {}) });
+          abort.signal.throwIfAborted();
           const { streamChat } = await import("./provider");
           const withImages = ctx.imageMode === "delegate" ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries]) : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
           const hydrated = ctx.loadDocumentText ? await hydrateDocumentParts(withImages, ctx.loadDocumentText) : withImages;
