@@ -1,7 +1,7 @@
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS, type BoundSkill } from "../assistant/tools";
 import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
-import { buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
+import { acquireMcpToolset, buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, CHAT_IDENTITY } from "../assistant/prompt";
@@ -18,7 +18,7 @@ import { AssistantJevService } from "./assistant-jev.service";
 import { ProviderNotConfigured, VisionNotConfigured, InvalidArgs, AssistantThreadNotFound, AssistantTaskActive, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired, ChatAttachmentsDisabled, AttachmentExtractionFailed, errorCodeMap } from "../api/errors";
 import { isChatImageMime } from "../storage/mime";
 import { chatAttachmentsEnabled } from "../capabilities";
-import { buildAssistantWriteTools, createWriteRecorder, parseWriteTools, buildAutoWriteRecord, buildDenyWriteRecord, type AssistantWriteToolDeps, type QueuedProposal } from "../assistant/write-tools";
+import { buildAssistantWriteTools, createWriteRecorder, createLocalWriteTracker, parseWriteTools, buildAutoWriteRecord, buildDenyWriteRecord, type AssistantWriteToolDeps, type LocalWriteTracker, type QueuedProposal } from "../assistant/write-tools";
 import { applyAssistantWrite, executeAssistantWrite } from "../assistant/write-execution";
 import { TaskService } from "./task.service";
 import { CommentService } from "./comment.service";
@@ -34,14 +34,21 @@ import { resolveAssistantToolPermissionMode } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, findNewestPendingBatch, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
 import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim";
 import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
-import { collectResumeResults } from "../assistant/resume-results";
+import { collectResumeResults, resumeOutcomeLog, stoppedResumeEntry, targetOf, type ResumeResult } from "../assistant/resume-results";
 import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForTurn, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
 import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
 import { AssistantProvidersService } from "./assistant-providers.service";
-import { activeChats, tryAcquireChat } from "../assistant/active-chats";
+import { activeChats, tryAcquireChat, releaseChat } from "../assistant/active-chats";
 
+function bindRequestAbort(signal: AbortSignal | undefined, controller: AbortController): () => void {
+  if (!signal) return () => {};
+  const abort = () => controller.abort();
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  return () => signal.removeEventListener("abort", abort);
+}
 export class AssistantChatService extends Effect.Service<AssistantChatService>()("Lexa/AssistantChatService", {
   dependencies: [AssistantSettingsRepo.Default, AssistantThreadRepo.Default, AssistantPendingWritesRepo.Default, ProjectMemoryRepo.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, AssistantGateway.Default, AssistantJevService.Default, AssistantProvidersService.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
@@ -79,7 +86,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
 
     // Read-only MCP tools for this project: globally + project enabled servers,
     // discovered fail-open. Undefined when the project has none.
-    const loadAssistantMcp = (projectId: string, allowlist: string | null): Effect.Effect<McpToolset | undefined> =>
+    const loadAssistantMcp = (projectId: string, allowlist: string | null, register: (toolset: McpToolset | undefined) => void): Effect.Effect<McpToolset | undefined> =>
       Effect.gen(function* () {
         const env = yield* currentEnv;
         const servers = yield* Effect.tryPromise({
@@ -87,7 +94,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           catch: () => new DbError({ message: "failed to load enabled MCP servers" }),
         }).pipe(Effect.catchAll(() => Effect.succeed([] as McpServerRowWithSecret[])));
         if (servers.length === 0) return undefined;
-        return yield* Effect.promise(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined));
+        return yield* acquireMcpToolset(() => buildMcpTools({ servers, projectId, env, allowlist }).catch(() => undefined), register);
       });
 
     const configFromRow = (row: AssistantSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
@@ -229,8 +236,9 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         return { columns, swimlanes, milestones };
       },
     });
-    const makeWriteDeps = (projectId: string, record: AssistantWriteToolDeps["record"]): AssistantWriteToolDeps => ({
+    const makeWriteDeps = (projectId: string, record: AssistantWriteToolDeps["record"], localWriteTracker: LocalWriteTracker): AssistantWriteToolDeps => ({
       projectId,
+      localWriteTracker,
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
         if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
@@ -252,7 +260,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
     // in-loop via `applyAssistantWrite` with a per-turn budget (no pending row,
     // no drain, no suspend); `deny` refuses locally (no drain). The enabled-name
     // filter is shared by all modes.
-    const buildWriteToolset = (settingsRow: AssistantSettingsRow, turn: { projectId: string; documentType: "task" | "wiki" | "chat"; documentId: string; ownerUserId: string }, mode: AssistantToolPermissionMode): { tools: unknown[]; drain: (() => QueuedProposal[]) | undefined } => {
+    const buildWriteToolset = (settingsRow: AssistantSettingsRow, turn: { projectId: string; documentType: "task" | "wiki" | "chat"; documentId: string; ownerUserId: string }, mode: AssistantToolPermissionMode, localWriteTracker: LocalWriteTracker): { tools: unknown[]; drain: (() => QueuedProposal[]) | undefined } => {
       const enabled = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
       if (enabled.length === 0) return { tools: [], drain: undefined };
       let drain: (() => QueuedProposal[]) | undefined;
@@ -275,7 +283,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         record = recorder.record;
         drain = () => recorder.drain();
       }
-      const all = buildAssistantWriteTools(makeWriteDeps(turn.projectId, record)) as Array<{ name: string }>;
+      const all = buildAssistantWriteTools(makeWriteDeps(turn.projectId, record, localWriteTracker)) as Array<{ name: string }>;
       const enabledSet = new Set(enabled);
       const tools = all.filter((t) => enabledSet.has(t.name));
       return tools.length === 0 ? { tools: [], drain: undefined } : { tools, drain };
@@ -343,8 +351,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         if (next.title === undefined && next.pinned === undefined) return yield* new InvalidArgs({ reason: "nothing to update — provide title or pinned" });
         return yield* threadRepo.updateChatMeta(chatId, userId, next);
       }),
-      runChatStream: (chatId: string, userId: string, req: AssistantChatStreamRequest) => Effect.gen(function* () {
+      runChatStream: (chatId: string, userId: string, req: AssistantChatStreamRequest, requestSignal?: AbortSignal) => Effect.gen(function* () {
         if (!tryAcquireChat(chatId)) return yield* new AssistantTaskActive();
+        const controller = activeChats.get(chatId)!;
+        const detachRequestAbort = bindRequestAbort(requestSignal, controller);
+        const release = () => { detachRequestAbort(); releaseChat(chatId, controller); };
+        let mcp: McpToolset | undefined = undefined;
         return yield* Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(req.projectId);
         const config = configFromRow(settingsRow);
@@ -432,22 +444,26 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const baseModelOptions = modelOptionsForTurn(resolveReasoningEffort(settingsEffort, req.reasoningEffort), config.kind);
         const modelOptions = modelOptionsWithWriteIntent(baseModelOptions, req.message, enabledWriteTools);
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const mcp = yield* loadAssistantMcp(req.projectId, allowlist);
+        yield* loadAssistantMcp(req.projectId, allowlist, (toolset) => { mcp = toolset; });
         const visionConfig = imageMode === "delegate" && imageAttachments.length > 0 ? yield* visionConfigOf(settingsRow) : null;
+        const localWriteTracker = createLocalWriteTracker();
         return buildStream({
-          keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as object) } as never),
+          keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(req.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: req.projectId, ...input }), localWriteTracker,
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
             const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } });
-            const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, permissionMode);
+            const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, permissionMode, localWriteTracker);
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
             return visionConfig !== null ? [...base, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: chatId }, loadImageBase64: loadImageBase64For(req.projectId), resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
-          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(req.projectId), loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, writeMode: permissionMode, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
+          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(req.projectId), loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, writeMode: permissionMode, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
-        }).pipe(Effect.tapError(() => Effect.sync(() => { activeChats.delete(chatId); })));
+        }).pipe(Effect.onError(() => Effect.promise(async () => {
+          try { if (mcp) await mcp.close(); } catch {}
+          finally { release(); }
+        })));
       }),
       decideApproval: (approvalId: string, userId: string, verdict: "approve" | "reject") => Effect.gen(function* () {
         yield* pendingWritesRepo.sweepExpired();
@@ -460,71 +476,119 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const remaining = yield* pendingWritesRepo.countByBatchRemaining(row.batch_id);
         return { approvalId, batchId: row.batch_id, status: decided?.status ?? row.status, remaining };
       }),
-      resumeChatStream: (chatId: string, userId: string) => Effect.gen(function* () {
+      resumeChatStream: (chatId: string, userId: string, requestedBatchId?: string, requestSignal?: AbortSignal) => Effect.gen(function* () {
         if (!tryAcquireChat(chatId)) return yield* new AssistantTaskActive();
+        const controller = activeChats.get(chatId)!;
+        const detachRequestAbort = bindRequestAbort(requestSignal, controller);
+        const release = () => { detachRequestAbort(); releaseChat(chatId, controller); };
+        let mcp: McpToolset | undefined = undefined;
+        let ownedClaim: string | undefined;
+        let executionStarted = false;
+        let executingRow: AssistantPendingWriteRow | undefined;
+        let progressResults: ResumeResult[] = [];
+        let progressLines: Parameters<typeof buildResumeResultsNote>[0] = [];
+        let persistResumeOutcome: ((stopped: boolean) => Promise<void>) | undefined;
+        const releaseUnusedClaim = () => Effect.uninterruptible(Effect.gen(function* () {
+          if (ownedClaim !== undefined && !executionStarted) {
+            yield* releaseResumeBatch(db, ownedClaim);
+            ownedClaim = undefined;
+          }
+        }));
         return yield* Effect.gen(function* () {
-        const loadDocumentText = makeDocumentTextLoader();
-        yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
-        const thread = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId })));
-        const settingsRow = yield* getSettingsOrFail(thread.projectId);
-        yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
-        // Shape-agnostic: a DO-path transcript carries the D3
-        // `data-assistant-approval` carrier part instead of the legacy
-        // `pendingBatch` field. Target the newest marker across BOTH shapes so a
-        // parts-shaped thread resumes instead of 409ing with an empty batchId.
-        const batchId = findNewestPendingBatch(thread.messages);
-        if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
-        // Claim BEFORE any work so a retry / second tab cannot re-execute the
-        // same approved writes. `duplicate` (a prior claim or a non-missing-
-        // table DB error) no-ops; only a missing claim table proceeds without a
-        // claim (`unclaimed`).
-        const claim = yield* claimResumeBatch(db, batchId);
-        if (claim === "duplicate") return emptyFrameStream();
-        const rows = yield* pendingWritesRepo.listByBatch(batchId);
-        const remaining = rows.filter((r) => r.status === "pending").length;
-        if (remaining > 0) {
-          yield* releaseResumeBatch(db, batchId);
-          return yield* new ApprovalsPending({ batchId, remaining });
-        }
-        // Marker with no rows: nothing to execute — release and settle WITHOUT
-        // a provider turn (mirrors agent.ts:955-963; the continuation runs only
-        // when there is a results note to deliver).
-        if (rows.length === 0) {
-          yield* releaseResumeBatch(db, batchId);
-          return emptyFrameStream();
-        }
-        const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };
-        const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row, ctx as unknown as never));
-        const resumeResultsNote = buildResumeResultsNote(noteLines);
-        const history = applyResumeResults(thread.messages, [batchId]);
-        // Resume continues the same user turn, so the `$mentioned` skills are
-        // re-injected with the same catalog the original run carried.
-        const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
-        const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(lastUserText(history), boundSkills);
-        const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
-        const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
-        const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
-        // No preflight on resume: the judgment was made against the original
-        // request. The tool is still offered — its budget is per stream. The
-        // config is resolved once here too, so a resume gets the same gate.
-        const jevConfig = yield* jevService.resolveForProject(thread.projectId);
-        const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, writeTools: enabledWriteTools });
-        const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, thread.permissionMode);
-        const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const mcp = yield* loadAssistantMcp(thread.projectId, allowlist);
-        const config = configFromRow(settingsRow);
-        const settingsEffort = (settingsRow as unknown as { reasoning_effort: AssistantReasoningEffort | null }).reasoning_effort;
-        let citations: Citation[] = [];
-        return buildStream({
-          keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as object) } as never),
-          systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsEffort), config.kind),
-          userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, writeMode: thread.permissionMode,
-          tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
-          toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, ...(mcp ? { onDispose: mcp.close } : {}),
-          persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: null, messages, summary, summarizedCount })).then(() => {}),
-          onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
-        });
-        }).pipe(Effect.tapError(() => Effect.sync(() => { activeChats.delete(chatId); })));
+          const loadDocumentText = makeDocumentTextLoader();
+          yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
+          const thread = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId })));
+          const settingsRow = yield* getSettingsOrFail(thread.projectId);
+          yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
+          const batchId = requestedBatchId ?? findNewestPendingBatch(thread.messages);
+          if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
+          if (requestedBatchId !== undefined && !findPendingBatches(thread.messages).includes(requestedBatchId) && !carrierBatchIds(thread.messages).includes(requestedBatchId)) {
+            return yield* new ApprovalNotFound({ id: requestedBatchId });
+          }
+          const rows = yield* pendingWritesRepo.listByBatch(batchId);
+          if (rows.some((row) => row.project_id !== thread.projectId || row.document_type !== "chat" || row.document_id !== chatId || row.owner_user_id !== userId)) {
+            return yield* new ApprovalNotFound({ id: batchId });
+          }
+          const claim = yield* Effect.uninterruptible(Effect.gen(function* () {
+            const outcome = yield* claimResumeBatch(db, batchId);
+            if (outcome === "claimed") ownedClaim = batchId;
+            return outcome;
+          }));
+          if (claim === "duplicate") {
+            release();
+            return emptyFrameStream();
+          }
+          const remaining = rows.filter((r) => r.status === "pending").length;
+          if (remaining > 0) {
+            yield* releaseUnusedClaim();
+            return yield* new ApprovalsPending({ batchId, remaining });
+          }
+          if (rows.length === 0) {
+            yield* releaseUnusedClaim();
+            release();
+            return emptyFrameStream();
+          }
+          const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };
+          persistResumeOutcome = async (stopped) => {
+            const messages = executionStarted ? applyResumeResults(thread.messages, [batchId]) : thread.messages;
+            const indeterminate = executingRow !== undefined && !progressResults.some((result) => result.approvalId === executingRow!.id)
+              ? { tool: executingRow.tool_name, target: targetOf(executingRow) } : undefined;
+            const entry = stoppedResumeEntry(progressLines, indeterminate);
+            const { stopped: _stopped, ...outcomeEntry } = entry;
+            const terminal = stopped ? entry : { ...outcomeEntry, error: { code: "ASSISTANT_GENERATION_FAILED", message: "Assistant generation failed" } };
+            await Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: null, messages: [...messages, terminal], summary: thread.summary, summarizedCount: thread.summarizedCount }));
+          };
+          const { results, noteLines } = yield* collectResumeResults(rows, (row) => executeAssistantWrite(row, {
+            ...ctx,
+            cancellation: { signal: controller.signal, onExecutionStarted: () => { executionStarted = true; executingRow = row; } },
+          } as unknown as never), {
+            signal: controller.signal,
+            onProgress: (collected, lines) => { progressResults = collected; progressLines = lines; },
+          });
+          yield* releaseUnusedClaim();
+          const resumeResultsNote = buildResumeResultsNote(noteLines);
+          const history = controller.signal.aborted && !executionStarted && rows.some((row) => row.status === "approved")
+            ? thread.messages : applyResumeResults(thread.messages, [batchId]);
+          const resumeToolLog = resumeOutcomeLog(noteLines);
+          const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
+          const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(lastUserText(history), boundSkills);
+          const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
+          const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
+          const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
+          const jevConfig = yield* jevService.resolveForProject(thread.projectId);
+          const systemPrompts = buildSystemPrompts({ identity: CHAT_IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: null, skillMarkdowns, skillCatalog, writeTools: enabledWriteTools });
+          const localWriteTracker = createLocalWriteTracker();
+          const writeSet = buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, thread.permissionMode, localWriteTracker);
+          const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
+          yield* loadAssistantMcp(thread.projectId, allowlist, (toolset) => { mcp = toolset; });
+          const config = configFromRow(settingsRow);
+          const settingsEffort = (settingsRow as unknown as { reasoning_effort: AssistantReasoningEffort | null }).reasoning_effort;
+          let citations: Citation[] = [];
+          return buildStream({
+            keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(thread.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: thread.projectId, ...input }), localWriteTracker,
+            systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsEffort), config.kind),
+            userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, writeMode: thread.permissionMode,
+            tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+            toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
+            persist: (messages, summary, summarizedCount) => {
+              const tail = messages.at(-1) as { role?: string; toolLog?: Array<{ name: string; detail?: string }> } | undefined;
+              const canonical = resumeToolLog.length > 0 && tail?.role === "assistant"
+                ? [...messages.slice(0, -1), { ...tail, toolLog: [...resumeToolLog, ...(tail.toolLog ?? [])] }] : messages;
+              return Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: thread.projectId, ownerUserId: userId, title: thread.title, agentId: thread.agentId, skillId: null, messages: canonical, summary, summarizedCount })).then(() => {});
+            },
+            onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
+          });
+        }).pipe(Effect.onError((cause) => Effect.uninterruptible(Effect.promise(async () => {
+          const stopped = controller.signal.aborted || Cause.isInterrupted(cause);
+          controller.abort();
+          try {
+            await Effect.runPromise(releaseUnusedClaim());
+            if (executionStarted && persistResumeOutcome) await persistResumeOutcome(stopped);
+          } finally {
+            try { if (mcp) await mcp.close(); } catch {}
+            finally { release(); }
+          }
+        }))));
       }),
     };
   }),

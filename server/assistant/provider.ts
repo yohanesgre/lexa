@@ -270,12 +270,13 @@ export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   // (CF GLM/DeepSeek/Qwen thinking streams) is emitted as a reasoning chunk;
   // the root `createOpenaiChatCompletions` adapter drops it silently.
   if (kind === "openai_compatible" || kind === "workers_ai") {
-    return openaiCompatibleText(config.model, {
+    const adapter = openaiCompatibleText(config.model, {
       name: "openai-chat",
       apiKey: config.apiKey,
       baseURL: normalizeBaseUrl(config.baseUrl, kind),
       defaultHeaders: opencodeSessionHeaders(config.sessionId, config),
     });
+    return adapter;
   }
   if (kind === "openai_responses") {
     return createOpenaiChat(config.model as OpenAiResponsesModel, config.apiKey, {
@@ -332,6 +333,16 @@ export function streamChat(input: StreamChatInput): AsyncIterable<StreamChunk> {
     // Lexa-owned model-turn cap (M3): never rely on the SDK's unpinned default.
     agentLoopStrategy: maxIterations(MAX_MODEL_ITERATIONS),
     ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
+    ...(input.modelOptions?.tool_choice === "required" ? {
+      middleware: [{
+        name: "initial-tool-choice",
+        onConfig(context, config) {
+          if (config.modelOptions?.tool_choice !== "required" || (context.iteration === 0 && config.tools.length > 0)) return;
+          const { tool_choice: _choice, ...modelOptions } = config.modelOptions;
+          return { modelOptions };
+        },
+      }],
+    } : {}),
     ...(debug !== undefined ? { debug } : {}),
   }) as AsyncIterable<StreamChunk>;
 }
@@ -344,22 +355,30 @@ export async function completeText(
 ): Promise<string> {
   const debug = debugOption();
   let abortController = opts?.abortController;
-  if (!abortController && opts?.signal) {
+  const signal = opts?.signal;
+  let onAbort: (() => void) | undefined;
+  if (!abortController && signal) {
     abortController = new AbortController();
-    const sig = opts.signal;
-    if (sig.aborted) abortController.abort((sig as AbortSignal & { reason?: unknown }).reason);
-    else sig.addEventListener("abort", () => abortController!.abort((sig as AbortSignal & { reason?: unknown }).reason), { once: true });
+    if (signal.aborted) abortController.abort((signal as AbortSignal & { reason?: unknown }).reason);
+    else {
+      onAbort = () => abortController!.abort((signal as AbortSignal & { reason?: unknown }).reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   }
-  return (await chat({
-    adapter: buildAdapter(
-      opts?.sessionId !== undefined ? { ...config, sessionId: opts.sessionId } : config,
-    ),
-    systemPrompts: toSystemPrompts(config.kind, input.systemPrompts ?? []) as never,
-    messages: input.messages,
-    stream: false,
-    ...(abortController !== undefined ? { abortController } : {}),
-    ...(debug !== undefined ? { debug } : {}),
-  })) as string;
+  try {
+    return (await chat({
+      adapter: buildAdapter(
+        opts?.sessionId !== undefined ? { ...config, sessionId: opts.sessionId } : config,
+      ),
+      systemPrompts: toSystemPrompts(config.kind, input.systemPrompts ?? []) as never,
+      messages: input.messages,
+      stream: false,
+      ...(abortController !== undefined ? { abortController } : {}),
+      ...(debug !== undefined ? { debug } : {}),
+    })) as string;
+  } finally {
+    if (signal !== undefined && onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 export interface FetchLike {

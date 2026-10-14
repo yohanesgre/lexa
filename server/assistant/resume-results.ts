@@ -58,34 +58,72 @@ export function targetOf(row: { args: string }): string | undefined {
 // executed).
 export const collectResumeResults = <R extends ResumeRow, E, Req>(
   rows: readonly R[],
-  run: (row: R) => Effect.Effect<WriteOutcome, E, Req>
+  run: (row: R) => Effect.Effect<WriteOutcome, E, Req>,
+  control: {
+    signal: AbortSignal;
+    onProgress: (results: ResumeResult[], noteLines: ResumeResultLine[]) => void;
+  }
 ): Effect.Effect<{ results: ResumeResult[]; noteLines: ResumeResultLine[] }, E, Req> =>
   Effect.gen(function* () {
     const results: ResumeResult[] = [];
     const noteLines: ResumeResultLine[] = [];
     for (const row of rows) {
       if (row.status === "approved") {
-        const outcome = yield* run(row);
-        if (outcome.ok) {
-          const partial = partialOfResult(outcome.result);
-          results.push({ approvalId: row.id, status: "applied", ...(partial !== undefined ? { partial } : {}) });
-          const createdKey = row.tool_name === "create_task" ? (outcome.result as { task?: { key?: unknown } } | undefined)?.task?.key : undefined;
-          noteLines.push({ tool: row.tool_name, target: targetOf(row), ...(typeof createdKey === "string" && createdKey !== "" ? { created: createdKey } : {}), status: "applied", ...(partial !== undefined ? { partial } : {}) });
-        } else {
-          results.push({ approvalId: row.id, status: "failed", ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
-          noteLines.push({ tool: row.tool_name, target: targetOf(row), status: "failed", ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
-        }
+        yield* Effect.uninterruptible(Effect.gen(function* () {
+          const outcome = control.signal.aborted
+            ? { ok: false as const, error: "Assistant stopped" }
+            : yield* run(row);
+          if (outcome.ok) {
+            const partial = partialOfResult(outcome.result);
+            results.push({ approvalId: row.id, status: "applied", ...(partial !== undefined ? { partial } : {}) });
+            const createdKey = row.tool_name === "create_task" ? (outcome.result as { task?: { key?: unknown } } | undefined)?.task?.key : undefined;
+            noteLines.push({ tool: row.tool_name, target: targetOf(row), ...(typeof createdKey === "string" && createdKey !== "" ? { created: createdKey } : {}), status: "applied", ...(partial !== undefined ? { partial } : {}) });
+          } else {
+            results.push({ approvalId: row.id, status: "failed", ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
+            noteLines.push({ tool: row.tool_name, target: targetOf(row), status: "failed", ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
+          }
+          control.onProgress(results, noteLines);
+        }));
       } else if (row.status === "rejected") {
         results.push({ approvalId: row.id, status: "denied" });
         noteLines.push({ tool: row.tool_name, target: targetOf(row), status: "denied" });
+        control.onProgress(results, noteLines);
       } else if (row.status === "expired") {
         // Expired rows never ran and carry no approval result; report them in
         // the note so a mixed batch is not silently missing them.
         noteLines.push({ tool: row.tool_name, target: targetOf(row), status: "expired" });
+        control.onProgress(results, noteLines);
       }
     }
     return { results, noteLines };
   });
+
+export function resumeOutcomeLog(
+  noteLines: readonly ResumeResultLine[],
+  indeterminate?: { tool: string; target?: string | undefined },
+) {
+  const toolLog = noteLines.map((line) => ({
+    name: line.tool,
+    detail: `${line.status}${line.target ? `: ${line.target}` : ""}${line.partial ? ` (${line.partial.applied} applied, ${line.partial.failed} failed)` : ""}`,
+  }));
+  if (indeterminate) {
+    toolLog.push({ name: indeterminate.tool, detail: `indeterminate${indeterminate.target ? `: ${indeterminate.target}` : ""}` });
+  }
+  return toolLog;
+}
+
+export function stoppedResumeEntry(
+  noteLines: readonly ResumeResultLine[],
+  indeterminate?: { tool: string; target?: string | undefined },
+) {
+  return {
+    role: "assistant" as const,
+    content: "",
+    ts: new Date().toISOString(),
+    stopped: true as const,
+    toolLog: resumeOutcomeLog(noteLines, indeterminate),
+  };
+}
 
 // Note lines for a fully-decided batch with no approved rows (all
 // rejected/expired). The DO resumes the turn on this note so the user is never

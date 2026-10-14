@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { createAssistantApiHandler } from "./assistant-api";
+import type { RuntimeEnv } from "../env";
 import { seedProviderSecret } from "../assistant/test-secrets";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -51,11 +52,13 @@ const authed = (method: string, path: string, body?: unknown, key = ADMIN_KEY) =
 // that emits one delta then HOLDS OPEN until the client disconnects — long
 // enough to exercise the active-chat guards against a live stream.
 let mockServer: Server;
-let mockPort = 0;
+let mockPort: number;
+let mockProviderRequests = 0;
 
 function startMockProvider(): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
   mockServer = createServer((req, res) => {
+    mockProviderRequests += 1;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
     res.write(
       `data: {"id":"1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}\n\n`
@@ -274,14 +277,31 @@ describe("GET /api/assistant/chat/:chatId (D3 UIMessage parts + export)", () => 
   });
 });
 
+
 describe("DELETE /api/assistant/chat/:chatId and concurrent streams (active-chat guard)", () => {
+  it("refuses replay cursors on the in-process path without starting a generation", async () => {
+    mockProviderRequests = 0;
+    const replay = await handler(
+      authed("POST", "/api/assistant/chat/stream", {
+        projectId: "p1",
+        chatId: "replay-unsafe",
+        message: "create a task",
+        replayFrom: 0,
+      })
+    );
+    expect(replay.status).toBe(409);
+    expect((await replay.json()).error.code).toBe("ASSISTANT_TASK_ACTIVE");
+    expect(mockProviderRequests).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM assistant_threads WHERE document_id = 'replay-unsafe'").get()).toMatchObject({ count: 0 });
+  });
+
   it("delete while streaming and a second concurrent stream both 409 ASSISTANT_TASK_ACTIVE; client abort releases the chat", async () => {
     const ac = new AbortController();
     const res = await handler(
       new Request("http://lexa.test/api/assistant/chat/stream", {
         method: "POST",
         headers: { authorization: `Bearer ${ADMIN_KEY}`, "content-type": "application/json" },
-        body: JSON.stringify({ projectId: "p1", chatId: "c-del-live", message: "hello" }),
+        body: JSON.stringify({ projectId: "p1", chatId: "c-del-live", message: "hello", fromIndex: 0 }),
         signal: ac.signal,
       })
     );
@@ -314,19 +334,64 @@ describe("DELETE /api/assistant/chat/:chatId and concurrent streams (active-chat
     expect(second.status).toBe(409);
     expect((await second.json()).error.code).toBe("ASSISTANT_TASK_ACTIVE");
 
-    // Client disconnect aborts the run and frees the chatId; a fresh stream is accepted.
+    // The first request's signal stays live after its stream is canceled. Aborting it after a newer run starts must not target the current controller.
     reader.cancel().catch(() => {});
-    ac.abort();
     await new Promise((r) => setTimeout(r, 250));
     const released = await handler(authed("DELETE", "/api/assistant/chat/c-del-live"));
     expect(released.status).toBe(204);
 
+    const nextRequest = new AbortController();
     const third = await handler(
-      authed("POST", "/api/assistant/chat/stream", { projectId: "p1", chatId: "c-del-live", message: "fresh" })
+      new Request("http://lexa.test/api/assistant/chat/stream", {
+        method: "POST",
+        headers: { authorization: `Bearer ${ADMIN_KEY}`, "content-type": "application/json" },
+        body: JSON.stringify({ projectId: "p1", chatId: "c-del-live", message: "fresh" }),
+        signal: nextRequest.signal,
+      })
     );
     expect(third.status).toBe(200);
-    await readSseFrames(third, "start");
+    const nextReader = third.body!.getReader();
+    expect((await nextReader.read()).done).toBe(false);
+    ac.abort();
+    const stillActive = await handler(authed("DELETE", "/api/assistant/chat/c-del-live"));
+    expect(stillActive.status).toBe(409);
+    expect((await stillActive.json()).error.code).toBe("ASSISTANT_TASK_ACTIVE");
+    nextReader.cancel().catch(() => {});
+    nextRequest.abort();
   }, 20000);
+
+  it("Stop cancels an in-process resume when supervision is enabled but owns no producer", async () => {
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+VALUES ('chat', 'c-resume-stop', 'p1', 'u1', '[{"role":"user","content":"hello"},{"role":"assistant","content":"","pendingBatch":{"batchId":"b-resume-stop","approvals":[]}}]');
+INSERT INTO assistant_pending_writes
+  (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+VALUES ('ap-resume-stop', 'p1', 'chat', 'c-resume-stop', 'u1', 'b-resume-stop', 0, 'create_task', '{"title":"Not approved"}', '{"type":"task_create","title":"Not approved","fields":{}}', 'rejected', datetime('now', '+1 hour'));
+`);
+    const supervised = createAssistantApiHandler(dbPath, {
+      LXK_SECRETS_MASTER_KEY: MASTER_KEY,
+      LXK_CHAT_SUPERVISOR: "1",
+      CHAT_DO: {
+        idFromName: () => ({}),
+        get: () => ({ fetch: async () => Response.json({ ok: false }) }),
+      } as unknown as RuntimeEnv["CHAT_DO"],
+    });
+    const response = await supervised(authed("POST", "/api/assistant/chat/c-resume-stop/resume", { batchId: "b-resume-stop" }));
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    expect((await reader.read()).done).toBe(false);
+    const cancel = await supervised(authed("POST", "/api/assistant/chat/c-resume-stop/cancel"));
+    expect(cancel.status).toBe(200);
+    expect(await cancel.json()).toEqual({ ok: true });
+    for (;;) {
+      if ((await reader.read()).done) break;
+    }
+    const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_id = 'c-resume-stop'").get() as { messages: string };
+    expect((JSON.parse(saved.messages) as Array<Record<string, unknown>>).at(-1)).toMatchObject({ stopped: true });
+    const settledCancel = await supervised(authed("POST", "/api/assistant/chat/c-resume-stop/cancel"));
+    expect(settledCancel.status).toBe(200);
+    expect(await settledCancel.json()).toEqual({ ok: false });
+  });
 });
 
 describe("POST /api/assistant/chat/:chatId/resume — in-process SSE (no DO handoff)", () => {
@@ -349,5 +414,21 @@ INSERT OR REPLACE INTO assistant_resume_claims (batch_id) VALUES ('rb1');
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).toContain("event: done");
+  });
+});
+
+describe("POST /api/assistant/threads/:documentType/:documentId/resume optional batchId", () => {
+  // Contract A4: empty legacy body omits selection; a supplied non-marker ID is decoded and rejected.
+  it("accepts a bodyless legacy resume and forwards an explicit batchId", async () => {
+    db.exec(`INSERT OR REPLACE INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, messages)
+      VALUES ('task', 'resume-thread', 'p2', 'u1', 'Resume', '[{"role":"assistant","content":"proposed","pendingBatch":{"batchId":"thread-b1","approvals":[]}}]');`);
+
+    const legacy = await handler(authed("POST", "/api/assistant/threads/task/resume-thread/resume"));
+    expect(legacy.status).toBe(200);
+    expect(await legacy.text()).toContain("event: done");
+
+    const explicit = await handler(authed("POST", "/api/assistant/threads/task/resume-thread/resume", { batchId: "not-in-thread" }));
+    expect(explicit.status).toBe(404);
+    expect((await explicit.json()).error.code).toBe("APPROVAL_NOT_FOUND");
   });
 });

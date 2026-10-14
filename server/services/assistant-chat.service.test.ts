@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Layer, Context } from "effect";
+import { Cause, Effect, Fiber, Layer, Context, Schema } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
-import { DbBunLive } from "../db/db";
+import { Db, type DbDriver, type LexaRow, type SqlParam } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig } from "../storage/config";
 import { RuntimeEnvLive } from "../runtime-env";
@@ -47,6 +48,7 @@ const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 // normalization and logging paths are exercised.
 const providerMock = vi.hoisted(() => ({
   calls: [] as Array<{ systemPrompts: unknown; tools: unknown; messages: unknown; modelOptions?: Record<string, unknown> | undefined }>,
+  hold: undefined as { started: () => void; wait: Promise<void> } | undefined,
 }));
 vi.mock("../assistant/provider", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../assistant/provider")>();
@@ -59,6 +61,11 @@ vi.mock("../assistant/provider", async (importOriginal) => {
     streamChat: (input: { systemPrompts: unknown; tools?: unknown; messages?: unknown; modelOptions?: Record<string, unknown> | undefined }) => {
       providerMock.calls.push({ systemPrompts: input.systemPrompts, tools: input.tools ?? [], messages: input.messages ?? [], ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}) });
       return (async function* () {
+        const hold = providerMock.hold;
+        if (hold) {
+          hold.started();
+          await hold.wait;
+        }
         yield { type: "TEXT_MESSAGE_CONTENT", delta: "ok" };
         yield { type: "RUN_FINISHED", usage: { input: 1, output: 1 } };
       })();
@@ -70,6 +77,7 @@ type FetchCall = { url: string; init: RequestInit };
 
 let dir: string;
 let db: Database;
+let driver: DbDriver;
 let service: AssistantChatService;
 let env: RuntimeEnv;
 const jevCalls: FetchCall[] = [];
@@ -124,8 +132,7 @@ function setup(opts: { env?: RuntimeEnv; jev?: JevSeedMode } = {}) {
   runMigrations(dbPath, MIGRATIONS);
   db = new Database(dbPath);
   db.exec("PRAGMA foreign_keys = ON");
-  // A real provider + model + binding: the gateway must resolve a config for
-  // these runs, so only the Jev call is faked, never the model dispatch.
+  // Real registry rows exercise config resolution; outbound calls are stubbed.
   db.exec(`
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'a@lexa.test', 'A', 'superadmin');
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 1);
@@ -152,11 +159,12 @@ INSERT INTO assistant_settings (project_id, write_tools, provider_id, primary_mo
   }
   env = opts.env ?? ({ LXK_SECRETS_MASTER_KEY: JEV_MASTER_KEY } as RuntimeEnv);
   const cfg = resolveStorageConfig({}, dir);
+  driver = createBunSqliteDriver(db);
   const layer = AssistantChatService.Default.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.succeed(Sqlite, db),
-        DbBunLive(db),
+        Layer.succeed(Db, driver),
         Layer.succeed(StorageConfig, cfg),
         Storage.Default.pipe(Layer.provide(Layer.succeed(StorageConfig, cfg))),
         RuntimeEnvLive(env),
@@ -200,6 +208,7 @@ function runStream(chatId: string, message: string) {
 beforeEach(() => {
   jevCalls.length = 0;
   providerMock.calls.length = 0;
+  providerMock.hold = undefined;
 });
 
 afterEach(() => {
@@ -210,6 +219,23 @@ afterEach(() => {
 });
 
 describe("chat preflight — new run", () => {
+  it("releases an interrupted preflight so the next turn can complete", async () => {
+    let entered!: () => void;
+    let finish!: (response: Response) => void;
+    const entering = new Promise<void>((resolve) => { entered = resolve; });
+    const response = new Promise<Response>((resolve) => { finish = resolve; });
+    stubFetch(() => { entered(); return response; });
+    setup();
+    const fiber = Effect.runFork(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "reply briefly" }).pipe(Effect.provide(RuntimeEnvLive(env))));
+    await entering;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    finish(jevResponse());
+    expect(activeChats.has("c1")).toBe(false);
+    stubFetch(() => Promise.resolve(jevResponse()));
+    const frames = await drain(await runStream("c1", "next turn"));
+    expect(frames.some((frame) => frame.type === "done")).toBe(true);
+  });
+
   it("sends one preflight and the advisory segment reaches the system prompt", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
@@ -233,6 +259,26 @@ describe("chat preflight — new run", () => {
     expect(text).toContain("Jev advisory (non-authoritative)");
     expect(text).toContain("write intent: write");
     expect(text).toContain("live project data remains authoritative");
+  });
+});
+describe("request-owned abort cleanup", () => {
+  it("late abort from settled chat request leaves newer chat run alive", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    const oldRequest = new AbortController();
+    await drain(await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "first" }, oldRequest.signal)));
+
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    providerMock.hold = { started: started.resolve, wait: finish.promise };
+    const nextStream = await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "second" }));
+    await started.promise;
+    const nextController = activeChats.get("c1")!;
+
+    oldRequest.abort();
+    expect(nextController.signal.aborted).toBe(false);
+    finish.resolve();
+    await drain(nextStream);
   });
 });
 
@@ -368,16 +414,349 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
 `);
   };
 
-  it("executes the batch once on the first resume", async () => {
+  it.each(["rejected", "expired"] as const)("settles an entirely %s batch before later transcript replacement", async (status) => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
     seed("approved");
+    db.prepare("UPDATE assistant_pending_writes SET status = ? WHERE id = 'ap1'").run(status);
+    const acknowledged = await drain(await run(service.resumeChatStream("c1", "u1", "b1")));
+    expect(acknowledged.at(-1)?.type).toBe("done");
+    const history = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'");
+    const StoredChatMessage = Schema.Struct({
+      role: Schema.String,
+      content: Schema.Unknown,
+      pendingBatch: Schema.optional(Schema.Unknown),
+    });
+    const parseHistory = Schema.decodeUnknownSync(Schema.Array(StoredChatMessage), { onExcessProperty: "preserve" });
+    const parseRow = Schema.decodeUnknownSync(Schema.Struct({ messages: Schema.String }));
+    const storedMessages = () => {
+      const row = parseRow(history.get());
+      return parseHistory(JSON.parse(row.messages));
+    };
+    const afterAcknowledgement = storedMessages();
+    expect(newTaskCount()).toBe(0);
+    expect(claimCount()).toBe(0);
+    const later = await drain(await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "Later read-only request", permissionMode: "deny" })));
+    expect(later.at(-1)?.type).toBe("done");
+    const beforeEdit = storedMessages();
+    const fromIndex = beforeEdit.findLastIndex((message) => message.role === "user");
+    const replaced = await drain(await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "Edited read-only request", permissionMode: "deny", fromIndex })));
+    expect(replaced.at(-1)?.type).toBe("done");
+    const afterEdit = storedMessages();
+    expect(afterEdit.slice(0, fromIndex)).toEqual(beforeEdit.slice(0, fromIndex));
+    expect(afterEdit.slice(fromIndex).map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(afterEdit[fromIndex]?.content).toBe("Edited read-only request");
+    expect(afterEdit.some((message) => message.pendingBatch !== undefined)).toBe(false);
+    expect(afterAcknowledgement.some((message) => message.pendingBatch !== undefined)).toBe(false);
+    expect(newTaskCount()).toBe(0);
+    expect(claimCount()).toBe(0);
+  });
+
+  it("Stop settles the first approved mutation without starting the second", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seed("approved");
+    db.exec(`INSERT INTO assistant_pending_writes
+      (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+      SELECT 'ap2', project_id, document_type, document_id, owner_user_id, batch_id, 1, tool_name,
+        '{"title":"Must not start"}', '{"type":"task_create","title":"Must not start","fields":{}}', status, expires_at
+      FROM assistant_pending_writes WHERE id = 'ap1'`);
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const batch = driver.batch.bind(driver);
+    let mutationBatches = 0;
+    const spy = vi.spyOn(driver, "batch").mockImplementation(async (stmts) => {
+      if (stmts.some((stmt) => /INSERT INTO tasks\b/i.test(stmt.sql))) {
+        mutationBatches += 1;
+        if (mutationBatches === 1) {
+          entered.resolve();
+          await finish.promise;
+        }
+      }
+      return batch(stmts);
+    });
+    try {
+      const resuming = run(service.resumeChatStream("c1", "u1", "b1"));
+      await entered.promise;
+      const controller = activeChats.get("c1")!;
+      expect(service.abortChat("c1")).toBe(true);
+      expect(controller.signal.aborted).toBe(true);
+      expect(newTaskCount()).toBe(0);
+      expect(activeChats.get("c1")).toBe(controller);
+      finish.resolve();
+      const frames = await drain(await resuming);
+      expect(mutationBatches).toBe(1);
+      expect(newTaskCount()).toBe(1);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title = 'Must not start'").get()).toEqual({ n: 0 });
+      expect(frames.filter((frame) => frame.type === "approval_result")).toEqual([
+        { type: "approval_result", approvalId: "ap1", status: "applied" },
+        { type: "approval_result", approvalId: "ap2", status: "failed", error: "Assistant stopped" },
+      ]);
+      expect(claimCount()).toBe(1);
+      expect(activeChats.has("c1")).toBe(false);
+      const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
+      const messages = JSON.parse(saved.messages) as Array<Record<string, unknown>>;
+      expect(messages.at(-1)).toMatchObject({
+        role: "assistant", content: "", stopped: true,
+        toolLog: [
+          { name: "create_task", detail: expect.stringMatching(/^applied: New task/) },
+          { name: "create_task", detail: expect.stringMatching(/^failed: Must not start/) },
+        ],
+      });
+      expect(providerMock.calls).toHaveLength(0);
+      const replay = await run(Effect.either(service.resumeChatStream("c1", "u1", "b1")));
+      expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      expect(newTaskCount()).toBe(1);
+      expect(mutationBatches).toBe(1);
+      expect(claimCount()).toBe(1);
+      expect((await drain(await runStream("c1", "next turn"))).some((frame) => frame.type === "done")).toBe(true);
+    } finally {
+      finish.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  it("Stop preserves a bulk approval's committed prefix without starting its remaining mutations", async () => {
+    setup();
+    seed("approved", "archive_task", '{"refs":["t1","t2"]}', '{"type":"task_archive","taskRef":"2 tasks","taskTitle":"EG-1, EG-2"}');
+    db.exec(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number)
+      VALUES ('t2', 'p1', 'c1', 's-backlog', 'Second task', 'a1', '2026-01-01 10:00:00', 'EG-2', 2)`);
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const batch = driver.batch.bind(driver);
+    let mutationBatches = 0;
+    const spy = vi.spyOn(driver, "batch").mockImplementation(async (stmts) => {
+      if (stmts.some((stmt) => /UPDATE tasks SET archived_at/i.test(stmt.sql))) {
+        mutationBatches += 1;
+        if (mutationBatches === 1) {
+          entered.resolve();
+          await finish.promise;
+        }
+      }
+      return batch(stmts);
+    });
+    try {
+      const resuming = run(service.resumeChatStream("c1", "u1", "b1"));
+      await entered.promise;
+      expect(service.abortChat("c1")).toBe(true);
+      finish.resolve();
+      const frames = await drain(await resuming);
+      expect(mutationBatches).toBe(1);
+      expect(db.prepare("SELECT id FROM tasks WHERE archived_at IS NOT NULL ORDER BY id").all()).toEqual([{ id: "t1" }]);
+      expect(db.prepare("SELECT archived_at FROM tasks WHERE id = 't2'").get()).toEqual({ archived_at: null });
+      expect(frames.find((frame) => frame.type === "approval_result")).toMatchObject({
+        approvalId: "ap1", status: "applied", partial: { applied: 1, failed: 1, errors: ["Assistant stopped"] },
+      });
+      expect(claimCount()).toBe(1);
+      const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
+      const messages = JSON.parse(saved.messages) as Array<Record<string, unknown>>;
+      expect(messages.at(-1)).toMatchObject({
+        stopped: true,
+        toolLog: [{ name: "archive_task", detail: expect.stringMatching(/^applied: 2 tasks.*1 applied, 1 failed/) }],
+      });
+      const replay = await run(Effect.either(service.resumeChatStream("c1", "u1", "b1")));
+      expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      expect(mutationBatches).toBe(1);
+      expect(db.prepare("SELECT archived_at FROM tasks WHERE id = 't2'").get()).toEqual({ archived_at: null });
+      expect(claimCount()).toBe(1);
+    } finally {
+      finish.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  it.each(["Stop", "Fiber"] as const)("releases an unused claim when %s interrupts the executor lookup before mutation", async (cancellation) => {
+    setup();
+    seed("approved");
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    const prepare = driver.prepare.bind(driver);
+    const spy = vi.spyOn(driver, "prepare").mockImplementation((sql) => {
+      const stmt = prepare(sql);
+      if (!/SELECT id FROM columns WHERE project_id = \? ORDER BY position ASC LIMIT 1/i.test(sql)) return stmt;
+      return {
+        ...stmt,
+        all: stmt.all.bind(stmt),
+        run: stmt.run.bind(stmt),
+        first: async <T extends LexaRow>(...params: SqlParam[]) => {
+          entered.resolve();
+          await finish.promise;
+          try { return await stmt.first<T>(...params); }
+          finally { settled.resolve(); }
+        },
+      };
+    });
+    try {
+      const fiber = Effect.runFork(service.resumeChatStream("c1", "u1", "b1").pipe(Effect.provide(RuntimeEnvLive(env))));
+      await entered.promise;
+      expect(claimCount()).toBe(1);
+      if (cancellation === "Stop") expect(service.abortChat("c1")).toBe(true);
+      else await Effect.runPromise(Fiber.interruptFork(fiber));
+      finish.resolve();
+      if (cancellation === "Stop") await drain(await Effect.runPromise(Fiber.join(fiber)));
+      else {
+        const exit = await Effect.runPromise(Fiber.await(fiber));
+        expect(exit._tag === "Failure" && Cause.isInterrupted(exit.cause)).toBe(true);
+      }
+      await settled.promise;
+      expect(newTaskCount()).toBe(0);
+      expect(claimCount()).toBe(0);
+      expect(activeChats.has("c1")).toBe(false);
+      const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
+      expect(JSON.parse(saved.messages)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ pendingBatch: expect.objectContaining({ batchId: "b1" }) }),
+      ]));
+      spy.mockRestore();
+      await drain(await run(service.resumeChatStream("c1", "u1", "b1")));
+      expect(newTaskCount()).toBe(1);
+      const replay = await run(Effect.either(service.resumeChatStream("c1", "u1", "b1")));
+      expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      expect(newTaskCount()).toBe(1);
+      expect(claimCount()).toBe(1);
+    } finally {
+      finish.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  it.each(["owned", "duplicate"] as const)("cleans up only its own asynchronous claim INSERT after interruption (%s)", async (ownership) => {
+    setup();
+    seed("approved");
+    if (ownership === "duplicate") db.exec("INSERT INTO assistant_resume_claims (batch_id) VALUES ('b1')");
+    db.exec("INSERT INTO assistant_resume_claims (batch_id) VALUES ('another-invocation')");
+    const entered = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    const prepare = driver.prepare.bind(driver);
+    const spy = vi.spyOn(driver, "prepare").mockImplementation((sql) => {
+      const stmt = prepare(sql);
+      if (!/INSERT OR IGNORE INTO assistant_resume_claims\b/i.test(sql)) return stmt;
+      return {
+        ...stmt,
+        all: stmt.all.bind(stmt),
+        first: stmt.first.bind(stmt),
+        run: async (...params) => {
+          entered.resolve();
+          await finish.promise;
+          try { return await stmt.run(...params); }
+          finally { settled.resolve(); }
+        },
+      };
+    });
+    try {
+      const fiber = Effect.runFork(service.resumeChatStream("c1", "u1", "b1").pipe(Effect.provide(RuntimeEnvLive(env))));
+      await entered.promise;
+      await Effect.runPromise(Fiber.interruptFork(fiber));
+      finish.resolve();
+      await settled.promise;
+      const exit = await Effect.runPromise(Fiber.await(fiber));
+      expect(exit._tag === "Failure" && Cause.isInterrupted(exit.cause)).toBe(true);
+      expect(claimCount()).toBe(ownership === "owned" ? 0 : 1);
+      expect(db.prepare("SELECT batch_id FROM assistant_resume_claims WHERE batch_id = 'another-invocation'").get()).toEqual({ batch_id: "another-invocation" });
+      expect(newTaskCount()).toBe(0);
+      expect(activeChats.has("c1")).toBe(false);
+      spy.mockRestore();
+      await drain(await run(service.resumeChatStream("c1", "u1", "b1")));
+      expect(newTaskCount()).toBe(ownership === "owned" ? 1 : 0);
+      expect(claimCount()).toBe(1);
+      if (ownership === "owned") {
+        const replay = await run(Effect.either(service.resumeChatStream("c1", "u1", "b1")));
+        expect(replay).toMatchObject({ _tag: "Left", left: { _tag: "ApprovalNotFound", id: "b1" } });
+      } else {
+        expect(await drain(await run(service.resumeChatStream("c1", "u1", "b1")))).toEqual([
+          { type: "done", text: "", usage: { in: 0, out: 0 } },
+        ]);
+      }
+      expect(newTaskCount()).toBe(ownership === "owned" ? 1 : 0);
+      expect(claimCount()).toBe(1);
+    } finally {
+      finish.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  // Contract A8: resumed outcomes and retained claims match real domain changes.
+  it("executes once and reports mixed results matching stored tasks", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seed("approved");
+    const insert = db.prepare(`INSERT INTO assistant_pending_writes
+      (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+      SELECT ?, project_id, document_type, document_id, owner_user_id, batch_id, ?, ?, ?, ?, ?, expires_at
+      FROM assistant_pending_writes WHERE id = 'ap1'`);
+    insert.run("ap2", 1, "archive_task", JSON.stringify({ refs: ["t1", "missing"] }), JSON.stringify({ type: "task_archive", taskRef: "2 tasks", taskTitle: "EG-1, missing" }), "approved");
+    insert.run("ap3", 2, "archive_task", JSON.stringify({ refs: ["missing"] }), JSON.stringify({ type: "task_archive", taskRef: "missing", taskTitle: "Missing task" }), "approved");
+    insert.run("ap4", 3, "create_task", JSON.stringify({ title: "Rejected task" }), JSON.stringify({ type: "task_create", title: "Rejected task", fields: {} }), "rejected");
+    insert.run("ap5", 4, "create_task", JSON.stringify({ title: "Expired task" }), JSON.stringify({ type: "task_create", title: "Expired task", fields: {} }), "expired");
     const frames = await drain(await run(service.resumeChatStream("c1", "u1")));
-    expect(frames.some((f) => f.type === "done")).toBe(true);
+    const results = frames.filter((frame) => frame.type === "approval_result");
+    expect(frames.some((frame) => frame.type === "done")).toBe(true);
+    expect(results.find((frame) => frame.approvalId === "ap1")).toMatchObject({ status: "applied" });
+    expect(results.find((frame) => frame.approvalId === "ap2")).toMatchObject({ status: "applied", partial: { applied: 1, failed: 1 } });
+    expect(results.find((frame) => frame.approvalId === "ap3")).toMatchObject({ status: "failed" });
+    expect(results.find((frame) => frame.approvalId === "ap4")).toMatchObject({ status: "denied" });
+    expect(results.some((frame) => frame.approvalId === "ap5")).toBe(false);
+    expect(db.prepare("SELECT count(*) AS c FROM tasks WHERE id = 't1' AND archived_at IS NOT NULL").get()).toEqual({ c: 1 });
+    expect(db.prepare("SELECT count(*) AS c FROM tasks WHERE title IN ('Rejected task', 'Expired task')").get()).toEqual({ c: 0 });
+    const failed = db.prepare("SELECT execution_error FROM assistant_pending_writes WHERE id = 'ap3'").get() as { execution_error: string };
+    expect(failed.execution_error).toMatch(/^TASK_NOT_FOUND:/);
+    expect(claimCount()).toBe(1);
+    expect(newTaskCount()).toBe(1);
+    const saved = db.prepare("SELECT messages FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'c1'").get() as { messages: string };
+    const messages = JSON.parse(saved.messages) as Array<Record<string, unknown>>;
+    expect(messages.at(-1)).toMatchObject({
+      toolLog: [
+        { name: "create_task", detail: expect.stringMatching(/^applied: New task/) },
+        { name: "archive_task", detail: expect.stringMatching(/^applied: 2 tasks.*1 applied, 1 failed/) },
+        { name: "archive_task", detail: expect.stringMatching(/^failed:/) },
+        { name: "create_task", detail: expect.stringMatching(/^denied: Rejected task/) },
+        { name: "create_task", detail: expect.stringMatching(/^expired: Expired task/) },
+      ],
+    });
+    const repeated = await run(Effect.either(service.resumeChatStream("c1", "u1", "b1")));
+    if (repeated._tag === "Right") await drain(repeated.right);
     expect(claimCount()).toBe(1);
     expect(newTaskCount()).toBe(1);
   });
 
+  // Contract A4: an explicit batchId selects that thread marker instead of the newer default.
+  it("resumes the explicitly selected batch", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seed("approved");
+    db.prepare("UPDATE assistant_threads SET messages = ? WHERE document_id = 'c1'").run(JSON.stringify([
+      { role: "user", content: "create it" },
+      { role: "assistant", content: "proposed", pendingBatch: { batchId: "b1", approvals: [{ approvalId: "ap1", seq: 0, name: "create_task" }] } },
+      { role: "user", content: "another turn" },
+      { role: "assistant", content: "proposed", pendingBatch: { batchId: "b2", approvals: [] } },
+    ]));
+    const frames = await drain(await run(service.resumeChatStream("c1", "u1", "b1")));
+    expect(frames.some((f) => f.type === "approval_result" && (f as { approvalId?: string; status?: string }).approvalId === "ap1" && (f as { status?: string }).status === "applied")).toBe(true);
+    expect(claimCount()).toBe(1);
+    expect(newTaskCount()).toBe(1);
+  });
+  it("late abort from settled chat resume leaves newer chat run alive", async () => {
+    stubFetch(() => Promise.resolve(jevResponse()));
+    setup();
+    seed("approved");
+    const oldRequest = new AbortController();
+    await drain(await run(service.resumeChatStream("c1", "u1", "b1", oldRequest.signal)));
+
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    providerMock.hold = { started: started.resolve, wait: finish.promise };
+    const nextStream = await run(service.runChatStream("c1", "u1", { projectId: "p1", chatId: "c1", message: "next" }));
+    await started.promise;
+    const nextController = activeChats.get("c1")!;
+
+    oldRequest.abort();
+    expect(nextController.signal.aborted).toBe(false);
+    finish.resolve();
+    await drain(nextStream);
+  });
+
+  // Contract A5: a duplicate no-op releases the chat run lock so the next normal send can start.
   it("a pre-claimed batch or a marker with no rows settles without executing", async () => {
     stubFetch(() => Promise.resolve(jevResponse()));
     setup();
@@ -388,6 +767,8 @@ INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id
     expect(claimed).toEqual([{ type: "done", text: "", usage: { in: 0, out: 0 } }]);
     expect(providerMock.calls).toHaveLength(0);
     expect(newTaskCount()).toBe(0);
+    const nextTurn = await drain(await runStream("c1", "follow up"));
+    expect(nextTurn.some((f) => f.type === "done")).toBe(true);
 
     activeChats.clear();
     setup();

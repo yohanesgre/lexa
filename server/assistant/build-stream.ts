@@ -1,6 +1,8 @@
 import { translateRunError, clientFacingErrorMessage } from "./provider";
+import type { ProviderConfig } from "./provider";
+import type { GatewayStreamInput } from "./gateway.service";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail } from "./tools";
-import { isAssistantWriteTool, type QueuedProposal } from "./write-tools";
+import { isAssistantWriteTool, type LocalWriteCompletion, type LocalWriteTracker, type QueuedProposal } from "./write-tools";
 import { approvalCarriersOf } from "./approval-carrier";
 import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/errors";
 import type { AssistantReasoningEffort, AssistantToolPermissionMode, StreamFrame, ApprovalPartial } from "../../shared/assistant";
@@ -332,7 +334,8 @@ export interface StreamRunContext {
   idField: "taskId" | "chatId";
   threadId: string;
   registry: Map<string, AbortController>;
-  config: import("./provider").ProviderConfig;
+  config: ProviderConfig;
+  gatewayStream?: ((input: Omit<GatewayStreamInput, "projectId">) => AsyncIterable<StreamChunk>) | undefined;
   systemPrompts: import("./prompt").CacheablePrompt[];
   history: unknown[];
   userTs: string;
@@ -362,11 +365,13 @@ export interface StreamRunContext {
   // proposals and suspend; `auto` applies in-loop (its tools carry no drain) and
   // `deny` refuses locally — neither suspends. Absent → "ask".
   writeMode?: AssistantToolPermissionMode | undefined;
+  // Per-turn barrier shared with write tools; remains held until local mutation settles.
+  localWriteTracker?: LocalWriteTracker | undefined;
   // Trailing-throttle window for incremental partial persistence (ADR-0005
   // §Reliability.3). Default 2000 ms; tests shorten it.
   partialPersistIntervalMs?: number | undefined;
   modelOptions?: Record<string, unknown> | undefined;
-  gatewayStream?: ((input: unknown) => AsyncIterable<StreamChunk>) | undefined;
+  resolveCompactionConfig?: (() => Promise<ProviderConfig>) | undefined;
   onDispose?: (() => Promise<void>) | undefined;
   // Total-turn wall clock (M1). Defaults to `ASSISTANT_TURN_BUDGET_MS`; tests
   // shorten it.
@@ -418,7 +423,7 @@ export function normalizeRunUsage(raw: unknown, fallback: NormalizedRunUsage): N
   return fallback;
 }
 
-async function summarizeOlder(config: import("./provider").ProviderConfig, older: unknown[], priorSummary: string | null, sessionId: string): Promise<string> {
+async function summarizeOlder(config: ProviderConfig, older: unknown[], priorSummary: string | null, sessionId: string, signal: AbortSignal): Promise<string> {
   const { completeText } = await import("./provider");
   // Thread the prior summary through (mirrors the DO's `summarizeTranscript`):
   // re-compaction condenses only the newly-unfolded slice, so the accumulated
@@ -435,16 +440,18 @@ async function summarizeOlder(config: import("./provider").ProviderConfig, older
   return completeText(config, {
     systemPrompts: [{ content: "You condense working conversations. Reply with a terse bullet summary of decisions, constraints and open threads only." }],
     messages: [{ role: "user", content: `Summarize these earlier conversation turns for continuity. Reply with bullets only.${prior}\n\n${JSON.stringify(olderRedacted).slice(0, 60000)}` }],
-  }, { sessionId });
+  }, { sessionId, signal });
 }
 
 export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
+  let runAbort: AbortController | undefined;
+  let closed = false;
   return new ReadableStream<StreamFrame>({
     start(controller) {
       const existing = ctx.registry.get(ctx.keyId);
       const abort = existing ?? new AbortController();
       if (!existing) ctx.registry.set(ctx.keyId, abort);
-      let closed = false;
+      runAbort = abort;
       const push = (frame: StreamFrame) => { if (!closed) controller.enqueue(frame); };
       void (async () => {
         let text = "";
@@ -456,6 +463,34 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         // trickling reasoning deltas never trips it and a turn could run eight
         // minutes. This one is checked before each wait and bounds the wait too.
         const turnDeadline = Date.now() + (ctx.turnBudgetMs ?? ASSISTANT_TURN_BUDGET_MS);
+        const awaitTurnWork = async <T>(work: () => Promise<T>): Promise<T> => {
+          if (abort.signal.aborted) throw abort.signal.reason ?? new Error("Assistant stopped");
+          const budgetLeft = turnDeadline - Date.now();
+          if (budgetLeft <= 0) {
+            turnBudgetExceeded = true;
+            abort.abort();
+            throw new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE });
+          }
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let onAbort: (() => void) | undefined;
+          const aborted = new Promise<never>((_, reject) => {
+            onAbort = () => reject(abort.signal.reason ?? new Error("Assistant stopped"));
+            abort.signal.addEventListener("abort", onAbort, { once: true });
+          });
+          const deadline = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              turnBudgetExceeded = true;
+              abort.abort();
+              reject(new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE }));
+            }, budgetLeft);
+          });
+          try {
+            return await Promise.race([work(), aborted, deadline]);
+          } finally {
+            clearTimeout(timer);
+            if (onAbort !== undefined) abort.signal.removeEventListener("abort", onAbort);
+          }
+        };
         let turnBudgetExceeded = false;
         // Finish reason of the LAST provider response of the turn (M2): the
         // request carries `ASSISTANT_MAX_OUTPUT_TOKENS`, so `length` means the
@@ -503,7 +538,14 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         const userEntries = ctx.skipUserEntry || isEmptyUserContent(effectiveUserContent as string | unknown[]) ? [] : [userEntry];
         const toolLog: Array<{ name: string; detail?: string }> = [];
         const writeToolCallIds: string[] = [];
+        const knownToolCalls = new Map<string, { name: string; args: string }>();
+        const loggedToolCallIds = new Set<string>();
         let writeQueueDrained = false;
+        let autoWriteSucceeded = false;
+        let autoWriteFailed = false;
+        let autoWritePartial = false;
+        let autoWriteInFlight = 0;
+        let autoWriteIndeterminate = false;
         const writeMode: AssistantToolPermissionMode = ctx.writeMode ?? "ask";
         const drainWrites = (): QueuedProposal[] => {
           // Only `ask` suspends on proposals: auto applies in-loop and deny
@@ -511,6 +553,46 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           if (writeMode !== "ask" || writeQueueDrained || !ctx.writeDrain) return [];
           writeQueueDrained = true;
           return ctx.writeDrain();
+        };
+        const seenWriteToolResults = new Set<string>();
+        const reconcileWriteCompletion = (completion: LocalWriteCompletion): void => {
+          const id = completion.toolCallId ?? "";
+          const hasResult = id !== "" && seenWriteToolResults.has(id);
+          if (!hasResult && writeMode === "auto" && isAssistantWriteTool(completion.toolName)) {
+            autoWriteInFlight = Math.max(0, autoWriteInFlight - 1);
+            const result = completion.result;
+            const output = result !== null && typeof result === "object" && "output" in result
+              ? (result as { output?: unknown }).output
+              : result;
+            if (completion.error !== undefined) autoWriteIndeterminate = true;
+            else if (output !== null && typeof output === "object") {
+              const outcome = output as Record<string, unknown>;
+              if (outcome.partial !== undefined) autoWritePartial = true;
+              if (outcome.ok === true && outcome.applied === true) autoWriteSucceeded = true;
+              else if (outcome.ok === false || outcome.applied === false || typeof outcome.error === "string" || outcome.proposed === false) autoWriteFailed = true;
+              else autoWriteIndeterminate = true;
+            } else autoWriteIndeterminate = true;
+          }
+          if (!hasResult && writeMode === "ask" && isAssistantWriteTool(completion.toolName)) {
+            const result = completion.result;
+            if (id !== "" && result !== null && typeof result === "object" && "approvalId" in result) writeToolCallIds.push(id);
+          }
+          if (isAssistantWriteTool(completion.toolName) && !loggedToolCallIds.has(id)) {
+            const call = knownToolCalls.get(id);
+            const name = call?.name ?? completion.toolName;
+            if (shouldEmitToolFrame(name)) {
+              let detail: string | undefined;
+              if (call?.args.trim()) {
+                try { detail = toolCallDetail(name, JSON.parse(call.args) as unknown); } catch {}
+              }
+              toolLog.push(detail === undefined ? { name } : { name, detail });
+              if (id !== "") loggedToolCallIds.add(id);
+            }
+          }
+        };
+        const quiesceLocalWrites = async (): Promise<void> => {
+          if (ctx.localWriteTracker === undefined) return;
+          for (const completion of await ctx.localWriteTracker.quiesce()) reconcileWriteCompletion(completion);
         };
         // ── Incremental partial persistence (ADR-0005 §Reliability.3) ──
         // A killed turn must keep its partial output. Every thread-row write
@@ -601,13 +683,22 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 abort.abort();
                 throw new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE });
               }
+              if (abort.signal.aborted) throw abort.signal.reason ?? new Error("Assistant stopped");
               const next = iterator.next();
               next.catch(() => {});
               let result: IteratorResult<StreamChunk>;
               let stallTimer: ReturnType<typeof setTimeout> | undefined;
+              let onAbort: (() => void) | undefined;
+              const aborted = new Promise<never>((_, reject) => {
+                onAbort = () => reject(abort.signal.reason ?? new Error("Assistant stopped"));
+                abort.signal.addEventListener("abort", onAbort, { once: true });
+              });
               try {
-                result = await Promise.race([next, new Promise<never>((_, reject) => { stallTimer = setTimeout(() => { if (Date.now() >= turnDeadline) { turnBudgetExceeded = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE })); return; } stalled = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_STALL_MESSAGE })); }, Math.min(ASSISTANT_STALL_TIMEOUT_MS, budgetLeft)); })]);
-              } finally { clearTimeout(stallTimer); }
+                result = await Promise.race([next, aborted, new Promise<never>((_, reject) => { stallTimer = setTimeout(() => { if (Date.now() >= turnDeadline) { turnBudgetExceeded = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_TURN_BUDGET_MESSAGE })); return; } stalled = true; abort.abort(); reject(new AssistantGenerationFailed({ message: ASSISTANT_STALL_MESSAGE })); }, Math.min(ASSISTANT_STALL_TIMEOUT_MS, budgetLeft)); })]);
+              } finally {
+                clearTimeout(stallTimer);
+                if (onAbort) abort.signal.removeEventListener("abort", onAbort);
+              }
               if (result.done) break;
               const chunk = result.value;
               // Start/keep the trailing partial-persist timer alive while the
@@ -633,12 +724,15 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               } else if (chunk.type === "TOOL_CALL_START") {
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const startName = chunk.toolCallName ?? chunk.toolName ?? "";
-                pendingCalls.set(id, { name: startName, args: "" });
+                const call = { name: startName, args: "" };
+                pendingCalls.set(id, call);
+                knownToolCalls.set(id, call);
                 if (startName) toolNamesById.set(id, startName);
               } else if (chunk.type === "TOOL_CALL_ARGS") {
                 const pending = pendingCalls.get(chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "");
                 if (pending) { const piece = typeof chunk.delta === "string" ? chunk.delta : ""; pending.args += piece; }
               } else if (chunk.type === "TOOL_CALL_END") {
+                if (abort.signal.aborted) throw abort.signal.reason ?? new Error("Assistant stopped");
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const pending = pendingCalls.get(id);
                 const rawName = pending?.name ?? "";
@@ -646,6 +740,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 pendingCalls.delete(id);
                 const name = rawName;
                 const isWrite = isAssistantWriteTool(name);
+                if (writeMode === "auto" && isWrite) autoWriteInFlight += 1;
                 const normalizeDueAtNone = (s: string): string => s.replace(/"dueAt"\s*:\s*"None"/g, '"dueAt":null').replace(/"dueAt"\s*:\s*None\b/g, '"dueAt":null');
                 const tryParseStrict = (raw: string): unknown | undefined => {
                   const normalized = normalizeDueAtNone(raw);
@@ -750,15 +845,38 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                   push(detail === undefined ? { type: "tool", phase: "call", name } : { type: "tool", phase: "call", name, detail });
                   push(detail === undefined ? { type: "tool", phase: "result", name } : { type: "tool", phase: "result", name, detail });
                   toolLog.push(detail === undefined ? { name } : { name, detail });
+                  if (id !== "") loggedToolCallIds.add(id);
                 }
                 if (toolRounds > ctx.toolRoundCap) { abort.abort(); throw new AssistantToolBudgetExceeded({ rounds: ctx.toolRoundCap }); }
               } else if (chunk.type === "TOOL_CALL_RESULT") {
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const toolName = pendingCalls.get(id)?.name ?? toolNamesById.get(id) ?? (chunk as unknown as { toolCallName?: string; toolName?: string }).toolCallName ?? (chunk as unknown as { toolCallName?: string; toolName?: string }).toolName ?? "";
-                // Only `ask` aborts on a write-tool result: the drain then
-                // suspends the turn. In `auto` the tool EXECUTED in-loop and the
-                // provider stream must run to completion — aborting here killed
-                // the in-flight turn (done:0, cancelled:1, lost tail).
+                if (isAssistantWriteTool(toolName) && id !== "") seenWriteToolResults.add(id);
+                if (writeMode === "auto" && isAssistantWriteTool(toolName)) {
+                  autoWriteInFlight = Math.max(0, autoWriteInFlight - 1);
+                  const resultChunk = chunk as unknown as Record<string, unknown>;
+                  const rawContent = resultChunk.content;
+                  let output: Record<string, unknown> | null = null;
+                  if (typeof rawContent === "string") {
+                    try {
+                      const parsed: unknown = JSON.parse(rawContent);
+                      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) output = parsed as Record<string, unknown>;
+                    } catch {}
+                  } else if (rawContent !== null && typeof rawContent === "object" && !Array.isArray(rawContent)) {
+                    output = rawContent as Record<string, unknown>;
+                  }
+                  const state = (resultChunk.metadata as { tanstack?: { state?: unknown } } | undefined)?.tanstack?.state;
+                  if (output?.partial !== undefined) autoWritePartial = true;
+                  if (state === "output-error") {
+                    autoWriteIndeterminate = true;
+                  } else if (output?.proposed === false || output?.applied === false || typeof output?.error === "string" || output?.ok === false) {
+                    autoWriteFailed = true;
+                  } else if (output?.applied === true && output.ok === true) {
+                    autoWriteSucceeded = true;
+                  } else {
+                    autoWriteIndeterminate = true;
+                  }
+                }
                 if (writeMode === "ask" && isAssistantWriteTool(toolName)) { writeToolCallIds.push(id); if (!abort.signal.aborted) abort.abort(); }
               } else if (chunk.type === "RUN_FINISHED") {
                 didFinish = true;
@@ -787,8 +905,15 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             }
           };
           await consume(ctx.tools);
+          await quiesceLocalWrites();
           let drained = drainWrites();
-          if (drained.length === 0 && stripToolCallXml(text) === "" && ctx.tools && ctx.tools.length > 0) { await consume(undefined); drained = drainWrites(); }
+          if (autoWriteIndeterminate || autoWriteInFlight > 0) throw new AssistantGenerationFailed({ message: "The write outcome could not be confirmed. Check the affected items before starting another reply." });
+          if (didFinish && drained.length === 0 && stripToolCallXml(text) === "" && toolRounds === 0 && pendingCalls.size === 0 && reasoningText === "" && ctx.tools && ctx.tools.length > 0) {
+            didFinish = false;
+            lastFinishReason = null;
+            await consume(undefined);
+            drained = drainWrites();
+          }
           text = stripToolCallXml(text);
           // Explicit stop / disconnect (M5b): an abort can surface as a graceful
           // stream end (no RUN_FINISHED), so `didFinish` is false and the failure
@@ -807,15 +932,17 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           }
           {
             const hasWriteTools = ctx.writeTools !== undefined ? ctx.writeTools.length > 0 : !!ctx.writeDrain;
-            if (hasWriteTools && drained.length === 0) {
+            const autoWriteKnownNoChanges = autoWriteFailed && !autoWriteSucceeded && !autoWritePartial && !autoWriteIndeterminate && autoWriteInFlight === 0;
+            const noAutoWriteOutcome = !autoWriteFailed && !autoWriteSucceeded && !autoWritePartial && !autoWriteIndeterminate && autoWriteInFlight === 0;
+            if (hasWriteTools && drained.length === 0 && (writeMode !== "auto" || autoWriteKnownNoChanges || noAutoWriteOutcome)) {
               const userText = extractUserText(ctx.userContent as string | unknown[]);
               const hallucinated = HALLUCINATION_RE.test(text);
               const writeIntent = WRITE_INTENT_RE.test(userText);
               const writeIntentClaim = !hallucinated && writeIntent && isWriteIntentClaim(text);
-              if (hallucinated || writeIntentClaim) {
+              if (autoWriteKnownNoChanges || hallucinated || writeIntentClaim) {
                 const prev = text.slice(0, 500);
                 text = WRITE_NOT_EXECUTED_COPY;
-                const reason = hallucinated ? "hallucinated success without tool call" : "write intent asserted without tool call";
+                const reason = autoWriteKnownNoChanges ? "auto write failed without changes" : hallucinated ? "hallucinated success without tool call" : "write intent asserted without tool call";
                 try {
                   const line = JSON.stringify({
                     level: "WARN",
@@ -883,7 +1010,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           if (drained.length > 0) { await suspendTurn(drained); return; }
           if (!didFinish && !stalled) {
             const code = "ASSISTANT_GENERATION_FAILED";
-            const message = ASSISTANT_STALL_MESSAGE;
+            const message = "Assistant stream ended without RUN_FINISHED";
             const citationsErr = ctx.getCitations();
             const extra: Record<string, unknown> = { error: { code, message } };
             if (citationsErr.length > 0) extra.citations = citationsErr;
@@ -912,7 +1039,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             return;
           }
           const citations = ctx.getCitations();
-          const finalMessages = [...ctx.history, ...userEntries, { role: "assistant", content: text, ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...reasoningFields() }];
+          const finalMessages = [...ctx.history, ...userEntries, { role: "assistant", content: text, ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}), ...(toolLog.length > 0 ? { toolLog } : {}), ...reasoningFields() }];
           let summary = ctx.historySummary();
           let summarizedCount = ctx.historySummarizedCount();
           let kept = finalMessages;
@@ -928,7 +1055,23 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               // `summary` is the PRIOR summary; `summarizeOlder` threads it into
               // the prompt so re-compaction accumulates (mirrors the DO's
               // `summarizeTranscript(older, priorSummary, …)`).
-              const condensed = await summarizeOlder(ctx.config, window.older, summary, ctx.threadId).catch(() => null);
+              let compactionConfig: ProviderConfig | null = ctx.config;
+              if (ctx.resolveCompactionConfig !== undefined) {
+                try {
+                  compactionConfig = await awaitTurnWork(() => ctx.resolveCompactionConfig!());
+                } catch (error) {
+                  if (abort.signal.aborted) throw error;
+                  compactionConfig = null;
+                }
+              }
+              let condensed: string | null = null;
+              if (compactionConfig !== null) {
+                try {
+                  condensed = await awaitTurnWork(() => summarizeOlder(compactionConfig, window.older, summary, ctx.threadId, abort.signal));
+                } catch (error) {
+                  if (abort.signal.aborted) throw error;
+                }
+              }
               if (condensed !== null) {
                 // Base consistency: the stored transcript is truncated to the
                 // window, so `summarizedCount` is stored RELATIVE to that
@@ -947,11 +1090,14 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           await ctx.onDone(text);
           push({ type: "done", [ctx.idField]: ctx.keyId, text, usage: { in: usageIn, out: usageOut } } as StreamFrame);
         } catch (e) {
+          const wasAborted = abort.signal.aborted;
+          abort.abort();
+          await quiesceLocalWrites();
           const drained = drainWrites();
           if (drained.length > 0) {
             await suspendTurn(drained).catch(async () => { await persistTerminalTurn({ stopped: true }).catch(() => {}); await ctx.onCancel().catch(() => {}); });
           } else if (e instanceof AssistantToolBudgetExceeded) {
-            await persistTerminalTurn({ error: { code: "ASSISTANT_TOOL_BUDGET_EXCEEDED", message: `Assistant exceeded its tool budget (${e.rounds} rounds)` } }).catch(() => {});
+            await persistTerminalTurn({ error: { code: "ASSISTANT_TOOL_BUDGET_EXCEEDED", message: `Assistant exceeded its tool budget (${e.rounds} rounds)` }, ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onFail(`Assistant exceeded its tool budget (${e.rounds} rounds)`).catch(() => {});
             push({ type: "error", code: "ASSISTANT_TOOL_BUDGET_EXCEEDED", message: `Assistant exceeded its tool budget (${e.rounds} rounds)` });
           } else if (turnBudgetExceeded) {
@@ -963,7 +1109,13 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             await persistTerminalTurn({ error: { code, message }, ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onFail(message).catch(() => {});
             push({ type: "error", code, message });
-          } else if (abort.signal.aborted && !stalled) {
+          } else if (autoWriteIndeterminate || autoWriteInFlight > 0) {
+            const code = "ASSISTANT_GENERATION_FAILED";
+            const message = "The write outcome could not be confirmed. Check the affected items before starting another reply.";
+            await persistTerminalTurn({ error: { code, message }, ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
+            await ctx.onFail(message).catch(() => {});
+            push({ type: "error", code, message });
+          } else if (wasAborted && !stalled) {
             // Explicit stop / disconnect: persist the partial turn as stopped even
             // when it carries only tool activity (a text-less tool loop), so the
             // transcript renders a clean stopped turn — never a plain partial or a
@@ -972,7 +1124,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             await persistTerminalTurn({ stopped: true, ...(citationsStop.length > 0 ? { citations: citationsStop } : {}), ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onCancel().catch(() => {});
           } else {
-            const err = translateRunError(e);
+            const err = stalled ? new AssistantGenerationFailed({ message: ASSISTANT_STALL_MESSAGE }) : translateRunError(e);
             const { errorCodeMap } = await import("../api/errors");
             const code = (errorCodeMap as Record<string, string>)[(err as { _tag: string })._tag] ?? "ASSISTANT_GENERATION_FAILED";
             const message = String((err as { message?: string }).message ?? "Assistant generation failed");
@@ -984,7 +1136,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               if (level === "FATAL" || level === "ERROR") process.stderr.write(line + "\n");
               else process.stdout.write(line + "\n");
             } catch {}
-            await persistTerminalTurn({ error: { code, message: clientMessage } }).catch(() => {});
+            await persistTerminalTurn({ error: { code, message: clientMessage }, ...(toolLog.length > 0 ? { toolLog } : {}) }).catch(() => {});
             await ctx.onFail(clientMessage.slice(0, 2000)).catch(() => {});
             push({ type: "error", code, message: clientMessage });
           }
@@ -999,6 +1151,6 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         }
       })();
     },
-    cancel() { const abort = ctx.registry.get(ctx.keyId); abort?.abort(); },
+    cancel() { closed = true; runAbort?.abort(); },
   });
 }
