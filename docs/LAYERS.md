@@ -1360,6 +1360,15 @@ the run intact, and Jev emits no `task_activity` of its own.
   alive with `waitUntil`; Stop interrupts its owned startup effect and captured
   producer controller, never a later controller looked up by chat id.
   A failed setup clears only that reservation.
+  A hard reload recovers the accepted execution request from the existing
+  browser route-history entry and explicitly replays from frame zero. The
+  checkpoint belongs to that turn, not a new store or canonical transcript;
+  terminal cleanup cannot erase a newer turn's checkpoint. Unavailable buffers
+  fail without regenerating a write.
+  Durable `start` acknowledges the exact request independently of content
+  ingress; attachment and queue readiness keep their existing ingress boundary.
+  Selecting a surviving live session republishes its checkpoint into that
+  thread's current route entry, even if no new provider frame arrives.
 - **Engine** — `server/assistant/provider.ts` (the only `chat()` importer),
   `build-stream.ts` (`buildStream`, stall watchdog, write drain/suspend, resume
   note, incremental partial persist), `gateway.service.ts` (fallback walk ≤3,
@@ -1641,8 +1650,10 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   no detail (name-only frames).
 - **Thread persistence floor:** `assistant_threads` rows are read/written only
   through `AssistantThreadRepo.loadThread(doc)` / `saveThread(doc, patch)` —
-  called directly at the terminal points (post-`done` persist, enqueue-time
-  attachment pre-save, reset). A future D1 swap touches the repo only.
+  called for the accepted user entry before `start`, incremental partial
+  checkpoints, terminal settlement, attachment pre-save and reset. Initial
+  persistence settles before cancellation cleanup; a resume with no new user
+  entry does not append one. A future D1 swap touches the repo only.
   Continue-vs-fresh: same doc + same agentId + existing row → continue;
   anything else → fresh overwrite. A chat thread carries no skill binding —
   `$name` skills are per-message (≤3, junction-bound at parse time, discovered

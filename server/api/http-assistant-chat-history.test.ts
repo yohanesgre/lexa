@@ -309,6 +309,17 @@ describe("DELETE /api/assistant/chat/:chatId and concurrent streams (active-chat
     const reader = res.body!.getReader();
     const first = await reader.read();
     expect(first.done).toBe(false); // start frame arrived — stream is live
+    try {
+      const accepted = await handler(authed("GET", "/api/assistant/chat/c-del-live"));
+      expect(accepted.status).toBe(200);
+      expect((await accepted.json()).messages).toMatchObject([
+        { role: "user", parts: [{ type: "text", text: "hello" }] },
+      ]);
+    } catch (error) {
+      reader.cancel().catch(() => {});
+      ac.abort();
+      throw error;
+    }
 
     // Active-chat guard is registered synchronously at stream construction;
     // small retry loop absorbs scheduler jitter. Deterministic fake timers

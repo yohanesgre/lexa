@@ -2226,6 +2226,10 @@ body { projectId*, chatId*, message*, agentId?,
   It controls replay position, not transcript truncation. An explicit cursor
   on the default in-process path receives `409 ASSISTANT_TASK_ACTIVE`, never
   a new generation. Ordinary sends without a cursor keep the default behavior.
+  For a new user turn, `start` is emitted only after its canonical user entry
+  has committed. A history read after that frame can recover the accepted prompt
+  even before the provider emits text. Resumes without a new user entry do not
+  append a synthetic user message.
   `reasoningEffort` is the composer's per-message EFFORT pick. It overrides the
   project setting (`assistant_settings.reasoning_effort`) for this turn only and
   is merged, with the output ceiling below, into the provider request body
@@ -2339,6 +2343,12 @@ GET    /api/assistant/chat/:chatId
   user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
   failure an `error` {code,message} block or a `stopped:true` marker (client
   abort with partial text).
+  In-progress `partial:true` checkpoints are also projected as `stopped:true`
+  on read for crash recovery; that projection alone does not prove a supervised
+  producer is idle. Delivery recovery retains the exact accepted request in the
+  current browser route-history entry and uses explicit `replayFrom:0` after a
+  hard reload. It never turns a missing buffer into a new generation; canonical
+  history remains authoritative and completed replies retire the checkpoint.
 
 DELETE /api/assistant/chat/:chatId
 → 204 | 404 ASSISTANT_THREAD_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE

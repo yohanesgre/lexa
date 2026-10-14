@@ -61,6 +61,8 @@ All notable changes to Lexa are documented here. Format based on
   Settled rejected/expired batches clear orphan history markers, while a
   pre-execution Stop keeps approved writes retryable; later transcript edits
   preserve their prefix and complete instead of truncating then refusing.
+  Accepted user turns now commit before the first `start` frame, so an immediate
+  history read or supervised reload cannot lose the prompt to an empty thread.
 
 - **Assistant turns were unbounded in wall clock and output** — one provider request ran 506s and emitted
   28,519 output tokens with no reply text. Added three limits, each documented where its contract lives
