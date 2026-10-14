@@ -1,7 +1,7 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { ApprovalPartial, AssistantWriteDiff, StreamFrame } from "../../shared/assistant";
 import { ASSISTANT_PRE_INGRESS_TIMEOUT_MS, ASSISTANT_STALL_MESSAGE, ASSISTANT_STALL_TIMEOUT_MS } from "../../shared/assistant";
-import { Duration, Effect, Schedule, Stream } from "effect";
+import { Duration, Effect, Option, Schedule, Schema, Stream } from "effect";
 
 // Fetch-based SSE reader for Assistant's POST stream endpoints (S5). Sessions
 // live in a module-level store keyed by taskId/chatId so a closed popover or
@@ -178,11 +178,42 @@ function frameDetail(frame: StreamFrame): string | undefined {
   return typeof detail === "string" && detail.trim().length > 0 ? detail : undefined;
 }
 
+const deliveryHistorySchema = Schema.NullOr(Schema.Struct({
+  lexaAssistantDelivery: Schema.optional(Schema.Struct({
+    key: Schema.String,
+    owner: Schema.String,
+    url: Schema.Literal("/api/assistant/chat/stream"),
+    body: Schema.Struct({
+      projectId: Schema.String,
+      chatId: Schema.String,
+      message: Schema.String,
+      agentId: Schema.optional(Schema.String),
+      attachments: Schema.optional(Schema.Array(Schema.Struct({
+        storageKey: Schema.String,
+        mimeType: Schema.String,
+        name: Schema.String,
+      }))),
+      fromIndex: Schema.optional(Schema.Number),
+      replayFrom: Schema.optional(Schema.Number),
+      reasoningEffort: Schema.optional(Schema.NullOr(Schema.Literal("minimal", "low", "medium", "high"))),
+      permissionMode: Schema.optional(Schema.Literal("ask", "auto", "deny")),
+    }),
+  })),
+}));
+const decodeDeliveryHistory = Schema.decodeUnknownOption(deliveryHistorySchema, { onExcessProperty: "preserve" });
+const decodeDeliveryTail = Schema.decodeUnknownOption(Schema.Struct({
+  role: Schema.Literal("user", "assistant"),
+  metadata: Schema.optional(Schema.Struct({ stopped: Schema.optional(Schema.Boolean) })),
+}));
+
 class AssistantStreamSession {
   private snapshot: AssistantStreamSnapshot = { ...IDLE, frames: [], tools: [] };
   private listeners = new Set<(coalesce?: boolean) => void>();
   private resumeReported = false;
   private deliveryInterrupted = false;
+  private checkpointOwner: string | null = null;
+  private observedHistoryState: unknown;
+  private deliveryAccepted = false;
   readonly controller = new AbortController();
 
   constructor(
@@ -190,9 +221,13 @@ class AssistantStreamSession {
     private readonly url: string,
     private readonly body: unknown,
     private readonly onResult?: ((result: ResumeResult) => void) | undefined,
-    initialSnapshot?: AssistantStreamSnapshot | undefined
+    initialSnapshot?: AssistantStreamSnapshot | undefined,
+    checkpointOwner?: string | undefined
   ) {
     if (initialSnapshot) this.snapshot = initialSnapshot;
+    this.checkpointOwner = checkpointOwner ?? null;
+    this.deliveryAccepted = checkpointOwner !== undefined || initialSnapshot?.hasIngress === true
+      || initialSnapshot?.frames.some((frame) => frame.type === "start") === true;
   }
 
   canReconnect(): boolean {
@@ -236,7 +271,49 @@ class AssistantStreamSession {
 
   private emit(patch: Partial<AssistantStreamSnapshot>, coalesce = false) {
     this.snapshot = { ...this.snapshot, ...patch };
+    this.updateDeliveryHistory();
     for (const listener of this.listeners) listener(coalesce);
+  }
+
+  updateDeliveryHistory() {
+    if (typeof window === "undefined" || this.url !== "/api/assistant/chat/stream" || !this.key.startsWith("assistant-chat:")) return;
+    const recoverable = (this.deliveryAccepted || this.snapshot.hasIngress) && (this.snapshot.status === "streaming" || this.snapshot.status === "connecting" || this.canReconnect());
+    const currentState = window.history.state;
+    if (recoverable && this.observedHistoryState === currentState) return;
+    const parsed = decodeDeliveryHistory(currentState);
+    if (Option.isNone(parsed)) return;
+    const state = parsed.value;
+    try {
+      if (recoverable) {
+        if (new URL(window.location.href).searchParams.get("thread") !== this.key.slice("assistant-chat:".length)) {
+          this.observedHistoryState = currentState;
+          return;
+        }
+        if (state?.lexaAssistantDelivery?.owner === this.checkpointOwner && state.lexaAssistantDelivery.key === this.key) {
+          this.observedHistoryState = currentState;
+          return;
+        }
+        const candidate = decodeDeliveryHistory({
+          ...state,
+          lexaAssistantDelivery: {
+            key: this.key,
+            owner: this.checkpointOwner ?? crypto.randomUUID(),
+            url: this.url,
+            body: this.body,
+          },
+        });
+        if (Option.isNone(candidate) || !candidate.value?.lexaAssistantDelivery) return;
+        this.checkpointOwner = candidate.value.lexaAssistantDelivery.owner;
+        window.history.replaceState(candidate.value, "");
+        this.observedHistoryState = window.history.state;
+      } else if (!this.canReconnect() && state?.lexaAssistantDelivery?.owner === this.checkpointOwner) {
+        const { lexaAssistantDelivery: _delivery, ...rest } = state;
+        window.history.replaceState(rest, "");
+        this.observedHistoryState = undefined;
+      }
+    } catch {
+      // An unavailable navigation checkpoint must not interrupt the live reply.
+    }
   }
 
   abort() {
@@ -459,6 +536,7 @@ class AssistantStreamSession {
           break;
         }
         case "start":
+          this.deliveryAccepted = true;
           this.emit({ frames: [...frames], ...burstPatch, hasIngress });
           break;
       }
@@ -586,6 +664,7 @@ export function assistantGetSnapshot(key: string): AssistantStreamSnapshot {
 export interface AssistantStream extends AssistantStreamSnapshot {
   send: (url: string, body: unknown, onResult?: (result: ResumeResult) => void) => void;
   reconnect: () => void;
+  restoreDelivery: (tail: unknown) => boolean;
   canReconnect: () => boolean;
   abort: () => void;
   reset: () => void;
@@ -627,6 +706,7 @@ export function useAssistantStream(key: string | null): AssistantStream {
         else timer = setTimeout(flush, 16);
       };
       const unsubscribe = session.subscribe(wrapped);
+      session.updateDeliveryHistory();
       return () => {
         cancelAnimationFrame(raf);
         clearTimeout(timer);
@@ -661,6 +741,35 @@ export function useAssistantStream(key: string | null): AssistantStream {
       sessions.set(key, next);
       setSessionEpoch((e) => e + 1);
       next.start();
+    },
+    restoreDelivery: (rawTail) => {
+      if (!key || typeof window === "undefined") return false;
+      const existing = sessions.get(key);
+      if (existing) {
+        existing.updateDeliveryHistory();
+        return false;
+      }
+      const parsed = decodeDeliveryHistory(window.history.state);
+      if (Option.isNone(parsed) || !parsed.value?.lexaAssistantDelivery) return false;
+      const state = parsed.value;
+      const saved = state.lexaAssistantDelivery;
+      if (!saved || saved.key !== key || key !== `assistant-chat:${saved.body.chatId}`) return false;
+      if (new URL(window.location.href).searchParams.get("thread") !== saved.body.chatId) return false;
+      const tail = Option.getOrNull(decodeDeliveryTail(rawTail));
+      // History projects a live partial checkpoint as stopped, not settled.
+      if (!tail || (tail.role === "assistant" && tail.metadata?.stopped !== true)) {
+        const { lexaAssistantDelivery: _delivery, ...rest } = state;
+        window.history.replaceState(rest, "");
+        return false;
+      }
+      // A hard reload has no received-frame state: replay the same turn from zero.
+      const next = new AssistantStreamSession(key, saved.url, { ...saved.body, replayFrom: 0 }, undefined, {
+        ...IDLE, frames: [], tools: [], hasIngress: tail.role === "assistant",
+      }, saved.owner);
+      sessions.set(key, next);
+      setSessionEpoch((e) => e + 1);
+      next.start();
+      return true;
     },
     abort: () => {
       if (key) sessions.get(key)?.abort();

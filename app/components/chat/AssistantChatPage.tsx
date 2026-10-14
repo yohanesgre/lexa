@@ -244,10 +244,7 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     setResolutionProject(projectId);
   }, [projectId, thread, chatId, applyChatId]);
 
-  // Transport: the in-process SSE store (ADR-0005). Sessions live in a
-  // module-level map keyed by thread, so an in-app navigation or tab switch
-  // re-attaches to the running stream; a reload/close aborts it (partial
-  // output persists as `stopped`).
+  // Selection shares the live session; reload restores delivery, never generation.
   const streamKey = chatId ? `assistant-chat:${chatId}` : null;
   const stream = useAssistantStream(streamKey);
   const streaming = stream.status === "connecting" || stream.status === "streaming";
@@ -335,6 +332,18 @@ export function AssistantChatPage({ slug, thread }: { slug: string; thread?: str
     sendAccepted,
     transcriptUpdatedAt: transcript.dataUpdatedAt,
   });
+  const restoredDeliveryRef = useRef("");
+  useEffect(() => {
+    if (!chatId || restoredDeliveryRef.current === chatId || !transcript.data || transcript.data.chatId !== chatId) return;
+    restoredDeliveryRef.current = chatId;
+    if (stream.restoreDelivery(transcript.data.messages.at(-1))) {
+      const checkpointIndex = transcript.data.messages.length - 1;
+      setTurns((prev) => {
+        const tail = prev?.at(-1);
+        return prev && tail?.role === "assistant" && tail.stopped && tail.rawIndex === checkpointIndex ? prev.slice(0, -1) : prev;
+      });
+    }
+  }, [chatId, transcript.data, stream, setTurns]);
   const handleReconnectTurn = useCallback(() => {
     if (!stream.canReconnect()) return;
     setTurns((prev) => {

@@ -86,6 +86,13 @@ All notable changes to Lexa are documented here. Format based on
   Mobile generated-content and Threads drawers trap/restore keyboard focus. Composer placeholders
   and user-message metadata meet contrast requirements; phone controls retain touch targets,
   and narrow zoom reflow keeps the existing Chat topbar and landing usable.
+  Hard reload retains the accepted turn's exact delivery request in existing
+  route history and replays from frame zero, without starting a new generation
+  or inventing another store. Live partial checkpoints are not mistaken for
+  settled replies; completed or explicitly stopped turns clear their checkpoint.
+  Durable start acknowledgements are recoverable before provider content,
+  and returning through Threads republishes delivery identity without waiting
+  for another frame or changing attachment/queue ingress semantics.
 
 ## [2026.11.1] - 2026-10-11
 ### Fixed

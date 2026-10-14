@@ -140,4 +140,90 @@ describe("assistant stream terminal recovery", () => {
     expect(result.current.text).toBe("partial reply");
     expect(result.current.canReconnect()).toBe(false);
   });
+
+  it("restores the owned reply across start-only navigation and later partial reload", async () => {
+    const body = {
+      projectId: "p-reload",
+      chatId: "c-reload",
+      message: "Continue the owned reply",
+      agentId: "agent-reload",
+      fromIndex: 4,
+      reasoningEffort: "high",
+      permissionMode: "auto",
+      attachments: [{ storageKey: "blobs/reload", mimeType: "text/plain", name: "context.txt" }],
+    };
+    const key = "assistant-chat:c-reload";
+    const encoder = new TextEncoder();
+    let original: ReadableStreamDefaultController<Uint8Array>;
+    let replay: ReadableStreamDefaultController<Uint8Array>;
+    let generations = 0;
+    let replays = 0;
+    window.history.replaceState({}, "", "/project/chat?thread=c-reload");
+    vi.stubGlobal("fetch", (_input: unknown, init?: RequestInit) => {
+      const request: Record<string, unknown> = JSON.parse(String(init?.body));
+      if (request.replayFrom === 0) {
+        const matches = request.projectId === body.projectId && request.chatId === body.chatId
+          && request.message === body.message && request.agentId === body.agentId
+          && request.fromIndex === body.fromIndex && request.reasoningEffort === body.reasoningEffort
+          && request.permissionMode === body.permissionMode
+          && JSON.stringify(request.attachments) === JSON.stringify(body.attachments);
+        if (!matches) return Promise.resolve(new Response('{"error":{"code":"ASSISTANT_TASK_ACTIVE","message":"different turn"}}', { status: 409 }));
+        replays += 1;
+        if (replays === 1) {
+          return Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              replay = controller;
+              controller.enqueue(encoder.encode('data: {"type":"delta","text":"owned reply"}\n\n'));
+            },
+          }), { headers: { "content-type": "text/event-stream" } }));
+        }
+        return Promise.resolve(new Response('data: {"type":"done","text":"owned reply complete"}\n\n', {
+          headers: { "content-type": "text/event-stream" },
+        }));
+      }
+      generations += 1;
+      return Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          original = controller;
+          controller.enqueue(encoder.encode('data: {"type":"start","chatId":"c-reload","threadId":"owned"}\n\n'));
+        },
+      }), { headers: { "content-type": "text/event-stream" } }));
+    });
+    try {
+      const selected = renderHook(({ selectedKey }) => useAssistantStream(selectedKey), { initialProps: { selectedKey: key } });
+      act(() => selected.result.current.send("/api/assistant/chat/stream", body));
+      await waitFor(() => expect(selected.result.current.frames.at(-1)?.type).toBe("start"));
+      expect(selected.result.current.hasIngress).toBe(false);
+      window.history.replaceState({}, "", "/project/chat?thread=other");
+      selected.rerender({ selectedKey: "assistant-chat:other" });
+      window.history.replaceState({}, "", "/project/chat?thread=c-reload");
+      selected.rerender({ selectedKey: key });
+      selected.unmount();
+      original!.error(new Error("document disconnected before provider content"));
+      await flush();
+      vi.resetModules();
+      // Both dynamic imports intentionally discard the old module store at reload boundaries.
+      const reloaded = await import("./use-assistant-stream");
+      const partial = renderHook(({ selectedKey }) => reloaded.useAssistantStream(selectedKey), { initialProps: { selectedKey: key } });
+      act(() => partial.result.current.restoreDelivery({ role: "user" }));
+      expect(partial.result.current.hasIngress).toBe(false);
+      await waitFor(() => expect(partial.result.current.text).toBe("owned reply"));
+      window.history.replaceState({}, "", "/project/chat?thread=other");
+      partial.rerender({ selectedKey: "assistant-chat:other" });
+      window.history.replaceState({}, "", "/project/chat?thread=c-reload");
+      partial.rerender({ selectedKey: key });
+      partial.unmount();
+      replay!.error(new Error("document disconnected after partial reply"));
+      await flush();
+      vi.resetModules();
+      const reloadedAfterPartial = await import("./use-assistant-stream");
+      const { result } = renderHook(() => reloadedAfterPartial.useAssistantStream(key));
+      act(() => result.current.restoreDelivery({ role: "assistant", metadata: { stopped: true } }));
+      await waitFor(() => expect(result.current.status).toBe("done"));
+      expect(result.current.text).toBe("owned reply complete");
+      expect(generations).toBe(1);
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+  });
 });
