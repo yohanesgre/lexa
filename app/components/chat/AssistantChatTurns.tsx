@@ -18,7 +18,15 @@ type Stream = ReturnType<typeof useAssistantStream>;
 // Render-only pieces of the Assistant chat page (assistant-chat.html). State and
 // stream orchestration stay in AssistantChatPage; these take props only.
 
-export function ChatProviderMissingPanel({ projectId }: { projectId: string | undefined }) {
+export function ChatProviderMissingPanel({
+  projectId,
+  canManageSettings,
+  isMember,
+}: {
+  projectId: string | undefined;
+  canManageSettings: boolean;
+  isMember: boolean;
+}) {
   return (
     <div className="chat-scroll">
       <div className="card-panel chat-void">
@@ -26,11 +34,15 @@ export function ChatProviderMissingPanel({ projectId }: { projectId: string | un
           <div className="empty-state-icon">
             <AssistantFlameIcon size={24} />
           </div>
-          <div className="text-sm font-medium text-lx-text-primary">No AI provider configured</div>
+          <div className="text-sm font-medium text-lx-text-primary">Assistant isn't configured for this project</div>
           <p className="text-xs text-lx-text-secondary mt-1" style={{ maxWidth: 260 }}>
-            Set up a provider for this project in Project Settings → Assistant provider.
+            {isMember
+              ? "Ask a workspace admin to configure Assistant."
+              : canManageSettings
+                ? "Configure an Assistant provider for this project in Project Settings → Assistant provider."
+                : "Assistant is unavailable until an administrator configures a provider."}
           </p>
-          {projectId && (
+          {projectId && canManageSettings && (
             <div className="mt-3">
               <Link to="/settings/project/$projectId" params={{ projectId }} className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>
                 Open Settings
@@ -139,6 +151,7 @@ export function UserTurnBubble({
   onCancelEdit,
   onCommitEdit,
   lastUser,
+  canRegenerate,
   streaming,
   onRegenerate,
   attachmentIndex,
@@ -153,6 +166,7 @@ export function UserTurnBubble({
   onCancelEdit: () => void;
   onCommitEdit: () => void;
   lastUser: boolean;
+  canRegenerate: boolean;
   streaming: boolean;
   onRegenerate: () => void;
   attachmentIndex?: Map<string, ChatAttachment> | undefined;
@@ -179,7 +193,7 @@ export function UserTurnBubble({
             <button type="button" className="icon-btn" title="Edit message" aria-label={`Edit message ${pos + 1}`} onClick={onBeginEdit}>
               <EditIcon />
             </button>
-            {lastUser && (
+            {lastUser && canRegenerate && (
               <button type="button" className="icon-btn" title="Regenerate from here" aria-label="Regenerate from here" disabled={streaming} onClick={onRegenerate}>
                 <RegenerateIcon />
               </button>

@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, FileText, Image as ImageIcon, Paperclip, Send, Square, XCircle } from "lucide-react";
 import {
   CHAT_ATTACHMENT_CAPS,
@@ -24,7 +24,7 @@ import type { AssistantStreamStatus } from "../../lib/use-assistant-stream";
 import { MENTION_SECTIONS, type MentionItem } from "../../lib/mention-suggestion";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { matchMedia } from "../../lib/viewport";
-import { lastApprovalBatch } from "./assistant-chat-utils";
+import { chatAttachmentsReady, lastApprovalBatch } from "./assistant-chat-utils";
 import type { LexaSkill } from "../../../shared/types";
 
 // A cleared chip's object URL is revoked by the drop-out effect, so a restored
@@ -366,10 +366,16 @@ function AttachmentStrip({
 }) {
   const total = countedBytes(attachments);
   const pct = Math.min(100, Math.round((total / CHAT_ATTACHMENT_CAPS.maxTotalBytes) * 100));
-  const over = attachments.length >= CHAT_ATTACHMENT_CAPS.maxCount || total >= CHAT_ATTACHMENT_CAPS.maxTotalBytes;
-  const chips = attachments.filter((a) => a.status === "uploading" || a.status === "ready");
-  const failed = attachments.filter((a) => a.status === "failed");
+  const unresolved = attachments.filter((a) => a.status === "failed" || a.status === "extraction-failed" || (a.status === "ready" && !a.storageKey));
+  const chips = attachments.filter((a) => a.status === "uploading" || (a.status === "ready" && !!a.storageKey));
+  const failed = unresolved.filter((a) => a.status !== "extraction-failed");
   const unreadable = attachments.filter((a) => a.status === "extraction-failed");
+  const ready = chatAttachmentsReady(attachments);
+  const readinessMessage = ready
+    ? null
+    : unresolved.length > 0
+      ? "Retry or remove the failed attachment before sending."
+      : "Wait for attachments to finish uploading.";
 
   if (chips.length === 0 && rejections.length === 0 && failed.length === 0 && unreadable.length === 0) return null;
 
@@ -434,7 +440,9 @@ function AttachmentStrip({
       {failed.map((att) => (
         <div key={att.id} style={ERROR_ROW_STYLE}>
           <XCircle size={14} strokeWidth={1.5} style={{ color: "var(--lx-text-danger)", flexShrink: 0 }} />
-          <span style={ERROR_TEXT_STYLE}>{uploadFailedMessage(att.name)}</span>
+          <span style={ERROR_TEXT_STYLE}>
+            {att.status === "ready" ? `${att.name} is not ready to send.` : uploadFailedMessage(att.name)}
+          </span>
           <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0, height: 24, padding: "0 8px", fontSize: 11 }} onClick={() => onRetry(att.id)}>
             Retry
           </button>
@@ -448,20 +456,19 @@ function AttachmentStrip({
         <div key={att.id} style={ERROR_ROW_STYLE}>
           <AlertCircle size={14} strokeWidth={1.5} style={{ color: "var(--lx-text-danger)", flexShrink: 0 }} />
           <span style={ERROR_TEXT_STYLE}>{extractionFailedMessage(att.name)}</span>
-          <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0, height: 24, padding: "0 8px", fontSize: 11 }} onClick={() => onRemove(att.id)}>
-            Remove
+          <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0, height: 24, padding: "0 8px", fontSize: 11 }} onClick={() => onRetry(att.id)}>
+            Retry
+          </button>
+          <button type="button" aria-label={`Remove ${att.name}`} onClick={() => onRemove(att.id)} style={{ border: "none", background: "none", cursor: "pointer", padding: 0, color: "var(--lx-text-muted)", flexShrink: 0 }}>
+            ✕
           </button>
         </div>
       ))}
 
-      {(chips.length > 0 || failed.length > 0 || unreadable.length > 0) && (
-        <div className="deck-attach">
-          <span className={`deck-meter${over ? " is-over" : ""}`}>
-            <span className="deck-meter-fill" style={{ width: `${pct}%` }} />
-          </span>
-          <span className="font-micro text-2xs" style={{ color: over ? "var(--lx-text-danger)" : "var(--lx-text-muted)" }}>
-            {attachments.length}/{CHAT_ATTACHMENT_CAPS.maxCount} · {formatMegaBytes(total)}/10MB
-          </span>
+      {readinessMessage && (
+        <div className="notice notice-danger" role="alert">
+          <AlertCircle aria-hidden="true" size={14} strokeWidth={1.5} />
+          <span>{readinessMessage}</span>
         </div>
       )}
 
@@ -491,8 +498,9 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   onUnqueue,
   seed,
   initialAttachments,
-  ensureChatId,
   uploadAttachment,
+  ensureChatId,
+  onReadinessChange,
 }: {
   slug: string;
   skills?: LexaSkill[] | undefined;
@@ -523,6 +531,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   initialAttachments?: ComposerAttachment[] | undefined;
   ensureChatId?: (() => string) | undefined;
   uploadAttachment?: ((req: ChatUploadRequest) => Promise<ChatAttachment>) | undefined;
+  onReadinessChange?: ((ready: boolean) => void) | undefined;
 }) {
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachment[]>(() => initialAttachments ?? []);
@@ -533,6 +542,13 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   const mention = useMentionTokens({ slug, value: draft, onChange: setDraft, skills });
   // Combobox wiring: the textarea owns focus, the popup is its listbox, and the
   // focused row is named by aria-activedescendant (focusedIndex).
+  const allAttachmentsReady = chatAttachmentsReady(attachments);
+  const queuedOutcomeUncertain = !!queued?.heldReason && queued.flushing === false &&
+    (!sendError || sendError.code === "ASSISTANT_GENERATION_FAILED" || sendError.code === "ASSISTANT_TASK_ACTIVE");
+
+  useLayoutEffect(() => {
+    onReadinessChange?.(allAttachmentsReady);
+  }, [allAttachmentsReady, onReadinessChange]);
   const mentionListboxId = useId();
   const mentionActiveDescendant =
     mention.open && mention.items.length > 0 ? `${mentionListboxId}-opt-${mention.focusedIndex}` : undefined;
@@ -701,11 +717,9 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     return refs;
   }, [attachments]);
 
-  const hasExtractionFailure = attachments.some((a) => a.status === "extraction-failed");
-
   const handleSend = useCallback(() => {
     const msg = draft.trim();
-    if (!msg || streaming || suspendedLock || hasExtractionFailure) return;
+    if (!msg || streaming || suspendedLock || !allAttachmentsReady) return;
     const accepted = onSend(msg, readyRefs());
     if (!accepted) return;
     // Accepted send: clear the ready chips immediately (the sent turn carries
@@ -721,11 +735,11 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     setRejections([]);
     setWarning(null);
     setQueueWarning(null);
-  }, [draft, streaming, suspendedLock, hasExtractionFailure, onSend, readyRefs, attachments, mention]);
+  }, [draft, streaming, suspendedLock, allAttachmentsReady, onSend, readyRefs, attachments, mention]);
 
   const handleQueue = useCallback(() => {
     const msg = draft.trim();
-    if (!msg || busy409) return;
+    if (!msg || busy409 || !allAttachmentsReady) return;
     // A second queued message would overwrite the held one (one entry per
     // chat) — refuse and keep the draft so nothing the user typed is
     // discarded without notice (D8).
@@ -736,11 +750,11 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     setQueueWarning(null);
     setDraft("");
     mention.close();
-  }, [draft, busy409, onQueue, mention]);
+  }, [draft, busy409, allAttachmentsReady, onQueue, mention]);
 
   const flushHeld = useCallback(() => {
     if (!queued) return;
-    if (streaming || suspendedLock || hasExtractionFailure) return;
+    if (streaming || suspendedLock || !allAttachmentsReady || queuedOutcomeUncertain) return;
     const accepted = onSend(queued.text, readyRefs());
     if (!accepted) return;
     const sent = attachments.filter((a) => a.status === "ready");
@@ -752,7 +766,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     setQueueWarning(null);
     setRejections([]);
     setWarning(null);
-  }, [queued, streaming, suspendedLock, hasExtractionFailure, onSend, readyRefs, attachments, onUnqueue]);
+  }, [queued, streaming, suspendedLock, allAttachmentsReady, queuedOutcomeUncertain, onSend, readyRefs, attachments, onUnqueue]);
 
   // Click the queued chip text to pull the held message back into the draft.
   const editQueuedText = useCallback(() => {
@@ -767,7 +781,8 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
   // empty (sent, cancelled, or flushed).
   useEffect(() => {
     if (!queued) setQueueWarning(null);
-  }, [queued]);
+    else if (queuedOutcomeUncertain) setQueueWarning("Check affected items before sending this message again. Changes already applied are not undone.");
+  }, [queued, queuedOutcomeUncertain]);
 
   const reviewApprovals = useCallback(() => {
     const scrollRoot = document.querySelector(".chat-scroll") ?? document;
@@ -857,8 +872,8 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
     setWarning(null);
   }, [streamStatus, streaming, sendError, hasIngress]);
 
-  const canSend = draft.trim().length > 0 && !streaming && !suspendedLock && !hasExtractionFailure;
-  const canQueue = draft.trim().length > 0 && !busy409;
+  const canSend = draft.trim().length > 0 && !streaming && !suspendedLock && allAttachmentsReady;
+  const canQueue = draft.trim().length > 0 && !busy409 && allAttachmentsReady;
 
   const placeholder = busy409
     ? "Waiting for the current reply…"
@@ -918,7 +933,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                disabled={streaming || suspendedLock || hasExtractionFailure}
+                disabled={streaming || suspendedLock || !allAttachmentsReady || queuedOutcomeUncertain}
                 onClick={flushHeld}
               >
                 Send
@@ -955,7 +970,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
           style={{ border: "none", background: "transparent" }}
         />
       </div>
-      {attachmentsEnabled && (
+      {(attachmentsEnabled || attachments.length > 0) && (
         <AttachmentStrip
           attachments={attachments}
           rejections={rejections}
@@ -969,7 +984,7 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
         {busy409 ? (
           <>
             <span className="deck-status" style={{ color: "var(--lx-text-secondary)" }}>
-              ANOTHER ASSISTANT RUN IS IN PROGRESS
+              REQUEST NOT ACCEPTED
             </span>
             <button type="button" className="btn btn-primary btn-sm" style={{ marginLeft: "auto" }} disabled={!canSend} onClick={handleSend}>
               Send
@@ -982,11 +997,12 @@ export const AssistantChatComposer = memo(function AssistantChatComposer({
               <span aria-hidden="true" style={STATUS_DOT_STYLE} />
               {streaming ? (
                 <>
-                  STREAMING · <span aria-hidden="true">{mmss(elapsed)}</span>
+                  {streamStatus === "connecting" ? hasIngress ? "Reconnecting to the current reply…" : "Connecting to Assistant…" : "Assistant is replying…"}
+                  <span aria-hidden="true"> · {mmss(elapsed)}</span>
                 </>
               ) : (
                 <>
-                  TURN SUSPENDED · {suspendCount} PENDING APPROVALS
+                  TURN SUSPENDED · {suspendCount} PENDING {suspendCount === 1 ? "APPROVAL" : "APPROVALS"}
                 </>
               )}
             </span>

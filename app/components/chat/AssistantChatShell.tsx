@@ -3,7 +3,6 @@ import { PanelRight, Pin } from "lucide-react";
 import { formatRelative } from "../../lib/relative-time";
 import type { SpawnedRunRef } from "../../lib/assistant-run-adapter";
 import type { useAssistantStream } from "../../lib/use-assistant-stream";
-import { AssistantApprovalBatch } from "./AssistantApprovals";
 import type { ApprovalChip } from "./AssistantApprovals";
 import { ChatJumpButton, StreamingBubble, UserTurnBubble } from "./AssistantChatTurns";
 import { AssistantBubble } from "./AssistantBubble";
@@ -13,7 +12,7 @@ import { AssistantChatComposer, type ChatUploadRequest } from "./AssistantChatCo
 import { EffortPicker, DeckRailSummary } from "./EffortPicker";
 import { WritesPicker, WritesModeSummary, WritesEmptyHint } from "./WritesModePicker";
 import { useChatComposerClearance } from "./assistant-chat-hooks";
-import type { ActivityView, ChatTurn } from "./assistant-chat-utils";
+import { turnMayHaveAppliedWrite, type ActivityView, type ChatTurn } from "./assistant-chat-utils";
 import type { QueuedMessage } from "./useChatQueue";
 import type { LexaSkill } from "../../../shared/types";
 import type { AssistantReasoningEffort, AssistantToolPermissionMode } from "../../../shared/assistant";
@@ -250,6 +249,8 @@ export function ChatHeader({
             type="button"
             className="icon-btn"
             aria-pressed={detailOpen}
+            aria-controls="generated-content-pane"
+            aria-expanded={detailOpen}
             title={detailOpen ? "Hide generated content" : "Show generated content"}
             aria-label={detailOpen ? "Hide generated content" : "Show generated content"}
             onClick={onToggleDetail}
@@ -279,6 +280,10 @@ export function ChatTranscriptArea({
   onApproveAll,
   onRejectAll,
   onRetryTurn,
+  onReconnectTurn,
+  canManageProviderSettings,
+  isProjectMember,
+  onActiveChipChange,
   scrollRef,
   onScroll,
   editingPos,
@@ -300,14 +305,9 @@ export function ChatTranscriptArea({
   onRetryRead,
 }: {
   turns: ChatTurn[];
-  // Thread id: folds into every row key so per-row local state cannot leak
-  // across a thread switch (the transcript component is not remounted).
   chatId: string;
   slug: string;
   streaming: boolean;
-  // Send accepted but the transport has not taken over yet (deferred fresh-
-  // thread write). Renders the same pre-first-token caret as `streaming` so a
-  // lone user bubble never reads as a failed prompt.
   pendingReply?: boolean | undefined;
   renderText: (text: string) => ReactNode;
   projectId?: string | undefined;
@@ -317,6 +317,10 @@ export function ChatTranscriptArea({
   onApproveAll: (chips: ApprovalChip[]) => void;
   onRejectAll: (chips: ApprovalChip[]) => void;
   onRetryTurn: (turn: ChatTurn) => void;
+  onReconnectTurn: () => void;
+  canManageProviderSettings: boolean;
+  isProjectMember: boolean;
+  onActiveChipChange?: ((chip: ApprovalChip) => void) | undefined;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onScroll: () => void;
   editingPos: number | null;
@@ -332,16 +336,13 @@ export function ChatTranscriptArea({
   onJump: () => void;
   attachmentIndex?: Map<string, ChatAttachment> | undefined;
   renderRunCard?: ((ref: SpawnedRunRef) => ReactNode) | undefined;
-  // Post-decision resume progress row (State 3c) — rendered between the
-  // proposal bubble and the continuation bubble's slot.
   resumeProgress?: ResumeProgress | null | undefined;
   onRetryResume?: (() => void) | undefined;
-  // The transcript read failed (non-404) and cleared the turns — render the
-  // danger void with Retry instead of a blank thread (D4b).
   readError?: boolean | undefined;
   onRetryRead?: (() => void) | undefined;
 }) {
   const lastAssistantPos = turns.findLastIndex((turn) => turn.role === "assistant");
+  const lastApprovalPos = turns.findLastIndex((turn) => turn.role === "assistant" && !!turn.batch?.chips.length);
   return (
     <div className="chat-transcript">
       <div className="chat-header-scrim" aria-hidden="true" />
@@ -369,6 +370,14 @@ export function ChatTranscriptArea({
                 onCancelEdit={onCancelEdit}
                 onCommitEdit={() => onCommitEdit(pos)}
                 lastUser={pos === lastUserPos}
+                canRegenerate={
+                  !turns[pos + 1] ||
+                  turns[pos + 1]?.role !== "assistant" ||
+                  !turnMayHaveAppliedWrite(
+                    turns[pos + 1]!,
+                    streamActivity && pos + 1 === turns.length - 1 ? streamActivity : undefined
+                  )
+                }
                 streaming={streaming}
                 onRegenerate={() => onRegenerate(turn)}
                 attachmentIndex={attachmentIndex}
@@ -387,6 +396,11 @@ export function ChatTranscriptArea({
                   onApproveAll={onApproveAll}
                   onRejectAll={onRejectAll}
                   onRetry={() => onRetryTurn(turn)}
+                  canReconnect={pos === lastAssistantPos && stream.canReconnect()}
+                  onReconnect={onReconnectTurn}
+                  canManageSettings={canManageProviderSettings}
+                  isProjectMember={isProjectMember}
+                  onActiveChipChange={pos === lastApprovalPos ? onActiveChipChange : undefined}
                 />
                 {turn.spawnedRuns?.map((ref) => (
                   <Fragment key={ref.toolCallId}>{renderRunCard?.(ref)}</Fragment>
@@ -430,8 +444,9 @@ export function ChatComposerArea({
   onQueue,
   onUnqueue,
   seed,
-  ensureChatId,
   uploadAttachment,
+  ensureChatId,
+  onReadinessChange,
 }: {
   skills: LexaSkill[];
   busy409: boolean;
@@ -463,10 +478,11 @@ export function ChatComposerArea({
   onQueue?: ((text: string) => boolean | void) | undefined;
   onUnqueue?: (() => void) | undefined;
   seed?: { text: string; nonce: number } | null | undefined;
-  ensureChatId?: (() => string) | undefined;
   uploadAttachment?: ((req: ChatUploadRequest) => Promise<ChatAttachment>) | undefined;
+  ensureChatId?: (() => string) | undefined;
+  onReadinessChange?: ((ready: boolean) => void) | undefined;
 }) {
-  const railDisabled = streaming || busy409 || suspendedLock;
+  const railDisabled = streaming || suspendedLock;
   const onPermissionChange = onPermissionModeChange ?? (() => {});
   // The docked composer floats over the transcript (chat-composer-float);
   // measure it and publish the clearance var on the shell. Landing never
@@ -503,6 +519,7 @@ export function ChatComposerArea({
           seed={landing ? seed : undefined}
           ensureChatId={ensureChatId}
           uploadAttachment={uploadAttachment}
+          onReadinessChange={onReadinessChange}
           rail={
             isMobileComposer ? (
               <>

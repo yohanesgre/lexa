@@ -445,21 +445,29 @@ export function useStreamFrameFreeze(args: {
     if (stream.status === "connecting" || stream.status === "streaming") frozeErrorRef.current = null;
   }, [stream.status]);
 
-  // An `approval_result` frame reports the execution outcome of a decided row
-  // (resume streams only). A failed row patches its chip to the `failed`
-  // terminal state with the "CODE: message" error — the only signal that an
-  // approved write did not run (D3). Applied from session memory; the reload
-  // path carries `executionError` through the transcript carrier instead.
+  // `approval_result` is the live execution record for a resumed batch. Apply
+  // applied, failed, denied, and partial outcomes to session chips; the current
+  // transcript contract persists failures only.
   useEffect(() => {
-    const failed = stream.approvalResults.filter((r) => r.status === "failed");
-    if (failed.length === 0) return;
+    if (stream.approvalResults.length === 0) return;
     setTurns((prev) => {
       let next = prev;
-      for (const r of failed) {
-        next = applyChipPatch(next, r.approvalId, {
-          state: "failed",
-          error: parseApprovalExecutionError(r.error ?? "ASSISTANT_WRITE_FAILED"),
-        });
+      for (const result of stream.approvalResults) {
+        if (result.status === "applied") {
+          next = applyChipPatch(next, result.approvalId, {
+            state: "approved",
+            executionStatus: "applied",
+            ...(result.partial ? { executionPartial: { applied: result.partial.applied, failed: result.partial.failed } } : {}),
+          });
+        } else if (result.status === "denied") {
+          next = applyChipPatch(next, result.approvalId, { state: "rejected", executionStatus: "denied" });
+        } else {
+          next = applyChipPatch(next, result.approvalId, {
+            state: "failed",
+            executionStatus: "failed",
+            error: parseApprovalExecutionError(result.error ?? "ASSISTANT_WRITE_FAILED"),
+          });
+        }
       }
       return next;
     });

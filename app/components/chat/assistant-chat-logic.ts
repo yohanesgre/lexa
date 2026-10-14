@@ -187,12 +187,19 @@ export function appendEphemeralUserTurn(prev: ChatTurn[] | null, message: string
   return [...arr, ephemeralUserTurn(message, attachments)];
 }
 
-// Keep turns up to & including `target` (optionally rewriting its text) —
+// Keep turns up to and including `target` (optionally rewriting its text) —
 // the optimistic view of edit/regenerate/retry until the terminal-state
-// refetch replaces it with server truth.
+// refetch replaces it with server truth. Resolve by raw position too: a stream
+// status render can rebuild transcript turns between the click and this updater.
 export function truncateTurns(prev: ChatTurn[] | null, target: ChatTurn, replaceText?: string): ChatTurn[] {
   const arr = prev ?? [];
-  const pos = arr.indexOf(target);
+  const identityPos = arr.indexOf(target);
+  const pos =
+    identityPos >= 0
+      ? identityPos
+      : target.rawIndex >= 0
+        ? arr.findIndex((turn) => turn.role === target.role && turn.rawIndex === target.rawIndex)
+        : -1;
   if (pos < 0) return arr;
   const kept = arr.slice(0, pos + 1);
   return replaceText !== undefined ? kept.map((t, i) => (i === pos ? { ...t, text: replaceText } : t)) : kept;
@@ -358,18 +365,30 @@ export function mergeBatchChips(prev: ChatTurn[] | null, batchId: string, incomi
   return touched ? out : arr;
 }
 
-// Error frames freeze/merge into the trailing assistant turn: same-code
-// errors are idempotent (no dup), a different error on an errored tail
-// overwrites it, otherwise a fresh failed turn appends.
+// Error frames merge into an existing trailing assistant turn so partial text
+// stays in one bubble; repeated terminal errors update it without duplication.
 export function nextTurnsAfterStreamError(
   prev: ChatTurn[] | null,
   args: { code: string; text: string; error: { code: string; message: string }; activity: ActivityView | undefined }
 ): ChatTurn[] {
   const arr = prev ?? [];
   const last = arr[arr.length - 1];
-  if (last?.role === "assistant" && last.error?.code === args.code) return arr;
-  if (last?.role === "assistant" && last.error) {
-    return arr.map((t, i) => (i === arr.length - 1 ? { ...t, text: args.text || t.text, error: args.error, ...(args.activity ? { activity: args.activity } : {}) } : t));
+  if (last?.role === "assistant") {
+    const text = args.text || last.text;
+    const activity = args.activity ?? last.activity;
+    if (
+      last.text === text &&
+      last.error?.code === args.error.code &&
+      last.error.message === args.error.message &&
+      last.activity === activity
+    ) {
+      return arr;
+    }
+    return arr.map((turn, index) =>
+      index === arr.length - 1
+        ? { ...turn, text, error: args.error, ...(activity ? { activity } : {}) }
+        : turn
+    );
   }
   return [...arr, { role: "assistant", text: args.text, imageCount: 0, rawIndex: -1, error: args.error, ...(args.activity ? { activity: args.activity } : {}) }];
 }

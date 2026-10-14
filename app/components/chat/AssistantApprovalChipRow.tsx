@@ -61,22 +61,22 @@ function ChipDiffArea({ chip }: { chip: ApprovalChip }) {
       </div>
     );
   }
-  if (chip.state === "failed" && chip.error) {
+  if (chip.state === "failed") {
     return (
       <div className="approval-diff">
-        <div style={{ background: "var(--lx-bg-danger-subtle)", border: "1px solid var(--lx-bg-danger-subtle)", borderRadius: 6, padding: "8px 10px", overflow: "hidden" }}>
-          <div className="font-mono text-xs font-medium" style={{ color: "var(--lx-text-danger)" }}>
-            {chip.error.code}
-          </div>
-          <div className="text-xs text-lx-text-secondary mt-1" style={{ lineHeight: "16px" }}>
-            {chip.error.message}
-          </div>
+        <div className="notice notice-danger" role="alert">
+          <span>This approved change did not complete. Review the current item state before starting another attempt.</span>
         </div>
       </div>
     );
   }
   return (
     <div className="approval-diff">
+      {chip.executionStatus === "applied" && (chip.executionPartial?.failed ?? 0) > 0 && (
+        <div className="notice notice-danger mb-2" role="status">
+          Partially applied: {chip.executionPartial!.applied} applied, {chip.executionPartial!.failed} failed. Review the current item state.
+        </div>
+      )}
       <DiffBody chip={chip} />
     </div>
   );
@@ -95,8 +95,26 @@ export function ApprovalChipRow({
 }) {
   const decided = chip.state !== "pending";
   const terminal = decided ? (chip.state as Exclude<ApprovalChipState, "pending">) : null;
+  const stateLabel = !terminal
+    ? null
+    : chip.executionStatus === "applied" && (chip.executionPartial?.failed ?? 0) > 0
+      ? "Partially applied"
+      : chip.executionStatus === "applied"
+        ? "Applied"
+        : chip.executionStatus === "denied"
+          ? "Not applied"
+          : STATE_LABEL[terminal];
+  const stateColor = !terminal
+    ? ""
+    : chip.executionStatus === "applied" && (chip.executionPartial?.failed ?? 0) > 0
+      ? "text-lx-text-warning"
+      : chip.executionStatus === "applied"
+        ? "text-lx-text-success"
+        : chip.executionStatus === "denied"
+          ? "text-lx-text-danger"
+          : STATE_COLOR[terminal];
   // The per-chip seq badge is folded into the carousel's N / M counter, so a
-  // card carries only its tool · target · (terminal status).
+  // card carries only its tool · target · terminal status.
   return (
     <div className={`approval-chip${STATE_CLASS[chip.state]}`}>
       <div className="flex items-center gap-2">
@@ -104,9 +122,9 @@ export function ApprovalChipRow({
         <span className="text-lx-text-muted text-xs text-lx-text-muted">·</span>
         <span className="approval-target">{targetFor(chip.diff)}</span>
         {terminal && (
-          <span className={`approval-status ${STATE_COLOR[terminal]}`} style={{ marginLeft: "auto" }}>
+          <span className={`approval-status ${stateColor}`} style={{ marginLeft: "auto" }}>
             {STATE_ICON[terminal]}
-            {STATE_LABEL[terminal]}
+            {stateLabel}
           </span>
         )}
       </div>

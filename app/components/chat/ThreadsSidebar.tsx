@@ -1,7 +1,8 @@
-import { useEffect, useMemo, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Plus } from "lucide-react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { matchMedia } from "../../lib/viewport";
+import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 import type { AssistantChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 
@@ -76,6 +77,9 @@ export function ThreadsSidebar({
   error = false,
   onRetry,
 }: ThreadsSidebarProps) {
+  const panelRef = useRef<HTMLElement>(null);
+  const overlayActive = open && isDrawerViewport();
+  useOverlayFocusTrap(overlayActive, panelRef);
   // Drawer Esc-dismiss (<1024px). Thread actions — including the delete
   // dialog's own Escape handling — live in the header, not this pane.
   useEffect(() => {
@@ -143,7 +147,7 @@ export function ThreadsSidebar({
   return (
     <>
       {open && <button type="button" className="threads-sidebar-backdrop" aria-label="Close threads" onClick={() => onClose?.()} />}
-      <aside id="threads-pane" className={`threads-sidebar${open ? " open" : ""}`} aria-label="Threads">
+      <aside ref={panelRef} id="threads-pane" className={`threads-sidebar${open ? " open" : ""}`} aria-label="Threads" role={overlayActive ? "dialog" : undefined} aria-modal={overlayActive || undefined} tabIndex={-1}>
         <div className="pane-top">
           <div className="pane-head">
             <span className="pane-head-label">Threads</span>

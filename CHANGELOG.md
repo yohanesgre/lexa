@@ -78,6 +78,24 @@ All notable changes to Lexa are documented here. Format based on
   Lexa-owned cap instead of the SDK default, and the unused `MAX_RUNNER_STEPS` / `runnerStopWhen()` exports
   are deleted.
 
+- **Chat recovery and attachment readiness:** partial replies remain visible with stopped/error
+  notices. New generation, delivery reconnect and approved-write Resume are distinct; known or
+  indeterminate writes suppress unsafe regeneration. A single composer preserves draft/files
+  across landing-to-transcript transitions. Unresolved files block every send/queue path; queued
+  dispatch waits for real receipt and keeps failed attempts held. Mounted, focused and paged
+  proposals keep the visible card, counter and selected full task/wiki body aligned, including
+  resize and thread switches; history loading and failure differ from an empty viewer.
+  Mobile generated-content and Threads drawers trap/restore keyboard focus. Composer placeholders
+  and user-message metadata meet contrast requirements; phone controls retain touch targets,
+  and narrow zoom reflow keeps the existing Chat topbar and landing usable.
+  Hard reload retains the accepted turn's exact delivery request in existing
+  route history and replays from frame zero, without starting a new generation
+  or inventing another store. Live partial checkpoints are not mistaken for
+  settled replies; completed or explicitly stopped turns clear their checkpoint.
+  Durable start acknowledgements are recoverable before provider content,
+  and returning through Threads republishes delivery identity without waiting
+  for another frame or changing attachment/queue ingress semantics.
+
 ## [2026.11.1] - 2026-10-11
 ### Fixed
 
