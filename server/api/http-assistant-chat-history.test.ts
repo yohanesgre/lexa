@@ -228,6 +228,32 @@ describe("PATCH / DELETE /api/assistant/chat/:chatId", () => {
     expect((await gone.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
   });
 });
+describe("POST /api/assistant/chat/stream ownership", () => {
+  it("hides a foreign transcript and leaves its owner, history, and permission mode unchanged", async () => {
+    db.exec(`
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, title, permission_mode, messages, summary)
+VALUES ('chat', 'chat-private-owner-check', 'p2', 'u2', 'Private', 'write', '[{"role":"user","content":"owner history"}]', 'owner summary');
+`);
+    const response = await handler(authed("POST", "/api/assistant/chat/stream", {
+      projectId: "p2",
+      chatId: "chat-private-owner-check",
+      message: "foreign send",
+    }));
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+    const thread = db.prepare(`
+SELECT owner_user_id, messages, summary, permission_mode
+FROM assistant_threads WHERE document_id = 'chat-private-owner-check'
+`).get() as { owner_user_id: string; messages: string; summary: string; permission_mode: string };
+    expect(thread).toEqual({
+      owner_user_id: "u2",
+      messages: '[{"role":"user","content":"owner history"}]',
+      summary: "owner summary",
+      permission_mode: "write",
+    });
+  });
+});
+
 
 describe("GET /api/assistant/chat/:chatId (D3 UIMessage parts + export)", () => {
   it("serves parts-shaped D1 mirror rows verbatim, and exports a markdown attachment with template markers", async () => {

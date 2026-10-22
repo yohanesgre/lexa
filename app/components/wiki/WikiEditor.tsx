@@ -1,58 +1,66 @@
 import { useRef, useState } from "react";
-import type { Editor, JSONContent } from "@tiptap/core";
-import { EditorContent } from "@tiptap/react";
-import type { TipTapDoc } from "../../../shared/types";
-import { Toolbar } from "../TextEditor";
+import { MarkdownToolbar } from "../TextEditor";
 import { AssistantReviewSurface } from "../assistant/AssistantReviewSurface";
 import { useAssistantReview } from "../../lib/useAssistantReview";
 import { EditorViewToggle, type EditorView } from "../editor/EditorViewToggle";
-import { MarkdownEditorPane, type MarkdownTarget } from "../editor/MarkdownEditorPane";
-import { renderDoc } from "../tiptap-render";
+import { MarkdownEditorPane, type MarkdownSource, type MarkdownTarget } from "../editor/MarkdownEditorPane";
+import { MarkdownContent } from "../MarkdownContent";
 import { cn } from "../ui/cn";
+import { useAttachmentEmbeds } from "../../lib/useAttachmentEmbeds";
 
 interface WikiEditorProps {
-  editor: Editor;
-  slug: string;
-  previewContent: TipTapDoc;
+  source: string;
+  sourceIdentity: string;
   editable: boolean;
-  onDocChange: (doc: TipTapDoc) => void;
-  runtime?: { slug: string; documentType: "task" | "wiki"; documentId: string };
+  onSourceChange: (source: string) => void;
+  runtime: { slug: string; documentType: "wiki"; documentId: string };
   onReviewStateChange?: (active: boolean, accepted: boolean) => void;
 }
 
-// The page's editing surface: one pane. The Editor view is the page document's
-// Markdown source (the toolbar acts on that source), the Preview view is the
-// same document through the read renderer. The document stays TipTap JSON: a
-// pane edit converts back through shared/markdown.ts, and the editor instance
-// stays the model the save payload (manual and autosave), the Assistant popover
-// and the review-in-editor flow read.
-export function WikiEditor({ editor, slug, previewContent, editable, onDocChange, runtime, onReviewStateChange }: WikiEditorProps) {
+export function WikiEditor({ source, sourceIdentity, editable, onSourceChange, runtime, onReviewStateChange }: WikiEditorProps) {
   const [view, setView] = useState<EditorView>("editor");
   const targetRef = useRef<MarkdownTarget | null>(null);
-  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useAssistantReview(editor, onReviewStateChange);
+  const sourceRef = useRef<MarkdownSource | null>(null);
+  const editableRef = useRef(editable);
+  editableRef.current = editable;
+  const embeds = useAttachmentEmbeds({ slug: runtime.slug, documentType: "wiki", documentId: runtime.documentId });
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } =
+    useAssistantReview(sourceRef, sourceIdentity, onReviewStateChange);
   return (
     <div className={cn("editor-wrapper flex flex-col flex-1 min-h-0", review && "is-reviewing")}>
-      <Toolbar editor={editor} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} target={targetRef} disabled={view === "preview"}>
+      <MarkdownToolbar
+        sourceRef={sourceRef}
+        runtime={runtime}
+        reviewActive={review !== null}
+        appliedTaskId={appliedTaskId}
+        rejectedTaskId={rejectedTaskId}
+        onReview={(text, identity) => { if (editableRef.current) handleReview(text, identity); }}
+        target={targetRef}
+        disabled={!editable || view === "preview"}
+      >
         <EditorViewToggle view={view} onChange={setView} />
-      </Toolbar>
+      </MarkdownToolbar>
       {review && (
         <AssistantReviewSurface skillName={review.skillName} agentName={review.agentName} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
       )}
-      {view === "editor" ? (
-        <MarkdownEditorPane
-          doc={previewContent}
-          slug={slug}
-          editable={editable && review === null}
-          onDocChange={onDocChange}
-          targetRef={targetRef}
-          ariaLabel="Page content, Markdown"
-        />
-      ) : (
-        <div className="editor-preview wiki-prose wiki-edit-preview">{renderDoc(previewContent, "wiki", slug)}</div>
+      <MarkdownEditorPane
+        value={source}
+        onChange={onSourceChange}
+        editable={editable && review === null}
+        targetRef={targetRef}
+        sourceRef={sourceRef}
+        ariaLabel="Page content, Markdown"
+        hidden={view !== "editor"}
+        mentionSlug={runtime.slug}
+        onPaste={embeds.handlePaste}
+        onDrop={embeds.handleDrop}
+        onViewUpdate={embeds.handleViewUpdate}
+      />
+      {view === "preview" && (
+        <div className="editor-preview wiki-prose wiki-edit-preview">
+          <MarkdownContent md={source} surface="document" />
+        </div>
       )}
-      <div hidden>
-        <EditorContent editor={editor} className="editor-content flex-1" />
-      </div>
     </div>
   );
 }

@@ -26,6 +26,7 @@ import { RuntimeEnvLive } from "../runtime-env";
 import { Db, type DbDriver } from "../db/db";
 import { createD1Driver } from "../db/drivers/d1";
 import { d1DatabaseToD1Like } from "../api/workers-ports";
+import { assertMarkdownReady } from "../db/document-format";
 import { assistantServiceLayerWithStorage } from "../api/assistant-api";
 import { buildBaseServiceLayerWithStorage } from "../api/http";
 import { LoggerLayer } from "../logging/logger";
@@ -50,6 +51,7 @@ export interface ChatSupervisorRunPayload {
 
 interface SupervisedRun {
   chatId: string;
+  userId: string;
   request: AssistantChatStreamRequest;
   frames: StreamFrame[];
   finished: boolean;
@@ -111,7 +113,17 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
     const url = new URL(request.url);
     if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
     if (url.pathname === "/cancel") return this.#cancel();
-    if (url.pathname === "/run") return this.#turn(request);
+    if (url.pathname === "/run") {
+      const env = (this.#runtimeEnv ??= getEnvFromWorkers(this.env));
+      if (!env.DB) return jsonResponse({ error: { code: "INTERNAL", message: "Internal error" } }, 500);
+      this.#driver ??= createD1Driver(d1DatabaseToD1Like(env.DB));
+      try {
+        await Effect.runPromise(assertMarkdownReady(this.#driver));
+      } catch {
+        return jsonResponse({ error: { code: "INTERNAL", message: "Internal error" } }, 500);
+      }
+      return this.#turn(request);
+    }
     return new Response("not found", { status: 404 });
   }
 
@@ -125,10 +137,19 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
     }
 
     const active = this.#run;
+    const sameOwner = active?.userId === payload.userId;
+    // A completed buffer must not pin a re-claimed chat to its previous owner.
+    if (active?.chatId === payload.chatId && !sameOwner && (!active.finished || payload.fromIndex !== undefined)) {
+      return jsonResponse(errorResponse({
+        _tag: "AssistantThreadNotFound",
+        documentType: "chat",
+        documentId: payload.chatId,
+      }), 404);
+    }
     if (active) {
       const expected = active.request;
       const incoming = payload.request;
-      let sameTurn = active.chatId === payload.chatId
+      let sameTurn = sameOwner && active.chatId === payload.chatId
         && expected.projectId === incoming.projectId
         && expected.message === incoming.message
         && expected.agentId === incoming.agentId
@@ -155,6 +176,7 @@ export class LexaChatSupervisor extends DurableObject<ChatSupervisorEnv> {
 
     const run: SupervisedRun = {
       chatId: payload.chatId,
+      userId: payload.userId,
       request: payload.request,
       frames: [],
       finished: false,

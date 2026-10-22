@@ -12,12 +12,14 @@ import { AttachmentService } from "../services/attachment.service";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig, CHAT_ATTACHMENT_MAX_UPLOAD_BYTES } from "../storage/config";
 import { createApiHandler } from "./http";
+import { buildAssistantTools } from "../assistant/tools";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 const ADMIN_KEY = "lxk_" + "a".repeat(43);
 const MEMBER_KEY = "lxk_" + "b".repeat(43);
 const MEMBER2_KEY = "lxk_" + "c".repeat(43);
+const PROJECT_ADMIN_KEY = "lxk_" + "d".repeat(43);
 
 async function sha256(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
@@ -83,6 +85,7 @@ beforeAll(async () => {
   const adminHash = await sha256(ADMIN_KEY);
   const memberHash = await sha256(MEMBER_KEY);
   const member2Hash = await sha256(MEMBER2_KEY);
+  const projectAdminHash = await sha256(PROJECT_ADMIN_KEY);
   db = new Database(dbPath);
   db.exec(`
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'superadmin');
@@ -96,13 +99,16 @@ INSERT INTO users (id, email, name, role) VALUES ('u4', 'carol@lexa.test', 'Caro
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', '${memberHash}', 'u2');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k4', 'test-member2', '${member2Hash}', 'u4');
+INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k5', 'test-project-admin', '${projectAdminHash}', 'u3');
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 1);
 INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u4', 'member', 'p1');
+INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u2', 'member', 'p1');
+INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u3', 'admin', 'p1');
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'T1', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Home', 'home', '{"type":"doc","content":[]}', 'hello world', 0);
-INSERT INTO wiki_pages (id, project_id, title, slug, parent_id, content, content_text, position) VALUES ('w2', 'p1', 'Child', 'child', 'w1', '{"type":"doc","content":[]}', 'child page', 0);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Home', 'home', '', 'hello world', 0);
+INSERT INTO wiki_pages (id, project_id, title, slug, parent_id, content, content_text, position) VALUES ('w2', 'p1', 'Child', 'child', 'w1', '', 'child page', 0);
 `);
   handler = createApiHandler(dbPath);
   buildServiceTestLayer();
@@ -163,6 +169,21 @@ async function runServiceRemoveChat(
   }
   return { outcome: "Right" };
 }
+async function runServiceListChat(
+  chatId: string,
+  projectId: string,
+  userId: string | null
+): Promise<{ outcome: "Left"; errorTag?: string | undefined } | { outcome: "Right"; rows: unknown[] }> {
+  const result = await Effect.runPromise(
+    Effect.gen(function* () {
+      const svc = yield* AttachmentService;
+      return yield* svc.listChat(chatId, projectId, userId);
+    }).pipe(Effect.provide(serviceTestLayer!), Effect.either)
+  );
+  if (result._tag === "Left") return { outcome: "Left", errorTag: result.left._tag };
+  return { outcome: "Right", rows: result.right };
+}
+
 
 describe("POST /api/projects/:slug/tasks/:taskId/attachments", () => {
   it("upload → 201 + attachment_added activity; concurrent identical uploads dedupe to one row/one activity/same id; oversize → 413", async () => {
@@ -228,6 +249,60 @@ describe("GET /api/attachments/:id", () => {
     expect(lieRes.headers.get("content-type")).toBe("image/svg+xml");
     expect((lieRes.headers.get("content-disposition") ?? "").startsWith("attachment")).toBe(true);
     expect(lieRes.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const source = "\uFEFF# Stored Markdown\r\n\r\n- [x] exact source Ω\n";
+    const markdown = await uploadToTask(source, "stored-notes.md");
+    expect(markdown.res.status).toBe(201);
+    const stored = db.prepare("SELECT storage_key, mime_type FROM attachments WHERE id = ?")
+      .get(markdown.body.data.id) as { storage_key: string; mime_type: string };
+    expect(stored.mime_type).toBe("application/octet-stream");
+    const download = await handler(authed("GET", `/api/attachments/${markdown.body.data.id}`));
+    expect(download.headers.get("content-type")).toBe("application/octet-stream");
+    expect(download.headers.get("content-disposition")).toMatch(/^attachment/);
+    expect(new Uint8Array(await download.arrayBuffer())).toEqual(new TextEncoder().encode(source));
+
+    const counts = { ownership: 0, metadata: 0, blob: 0, ai: 0 };
+    const unexpected = async (): Promise<never> => { throw new Error("unexpected tool dependency"); };
+    const readFile = (projectId: string) => {
+      const read = buildAssistantTools({
+        projectId,
+        allowlist: null,
+        searchApiKey: null,
+        fetchImpl: fetch,
+        projectOwnsStorageKey: async (pid, key) => {
+          counts.ownership++;
+          return db.prepare("SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1").get(pid, key) !== null;
+        },
+        resolveStorageFile: async (pid, key) => {
+          counts.metadata++;
+          const row = db.prepare("SELECT filename, mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1")
+            .get(pid, key) as { filename: string; mime_type: string } | null;
+          return row ? { filename: row.filename, mimeType: row.mime_type } : null;
+        },
+        storageGet: async (key) => {
+          counts.blob++;
+          return Effect.runPromise(Effect.gen(function* () {
+            return yield* (yield* Storage).get(key);
+          }).pipe(Effect.provide(Storage.Default), Effect.provide(Layer.succeed(StorageConfig, resolveStorageConfig(process.env, dir)))));
+        },
+        markdownBinding: { toMarkdown: async () => { counts.ai++; throw new Error("text must not invoke AI"); } },
+        findTaskByRef: unexpected,
+        searchTasksByTitle: unexpected,
+        searchWikiPages: unexpected,
+        findWikiPageBySlug: unexpected,
+        listAllTasks: unexpected,
+        listWikiPagesFull: unexpected,
+        getBoardStructure: unexpected,
+      }).find((tool) => tool.name === "read_s3_file");
+      if (!read) throw new Error("missing storage read tool");
+      return read as unknown as { execute: (input: { key: string }) => Promise<unknown> };
+    };
+    expect(await readFile("p1").execute({ key: stored.storage_key })).toEqual({ content: source, mimeType: "text/markdown" });
+    expect(counts).toEqual({ ownership: 1, metadata: 1, blob: 1, ai: 0 });
+    expect(await readFile("foreign-project").execute({ key: stored.storage_key })).toEqual({
+      content: "", mimeType: "", error: "no such attachment in this project",
+    });
+    expect(counts).toEqual({ ownership: 2, metadata: 1, blob: 1, ai: 0 });
   });
 });
 
@@ -344,15 +419,23 @@ describe("Chat attachments — upload/serve/caps/authority/kill switch/isolation
     expect(overErr.code).toBe("PAYLOAD_TOO_LARGE");
     expect(overErr.message).toContain("big.txt");
 
-    // Member-bound key → 403; direct service guard agrees.
-    const mid = await handler(authed("DELETE", `/api/chat-attachments/${uploaded.id}`, undefined, MEMBER_KEY));
-    expect(mid.status).toBe(403);
-    expect((await mid.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
-    const verdict = await runServiceRemoveChat(uploaded.id, {
-      keyId: "k2", keyName: "Bob", userId: "u2", userName: "Bob", role: "member",
-    });
-    expect(verdict.outcome).toBe("Left");
-    expect(verdict.errorTag).toBe("AttachmentDeleteForbidden");
+    // Every non-owner is denied all private surfaces, including project admin.
+    for (const key of [MEMBER_KEY, MEMBER2_KEY, PROJECT_ADMIN_KEY]) {
+      const list = await handler(authed("GET", CHAT, undefined, key));
+      expect(list.status).toBe(404);
+      expect((await list.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+      const uploadBytes = new TextEncoder().encode(`foreign upload ${key}`);
+      const foreignUpload = await handler(uploadReq(CHAT, uploadBytes, "foreign.txt", key));
+      expect(foreignUpload.status).toBe(404);
+      expect((await foreignUpload.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+      expect(existsSync(join(blobDir(), await sha256(new TextDecoder().decode(uploadBytes))))).toBe(false);
+      const foreignServe = await handler(authed("GET", `/api/chat-attachments/${uploaded.id}`, undefined, key));
+      expect(foreignServe.status).toBe(404);
+      expect((await foreignServe.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+      const foreignDelete = await handler(authed("DELETE", `/api/chat-attachments/${uploaded.id}`, undefined, key));
+      expect(foreignDelete.status).toBe(404);
+      expect((await foreignDelete.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+    }
     expect(db.prepare("SELECT id FROM chat_attachments WHERE id = ?").get(uploaded.id)).toBeTruthy();
 
     // Kill switch: on the Bun host `currentEnv` resolves from process.env.
@@ -371,6 +454,68 @@ describe("Chat attachments — upload/serve/caps/authority/kill switch/isolation
     const isolation = await handler(authed("GET", CHAT, undefined, MEMBER2_KEY));
     expect(isolation.status).toBe(404);
     expect((await isolation.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+    const memberChat = "/api/projects/p1/assistant/chat/member-chat/attachments";
+    const memberUpload = await handler(uploadReq(memberChat, "member-owned body", "member.txt", MEMBER_KEY));
+    expect(memberUpload.status).toBe(201);
+    const memberAttachment = (await memberUpload.json()).data;
+    expect((await handler(authed("GET", memberChat, undefined, MEMBER_KEY))).status).toBe(200);
+    const superadminList = await handler(authed("GET", memberChat, undefined, ADMIN_KEY));
+    expect(superadminList.status).toBe(404);
+    expect((await superadminList.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+    const superadminServe = await handler(authed("GET", `/api/chat-attachments/${memberAttachment.id}`, undefined, ADMIN_KEY));
+    expect(superadminServe.status).toBe(404);
+    expect((await superadminServe.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+    const superadminDelete = await handler(authed("DELETE", `/api/chat-attachments/${memberAttachment.id}`, undefined, ADMIN_KEY));
+    expect(superadminDelete.status).toBe(404);
+    expect((await superadminDelete.json()).error.code).toBe("ATTACHMENT_NOT_FOUND");
+    const nullOwner = await runServiceRemoveChat(memberAttachment.id, {
+      keyId: "null-user", keyName: "null-user", userId: null, userName: null, role: "admin",
+    });
+    expect(nullOwner.outcome).toBe("Left");
+    expect(nullOwner.errorTag).toBe("AttachmentNotFound");
+    const superadminBytes = new TextEncoder().encode("superadmin foreign upload");
+    const superadminUpload = await handler(uploadReq(memberChat, superadminBytes, "foreign.txt", ADMIN_KEY));
+    expect(superadminUpload.status).toBe(404);
+    expect((await superadminUpload.json()).error.code).toBe("ASSISTANT_THREAD_NOT_FOUND");
+    expect(existsSync(join(blobDir(), await sha256(new TextDecoder().decode(superadminBytes))))).toBe(false);
+    db.prepare(`INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+      VALUES ('task', 'legacy-private-row', 'p1', 'u1', '[]'), ('chat', 'legacy-private-row', 'p1', 'u2', '[]')`).run();
+    db.prepare(`INSERT INTO chat_attachments
+      (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+      VALUES ('legacy-private-attachment', 'p1', 'task', 'legacy-private-row', 'private.txt', 'text/plain', 1, 'legacy-hash', ?, 'u1')`)
+      .run(memberAttachment.storageKey);
+    expect((await handler(authed("GET", "/api/chat-attachments/legacy-private-attachment", undefined, MEMBER_KEY))).status).toBe(404);
+    expect((await handler(authed("DELETE", "/api/chat-attachments/legacy-private-attachment", undefined, MEMBER_KEY))).status).toBe(404);
+    db.prepare("DELETE FROM assistant_threads WHERE document_id = 'legacy-private-row'").run();
+    db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      db.prepare(`INSERT INTO chat_attachments
+        (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+        VALUES ('orphan-private-attachment', 'p1', 'chat', 'missing-private-thread', 'private.txt', 'text/plain', 1, 'orphan-hash', ?, 'u2')`)
+        .run(memberAttachment.storageKey);
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON");
+    }
+    expect((await handler(authed("GET", "/api/chat-attachments/orphan-private-attachment", undefined, ADMIN_KEY))).status).toBe(404);
+    expect((await handler(authed("DELETE", "/api/chat-attachments/orphan-private-attachment", undefined, ADMIN_KEY))).status).toBe(404);
+    const ownerlessList = await handler(authed("GET", "/api/projects/p1/assistant/chat/missing-private-thread/attachments", undefined, ADMIN_KEY));
+    expect(ownerlessList.status).toBe(200);
+    expect((await ownerlessList.json()).data).toEqual([]);
+    const noUserList = await runServiceListChat("missing-private-thread", "p1", null);
+    expect(noUserList).toMatchObject({ outcome: "Left", errorTag: "AssistantThreadNotFound" });
+    db.prepare("DELETE FROM chat_attachments WHERE id = 'orphan-private-attachment'").run();
+    const ownerDelete = await handler(authed("DELETE", `/api/chat-attachments/${memberAttachment.id}`, undefined, MEMBER_KEY));
+    expect(ownerDelete.status).toBe(204);
+    const raceChat = "/api/projects/p1/assistant/chat/claim-race/attachments";
+    const raceBodies = ["claim by u2", "claim by u4"];
+    const raceResults = await Promise.all([
+      handler(uploadReq(raceChat, raceBodies[0]!, "claim.txt", MEMBER_KEY)),
+      handler(uploadReq(raceChat, raceBodies[1]!, "claim.txt", MEMBER2_KEY)),
+    ]);
+    expect(raceResults.map((response) => response.status).sort()).toEqual([201, 404]);
+    const raceOwner = db.prepare("SELECT owner_user_id FROM assistant_threads WHERE document_type = 'chat' AND document_id = 'claim-race'").get() as { owner_user_id: string };
+    const losingBody = raceBodies[raceOwner.owner_user_id === "u2" ? 1 : 0]!;
+    expect(existsSync(join(blobDir(), await sha256(losingBody)))).toBe(false);
   });
 });
 

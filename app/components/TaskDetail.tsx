@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import type { Board, BoardTask, Task, TipTapDoc, GithubIssue, Milestone, Swimlane } from "../../shared/types";
-import { isEmptyDoc } from "../../shared/tiptap-text";
-import { renderDoc } from "./tiptap-render";
+import type { Board, BoardTask, Task, GithubIssue, Milestone, Swimlane } from "../../shared/types";
+import { isMarkdownEmpty } from "../../shared/markdown";
+import { laneNeighbors } from "../lib/lane-neighbors";
 import { GithubMark, TrashIcon, ArchiveIcon, LinkIcon } from "./icons";
-import { TextEditor } from "./TextEditor";
-import { SelectDropdown } from "./ui/SelectDropdown";
-import { AssigneeChips } from "./AssigneeChips";
-import { DescriptionEditor } from "./DescriptionEditor";
 import { SlideoverHeader } from "./SlideoverHeader";
 import { TaskPageBar } from "./TaskPageBar";
 import { TaskTitleInput } from "./TaskTitleInput";
@@ -21,11 +17,6 @@ import { TaskPropertyBar } from "./TaskPropertyBar";
 import { GitHubSection } from "./GitHubSection";
 import { AttachmentsPanel } from "./AttachmentsPanel";
 import { TaskFooter } from "./TaskFooter";
-import { Toolbar } from "./TextEditor";
-import { textEditorExtensions } from "../lib/tiptap";
-import { laneNeighbors } from "../lib/lane-neighbors";
-import { SourcesSection } from "./document/SourcesSection";
-import { LinksSection } from "./document/LinksSection";
 import { ActivityTab } from "./activity/ActivityTab";
 import { cn } from "./ui/cn";
 
@@ -50,7 +41,8 @@ interface TaskDetailProps {
   taskKeys?: Map<string, string>;      // taskId → key, for link display
   fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
-  onUpdate?: (id: string, data: Partial<Task>) => void;
+  onUpdate?: (id: string, data: Partial<Task>) => void | Promise<void>;
+  onSaveDescription?: (id: string, data: { description: string }) => Promise<void>;
   onMove?: (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined }) => void | Promise<void>;
   onDelete?: (id: string) => Promise<void>;
   onArchive?: (id: string) => Promise<void>;
@@ -63,32 +55,30 @@ interface TaskDetailProps {
     priority: string;
     type: string;
     assignees: string[];
-    description: TipTapDoc;
-    dueAt?: string | null | undefined;
-    swimlaneId?: string | undefined;
+    description: string;
   }) => Promise<void>;
 }
 
-const emptyDoc: TipTapDoc = { type: "doc", content: [] };
+const emptyContent = "";
 
 function getMissingRequiredFields(
   columnId: string,
   requiredFieldsMap: { columnId: string; fields: string[] }[] | undefined,
-  values: { assignees: string[]; description: TipTapDoc }
+  values: { assignees: string[]; description: string }
 ): RequiredFieldName[] {
   const required = requiredFieldsMap?.find((column) => column.columnId === columnId)?.fields ?? [];
   const missing: RequiredFieldName[] = [];
   for (const field of required) {
     if (field === "assignee" && values.assignees.length === 0) {
       missing.push("assignee");
-    } else if (field === "description" && isEmptyDoc(values.description)) {
+    } else if (field === "description" && isMarkdownEmpty(values.description)) {
       missing.push("description");
     }
   }
   return missing;
 }
 
-function missingFieldsFor(isCreate: boolean, createColumnId: string, currentColumnId: string, columnRequiredFields: TaskDetailProps["columnRequiredFields"], task: Task | undefined, createAssignees: string[], createDescription: TipTapDoc): RequiredFieldName[] {
+function missingFieldsFor(isCreate: boolean, createColumnId: string, currentColumnId: string, columnRequiredFields: TaskDetailProps["columnRequiredFields"], task: Task | undefined, createAssignees: string[], createDescription: string): RequiredFieldName[] {
   return isCreate
     ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
         assignees: createAssignees,
@@ -96,7 +86,7 @@ function missingFieldsFor(isCreate: boolean, createColumnId: string, currentColu
       })
     : getMissingRequiredFields(currentColumnId, columnRequiredFields, {
         assignees: task?.assignees ?? [],
-        description: task?.description ?? emptyDoc,
+        description: task?.description ?? emptyContent,
       });
 }
 
@@ -210,7 +200,7 @@ function ArchivedBanner() {
   );
 }
 
-function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription, setEditingDescription, setCreateDescription, onUpdate, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
+function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription, setEditingDescription, setCreateDescription, onSaveDescription, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
   isCreate: boolean;
   tab: "description" | "activity";
   setTab: (tab: "description" | "activity") => void;
@@ -218,8 +208,8 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
   task: Task | undefined;
   editingDescription: boolean;
   setEditingDescription: (editing: boolean) => void;
-  setCreateDescription: (doc: TipTapDoc) => void;
-  onUpdate: (id: string, data: Partial<Task>) => void;
+  setCreateDescription: (source: string) => void;
+  onSaveDescription: (id: string, data: { description: string }) => Promise<void>;
   taskTitles: Map<string, string> | undefined;
   taskKeys: Map<string, string> | undefined;
   githubs: GithubIssue[];
@@ -249,13 +239,13 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
               isCreate={isCreate}
               slug={slug}
               task={task ?? null}
-              emptyDoc={emptyDoc}
+              emptyContent={emptyContent}
               taskTitles={taskTitles}
               taskKeys={taskKeys}
               editingDescription={editingDescription}
               setEditingDescription={setEditingDescription}
               setCreateDescription={setCreateDescription}
-              onUpdate={onUpdate}
+              onSaveDescription={onSaveDescription}
             />
 
             {!isCreate && (
@@ -280,7 +270,7 @@ function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription
   );
 }
 
-export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, boardTasks, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, defaultSwimlaneId, showCreateSwimlane, columns, swimlanes, milestones, boardTasks, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onSaveDescription, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -343,7 +333,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
     columns,
     columnRequiredFields,
     fieldConfig,
-    emptyDoc,
+    emptyContent,
     onLinkGithub,
     onUnlinkGithub,
     onCreate,
@@ -486,7 +476,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           editingDescription={editingDescription}
           setEditingDescription={setEditingDescription}
           setCreateDescription={setCreateDescription}
-          onUpdate={onUpdate!}
+          onSaveDescription={onSaveDescription!}
           taskTitles={taskTitles}
           taskKeys={taskKeys}
           githubs={ctx.githubs}

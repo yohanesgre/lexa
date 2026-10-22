@@ -4,7 +4,7 @@ import { OutlinePanel } from "./OutlinePanel";
 import { useOverlayFocusTrap } from "../../lib/sidebar-state";
 import { lockScroll } from "../../lib/scroll-lock";
 import { useMobilePanel } from "../../lib/viewport";
-import type { HeadingOutline } from "../tiptap-render";
+import type { HeadingOutline } from "../../lib/markdownToReact";
 
 const DESKTOP_PANEL_ID = "wiki-outline-panel";
 const MOBILE_PANEL_ID = "wiki-outline-sheet-mobile";

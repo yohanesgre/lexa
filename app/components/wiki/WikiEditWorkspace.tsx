@@ -5,10 +5,9 @@ import { PageSettingsPanel } from "./PageSettingsPanel";
 import { useWikiEditor } from "./useWikiEditor";
 import { formatRelative, formatSavedAt } from "./wiki-format";
 
-// Lazy-loaded edit surface: importing this module pulls the whole TipTap
-// editor graph, so WikiPageViewer only reaches for it once the reader opts
-// into editing. Mounted only while editing; it calls handleStartEditing once
-// the editor exists and asks the parent to unmount when editing ends.
+// Lazy-loaded edit surface: importing this module pulls the complete Markdown
+// editing UI, so WikiPageViewer only reaches for it once the reader opts into
+// editing. Mounted only while editing; save/cancel returns control to reader.
 function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, settingsPanel, onCancel, onSave, onTitleChange }: {
   breadcrumb: string;
   title: string;
@@ -64,15 +63,15 @@ interface WikiEditWorkspaceProps {
 
 export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWorkspaceProps) {
   const {
-    editor,
     isEditing,
     title,
     lastSavedPage,
     lastSavedAt,
     isDirty,
     isSaving,
+    isManualSaving,
     restoring,
-    previewContent,
+    source,
     historyPreviewId,
     autosaveEnabled,
     autosaveDelay,
@@ -93,10 +92,10 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
   const sawEditingRef = useRef(false);
 
   useEffect(() => {
-    if (startedRef.current || !editor) return;
+    if (startedRef.current) return;
     startedRef.current = true;
     handleStartEditing();
-  }, [editor]);
+  }, []);
 
   // The hook leaves edit mode on save/cancel; hand control back to the reader.
   useEffect(() => {
@@ -114,7 +113,7 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
         <EditHeader
           breadcrumb={breadcrumb}
           title={title}
-          isSaving={isSaving}
+          isSaving={isSaving || isManualSaving}
           historyPreviewId={historyPreviewId}
           onCancel={handleCancel}
           onSave={handleSave}
@@ -137,16 +136,15 @@ export function WikiEditWorkspace({ slug, page, breadcrumb, onDone }: WikiEditWo
         />
 
         <WikiEditSplit
-          editor={editor}
+          source={source}
+          sourceIdentity={`${slug}:wiki:${page.id}`}
           slug={slug}
           pageSlug={page.slug}
-          previewContent={previewContent}
-          editable={isEditing && historyPreviewId === null && !isSaving}
-          onDocChange={handleMarkdownChange}
-          isSaving={isSaving}
+          editable={isEditing && historyPreviewId === null && !isManualSaving}
+          onSourceChange={handleMarkdownChange}
+          isSaving={isSaving || isManualSaving}
           isDirty={isDirty}
-          lastSavedAt={lastSavedAt}
-          lastSavedLabel={isSaving ? "Saving…" : lastSavedAt ? formatSavedAt(lastSavedAt) : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
+          lastSavedLabel={isSaving || isManualSaving ? "Saving…" : lastSavedAt ? formatSavedAt(lastSavedAt) : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
           updatedByName={lastSavedPage.updatedByName}
           onReviewStateChange={handleReviewStateChange}
         />

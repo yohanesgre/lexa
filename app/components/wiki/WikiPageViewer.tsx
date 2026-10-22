@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Pencil, Share2, Trash2 } from "lucide-react";
-import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
-import { renderDoc, planHeadings, slugifyHeading, type HeadingOutline, type TTNode } from "../tiptap-render";
+import type { WikiPage, WikiPageMeta } from "../../../shared/types";
+import { MarkdownContent } from "../MarkdownContent";
+import { planHeadings, slugifyHeading, type HeadingOutline } from "../../lib/markdownToReact";
 import { OutlinePill } from "./OutlinePill";
 import { OutlineRail } from "./OutlineRail";
 import { useScrollSpy } from "../../lib/use-scroll-spy";
@@ -10,12 +11,7 @@ import { formatRelative } from "./wiki-format";
 import { ShareDialog } from "./ShareDialog";
 import { WikiEditWorkspace } from "./WikiEditWorkspace";
 
-const emptyDoc: TipTapDoc = { type: "doc", content: [] };
-
-// Stable identity: a page with no navigator must not re-render its document on
-// every scroll frame.
 const NO_SECTIONS: HeadingOutline[] = [];
-
 function buildAncestors(pages: WikiPageMeta[], page: WikiPage): WikiPageMeta[] {
   const byId = new Map(pages.map((p) => [p.id, p]));
   const ancestors: WikiPageMeta[] = [];
@@ -40,11 +36,11 @@ function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedB
   breadcrumb: string;
   title: string;
   titleId: string;
-  content: TipTapDoc | undefined;
+  content: string;
   updatedAt: string;
   updatedByName: string | null;
   headings: HeadingOutline[];
-  headingIds: Map<TTNode, string>;
+  headingIds: (text: string, index: number) => string;
   onEdit: () => void;
   onShare: () => void;
   onDelete: () => void;
@@ -85,7 +81,13 @@ function WikiReadView({ breadcrumb, title, titleId, content, updatedAt, updatedB
                   </button>
                 </span>
               </div>
-              <div>{renderDoc(content ?? emptyDoc, "wiki", slug, undefined, headingIds)}</div>
+              <div>
+                {content.length > 0 ? (
+                  <MarkdownContent md={content} surface="document" headingIds={headingIds} />
+                ) : (
+                  <p className="italic text-lx-text-muted">This page is empty.</p>
+                )}
+              </div>
               <SourcesSection
                 slug={slug}
                 documentType="wiki"
@@ -120,13 +122,14 @@ export function WikiPageViewer({ slug, page, pages, onDelete }: WikiPageViewerPr
   // so its slug is reserved here: a heading repeating it takes the -2 suffix.
   const titleId = slugifyHeading(page.title);
   const plan = useMemo(
-    () => planHeadings(page.content as unknown as TTNode, [titleId]),
+    () => planHeadings(page.content, [titleId]),
     [page.content, titleId]
   );
   const sections = useMemo(
     () => plan.headings.filter((heading) => heading.level >= 2),
     [plan]
   );
+  const headingIds = plan.createHeadingIds();
 
   const readView = (
     <WikiReadView
@@ -137,7 +140,7 @@ export function WikiPageViewer({ slug, page, pages, onDelete }: WikiPageViewerPr
       updatedAt={page.updatedAt}
       updatedByName={page.updatedByName}
       headings={sections}
-      headingIds={plan.ids}
+      headingIds={headingIds}
       onEdit={() => setIsEditing(true)}
       onShare={() => setShareOpen(true)}
       onDelete={onDelete}

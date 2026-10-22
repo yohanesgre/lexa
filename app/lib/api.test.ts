@@ -24,12 +24,12 @@ afterEach(() => {
 });
 
 const PROJECT = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
-const TASK = { id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T", description: { type: "doc", content: [] }, priority: "prio-1", type: "type-1", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" };
+const TASK = { id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T", description: "", priority: "prio-1", type: "type-1", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" };
 const EV = { id: 1, taskId: "t1", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "created", message: "m", createdAt: "t" };
 const COLUMN = { id: "c1", projectId: "p1", name: "C", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
 const SWIMLANE = { id: "m1", projectId: "p1", name: "M1", description: "", position: 1, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" };
 const MILESTONE = { id: "m1", projectId: "p1", name: "M1", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 };
-const PAGE = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" };
+const PAGE = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: "t", content: "", createdAt: "t" };
 const KEY = { id: "k1", name: "ops", createdAt: "t", lastUsedAt: null };
 
 interface Case {
@@ -68,8 +68,8 @@ describe("api request building matrix", () => {
   });
 
   it("createComment unwraps the {data:{comment,activity}} envelope", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: { comment: { id: 1, taskId: "t1", authorId: null, authorKind: "user", authorLabel: "Maria", body: {}, editedAt: null, deletedAt: null, createdAt: "t" }, activity: EV } }));
-    const result = await api.createComment("demo", "t1", { type: "doc", content: [] });
+    fetchMock.mockResolvedValue(jsonResponse({ data: { comment: { id: 1, taskId: "t1", authorId: null, authorKind: "user", authorLabel: "Maria", body: "", editedAt: null, deletedAt: null, createdAt: "t" }, activity: EV } }));
+    const result = await api.createComment("demo", "t1", "");
     expect(result.comment.id).toBe(1);
     expect(result.activity.type).toBe("created");
   });

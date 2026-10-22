@@ -46,7 +46,7 @@ function archivedTasks(laneId: string, count: number): Task[] {
     columnId: "c1",
     swimlaneId: laneId,
     title: `Task ${i}`,
-    description: { type: "doc", content: [] },
+    description: "",
     priority: "p",
     type: "t",
     assignees: [],

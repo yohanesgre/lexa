@@ -1,20 +1,25 @@
 // shared/db.ts row→Task mapping + shared/diff.ts text diffing. Both are pure
 // helpers consumed by the CLI; folded into one file at depth-2 (db+diff merge).
 import { describe, it, expect } from "vitest";
-import { rowToTask } from "./db";
+import { rowToTask, rowToTaskSlim } from "./db";
 import type { TaskRow } from "./db";
-import { diffText, docToDiffText } from "./diff";
-import { markdownToDoc } from "./markdown";
+import { diffText } from "./diff";
 
 const NOW = "2026-07-29T12:00:00Z";
 
 describe("rowToTask", () => {
-  const row: TaskRow = { id: "t1", key: "EG-1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", due_at: null, archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
+  const row: TaskRow = { id: "t1", key: "EG-1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: "# Existing **Markdown**", priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", due_at: null, archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
 
-  it("splits assignees on || and parses the description as a TipTap doc", () => {
-    const t = rowToTask({ ...row, assignees: "alice||bob", description: '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}' });
+  it("splits assignees on || and preserves the description source as Markdown", () => {
+    const source = "# Hi\n\n**bold**";
+    const t = rowToTask({ ...row, assignees: "alice||bob", description: source });
     expect(t.assignees).toEqual(["alice", "bob"]);
-    expect(t.description).toEqual({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] });
+    expect(t.description).toBe(source);
+  });
+
+  it("uses the empty Markdown source for slim task rows", () => {
+    const { description: _description, ...slim } = row;
+    expect(rowToTaskSlim(slim).description).toBe("");
   });
 
   it("builds the githubs array from the SQL JSON aggregate (url shape, empty title→null)", () => {
@@ -34,17 +39,6 @@ describe("rowToTask", () => {
     expect(rowToTask(linked, "closed").githubs[0]!.outOfSync).toBe(true);
     const fallback: TaskRow = { ...linked, github_issues_raw: JSON.stringify([{ issueId: "ghi1", issueNumber: 1, repo: "r", syncedState: "closed", pushFailed: 0, title: null }]), column_github_state: "open" };
     expect(rowToTask(fallback).githubs[0]!.outOfSync).toBe(true);
-  });
-});
-
-describe("docToDiffText", () => {
-  it("renders heading, list and code content without markdown syntax", () => {
-    const doc = markdownToDoc(
-      "The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones.\n\n### Root cause\n\n- Loader assumes chunk indices start at 0\n- Streaming system assigns indices from the world origin\n\n```\nconst cx = chunkIndex - originChunkIndex;\n```"
-    );
-    expect(docToDiffText(doc)).toBe(
-      "The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones.\nRoot cause\n- Loader assumes chunk indices start at 0\n- Streaming system assigns indices from the world origin\nconst cx = chunkIndex - originChunkIndex;"
-    );
   });
 });
 

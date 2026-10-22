@@ -1,4 +1,3 @@
-import type { TipTapDoc, TipTapNode } from "./types";
 
 // Git-style unified diff for the Runtime review-in-editor flow.
 // The document is never mutated while the diff is shown: the original side is
@@ -32,75 +31,6 @@ export interface DiffResult {
   hunks: DiffHunk[];
 }
 
-type DiffNode = TipTapNode;
-
-// Canonical plain-text form used for diffing: headings bare (no # markers),
-// list items prefixed with "- ", code blocks bare (no fences), blocks joined
-// with "\n". Matches the runtime-review wireframe's rendering.
-export function docToDiffText(doc: TipTapDoc): string {
-  try {
-    if (!doc || !Array.isArray(doc.content)) return "";
-    return collectDiffLines(doc.content, "").join("\n");
-  } catch {
-    return "";
-  }
-}
-
-function collectDiffLines(nodes: DiffNode[] | undefined, prefix: string): string[] {
-  if (!nodes) return [];
-  const lines: string[] = [];
-  for (const node of nodes) {
-    switch (node.type) {
-      case "heading":
-      case "paragraph": {
-        const text = prefix + renderDiffInline(node.content);
-        if (text !== "") lines.push(text);
-        break;
-      }
-      case "listItem":
-        lines.push(...collectDiffLines(node.content, `${prefix}- `));
-        break;
-      case "taskItem": {
-        const marker = node.attrs?.checked ? "- [x] " : "- [ ] ";
-        lines.push(...collectDiffLines(node.content, prefix + marker));
-        break;
-      }
-      case "blockquote":
-        lines.push(...collectDiffLines(node.content, `${prefix}> `));
-        break;
-      case "codeBlock": {
-        const text = prefix + renderDiffInline(node.content);
-        if (text !== "") lines.push(text);
-        break;
-      }
-      case "bulletList":
-      case "orderedList":
-      case "taskList":
-        lines.push(...collectDiffLines(node.content, prefix));
-        break;
-      case "horizontalRule":
-        lines.push(prefix + "---");
-        break;
-      case "text":
-        lines.push(prefix + (node.text ?? ""));
-        break;
-      default:
-        lines.push(...collectDiffLines(node.content, prefix));
-    }
-  }
-  return lines;
-}
-
-function renderDiffInline(nodes: DiffNode[] | undefined): string {
-  if (!nodes) return "";
-  let out = "";
-  for (const node of nodes) {
-    if (node.type === "text") out += node.text ?? "";
-    else if (node.type === "hardBreak") out += "\n";
-    else out += renderDiffInline(node.content);
-  }
-  return out;
-}
 
 function splitLines(text: string): string[] {
   const lines = text.split("\n");

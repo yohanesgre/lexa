@@ -12,6 +12,7 @@
 // top-level import/export would turn this back into an augmentation.
 declare module "cloudflare:workers" {
   export abstract class DurableObject<Env = unknown> {
+    constructor(ctx: { waitUntil(promise: Promise<unknown>): void }, env: Env);
     protected readonly ctx: { waitUntil(promise: Promise<unknown>): void };
     protected readonly env: Env;
     protected fetch?(request: Request): Promise<Response>;

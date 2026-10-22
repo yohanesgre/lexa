@@ -11,6 +11,7 @@ import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { createBunSqliteDriver } from "./db/drivers/bun-sqlite";
+import { assertMarkdownReady } from "./db/document-format";
 import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
@@ -235,11 +236,9 @@ const server: Server<unknown> = Bun.serve({
         });
         return withSecurityHeaders(res);
       }
-      // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
-      // Signature verified over the RAW body, constant-time, BEFORE any
-      // parsing or processing — mismatch → 401. Ack 200 immediately, then
-      // the handler processes fire-and-forget in the background.
       if (url.pathname === "/api/webhooks/github") {
+        // HMAC authenticates raw bytes before readiness checks or JSON parsing.
+        // Ack only after readiness; processing stays fire-and-forget.
         const read = await readBodyWithLimit(req, 10_000_000);
         if (!read.ok) {
           console.warn(`[Webhook] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
@@ -253,6 +252,15 @@ const server: Server<unknown> = Bun.serve({
           return withSecurityHeaders(
             new Response(JSON.stringify({ error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }), { status: 401, headers: { "Content-Type": "application/json" } })
           );
+        }
+        const readinessDb = new Database(DATABASE_PATH, { readonly: true });
+        const readinessDriver = createBunSqliteDriver(readinessDb, { readonly: true });
+        try {
+          await Effect.runPromise(assertMarkdownReady(readinessDriver));
+        } catch {
+          return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "INTERNAL", message: "Internal error" } }), { status: 500, headers: { "Content-Type": "application/json" } }));
+        } finally {
+          readinessDriver.close();
         }
         return withSecurityHeaders(webhookHandler(rawBody, req.headers.get("x-github-delivery") ?? "", req.headers.get("x-github-event") ?? ""));
       }

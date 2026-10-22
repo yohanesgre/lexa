@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { OutlineList } from "./OutlineList";
-import type { HeadingOutline } from "../tiptap-render";
+import type { HeadingOutline } from "../../lib/markdownToReact";
 
 interface OutlinePanelProps {
   headings: HeadingOutline[];

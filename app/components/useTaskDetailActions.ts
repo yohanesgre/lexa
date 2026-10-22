@@ -1,7 +1,5 @@
 import { useState } from "react";
-import type { TipTapDoc } from "../../shared/types";
-import { isEmptyDoc } from "../../shared/tiptap-text";
-
+import { isMarkdownEmpty } from "../../shared/markdown";
 interface UseTaskDetailActionsArgs {
   task: { id: string; columnId: string | null; swimlaneId: string | null; title: string } | null | undefined;
   defaultColumnId?: string | null | undefined;
@@ -9,10 +7,10 @@ interface UseTaskDetailActionsArgs {
   columns?: { id: string }[] | undefined;
   columnRequiredFields?: { columnId: string; fields: string[] }[] | undefined;
   fieldConfig?: { priorities: { id: string }[]; types: { id: string }[] } | undefined;
-  emptyDoc: TipTapDoc;
+  emptyContent: string;
   onLinkGithub?: ((id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>) | undefined;
   onUnlinkGithub?: ((id: string, issueId: string) => Promise<void>) | undefined;
-  onCreate?: ((input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc; dueAt?: string | null | undefined; swimlaneId?: string | undefined }) => Promise<void>) | undefined;
+  onCreate?: ((input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: string; dueAt?: string | null | undefined; swimlaneId?: string | undefined }) => Promise<void>) | undefined;
   onClose: () => void;
 }
 
@@ -40,12 +38,12 @@ function hasMissingRequired(
   columnId: string,
   requiredFieldsMap: { columnId: string; fields: string[] }[] | undefined,
   assignees: string[],
-  description: TipTapDoc,
+  description: string,
 ): boolean {
   const required = requiredFieldsMap?.find((column) => column.columnId === columnId)?.fields ?? [];
   for (const field of required) {
     if (field === "assignee" && assignees.length === 0) return true;
-    if (field === "description" && isEmptyDoc(description)) return true;
+    if (field === "description" && isMarkdownEmpty(description)) return true;
   }
   return false;
 }
@@ -55,10 +53,10 @@ function canCreate(
   createColumnId: string,
   columnRequiredFields: UseTaskDetailActionsArgs["columnRequiredFields"],
   assignees: string[],
-  description: TipTapDoc,
+  description: string,
   onCreate: UseTaskDetailActionsArgs["onCreate"],
   creating: boolean,
-) {
+): boolean {
   if (!(title && createColumnId && onCreate && !creating)) return false;
   return !hasMissingRequired(createColumnId, columnRequiredFields, assignees, description);
 }
@@ -103,14 +101,14 @@ async function requestUnlinkIssue(
 }
 
 export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
-  const { task, defaultColumnId, defaultSwimlaneId, columns, columnRequiredFields, fieldConfig, emptyDoc, onLinkGithub, onUnlinkGithub, onCreate, onClose } = args;
+  const { task, defaultColumnId, defaultSwimlaneId, columns, columnRequiredFields, fieldConfig, emptyContent, onLinkGithub, onUnlinkGithub, onCreate, onClose } = args;
   const [createTitle, setCreateTitle] = useState("");
   const [createColumnId, setCreateColumnId] = useState(() => initialCreateColumnId(defaultColumnId, columns));
   const [createSwimlaneId, setCreateSwimlaneId] = useState<string>(() => defaultSwimlaneId ?? "");
   const [createPriority, setCreatePriority] = useState<string>(() => firstOptionId(fieldConfig?.priorities));
   const [createType, setCreateType] = useState<string>(() => firstOptionId(fieldConfig?.types));
   const [createAssignees, setCreateAssignees] = useState<string[]>([]);
-  const [createDescription, setCreateDescription] = useState<TipTapDoc>(emptyDoc);
+  const [createDescription, setCreateDescription] = useState<string>(emptyContent);
   const [createDueAt, setCreateDueAt] = useState("");
   const [creating, setCreating] = useState(false);
 

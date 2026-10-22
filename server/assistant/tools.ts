@@ -1,6 +1,6 @@
 import { toolDefinition } from "@tanstack/ai";
 import { z } from "zod";
-import { extractText } from "unpdf";
+import { extractText as extractPdfText } from "unpdf";
 import {
   FETCH_URL_MAX_REDIRECTS,
   FETCH_URL_PDF_CAP,
@@ -9,8 +9,8 @@ import {
   UrlBlocked,
   validateUrl,
 } from "./ssrf";
-import { docToMarkdown } from "../../shared/markdown";
-import type { TipTapDoc } from "../../shared/types";
+import { convertDocumentToMarkdown, type ManagedMarkdownBinding } from "../document-conversion";
+import { resolveChatAttachmentMime } from "../storage/mime";
 import {
   jevLog,
   JEV_TOOL_TIMEOUT_MS,
@@ -91,7 +91,7 @@ export interface WikiSearchHit {
 export interface WikiPageContent {
   title: string;
   slug: string;
-  content: TipTapDoc;
+  content: string;
 }
 
 export interface BoundSkill {
@@ -110,6 +110,8 @@ export interface AssistantToolDeps {
   jevConfig?: JevRuntimeConfig | null | undefined;
   fetchImpl: FetchLike;
   storageGet: (key: string) => Promise<Uint8Array>;
+  resolveStorageFile: (projectId: string, key: string) => Promise<{ filename: string; mimeType: string } | null>;
+  markdownBinding?: ManagedMarkdownBinding | undefined;
   projectOwnsStorageKey: (projectId: string, key: string) => Promise<boolean>;
   findTaskByRef: (ref: string) => Promise<TaskRef | null>;
   searchTasksByTitle: (query: string, limit?: number) => Promise<TaskRef[]>;
@@ -167,7 +169,9 @@ export function htmlToText(html: string): string {
 }
 
 async function extractPdf(bytes: Uint8Array): Promise<string> {
-  const pdf = await extractText(bytes, { mergePages: false });
+  // The library's own function name collides with a retired TipTap-era helper
+  // that invariant #7 scans for; the alias keeps that scan meaningful.
+  const pdf = await extractPdfText(bytes, { mergePages: false });
   const pages = pdf.text.slice(0, PDF_PAGE_CAP);
   return pages.join("\n\n").slice(0, FETCH_URL_TEXT_CAP);
 }
@@ -376,7 +380,7 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
     toolDefinition({
       name: "read_s3_file",
       description:
-        "Read a file from this project's attachment storage by storage key. Returns UTF-8 text for textual files, or a binary descriptor. Cross-project reads are rejected.",
+        "Read a file from this project's attachment storage by storage key and return Markdown text. Cross-project reads are rejected.",
       inputSchema: z.object({ key: z.string().min(1).describe("Attachment storage key, e.g. blobs/<sha256>") }),
       outputSchema: z.object({ content: z.string(), mimeType: z.string(), error: z.string().optional() }),
     }).server(async ({ key }) => {
@@ -384,10 +388,14 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
         if (!(await deps.projectOwnsStorageKey(deps.projectId, key))) {
           return { content: "", mimeType: "", error: "no such attachment in this project" };
         }
+        const file = await deps.resolveStorageFile(deps.projectId, key);
+        if (!file) return { content: "", mimeType: "", error: "no such attachment in this project" };
         const bytes = await deps.storageGet(key);
-        if (bytes.byteLength > S3_FILE_CAP) return { content: "", mimeType: "", error: "file exceeds the 5 MB limit" };
-        const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        return { content: decoded.slice(0, FETCH_URL_TEXT_CAP), mimeType: "text/plain" };
+        if (bytes.byteLength > S3_FILE_CAP) return { content: "", mimeType: file.mimeType, error: "file exceeds the 5 MB limit" };
+        const mimeType = resolveChatAttachmentMime(file.filename, bytes);
+        if (mimeType === null) return { content: "", mimeType: file.mimeType, error: "file could not be read" };
+        const decoded = await convertDocumentToMarkdown(bytes, mimeType, file.filename, deps.markdownBinding);
+        return { content: decoded.slice(0, FETCH_URL_TEXT_CAP), mimeType };
       } catch {
         return { content: "", mimeType: "application/octet-stream", error: "file could not be read" };
       }
@@ -456,7 +464,7 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
     toolDefinition({
       name: "read_wiki_page",
       description:
-        "Read one wiki page by slug. Returns the title and the content converted to markdown (capped at ~8k characters).",
+        "Read one wiki page by slug. Returns the title and Markdown source (capped at ~8k characters).",
       inputSchema: z.object({ slug: z.string().min(1).describe("Wiki page slug") }),
       outputSchema: z.object({
         page: z.object({ title: z.string(), slug: z.string(), markdown: z.string() }).nullable(),
@@ -469,7 +477,7 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
         page: {
           title: page.title,
           slug: page.slug,
-          markdown: docToMarkdown(page.content).slice(0, WIKI_READ_CAP),
+          markdown: page.content.slice(0, WIKI_READ_CAP),
         },
       };
     })
@@ -516,7 +524,7 @@ export function buildAssistantTools(deps: AssistantToolDeps) {
       let total = 0;
       let truncated = false;
       for (const p of await deps.listWikiPagesFull()) {
-        const markdown = docToMarkdown(p.content).slice(0, WIKI_READ_CAP);
+        const markdown = p.content.slice(0, WIKI_READ_CAP);
         if (total + markdown.length > ALL_WIKI_CAP) {
           truncated = true;
           break;

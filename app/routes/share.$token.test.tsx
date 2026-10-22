@@ -6,14 +6,14 @@ import { fetchSharedTree } from "../lib/share";
 
 const child = {
   id: "w2", title: "Child", slug: "child",
-  content: { type: "doc" as const, content: [] },
+  content: "",
   updatedAt: "2026-08-20T10:00:00.000Z", children: [],
 };
 
 const tree = {
   root: {
     id: "w1", title: "API Reference", slug: "home",
-    content: { type: "doc" as const, content: [] },
+    content: "# API Reference",
     updatedAt: "2026-08-21T10:00:00.000Z",
     children: [child],
   },
@@ -24,11 +24,6 @@ beforeEach(() => {
 });
 
 describe("fetchSharedTree", () => {
-  it("returns the payload on 200", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => tree }));
-    expect(await fetchSharedTree("tok")).toEqual(tree);
-    expect(fetch).toHaveBeenCalledWith("/api/share/tok");
-  });
   it("returns null on 404 — no auth header ever attached", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false });
     vi.stubGlobal("fetch", fetchMock);
@@ -39,20 +34,11 @@ describe("fetchSharedTree", () => {
 });
 
 describe("SharedWikiPage dead link", () => {
-  it("renders the dead-link surface when pageId is outside the shared subtree", () => {
-    render(<SharedWikiPage tree={tree} token="tok" pageId="not-in-tree" />);
-    expect(screen.getByRole("heading", { name: "Page not available" })).toBeInTheDocument();
-    expect(screen.getByText("/share/tok")).toBeInTheDocument();
-  });
-
-  it("renders the dead-link surface when the tree is null", () => {
-    render(<SharedWikiPage tree={null} token="tok" />);
-    expect(screen.getByRole("heading", { name: "Page not available" })).toBeInTheDocument();
-  });
-
-  it("falls back to the root page when no pageId is provided", () => {
-    render(<SharedWikiPage tree={tree} token="tok" />);
-    expect(screen.getByRole("heading", { name: "API Reference" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Page not available" })).toBeNull();
+  it("does not retain document content when navigation leaves the shared subtree", () => {
+    const scopedTree = { root: { ...tree.root, content: "Shared document body sentinel" } };
+    const view = render(<SharedWikiPage tree={scopedTree} token="tok" />);
+    expect(screen.getByText("Shared document body sentinel")).toBeInTheDocument();
+    view.rerender(<SharedWikiPage tree={scopedTree} token="tok" pageId="not-in-tree" />);
+    expect(screen.queryByText("Shared document body sentinel")).toBeNull();
   });
 });

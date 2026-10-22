@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, AssistantTask, LexaAgent, LexaSkill, DocumentSource, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
 import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantSkippedModel, AssistantUsage, AssistantCall, AssistantJevMasked, AssistantJevProjectPublic } from "../../shared/assistant";
 
 const BASE = "/api";
@@ -185,12 +185,12 @@ export interface TaskMutationResult {
   activity: ActivityEvent[];
 }
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId?: string | undefined; title: string; description?: TipTapDoc | undefined; priority?: string | undefined; type?: string | undefined; parentId?: string | undefined; assignees?: string[] | undefined; dueAt?: string | null }): Promise<TaskMutationResult> {
+export function createTask(slug: string, input: { columnId: string; swimlaneId?: string | undefined; title: string; description?: string | undefined; priority?: string | undefined; type?: string | undefined; parentId?: string | undefined; assignees?: string[] | undefined; dueAt?: string | null }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
 
-export function updateTask(slug: string, id: string, input: { title?: string | undefined; description?: TipTapDoc | undefined; priority?: string | undefined; type?: string | undefined; assignees?: string[] | undefined; dueAt?: string | null }): Promise<TaskMutationResult> {
+export function updateTask(slug: string, id: string, input: { title?: string | undefined; description?: string | undefined; priority?: string | undefined; type?: string | undefined; assignees?: string[] | undefined; dueAt?: string | null }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -225,7 +225,7 @@ export function getTaskActivity(slug: string, taskId: string, cursor?: string): 
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/activity${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
 }
 
-export async function createComment(slug: string, taskId: string, body: TipTapDoc): Promise<{ comment: TaskComment; activity: ActivityEvent }> {
+export async function createComment(slug: string, taskId: string, body: string): Promise<{ comment: TaskComment; activity: ActivityEvent }> {
   // The wire wraps the pair in { data: ... } (comment create envelope) — the
   // plan's consumers use result.comment/result.activity directly, so unwrap
   // here, at the boundary.
@@ -233,7 +233,7 @@ export async function createComment(slug: string, taskId: string, body: TipTapDo
   return res.data;
 }
 
-export async function updateComment(slug: string, taskId: string, commentId: number, body: TipTapDoc): Promise<TaskComment> {
+export async function updateComment(slug: string, taskId: string, commentId: number, body: string): Promise<TaskComment> {
   const res = await request<{ data: TaskComment }>(`${BASE}/projects/${slug}/tasks/${taskId}/comments/${commentId}`, { method: "PATCH", body: JSON.stringify({ body }) });
   return res.data;
 }
@@ -308,7 +308,7 @@ export function listWikiPages(slug: string): Promise<{ data: WikiPageMeta[] }> {
   return request(`${BASE}/projects/${slug}/wiki`);
 }
 
-export function createWikiPage(slug: string, input: { parentId?: string | null | undefined; title: string; slug?: string | undefined; content?: TipTapDoc }): Promise<WikiPage> {
+export function createWikiPage(slug: string, input: { parentId?: string | null | undefined; title: string; slug?: string | undefined; content?: string }): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -321,7 +321,7 @@ export function getWikiPage(slug: string, pageSlug: string): Promise<WikiPage> {
 }
 
 
-export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string | undefined; slug?: string | undefined; content?: TipTapDoc; parentId?: string | null | undefined; position?: number | undefined; saveType?: "autosave" | "manual" }): Promise<WikiPage> {
+export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string | undefined; slug?: string | undefined; content?: string; parentId?: string | null | undefined; position?: number | undefined; saveType?: "autosave" | "manual" }): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 

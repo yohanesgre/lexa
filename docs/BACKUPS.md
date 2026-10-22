@@ -120,3 +120,118 @@ Re-uploading the same content re-links by sha256 (content-addressed keys), so
 an orphan becomes referenced again instead of duplicating. Empty `-blobs/`
 directories may linger after retention pruning — deletion removes files only,
 never directories.
+
+## 6. One-time Markdown content conversion
+
+Schema migration `0030` changes empty defaults and creates the format/journal
+tables only. It does not convert document bodies at boot. This representation
+change is breaking: after apply, legacy TipTap-object API payloads are rejected.
+
+Use this order during the maintenance window:
+
+1. Stop application, webhook, assistant, and other database writers; keep request
+   traffic gated through post-apply verification.
+2. Create and restore-test a database backup plus matching blob backup.
+3. Run `audit`; inspect its report and resolve every blocker before proceeding.
+4. Create the SHA-256 manifest for that exact backup and target.
+5. Run `apply` with the audit report and manifest.
+6. Verify `documents.format`, source/journal consistency, `content_text`, and FTS;
+   only then reopen traffic on the matching application version.
+
+Audit queries application data with SELECT statements only. The Wrangler proxy
+used for D1 is nevertheless read/write-capable and may create temporary config,
+local session, or persistence metadata. Audit is not credential-enforced
+read-only and does not promise zero filesystem writes. It does not pass SQL
+through argv.
+
+For D1, the CLI reads the first `d1_databases` entry in Wrangler config. Its
+`binding`, `database_name`, and `database_id`, plus a valid
+`compatibility_date`, must be configured; `--database-name` must match that
+first binding. Select exactly one of `--local` or `--remote`. Local requires
+`--persist-to` as the Wrangler state root and forbids `--database-id`; the
+proxy stores D1 state under `<persist-to>/v3`. Remote requires
+`--database-id` matching the configured ID. The minimum Cloudflare token
+permissions were not verified; do not assume a D1-only token is sufficient.
+
+```bash
+# SQLite
+bun run scripts/migrate-markdown.ts audit \
+  --sqlite /absolute/path/lexa.db \
+  --report /absolute/path/markdown-audit.json
+bun run scripts/migrate-markdown.ts apply \
+  --sqlite /absolute/path/lexa.db \
+  --audit /absolute/path/markdown-audit.json \
+  --backup-manifest /absolute/path/markdown-backup.json \
+  --batch-size 25
+
+# Local D1 — explicit, isolated persistence directory
+bun run scripts/migrate-markdown.ts audit \
+  --d1-config /absolute/path/wrangler.jsonc \
+  --database-name lexa --local \
+  --persist-to /absolute/path/d1-markdown-rehearsal \
+  --report /absolute/path/markdown-audit.json
+bun run scripts/migrate-markdown.ts apply \
+  --d1-config /absolute/path/wrangler.jsonc \
+  --database-name lexa --local \
+  --persist-to /absolute/path/d1-markdown-rehearsal \
+  --audit /absolute/path/markdown-audit.json \
+  --backup-manifest /absolute/path/markdown-backup.json \
+  --batch-size 25
+
+# Remote D1 — requires the exact configured database ID
+bun run scripts/migrate-markdown.ts audit \
+  --d1-config /absolute/path/wrangler.jsonc \
+  --database-name lexa --remote --database-id <configured-uuid> \
+  --report /absolute/path/markdown-audit.json
+bun run scripts/migrate-markdown.ts apply \
+  --d1-config /absolute/path/wrangler.jsonc \
+  --database-name lexa --remote --database-id <configured-uuid> \
+  --audit /absolute/path/markdown-audit.json \
+  --backup-manifest /absolute/path/markdown-backup.json \
+  --batch-size 25
+```
+
+Apply refuses a dirty/stale audit, target mismatch, or missing/invalid backup
+evidence. A manifest uses this exact shape; hash the artifact itself with
+SHA-256 and record a restore test on a separate target:
+
+```json
+{
+  "format": "lexa-markdown-backup/v1",
+  "target_id": "sqlite:/absolute/path/lexa.db",
+  "created_at": "2026-10-14T12:00:00.000Z",
+  "artifact": {
+    "kind": "sqlite-snapshot",
+    "path": "/absolute/path/pre-markdown.db",
+    "sha256": "<64 lowercase hex characters>"
+  },
+  "restore_tested": true,
+  "restore_tested_at": "2026-10-14T12:30:00.000Z",
+  "restored_to_target_id": "sqlite:/absolute/path/isolated-restore.db",
+  "includes_blobs": true
+}
+```
+
+For D1, set `target_id` to
+`d1-local:<absolute-config>:<database-name>:<absolute-persist-dir>` or
+`d1-remote:<database-id>`. Remote D1 requires `"kind": "d1-export"`; a local
+SQLite snapshot is never remote D1 restore evidence.
+
+Local D1 also accepts `"kind": "sqlite-snapshot"`. Stop the local Worker and
+all D1 writers, locate the selected persistence directory's actual D1 SQLite
+file, and take a consistent snapshot with `sqlite3 <database> ".backup '<snapshot>'"`.
+Restore that snapshot into a separate persistence directory using the same
+database binding, then verify it through real local Wrangler D1 queries.
+Do not copy an active SQLite file without its WAL or label a SQLite snapshot
+as a D1 SQL export. The pinned Wrangler export command does not accept
+`--persist-to`; snapshots avoid exporting the wrong local persistence target.
+
+Include the matching blob backup in the restore evidence (verify an empty
+blob set explicitly). Audit reports contain row keys and source/target hashes,
+never body text. Unsupported or malformed legacy content blocks all apply
+writes. Apply writes source-CAS updates with matching hash-only
+`_markdown_migration` markers in bounded atomic batches (default 25, maximum
+50); interruptions resume from the journal. Request traffic stays gated until
+post-write, `content_text`, and FTS consistency checks pass and
+`documents.format` becomes `markdown-v1`. Reapplying a completed database does
+not parse source content.

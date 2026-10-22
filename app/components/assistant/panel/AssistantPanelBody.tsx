@@ -1,5 +1,4 @@
 import { RefreshCw, Square } from "lucide-react";
-import type { Editor } from "@tiptap/core";
 import type { useAssistantStream } from "../../../lib/use-assistant-stream";
 import { AssistantToolChips } from "./AssistantToolChips";
 import { AssistantProviderMissing } from "./AssistantProviderMissing";
@@ -28,7 +27,6 @@ export function AssistantPanelBody({
   onRetry,
   onStop,
   onDismiss,
-  editor,
   onClose,
   reconnecting,
   children,
@@ -49,7 +47,6 @@ export function AssistantPanelBody({
   onRetry: () => void;
   onStop: () => void;
   onDismiss: () => void;
-  editor: Editor;
   onClose: () => void;
   // Transport reconnect (herald-popover.html): the socket is down but the run
   // continues server-side. Read off the agent stream in AssistantPanel and
@@ -133,7 +130,6 @@ export function AssistantPanelBody({
         reviewActive={reviewActive}
         onReview={onReview}
         onDismiss={onDismiss}
-        editor={editor}
         onClose={onClose}
       />
     );

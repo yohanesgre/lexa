@@ -214,11 +214,14 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         yield* deleteBlobIfUnreferenced(row.storage_key);
       });
 
+    const findAttachment = (attachmentId: string): Effect.Effect<AttachmentRow, AttachmentNotFound | DbError> =>
+      attachmentRepo.findById(attachmentId).pipe(
+        Effect.flatMap((row) => row ? Effect.succeed(row) : Effect.fail(new AttachmentNotFound({ id: attachmentId })))
+      );
+
     const serve = (attachmentId: string): Effect.Effect<ServeAttachment, AttachmentNotFound | StorageError | DbError> =>
       Effect.gen(function* () {
-        const row = yield* attachmentRepo.findById(attachmentId).pipe(
-          Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new AttachmentNotFound({ id: attachmentId })))
-        );
+        const row = yield* findAttachment(attachmentId);
         const bytes = yield* storage.get(row.storage_key).pipe(
           Effect.catchTag("KeyNotFound", () => new AttachmentNotFound({ id: attachmentId }))
         );
@@ -298,24 +301,32 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         };
       });
 
-    // Chat threads are owner-scoped (AssistantThreadRepo.loadChat). List and
-    // upload previously only checked project membership, so a project member
-    // who knew another member's chatId could read or bind uploads into that
-    // thread. Resolve the thread and require the same owner. A missing row is
-    // allowed only because threads are created lazily on first send/upload —
-    // the caller then creates it under its own owner. A project mismatch is a
-    // 404 too (no cross-project existence oracle).
+    // Chat attachments are private to the authenticated thread owner. Missing
+    // threads are tolerated for list, but only an authenticated user can claim
+    // one during upload; the insert's conflict handling makes that claim atomic.
     const loadChatThread = (chatId: string): Effect.Effect<AssistantThread | null, DbError> =>
       threadRepo.loadThread("chat", chatId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
 
     const requireChatOwner = (chatId: string, projectId: string, userId: string | null): Effect.Effect<void, AssistantThreadNotFound | DbError> =>
       Effect.gen(function* () {
         const thread = yield* loadChatThread(chatId);
-        if (thread === null) return;
-        if (thread.ownerUserId !== userId || thread.projectId !== projectId) {
+        if (!userId || !thread || thread.ownerUserId !== userId || thread.projectId !== projectId) {
           return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: chatId });
         }
       });
+
+    const claimChatThread = (chatId: string, projectId: string, userId: string | null): Effect.Effect<void, AssistantThreadNotFound | DbError | ConstraintViolation> =>
+      Effect.gen(function* () {
+        if (!userId) return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: chatId });
+        yield* batch(db, [{
+          sql: `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+                VALUES ('chat', ?, ?, ?, '[]')
+                ON CONFLICT(document_type, document_id) DO NOTHING`,
+          params: [chatId, projectId, userId],
+        }]);
+        yield* requireChatOwner(chatId, projectId, userId);
+      });
+
 
     // Blob is shared across BOTH attachment tables — the last referencing row
     // (task/wiki or chat) wins. Orphan blobs remain possible and harmless.
@@ -349,21 +360,14 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         }
         const mimeType = resolveChatAttachmentMime(filename, input.bytes);
         if (mimeType === null) return yield* new InvalidArgs({ reason: `unsupported file type for '${filename}'` });
-        // Owner gate BEFORE the blob write: a mismatched thread must not gain
-        // an orphaned upload.
-        yield* requireChatOwner(input.chatId, input.projectId, input.actor.userId ?? null);
+        // Claim a missing lazy thread before touching storage. Conflict-safe
+        // insertion plus owner verification rejects a competing claim.
+        yield* claimChatThread(input.chatId, input.projectId, input.actor.userId ?? null);
         const sha256 = createHash("sha256").update(input.bytes).digest("hex");
         const key = storageKeyFor(sha256);
         yield* storage.put(key, input.bytes);
         const id = randomUUID();
-        // The thread row is created lazily on first send, but an attachment
-        // can arrive first — ensure it exists before the composite FK fires.
-        // Both writes run as one atomic batch.
         yield* batch(db, [
-          {
-            sql: `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, ?, ?, '[]') ON CONFLICT(document_type, document_id) DO NOTHING`,
-            params: [input.chatId, input.projectId, input.actor.userId ?? null],
-          },
           chatRepo.insertStmt({
             id,
             projectId: input.projectId,
@@ -386,30 +390,31 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
     const listChat = (chatId: string, projectId: string, userId: string | null): Effect.Effect<ChatAttachmentView[],
       AssistantThreadNotFound | DbError> =>
       Effect.gen(function* () {
+        if (!userId) return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: chatId });
+        const thread = yield* loadChatThread(chatId);
+        if (!thread) return [];
         yield* requireChatOwner(chatId, projectId, userId);
-        const rows = yield* chatRepo.findByThread("chat", chatId);
+        const rows = yield* chatRepo.findByOwnedThread("chat", chatId, projectId, userId);
         const list: ChatAttachmentView[] = [];
-        for (const row of rows) {
-          if (row.project_id !== projectId) continue;
-          list.push(yield* toChatAttachment(row));
-        }
+        for (const row of rows) list.push(yield* toChatAttachment(row));
         return list;
       });
 
-    // Serve is stricter than list/upload: the caller must own the thread OR be
-    // a project admin. Project access is additionally enforced at the route
-    // (an owner who lost project access is still refused there).
-    const serveChat = (attachmentId: string, identity: AuthIdentityShape): Effect.Effect<ServeChatAttachment,
-      AttachmentNotFound | AssistantThreadNotFound | StorageError | DbError> =>
+    const findChatAttachment = (attachmentId: string, identity: AuthIdentityShape): Effect.Effect<ChatAttachmentRow,
+      AttachmentNotFound | DbError> =>
       Effect.gen(function* () {
-        const row = yield* chatRepo.findById(attachmentId).pipe(
-          Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new AttachmentNotFound({ id: attachmentId })))
+        const row = yield* chatRepo.findById(attachmentId);
+        if (!row || row.document_type !== "chat") return yield* new AttachmentNotFound({ id: attachmentId });
+        yield* requireChatOwner(row.document_id, row.project_id, identity.userId).pipe(
+          Effect.catchTag("AssistantThreadNotFound", () => new AttachmentNotFound({ id: attachmentId }))
         );
-        const owner = identity.userId !== null && (yield* loadChatThread(row.document_id))?.ownerUserId === identity.userId;
-        const admin = yield* isProjectAdmin(identity, row.project_id);
-        if (!owner && !admin) {
-          return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: row.document_id });
-        }
+        return row;
+      });
+
+    const serveChat = (attachmentId: string, identity: AuthIdentityShape): Effect.Effect<ServeChatAttachment,
+      AttachmentNotFound | StorageError | DbError> =>
+      Effect.gen(function* () {
+        const row = yield* findChatAttachment(attachmentId, identity);
         const bytes = yield* storage.get(row.storage_key).pipe(
           Effect.catchTag("KeyNotFound", () => new AttachmentNotFound({ id: attachmentId }))
         );
@@ -417,16 +422,15 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
       });
 
     const removeChat = (attachmentId: string, identity: AuthIdentityShape): Effect.Effect<void,
-      AttachmentNotFound | AttachmentDeleteForbidden | DbError | ConstraintViolation> =>
+      AttachmentNotFound | DbError | ConstraintViolation> =>
       Effect.gen(function* () {
         const row = yield* chatRepo.findById(attachmentId).pipe(
           Effect.flatMap((r) => r ? Effect.succeed(r) : Effect.fail(new AttachmentNotFound({ id: attachmentId })))
         );
-        const admin = yield* isProjectAdmin(identity, row.project_id);
-        const uploader = identity.userId !== null && row.uploaded_by === identity.userId;
-        if (!uploader && !admin) {
-          return yield* new AttachmentDeleteForbidden({ id: attachmentId });
-        }
+        if (row.document_type !== "chat") return yield* new AttachmentNotFound({ id: attachmentId });
+        yield* requireChatOwner(row.document_id, row.project_id, identity.userId).pipe(
+          Effect.catchTag("AssistantThreadNotFound", () => new AttachmentNotFound({ id: attachmentId }))
+        );
         yield* chatRepo.deleteById(attachmentId);
         yield* deleteBlobIfUnreferenced(row.storage_key);
       });
@@ -443,7 +447,7 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
         for (const key of keys) yield* deleteBlobIfUnreferenced(key);
       });
 
-    return { upload, remove, serve, resolveShare, listForTask, listForWikiPage, uploadChat, listChat, serveChat, removeChat, cleanupThreadAttachments };
+    return { upload, remove, findAttachment, serve, resolveShare, listForTask, listForWikiPage, uploadChat, listChat, findChatAttachment, serveChat, removeChat, cleanupThreadAttachments };
   }),
 }) {}
 

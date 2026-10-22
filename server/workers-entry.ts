@@ -43,9 +43,11 @@ import type {
   ScheduledController,
 } from "@cloudflare/workers-types";
 import { getEnvFromWorkers, legacyGithubEnvVars, type RuntimeEnv } from "./env";
+import type { ManagedMarkdownBinding } from "./document-conversion";
 import { RuntimeEnvLive, RuntimeEnvTag } from "./runtime-env";
 import { Db, DbD1Live, batch as batchStmts, queryFirst, run } from "./db/db";
 import { createD1Driver } from "./db/drivers/d1";
+import { assertMarkdownReady } from "./db/document-format";
 import type { DbDriver } from "./db/db";
 import {
   d1DatabaseToD1Like,
@@ -64,6 +66,7 @@ import { capabilitiesFromRuntimeEnv } from "./capabilities";
 import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
 
 export interface WorkersEnv {
+  AI?: ManagedMarkdownBinding;
   DB?: D1Database;
   BLOB?: R2Bucket;
   KV?: KVNamespace;
@@ -207,7 +210,7 @@ type BetterAuthApi = {
 let apiCache: { fingerprint: string; handler: (req: Request) => Promise<Response> } | null = null;
 
 function apiFingerprint(runtimeEnv: RuntimeEnv): string {
-  return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? ""]);
+  return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? "", runtimeEnv.AI !== undefined]);
 }
 
 // better-auth is isolate-stable the same way the API stack is: build once per
@@ -351,7 +354,8 @@ async function handleSsr(req: WorkersRequest): Promise<Response> {
 async function handleWebhook(
   req: WorkersRequest,
   ctx: ExecutionContext,
-  base: BaseLayers
+  base: BaseLayers,
+  driver: DbDriver
 ): Promise<Response> {
   const headers = new Headers(req.headers as unknown as HeadersInit);
   const rawBody = await req.arrayBuffer();
@@ -383,6 +387,12 @@ async function handleWebhook(
       `[Webhook] signature rejected delivery=${headers.get("x-github-delivery") ?? "unknown"} event=${headers.get("x-github-event") ?? "unknown"}`
     );
     return json({ error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }, 401);
+  }
+  try {
+    await Effect.runPromise(assertMarkdownReady(driver));
+  } catch {
+    await runtime.dispose();
+    return json({ error: { code: "INTERNAL", message: "Internal error" } }, 500);
   }
   const deliveryId = headers.get("x-github-delivery") ?? "";
   const event = headers.get("x-github-event") ?? "";
@@ -524,7 +534,7 @@ const handler: ExportedHandler<WorkersEnv> = {
       const { runtimeEnv, driver, base } = requestLayers(env);
 
       if (path === "/api/webhooks/github") {
-        return (await handleWebhook(req, ctx, base)) as unknown as WorkersResponse;
+        return (await handleWebhook(req, ctx, base, driver)) as unknown as WorkersResponse;
       }
       if (path.startsWith("/api/auth/")) {
         // Same /api/auth/* middleware semantics as the Bun host (server/auth.ts):

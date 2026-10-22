@@ -1,8 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject, Task, BoardTask } from "./types";
-import { parseTipTapDoc } from "./types";
+import type { ISODate, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject, Task, BoardTask } from "./types";
 
 export interface PriorityOptionRow {
   id: string;
@@ -193,11 +192,11 @@ export function rowToWikiPageMeta(row: WikiPageRow): {
 }
 
 export function rowToWikiPage(row: WikiPageRow): {
-  id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedBy: string | null; updatedByName: string | null; updatedAt: ISODate; content: TipTapDoc; createdAt: ISODate;
+  id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedBy: string | null; updatedByName: string | null; updatedAt: ISODate; content: string; createdAt: ISODate;
 } {
   return {
     ...rowToWikiPageMeta(row),
-    content: parseTipTapDoc(row.content),
+    content: row.content,
     createdAt: row.created_at,
   };
 }
@@ -214,14 +213,14 @@ export interface WikiPageRevisionRow {
 }
 
 export function rowToWikiPageRevision(row: WikiPageRevisionRow): {
-  id: string; pageId: string; title: string; slug: string; content: TipTapDoc; contentText: string; saveType: "autosave" | "manual"; createdAt: string;
+  id: string; pageId: string; title: string; slug: string; content: string; contentText: string; saveType: "autosave" | "manual"; createdAt: string;
 } {
   return {
     id: row.id,
     pageId: row.page_id,
     title: row.title,
     slug: row.slug,
-    content: parseTipTapDoc(row.content),
+    content: row.content,
     contentText: row.content_text,
     saveType: row.save_type,
     createdAt: row.created_at,
@@ -288,16 +287,16 @@ export interface TaskRow {
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): Task {
-  return { ...taskBaseFromRow(row, columnGithubState), description: parseTipTapDoc(row.description) };
+  return { ...taskBaseFromRow(row, columnGithubState), description: row.description };
 }
 
-// Slim rows (board/list paths select no description) map to an empty doc —
-// the key stays in the response shape, the blob never ships.
+// Slim rows (board/list paths select no description) map to an empty Markdown
+// source; the key stays in the response shape, the full source never ships.
 export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): Task {
-  return { ...taskBaseFromRow(row as TaskRow, columnGithubState), description: { type: "doc", content: [] } };
+  return { ...taskBaseFromRow(row as TaskRow, columnGithubState), description: "" };
 }
 
-// Board rows carry no `description` key at all (not even an empty doc).
+// Board rows carry no `description` key at all (not even an empty source).
 export function rowToBoardTask(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): BoardTask {
   return taskBaseFromRow(row as TaskRow, columnGithubState);
 }
@@ -583,7 +582,7 @@ export function rowToComment(r: CommentRow): TaskComment {
     authorId: r.author_id,
     authorKind: r.author_kind,
     authorLabel: r.author_label,
-    body: parseTipTapDoc(r.body),
+    body: r.body,
     viaAssistant: r.via_assistant === 1,
     editedAt: r.edited_at,
     deletedAt: r.deleted_at,

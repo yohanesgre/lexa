@@ -11,6 +11,8 @@
 
 import type { D1Database, DurableObjectNamespace, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 
+import type { ManagedMarkdownBinding } from "./document-conversion";
+
 // Every string slot of RuntimeEnv, in one place. `RuntimeEnv` is DERIVED from
 // this list, so adding a slot here is the only way to add one.
 export const RUNTIME_ENV_STRING_KEYS = [
@@ -72,6 +74,8 @@ export interface RuntimeEnv extends Partial<Record<RuntimeEnvStringKey, string |
   // ADR-0006: the chat supervisor Durable Object namespace (Workers-only). Its
   // presence + LXK_CHAT_SUPERVISOR=1 selects the supervised chat transport.
   CHAT_DO?: DurableObjectNamespace | undefined;
+  // Workers-only managed document conversion; Bun deliberately has no AI binding.
+  AI?: ManagedMarkdownBinding | undefined;
 }
 
 const RUNTIME_ENV_STRING_KEY_SET: ReadonlySet<string> = new Set(RUNTIME_ENV_STRING_KEYS);
@@ -190,6 +194,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     BLOB: env.BLOB as R2Bucket | undefined,
     KV: env.KV as KVNamespace | undefined,
     CHAT_DO: env.CHAT_DO as DurableObjectNamespace | undefined,
+    AI: env.AI as ManagedMarkdownBinding | undefined,
     CRON_SECRET: s("CRON_SECRET"),
   };
 }

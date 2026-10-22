@@ -381,6 +381,7 @@ export interface RootWorkerConfig {
   compatibility_date?: string;
   observability?: Record<string, unknown>;
   triggers?: Record<string, unknown>;
+  ai?: { binding: string; dev?: Record<string, unknown> };
 }
 
 // Remove // line comments and /* */ block comments while respecting string
@@ -467,17 +468,20 @@ function stripTrailingCommas(input: string): string {
   return out;
 }
 
-export function readRootWranglerConfig(dir: string): RootWorkerConfig {
-  const path = join(dir, "wrangler.jsonc");
+export function readWranglerConfig(path: string): unknown {
   const raw = readFileSync(path, "utf-8");
   try {
     return JSON.parse(
       stripTrailingCommas(stripJsoncComments(raw)),
-    ) as RootWorkerConfig;
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`${path}: ${message}`);
   }
+}
+
+export function readRootWranglerConfig(dir: string): RootWorkerConfig {
+  return readWranglerConfig(join(dir, "wrangler.jsonc")) as RootWorkerConfig;
 }
 
 // Observability block written into the per-deploy config: root's block
@@ -938,10 +942,9 @@ export function buildDeployConfig(
     // appended while a prior deploy owns `LexaAssistantAgent` (else CF error
     // 10064), and the supervisor's create tag rides on top of that history.
     durable_objects: chatSupervisorDurableObjects(),
-    ...(migrations.length > 0 ? { migrations } : {}),
-    // Scheduled tick carried verbatim from root (prune + R2 backup retention
-    // — the only pruner on Workers; ADR-0005 W6 keeps it while dropping the
-    // assistant schedule drain).
+    migrations,
+    ai: rootConfig.ai ?? { binding: "AI" },
+    // Scheduled tick carried verbatim from root (prune + R2 backup retention).
     ...(rootConfig.triggers !== undefined ? { triggers: rootConfig.triggers } : {}),
     observability: resolveObservability(rootConfig),
   };

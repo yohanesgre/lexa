@@ -7,10 +7,10 @@ import { DbError, RowNotFound, ConstraintViolation, Db, batchResults, requireRow
 import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable, TaskNotFound } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
-import { rowToDocumentSource, rowToActivityEvent, type DocumentSourceRow, type ActivityRow } from "../../shared/db";
-import { extractText } from "../../shared/tiptap-text";
+import { markdownToText } from "../../shared/markdown";
+import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { isPrivateIp, isPublicUrl } from "../ssrf";
-import type { DocumentSource, TipTapDoc, Actor, ActivityEvent } from "../../shared/types";
+import type { DocumentSource, Actor, ActivityEvent } from "../../shared/types";
 
 export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceService", {
   dependencies: [SourceRepo.Default, ProjectRepo.Default, WikiRepo.Default, TaskRepo.Default, ActivityService.Default],
@@ -245,7 +245,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
             const page = yield* wikiRepo.findBySlug(projectId, source.ref).pipe(
               Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: source.ref }))
             );
-            return extractText(page.content as TipTapDoc) || page.title;
+            return markdownToText(page.content) || page.title;
           }
           return yield* fetchText(source.ref);
         }),

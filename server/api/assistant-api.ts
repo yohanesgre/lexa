@@ -13,6 +13,7 @@ import { Cause, Effect, Either, Layer, Schema, Stream } from "effect";
 import { dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
 import { Db, queryAll, batch, RowNotFound, DbError, type BatchStmt, type DbDriver } from "../db/db";
+import { assertMarkdownReady } from "../db/document-format";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import {
   AssistantGenerationFailed,
@@ -302,6 +303,13 @@ const assistantLive = HttpApiBuilder.group(LexaApi, "assistant", (handlers) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         if (!identity.userId) return yield* new NoUserContext();
+        const threadRepo = yield* AssistantThreadRepo;
+        const existing = yield* threadRepo.loadThread("chat", req.payload.chatId).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+        );
+        if (existing && (existing.ownerUserId !== identity.userId || existing.projectId !== req.payload.projectId)) {
+          return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: req.payload.chatId });
+        }
         yield* requireProjectReadById(req.payload.projectId);
         const env = yield* currentEnv;
         if (req.payload.replayFrom !== undefined && !supervisorEnabled(env)) return yield* new AssistantTaskActive();
@@ -1370,6 +1378,13 @@ export interface WorkersApiHandlerOptions {
   mcpConnector?: Layer.Layer<McpConnector> | undefined;
 }
 
+const isMarkdownReadinessExemptPath = (pathname: string): boolean =>
+  pathname === "/health" || pathname === "/api/health" ||
+  pathname === "/setup" || pathname.startsWith("/setup/") ||
+  pathname === "/api/setup" || pathname.startsWith("/api/setup/") ||
+  pathname === "/auth" || pathname.startsWith("/auth/") ||
+  pathname === "/api/auth" || pathname.startsWith("/api/auth/");
+
 export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
   const { driver, runtimeEnv, storage, authHooks } = opts;
   const dbLayer = Layer.mergeAll(
@@ -1391,7 +1406,16 @@ export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
     createWorkersApiMiddleware(driver, runtimeEnv, storage, { getSession: opts.getSession })
   );
   const { handler } = HttpApiBuilder.toWebHandler(finalLayer as never);
-  return async (req: Request) => handler(req);
+  return async (req: Request) => {
+    if (!isMarkdownReadinessExemptPath(new URL(req.url).pathname)) {
+      try {
+        await Effect.runPromise(assertMarkdownReady(driver));
+      } catch {
+        return new Response(JSON.stringify({ error: { code: "INTERNAL", message: "Internal error" } }), { status: 500, headers: { "Content-Type": "application/json" } });
+      }
+    }
+    return handler(req);
+  };
 }
 
 // ─── Bun-host factory including the assistant (tests) ───────────────────
@@ -1410,7 +1434,8 @@ export function createAssistantApiHandler(
     const start = Date.now();
     const url = new URL(req.url);
     try {
-      const { handler } = await ready;
+      const { handler, driver } = await ready;
+      if (!isMarkdownReadinessExemptPath(url.pathname)) await Effect.runPromise(assertMarkdownReady(driver));
       const res = await handler(req);
       const level = res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO";
       console.log(JSON.stringify({ level, service: "http", method: req.method, path: url.pathname, status: res.status, duration: Date.now() - start, timestamp: new Date().toISOString() }));

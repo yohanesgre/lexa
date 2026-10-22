@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolExecutionContext } from "@tanstack/ai";
-import type { TipTapDoc } from "../../shared/types";
 import { withToolTimeout } from "./tool-caps";
 import { buildAssistantWriteTools, buildTaskCreateDiff, buildWikiEditDiff, createLocalWriteTracker, createWriteRecorder } from "./write-tools";
 
@@ -10,10 +9,6 @@ import { buildAssistantWriteTools, buildTaskCreateDiff, buildWikiEditDiff, creat
 // scrolls it rather than cutting it. Regression guard for the owner report that
 // a long page's proposal was shown truncated.
 
-const doc = (...text: string[]): TipTapDoc => ({
-  type: "doc",
-  content: text.map((t) => ({ type: "paragraph", content: [{ type: "text", text: t }] })),
-});
 
 describe("withToolTimeout (M5 per-call ceiling)", () => {
   it("rejects a call that outlives the ceiling", async () => {
@@ -86,16 +81,16 @@ describe("write mutation cancellation", () => {
 
 describe("write approval document fidelity", () => {
   it("carries full wiki and task descriptions beyond the preview cap", () => {
-    const before = "b".repeat(2500);
-    const after = "a".repeat(2600);
-    const diff = buildWikiEditDiff({ slug: "intro", title: "Intro", text: before }, { title: "Intro v2", content: doc(after) });
+    const before = `# ${"b".repeat(2500)}`;
+    const after = `## ${"a".repeat(2600)}\n\n**formatting stays in source**`;
+    const diff = buildWikiEditDiff({ slug: "intro", title: "Intro", text: before }, { title: "Intro v2", content: after });
     expect(diff.beforeText).toBe(before);
     expect(diff.afterText).toBe(after);
-    expect(buildTaskCreateDiff({ title: "Task", description: doc(after) }).fields.description).toBe(after);
+    expect(buildTaskCreateDiff({ title: "Task", description: after }).fields.description).toBe(after);
   });
 
-  it("projects an empty document as empty text", () => {
-    const diff = buildWikiEditDiff({ slug: "intro", title: "Intro", text: "" }, { content: { type: "doc", content: [] } });
+  it("keeps empty Markdown source empty", () => {
+    const diff = buildWikiEditDiff({ slug: "intro", title: "Intro", text: "" }, { content: "" });
     expect(diff.afterText).toBe("");
   });
 });

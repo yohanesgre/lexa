@@ -1,29 +1,10 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useEditor } from "@tiptap/react";
-import type { Editor, JSONContent } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import Code from "@tiptap/extension-code";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import Link from "@tiptap/extension-link";
-import Highlight from "@tiptap/extension-highlight";
-import Underline from "@tiptap/extension-underline";
-import Image from "@tiptap/extension-image";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
-import Placeholder from "@tiptap/extension-placeholder";
-import type { WikiPage, TipTapDoc } from "../../../shared/types";
+import type { WikiPage } from "../../../shared/types";
 import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
-import { useAttachmentEmbeds } from "../../lib/useAttachmentEmbeds";
-import { createMentionExtension } from "../../lib/mention-suggestion";
 import * as api from "../../lib/api";
 import { Effect } from "effect";
-import { createWikiAutosaveEffect } from "../../lib/effect-api";
-
-const emptyDoc: TipTapDoc = { type: "doc", content: [] };
+import { ApiError, createWikiAutosaveEffect, type DebouncedEffect } from "../../lib/effect-api";
 
 interface EditState {
   isEditing: boolean;
@@ -69,19 +50,12 @@ function editReducer(state: EditState, action: EditAction): EditState {
     case "saving":
       return { ...state, isSaving: true };
     case "saved":
-      // A save that overlapped further edits must not adopt the server title
-      // or clear the dirty flag — those edits would be silently dropped. It
-      // must also not overwrite lastSavedPage: after a page switch the in-flight
-      // response belongs to the previous page (LX-93), and after a cancel it
-      // carries the discarded edits.
-      if (action.stale) {
-        return { ...state, lastSavedAt: action.at };
-      }
+      if (action.stale) return { ...state, lastSavedPage: action.page, lastSavedAt: action.at };
       return { ...state, title: action.page.title, lastSavedPage: action.page, lastSavedAt: action.at, isDirty: false };
     case "cancel":
-      return { ...state, title: action.page.title, lastSavedPage: action.page, isDirty: false };
+      return { ...state, title: action.page.title, lastSavedPage: action.page, isDirty: false, isSaving: false };
     case "stopEditing":
-      return { ...state, isEditing: false, isDirty: false };
+      return { ...state, isEditing: false, isDirty: false, isSaving: false };
     case "done":
       return { ...state, isSaving: false };
   }
@@ -91,10 +65,11 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   const navigate = useNavigate();
   const updateWikiPage = useUpdateWikiPage(slug);
   const restoreWikiPage = useRestoreWikiRevision(slug);
-
   const [edit, dispatch] = useReducer(editReducer, page, initEditState);
   const { isEditing, title, lastSavedPage, lastSavedAt, isDirty, isSaving } = edit;
-  const [previewContent, setPreviewContent] = useState<TipTapDoc>(emptyDoc);
+  const [source, setSource] = useState(page.content ?? "");
+  const sourceRef = useRef(source);
+  const [isManualSaving, setIsManualSaving] = useState(false);
   const [historyPreviewId, setHistoryPreviewId] = useState<string | null>(null);
   const [autosaveEnabled, setAutosaveEnabled] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -110,148 +85,103 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   useEffect(() => {
     window.localStorage.setItem("lexa-wiki-autosave", String(autosaveEnabled));
   }, [autosaveEnabled]);
-
   useEffect(() => {
     window.localStorage.setItem("lexa-wiki-autosave-delay", String(autosaveDelay));
   }, [autosaveDelay]);
 
-  const editorRef = useRef<Editor | null>(null);
+  const pageIdentity = `${slug}:${page.id}:${page.slug}`;
+  const pageIdentityRef = useRef(pageIdentity);
+  const editSessionRef = useRef(0);
+  const latestSaveRequestRef = useRef(0);
   const titleRef = useRef(title);
-  // Monotonic edit counter: bumped on every meaningful edit so an in-flight
-  // save can tell whether newer edits landed while it awaited the server.
   const editVersionRef = useRef(0);
-  const embeds = useAttachmentEmbeds({ slug, documentType: "wiki", documentId: page.slug });
   const markDirtyRef = useRef<() => void>(() => {});
   const reviewActiveRef = useRef(false);
   const historyPreviewRef = useRef<string | null>(null);
-  const previewSnapshotRef = useRef<TipTapDoc | null>(null);
-  const autosaveHandleRef = useRef<ReturnType<typeof createWikiAutosaveEffect> | null>(null);
-  // Latest async handles for the debounced autosave effect, whose deps stay
-  // stable (autosaveDelay / page.slug / slug) so a re-render never destroys the
-  // armed timer. `useMutation` returns a new object every render.
+  const previewSnapshotRef = useRef<string | null>(null);
+  const autosaveHandleRef = useRef<DebouncedEffect<string> | null>(null);
   const autosaveMutationRef = useRef(updateWikiPage.mutateAsync);
   const navigateRef = useRef(navigate);
-  const slugRef = useRef(slug);
   const pageSlugRef = useRef(page.slug);
+  const revisionRequestRef = useRef(0);
+  const manualSaveInProgressRef = useRef(false);
+  const autosaveRequestsRef = useRef(new Set<Promise<WikiPage>>());
 
+  useLayoutEffect(() => {
+    if (pageIdentityRef.current === pageIdentity) return;
+    pageIdentityRef.current = pageIdentity;
+    editSessionRef.current += 1;
+    latestSaveRequestRef.current += 1;
+    revisionRequestRef.current += 1;
+    autosaveHandleRef.current?.cancel();
+    previewSnapshotRef.current = null;
+    reviewActiveRef.current = false;
+    historyPreviewRef.current = null;
+    setHistoryPreviewId(null);
+    const next = page.content ?? "";
+    sourceRef.current = next;
+    setSource(next);
+    titleRef.current = page.title;
+    pageSlugRef.current = page.slug;
+    dispatch({ type: "reset", page });
+  }, [page, pageIdentity]);
   useEffect(() => {
     titleRef.current = title;
   }, [title]);
-
-  // P0-5 backstop: if the page prop changes without a remount (missing key),
-  // reset edit state and swap the editor doc so A's content can never be
-  // PATCHed into B's slug.
-  const previousSlugRef = useRef(page.slug);
-  useEffect(() => {
-    if (previousSlugRef.current === page.slug) return;
-    previousSlugRef.current = page.slug;
-    // Bump the edit counter so any save already in flight is recognised as
-    // stale on resolve — its response must not adopt the previous page's
-    // title/state onto the new page.
-    editVersionRef.current += 1;
-    autosaveHandleRef.current?.cancel();
-    previewSnapshotRef.current = null;
-    setHistoryPreviewId(null);
-    dispatch({ type: "reset", page });
-    editorRef.current?.setEditable(true, false);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
-    setPreviewContent(page.content ?? emptyDoc);
-  }, [page]);
-
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ heading: { levels: [2, 3, 4, 5] }, code: false }),
-      // Code must combine with other marks (bold+code is valid CommonMark,
-      // common in Runtime results) or accepting such a result throws.
-      Code.extend({ excludes: "" }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false }),
-      Highlight,
-      Underline,
-      // Image + table nodes must be in the schema for stored pages to open
-      // without ProseMirror dropping the nodes (unknown nodes are stripped).
-      Image.configure({ inline: true, allowBase64: false }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      Placeholder.configure({ placeholder: "Start writing..." }),
-      // Per-editor mention plugin (project-scoped "@" autocomplete).
-      createMentionExtension({ slug }),
-    ],
-    content: (page.content ?? emptyDoc) as unknown as JSONContent,
-    editable: isEditing,
-    onUpdate: () => markDirtyRef.current?.(),
-    editorProps: {
-      attributes: {
-        style: "line-height: 26px",
-      },
-      handlePaste: embeds.handlePaste,
-      handleDrop: embeds.handleDrop,
-    },
-  });
-
-  useEffect(() => {
-    editorRef.current = editor ?? null;
-  }, [editor]);
-
-  const updatePreviewRef = useRef<(json: TipTapDoc) => void>(() => {});
-
-  useEffect(() => {
-    updatePreviewRef.current = (json: TipTapDoc) => setPreviewContent(json);
-  }, []);
-
   useEffect(() => {
     historyPreviewRef.current = historyPreviewId;
   }, [historyPreviewId]);
 
-  useEffect(() => {
-    if (!editor) return;
-    const handler = () => {
-      // A history preview owns the preview pane — live editor updates must
-      // not clobber it until Close preview hands the pane back.
-      if (historyPreviewRef.current !== null) return;
-      updatePreviewRef.current(editor.getJSON() as unknown as TipTapDoc);
-    };
-    editor.on("update", handler);
-    return () => {
-      editor.off("update", handler);
-    };
-  }, [editor]);
 
   const save = async (saveType: "autosave" | "manual" = "manual") => {
-    const editor = editorRef.current;
-    if (!editor) return;
+    const isManual = saveType === "manual";
+    if (isManual && manualSaveInProgressRef.current) return;
+    if (isManual) {
+      manualSaveInProgressRef.current = true;
+      setIsManualSaving(true);
+    }
     autosaveHandleRef.current?.cancel();
+    const identityAtStart = pageIdentityRef.current;
+    const sessionAtStart = editSessionRef.current;
+    const requestId = ++latestSaveRequestRef.current;
     const versionAtStart = editVersionRef.current;
+    const titleAtStart = titleRef.current;
+    const content = sourceRef.current;
+    const pageSlug = page.slug;
     dispatch({ type: "saving" });
-    // Lock the editor for the manual save's duration so the request payload is
-    // the doc the user saw when they pressed Save.
-    if (saveType === "manual") editor.setEditable(false, false);
-    let stale = false;
     try {
+      if (isManual) {
+        await Promise.allSettled([...autosaveRequestsRef.current]);
+        if (pageIdentityRef.current !== identityAtStart || editSessionRef.current !== sessionAtStart) return true;
+      }
       const savedPage = await updateWikiPage.mutateAsync({
-        pageSlug: page.slug,
-        title: titleRef.current,
-        content: editor.getJSON() as unknown as TipTapDoc,
+        projectSlug: slug,
+        pageSlug,
+        title: titleAtStart,
+        content,
         saveType,
       });
-      stale = editVersionRef.current !== versionAtStart;
-      dispatch({ type: "saved", page: savedPage, at: new Date(), stale });
-      if (savedPage.slug !== page.slug) {
-        navigate({
+      const current = pageIdentityRef.current === identityAtStart && editSessionRef.current === sessionAtStart;
+      const latestRequest = latestSaveRequestRef.current === requestId;
+      const stale = !current || editVersionRef.current !== versionAtStart || !latestRequest;
+      if (current && latestRequest) dispatch({ type: "saved", page: savedPage, at: new Date(), stale });
+      if (!stale && savedPage.slug !== pageSlug) {
+        navigateRef.current({
           to: "/$slug/wiki/$pageSlug",
           params: { slug, pageSlug: savedPage.slug },
           replace: true,
         });
       }
+      return stale;
     } finally {
-      if (saveType === "manual" && editorRef.current === editor) editor.setEditable(true, false);
-      dispatch({ type: "done" });
+      if (isManual) {
+        manualSaveInProgressRef.current = false;
+        setIsManualSaving(false);
+      }
+      if (pageIdentityRef.current === identityAtStart && editSessionRef.current === sessionAtStart && latestSaveRequestRef.current === requestId) {
+        dispatch({ type: "done" });
+      }
     }
-    return stale;
   };
 
   const saveRef = useRef(save);
@@ -259,51 +189,64 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     saveRef.current = save;
     autosaveMutationRef.current = updateWikiPage.mutateAsync;
     navigateRef.current = navigate;
-    slugRef.current = slug;
     pageSlugRef.current = page.slug;
   });
 
   useEffect(() => {
     autosaveHandleRef.current?.destroy();
     const handle = createWikiAutosaveEffect(
-      (decodedDoc) =>
-        Effect.tryPromise({
+      (content) => {
+        if (manualSaveInProgressRef.current || reviewActiveRef.current || historyPreviewRef.current !== null) return Effect.succeed(undefined);
+        const identityAtStart = pageIdentityRef.current;
+        const sessionAtStart = editSessionRef.current;
+        const requestId = ++latestSaveRequestRef.current;
+        const versionAtStart = editVersionRef.current;
+        const titleAtStart = titleRef.current;
+        const pageSlug = pageSlugRef.current;
+        return Effect.tryPromise({
           try: () => {
-            const ed = editorRef.current;
-            if (!ed) return Promise.resolve(null);
-            const versionAtStart = editVersionRef.current;
-            dispatch({ type: "saving" });
-            return autosaveMutationRef.current({
-              pageSlug: pageSlugRef.current,
-              title: titleRef.current,
-              content: decodedDoc,
+            const request = autosaveMutationRef.current({
+              projectSlug: slug,
+              pageSlug,
+              title: titleAtStart,
+              content,
               saveType: "autosave",
-            }).then((saved) => ({ saved, versionAtStart }));
+            });
+            autosaveRequestsRef.current.add(request);
+            void request.then(
+              () => autosaveRequestsRef.current.delete(request),
+              () => autosaveRequestsRef.current.delete(request)
+            );
+            return request.then((saved) => ({ saved, identityAtStart, sessionAtStart, requestId, versionAtStart, pageSlug, slug }));
           },
-          catch: (e) => e as unknown as Error,
+          catch: (error) => new ApiError({ code: "AUTOSAVE_FAILED", message: error instanceof Error ? error.message : String(error) }),
         }).pipe(
           Effect.flatMap((result) =>
             Effect.sync(() => {
-              if (!result) return;
-              const { saved, versionAtStart } = result as { saved: WikiPage; versionAtStart: number };
-              dispatch({
-                type: "saved",
-                page: saved,
-                at: new Date(),
-                stale: editVersionRef.current !== versionAtStart,
-              });
-              if (saved.slug !== pageSlugRef.current) {
+              const { saved, identityAtStart, sessionAtStart, requestId, versionAtStart, pageSlug, slug } = result;
+              const current = pageIdentityRef.current === identityAtStart && editSessionRef.current === sessionAtStart;
+              const latestRequest = latestSaveRequestRef.current === requestId;
+              const stale = !current || editVersionRef.current !== versionAtStart || !latestRequest;
+              if (current && latestRequest) dispatch({ type: "saved", page: saved, at: new Date(), stale });
+              if (!stale && saved.slug !== pageSlug) {
                 navigateRef.current({
                   to: "/$slug/wiki/$pageSlug",
-                  params: { slug: slugRef.current, pageSlug: saved.slug },
+                  params: { slug, pageSlug: saved.slug },
                   replace: true,
                 });
               }
+              if (current && latestRequest) dispatch({ type: "done" });
             })
           ),
-          Effect.ensuring(Effect.sync(() => dispatch({ type: "done" }))),
-          Effect.catchAll(() => Effect.succeed(undefined))
-        ),
+          Effect.catchAll(() =>
+            Effect.sync(() => {
+              if (pageIdentityRef.current === identityAtStart && editSessionRef.current === sessionAtStart && latestSaveRequestRef.current === requestId) {
+                dispatch({ type: "done" });
+              }
+            })
+          )
+        );
+      },
       autosaveDelay
     );
     autosaveHandleRef.current = handle;
@@ -313,159 +256,175 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   const markDirty = useCallback(() => {
     editVersionRef.current += 1;
     dispatch({ type: "dirty" });
-    if (reviewActiveRef.current) return;
-    if (!autosaveEnabled) return;
-    const ed = editorRef.current;
-    if (!ed) return;
-    const doc = ed.getJSON() as unknown as TipTapDoc;
-    autosaveHandleRef.current?.trigger(doc);
+    if (manualSaveInProgressRef.current || reviewActiveRef.current || historyPreviewRef.current !== null || !autosaveEnabled) return;
+    autosaveHandleRef.current?.trigger(sourceRef.current);
   }, [autosaveEnabled]);
 
   useEffect(() => {
     markDirtyRef.current = markDirty;
   }, [markDirty]);
+  const handleReviewStateChange = useCallback((active: boolean, accepted: boolean) => {
+    const wasActive = reviewActiveRef.current;
+    reviewActiveRef.current = active;
+    if (active) autosaveHandleRef.current?.cancel();
+    else if (wasActive && historyPreviewRef.current === null && isEditing && autosaveEnabled && (accepted || isDirty)) {
+      autosaveHandleRef.current?.trigger(sourceRef.current);
+    }
+  }, [isEditing, autosaveEnabled, isDirty]);
 
-  // The Markdown pane's commit path: the pane derives the document from its
-  // text (shared/markdown.ts) and hands it here. The editor model takes it
-  // first, so the save payload (manual and autosave), the preview and the
-  // Assistant all read one document, and the committed object itself carries
-  // into the preview state so the pane can tell its own commit apart from a
-  // replaced document.
-  const handleMarkdownChange = useCallback((next: TipTapDoc) => {
-    if (historyPreviewRef.current !== null) return;
-    editorRef.current?.commands.setContent(next as unknown as JSONContent, { emitUpdate: false });
-    setPreviewContent(next);
-    markDirtyRef.current?.();
+
+  const handleMarkdownChange = useCallback((next: string) => {
+    if (manualSaveInProgressRef.current || historyPreviewRef.current !== null) return;
+    sourceRef.current = next;
+    setSource(next);
+    markDirtyRef.current();
   }, []);
 
   const handleSelectRevision = async (revisionId: string) => {
-    if (historyPreviewId === revisionId) return;
+    if (reviewActiveRef.current || historyPreviewRef.current === revisionId) return;
+    autosaveHandleRef.current?.cancel();
+    const request = ++revisionRequestRef.current;
+    const identityAtStart = pageIdentityRef.current;
+    const sessionAtStart = editSessionRef.current;
+    const versionAtStart = editVersionRef.current;
+    const requestedPageSlug = page.slug;
     try {
-      const { revision } = await api.getWikiRevision(slug, page.slug, revisionId);
-      const editor = editorRef.current;
-      // First preview captures the live doc (may hold unsaved typing); a
-      // revision-to-revision swap must not clobber that snapshot.
-      if (previewSnapshotRef.current === null && editor) {
-        previewSnapshotRef.current = editor.getJSON() as unknown as TipTapDoc;
-      }
-      editor?.commands.setContent(revision.content as unknown as JSONContent, { emitUpdate: false });
-      editor?.setEditable(false, false);
+      const { revision } = await api.getWikiRevision(slug, requestedPageSlug, revisionId);
+      if (
+        revisionRequestRef.current !== request ||
+        pageIdentityRef.current !== identityAtStart ||
+        editSessionRef.current !== sessionAtStart ||
+        editVersionRef.current !== versionAtStart ||
+        reviewActiveRef.current ||
+        revision.id !== revisionId ||
+        revision.pageId !== page.id ||
+        typeof revision.content !== "string"
+      ) return;
+      if (previewSnapshotRef.current === null) previewSnapshotRef.current = sourceRef.current;
+      historyPreviewRef.current = revisionId;
       setHistoryPreviewId(revisionId);
-      setPreviewContent(revision.content);
+      sourceRef.current = revision.content;
+      setSource(revision.content);
     } catch {
+      if (revisionRequestRef.current !== request || pageIdentityRef.current !== identityAtStart || editSessionRef.current !== sessionAtStart) return;
+      historyPreviewRef.current = null;
       const snapshot = previewSnapshotRef.current;
-      if (snapshot) {
+      if (snapshot !== null) {
         previewSnapshotRef.current = null;
-        const editor = editorRef.current;
-        editor?.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
-        editor?.setEditable(true, false);
+        sourceRef.current = snapshot;
+        setSource(snapshot);
       }
       setHistoryPreviewId(null);
     }
   };
 
   const handleClosePreview = () => {
+    revisionRequestRef.current += 1;
+    historyPreviewRef.current = null;
     const snapshot = previewSnapshotRef.current;
     previewSnapshotRef.current = null;
     setHistoryPreviewId(null);
-    const editor = editorRef.current;
-    if (editor) {
-      if (snapshot) editor.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
-      editor.setEditable(true, false);
-      setPreviewContent(editor.getJSON() as unknown as TipTapDoc);
+    if (snapshot !== null) {
+      sourceRef.current = snapshot;
+      setSource(snapshot);
     }
   };
 
   const handleRestore = async (revisionId: string) => {
     autosaveHandleRef.current?.cancel();
+    latestSaveRequestRef.current += 1;
+    editVersionRef.current += 1;
+    const identityAtStart = pageIdentityRef.current;
+    const sessionAtStart = editSessionRef.current;
+    const requestedPageSlug = page.slug;
+    const versionAtStart = editVersionRef.current;
     try {
-      const restored = await restoreWikiPage.mutateAsync({ pageSlug: page.slug, revisionId });
+      const restored = await restoreWikiPage.mutateAsync({ projectSlug: slug, pageSlug: requestedPageSlug, revisionId });
+      if (
+        pageIdentityRef.current !== identityAtStart ||
+        editSessionRef.current !== sessionAtStart ||
+        editVersionRef.current !== versionAtStart
+      ) return;
+      const restoredSource = restored.content ?? "";
+      sourceRef.current = restoredSource;
+      setSource(restoredSource);
+      titleRef.current = restored.title;
       dispatch({ type: "title", title: restored.title });
       dispatch({ type: "saved", page: restored, at: new Date() });
-      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
       autosaveHandleRef.current?.cancel();
       previewSnapshotRef.current = null;
-      editorRef.current?.setEditable(true, false);
+      historyPreviewRef.current = null;
+      revisionRequestRef.current += 1;
       setHistoryPreviewId(null);
-      setPreviewContent(restored.content ?? emptyDoc);
-      if (restored.slug !== page.slug) {
-        navigate({
+      if (restored.slug !== requestedPageSlug) {
+        navigateRef.current({
           to: "/$slug/wiki/$pageSlug",
           params: { slug, pageSlug: restored.slug },
           replace: true,
         });
       }
     } catch {
-      // restore failed — mutation cache untouched, UI stays as-is
-    }
-  };
-
-  const handleReviewStateChange = (active: boolean, _accepted: boolean) => {
-    reviewActiveRef.current = active;
-    if (!active) {
-      // Accept/Reject ended the review — persist whatever the doc holds now
-      // (the accepted result, or the restored pre-review snapshot).
-      markDirtyRef.current?.();
+      // Keep the current draft when a restore fails.
     }
   };
 
   const handleStartEditing = () => {
+    editSessionRef.current += 1;
     dispatch({ type: "start", page });
-    setPreviewContent(page.content ?? emptyDoc);
-    editorRef.current?.setEditable(true, false);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent, { emitUpdate: false });
+    const next = page.content ?? "";
+    sourceRef.current = next;
+    setSource(next);
+    titleRef.current = page.title;
   };
 
   const handleCancel = () => {
-    // No AbortSignal on the PATCH, so an in-flight autosave cannot be recalled.
-    // Bump the edit counter first: when it resolves it is treated as stale and
-    // cannot adopt the discarded content (LX-93). The content swap below must
-    // not emit an update either, or markDirty re-arms autosave after cancel.
-    editVersionRef.current += 1;
+    editSessionRef.current += 1;
+    latestSaveRequestRef.current += 1;
+    revisionRequestRef.current += 1;
     autosaveHandleRef.current?.cancel();
+    reviewActiveRef.current = false;
     previewSnapshotRef.current = null;
+    historyPreviewRef.current = null;
     setHistoryPreviewId(null);
     dispatch({ type: "cancel", page: lastSavedPage });
-    // Tiptap emits an update by default on setEditable; that would re-arm
-    // autosave with the discarded doc right after cancel. Suppress it.
-    editorRef.current?.setEditable(true, false);
-    editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent, { emitUpdate: false });
+    sourceRef.current = lastSavedPage.content ?? "";
+    setSource(sourceRef.current);
+    titleRef.current = lastSavedPage.title;
     dispatch({ type: "stopEditing" });
   };
 
   const handleSave = async () => {
+    if (isSaving || reviewActiveRef.current || historyPreviewRef.current !== null) return;
     if (isDirty) {
       let stale = false;
       try {
         stale = (await saveRef.current("manual")) ?? false;
       } catch {
-        // Save failed — stay in edit mode so the user can retry.
         return;
       }
-      // Edits landed while the save was in flight — the server now holds an
-      // older doc, so leaving edit mode here would silently drop them.
       if (stale) return;
     }
-    editorRef.current?.setEditable(false, false);
     dispatch({ type: "stopEditing" });
   };
 
-  useEffect(() => {
-    return () => {
-      autosaveHandleRef.current?.destroy();
-    };
+  useEffect(() => () => {
+    editSessionRef.current += 1;
+    latestSaveRequestRef.current += 1;
+    revisionRequestRef.current += 1;
+    autosaveHandleRef.current?.destroy();
   }, []);
 
+  const sourceForPage = pageIdentityRef.current === pageIdentity ? source : page.content ?? "";
   return {
-    editor,
     isEditing,
     title,
     lastSavedPage,
     lastSavedAt,
     isDirty,
+    isManualSaving,
     isSaving,
     restoring: restoreWikiPage.isPending,
-    previewContent,
+    source: sourceForPage,
     historyPreviewId,
     autosaveEnabled,
     autosaveDelay,

@@ -42,8 +42,8 @@ INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', 
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k3', 'test-server', '${serverHash}', NULL);
 INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
 INSERT INTO projects (id, name, slug) VALUES ('p2', 'Q', 'p2');
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Home', 'home', '{"type":"doc","content":[]}', 'hello world', 0);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES ('w2', 'p1', 'Child', 'child', '{"type":"doc","content":[]}', 'child page', 'w1', 0);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Home', 'home', 'hello world', 'hello world', 0);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES ('w2', 'p1', 'Child', 'child', 'child page', 'child page', 'w1', 0);
 `);
   handler = createApiHandler(dbPath);
 });
@@ -188,7 +188,7 @@ describe("public GET /api/share/:token", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.root).toMatchObject({ id: "w1", title: "Home", slug: "home" });
-    expect(body.root.content).toEqual({ type: "doc", content: [] });
+    expect(body.root.content).toBe("hello world");
     const child = (body.root.children as Array<Record<string, unknown>>).find((c) => c.id === "w2");
     expect(child).toMatchObject({ title: "Child", slug: "child" });
 

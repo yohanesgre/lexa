@@ -57,7 +57,7 @@ key is rejected with `403 FORBIDDEN "Admin role required"`.
 | `project delete <slug> --yes` | Admin. `--yes` is required — no interactive confirm. |
 | `task list --project <slug> [--limit N] [--json]` | |
 | `task get <id> --project <slug> [--json]` | |
-| `task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]` | Description is Markdown, converted to TipTap. |
+| `task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]` | Description is stored as Markdown source. |
 | `task move <id> --project <slug> --column <name\|id> [--swimlane <name\|id>] [--before <id\|PREFIX-N>] [--after <id\|PREFIX-N>] [--clear-due]` | `--before`/`--after` place the card at a position; `--clear-due` drops an existing due date. |
 | `task update <id> --project <slug> [--title <t>] [--description <md>] [--priority <id>] [--type <id>] [--assignees <a,b> \| --assignees=] [--due <YYYY-MM-DD>] [--clear-due]` | `--assignees=` (empty) clears assignees; `--clear-due` clears the due date. |
 | `task delete <id> --project <slug>` | Deletes the task and its activity history. |
@@ -101,8 +101,7 @@ The stable integration surface is exactly:
   `list` reads (`project`, `column`, `swimlane`, `milestone`), and
   `field-config get`. `lx settings *` takes no `--json`; writes print
   human-readable confirmations.
-- Task and wiki documents are TipTap JSON; the CLI renders them to Markdown
-  (`task get`, `wiki get`) and accepts Markdown on writes.
+- Task and wiki documents are stored and returned as Markdown strings.
 - Task ids accept the full UUID **or** the ticket key (`PREFIX-N`, e.g.
   `NIM-12`) anywhere an id is taken — the server resolves both.
 - Wiki pages are addressed by **slug**, including on `wiki create`; a

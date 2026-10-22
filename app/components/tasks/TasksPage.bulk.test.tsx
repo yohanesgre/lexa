@@ -20,7 +20,7 @@ const fx = vi.hoisted(() => {
       columnId: "c1",
       swimlaneId: "s1",
       title,
-      description: { type: "doc", content: [] },
+      description: "",
       priority: "pr1",
       type: "tp1",
       assignees: [] as string[],

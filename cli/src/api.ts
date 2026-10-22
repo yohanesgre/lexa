@@ -68,7 +68,7 @@ export interface TaskInfo {
   columnId: string;
   swimlaneId: string;
   assignees: string[] | null;
-  description?: unknown;
+  description?: string;
   githubs?: Array<{
     issueId: string;
     issueNumber: number;
@@ -150,8 +150,7 @@ export interface WikiPageInfo {
   projectId: string;
   title: string;
   slug: string;
-  content: unknown;
-  contentText?: string;
+  content: string;
   parentId: string | null;
   position: number;
   updatedBy: string | null;
@@ -244,14 +243,14 @@ export class LexaClient {
 
   // Task mutations respond with a { data, activity } envelope (activity is
   // the appended timeline rows) — unwrap to the task so callers get a TaskInfo.
-  createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: unknown; priority?: string; type?: string }): Effect.Effect<TaskInfo, ApiError, never> {
+  createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: string; priority?: string; type?: string }): Effect.Effect<TaskInfo, ApiError, never> {
     return Effect.map(
       this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) }),
       (r) => r.data
     );
   }
 
-  updateTask(slug: string, id: string, input: { title?: string; description?: unknown; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }): Effect.Effect<TaskInfo, ApiError, never> {
+  updateTask(slug: string, id: string, input: { title?: string; description?: string; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }): Effect.Effect<TaskInfo, ApiError, never> {
     return Effect.map(
       this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
       (r) => r.data
@@ -317,19 +316,19 @@ export class LexaClient {
     return Effect.map(this.request<{ data: WikiPageMetaInfo[] }>(`/api/projects/${slug}/wiki`), (r) => r.data);
   }
 
-  getWikiPage(slug: string, pageSlug: string): Effect.Effect<{ id: string; title: string; slug: string; content: unknown }, ApiError, never> {
-    return this.request<{ id: string; title: string; slug: string; content: unknown }>(`/api/projects/${slug}/wiki/${pageSlug}`);
+  getWikiPage(slug: string, pageSlug: string): Effect.Effect<{ id: string; title: string; slug: string; content: string }, ApiError, never> {
+    return this.request<{ id: string; title: string; slug: string; content: string }>(`/api/projects/${slug}/wiki/${pageSlug}`);
   }
 
   // Wiki create/update return the page directly (no { data } envelope):
   // 201 WikiPage | 404 PROJECT_NOT_FOUND | 409 SLUG_TAKEN. Server slugifies
   // the title when `slug` is omitted.
-  createWikiPage(slug: string, input: { title: string; slug?: string; content?: unknown; parentId?: string }): Effect.Effect<WikiPageInfo, ApiError, never> {
+  createWikiPage(slug: string, input: { title: string; slug?: string; content?: string; parentId?: string }): Effect.Effect<WikiPageInfo, ApiError, never> {
     return this.request<WikiPageInfo>(`/api/projects/${slug}/wiki`, { method: "POST", body: JSON.stringify(input) });
   }
 
   // 200 WikiPage | 404 | 409 SLUG_TAKEN | 422 INVALID_PARENT
-  updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: unknown; parentId?: string | null; position?: number }): Effect.Effect<WikiPageInfo, ApiError, never> {
+  updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: string; parentId?: string | null; position?: number }): Effect.Effect<WikiPageInfo, ApiError, never> {
     return this.request<WikiPageInfo>(`/api/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
   }
 

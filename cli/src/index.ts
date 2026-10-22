@@ -565,19 +565,14 @@ function cmdTaskCreate(flags: Record<string, string | boolean>): Effect.Effect<v
     const column = (typeof flags.column === "string" && flags.column) || "";
     const swimlane = (typeof flags.swimlane === "string" && flags.swimlane) || "";
     const title = (typeof flags.title === "string" && flags.title) || "";
-    const description = typeof flags.description === "string" && flags.description ? flags.description : undefined;
+    const description = typeof flags.description === "string" ? flags.description : undefined;
     if (!slug || !column || !swimlane || !title) {
       console.error("  Usage: lx task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <markdown>]");
       process.exit(1);
     }
     const columnInfo = yield* resolveColumn(client, slug, column);
     const swimlaneInfo = yield* resolveSwimlane(client, slug, swimlane);
-    let descriptionDoc: unknown;
-    if (description) {
-      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
-      descriptionDoc = markdownToDoc(description);
-    }
-    const task = yield* client.createTask(slug, { columnId: columnInfo.id, swimlaneId: swimlaneInfo.id, title, description: descriptionDoc });
+    const task = yield* client.createTask(slug, { columnId: columnInfo.id, swimlaneId: swimlaneInfo.id, title, ...(description !== undefined ? { description } : {}) });
     console.log(`  Created task ${task.id} — ${task.title}`);
   });
 }
@@ -629,11 +624,7 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
     console.log(`  ${t.key} — ${t.title}`);
     console.log(`  id: ${t.id}  priority: ${t.priority ?? "—"}  type: ${t.type ?? "—"}`);
     console.log(`  column: ${t.columnId}  swimlane: ${t.swimlaneId}`);
-    // Description is TipTap JSON — render to Markdown so agents/humans can
-    // actually read it.
-    const { docToMarkdown } = yield* Effect.promise(() => import("../../shared/markdown"));
-    const md = docToMarkdown(t.description as import("../../shared/types").TipTapDoc).trim();
-    console.log(`  description: ${md ? `\n${md}` : "(empty)"}`);
+    console.log(`  description: ${t.description || "(empty)"}`);
   });
 }
 
@@ -661,12 +652,9 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
       (hasDue && clearDue) ||
       (title === undefined && !hasDescription && priority === undefined && type === undefined && !hasAssignees && !hasDue && !clearDue);
     if (bad) { console.error(usageMsg); process.exit(1); }
-    const input: { title?: string; description?: unknown; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null } = {};
+    const input: { title?: string; description?: string; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null } = {};
     if (title !== undefined) input.title = title;
-    if (hasDescription) {
-      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
-      input.description = markdownToDoc(flags.description as string);
-    }
+    if (hasDescription) input.description = flags.description as string;
     if (priority !== undefined) input.priority = priority;
     if (type !== undefined) input.type = type;
     if (assignees !== undefined) input.assignees = assignees;
@@ -825,11 +813,7 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
     if (flags.json === true) { console.log(JSON.stringify(page, null, 2)); return; }
     console.log(`# ${page.title}`);
     console.log("");
-    // Wiki content is TipTap JSON — render to Markdown so the CLI stays
-    // human-readable.
-    const { docToMarkdown } = yield* Effect.promise(() => import("../../shared/markdown"));
-    const md = docToMarkdown(page.content as import("../../shared/types").TipTapDoc);
-    console.log(md.trim() || "(empty page)");
+    console.log(page.content || "(empty page)");
   });
 }
 
@@ -847,23 +831,18 @@ function cmdWikiCreate(flags: Record<string, string | boolean>): Effect.Effect<v
     const slug = (typeof flags.project === "string" && flags.project) || "";
     const title = typeof flags.title === "string" ? flags.title : "";
     const pageSlug = typeof flags.slug === "string" ? flags.slug : undefined;
-    const hasContent = typeof flags.content === "string";
+    const content = typeof flags.content === "string" ? flags.content : undefined;
     const parent = typeof flags.parent === "string" ? flags.parent : undefined;
-    const emptyFlag = flags.slug === "" || flags.content === "" || flags.parent === "";
+    const emptyFlag = flags.slug === "" || flags.parent === "";
     if (!slug || !title || emptyFlag) {
       console.error("  Usage: lx wiki create --project <slug> --title <t> [--slug <s>] [--content <md>] [--parent <pageSlug>]");
       process.exit(1);
-    }
-    let content: unknown;
-    if (hasContent) {
-      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
-      content = markdownToDoc(flags.content as string);
     }
     const parentId = parent ? yield* resolveWikiParent(client, slug, parent) : undefined;
     const page = yield* client.createWikiPage(slug, {
       title,
       ...(pageSlug !== undefined ? { slug: pageSlug } : {}),
-      ...(hasContent ? { content } : {}),
+      ...(content !== undefined ? { content } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
     });
     console.log(`  Created page ${page.slug} — ${page.title}`);
@@ -883,7 +862,7 @@ function cmdWikiUpdate(flags: Record<string, string | boolean>, args: string[]):
     const hasPosition = flags.position !== undefined;
     const position = typeof flags.position === "string" && /^\d+$/.test(flags.position) ? Number(flags.position) : undefined;
     const usageMsg = "  Usage: lx wiki update <pageSlug> --project <slug> [--title <t>] [--slug <s>] [--content <md>] [--parent <pageSlug> | --parent-root] [--position <n>]";
-    const emptyFlag = flags.title === "" || flags.slug === "" || flags.content === "" || flags.parent === "";
+    const emptyFlag = flags.title === "" || flags.slug === "" || flags.parent === "";
     const bad =
       !slug || !pageSlug ||
       emptyFlag ||
@@ -891,13 +870,10 @@ function cmdWikiUpdate(flags: Record<string, string | boolean>, args: string[]):
       (hasPosition && position === undefined) ||
       (title === undefined && newSlug === undefined && !hasContent && parent === undefined && !parentRoot && !hasPosition);
     if (bad) { console.error(usageMsg); process.exit(1); }
-    const input: { title?: string; slug?: string; content?: unknown; parentId?: string | null; position?: number } = {};
+    const input: { title?: string; slug?: string; content?: string; parentId?: string | null; position?: number } = {};
     if (title !== undefined) input.title = title;
     if (newSlug !== undefined) input.slug = newSlug;
-    if (hasContent) {
-      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
-      input.content = markdownToDoc(flags.content as string);
-    }
+    if (hasContent) input.content = flags.content as string;
     if (parentRoot) input.parentId = null;
     else if (parent !== undefined) input.parentId = yield* resolveWikiParent(client, slug, parent);
     if (position !== undefined) input.position = position;

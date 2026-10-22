@@ -58,8 +58,7 @@ lx task update <id> --project <slug> [--title <t>] [--description <md>] \
 lx task delete <id> --project <slug>
 ```
 
-- Descriptions are Markdown, converted to TipTap JSON; `task get` renders TipTap
-  back to Markdown.
+- Descriptions are stored and returned as Markdown source; `task get` prints it directly.
 - `--assignees=` (empty) clears assignees; `--clear-due` clears the due date.
 - `--before`/`--after` place the card at a position in the target column.
 

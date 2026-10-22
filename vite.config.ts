@@ -94,13 +94,8 @@ export default defineConfig(async ({ command }) => {
           // itself is split by TanStack's autoCodeSplitting (above); unmatched
           // node_modules keep Rolldown's default shared-chunk behavior.
           //
-          // Native Rolldown groups (not Rollup-compat `manualChunks`): the
-          // manualChunks shim runs one group with includeDependenciesRecursively
-          // defaulting true, so @tiptap/react's deps (react-dom base,
-          // use-sync-external-store) were swallowed into vendor-editor — and
-          // since the entry chunk needs react-dom, the whole editor graph was
-          // modulepreloaded on boot. Explicit groups + priority let the react
-          // group claim its modules first, so vendor-editor stays tiptap-only.
+          // Native groups keep framework deps ahead of editor groups; recursive
+          // manual chunks otherwise preload the entire editor graph on boot.
           codeSplitting: {
             groups: [
               {
@@ -110,7 +105,7 @@ export default defineConfig(async ({ command }) => {
               },
               {
                 name: "vendor-editor",
-                test: /node_modules[\\/](@tiptap|prosemirror|orderedmap|rope-sequence|w3c-keyname|linkifyjs|@floating-ui)[\\/]/,
+                test: /node_modules[\\/](@codemirror|@lezer|@uiw[\\/](?:react-codemirror|codemirror-extensions-basic-setup)|codemirror|style-mod|w3c-keyname|crelt)[\\/]/,
                 priority: 10,
               },
               {
@@ -120,8 +115,8 @@ export default defineConfig(async ({ command }) => {
               },
               {
                 name: "vendor-markdown",
-                test: /node_modules[\\/](marked|highlight\.js)[\\/]/,
-                priority: 10,
+                test: /node_modules[\\/](@tanstack[\\/]markdown|@lezer[\\/](?:markdown|common|highlight)|highlight\.js)[\\/]/,
+                priority: 11,
               },
               {
                 name: "vendor-icons",

@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import type { Editor } from "@tiptap/core";
+import type { MarkdownSource } from "../../editor/MarkdownEditorPane";
 import { AssistantPanel } from "./AssistantPanel";
 import { assistantPanelSessionKey } from "./assistant-panel-store";
 import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
@@ -11,7 +11,7 @@ import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
 // Failed (code + Retry). No engine toggle, runtime picker, or session line.
 
 export interface AssistantPopoverProps {
-  editor: Editor;
+  sourceRef: { current: MarkdownSource | null };
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
@@ -108,7 +108,7 @@ function usePopoverPosition(open: boolean, anchorRect: DOMRect | null, container
   return popoverTop;
 }
 
-export function AssistantPopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect, triggerRef }: AssistantPopoverProps) {
+export function AssistantPopover({ sourceRef, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect, triggerRef }: AssistantPopoverProps) {
   // Hydration-safe portal target: SSR and the first client render both see
   // null, the browser switches to document.body after hydration.
   const portalTarget = useSyncExternalStore(
@@ -185,7 +185,7 @@ export function AssistantPopover({ editor, slug, documentType, documentId, open,
     >
       <AssistantPanel
         key={assistantPanelSessionKey(slug, documentType, documentId)}
-        editor={editor}
+        sourceRef={sourceRef}
         slug={slug}
         documentType={documentType}
         documentId={documentId}

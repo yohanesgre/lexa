@@ -29,8 +29,8 @@ const GITHUB_ISSUES_RAW = `COALESCE((SELECT json_group_array(json_object('issueI
 
 const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, ${GITHUB_ISSUES_RAW}`;
 
-// Slim variant for list/board/anchor paths — no t.description (the TipTap
-// blob is only needed for get/update/mutation responses).
+// Slim variant for list/board/anchor paths — no t.description source
+// (only needed for get/update/mutation responses).
 const TASK_SELECT_SLIM = `t.id, t.key, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, ${GITHUB_ISSUES_RAW}`;
 
 const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id`;

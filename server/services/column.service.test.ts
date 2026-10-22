@@ -235,13 +235,13 @@ function seedWip(db: Database) {
                 ('c-approach','p1','Approach',2,3,NULL),
                 ('c-exceed','p1','Exceed',3,1,NULL)`).run();
   db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
-                ('t-ok','p1','c-ok','s1','Ok','{"type":"doc","content":[]}','prio-1','type-1','a0','2026-01-01 10:00:00'),
-                ('t-ok-arch','p1','c-ok','s1','Archived','{"type":"doc","content":[]}','prio-1','type-1','a1','2026-01-02 10:00:00'),
-                ('t-a1','p1','c-approach','s1','A1','{"type":"doc","content":[]}','prio-1','type-1','b0','2026-01-03 10:00:00'),
-                ('t-a2','p1','c-approach','s1','A2','{"type":"doc","content":[]}','prio-1','type-1','b1','2026-01-04 10:00:00'),
-                ('t-a3','p1','c-approach','s1','A3','{"type":"doc","content":[]}','prio-1','type-1','b2','2026-01-05 10:00:00'),
-                ('t-e1','p1','c-exceed','s1','E1','{"type":"doc","content":[]}','prio-1','type-1','c0','2026-01-06 10:00:00'),
-                ('t-e2','p1','c-exceed','s1','E2','{"type":"doc","content":[]}','prio-1','type-1','c1','2026-01-07 10:00:00')`).run();
+                ('t-ok','p1','c-ok','s1','Ok','','prio-1','type-1','a0','2026-01-01 10:00:00'),
+                ('t-ok-arch','p1','c-ok','s1','Archived','','prio-1','type-1','a1','2026-01-02 10:00:00'),
+                ('t-a1','p1','c-approach','s1','A1','','prio-1','type-1','b0','2026-01-03 10:00:00'),
+                ('t-a2','p1','c-approach','s1','A2','','prio-1','type-1','b1','2026-01-04 10:00:00'),
+                ('t-a3','p1','c-approach','s1','A3','','prio-1','type-1','b2','2026-01-05 10:00:00'),
+                ('t-e1','p1','c-exceed','s1','E1','','prio-1','type-1','c0','2026-01-06 10:00:00'),
+                ('t-e2','p1','c-exceed','s1','E2','','prio-1','type-1','c1','2026-01-07 10:00:00')`).run();
   db.prepare("UPDATE tasks SET archived_at = '2026-01-08 10:00:00' WHERE id = 't-ok-arch'").run();
 }
 

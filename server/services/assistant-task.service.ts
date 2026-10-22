@@ -4,6 +4,7 @@ import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, 
 import { acquireMcpToolset, buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
 import { currentEnv } from "../runtime-env";
+import type { RuntimeEnv } from "../env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, IDENTITY, buildUserMessage } from "../assistant/prompt";
 import { buildSkillPromptParts } from "../assistant/context";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
@@ -30,10 +31,8 @@ import { WikiService } from "./wiki.service";
 import { MilestoneService } from "./milestone.service";
 import { SwimlaneService } from "./swimlane.service";
 import { ActivityService } from "./activity.service";
-import { docToMarkdown } from "../../shared/markdown";
-import { extractText } from "../../shared/tiptap-text";
 import * as msg from "../activity-messages";
-import type { TipTapDoc, Task, WikiPage, Actor, AssistantTask, ActivityType } from "../../shared/types";
+import type { Task, WikiPage, Actor, AssistantTask, ActivityType } from "../../shared/types";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import { AssistantProvidersService } from "./assistant-providers.service";
 import { buildStream, findPendingBatches, findNewestPendingBatch, applyResumeResults, buildResumeResultsNote } from "../assistant/build-stream";
@@ -204,15 +203,13 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
     const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
     const skillJunctionBound = async (agentId: string, skillId: string): Promise<boolean> => (await dbFirst(`SELECT 1 FROM lexa_agent_skills WHERE agent_id = ? AND skill_id = ? LIMIT 1`, agentId, skillId)) !== null;
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
-    const taskRefOf = (t: Task): TaskRef => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: docToMarkdown(t.description as TipTapDoc) });
+    const taskRefOf = (t: Task): TaskRef => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: t.description });
     const loadDocContext = (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<{ title: string; context: string }, TaskNotFound | WikiPageNotFound | DbError | RowNotFound> => Effect.gen(function* () {
-      if (documentType === "task") { const t = yield* taskRepo.findById(documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: documentId }))); const md = docToMarkdown(t.description as TipTapDoc); return { title: t.title, context: `Task: ${t.key} — ${t.title}${md ? `\nDescription:\n${md}` : ""}` }; }
-      const page = yield* wikiRepo.findBySlug(projectId, documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: documentId }))); const md = docToMarkdown(page.content as TipTapDoc); return { title: page.title, context: `Wiki page: ${page.title}${md ? `\n${md}` : ""}` };
+      if (documentType === "task") { const t = yield* taskRepo.findById(documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: documentId }))); const md = t.description; return { title: t.title, context: `Task: ${t.key} — ${t.title}${md ? `\nDescription:\n${md}` : ""}` }; }
+      const page = yield* wikiRepo.findBySlug(projectId, documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: documentId }))); const md = page.content; return { title: page.title, context: `Wiki page: ${page.title}${md ? `\n${md}` : ""}` };
     });
-    // Project-scoped image loader: the blob read is gated on ownership by
-    // `(project_id, storage_key)` across both attachment tables.
+    // Document tools read project artifacts, never private chat uploads.
     const ownsImageStorageKey = async (projectId: string, key: string): Promise<boolean> =>
-      (await dbFirst(`SELECT 1 FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null ||
       (await dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null;
     const loadImageBase64For = (projectId: string) => async (key: string): Promise<string | null> => {
       if (!(await ownsImageStorageKey(projectId, key))) return null;
@@ -243,29 +240,33 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       );
     };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[]) => ({
-      projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch,
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[], markdownBinding?: RuntimeEnv["AI"]) => ({
+      projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch, markdownBinding,
       // get_skill can only discover skills the agent actually has bound, so the
       // loader (and with it the tool) is omitted when there are none.
       ...(boundSkills.length > 0 ? { loadSkillByName: async (name: string): Promise<BoundSkill | null> => matchBoundSkillByName(boundSkills, name) } : {}),
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
+      resolveStorageFile: async (pid: string, key: string) => {
+        const row = await dbFirst<{ filename: string; mime_type: string }>(`SELECT filename, mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key);
+        return row ? { filename: row.filename, mimeType: row.mime_type } : null;
+      },
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
-        if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
+        if (!t || t.projectId !== projectId) return null;
         const [col, lane] = await Promise.all([
-          dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId),
-          dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId),
+          dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, t.columnId),
+          dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, t.swimlaneId),
         ]);
         let milestoneName: string | null = null; if (lane?.milestone_id) { const m = await dbFirst<{ name: string }>(`SELECT name FROM milestones WHERE id = ?`, lane.milestone_id); milestoneName = m?.name ?? null; }
-        const gi = (t as unknown as { githubs: Array<{ repo: string; issueNumber: number }> }).githubs[0];
-        return { ...taskRefOf(t as unknown as Task), columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: (t as unknown as { type: string }).type, assignees: (t as unknown as { assignees: string[] }).assignees, githubIssue: gi ? { repo: gi.repo, number: gi.issueNumber } : null };
+        const gi = t.githubs[0];
+        return { ...taskRefOf(t), columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: t.type, assignees: t.assignees, githubIssue: gi ? { repo: gi.repo, number: gi.issueNumber } : null };
       },
       searchTasksByTitle: async (query: string, limit = 10) => { const rows = await Effect.runPromise(taskRepo.searchByTitle(projectId, query, limit)).catch(() => [] as Task[]); return rows.map(taskRefOf); },
-      searchWikiPages: async (query: string, limit = 10) => { const rows = await Effect.runPromise(wikiRepo.search(projectId, query, limit)).catch(() => []); return rows.map((p) => ({ title: (p as unknown as { title: string }).title, slug: (p as unknown as { slug: string }).slug, snippet: (p as unknown as { snippet: string }).snippet })); },
-      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); if (!page) return null; return { title: (page as unknown as { title: string }).title, slug: (page as unknown as { slug: string }).slug, content: (page as unknown as { content: TipTapDoc }).content as TipTapDoc }; },
+      searchWikiPages: async (query: string, limit = 10) => { const rows = await Effect.runPromise(wikiRepo.search(projectId, query, limit)).catch(() => []); return rows.map((p) => ({ title: p.title, slug: p.slug, snippet: p.snippet })); },
+      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); return page ? { title: page.title, slug: page.slug, content: page.content } : null; },
       listAllTasks: async () => { const rows = await Effect.runPromise(taskRepo.listByProject(projectId)).catch(() => [] as Task[]); return rows.map(taskRefOf); },
-      listWikiPagesFull: async () => { const rows = await Effect.runPromise(wikiRepo.findFullByProject(projectId)).catch(() => [] as WikiPage[]); return rows.map((p) => ({ title: p.title, slug: p.slug, content: p.content as TipTapDoc })); },
+      listWikiPagesFull: async () => { const rows = await Effect.runPromise(wikiRepo.findFullByProject(projectId)).catch(() => [] as WikiPage[]); return rows.map((p) => ({ title: p.title, slug: p.slug, content: p.content })); },
       getBoardStructure: async () => {
         const columns = (await dbAll<{ id: string; name: string; position: number; wip_limit: number | null; github_state: "open" | "closed" | null; is_done: number }>(`SELECT id, name, position, wip_limit, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`, projectId)).map((c) => ({ id: c.id, name: c.name, position: c.position, wipLimit: c.wip_limit, githubState: c.github_state, isDone: c.is_done !== 0 }));
         const swimlanes = (await dbAll<{ id: string; name: string; kind: "backlog" | "sprint"; start_at: string | null; due_at: string | null; archived_at: string | null; milestone_id: string | null }>(`SELECT id, name, kind, start_at, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`, projectId)).map((l) => ({ id: l.id, name: l.name, kind: l.kind, startAt: l.start_at, dueAt: l.due_at, archived: l.archived_at !== null, milestoneId: l.milestone_id }));
@@ -279,12 +280,12 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
       localWriteTracker,
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
-        if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
-        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId);
-        return { id: (t as unknown as { id: string }).id, key: (t as unknown as { key: string }).key, title: (t as unknown as { title: string }).title, columnName: col?.name ?? "", priority: (t as unknown as { priority: string }).priority, type: (t as unknown as { type: string }).type, dueAt: (t as unknown as { dueAt: string | null }).dueAt, assignees: (t as unknown as { assignees: string[] }).assignees, descriptionText: extractText((t as unknown as { description: TipTapDoc }).description as TipTapDoc), archivedAt: (t as unknown as { archivedAt: string | null }).archivedAt };
+        if (!t || t.projectId !== projectId) return null;
+        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, t.columnId);
+        return { id: t.id, key: t.key, title: t.title, columnName: col?.name ?? "", priority: t.priority, type: t.type, dueAt: t.dueAt, assignees: t.assignees, description: t.description, archivedAt: t.archivedAt };
       },
       findColumn: async (id: string) => (await dbFirst<{ id: string; name: string }>(`SELECT id, name FROM columns WHERE id = ?`, id)) ?? null,
-      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); if (!page) return null; return { slug: (page as unknown as { slug: string }).slug, title: (page as unknown as { title: string }).title, text: extractText((page as unknown as { content: TipTapDoc }).content as TipTapDoc) }; },
+      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); return page ? { slug: page.slug, title: page.title, text: page.content } : null; },
       findMilestone: async (id: string) => { const m = await dbFirst<{ id: string; name: string; due_at: string | null; archived_at: string | null }>(`SELECT id, name, due_at, archived_at FROM milestones WHERE id = ?`, id); return m ? { id: m.id, name: m.name, dueAt: m.due_at, archivedAt: m.archived_at } : null; },
       findSwimlane: async (id: string) => { const l = await dbFirst<{ id: string; name: string; kind: "backlog" | "milestone" | "sprint"; archived_at: string | null; milestone_id: string | null }>(`SELECT id, name, kind, archived_at, milestone_id FROM swimlanes WHERE id = ?`, id); return l ? { id: l.id, name: l.name, kind: l.kind, archivedAt: l.archived_at, milestoneId: l.milestone_id } : null; },
       countSprints: async (milestoneId) => { const r = await dbFirst<{ c: number }>(`SELECT COUNT(*) AS c FROM swimlanes WHERE milestone_id = ? AND kind = 'sprint' AND archived_at IS NULL`, milestoneId); return r?.c ?? 0; },
@@ -482,7 +483,8 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, autoSkill: true, repoContent, docContext: doc.context, writeTools: enabledWriteTools, advisory: preflight.segment });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
+        const env = yield* currentEnv;
+        const baseTools = buildAssistantTools(buildToolDeps(task.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env.AI));
         const localWriteTracker = createLocalWriteTracker();
         const writeSet = opts?.userId !== undefined ? buildWriteToolset(settingsRow, { projectId: task.projectId, documentType: task.documentType, documentId: task.documentId, ownerUserId: opts.userId }, localWriteTracker) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         yield* loadAssistantMcp(task.projectId, allowlist, (toolset) => { mcp = toolset; });
@@ -651,7 +653,8 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
         const systemPrompts = buildSystemPrompts({ identity: IDENTITY, memoryBlock: memoryBlockFromHits(memoryHits), agentMarkdown: agent.instructions, skillMarkdowns: skill ? [skill.instructions] : [], skillCatalog, autoSkill: true, repoContent, docContext: doc.context, writeTools: enabledWriteTools });
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         const allowlist = (settingsRow as unknown as { url_allowlist: string | null }).url_allowlist;
-        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills));
+        const env = yield* currentEnv;
+        const baseTools = buildAssistantTools(buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env.AI));
         const localWriteTracker = createLocalWriteTracker();
         const writeSet = thread.ownerUserId !== null ? buildWriteToolset(settingsRow, { projectId: thread.projectId, documentType, documentId, ownerUserId: thread.ownerUserId }, localWriteTracker) : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
         yield* loadAssistantMcp(thread.projectId, allowlist, (toolset) => { mcp = toolset; });

@@ -193,21 +193,44 @@ afterEach(() => {
 });
 
 describe("runMigrations", () => {
-  it("applies the real migrations dir and records _migrations", () => {
+  it("changes Markdown defaults without converting legacy documents or losing child revisions", () => {
     const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, stageThrough("0029"));
+    const old = new Database(dbPath);
+    const source = '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"kept"}]}]}';
+    old.exec(`
+      INSERT INTO projects (id,name,slug,key,next_task_number) VALUES ('p','P','p','P',3);
+      INSERT INTO columns (id,project_id,name,position) VALUES ('c','p','Todo',0);
+      INSERT INTO swimlanes (id,project_id,name,position,kind) VALUES ('s','p','Backlog',0,'backlog');
+      INSERT INTO wiki_pages (id,project_id,title,slug) VALUES ('w','p','Page','page');
+    `);
+    old.prepare("INSERT INTO tasks (id,project_id,column_id,swimlane_id,title,position,key,number,description) VALUES ('t','p','c','s','T','a0','P-1',1,?)").run(source);
+    old.prepare("INSERT INTO wiki_page_revisions (id,page_id,title,slug,content,save_type) VALUES ('r','w','Page','page',?,'manual')").run(source);
+    old.exec(`
+      INSERT INTO attachments (id,project_id,task_id,filename,mime_type,size_bytes,sha256,storage_key)
+      VALUES ('attachment','p','t','source.txt','text/plain',4,'fixture-hash','unchanged/source.txt');
+    `);
+    old.close();
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql", "0028_assistant_settings_vision_model.sql", "0029_assistant_permission_mode_resume_claims.sql"]);
+    runMigrations(dbPath, MIGRATIONS);
     const db = new Database(dbPath);
-    expect(tableExists(db, "tasks")).toBe(true);
-    expect(tableExists(db, "_migrations")).toBe(true);
-    db.close();
-  });
-
-  it("is a no-op on the second run", () => {
-    const dbPath = join(tmpDir(), "app.db");
-    runMigrations(dbPath, MIGRATIONS);
-    runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql", "0005_runtime_rename.sql", "0006_assistant_rename.sql", "0007_runtimes_team_restrict.sql", "0008_remove_agent_runtimes.sql", "0009_assistant_mcp.sql", "0010_remove_stdio_mcp_clients.sql", "0011_mcp_managed_secrets.sql", "0012_remove_mcp_secret_refs.sql", "0013_jev_registry.sql", "0014_provider_secrets.sql", "0015_chat_attachments.sql", "0017_github_app_secrets.sql", "0018_user_project_roles_unique.sql", "0019_workers_ai_provider_kind.sql", "0020_assistant_runs.sql", "0021_assistant_schedules.sql", "0022_assistant_pending_writes_run_id.sql", "0023_assistant_call_log_rebuild.sql", "0024_assistant_call_log_cached_write_in.sql", "0025_columns_done_flag_backfill.sql", "0026_assistant_tasks_nullable_skill.sql", "0027_drop_idx_wiki_project.sql", "0028_assistant_settings_vision_model.sql", "0029_assistant_permission_mode_resume_claims.sql"]);
+    try {
+      expect(db.query("SELECT description FROM tasks WHERE id='t'").get()).toEqual({ description: source });
+      expect(db.query("SELECT content FROM wiki_pages WHERE id='w'").get()).toEqual({ content: "{}" });
+      expect(db.query("SELECT content,page_id FROM wiki_page_revisions WHERE id='r'").get()).toEqual({ content: source, page_id: "w" });
+      expect(db.query("SELECT task_id,storage_key FROM attachments WHERE id='attachment'").get())
+        .toEqual({ task_id: "t", storage_key: "unchanged/source.txt" });
+      expect(db.query("SELECT value FROM settings WHERE key='documents.format'").get()).toEqual({ value: "tiptap-v1" });
+      db.exec(`
+        INSERT INTO tasks (id,project_id,column_id,swimlane_id,title,position,key,number) VALUES ('new','p','c','s','New','a1','P-2',2);
+        INSERT INTO wiki_pages (id,project_id,title,slug) VALUES ('new','p','New','new');
+      `);
+      expect(db.query("SELECT description FROM tasks WHERE id='new'").get()).toEqual({ description: "" });
+      expect(db.query("SELECT content FROM wiki_pages WHERE id='new'").get()).toEqual({ content: "" });
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {

@@ -46,27 +46,27 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, p
 VALUES
   ('seed-task-gs-1', 'seed-proj-start', 'seed-col-gs-0', 'seed-sw-gs-0',
    'Explore the board',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Drag this card to "},{"type":"text","marks":[{"type":"bold"}],"text":"In Progress"},{"type":"text","text":" to start working on it. Columns order the flow; drag cards between them to update status."}]}]}',
+   'Drag this card to **In Progress** to start working on it. Columns order the flow; drag cards between them to update status.',
    'seed-prio-gs-2', 'seed-type-gs-2', 'a0', 'GS-1', 1),
 
   ('seed-task-gs-2', 'seed-proj-start', 'seed-col-gs-0', 'seed-sw-gs-0',
    'Invite your team',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Open "},{"type":"text","marks":[{"type":"bold"}],"text":"Workspace settings"},{"type":"text","text":" to create a team and send invite links. Members only see projects their team owns."}]}]}',
+   'Open **Workspace settings** to create a team and send invite links. Members only see projects their team owns.',
    'seed-prio-gs-1', 'seed-type-gs-2', 'a1', 'GS-2', 2),
 
   ('seed-task-gs-3', 'seed-proj-start', 'seed-col-gs-1', 'seed-sw-gs-0',
    'Learn WIP limits',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"In Progress has a WIP limit of 3. Try moving a fourth task in — the move is rejected until something leaves the column."}]}]}',
+   'In Progress has a WIP limit of 3. Try moving a fourth task in — the move is rejected until something leaves the column.',
    'seed-prio-gs-2', 'seed-type-gs-0', 'a0', 'GS-3', 3),
 
   ('seed-task-gs-4', 'seed-proj-start', 'seed-col-gs-1', 'seed-sw-gs-0',
    'Write your first task',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Create a task with the + button on any column. Descriptions are rich text: headings, lists, code, images."}]}]}',
+   'Create a task with the + button on any column. Descriptions are rich text: headings, lists, code, images.',
    'seed-prio-gs-3', 'seed-type-gs-0', 'a1', 'GS-4', 4),
 
   ('seed-task-gs-5', 'seed-proj-start', 'seed-col-gs-2', 'seed-sw-gs-0',
    'Finish the setup wizard',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"You already did this one. Done columns can be mapped to GitHub so linked issues close automatically."}]}]}',
+   'You already did this one. Done columns can be mapped to GitHub so linked issues close automatically.',
    'seed-prio-gs-2', 'seed-type-gs-2', 'a0', 'GS-5', 5);
 
 INSERT INTO task_assignees (task_id, user_name)
@@ -78,6 +78,6 @@ INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, pare
 VALUES
   ('seed-wiki-gs-0', 'seed-proj-start',
    'Using Lexa', 'using-lexa',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Daily flow"}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Plan: keep next work in Backlog, ordered by priority."}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Do: pull one card into In Progress — the WIP limit keeps focus."}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Ship: drag to Done when it ships."}]}]}]},{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Where things live"}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Board: drag-and-drop kanban with swimlanes."}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Wiki: nested pages like this one for living docs."}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"GitHub: link a repo in project settings to sync issues."}]}]}]}]}',
+   '# Daily flow' || char(10) || char(10) || '- Plan: keep next work in Backlog, ordered by priority.' || char(10) || '- Do: pull one card into In Progress — the WIP limit keeps focus.' || char(10) || '- Ship: drag to Done when it ships.' || char(10) || char(10) || '## Where things live' || char(10) || char(10) || '- Board: drag-and-drop kanban with swimlanes.' || char(10) || '- Wiki: nested pages like this one for living docs.' || char(10) || '- GitHub: link a repo in project settings to sync issues.',
    'Daily flow\nPlan: keep next work in Backlog, ordered by priority.\nDo: pull one card into In Progress — the WIP limit keeps focus.\nShip: drag to Done when it ships.\nWhere things live\nBoard: drag-and-drop kanban with swimlanes.\nWiki: nested pages like this one for living docs.\nGitHub: link a repo in project settings to sync issues.',
    NULL, 0);

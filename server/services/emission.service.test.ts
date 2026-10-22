@@ -15,7 +15,7 @@ import { TaskLinkService } from "./task-link.service";
 import { CommentService } from "./comment.service";
 import { SourceNotFound, TaskLinkNotFound, CommentInvalid, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, TaskNotFound } from "../api/errors";
 import type { AuthIdentityShape } from "../api/auth";
-import type { Actor, TipTapDoc } from "../../shared/types";
+import type { Actor } from "../../shared/types";
 
 // Invariant #12 cluster: every one of these services writes its task_activity
 // rows in the same transaction/batch as the data write. Folded from
@@ -336,8 +336,8 @@ describe("TaskLinkService.search LIKE escaping", () => {
 
 const commentIdOf = (userId: string | null): AuthIdentityShape => ({ keyId: "k1", keyName: "k1", userId, userName: userId ? "X" : null, role: "member" });
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
-const COMMENT_BODY: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] };
-const COMMENT_EMPTY: TipTapDoc = { type: "doc", content: [] };
+const COMMENT_BODY = "hi";
+const COMMENT_EMPTY = "";
 
 function seedComments(database: Database) {
   database.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
@@ -416,7 +416,7 @@ describe("CommentService", () => {
         const wrongTask = yield* Effect.either(svc.edit(comment.id, commentIdOf("u1"), COMMENT_BODY, "t2"));
         expect(Either.isLeft(wrongTask)).toBe(true);
         if (Either.isLeft(wrongTask)) expect(wrongTask.left).toBeInstanceOf(CommentNotFound);
-        const edited = yield* Effect.either(svc.edit(comment.id, commentIdOf("u1"), { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "edited" }] }] }, "t1"));
+        const edited = yield* Effect.either(svc.edit(comment.id, commentIdOf("u1"), "edited", "t1"));
         expect(Either.isRight(edited)).toBe(true);
         if (Either.isRight(edited)) expect(edited.right.editedAt).not.toBeNull();
         const empty = yield* Effect.either(svc.edit(comment.id, commentIdOf("u1"), COMMENT_EMPTY, "t1"));

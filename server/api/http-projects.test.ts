@@ -262,11 +262,6 @@ describe("project access scoping (team membership)", () => {
     return (res.headers?.getSetCookie?.() ?? []).join("; ");
   }
 
-  const accDoc = (text: string) => ({
-    type: "doc",
-    content: [{ type: "paragraph", content: [{ type: "text", text }] }],
-  });
-
   beforeAll(async () => {
     accDir = mkdtempSync(join(tmpdir(), "lexa-project-access-api-"));
     accDbPath = join(accDir, "test.db");
@@ -316,7 +311,7 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, key,
 INSERT INTO task_links (id, project_id, from_task_id, to_task_id, relation) VALUES
  ('ghost-link-1', 'p-ghost', 't-ghost-1', '11111111-1111-4111-8111-111111111111', 'related_to');
 INSERT INTO task_comments (id, task_id, author_kind, author_label, body) VALUES
- (1, 't-ghost-1', 'user', 'ghost', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"ghost comment"}]}]}');
+ (1, 't-ghost-1', 'user', 'ghost', 'ghost comment');
 INSERT INTO document_sources (id, project_id, document_type, document_id, kind, title, ref) VALUES
  ('ghost-src-1', 'p-ghost', 'task', 't-ghost-1', 'external', 'Ghost source', 'https://example.com/ghost'),
  ('team-src-1', 'p-team', 'task', 't-team-1', 'external', 'Team source', 'https://example.com/team');
@@ -390,7 +385,7 @@ INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_byte
     expect((await accWithCookie(cookie, "PATCH", "/api/projects/ghost-proj/tasks/t-ghost-1", { title: "hijack" })).status).toBe(403);
     expect((await accWithCookie(cookie, "POST", "/api/projects/ghost-proj/tasks/t-ghost-1/move", { columnId: "c-g1", swimlaneId: "s-g1" })).status).toBe(403);
     expect((await accWithCookie(cookie, "DELETE", "/api/projects/ghost-proj/tasks/t-ghost-1")).status).toBe(403);
-    expect((await accWithCookie(cookie, "PATCH", "/api/projects/ghost-proj/tasks/t-ghost-1/comments/1", { body: accDoc("hijack") })).status).toBe(403);
+    expect((await accWithCookie(cookie, "PATCH", "/api/projects/ghost-proj/tasks/t-ghost-1/comments/1", { body: "hijack" })).status).toBe(403);
     // 404 — cannot reach a foreign task through their own project's slug
     const cross = await accWithCookie(cookie, "PATCH", "/api/projects/team-proj/tasks/t-ghost-1", { title: "hijack" });
     expect(cross.status).toBe(404);
@@ -403,10 +398,10 @@ INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_byte
     expect((await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-team-3/archive")).status).toBe(200);
     expect((await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-team-3/restore")).status).toBe(200);
     expect((await accWithCookie(cookie, "DELETE", "/api/projects/team-proj/tasks/t-team-4")).status).toBe(204);
-    const created = await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-team-1/comments", { body: accDoc("hello") });
+    const created = await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-team-1/comments", { body: "hello" });
     expect(created.status).toBe(201);
     const commentId = ((await created.json()) as { data: { comment: { id: number } } }).data.comment.id;
-    expect((await accWithCookie(cookie, "PATCH", `/api/projects/team-proj/tasks/t-team-1/comments/${commentId}`, { body: accDoc("edited") })).status).toBe(200);
+    expect((await accWithCookie(cookie, "PATCH", `/api/projects/team-proj/tasks/t-team-1/comments/${commentId}`, { body: "edited" })).status).toBe(200);
 
     // raw task-id path scoping: reads/writes, comments, links cannot cross projects
     expect((await accWithCookie(cookie, "GET", "/api/projects/team-proj/tasks/t-ghost-1")).status).toBe(404);
@@ -414,7 +409,7 @@ INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_byte
     expect((await accWithCookie(cookie, "GET", "/api/projects/team-proj/tasks/t-team-1")).status).toBe(200);
     expect((await accWithCookie(cookie, "GET", "/api/projects/team-proj/tasks/t-team-1/activity")).status).toBe(200);
     // createComment cannot write to another project's task
-    expect((await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-ghost-1/comments", { body: accDoc("hijack") })).status).toBe(404);
+    expect((await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-ghost-1/comments", { body: "hijack" })).status).toBe(404);
     const adb2 = new Database(accDbPath);
     expect(adb2.query("SELECT COUNT(*) c FROM task_comments WHERE task_id = 't-ghost-1'").get()).toEqual({ c: 1 });
     adb2.close();
@@ -423,7 +418,7 @@ INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_byte
     const adb3 = new Database(accDbPath);
     expect(adb3.query("SELECT deleted_at FROM task_comments WHERE id = 1").get()).toEqual({ deleted_at: null });
     adb3.close();
-    const ownComment = await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-team-1/comments", { body: accDoc("bye") });
+    const ownComment = await accWithCookie(cookie, "POST", "/api/projects/team-proj/tasks/t-team-1/comments", { body: "bye" });
     const ownCommentId = ((await ownComment.json()) as { data: { comment: { id: number } } }).data.comment.id;
     expect((await accWithCookie(cookie, "DELETE", `/api/projects/team-proj/tasks/t-team-1/comments/${ownCommentId}`)).status).toBe(204);
     // GitHub link/unlink cannot target another project's task

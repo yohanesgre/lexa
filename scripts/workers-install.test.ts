@@ -570,7 +570,8 @@ describe("buildDeployConfig", () => {
       },
       priorConfig: null,
     });
-    // ADR-0006: every deploy carries the supervisor namespace + its create tag.
+    // ADR-0006: every installer-generated Worker keeps managed conversion available.
+    expect(config.ai).toEqual({ binding: "AI" });
     expect(config.durable_objects).toEqual({ bindings: [{ name: "CHAT_DO", class_name: "LexaChatSupervisor" }] });
     expect(config.migrations).toEqual([{ tag: "v1", new_sqlite_classes: ["LexaChatSupervisor"] }]);
     expect(config.triggers).toEqual({ crons: ["*/15 * * * *"] });
@@ -589,6 +590,7 @@ describe("buildDeployConfig", () => {
       manifest: { main: "index.js", assets: { directory: "../client" } },
       rootConfig: {
         compatibility_date: "2026-08-01",
+        ai: { binding: "AI" },
         triggers: { crons: ["*/15 * * * *"] },
       },
       priorConfig: {
@@ -600,6 +602,7 @@ describe("buildDeployConfig", () => {
         migrations: [{ tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] }],
       },
     });
+    expect(config.ai).toEqual({ binding: "AI" });
     expect(config.durable_objects).toEqual({ bindings: [{ name: "CHAT_DO", class_name: "LexaChatSupervisor" }] });
     expect(config.migrations).toEqual([
       { tag: "v1", new_sqlite_classes: ["LexaAssistantAgent"] },

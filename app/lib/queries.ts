@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, BoardTask, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, AssistantTask, TaskLink, LexaAgent, LexaSkill, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
+import type { Task, BoardTask, Project, ProjectRepo, Board, Column, Swimlane, Milestone, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, AssistantTask, TaskLink, LexaAgent, LexaSkill, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
 import type { AssistantSettingsMasked, AssistantSettingsInput } from "../../shared/assistant";
 import type { AssistantMemoryEntry } from "./api";
 import * as api from "./api";
@@ -379,19 +379,20 @@ export function useUpdateTask(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; title?: string | undefined; description?: TipTapDoc; priority?: string | undefined; type?: string | undefined; assignees?: string[]; dueAt?: string | null }) =>
-      api.updateTask(slug, id, input),
-    onSuccess: ({ data: task, activity }) => {
-      qc.setQueryData(["tasks", slug, task.id], task);
-      qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
+    mutationFn: ({ id, projectSlug, ...input }: { id: string; projectSlug?: string; title?: string | undefined; description?: string; priority?: string | undefined; type?: string | undefined; assignees?: string[]; dueAt?: string | null }) =>
+      api.updateTask(projectSlug || slug, id, input),
+    onSuccess: ({ data: task, activity }, variables) => {
+      const requestSlug = variables.projectSlug || slug;
+      qc.setQueryData(["tasks", requestSlug, task.id], task);
+      qc.setQueryData(["board", requestSlug, false], (old: Board | undefined) => {
         if (!old) return old;
         return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
       });
-      qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
+      qc.setQueryData(["board", requestSlug, true], (old: Board | undefined) => {
         if (!old) return old;
         return { ...old, tasks: old.tasks.map((t: BoardTask) => (t.id === task.id ? task : t)) };
       });
-      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
+      if (activity?.length) prependActivity(qc, requestSlug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
     },
     onError: (err) => {
       toast.push("error", "Failed to save", toastMessage(err));
@@ -721,14 +722,20 @@ export function useUpdateWikiPage(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ pageSlug, ...input }: { pageSlug: string } & Parameters<typeof api.updateWikiPage>[2]) =>
-      api.updateWikiPage(slug, pageSlug, input),
-    onSuccess: (page) => {
-      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(slug), (old) => {
+    mutationFn: ({ pageSlug, projectSlug, ...input }: { pageSlug: string; projectSlug?: string } & Parameters<typeof api.updateWikiPage>[2]) =>
+      api.updateWikiPage(projectSlug ?? slug, pageSlug, input),
+    onSuccess: (page, variables) => {
+      const projectSlug = variables.projectSlug ?? slug;
+      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(projectSlug), (old) => {
         if (!old) return old;
         return old.map((p) => (p.id === page.id ? page : p));
       });
-      qc.setQueryData(wikiKeys.page(slug, page.slug), page);
+      qc.setQueryData(wikiKeys.page(projectSlug, page.slug), page);
+      // Revision rows are absent from the save response; refresh only existing history.
+      const revisionKey = wikiKeys.revisions(projectSlug, page.slug, 20);
+      void qc.cancelQueries({ queryKey: revisionKey, exact: true }).then(() =>
+        qc.refetchQueries({ queryKey: revisionKey, exact: true })
+      );
     },
     onError: (err) => {
       toast.push("error", "Failed to update page", toastMessage(err));
@@ -746,19 +753,20 @@ export function useRevisions(slug: string, pageSlug: string, limit?: number) {
 export function useRestoreWikiRevision(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ pageSlug, revisionId }: { pageSlug: string; revisionId: string }) =>
-      api.restoreWikiRevision(slug, pageSlug, revisionId),
+    mutationFn: ({ pageSlug, revisionId, projectSlug }: { pageSlug: string; revisionId: string; projectSlug?: string }) =>
+      api.restoreWikiRevision(projectSlug ?? slug, pageSlug, revisionId),
     onSuccess: (page, variables) => {
-      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(slug), (old) => {
+      const projectSlug = variables.projectSlug ?? slug;
+      qc.setQueryData<WikiPageMeta[]>(wikiKeys.pages(projectSlug), (old) => {
         if (!old) return old;
         return old.map((p) => (p.id === page.id ? page : p));
       });
-      qc.setQueryData(wikiKeys.page(slug, variables.pageSlug), page);
-      qc.setQueryData(wikiKeys.page(slug, page.slug), page);
-      void qc.fetchQuery({
-        queryKey: wikiKeys.revisions(slug, variables.pageSlug, 20),
-        queryFn: () => api.listRevisions(slug, variables.pageSlug, 20).then((r) => r.revisions),
-      });
+      qc.setQueryData(wikiKeys.page(projectSlug, variables.pageSlug), page);
+      qc.setQueryData(wikiKeys.page(projectSlug, page.slug), page);
+      const revisionKey = wikiKeys.revisions(projectSlug, page.slug, 20);
+      void qc.cancelQueries({ queryKey: revisionKey, exact: true }).then(() =>
+        qc.refetchQueries({ queryKey: revisionKey, exact: true })
+      );
     },
   });
 }
@@ -2214,9 +2222,12 @@ export function useAddComment(slug: string, taskId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (body: TipTapDoc) => api.createComment(slug, taskId, body),
-    onSuccess: (result) => {
-      prependActivity(qc, slug, taskId, [
+    mutationFn: ({ body, projectSlug, taskId: requestTaskId }: { body: string; projectSlug: string; taskId: string }) =>
+      api.createComment(projectSlug || slug, requestTaskId || taskId, body),
+    onSuccess: (result, variables) => {
+      const projectSlug = variables.projectSlug || slug;
+      const requestTaskId = variables.taskId || taskId;
+      prependActivity(qc, projectSlug, requestTaskId, [
         { kind: "comment", ...result.comment },
         { kind: "event", ...result.activity },
       ]);
@@ -2229,9 +2240,12 @@ export function useUpdateComment(slug: string, taskId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ commentId, body }: { commentId: number; body: TipTapDoc }) => api.updateComment(slug, taskId, commentId, body),
-    onSuccess: (comment) => {
-      qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", slug, taskId], (old) => {
+    mutationFn: ({ commentId, body, projectSlug, taskId: requestTaskId }: { commentId: number; body: string; projectSlug: string; taskId: string }) =>
+      api.updateComment(projectSlug || slug, requestTaskId || taskId, commentId, body),
+    onSuccess: (comment, variables) => {
+      const projectSlug = variables.projectSlug || slug;
+      const requestTaskId = variables.taskId || taskId;
+      qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", projectSlug, requestTaskId], (old) => {
         if (!old) return old;
         return {
           ...old,
@@ -2252,16 +2266,16 @@ export function useDeleteComment(slug: string, taskId: string) {
   const { data: session } = useSession();
   const label = session?.user?.name ?? "user";
   return useMutation({
-    mutationFn: (commentId: number) => api.deleteComment(slug, taskId, commentId),
-    onSuccess: (_v, commentId) => {
+    mutationFn: ({ commentId, projectSlug, taskId: requestTaskId }: { commentId: number; projectSlug: string; taskId: string }) =>
+      api.deleteComment(projectSlug || slug, requestTaskId || taskId, commentId),
+    onSuccess: (_v, variables) => {
+      const projectSlug = variables.projectSlug || slug;
+      const requestTaskId = variables.taskId || taskId;
       const now = new Date().toISOString();
-      // DELETE returns 204 with no activity payload — remove the comment card
-      // and prepend a LOCAL comment_deleted row (negative id, server row
-      // replaces it on the next refetch).
-      qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", slug, taskId], (old) => {
+      qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", projectSlug, requestTaskId], (old) => {
         if (!old) return old;
         const local: ActivityItem = {
-          kind: "event", id: -Date.now(), taskId, type: "comment_deleted",
+          kind: "event", id: -Date.now(), taskId: requestTaskId, type: "comment_deleted",
           actorKind: "user", actorLabel: label, actorUserId: null,
           message: `${label} deleted a comment`, viaAssistant: false, createdAt: now,
         };
@@ -2270,8 +2284,8 @@ export function useDeleteComment(slug: string, taskId: string) {
           pages: old.pages.map((p, i) => ({
             ...p,
             data: i === 0
-              ? [...p.data.filter((it) => !(it.kind === "comment" && it.id === commentId)), local]
-              : p.data.filter((it) => !(it.kind === "comment" && it.id === commentId)),
+              ? [...p.data.filter((it) => !(it.kind === "comment" && it.id === variables.commentId)), local]
+              : p.data.filter((it) => !(it.kind === "comment" && it.id === variables.commentId)),
           })),
         };
       });

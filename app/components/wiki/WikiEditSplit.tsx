@@ -1,6 +1,4 @@
-import type { Editor } from "@tiptap/core";
 import { Download, Paperclip, Image as ImageIcon, X } from "lucide-react";
-import type { TipTapDoc } from "../../../shared/types";
 import { useDeleteAttachment, useSession, useWikiAttachments } from "../../lib/queries";
 import { WikiEditor } from "./WikiEditor";
 
@@ -95,39 +93,34 @@ function WikiAttachmentsSection({ slug, pageSlug }: { slug: string; pageSlug: st
 
 
 interface WikiEditSplitProps {
-  editor: Editor | null;
+  source: string;
+  sourceIdentity: string;
   slug: string;
   pageSlug: string;
-  previewContent: TipTapDoc;
   editable: boolean;
-  onDocChange: (doc: TipTapDoc) => void;
+  onSourceChange: (source: string) => void;
   isSaving: boolean;
   isDirty: boolean;
-  lastSavedAt: Date | null;
   lastSavedLabel: string;
   updatedByName: string | null;
   onReviewStateChange: (active: boolean, accepted: boolean) => void;
 }
 
-// The page's editing lane: one pane — the rich editor (whose toolbar carries
-// the Editor/Preview toggle) over the page's attachments and save status. The
-// preview is not a second pane here: the toggle turns this pane itself into the
-// rendered document, exactly as the task description does.
-export function WikiEditSplit({ editor, slug, pageSlug, previewContent, editable, onDocChange, isSaving, isDirty, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
+// The page's editing lane: one source editor with a toolbar Editor/Preview
+// toggle, attachment chips and save status.
+export function WikiEditSplit({ source, sourceIdentity, slug, pageSlug, editable, onSourceChange, isSaving, isDirty, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
   return (
     <div className="editor-pane flex flex-1 flex-col overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
-        {editor && (
-          <WikiEditor
-            editor={editor}
-            slug={slug}
-            previewContent={previewContent}
-            editable={editable}
-            onDocChange={onDocChange}
-            runtime={{ slug, documentType: "wiki", documentId: pageSlug }}
-            onReviewStateChange={onReviewStateChange}
-          />
-        )}
+        <WikiEditor
+          key={sourceIdentity}
+          source={source}
+          sourceIdentity={sourceIdentity}
+          editable={editable}
+          onSourceChange={onSourceChange}
+          runtime={{ slug, documentType: "wiki", documentId: pageSlug }}
+          onReviewStateChange={onReviewStateChange}
+        />
       </div>
       <WikiAttachmentsSection slug={slug} pageSlug={pageSlug} />
       <div

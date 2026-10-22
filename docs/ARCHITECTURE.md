@@ -14,7 +14,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Machine auth | API keys (`lxk_` + base62(43B)) | CLI/webhooks/scripts: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
 | Styling      | Tailwind                      | Fast, tree-shaken |
-| Rich Text    | TipTap (ProseMirror)          | Structured JSON, React integration |
+| Documents    | Markdown strings            | Source is stored verbatim; parsed only for display, search, and semantic validation |
 | Drag & Drop  | @dnd-kit                      | Accessible, works with fractional-index positions |
 | Ordering     | `fractional-indexing` (npm)   | `generateKeyBetween` — correct, tiny, Workers-safe |
 
@@ -47,7 +47,7 @@ milestones (goal wrapper above sprints)
 │
 tasks
 ├── id, column_id, swimlane_id (NOT NULL — every task belongs to a lane), project_id
-├── title, description (TipTap JSON), priority, type (option ids — field-config)
+├── title, description (Markdown string), priority, type (option ids — field-config)
 ├── key (ticket key "PREFIX-n", immutable), number (per-project, never reused)
 ├── assignee (freeform string), archived_at (soft archive)
 ├── position (fractional-index key, UNIQUE per column)
@@ -62,8 +62,8 @@ task_links (subtask_of / blocked_by / related_to)
 └── id, project_id, from_task_id, to_task_id, relation
 │
 wiki_pages (nested)
-├── id, title, slug (UNIQUE per project), content (TipTap JSON)
-├── content_text (plain text, backs FTS5 search)
+├── id, title, slug (UNIQUE per project), content (Markdown string)
+├── content_text (plain-text projection, backs FTS5 search)
 ├── parent_id (ON DELETE RESTRICT), position
 └── timestamps
 │
@@ -215,7 +215,7 @@ applied at build time, before route matching and before body decode:
 | Issue body ↔ task description | (same row above — content sync) | (same row above — content sync) |
 | Assignees | ❌ | ❌ |
 
-The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. State flows both ways (echo-suppressed); content flows both ways but **asymmetrically** — Lexa pushes on save (TipTap → Markdown), GitHub edits pull back via `edited` (Markdown → TipTap), and the webhook skips our own pushes by comparing fetched title **and** body against `pushed_*` after trim + CRLF→LF normalization.
+The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. State flows both ways (echo-suppressed); content flows both ways but asymmetrically. Both sides exchange Markdown strings directly. The webhook skips our own pushes by comparing fetched title **and** body against `pushed_*` after trim + CRLF→LF normalization; `normalizeMarkdownForEcho` remains a boundary-only comparison helper.
 
 **Repo roles:** a project links N repos via `project_repos`, each with independent `source_role` (Assistant grounding + project label) and `workspace_role` (issue link/create/sync) booleans — at least one per row. Workspace-role repos gate NEW issue links; removing a role never freezes existing links. Assistant grounding sources from the project's source-role repos (cap `settings.assistant_repo_cap`, default 3).
 
@@ -241,7 +241,7 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 6. `move()` early-returns on no-op (same column, no reposition).
 7. One task ↔ many issues (junction table), one per repo: duplicate repo links rejected (already-linked guard). Per-issue `UNIQUE(task_id, issue_id)`.
 8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
-9. **Content sync is asymmetric + echo-safe.** Lexa pushes title+body on task save (only when changed, after the mutation commits; diffed against `pushed_title`/`pushed_body`; the push itself emits no activity). The webhook `edited` handler GETs the issue, skips when fetched title+body both match `pushed_*` (trim + CRLF→LF via `normalizeMarkdownForEcho`; GET failure → title-only compare fallback), else applies title + description (Markdown → TipTap) emitting `field_changed` (actor system/'github') in the same transaction. `push_failed` drives the "edit not pushed" divergence reason.
+9. **Content sync is asymmetric + echo-safe.** Lexa pushes title+body on task save (only when changed, after the mutation commits; diffed against `pushed_title`/`pushed_body`; the push itself emits no activity). The webhook `edited` handler GETs the issue, skips when fetched title+body both match `pushed_*` (`normalizeMarkdownForEcho`; GET failure → title-only compare fallback), else applies title + Markdown description and emits `field_changed` (actor system/'github') in the same transaction. `push_failed` drives the "edit not pushed" divergence reason.
 10. **Repo roles gate new links only.** `source_role` (Assistant grounding + label) and `workspace_role` (issue link/create/sync) are independent; removing a role never freezes existing task↔issue links — they keep syncing.
 
 ### Trust boundary
@@ -285,6 +285,14 @@ thread state lives in canonical `assistant_threads` (ModelMessage[] JSON, rollin
 summary). Both flavors expose the assistant over SSE. The optional Workers
 supervisor coordinates chat only; it is not an executor, queue, schedule runner,
 or external worker.
+
+**Attachment trust boundaries (owner decision):** chat uploads are
+private to their authenticated user and conversation thread. Administrative rank,
+including superadmin, grants no exception to reading, deleting or ingesting another
+user's chat attachment, and another thread of the same user is not the current
+thread. Task/wiki attachments remain project-bound. Model/conversion/history
+loaders enforce the appropriate row-level boundary before accessing a shared blob;
+content-addressing is storage dedupe, not authorization.
 
 **Product statement:** Lexa is self-hosted project management, not a software
 factory.
@@ -806,7 +814,7 @@ hits via class/tag name and the write executor — not a `TaskService` →
 /admin/assistant/bindings   → Per-project assistant bindings overview (superadmin)
 ```
 
-Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
+Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + Markdown source/preview page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
 
 ### Mutation responses are authoritative
 SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.** Invariant #6 preserved.
@@ -858,6 +866,50 @@ Compliance gate: `scripts/check-invariants.ts` scans for the 14 invariants.
 Full Workers HOW: `docs/CLOUDFLARE_WORKERS.md` (decision formerly ADR-0002,
 now merged there); deploy flows: `docs/DEPLOYMENT.md`.
 
+## ADR-0007: Markdown is canonical document content
+
+**Status:** Accepted  
+**Date:** 2026-10-14  
+**Deciders:** Project owner
+
+### Context
+
+Task descriptions, wiki pages and revisions, and task comments were persisted as TipTap JSON despite editing, GitHub sync, assistant tools, and document imports using Markdown. Parse/serialize round trips can lose source. Public contracts and storage must move together; unknown legacy structures cannot be silently discarded.
+
+### Decision
+
+- Store `Task.description`, `WikiPage.content`, wiki revision `content`, and comment `body` as Markdown strings at existing field names, routes, and response envelopes.
+- Store submitted source exactly; do not parse and reserialize on writes. New document defaults are `""`.
+- Use `markdownToText` only for readable projections/search/snippets; it omits image alt text, matching the existing plain-text projection. `isMarkdownEmpty` owns task required-field validation. Visible text, nonempty code, safe images, horizontal rules, and tables with meaningful cell content count as meaningful. Formatting-only and whitespace-only source, empty task-list markers, unsafe images, and empty table structure do not. Comments additionally require non-whitespace text and preserve `JSON.stringify(body).length <= 65,536` JavaScript characters.
+- Keep `normalizeMarkdownForEcho` solely for GitHub boundary comparison (trim and CRLF normalization).
+- Render with `@tanstack/markdown` 1.0.0; CodeMirror packages are pinned at `@uiw/react-codemirror` 4.25.12 and `@codemirror/lang-markdown` 6.5.2. HTML input is rendered as escaped text; `javascript:` links are removed. ATX headings, task lists, and tables render. Setext headings remain paragraphs, indented code is a paragraph, bare URLs do not autolink, two-space hard breaks are not `<br>` (backslash-newline is), partial fences stay safe, and an incomplete `# ` heading emits nothing. Preserve source where display syntax differs; do not add a second general parser/compiler.
+- Declare the editor's already-bundled public core APIs explicitly: `@codemirror/state` 6.7.6 and `@codemirror/language` 6.13.1. Code context comes from the native incremental grammar, not another fence scanner. Keep the incumbent authenticated route `ssr: false` boundaries; the public share renderer does not mount an editor.
+- Keep render profiles explicit. Task/comment prose reuses existing per-element classes, wiki/share reuse their wrappers and focusable anchors, and headings cap at h4 in both rendered output and outline levels. Preserve checklist markup and chat code chrome/caret. Comments retain external-only links and do not load images; chat images remain alt text; authenticated document images and token-scoped public share rewriting retain their existing policies.
+- CodeMirror inherits PHOSPHOR fonts, geometry, selection and caret colours rather than its default themed chrome. Source, toolbar, save and review read the same current Markdown value. Schedule cursor-popup measurements with `requestMeasure`; native IME commits must not be cancelled by the editor's handled-key path.
+- Convert legacy TipTap data only in explicit offline operator tooling. Preserve supported Markdown meaning and literal source characters; refuse malformed or unsupported structures rather than dropping or inventing content. Audit blockers remain visible for operator resolution. Task mentions map to `/{slug}/board?task={id}` and wiki mentions to `/{slug}/wiki/{pageSlug}` only when target and label are valid.
+- Chat document conversion is optional in the existing Workers runtime: the configured AI binding handles PDF and DOCX; Markdown/MD/TXT bypass it and require strict UTF-8. Other accepted binary formats can fail explicitly if the managed service cannot convert them. No local converter fallback, automatic persistence, second Worker, or replacement of REST model-provider configuration. Existing image signatures and vision flow stay unchanged.
+- Preserve IDs, authors, timestamps, ordering, soft-delete state, revisions, comments, and historical audit data. Convert document-bearing pending proposals with arguments/diffs; already-applied history remains immutable.
+- Migration `0030` establishes setting `settings.key='documents.format'`: empty new databases and databases with no four-table or active proposal rows start `markdown-v1`; existing content starts `tiptap-v1`. The only states are `tiptap-v1`, `migrating-markdown-v1`, and `markdown-v1`.
+- Durable table `_markdown_migration(table_name, row_key, source_hash, target_hash)` has `(table_name,row_key)` primary key and contains hashes only, never document bodies. Each bounded batch CAS-updates source rows and inserts matching journal hashes atomically. A changed source, hash mismatch, or incomplete target verification blocks completion.
+- Count affected source/journal rows from SQL `RETURNING`, not driver change metadata that may include FTS trigger writes or be absent from local Wrangler JSON. SQLite audits open read-only and skip journal-mode changes. Local D1 restore evidence may use a verified SQLite snapshot of its selected persistence directory; remote D1 still requires a D1 export, never that local snapshot.
+- After verification, apply sets `documents.format` to `markdown-v1`; reapply checks that setting and never parses JSON-looking Markdown. `server/db/document-format.ts` exports Worker-safe `assertMarkdownReady(db: DbDriver): Effect.Effect<void, DbError>`; API factories/middleware must reject traffic unless value is `markdown-v1`. The format guard does not convert data.
+Historically applied SQL migrations remain immutable. `0030` uses D1-supported column replacement to set task/wiki empty defaults; application creation paths still explicitly write `""`. Operators follow `docs/BACKUPS.md`: stop writers, take and verify a restorable database/blob backup, audit and resolve blockers, apply with matching backup evidence, verify format/projections, then reopen traffic. Rollback restores the matching pre-upgrade backup and application version.
+
+### Options considered
+
+**Keep TipTap JSON:** avoids a breaking API change, but perpetuates conversion code and makes source round trips lossy.
+
+**Store both TipTap and Markdown:** avoids immediate cutover but creates competing canonical values and synchronization failure modes.
+
+**Canonical Markdown (selected):** aligns storage and existing source-editing/sync formats, removes routine conversions, and requires a guarded one-time migration.
+
+### Consequences
+
+- REST fields retain names/routes but become strings; legacy object payloads are rejected after coordinated cutover.
+- FTS text is regenerated from Markdown and maintained by existing wiki triggers; source remains unchanged.
+- Unsupported legacy rows block migration rather than losing content. Application rollout waits for format-complete guard.
+- Old binaries cannot safely read converted data; rollback restores the matching pre-upgrade backup with writes stopped.
+
 ## File Structure
 
 ```
@@ -872,12 +924,12 @@ lexa/
 │   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
 │   ├── services/             # task, project, wiki, column, swimlane, session, authorization, workspace-invites, password-links, ...
 │   ├── repos/                # task.repo.ts, project.repo.ts, ...
-│   ├── db/                   # database.ts (bun:sqlite layer), migrate.ts
+│   ├── db/                   # database.ts (bun:sqlite layer), migrate.ts, document-format.ts, markdown-upgrade.ts, legacy-tiptap.ts
 │   └── github/               # GitHub App client + webhook
-├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
-├── migrations/               # *.sql applied on boot by server/db/migrate.ts
+├── shared/                   # types + pure functions (Markdown, positions)
+├── migrations/               # *.sql; schema only (document conversion is explicit operator work)
 ├── cli/                      # lx (operator CLI; task/wiki/project/github/keys — no deploy, no daemon)
-├── scripts/                  # compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
+├── scripts/                  # migrate-markdown.ts, compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes
 └── package.json
 ```

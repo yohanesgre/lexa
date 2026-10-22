@@ -7,7 +7,7 @@ import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound, Db, withTx, run, batch, type BatchStmt } from "../db/db";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
-import { isEmptyDoc } from "../../shared/tiptap-text";
+import { isMarkdownEmpty } from "../../shared/markdown";
 import {
   TaskNotFound,
   TaskHasChildren,
@@ -37,11 +37,7 @@ import {
   buildWipMoveStmt,
   type ActivityInput,
 } from "../repos/task-batch";
-import type { Task, BoardTask, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType, FieldOption } from "../../shared/types";
-
-// Re-exported for callers that historically imported it from this module; the
-// single implementation lives in shared (invariant 10 parity).
-export { isEmptyDoc };
+import type { Task, BoardTask, Column, Swimlane, Actor, ActivityEvent, ActivityType, FieldOption } from "../../shared/types";
 
 // Hard request cap for POST /projects/:slug/tasks/bulk — an oversized batch is
 // refused with InvalidArgs (422) before any write.
@@ -54,7 +50,7 @@ function validateRequiredFields(
   for (const field of column.requiredFields) {
     let empty = false;
     if (field === "description") {
-      empty = isEmptyDoc(taskLike.description as TipTapDoc);
+      empty = isMarkdownEmpty(typeof taskLike.description === "string" ? taskLike.description : "");
     } else if (field === "assignee") {
       empty = !taskLike.assignees || (taskLike.assignees as string[]).length === 0;
     } else {
@@ -164,7 +160,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       actor: Actor,
       input: {
         title?: string;
-        description?: TipTapDoc;
+        description?: string;
         priority?: string;
         type?: string;
         assignees?: string[];
@@ -216,7 +212,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         if (input.title !== undefined && input.title !== task.title) {
           rows.push(asInput(actor, "field_changed", msg.titleChanged(actor.label), viaAssistant));
         }
-        if (input.description !== undefined && JSON.stringify(input.description) !== JSON.stringify(task.description)) {
+        if (input.description !== undefined && input.description !== task.description) {
           rows.push(asInput(actor, "field_changed", msg.descriptionUpdated(actor.label), viaAssistant));
         }
         if (input.priority !== undefined && input.priority !== task.priority) {
@@ -238,7 +234,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         const stmts: BatchStmt[] = buildTaskUpdateBatch({
           id: task.id,
           ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.description !== undefined ? { description: JSON.stringify(input.description) } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
           ...(input.priority !== undefined ? { priority: input.priority } : {}),
           ...(input.type !== undefined ? { type: input.type } : {}),
           ...(input.assignees !== undefined ? { replaceAssignees: input.assignees } : {}),
@@ -435,7 +431,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         columnId: string;
         swimlaneId?: string | null;
         title: string;
-        description?: TipTapDoc;
+        description?: string;
         priority?: string;
         type?: string;
         assignees?: string[];
@@ -486,7 +482,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           if (input.dueAt && lane.dueAt && input.dueAt > lane.dueAt)
             return yield* new DeadlineAfterLane({ date: lane.dueAt });
           swimlaneId = lane.id;
-          const desc = input.description ?? { type: "doc" as const, content: [] as unknown[] };
+          const desc = input.description ?? "";
           const priority = yield* resolveOption(project.id, "priority", input.priority);
           const type = yield* resolveOption(project.id, "type", input.type);
           yield* validateOption(project.id, "priority", priority);
@@ -512,7 +508,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               columnId,
               swimlaneId,
               title: input.title,
-              description: JSON.stringify(desc),
+              description: desc,
               priority,
               type,
               position,
@@ -573,7 +569,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         id: string,
         input: {
           title?: string;
-          description?: TipTapDoc;
+          description?: string;
           priority?: string;
           type?: string;
           assignees?: string[];

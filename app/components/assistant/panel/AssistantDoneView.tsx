@@ -1,9 +1,7 @@
 import { Check } from "lucide-react";
-import type { Editor } from "@tiptap/core";
 import type { useAssistantStream } from "../../../lib/use-assistant-stream";
 import { ASSISTANT_AGENT_NAME } from "../../../lib/assistant-agent";
 import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
-import { insertMarkdown } from "./assistant-panel-utils";
 
 type Stream = ReturnType<typeof useAssistantStream>;
 
@@ -18,7 +16,6 @@ export function AssistantDoneView({
   reviewActive,
   onReview,
   onDismiss,
-  editor,
   onClose,
 }: {
   stream: Stream;
@@ -31,7 +28,6 @@ export function AssistantDoneView({
   reviewActive?: boolean | undefined;
   onReview?: ((text: string, identity: AssistantReviewIdentity) => void) | undefined;
   onDismiss: () => void;
-  editor: Editor;
   onClose: () => void;
 }) {
   if (!taskId) return null;
@@ -40,25 +36,15 @@ export function AssistantDoneView({
   const rejected = rejectedTaskId === taskId;
   const resolvedSkillName = skillName || "Assistant";
 
-  const handleInsert = () => {
-    if (!stream.text) return;
-    insertMarkdown(editor, stream.text);
-    onClose();
-  };
-
   const handleReviewInEditor = () => {
-    if (!stream.text) return;
-    if (onReview) {
-      onReview(stream.text, {
-        skillName: resolvedSkillName,
-        agentName: ASSISTANT_AGENT_NAME,
-        provider: providerLabel,
-        taskId,
-      });
-      onClose();
-    } else {
-      handleInsert();
-    }
+    if (!stream.text || !onReview) return;
+    onReview(stream.text, {
+      skillName: resolvedSkillName,
+      agentName: ASSISTANT_AGENT_NAME,
+      provider: providerLabel,
+      taskId,
+    });
+    onClose();
   };
 
   const terminalLabel = applied ? "Applied to document" : rejected ? "Result rejected" : "In review in editor";

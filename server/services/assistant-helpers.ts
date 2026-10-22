@@ -5,6 +5,7 @@ import { skillToken } from "../../shared/skill-tokens";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
 import { InvalidArgs } from "../api/errors";
 import { isChatAttachmentMime } from "../storage/mime";
+import { convertDocumentToMarkdown, type ManagedMarkdownBinding } from "../document-conversion";
 
 export const SUMMARY_THRESHOLD_MESSAGES = 40;
 export const SUMMARY_THRESHOLD_BYTES = 64 * 1024;
@@ -189,22 +190,17 @@ export function capDocumentText(text: string): string {
   if (text.length <= DOCUMENT_TEXT_MAX_CHARS) return text;
   return `${text.slice(0, DOCUMENT_TEXT_MAX_CHARS)}…[truncated: ${text.length - DOCUMENT_TEXT_MAX_CHARS} chars omitted]`;
 }
-// Text/markdown decode directly; PDFs extract via `unpdf` (already a
-// dependency). Output is capped by capDocumentText (hydrateDocumentParts
-// injects exactly this string). Returns null on any read/parse failure or
-// empty output — the caller surfaces the named AttachmentExtractionFailed.
-export async function extractDocumentText(bytes: Uint8Array, mimeType: string): Promise<string | null> {
+// Document parts become model-visible Markdown (capped before injection).
+// Conversion failures return null: current-turn validation raises the existing
+// named error, while unavailable historical refs are dropped as before.
+export async function extractDocumentText(
+  bytes: Uint8Array,
+  mimeType: string,
+  filename: string,
+  binding?: ManagedMarkdownBinding,
+): Promise<string | null> {
   try {
-    if (mimeType === "text/markdown" || mimeType === "text/plain") {
-      return capDocumentText(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    }
-    if (mimeType === "application/pdf") {
-      const { getDocumentProxy, extractText } = await import("unpdf");
-      const pdf = await getDocumentProxy(bytes);
-      const { text } = await extractText(pdf, { mergePages: true });
-      return capDocumentText(text);
-    }
-    return null;
+    return capDocumentText(await convertDocumentToMarkdown(bytes, mimeType, filename, binding));
   } catch {
     return null;
   }

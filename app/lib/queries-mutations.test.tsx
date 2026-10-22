@@ -10,11 +10,11 @@ import { createFetchMock, createQueryWrapper, createTestQueryClient, json } from
 import type { ComponentType, ReactNode } from "react";
 import {
   useCreateProject, useDeleteProject, useCreateTask,
-  useMoveTask, useDeleteTask, useArchiveTask, useCreateWikiPage,
+  useMoveTask, useDeleteTask, useArchiveTask, useCreateWikiPage, useUpdateTask,
   useUpdateWikiPage, useUpdateFieldConfig, useCreateColumn,
   useCreateSwimlane,
   useUpdateRateLimit, useClearGithubSettings,
-  useRestoreWikiRevision, wikiKeys,
+  useRestoreWikiRevision, useRevisions, wikiKeys,
   useSignIn, useRevokeWorkspaceInvite,
 } from "./queries";
 import { useUpdateTeam } from "./queries/team";
@@ -39,7 +39,7 @@ const MILESTONE: Milestone = { id: "m1", projectId: "p1", name: "v1.0", descript
 const FIELD_CONFIG: FieldConfig = { priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }], types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }] };
 const TASK: Task = {
   id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1",
-  description: { type: "doc", content: [] }, priority: "prio-1", type: "type-1",
+  description: "", priority: "prio-1", type: "type-1",
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null,
   createdAt: "t", updatedAt: "t",
 };
@@ -47,7 +47,7 @@ const MOVED_TASK: Task = { ...TASK, columnId: "c2", position: "a1" };
 const ARCHIVED_TASK: Task = { ...TASK, archivedAt: "2026-03-01T00:00:00.000Z" };
 const BOARD: Board = { project: PROJECT, columns: [COLUMN], swimlanes: [SWIMLANE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 const BOARD2: Board = { ...BOARD, columns: [...BOARD.columns, { ...COLUMN, id: "c2", name: "Done", position: 1 }] };
-const PAGE: WikiPage = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedBy: null, updatedByName: null, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" };
+const PAGE: WikiPage = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedBy: null, updatedByName: null, updatedAt: "t", content: "", createdAt: "t" };
 const PAGE2: WikiPage = { ...PAGE, id: "w2", slug: "other", title: "Other" };
 const EV = { id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "Maria", actorUserId: null, type: "created" as const, message: "m", createdAt: "t" };
 
@@ -150,6 +150,24 @@ describe("task mutations — board cache from the authoritative response", () =>
     expect(live.tasks[0]).toMatchObject({ id: "t1", columnId: "c2", position: "a1" });
     expect(boardCalls()).toBe(before);
   });
+  it("scopes a task mutation response to its request project", async () => {
+    const response = { ...TASK, title: "Saved for original project", description: "Markdown source" };
+    routes.set("PATCH /api/projects/demo/tasks/t1", { data: response, activity: [] });
+    queryClient.setQueryData(["tasks", "demo", "t1"], TASK);
+    queryClient.setQueryData(["tasks", "other-project", "t1"], { ...TASK, description: "Other project" });
+    queryClient.setQueryData<Board>(["board", "demo", false], BOARD);
+    queryClient.setQueryData<Board>(["board", "demo", true], BOARD);
+    queryClient.setQueryData<Board>(["board", "other-project", false], { ...BOARD, tasks: [{ ...TASK, title: "Other project" }] });
+    const update = renderHook(() => useUpdateTask("other-project"), { wrapper });
+    await act(async () => {
+      await update.result.current.mutateAsync({ id: "t1", projectSlug: "demo", description: response.description });
+    });
+
+    expect(queryClient.getQueryData<Task>(["tasks", "demo", "t1"])?.description).toBe(response.description);
+    expect(queryClient.getQueryData<Task>(["tasks", "other-project", "t1"])?.description).toBe("Other project");
+    expect(queryClient.getQueryData<Board>(["board", "demo", false])?.tasks[0]?.title).toBe(response.title);
+    expect(queryClient.getQueryData<Board>(["board", "other-project", false])?.tasks[0]?.title).toBe("Other project");
+  });
 
   it("useDeleteTask drops the card, detail and activity caches; useArchiveTask moves it to the archived board", async () => {
     routes.set("DELETE /api/projects/demo/tasks/t1", 204);
@@ -188,18 +206,49 @@ describe("wiki mutations", () => {
     expect(queryClient.getQueryData<WikiPage[]>(["wiki", "demo"])![0]!.title).toBe("Renamed");
     expect(queryClient.getQueryData<WikiPage>(["wikiPage", "demo", "home"])!.title).toBe("Renamed");
   });
+  it("scopes a wiki mutation response to request project, not hook project", async () => {
+    const response = { ...PAGE, title: "Saved in original project" };
+    routes.set("PATCH /api/projects/demo/wiki/home", response);
+    queryClient.setQueryData(["wiki", "demo"], [PAGE]);
+    queryClient.setQueryData(["wikiPage", "demo", "home"], PAGE);
+    queryClient.setQueryData(["wiki", "other-project"], [PAGE2]);
+    queryClient.setQueryData(["wikiPage", "other-project", "home"], PAGE2);
 
-  it("useRestoreWikiRevision refetches the limit-aware revisions key used by useRevisions", async () => {
-    routes.set("POST /api/projects/demo/wiki/home/restore", PAGE);
-    const fresh = [{ id: "r2", title: "Home", saveType: "manual" as const, createdAt: "t2" }];
-    routes.set("GET /api/projects/demo/wiki/home/revisions?limit=20", { revisions: fresh });
-    expect(wikiKeys.revisions("demo", "home", 20)).toEqual(["wikiRevisions", "demo", "home", 20]);
-    queryClient.setQueryData(wikiKeys.revisions("demo", "home", 20), []);
-    const { result } = renderHook(() => useRestoreWikiRevision("demo"), { wrapper });
-    await act(async () => { await result.current.mutateAsync({ pageSlug: "home", revisionId: "r1" }); });
-    await waitFor(() => {
-      expect(queryClient.getQueryData(wikiKeys.revisions("demo", "home", 20))).toEqual(fresh);
+    const update = renderHook(() => useUpdateWikiPage("other-project"), { wrapper });
+    await act(async () => {
+      await update.result.current.mutateAsync({ projectSlug: "demo", pageSlug: "home", title: response.title });
     });
+
+    expect(queryClient.getQueryData<WikiPage[]>(["wiki", "demo"])?.[0]?.title).toBe(response.title);
+    expect(queryClient.getQueryData<WikiPage[]>(["wiki", "other-project"])).toEqual([PAGE2]);
+    expect(queryClient.getQueryData<WikiPage>(["wikiPage", "demo", "home"])?.title).toBe(response.title);
+    expect(queryClient.getQueryData<WikiPage>(["wikiPage", "other-project", "home"])).toEqual(PAGE2);
+  });
+
+
+  it("keeps history current across a pending initial read and a fresh cached restore", async () => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    const saved = [{ id: "r2", title: "Home", saveType: "manual" as const, createdAt: "t2" }];
+    const restored = [{ id: "r3", title: "Home", saveType: "restore" as const, createdAt: "t3" }, ...saved];
+    routes.set("PATCH /api/projects/demo/wiki/home", PAGE);
+    routes.set("POST /api/projects/demo/wiki/home/restore", PAGE);
+    routes.set("GET /api/projects/demo/wiki/home/revisions?limit=20", { revisions: saved });
+    let releaseInitial!: (response: Response) => void;
+    let initialStarted = false;
+    const initial = new Promise<Response>((resolve) => { releaseInitial = resolve; });
+    fetchMock.mockImplementationOnce(() => { initialStarted = true; return initial; });
+    const history = renderHook(() => useRevisions("demo", "home", 20), { wrapper });
+    const update = renderHook(() => useUpdateWikiPage("demo"), { wrapper });
+    const restore = renderHook(() => useRestoreWikiRevision("demo"), { wrapper });
+
+    await waitFor(() => { expect(initialStarted).toBe(true); });
+    await act(async () => { await update.result.current.mutateAsync({ pageSlug: "home", content: "Saved" }); });
+    await waitFor(() => { expect(history.result.current.data).toEqual(saved); });
+    await act(async () => { releaseInitial(json({ revisions: [] })); });
+    expect(history.result.current.data).toEqual(saved);
+    routes.set("GET /api/projects/demo/wiki/home/revisions?limit=20", { revisions: restored });
+    await act(async () => { await restore.result.current.mutateAsync({ pageSlug: "home", revisionId: "r2" }); });
+    await waitFor(() => { expect(history.result.current.data).toEqual(restored); });
   });
 });
 

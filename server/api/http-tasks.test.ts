@@ -67,11 +67,46 @@ describe("task create routes", () => {
     const body = await res.json();
     expect(body.data.title).toBe("New");
     expect(body.data.priority).toBe("prio-1");
-    expect(body.data.swimlaneId).toBe("s-backlog");
+    expect(body.data.description).toBe("");
 
     const bad = await handler(json("POST", "/api/projects/p1/tasks", { columnId: "nope", title: "X" }));
     expect(bad.status).toBe(404);
     expect((await bad.json()).error.code).toBe("COLUMN_NOT_FOUND");
+  });
+  it("rejects legacy object descriptions before writing task or activity rows", async () => {
+    const taskCount = (db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE project_id = 'p1'").get() as { n: number }).n;
+    const activityCount = (db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n;
+    const description = (db.prepare("SELECT description FROM tasks WHERE id = 't1'").get() as { description: string }).description;
+    const legacy = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "old form" }] }] };
+    const create = await handler(json("POST", "/api/projects/p1/tasks", {
+      columnId: "c1",
+      title: "Legacy payload",
+      description: legacy,
+    }));
+    expect(create.status).toBeGreaterThanOrEqual(400);
+    const update = await handler(json("PATCH", "/api/projects/p1/tasks/t1", { description: legacy }));
+    expect(update.status).toBeGreaterThanOrEqual(400);
+    expect((db.prepare("SELECT description FROM tasks WHERE id = 't1'").get() as { description: string }).description).toBe(description);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE project_id = 'p1'").get() as { n: number }).n).toBe(taskCount);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM task_activity").get() as { n: number }).n).toBe(activityCount);
+  });
+  it("returns committed Markdown when an unrelated malformed destination cannot be expanded for GitHub", async () => {
+    const created = await handler(json("POST", "/api/projects/p1/tasks", { columnId: "c1", title: "URL boundary" }));
+    expect(created.status).toBe(201);
+    const task = (await created.json()).data as { id: string };
+    const source = "# Boundary\n\n[bad](//)\n";
+    try {
+      db.prepare("INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES (?, ?, ?, ?, ?)")
+        .run(task.id, "ghi-url-boundary", 7, "owner/repo", "open");
+      const response = await handler(json("PATCH", `/api/projects/p1/tasks/${task.id}`, { description: source }));
+      expect(response.status).toBe(200);
+      expect((await response.json()).data.description).toBe(source);
+      expect(db.prepare("SELECT description FROM tasks WHERE id = ?").get(task.id)).toEqual({ description: source });
+      expect(db.prepare("SELECT push_failed FROM task_github_issues WHERE issue_id = ?").get("ghi-url-boundary"))
+        .toEqual({ push_failed: 1 });
+    } finally {
+      db.prepare("DELETE FROM tasks WHERE id = ?").run(task.id);
+    }
   });
 
   it("POST into a column that requires assignee without one → 422 REQUIRED_FIELD", async () => {
@@ -384,8 +419,8 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, key,
 
 describe("activity and mentions API", () => {
   const ADMIN2_KEY = "lxk_" + "b".repeat(43);
-  const BODY = JSON.stringify({ body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] } });
-  const EMPTY_BODY = JSON.stringify({ body: { type: "doc", content: [] } });
+  const BODY = JSON.stringify({ body: "hi" });
+  const EMPTY_BODY = JSON.stringify({ body: "" });
   const headers = (key = ADMIN_KEY) => ({
     authorization: `Bearer ${key}`,
     "content-type": "application/json",
@@ -418,19 +453,19 @@ INSERT INTO swimlanes (id, project_id, name, position, kind, due_at, archived_at
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'Onboarding flow', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t2', 'p1', 'c1', 's-backlog', 'Payment retry logic', 'a1', '2026-01-01 10:00:00', 'EG-2', 2);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at, created_at, key, number) VALUES ('t-arch', 'p1', 'c2', 's-backlog', 'Onboarding archived', 'a0', '2026-02-01 10:00:00', '2026-01-01 10:00:00', 'EG-9', 9);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Roadmap', 'roadmap', '{"type":"doc","content":[]}', '', 0);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w2', 'p1', 'Unrelated page', 'unrelated', '{"type":"doc","content":[]}', '', 1);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Roadmap', 'roadmap', '', '', 0);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w2', 'p1', 'Unrelated page', 'unrelated', '', '', 1);
 -- Cap fixtures: 5 tasks + 5 wiki pages all matching q=capfill.
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('cap-t1', 'p1', 'c1', 's-backlog', 'Capfill one', 'b0', '2026-01-01 10:00:00', 'CF-1', 11);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('cap-t2', 'p1', 'c1', 's-backlog', 'Capfill two', 'b1', '2026-01-01 10:00:00', 'CF-2', 12);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('cap-t3', 'p1', 'c1', 's-backlog', 'Capfill three', 'b2', '2026-01-01 10:00:00', 'CF-3', 13);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('cap-t4', 'p1', 'c1', 's-backlog', 'Capfill four', 'b3', '2026-01-01 10:00:00', 'CF-4', 14);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('cap-t5', 'p1', 'c1', 's-backlog', 'Capfill five', 'b4', '2026-01-01 10:00:00', 'CF-5', 15);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w1', 'p1', 'Capfill w1', 'capfill-w1', '{"type":"doc","content":[]}', '', 2);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w2', 'p1', 'Capfill w2', 'capfill-w2', '{"type":"doc","content":[]}', '', 3);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w3', 'p1', 'Capfill w3', 'capfill-w3', '{"type":"doc","content":[]}', '', 4);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w4', 'p1', 'Capfill w4', 'capfill-w4', '{"type":"doc","content":[]}', '', 5);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w5', 'p1', 'Capfill w5', 'capfill-w5', '{"type":"doc","content":[]}', '', 6);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w1', 'p1', 'Capfill w1', 'capfill-w1', '', '', 2);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w2', 'p1', 'Capfill w2', 'capfill-w2', '', '', 3);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w3', 'p1', 'Capfill w3', 'capfill-w3', '', '', 4);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w4', 'p1', 'Capfill w4', 'capfill-w4', '', '', 5);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('cap-w5', 'p1', 'Capfill w5', 'capfill-w5', '', '', 6);
 -- Second project: its rows must never leak into p1 results.
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p2', 'Q', 'p2', 'ZZ', 1);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c2-1', 'p2', 'Todo', 0), ('c2-3', 'p2', 'In Review', 2);
@@ -438,10 +473,10 @@ INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2-backlog
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2-q3', 'p2', 'Q3 Sprint elsewhere', 1, 'sprint');
 INSERT INTO milestones (id, project_id, name, description, position, due_at) VALUES ('m2-zz', 'p2', 'Q3 Launch elsewhere', '', 0, NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t2-zz', 'p2', 'c2-1', 's2-backlog', 'Onboarding elsewhere', 'a0', '2026-01-01 10:00:00', 'ZZ-1', 1);
-INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w2-zz', 'p2', 'Roadmap elsewhere', 'roadmap-elsewhere', '{"type":"doc","content":[]}', '', 0);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w2-zz', 'p2', 'Roadmap elsewhere', 'roadmap-elsewhere', '', '', 0);
 -- Activity timeline fixtures for t1: one seed event + one seed comment.
 INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, created_at) VALUES ('t1', 'user', 'Maria', 'u1', 'created', 'Maria created this task', '2026-01-01 10:00:00');
-INSERT INTO task_comments (task_id, author_id, author_kind, author_label, body, created_at) VALUES ('t1', 'u1', 'user', 'Maria', '{"type":"doc","content":[]}', '2026-01-02 10:00:00');
+INSERT INTO task_comments (task_id, author_id, author_kind, author_label, body, created_at) VALUES ('t1', 'u1', 'user', 'Maria', '', '2026-01-02 10:00:00');
 `);
     db.close();
     actHandler = createApiHandler(dbPath);
@@ -526,7 +561,7 @@ INSERT INTO task_comments (task_id, author_id, author_kind, author_label, body, 
       expect(res.status).toBe(201);
       const { data } = await res.json();
       expect(data.comment.authorLabel).toBe("Maria");
-      expect(data.comment.body).toEqual(JSON.parse(BODY).body);
+      expect(data.comment.body).toBe("hi");
       expect(data.activity.type).toBe("commented");
       expect(data.activity.message).toBe("Maria commented");
 

@@ -1,27 +1,29 @@
-import type { ReactNode } from "react";
-import { marked, type Token, type Tokens } from "marked";
+import { headingCollectionExtension } from "@tanstack/markdown/extensions/headings";
+import { Children, isValidElement, type ComponentPropsWithoutRef, type ReactElement, type ReactNode } from "react";
+import { parseMarkdown, type MarkdownExtension, type RenderOptions } from "@tanstack/markdown";
+import { renderMarkdownReact, type MarkdownComponents } from "@tanstack/markdown/react";
 import hljs from "highlight.js/lib/common";
-import { withKeys } from "./withKeys";
-import { safeHref } from "../../shared/safe-href";
+import { safeHref, safeRelativeHref } from "../../shared/safe-href";
+import { normalizeTaskListMarkersForParsing, safeImageSrc } from "../../shared/markdown";
 
-// Assistant-transcript markdown → React elements. LLM output is UNTRUSTED,
-// so this never touches dangerouslySetInnerHTML EXCEPT for highlighted code:
-// hljs escapes its output by design and we escape the fallback path too
-// (highlightBoundary note below). Links allow http(s) only
-// (javascript:/data:/relative hrefs degrade to plain text) and open in a new
-// tab; images never load — they collapse to their alt text; raw HTML tokens
-// are dropped entirely. Partial markdown degrades gracefully: an unterminated
-// `**` pair or ``` fence just renders as text/code until closed.
+export type MarkdownSurface = "chat" | "task" | "document" | "comment" | "share";
 
-export interface MarkdownRenderOptions {
-  // Hook for plain-text leaves (e.g. mention-chip tokenization). Never
-  // applied inside code spans/blocks — those keep literal semantics.
-  renderText?: ((text: string) => ReactNode) | undefined;
+export interface ShareRenderContext {
+  token: string;
+  /** Wiki page slug -> page id for pages inside the shared subtree. */
+  pageIds: Map<string, string>;
 }
 
-// Highlighted-code boundary: the ONLY dangerouslySetInnerHTML in chat. Input
-// is untrusted; output is hljs's escaped HTML, or our own escaped fallback
-// when hljs throws or the grammar is unknown.
+export const SHARE_OUTSIDE_SUBTREE = "__outside__";
+
+export interface MarkdownRenderOptions {
+  renderText?: ((text: string) => ReactNode) | undefined;
+  surface?: MarkdownSurface | undefined;
+  share?: ShareRenderContext | undefined;
+  headingIds?: ((text: string, index: number) => string) | undefined;
+  headingAnchors?: boolean | RenderOptions["headingAnchors"];
+}
+
 export function highlightCode(code: string, lang?: string): string {
   try {
     if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
@@ -31,161 +33,194 @@ export function highlightCode(code: string, lang?: string): string {
   }
 }
 
-export const BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4"]);
+const ATTACHMENT_SRC_RE = /^\/api\/attachments\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 
-function renderInline(tokens: Token[] | undefined, opts: MarkdownRenderOptions): ReactNode[] {
-  return withKeys(tokens ?? [], (t) => t.type).map(({ item: t, key: k }) => {
-    switch (t.type) {
-      case "text":
-        return (
-          <span key={k}>
-            {"tokens" in t && t.tokens ? renderInline(t.tokens, opts) : (opts.renderText ? opts.renderText((t as Tokens.Text).text) : (t as Tokens.Text).text)}
-          </span>
-        );
-      case "escape":
-        return <span key={k}>{(t as Tokens.Escape).text}</span>;
-      case "strong":
-        return <strong key={k}>{renderInline((t as Tokens.Strong).tokens, opts)}</strong>;
-      case "em":
-        return <em key={k}>{renderInline((t as Tokens.Em).tokens, opts)}</em>;
-      case "del":
-        return <del key={k}>{(t as Tokens.Del).text}</del>;
-      case "codespan":
-        return <code key={k}>{(t as Tokens.Codespan).text}</code>;
-      case "link": {
-        const link = t as Tokens.Link;
-        const href = safeHref(link.href);
-        const inner = renderInline(link.tokens, opts);
-        if (!href) return <span key={k}>{inner}</span>;
-        return (
-          <a key={k} href={href} target="_blank" rel="noopener noreferrer">
-            {inner}
-          </a>
-        );
-      }
-      case "image":
-        return <span key={k}>{opts.renderText ? opts.renderText((t as Tokens.Image).text) : (t as Tokens.Image).text}</span>;
-      case "br":
-        return <br key={k} />;
-      default:
-        return null;
+function sharePageHref(share: ShareRenderContext, pageId: string): string {
+  return `/share/${encodeURIComponent(share.token)}?page=${encodeURIComponent(pageId)}`;
+}
+
+function resolveShareHref(href: string, share: ShareRenderContext): string {
+  if (!href.startsWith("/") || href.startsWith("/share/")) return href;
+  const segment = /\/wiki\/([^/?#]+)/.exec(href)?.[1];
+  if (segment !== undefined) {
+    let slug = segment;
+    try {
+      slug = decodeURIComponent(segment);
+    } catch {
+      // Malformed escapes cannot match a validated page slug.
     }
+    const pageId = share.pageIds.get(slug);
+    if (pageId) return sharePageHref(share, pageId);
+  }
+  return sharePageHref(share, SHARE_OUTSIDE_SUBTREE);
+}
+
+function transformUrl(url: string, kind: "link" | "image", surface: MarkdownSurface, share?: ShareRenderContext): string | null {
+  if (kind === "image") {
+    if (surface === "chat" || surface === "comment") return null;
+    const safe = safeImageSrc(url);
+    if (!safe) return null;
+    const attachmentId = share && ATTACHMENT_SRC_RE.exec(safe)?.[1];
+    return attachmentId ? `/api/share/${encodeURIComponent(share.token)}/attachments/${attachmentId}` : safe;
+  }
+  const safe = surface === "chat" || surface === "comment" ? safeHref(url) : safeRelativeHref(url);
+  return safe && surface === "share" && share ? resolveShareHref(safe, share) : safe;
+}
+
+function textComponent(renderText?: (text: string) => ReactNode) {
+  return (props: ComponentPropsWithoutRef<"span"> & { "data-markdown-text"?: string }): ReactNode => {
+    const text = props["data-markdown-text"];
+    if (renderText && typeof text === "string") return renderText(text);
+    return <span>{props.children}</span>;
+  };
+}
+
+function isCheckbox(node: ReactNode): node is ReactElement<ComponentPropsWithoutRef<"input">> {
+  return isValidElement<ComponentPropsWithoutRef<"input">>(node) && node.type === "input" && node.props.type === "checkbox";
+}
+
+function renderDocumentList({ children, className, ...props }: ComponentPropsWithoutRef<"ul">, proseClass?: string) {
+  const items = Children.toArray(children);
+  const taskList = items.length > 0 && items.every((item) =>
+    isValidElement<{ children?: ReactNode }>(item) && isCheckbox(Children.toArray(item.props.children)[0]));
+  return <ul {...props} className={taskList ? "checklist" : proseClass ?? className}>{children}</ul>;
+}
+
+function renderDocumentListItem({ children, ...props }: ComponentPropsWithoutRef<"li">) {
+  const parts = Children.toArray(children);
+  const checkbox = parts[0];
+  if (!isCheckbox(checkbox)) return <li {...props}>{children}</li>;
+  const checked = checkbox.props.checked === true;
+  return <li {...props} className={checked ? "checked" : undefined}>
+    <span className={checked ? "checkbox checked" : "checkbox"} />
+    <div className="min-w-0">{parts.slice(parts[1] === " " ? 2 : 1)}</div>
+  </li>;
+}
+
+const taskHeadingFour = (props: ComponentPropsWithoutRef<"h4">) => <h4 {...props} className="td-h3" />;
+const wikiHeadingFour = (props: ComponentPropsWithoutRef<"h4">) => <h4 {...props} tabIndex={-1} />;
+
+const taskComponents: MarkdownComponents = {
+  p: (props) => <p {...props} className="td-p" />,
+  h1: (props) => <h1 {...props} className="td-h1" />,
+  h2: (props) => <h2 {...props} className="td-h2" />,
+  h3: (props) => <h3 {...props} className="td-h3" />,
+  h4: taskHeadingFour,
+  h5: taskHeadingFour,
+  h6: taskHeadingFour,
+  ul: (props) => renderDocumentList(props, "td-ul"),
+  ol: (props) => <ol {...props} className="td-ol" />,
+  li: renderDocumentListItem,
+  code: ({ className, ...props }) => <code {...props} className={`td-code${className ? ` ${className}` : ""}`} />,
+  pre: (props) => <pre {...props} className="td-pre" />,
+  blockquote: (props) => <blockquote {...props} className="td-quote" />,
+  hr: (props) => <hr {...props} className="td-hr" />,
+  table: (props) => <div className="td-table-wrap"><table {...props} className="td-table" /></div>,
+};
+
+const wikiComponents: MarkdownComponents = {
+  h1: (props) => <h1 {...props} tabIndex={-1} />,
+  h2: (props) => <h2 {...props} tabIndex={-1} />,
+  h3: (props) => <h3 {...props} tabIndex={-1} />,
+  h4: wikiHeadingFour,
+  h5: wikiHeadingFour,
+  h6: wikiHeadingFour,
+  ul: (props) => renderDocumentList(props),
+  li: renderDocumentListItem,
+  table: (props) => <div className="table-wrap"><table {...props} /></div>,
+};
+
+const chatComponents: MarkdownComponents = {
+  h5: "h4",
+  h6: "h4",
+  code: ({ className, ...props }) => <code {...props} className={`hljs-theme${className ? ` ${className}` : ""}`} />,
+};
+
+export function markdownToReact(source: string, options: MarkdownRenderOptions = {}): ReactNode {
+  const surface = options.surface ?? "chat";
+  const textExtension: MarkdownExtension | undefined = options.renderText ? {
+    name: "render-plain-markdown-text",
+    transformInline(nodes) {
+      return nodes.map((node) => node.type === "text"
+        ? {
+            type: "inlineComponent" as const,
+            name: "render-text",
+            tagName: "span",
+            properties: { "data-markdown-text": node.value },
+            attributes: {},
+            children: [],
+          }
+        : node);
+    },
+  } : undefined;
+  const components: MarkdownComponents = {
+    ...(surface === "task" || surface === "comment" ? taskComponents : surface === "chat" ? chatComponents : wikiComponents),
+    a: ({ href, children, ...props }) => href
+      ? <a {...props} href={href} target={/^https?:/i.test(href) ? "_blank" : undefined} rel={/^https?:/i.test(href) ? "noopener noreferrer" : undefined}>{children}</a>
+      : <span>{children}</span>,
+    img: ({ src, alt }) => surface === "comment"
+      ? null
+      : surface === "chat" || !src
+        ? <>{alt}</>
+        : <img src={src} alt={alt ?? ""} loading="lazy" className={surface === "task" ? "td-img" : undefined} />,
+    span: textComponent(options.renderText),
+  };
+  return renderMarkdownReact(normalizeTaskListMarkersForParsing(source), {
+    allowHtml: false,
+    frontmatter: false,
+    urlTransform: (url, kind) => transformUrl(url, kind, surface, options.share),
+    ...(options.headingIds && { headingIds: options.headingIds }),
+    ...(options.headingAnchors !== undefined && { headingAnchors: options.headingAnchors }),
+    ...(surface === "chat" && { highlighter: highlightCode }),
+    extensions: textExtension ? [textExtension] : [],
+    components,
   });
 }
 
-function listItem(item: Tokens.ListItem, opts: MarkdownRenderOptions, key: string): ReactNode {
-  return (
-    <li key={key}>
-      {item.task && (
-        <input
-          type="checkbox"
-          disabled
-          checked={item.checked === true}
-          readOnly
-          aria-label={typeof item.text === "string" ? item.text : undefined}
-        />
-      )}
-      {withKeys(item.tokens ?? [], (t) => t.type).map(({ item: t, key: tk }) =>
-        t.type === "text" ? (
-          <span key={tk}>
-            {"tokens" in t && t.tokens ? renderInline(t.tokens, opts) : (opts.renderText ? opts.renderText((t as Tokens.Text).text) : (t as Tokens.Text).text)}
-          </span>
-        ) : (
-          renderBlock(t, opts, tk)
-        )
-      )}
-    </li>
-  );
+export function slugifyHeading(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-export function renderBlock(t: Token, opts: MarkdownRenderOptions, key: string): ReactNode {
-  switch (t.type) {
-    case "space":
-    case "def":
-      return null;
-    case "paragraph":
-      return <p key={key}>{renderInline((t as Tokens.Paragraph).tokens, opts)}</p>;
-    case "heading": {
-      const h = t as Tokens.Heading;
-      const tag = `h${Math.min(h.depth, 4)}` as "h1" | "h2" | "h3" | "h4";
-      const inner = renderInline(h.tokens, opts);
-      return createElementFor(tag, key, inner);
-    }
-    case "code": {
-      const code = t as Tokens.Code;
-      return (
-        <pre key={key}>
-          <code
-            className="hljs-theme"
-            dangerouslySetInnerHTML={{ __html: highlightCode(code.text, code.lang || undefined) }}
-          />
-        </pre>
-      );
-    }
-    case "hr":
-      return <hr key={key} />;
-    case "blockquote":
-      return <blockquote key={key}>{withKeys((t as Tokens.Blockquote).tokens, (child) => child.type).map(({ item: child, key: ck }) => renderBlock(child, opts, ck))}</blockquote>;
-    case "list": {
-      const list = t as Tokens.List;
-      const items = withKeys(list.items, () => "li").map(({ item, key: ik }) => listItem(item, opts, ik));
-      if (!list.ordered) return <ul key={key}>{items}</ul>;
-      return (
-        <ol key={key} {...(list.start && list.start !== 1 ? { start: list.start } : {})}>
-          {items}
-        </ol>
-      );
-    }
-    case "table": {
-      const table = t as Tokens.Table;
-      return (
-        <table key={key}>
-          <thead>
-            <tr>
-              {withKeys(table.header, () => "th").map(({ item: cell, key: hk }) => (
-                <th key={hk}>{renderInline(cell.tokens, opts)}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {withKeys(table.rows, () => "tr").map(({ item: row, key: rk }) => (
-              <tr key={rk}>
-                {withKeys(row, () => "td").map(({ item: cell, key: ck }) => (
-                  <td key={ck}>{renderInline(cell.tokens, opts)}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      );
-    }
-    case "html":
-    case "tag":
-      return null;
-    case "text":
-      return (
-        <span key={key}>
-          {"tokens" in t && t.tokens ? renderInline(t.tokens, opts) : (opts.renderText ? opts.renderText((t as Tokens.Text).text) : (t as Tokens.Text).text)}
-        </span>
-      );
-    default:
-      return null;
-  }
+export interface HeadingOutline {
+  level: number;
+  text: string;
+  id: string;
 }
 
-function createElementFor(tag: "h1" | "h2" | "h3" | "h4", key: string, children: ReactNode): ReactNode {
-  if (tag === "h1") return <h1 key={key}>{children}</h1>;
-  if (tag === "h2") return <h2 key={key}>{children}</h2>;
-  if (tag === "h3") return <h3 key={key}>{children}</h3>;
-  return <h4 key={key}>{children}</h4>;
+export interface HeadingPlan {
+  headings: HeadingOutline[];
+  createHeadingIds: () => (text: string, index: number) => string;
 }
 
-export function lexMarkdown(md: string) {
-  return marked.lexer(md);
+function uniqueHeadingId(base: string, used: Set<string>): string {
+  const root = base || "section";
+  let id = root;
+  let suffix = 1;
+  while (used.has(id)) id = `${root}-${++suffix}`;
+  used.add(id);
+  return id;
 }
 
-export function markdownToReact(md: string, opts: MarkdownRenderOptions = {}): ReactNode[] {
-  return withKeys(marked.lexer(md), (t) => t.type)
-    .map(({ item: t, key }) => renderBlock(t, opts, key))
-    .filter((n) => n !== null);
+export function planHeadings(source: string, reserved: Iterable<string> = []): HeadingPlan {
+  const used = new Set(reserved);
+  const ids = new Map<number, string>();
+  const document = parseMarkdown(normalizeTaskListMarkersForParsing(source), {
+    allowHtml: false,
+    frontmatter: false,
+    headingIds: (text, index) => {
+      const id = uniqueHeadingId(slugifyHeading(text), used);
+      ids.set(index, id);
+      return id;
+    },
+    extensions: [headingCollectionExtension()],
+  });
+  return {
+    headings: (document.headings ?? []).map((heading) => ({ level: Math.min(heading.level, 4), text: heading.text, id: heading.id })),
+    // The native parser indexes headings by source line, not heading ordinal.
+    createHeadingIds: () => (_text, index) => ids.get(index)!,
+  };
 }
+
+export const BLOCK_TAGS: Readonly<Record<string, true>> = {
+  p: true, h1: true, h2: true, h3: true, h4: true, li: true, blockquote: true, td: true, th: true,
+};

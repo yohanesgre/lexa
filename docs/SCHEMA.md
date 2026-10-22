@@ -197,7 +197,7 @@ CREATE TABLE workspace_invitations (
 -- ============================================================
 -- required_fields: JSON array of fields a task must have populated
 --   before entering this column, e.g. '["description","assignee"]'.
---   Emptiness for "description" = TipTap doc with no text-bearing nodes.
+--   Emptiness for "description" = meaningful Markdown content (see ADR-0007).
 --   Emptiness for "assignee" = task_assignees has no rows for this task.
 -- github_state: maps this column to a GitHub issue state for sync.
 --   Exactly one column per project should map to 'closed' (e.g. Done).
@@ -332,7 +332,7 @@ CREATE TABLE tasks (
                                                              -- deleting non-empty column → HasChildren 409
   swimlane_id         TEXT NOT NULL REFERENCES swimlanes(id),
   title               TEXT NOT NULL,
-  description         TEXT NOT NULL DEFAULT '{"type":"doc","content":[]}', -- TipTap JSON
+  description         TEXT NOT NULL DEFAULT '', -- Markdown; new tasks start empty
   priority            TEXT NOT NULL DEFAULT 'medium',        -- label string — no FK
   type                TEXT NOT NULL DEFAULT 'task',          -- label string — no FK
   position            TEXT NOT NULL,                         -- fractional-index key
@@ -448,7 +448,7 @@ CREATE INDEX idx_chat_attachments_storage_key ON chat_attachments(storage_key);
 CREATE INDEX idx_chat_attachments_project ON chat_attachments(project_id);
 
 -- ============================================================
--- Wiki Pages (nested, TipTap content)
+-- Wiki Pages (nested, Markdown content)
 -- ============================================================
 -- parent_id ON DELETE RESTRICT: deleting a page with children fails
 --   (HasChildren-style 409) — forces explicit move/delete of children.
@@ -460,8 +460,8 @@ CREATE TABLE wiki_pages (
   project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title        TEXT NOT NULL,
   slug         TEXT NOT NULL,
-  content      TEXT NOT NULL DEFAULT '{}',                   -- TipTap JSON
-  content_text TEXT NOT NULL DEFAULT '',                     -- app-maintained plain text
+  content      TEXT NOT NULL DEFAULT '',                   -- Markdown
+  content_text TEXT NOT NULL DEFAULT '',                   -- app-maintained plain-text projection
   parent_id    TEXT REFERENCES wiki_pages(id) ON DELETE RESTRICT,
   position     INTEGER NOT NULL DEFAULT 0,                   -- ordering within siblings
   updated_by   TEXT,                                         -- users.id of the last save; NULL for legacy rows
@@ -503,8 +503,8 @@ CREATE TABLE wiki_page_revisions (
   page_id      TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
   title        TEXT NOT NULL,
   slug         TEXT NOT NULL,
-  content      TEXT NOT NULL,                              -- TipTap JSON
-  content_text TEXT NOT NULL DEFAULT '',                   -- plain text snapshot
+  content      TEXT NOT NULL,                              -- Markdown source
+  content_text TEXT NOT NULL DEFAULT '',                   -- plain-text snapshot
   save_type    TEXT NOT NULL CHECK (save_type IN ('autosave', 'manual')),
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -1145,12 +1145,21 @@ CREATE TABLE task_comments (
   author_kind  TEXT NOT NULL DEFAULT 'user'
                CHECK (author_kind IN ('user','agent','system')),
   author_label TEXT NOT NULL,        -- frozen at write time
-  body         TEXT NOT NULL,        -- TipTap JSON doc (≤64KB, non-empty)
+  body         TEXT NOT NULL,        -- Markdown source (≤65,536 JS chars after JSON.stringify; non-whitespace text)
   edited_at    TEXT,                 -- set on edit → UI "edited" marker
   deleted_at   TEXT,                 -- soft delete → hidden from timeline
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_task_comments_task ON task_comments(task_id, created_at, id);
+
+-- Migration 0030: one row per converted source row; hashes only, no document bodies.
+CREATE TABLE _markdown_migration (
+  table_name  TEXT NOT NULL,
+  row_key     TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  target_hash TEXT NOT NULL,
+  PRIMARY KEY (table_name, row_key)
+);
 
 CREATE TABLE task_activity (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1431,7 +1440,7 @@ Normative: archived tasks do not count toward WIP limits.
 Every Lexa→GitHub state sync writes the state we pushed to `task_github_issues.synced_state` for that specific issue. The webhook handler compares the payload's issue state against `synced_state`: equal → our own echo → skip. Without this, every move triggers a self-reinforcing webhook storm.
 
 ### Content echo suppression (`pushed_title` / `pushed_body`)
-Content sync (title + description) is asymmetric: Lexa pushes on task save (TipTap → Markdown), GitHub pushes back via the `edited` webhook (Markdown → TipTap). The webhook echo check fetches the issue and skips only when the fetched title **and** body both match `pushed_title`/`pushed_body` after trimming + CRLF→LF normalization (our pushes always send title+body together, so a title match alone is not proof of echo). `push_failed` records a failed Lexa→GitHub content push for the inline divergence badge ("out of sync — edit not pushed").
+Content sync (title + description) is asymmetric and echo-safe: both Lexa and GitHub exchange Markdown source. The webhook skips a fetched title/body pair matching `pushed_*` after trimming + CRLF→LF normalization; matching only title is insufficient. `push_failed` records a failed Lexa→GitHub push.
 
 ### One task ↔ many issues
 Multiple GitHub issues can link to one task. Each link has its own `synced_state` for per-issue echo suppression. The webhook looks up by `issue_id` in `task_github_issues` to find the task.
@@ -1448,16 +1457,17 @@ Two-level model: `attachments` rows are scoped to a project (UNIQUE(project_id, 
 `chat_attachments` (0015) holds files attached to an Assistant chat message: images feed the existing vision path (`image-ref` parts) and PDF/Markdown/plain-text files become model-visible extracted text (`document-ref` parts, persisted in `assistant_threads.messages` like image refs). Differences from `attachments`:
 
 - **Lifecycle:** a row is bound to its conversation by the composite FK `(document_type, document_id) → assistant_threads(document_type, document_id)` with `ON DELETE CASCADE`; it dies with the thread (never listed on a project's attachment surface, never emits `task_activity`).
+- **Privacy:** upload/list/read/delete and model/vision/conversion loading require the current thread and its authenticated user owner. There is no project/team admin or superadmin exception. Task/wiki attachments remain project-bound; a shared physical blob does not grant access through a private chat row.
 - **No dedupe:** `chat_attachments` carries no `UNIQUE(project_id, sha256)` — every upload is its own row, though the blob stays content-addressed and shared.
 - **Blob lifecycle:** the same refcount rule as `attachments`, but counted across BOTH tables — a blob is dropped only when the last row in `attachments` **and** `chat_attachments` referencing its `storage_key` goes. Orphan blobs remain possible and harmless.
-- **Server-side extraction:** text/markdown decode directly; PDFs extract through `unpdf` (`server/services/assistant-helpers.ts`). A document that yields no text blocks the send with `ATTACHMENT_EXTRACTION_FAILED`.
+- **Server-side conversion:** UTF-8 text/Markdown decode directly; approved binary formats use the optional Workers AI `toMarkdown` capability (`server/document-conversion.ts`). Missing capability, failed conversion or empty output blocks the send with `ATTACHMENT_EXTRACTION_FAILED`; no local binary-extraction fallback.
 - **Caps (D4):** ≤3 attachments per message (images + documents share the count), ≤5 MB per file, ≤10 MB per message; zero-byte and unsupported types rejected. Kill switch `LXK_DISABLE_CHAT_ATTACHMENTS=1` disables uploads and sends-with-attachments.
 
 ### FTS5 for `search_wiki`
-The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` (plain-text projection of TipTap JSON) on every wiki write — searching raw TipTap JSON would match syntax tokens, not words.
+The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` as a plain-text projection of Markdown on every wiki write; searching Markdown source would match syntax as well as words.
 
-### Mentions are document nodes, not rows
-A mention is a TipTap node `{ type: "mention", attrs: { refType: "task"|"wiki", refId, label } }` living inside the existing description/content JSON — no table, column, index, or notification rows. Autocomplete is served by a read-only cross-repo search (`MentionService`, cap 8); GitHub push renders mentions as absolute deep links (`${PUBLIC_URL}/{slug}/...`) while pull degrades them back to plain links, keeping `pushed_body` byte-stable for echo suppression.
+### Markdown links are document references, not rows
+A task/wiki reference is a Markdown hyperlink in the existing description/content string; no table, column, index, or notification rows. Autocomplete is a read-only cross-repo search (`MentionService`, cap 8). GitHub receives stable deep links for task/wiki references.
 
 ### `updated_at` is app-maintained
 Every repo `update*` method sets `updated_at = datetime('now')` in the same statement. No triggers — the write path is already centralized in repositories.
@@ -1483,5 +1493,26 @@ Bun `BEGIN IMMEDIATE` serializes the check against a reciprocal writer; on D1
 ### SQLite notes (unchanged from v1)
 - TEXT UUIDs via `crypto.randomUUID()` in Bun.
 - SQLite is local (WAL) — reads are immediate. Frontend still updates its cache from mutation responses (TanStack Query `setQueryData`), not refetch, because the mutation response is the authoritative state.
-- No row-size limits at this scale: fine for TipTap docs.
+- No row-size limits at this scale: fine for Markdown source.
 - `webhook_events` grows unboundedly → periodic prune (`DELETE WHERE received_at < datetime('now','-7 days')`) on a timer or at boot.
+
+### Canonical Markdown documents
+Task descriptions, wiki page/revision content, and task comment bodies are
+Markdown strings at their existing column names. Writes preserve source exactly.
+`content_text` is a derived plain-text projection and wiki FTS remains trigger-
+maintained. New task/wiki rows use `''`; 0030 changes defaults without editing
+historical migration SQL.
+
+`settings.key='documents.format'` stores `tiptap-v1`, `migrating-markdown-v1`,
+or `markdown-v1`. Empty databases start ready; existing document/proposal rows
+start `tiptap-v1`. `_markdown_migration` records `(table_name,row_key)` and
+source/target SHA-256 hashes. Each hash marker commits atomically with its
+source compare-and-swap update. Only fully converted and verified databases
+reach `markdown-v1`; the application format guard refuses all other states.
+Pending/approved assistant proposals have `args` and `diff` migrated; decided
+history remains immutable.
+All four document columns and their API fields store Markdown strings, not
+TipTap/ProseMirror JSON. Saves do not parse or reserialize source; object
+payloads are rejected. `legacy-tiptap.ts` is isolated to the explicit offline
+upgrade. Its conversion is strict and no-loss: unsupported or malformed legacy
+content is reported and blocks apply rather than being stripped or guessed.
