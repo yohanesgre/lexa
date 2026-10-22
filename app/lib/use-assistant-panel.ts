@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Editor } from "@tiptap/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { MarkdownSource } from "../components/editor/MarkdownEditorPane";
 import {
   useProjects,
   useAssistantSettings,
@@ -29,13 +29,12 @@ import {
 // AssistantPanel* view files.
 
 type PanelArgs = {
-  editor: Editor;
+  sourceRef: { current: MarkdownSource | null };
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
 };
-
-function useAssistantPanelData({ editor, slug, documentType, documentId }: PanelArgs) {
+function useAssistantPanelData({ sourceRef, slug, documentType, documentId }: PanelArgs) {
   const { data: projects = [] } = useProjects();
   // null after load = PROVIDER_NOT_CONFIGURED → empty state + disabled Generate.
   const projectId = projects.find((p) => p.slug === slug)?.id;
@@ -45,19 +44,16 @@ function useAssistantPanelData({ editor, slug, documentType, documentId }: Panel
   // open doc mapped to attachment rows (taskId / wiki pageSlug per type).
   const { data: taskRows } = useTaskAttachments(slug, attachmentQueryId(documentType, "task", documentId));
   const { data: wikiRows } = useWikiAttachments(slug, attachmentQueryId(documentType, "wiki", documentId));
-  // Embed add/remove is an editor update, not a prop change — bump an epoch so
-  // the display list re-reads the doc even though `editor` is stable.
   const [docEpoch, setDocEpoch] = useState(0);
   useEffect(() => {
-    const bump = () => setDocEpoch((e) => e + 1);
-    editor.on("update", bump);
-    return () => {
-      editor.off("update", bump);
-    };
-  }, [editor]);
+    const source = sourceRef.current;
+    if (!source) return;
+    return source.subscribe(() => setDocEpoch((epoch) => epoch + 1));
+  }, [sourceRef, sourceRef.current]);
+  const sourceText = sourceRef.current?.getValue() ?? "";
   const docImages = useMemo(
-    () => toDocImages(pickAttachmentRows(documentType, taskRows, wikiRows), editor),
-    [editor, documentType, taskRows, wikiRows, docEpoch]
+    () => toDocImages(pickAttachmentRows(documentType, taskRows, wikiRows), sourceText),
+    [sourceText, documentType, taskRows, wikiRows, docEpoch]
   );
 
   return {
@@ -77,9 +73,8 @@ type RunArgs = PanelArgs & {
   taskRows: Attachment[] | undefined;
   wikiRows: Attachment[] | undefined;
 };
-
 function useAssistantRun(args: RunArgs) {
-  const { editor, slug, documentType, documentId, prompt, taskRows, wikiRows } = args;
+  const { sourceRef, slug, documentType, documentId, prompt, taskRows, wikiRows } = args;
   const createTask = useCreateAssistantTask();
   const cancelTask = useCancelAssistantTask();
   // Rehydrate the last run for this document: closing the popover keeps the
@@ -133,45 +128,35 @@ function useAssistantRun(args: RunArgs) {
     }
   }, [live, assistantTaskData]);
 
-  // Selection label updates on editor selection/doc changes; the run reads the
-  // selection fresh at click time (never a stale render value).
-  const [selectionText, setSelectionText] = useState(() => getSelection(editor).text);
+  const [selectionText, setSelectionText] = useState(() => getSelection(sourceRef.current).text);
   useEffect(() => {
-    const update = () => setSelectionText(getSelection(editor).text);
+    const source = sourceRef.current;
+    if (!source) return;
+    const update = () => setSelectionText(getSelection(sourceRef.current).text);
     update();
-    editor.on("selectionUpdate", update);
-    editor.on("update", update);
-    return () => {
-      editor.off("selectionUpdate", update);
-      editor.off("update", update);
-    };
-  }, [editor]);
+    return source.subscribe(update);
+  }, [sourceRef]);
 
   const running = stream.status === "connecting" || stream.status === "streaming";
   const done = stream.status === "done";
   const failed = stream.status === "error";
 
   const generate = useCallback(() => {
-    const selection = getSelection(editor);
-    const selectionMarkdown = resolveRunSelection(selection);
-    const images = toDocImages(pickAttachmentRows(documentType, taskRows, wikiRows), editor);
+    const selectionMarkdown = resolveRunSelection(getSelection(sourceRef.current));
+    const sourceText = sourceRef.current?.getValue() ?? "";
+    const images = toDocImages(pickAttachmentRows(documentType, taskRows, wikiRows), sourceText);
     createTask.mutate(
       buildRunRequest({ slug, documentType, documentId, prompt, selection: selectionMarkdown, docImages: images }),
       {
         onSuccess: (task) => {
           setTaskId(task.id);
           patchAssistantPanelSession(slug, documentType, documentId, { taskId: task.id });
-          // Boot the run's SSE session through the module store: this hook is
-          // still bound to the previous (null/old) key on this tick, so the
-          // POST must go through `assistantSendForKey`; the hook subscribes to
-          // the new session on the next render. The document thread key matches
-          // the key the hook derives once the task row loads.
           const key = `${documentType === "wiki" ? "assistant-wiki" : "assistant-task"}:${documentId}`;
           assistantSendForKey(key, `/api/assistant/tasks/${task.id}/stream`, {});
         },
       }
     );
-  }, [editor, createTask, slug, documentType, documentId, prompt, taskRows, wikiRows]);
+  }, [sourceRef, createTask, slug, documentType, documentId, prompt, taskRows, wikiRows]);
 
   const stop = useCallback(() => {
     if (!taskId) return;

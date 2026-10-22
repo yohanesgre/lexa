@@ -61,6 +61,17 @@ export class ChatAttachmentRepo extends Effect.Service<ChatAttachmentRepo>()("Le
           Effect.map((row) => row),
           Effect.catchTag("RowNotFound", () => Effect.succeed(null))
         ),
+      findByOwnedThread: (documentType: string, documentId: string, projectId: string, ownerUserId: string): Effect.Effect<ChatAttachmentRow[], DbError> =>
+        queryAll<ChatAttachmentRow>(
+          db,
+          `SELECT ca.* FROM chat_attachments ca
+           JOIN assistant_threads t
+             ON t.document_type = ca.document_type AND t.document_id = ca.document_id
+           WHERE ca.document_type = ? AND ca.document_id = ?
+             AND ca.project_id = ? AND t.project_id = ? AND t.owner_user_id = ?
+           ORDER BY ca.created_at ASC, ca.id ASC`,
+          documentType, documentId, projectId, projectId, ownerUserId
+        ),
 
       findByThread: (documentType: string, documentId: string): Effect.Effect<ChatAttachmentRow[], DbError> =>
         queryAll<ChatAttachmentRow>(

@@ -1,14 +1,12 @@
-import { useMemo, useState } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
-import type { JSONContent } from "@tiptap/core";
-import Placeholder from "@tiptap/extension-placeholder";
+import { useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { TaskComment } from "../../../shared/types";
-import { extractText } from "../../../shared/tiptap-text";
-import { textEditorExtensions } from "../../lib/tiptap";
+import { isMarkdownEmpty, markdownToText } from "../../../shared/markdown";
+import { MarkdownEditorPane, type MarkdownTarget } from "../editor/MarkdownEditorPane";
 import { CommentToolbar } from "./CommentToolbar";
 import { CommentBody } from "./CommentBody";
 import { RobotGlyph } from "./RobotGlyph";
+import { parseApiDate } from "../../lib/date";
 
 export interface CurrentUser {
   id: string | null;
@@ -35,7 +33,7 @@ function initials(name: string): string {
 }
 
 function formatTime(iso: string): string {
-  const d = new Date(iso);
+  const d = parseApiDate(iso);
   const diff = Date.now() - d.getTime();
   if (diff < 60_000) return "now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
@@ -111,42 +109,45 @@ function CommentHeaderMeta({ isAgent, label }: { isAgent: boolean; label: string
 
 export function CommentCard({ comment, members, currentUser, onDelete, onUpdate }: CommentCardProps) {
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.body);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const sessionRef = useRef(0);
+  const draftRef = useRef(draft);
+  const targetRef = useRef<MarkdownTarget | null>(null);
   const isAgent = comment.authorKind === "agent" || comment.authorKind === "system";
   const isAuthor = !isAgent && comment.authorId !== null && comment.authorId === currentUser.id;
   const canEdit = isAuthor;
   const canDelete = isAuthor || currentUser.role === "admin";
-  // Provenance pill (assistant-write-approvals.html State 5): comments posted by
-  // the add_comment tool. Fixed at creation — later edits keep it. Read
-  // defensively; the field rides the API payload when serialized.
   const viaAssistant = (comment as { viaAssistant?: unknown }).viaAssistant === true;
-
-  const extensions = useMemo(
-    () =>
-      textEditorExtensions.map((e) =>
-        (e as { name?: string } | null)?.name === "placeholder"
-          ? Placeholder.configure({ placeholder: "Edit comment…" })
-          : e
-      ),
-    []
-  );
-
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions,
-    content: comment.body as unknown as JSONContent,
-    editorProps: {
-      attributes: { class: "composer-editor" },
-    },
-  });
+  const saveDisabled = isMarkdownEmpty(draft) || markdownToText(draft).trim() === "" || JSON.stringify(draft).length > 65_536;
 
   const handleSave = async () => {
-    if (!editor || extractText(editor.getJSON() as TaskComment["body"]).trim() === "") return;
+    if (saveDisabled || savingRef.current) return;
+    const session = sessionRef.current;
+    const submitted = draftRef.current;
+    savingRef.current = true;
+    setSaving(true);
     try {
-      await onUpdate(comment.id, editor.getJSON() as TaskComment["body"]);
-      setEditing(false);
+      await onUpdate(comment.id, submitted);
+      if (session === sessionRef.current && draftRef.current === submitted) setEditing(false);
     } catch {
-      // The mutation hook toasts the failure; keep edit mode so the draft survives.
+      // Keep edit mode and source draft after a failed save.
+    } finally {
+      if (session === sessionRef.current) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
+  };
+
+  const handleCancel = () => {
+    sessionRef.current += 1;
+    savingRef.current = false;
+    draftRef.current = comment.body;
+    setDraft(comment.body);
+    setSaving(false);
+    setEditing(false);
   };
 
   return (
@@ -162,22 +163,32 @@ export function CommentCard({ comment, members, currentUser, onDelete, onUpdate 
             <CommentActions
               canEdit={canEdit}
               canDelete={canDelete}
-              onEdit={() => setEditing(true)}
+              onEdit={() => { sessionRef.current += 1; savingRef.current = false; draftRef.current = comment.body; setDraft(comment.body); setSaving(false); setEditing(true); }}
               onDelete={() => onDelete(comment.id)}
             />
           )}
         </div>
-        {editing && editor ? (
+        {editing ? (
           <div className="composer" style={{ marginTop: 6 }}>
-            <CommentToolbar editor={editor} />
-            <EditorContent editor={editor} className="editor-content" />
+            <CommentToolbar target={targetRef} />
+            <MarkdownEditorPane
+              value={draft}
+              onChange={(next) => { draftRef.current = next; setDraft(next); }}
+              onEnter={handleSave}
+              onEscape={handleCancel}
+              targetRef={targetRef}
+              ariaLabel="Edit comment"
+              placeholder="Edit comment…"
+              variant="comment"
+              className="comment-source"
+            />
             <div className="composer-footer">
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Enter to save · Shift+Enter newline</span>
               <div className="flex items-center gap-2">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={handleCancel}>
                   Cancel
                 </button>
-                <button type="button" className="btn btn-primary btn-sm" onClick={handleSave}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={saveDisabled || saving} onClick={handleSave}>
                   Save
                 </button>
               </div>

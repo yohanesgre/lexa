@@ -42,6 +42,9 @@
   "main": "./dist/server/index.js",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI"
+  },
   "no_bundle": true,
   "rules": [
     {

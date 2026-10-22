@@ -11,7 +11,7 @@ import { DbBunLive } from "../db/db";
 import { TaskService } from "./task.service";
 import { TaskRepo } from "../repos/task.repo";
 import { WipLimitExceeded, RequiredFieldMissing, DeadlineAfterLane } from "../api/errors";
-import type { Actor, TipTapDoc } from "../../shared/types";
+import type { Actor } from "../../shared/types";
 import { generateTaskKey, parseTaskKey } from "../task-key";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -145,9 +145,9 @@ describe("TaskService emission", () => {
   });
 });
 
-const REAL_DESC: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] };
-const EMPTY_DOC: TipTapDoc = { type: "doc", content: [] };
-const WS_DOC: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "  " }] }] };
+const REAL_DESC = "hi";
+const EMPTY_DOC = "";
+const WS_DOC = "  ";
 
 // c-todo: WIP limit 1, no required fields. c-done: no limit, no required.
 function seedWip(db: Database) {
@@ -254,7 +254,7 @@ describe("TaskService WIP + positions", () => {
 });
 
 describe("TaskService required fields", () => {
-  it("create rejects an empty or whitespace-only description (TipTap-aware)", async () => {
+  it("create rejects an empty or whitespace-only Markdown description", async () => {
     seedRequired(db);
     const svc = makeService(db);
     await Effect.runPromise(
@@ -474,7 +474,7 @@ describe("TaskRepo carries — archived anchor, GitHub title, D1 chunk bound", (
     seed(db);
     db.prepare(
       `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at, archived_at)
-       VALUES ('t-arch','p1','c-todo','s1','Archived','{"type":"doc","content":[]}','prio-1','type-1','a1','2026-01-02 10:00:00','2026-01-03 10:00:00')`
+       VALUES ('t-arch','p1','c-todo','s1','Archived','','prio-1','type-1','a1','2026-01-02 10:00:00','2026-01-03 10:00:00')`
     ).run();
     const svc = makeService(db);
     const { task } = await Effect.runPromise(
@@ -501,7 +501,7 @@ describe("TaskRepo carries — archived anchor, GitHub title, D1 chunk bound", (
     seed(db);
     const insert = db.prepare(
       `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at)
-       VALUES (?, 'p1', 'c-todo', 's1', ?, '{"type":"doc","content":[]}', 'prio-1', 'type-1', ?, '2026-01-01 10:00:00')`
+       VALUES (?, 'p1', 'c-todo', 's1', ?, '', 'prio-1', 'type-1', ?, '2026-01-01 10:00:00')`
     );
     const ids = Array.from({ length: 120 }, (_, i) => `chunk-${i}`);
     for (let i = 0; i < ids.length; i++) insert.run(ids[i]!, `Chunk ${i}`, `k${String(i).padStart(3, "0")}`);
@@ -511,7 +511,7 @@ describe("TaskRepo carries — archived anchor, GitHub title, D1 chunk bound", (
     expect(rows).toHaveLength(120);
     expect(new Set(rows.map((r) => r.id)).size).toBe(120);
     const byId = new Map(rows.map((r) => [r.id, r]));
-    expect(byId.get("chunk-0")!.description).toEqual({ type: "doc", content: [] });
+    expect(byId.get("chunk-0")!.description).toBe("");
     expect(byId.get("chunk-119")!.title).toBe("Chunk 119");
   });
 });

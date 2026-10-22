@@ -19,6 +19,15 @@ Preserve shell, thread sidebar, header, composer placement, transcript column, e
 
 Impeccable context reported a stale sidecar. The shell brief also contains older day-theme values and phone-band geometry. Do not copy those into this brief or repair them here: current `DESIGN.md` wins, and this lane does not touch shell geometry or tokens. Runtime rendering, contrast, and Delivery Gate evidence belong to the coordinator's integrated verification; this document is a design handoff, not proof of a passing UI.
 
+Markdown-first document cutover adds the bounded renderer/document contract in
+`markdown-first-documents.md` beside this brief. Task/wiki/comment document arguments and generated
+content are Markdown strings; raw source is the review diff's input, so formatting-only changes
+remain reviewable. Keep this brief's existing approval, retry/resume, partial-answer, attachment
+readiness, and per-write-result rules unchanged. Shared rendering does not merge document, chat,
+and public-share trust policies: chat images still render as alt text, code remains literal, and
+no stream delta automatically updates a document. This addendum records design requirements, not
+runtime, managed-conversion, or detector evidence.
+
 ## Regions and existing component map
 
 Paths below identify existing ownership seams, not permission to expand a worker's assigned file scope.

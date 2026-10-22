@@ -114,7 +114,7 @@ describe("lifecycle writes (task delete/update, wiki, github links)", () => {
     projectId: "p1",
     title: "Old Title",
     slug: "old-slug",
-    content: { type: "doc", content: [] },
+    content: "",
     parentId: null,
     position: 0,
     updatedBy: null,

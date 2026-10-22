@@ -1,37 +1,6 @@
 export type ID = string;
 export type ISODate = string;
 export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
-export type TipTapMark = { type: string; attrs?: Record<string, JSONValue> | Record<string, unknown> | undefined };
-export type TipTapNode = {
-  type: string;
-  attrs?: Record<string, JSONValue> | Record<string, unknown> | undefined;
-  content?: TipTapNode[] | undefined;
-  text?: string | undefined;
-  marks?: TipTapMark[] | undefined;
-};
-export type TipTapDoc = { type: "doc"; content: TipTapNode[] };
-
-export function parseTipTapDoc(json: string): TipTapDoc {
-  const parsed: unknown = JSON.parse(json);
-  if (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    (parsed as { type?: unknown }).type === "doc" &&
-    Array.isArray((parsed as { content?: unknown }).content)
-  ) {
-    return parsed as TipTapDoc;
-  }
-  throw new Error("Invalid TipTapDoc");
-}
-
-export function isTipTapDoc(value: unknown): value is TipTapDoc {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { type?: unknown }).type === "doc" &&
-    Array.isArray((value as { content?: unknown }).content)
-  );
-}
 
 export interface ProjectRepo {
   repo: string;
@@ -193,7 +162,7 @@ export interface Task {
   columnId: ID;
   swimlaneId: ID;
   title: string;
-  description: TipTapDoc;
+  description: string;
   priority: ID;               // priority_options.id — resolve via Board.fieldConfig
   type: ID;                   // type_options.id
   assignees: string[];
@@ -205,18 +174,16 @@ export interface Task {
   updatedAt: ISODate;
 }
 
-// Board list rows omit the TipTap `description` payload; the detail query
-// carries it. Hydrate the empty doc when a board row must render before the
-// detail response resolves.
+// Board rows omit the Markdown `description` source; hydrate an empty source
+// when a board row must render before the detail response resolves.
 export type BoardTask = Omit<Task, "description">;
 
 export function boardTaskToTask(task: BoardTask): Task {
-  // Board rows normally omit the doc, but mutation responses pushed straight
-  // into the board cache (create/update) are full Tasks — keep their
-  // authoritative doc instead of discarding it. The cast is safe: the runtime
-  // row may carry `description` even though BoardTask omits it by type.
+  // Board rows normally omit the description, but mutation responses pushed
+  // straight into the board cache (create/update) carry the authoritative
+  // source. Preserve it instead of replacing it with the empty default.
   const description = (task as Partial<Pick<Task, "description">>).description;
-  return { ...task, description: description ?? { type: "doc", content: [] } };
+  return { ...task, description: description ?? "" };
 }
 
 export interface WikiPageMeta {
@@ -232,7 +199,7 @@ export interface WikiPageMeta {
 }
 
 export interface WikiPage extends WikiPageMeta {
-  content: TipTapDoc;
+  content: string;
   createdAt: ISODate;
 }
 
@@ -241,7 +208,7 @@ export interface WikiPageRevision {
   pageId: string;
   title: string;
   slug: string;
-  content: TipTapDoc;
+  content: string;
   contentText: string;
   saveType: "autosave" | "manual";
   createdAt: string;
@@ -462,7 +429,7 @@ export interface TaskComment {
   authorId: string | null;
   authorKind: ActorKind;
   authorLabel: string;
-  body: TipTapDoc;
+  body: string;
   viaAssistant: boolean;
   editedAt: string | null;
   deletedAt: string | null;

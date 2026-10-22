@@ -11,7 +11,7 @@
 | Content type | `application/json; charset=utf-8` |
 | IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (32-char, `[a-zA-Z0-9]`; migrated legacy rows are 32 lowercase hex — opaque, do not pattern-match) |
 | Timestamps | ISO 8601 UTC (`2026-07-27T10:30:00Z`) |
-| Rich text | **TipTap/ProseMirror JSON object** on REST. |
+| Documents | **Markdown strings** in existing task, wiki, revision, and comment fields; source is stored exactly as submitted; new defaults are `""`. Legacy TipTap-object inputs are rejected; there is no save-time AST conversion or JSON-content guessing. |
 | Pagination | `?limit` (default 50, max 200) + `?cursor` (opaque). Response envelope: `{ "data": [...], "nextCursor": string \| null }`. **Exception: `/board` is unpaginated.** |
 | Slug generation | Server auto-slugifies `title`/`name` when `slug` is omitted; collisions → `SlugTaken` (client may retry with explicit slug) |
 
@@ -58,7 +58,7 @@ All non-2xx responses share one shape:
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
 | 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`). Chat attachment uploads use their own per-file cap of 5 MB (`CHAT_ATTACHMENT_MAX_UPLOAD_BYTES`) independent of `LXK_MAX_UPLOAD_MB` (details: `{ size, maxBytes, filename }`) |
-| 403 | `ATTACHMENT_DELETE_FORBIDDEN` | Attachment delete without uploader/admin authority |
+| 403 | `ATTACHMENT_DELETE_FORBIDDEN` | Project task/wiki attachment delete without uploader/admin authority |
 | 403 | `CHAT_ATTACHMENTS_DISABLED` | Chat attachment upload or a chat send carrying attachments while `LXK_DISABLE_CHAT_ATTACHMENTS=1` |
 | 403 | `TASKS_BULK_DISABLED` | `POST /projects/:slug/tasks/bulk` while `LXK_DISABLE_TASKS_BULK=1` — refused before any write |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
@@ -176,7 +176,7 @@ injection is removed — browsers authenticate `/api/*` via the session cookie.
 ```typescript
 type ID = string;                 // UUID
 type ISODate = string;
-type TipTapDoc = { type: "doc"; content: unknown[] };
+type Markdown = string;
 
 interface ProjectRepo {
   repo: string;                   // "owner/name"
@@ -318,7 +318,7 @@ interface Task {
   columnId: ID;
   swimlaneId: ID;
   title: string;
-  description: TipTapDoc;
+  description: Markdown;
   priority: ID;               // priority_options.id — resolves via Board.fieldConfig
   type: ID;                   // type_options.id
   assignees: string[];
@@ -345,7 +345,7 @@ interface WikiPageMeta {          // list/tree views — no content
 }
 
 interface WikiPage extends WikiPageMeta {
-  content: TipTapDoc;
+  content: Markdown;
   contentText?: string;       // plain-text extraction; present on create/update/search responses
   createdAt: ISODate;
 }
@@ -425,7 +425,7 @@ interface Attachment {
 // row goes. Serving: inline ONLY for image/* + application/pdf — everything
 // else downloads via Content-Disposition: attachment (+ nosniff always).
 
-interface BoardTask extends Omit<Task, "description"> {}  // board list row — no TipTap doc (fetch the task for content)
+interface BoardTask extends Omit<Task, "description"> {}  // board list row — no description field (fetch the task for content)
 
 interface Board {                 // GET /board — full snapshot, unpaginated
   project: Project;
@@ -801,7 +801,7 @@ body { ids*, action*, columnId?, swimlaneId?, priority?, type?, assignees?, dueA
 
 GET    /api/projects/:slug/board?includeArchived=true
 → 200 Board          (unpaginated full snapshot — the kanban's single fetch)
-  board tasks omit `description` (the TipTap doc) — fetch a single task via
+  board tasks omit `description` (Markdown source) — fetch a single task via
   GET /api/projects/:slug/tasks/:id for the full document; task detail keeps it
   includeArchived omitted/false → archived tasks AND archived lanes excluded; true → both included
   (rendered dimmed in the UI, non-draggable, still in their original column/lane)
@@ -826,7 +826,7 @@ upload paths so a legit large upload never trips it first.
 
 ```
 POST   /api/projects/:slug/tasks/:taskId/attachments      (multipart, field "file")
-→ 201 Attachment | 404 TASK_NOT_FOUND / PROJECT_ACCESS_DENIED | 413 PAYLOAD_TOO_LARGE
+→ 201 Attachment | 404 TASK_NOT_FOUND | 403 FORBIDDEN | 413 PAYLOAD_TOO_LARGE
   Task attachments emit an `attachment_added` activity row in the same
   transaction (returned as `activity` per the mutation-response rule).
   Dedupe hit (same project + sha256) → 201 Attachment with the EXISTING row
@@ -834,21 +834,21 @@ POST   /api/projects/:slug/tasks/:taskId/attachments      (multipart, field "fil
 
 GET    /api/projects/:slug/tasks/:taskId/attachments
 → 200 { data: Attachment[] } — oldest first (created_at ASC, id ASC)
-| 404 TASK_NOT_FOUND / PROJECT_ACCESS_DENIED
+| 404 TASK_NOT_FOUND | 403 FORBIDDEN
 
 POST   /api/projects/:slug/wiki/pages/:pageSlug/attachments   (multipart, field "file")
-→ 201 Attachment | 404 PAGE_NOT_FOUND / PROJECT_ACCESS_DENIED | 413 PAYLOAD_TOO_LARGE
+→ 201 Attachment | 404 PAGE_NOT_FOUND | 403 FORBIDDEN | 413 PAYLOAD_TOO_LARGE
   Wiki-page uploads emit NO activity (wiki has no timeline). Same dedupe rule.
 
 GET    /api/projects/:slug/wiki/pages/:pageSlug/attachments
 → 200 { data: Attachment[] } — oldest first (created_at ASC, id ASC)
-| 404 PAGE_NOT_FOUND / PROJECT_ACCESS_DENIED
+| 404 PAGE_NOT_FOUND | 403 FORBIDDEN
 
 GET    /api/attachments/:id
 → 200 binary (Content-Type = sniffed mime; Content-Disposition inline for
    image/* + application/pdf, attachment otherwise; X-Content-Type-Options:
    nosniff always)
-| 404 ATTACHMENT_NOT_FOUND (unknown id or blob missing) | 403 PROJECT_ACCESS_DENIED
+| 404 ATTACHMENT_NOT_FOUND (unknown id or blob missing) | 403 FORBIDDEN
 
 DELETE /api/attachments/:id
 → 204 | 404 ATTACHMENT_NOT_FOUND | 403 ATTACHMENT_DELETE_FORBIDDEN
@@ -862,8 +862,9 @@ Event types added: `attachment_added` · `attachment_removed`.
 
 ### Chat attachments (Assistant conversation context)
 
-Temporary, thread-scoped context — a separate surface from the project
-attachments above (see `docs/SCHEMA.md` → Chat attachments). One capability
+Temporary context, private to the conversation owner and current chat thread.
+Project/team admins and superadmins have no exception. Task/wiki attachments
+remain project-bound (see `docs/SCHEMA.md` → Chat attachments). One capability
 flag gates the composer: `GET /api/capabilities` reports `chatAttachments`
 (true only where the assistant is available and the kill switch is off). With
 `LXK_DISABLE_CHAT_ATTACHMENTS=1` every upload and every send carrying
@@ -871,19 +872,30 @@ attachments is refused with 403 `CHAT_ATTACHMENTS_DISABLED`, regardless of the
 flag. Kill switch default is enabled (feature ON).
 
 Upload accepts images (`image/png` `image/jpeg` `image/webp` `image/gif`) and
-documents (`application/pdf` `text/markdown` `text/plain`). The stored mime is
-SERVER-SNIFFED (magic bytes; content with no signature is UTF-8-probed and
-extension-classified — `.md`/`.markdown` → `text/markdown`, else
-`text/plain`); a sniffed-but-unsupported type (SVG/BMP/ICO/XLSX) is rejected
-`INVALID_ARGS`. Per-file cap is 5 MB
+documents classified from bytes (client MIME and filename are not trusted as
+content evidence). Supported documents: PDF, DOCX, XLSX, XLSM, XLSB, XLS,
+ODT, ODS, CSV, HTML/HTM, XML, Markdown/MD, and TXT. ZIP documents require
+validated OOXML/ODF package entries; OLE `.xls` requires a bounded, validated
+root Workbook/Book stream. Unsupported/ambiguous archives, SVG, BMP, ICO,
+Numbers (`.numbers`), ET (`.et`), and PPTX are rejected; no proprietary parser
+or arbitrary archive fallback is used. Per-file cap is 5 MB
 (`CHAT_ATTACHMENT_MAX_UPLOAD_BYTES`, independent of `LXK_MAX_UPLOAD_MB`);
 zero-byte files are rejected. Send-time caps: ≤3 attachments per message
 (images + documents share the count), ≤10 MB per message. Errors name the file.
 
+Document-to-Markdown conversion is optional and available only in the existing
+Workers runtime when its AI binding is configured. PDF and DOCX conversion use
+that binding; Markdown/MD/TXT bypass it and decode as strict UTF-8, so ordinary
+local text use needs no AI binding. Other accepted binary formats may fail if
+the managed service cannot convert them; conversion errors and missing
+capability are explicit, with no local fallback. Converted content is not
+persisted automatically. This binding does not replace REST model-provider
+configuration.
+
 ```
 POST   /api/projects/:slug/assistant/chat/:chatId/attachments   (multipart, field "file")
 → 201 { data: ChatAttachment }
-  | 404 PROJECT_ACCESS_DENIED / PROJECT_NOT_FOUND
+  | 404 PROJECT_NOT_FOUND | 403 FORBIDDEN
   | 404 ASSISTANT_THREAD_NOT_FOUND
   | 403 CHAT_ATTACHMENTS_DISABLED | 413 PAYLOAD_TOO_LARGE | 422 INVALID_ARGS
   The thread row is created lazily (ON CONFLICT DO NOTHING), so an attachment
@@ -891,31 +903,37 @@ POST   /api/projects/:slug/assistant/chat/:chatId/attachments   (multipart, fiel
 
 GET    /api/projects/:slug/assistant/chat/:chatId/attachments
 → 200 { data: ChatAttachment[] } — oldest first (created_at ASC, id ASC)
-  | 404 PROJECT_ACCESS_DENIED / PROJECT_NOT_FOUND
+  | 404 PROJECT_NOT_FOUND | 403 FORBIDDEN
   | 404 ASSISTANT_THREAD_NOT_FOUND
 
 GET    /api/chat-attachments/:id
 → 200 binary (Content-Type = sniffed mime; Content-Disposition inline for
    image/* + application/pdf, attachment otherwise; X-Content-Type-Options:
    nosniff always)
-  | 404 ATTACHMENT_NOT_FOUND (unknown id or blob missing) | 403 PROJECT_ACCESS_DENIED
-  | 404 ASSISTANT_THREAD_NOT_FOUND
+  | 404 ATTACHMENT_NOT_FOUND (unknown id, ownership denied, or blob missing)
+  | 403 FORBIDDEN
 
 DELETE /api/chat-attachments/:id
-→ 204 | 404 ATTACHMENT_NOT_FOUND | 403 ATTACHMENT_DELETE_FORBIDDEN
-  Authority: uploader OR project admin. The blob is deleted only when no other
-  row (task/wiki or chat) references its storage_key.
+→ 204 | 404 ATTACHMENT_NOT_FOUND (unknown id or ownership denied)
+  Authority: the authenticated thread owner only, with no admin exception.
+  The blob is deleted only when no other row (task/wiki or chat) references its storage_key.
 ```
 
-list/upload require thread ownership; serve requires the thread owner or a
-project admin.
+Upload, list, serve and delete require the authenticated thread owner. Project
+membership, uploader labels or a privileged role alone do not authorize private
+chat bytes. Authorization precedes blob access. Read/delete denials do not disclose
+the private thread identifier; list/upload use `ASSISTANT_THREAD_NOT_FOUND` for
+the thread identifier supplied by the caller.
 
 `ChatAttachment` = `{ id, projectId, chatId, filename, mimeType, sizeBytes,
 sha256, storageKey, uploadedBy, uploadedByLabel, createdAt }`. A send
 references these by `storageKey`; the server verifies the row belongs to the
-project and that the declared mime matches the stored (sniffed) mime. Text and
-Markdown decode directly; PDFs extract through `unpdf` server-side; a document
-that yields no text blocks the send with 422 `ATTACHMENT_EXTRACTION_FAILED`.
+current project and chat, that the authenticated user owns that chat, and that
+the declared mime matches the stored (sniffed) mime. UTF-8 text
+and Markdown decode directly; approved binary formats, including PDF/DOCX, use
+the optional Workers AI `toMarkdown` binding. Missing capability, failed conversion,
+or empty output blocks the send with 422 `ATTACHMENT_EXTRACTION_FAILED`; there is
+no local binary-extraction fallback.
 
 ### Activity & Comments
 
@@ -923,13 +941,13 @@ that yields no text blocks the send with 422 `ATTACHMENT_EXTRACTION_FAILED`.
 GET    /api/projects/:slug/tasks/:id/activity?cursor&limit
        → 200 { data: ActivityItem[], nextCursor }
        Item = { kind:'event', id, type, actorKind, actorLabel, actorUserId, message, createdAt }
-            | { kind:'comment', id, authorKind, authorLabel, authorId, body: TipTapDoc,
+            | { kind:'comment', id, authorKind, authorLabel, authorId, body: Markdown,
                 editedAt, createdAt }
        (limit default 50, max 200; ascending; cursor opaque)
 
-POST   /api/projects/:slug/tasks/:id/comments     { body: TipTapDoc }
+POST   /api/projects/:slug/tasks/:id/comments     { body: Markdown }
        → 201 { data: { comment, activity } }      # activity = 'commented' row
-       | 404 TASK_NOT_FOUND | 422 COMMENT_INVALID (empty/malformed/>64KB)
+       | 404 TASK_NOT_FOUND | 422 COMMENT_INVALID (non-whitespace text; `JSON.stringify(body).length <= 65,536`)
 
 PATCH  /api/projects/:slug/tasks/:id/comments/:commentId   { body }
        → 200 { data: Comment }                    # sets edited_at; no activity row (marker only)
@@ -983,7 +1001,7 @@ GET    /api/projects/:slug/mentions?q=
 ```
 
 Mention model (user-ruled split):
-- **TipTap documents** carry mention NODES `{ type: "mention", attrs: { refType: "task"|"wiki", refId, label } }` — links only, never context injection. Pushed to GitHub as absolute deep links (`${PUBLIC_URL}/{slug}/tasks?task={id}` / `${PUBLIC_URL}/{slug}/wiki/{slug}`) with the label as link text.
+- **Task/wiki document mentions** are Markdown links to `/{slug}/board?task={id}` and `/{slug}/wiki/{pageSlug}`. Navigation only, never context injection.
 - **Assistant chat** uses plain `@token` strings in the textarea; the server resolves them at send into ephemeral context (see the chat/stream contract above).
 
 ### Task Links (subtasks, blocked-by, related)
@@ -1060,8 +1078,8 @@ POST   /api/projects/:slug/github/task-from-issue
 body { repo*, issueNumber* }
 → 201 Task mutation response ({ data: Task, activity }) | 404 | 409 ALREADY_LINKED | 422 REQUIRED_FIELD | 502 GITHUB_API_ERROR
   Creates a task from an existing GitHub issue: task lands in the project's
-  first column (Backlog), title + description seeded from the issue (Markdown
-  → TipTap), issue auto-linked. repo must be a workspace repo. required_fields
+  first column (Backlog), title + description copied as Markdown source and
+  issue auto-linked. repo must be a workspace repo. required_fields
   enforced like a normal create. ALREADY_LINKED when the issue is already
   linked to any task.
 
@@ -1125,7 +1143,7 @@ GET    /api/projects/:slug/wiki/:pageSlug/revisions?limit
   Newest first. limit clamped 1–200.
 
 GET    /api/projects/:slug/wiki/:pageSlug/revisions/:revisionId
-→ 200 { revision: { id, pageId, title, slug, content: TipTapDoc,
+→ 200 { revision: { id, pageId, title, slug, content: Markdown,
                     contentText: string, saveType, createdAt } }
   | 404 PAGE_NOT_FOUND   (also when the revision belongs to a different page)
 
@@ -1152,7 +1170,7 @@ DELETE /api/projects/:slug/wiki/share/:linkId
 
 ```
 GET    /api/share/:token          (PUBLIC — no auth; dedicated stricter rate-limit bucket)
-→ 200 { root: { id, title, slug, content: TipTapDoc, updatedAt,
+→ 200 { root: { id, title, slug, content: Markdown, updatedAt,
                 children: [ <same shape, recursive> ] } }
   One request returns the root page plus its FULL descendant subtree,
   resolved at request time (later page edits are visible through the same
@@ -2226,6 +2244,10 @@ body { projectId*, chatId*, message*, agentId?,
   It controls replay position, not transcript truncation. An explicit cursor
   on the default in-process path receives `409 ASSISTANT_TASK_ACTIVE`, never
   a new generation. Ordinary sends without a cursor keep the default behavior.
+  Existing chats require the authenticated owner and stored project to match
+  before any transcript/permission write or model call; missing chat IDs are
+  claimed atomically. Foreign or unbound existing owners receive
+  `404 ASSISTANT_THREAD_NOT_FOUND`, even when no attachment is supplied.
   For a new user turn, `start` is emitted only after its canonical user entry
   has committed. A history read after that frame can recover the accepted prompt
   even before the provider emits text. Resumes without a new user entry do not
@@ -2270,16 +2292,21 @@ body { projectId*, chatId*, message*, agentId?,
   same project/thread. Its immutable execution-affecting request fields define
   identity, excluding the `replayFrom` frame cursor. A different turn receives
   `409 ASSISTANT_TASK_ACTIVE`. No message queue or multi-client frame fan-out
-  is provided.
-  attachments are chat-attachment refs (uploads above; cross-project keys →
-  422). Images feed the vision path: a configured `vision_model` routes them
+  is provided. A finished buffer stays replayable only for its owner; if that
+  chat is deleted and the id is atomically claimed by another user, replay
+  cursors against the old buffer receive `404 ASSISTANT_THREAD_NOT_FOUND`, while
+  a fresh non-replay turn proceeds under the new authenticated owner.
+  attachments are private chat-attachment refs (uploads above); foreign project,
+  user or thread keys receive 422 INVALID_ARGS before blob access or conversion.
+  Images feed the vision path: a configured `vision_model` routes them
   through the vision agent (delegate; current phase, always wins). **Today** no
   vision model → 409 VISION_NOT_CONFIGURED (inline parts when
   `primary_supports_images=1` is the later target, not yet the current gate);
   they persist as `image-ref` parts. Documents
-  (PDF/Markdown/plain text) are extracted server-side (PDF via `unpdf`) and
-  persist as `document-ref` parts, becoming model-visible text. Caps shared
-  across images + documents: ≤3 per message, ≤5 MB each, ≤10 MB per message;
+  use direct UTF-8 decoding for Markdown/plain text and Cloudflare Workers AI
+  `toMarkdown` for supported binary formats, with no local binary fallback.
+  Extracted documents persist as `document-ref` parts and become model-visible text.
+  Caps shared across images + documents: ≤3 per message, ≤5 MB each, ≤10 MB per message;
   the send is blocked with 422 ATTACHMENT_EXTRACTION_FAILED when a document
   yields no text, and with 403 CHAT_ATTACHMENTS_DISABLED under the kill switch.
   | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / ASSISTANT_TASK_ACTIVE

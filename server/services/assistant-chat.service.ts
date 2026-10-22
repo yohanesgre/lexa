@@ -3,6 +3,7 @@ import { buildAssistantTools, MAX_CHAT_TOOL_ROUNDS, type BoundSkill } from "../a
 import { buildPreflightState, jevLog, runJevPreflight, type JevPreflightResult, type JevRuntimeConfig } from "../assistant/jev";
 import { acquireMcpToolset, buildMcpTools, ENABLED_MCP_SERVERS_SQL, type McpToolset } from "../assistant/mcp";
 import type { McpServerRowWithSecret } from "../repos/assistant-mcp.repo";
+import type { RuntimeEnv } from "../env";
 import { currentEnv } from "../runtime-env";
 import { buildSystemPrompts, extractMemoryTerms, memoryBlockFromHits, CHAT_IDENTITY } from "../assistant/prompt";
 import { AssistantSettingsRepo, type AssistantSettingsRow } from "../repos/assistant-settings.repo";
@@ -26,9 +27,7 @@ import { WikiService } from "./wiki.service";
 import { MilestoneService } from "./milestone.service";
 import { SwimlaneService } from "./swimlane.service";
 import { AuthorizationService } from "./authorization.service";
-import { extractText } from "../../shared/tiptap-text";
 import { buildSkillPromptParts, lastUserText, resolveMentionContextEffect, type MentionResolverDeps } from "../assistant/context";
-import type { TipTapDoc } from "../../shared/types";
 import type { AssistantChatStreamRequest, AssistantReasoningEffort, AssistantToolPermissionMode, Citation, StreamFrame } from "../../shared/assistant";
 import { resolveAssistantToolPermissionMode } from "../../shared/assistant";
 import { buildStream, findPendingBatch, findPendingBatches, findNewestPendingBatch, applyResumeResults, reconcilePendingBatchStatuses, buildResumeResultsNote } from "../assistant/build-stream";
@@ -36,7 +35,6 @@ import { claimResumeBatch, releaseResumeBatch } from "../assistant/resume-claim"
 import { carrierBatchIds, reconcileApprovalCarriers } from "../assistant/approval-carrier";
 import { collectResumeResults, resumeOutcomeLog, stoppedResumeEntry, targetOf, type ResumeResult } from "../assistant/resume-results";
 import { resolveAssistantThread, resolveChatTitle, collectCitation, CHAT_CITATION_CAP, assertChatAttachmentCaps, extractDocumentText, resolveReasoningEffort, modelOptionsForTurn, modelOptionsWithWriteIntent, bytesToBase64, buildChatSnippet, validateChatFromIndex, matchBoundSkillByName, BOUND_SKILLS_SQL } from "./assistant-helpers";
-import { docToMarkdown } from "../../shared/markdown";
 import { buildAnalyzeImageTool, resolveVisionMode } from "../assistant/vision";
 import type { ProviderConfig } from "../assistant/provider";
 import { AssistantProvidersService } from "./assistant-providers.service";
@@ -115,36 +113,51 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       const apiKey = yield* providersService.resolveApiKey(providerId).pipe(Effect.catchAll(() => Effect.succeed("")));
       return { kind: modelRow.kind, baseUrl: providerRow.base_url, apiKey, model: visionModel };
     });
-    const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
+    const resolveMimeType = async (projectId: string, chatId: string, userId: string, key: string): Promise<string> =>
+      (await dbFirst<{ mime_type: string }>(
+        `SELECT ca.mime_type FROM chat_attachments ca
+         JOIN assistant_threads t ON t.document_type = 'chat' AND t.document_id = ca.document_id
+           AND t.project_id = ca.project_id AND t.owner_user_id = ?
+         WHERE ca.project_id = ? AND ca.document_type = 'chat' AND ca.document_id = ? AND ca.storage_key = ? LIMIT 1`,
+        userId, projectId, chatId, key
+      ))?.mime_type ??
+      (await dbFirst<{ mime_type: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ??
+      "image/png";
     const loadBoundSkills = (agentId: string): Promise<BoundSkill[]> => dbAll<BoundSkill>(BOUND_SKILLS_SQL, agentId);
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
-    // Project-scoped image loader: the blob read is gated on ownership by
-    // `(project_id, storage_key)` across both attachment tables, so a foreign or
-    // known-content key can never be handed to the vision model.
-    const ownsImageStorageKey = async (projectId: string, key: string): Promise<boolean> =>
-      (await dbFirst(`SELECT 1 FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null ||
+    // Private chat blobs require the owning thread; project attachments remain project-scoped.
+    const ownsImageStorageKey = async (projectId: string, chatId: string, userId: string, key: string): Promise<boolean> =>
+      (await dbFirst(
+        `SELECT 1 FROM chat_attachments ca
+         JOIN assistant_threads t ON t.document_type = 'chat' AND t.document_id = ca.document_id
+           AND t.project_id = ca.project_id AND t.owner_user_id = ?
+         WHERE ca.project_id = ? AND ca.document_type = 'chat' AND ca.document_id = ? AND ca.storage_key = ? LIMIT 1`,
+        userId, projectId, chatId, key
+      )) !== null ||
       (await dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key)) !== null;
-    const loadImageBase64For = (projectId: string) => async (key: string): Promise<string | null> => {
-      if (!(await ownsImageStorageKey(projectId, key))) return null;
+    const loadImageBase64For = (projectId: string, chatId: string, userId: string) => async (key: string): Promise<string | null> => {
+      if (!(await ownsImageStorageKey(projectId, chatId, userId, key))) return null;
       return Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
     };
-    // Chat documents are extracted once per key and cached for THAT RUN only:
-    // a fresh Map per stream bounds memory to one run's documents (a
-    // process-lifetime Map grew without limit). The current turn's prompt is
-    // pre-warmed before the stream starts (so a null here is a real failure),
-    // while history refs resolve lazily and a missing row/blob simply drops the
-    // part (see hydrateDocumentParts).
-    const makeDocumentTextLoader = (): ((key: string) => Promise<string | null>) => {
+    // History refs may resolve either thread-owned chat uploads or project attachments.
+    // Fresh cache per loader keeps extraction run-scoped and memory bounded.
+    const makeDocumentTextLoader = (projectId: string, chatId: string, userId: string, binding?: RuntimeEnv["AI"]): ((key: string) => Promise<string | null>) => {
       const cache = new Map<string, string | null>();
       return async (key: string): Promise<string | null> => {
         if (cache.has(key)) return cache.get(key) ?? null;
         const row =
-          (await dbFirst<{ mime_type: string }>(`SELECT mime_type FROM chat_attachments WHERE storage_key = ? LIMIT 1`, key)) ??
-          (await dbFirst<{ mime_type: string }>(`SELECT mime_type FROM attachments WHERE storage_key = ? LIMIT 1`, key));
+          (await dbFirst<{ filename: string; mime_type: string }>(
+            `SELECT ca.filename, ca.mime_type FROM chat_attachments ca
+             JOIN assistant_threads t ON t.document_type = 'chat' AND t.document_id = ca.document_id
+               AND t.project_id = ca.project_id AND t.owner_user_id = ?
+             WHERE ca.project_id = ? AND ca.document_type = 'chat' AND ca.document_id = ? AND ca.storage_key = ? LIMIT 1`,
+            userId, projectId, chatId, key
+          )) ??
+          (await dbFirst<{ filename: string; mime_type: string }>(`SELECT filename, mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key));
         if (!row) { cache.set(key, null); return null; }
         const bytes = await Effect.runPromise(storage.get(key)).catch(() => null);
         if (!bytes) { cache.set(key, null); return null; }
-        const text = await extractDocumentText(bytes, row.mime_type);
+        const text = await extractDocumentText(bytes, row.mime_type, row.filename, binding);
         const value = text !== null && text.trim() !== "" ? text : null;
         cache.set(key, value);
         return value;
@@ -161,7 +174,7 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           if (outcome.left._tag === "RowNotFound") return null;
           throw outcome.left;
         }
-        return { id: outcome.right.id, projectId: outcome.right.projectId, key: outcome.right.key, title: outcome.right.title, description: outcome.right.description as TipTapDoc };
+        return { id: outcome.right.id, projectId: outcome.right.projectId, key: outcome.right.key, title: outcome.right.title, description: outcome.right.description };
       },
       findWikiBySlug: async (projectId, slug) => {
         const outcome = await Effect.runPromise(Effect.either(wikiRepo.findBySlug(projectId, slug)));
@@ -169,18 +182,21 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           if (outcome.left._tag === "RowNotFound") return null;
           throw outcome.left;
         }
-        return { id: outcome.right.id, title: outcome.right.title, content: outcome.right.content as TipTapDoc };
+        return { id: outcome.right.id, title: outcome.right.title, content: outcome.right.content };
       },
     };
-    // Chat refs are validated against `chat_attachments` (not project
-    // `attachments`): the row must belong to this project and its stored
-    // server-sniffed mime must match the client-declared one. Caps are the
-    // shared image+document budget, named per file (D4).
-    const validateAttachments = (projectId: string, attachments: ReadonlyArray<{ storageKey: string; mimeType: string; name: string }>): Effect.Effect<void, InvalidArgs | DbError> => Effect.gen(function* () {
+    // Current-turn refs are accepted only from this owner's uploads on this thread.
+    const validateAttachments = (projectId: string, chatId: string, userId: string, attachments: ReadonlyArray<{ storageKey: string; mimeType: string; name: string }>): Effect.Effect<void, InvalidArgs | DbError> => Effect.gen(function* () {
       const sized: Array<{ mimeType: string; size: number; name: string }> = [];
       for (const a of attachments) {
-        const row = yield* Effect.promise(() => dbFirst<{ mime_type: string; size_bytes: number; filename: string }>(`SELECT mime_type, size_bytes, filename FROM chat_attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, a.storageKey));
-        if (!row) return yield* new InvalidArgs({ reason: `attachment '${a.name}' does not belong to this project` });
+        const row = yield* Effect.promise(() => dbFirst<{ mime_type: string; size_bytes: number; filename: string }>(
+          `SELECT ca.mime_type, ca.size_bytes, ca.filename FROM chat_attachments ca
+           JOIN assistant_threads t ON t.document_type = 'chat' AND t.document_id = ca.document_id
+             AND t.project_id = ca.project_id AND t.owner_user_id = ?
+           WHERE ca.project_id = ? AND ca.document_type = 'chat' AND ca.document_id = ? AND ca.storage_key = ? LIMIT 1`,
+          userId, projectId, chatId, a.storageKey
+        ));
+        if (!row) return yield* new InvalidArgs({ reason: `attachment '${a.name}' does not belong to this chat` });
         if (a.mimeType !== row.mime_type) return yield* new InvalidArgs({ reason: `attachment '${a.name}' mimeType mismatch` });
         sized.push({ mimeType: row.mime_type, size: row.size_bytes, name: row.filename });
       }
@@ -206,29 +222,33 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       );
     };
 
-    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[]) => ({
-      projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch,
+    const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null, jevConfig: JevRuntimeConfig | null, boundSkills: BoundSkill[], markdownBinding?: RuntimeEnv["AI"]) => ({
+      projectId, allowlist, searchApiKey, jevConfig, fetchImpl: fetch, markdownBinding,
       // get_skill can only discover skills the agent actually has bound, so the
       // loader (and with it the tool) is omitted when there are none.
       ...(boundSkills.length > 0 ? { loadSkillByName: async (name: string): Promise<BoundSkill | null> => matchBoundSkillByName(boundSkills, name) } : {}),
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
       projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
+      resolveStorageFile: async (pid: string, key: string) => {
+        const row = await dbFirst<{ filename: string; mime_type: string }>(`SELECT filename, mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key);
+        return row ? { filename: row.filename, mimeType: row.mime_type } : null;
+      },
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
-        if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
+        if (!t || t.projectId !== projectId) return null;
         const [col, lane] = await Promise.all([
-          dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId),
-          dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId),
+          dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, t.columnId),
+          dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, t.swimlaneId),
         ]);
         let milestoneName: string | null = null;
         if (lane?.milestone_id) { const m = await dbFirst<{ name: string }>(`SELECT name FROM milestones WHERE id = ?`, lane.milestone_id); milestoneName = m?.name ?? null; }
-        return { id: (t as unknown as { id: string }).id, key: (t as unknown as { key: string }).key, title: (t as unknown as { title: string }).title, priority: (t as unknown as { priority: string }).priority, dueAt: (t as unknown as { dueAt: string | null }).dueAt, archivedAt: (t as unknown as { archivedAt: string | null }).archivedAt, markdown: docToMarkdown((t as unknown as { description: TipTapDoc }).description as TipTapDoc), columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: (t as unknown as { type: string }).type, assignees: (t as unknown as { assignees: string[] }).assignees, githubIssue: null };
+        return { id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: t.description, columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: t.type, assignees: t.assignees, githubIssue: null };
       },
-      searchTasksByTitle: async (query: string, limit = 10) => { const rows = await Effect.runPromise(taskRepo.searchByTitle(projectId, query, limit)).catch(() => [] as unknown[]); return (rows as unknown as Array<{ id: string; key: string; title: string; priority: string; dueAt: string | null; archivedAt: string | null; description: TipTapDoc }>).map((t) => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: docToMarkdown(t.description as TipTapDoc) })); },
-      searchWikiPages: async (query: string, limit = 10) => { const rows = await Effect.runPromise(wikiRepo.search(projectId, query, limit)).catch(() => []); return rows.map((p) => ({ title: (p as unknown as { title: string }).title, slug: (p as unknown as { slug: string }).slug, snippet: (p as unknown as { snippet: string }).snippet })); },
-      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); if (!page) return null; return { title: (page as unknown as { title: string }).title, slug: (page as unknown as { slug: string }).slug, content: (page as unknown as { content: TipTapDoc }).content as TipTapDoc }; },
-      listAllTasks: async () => { const rows = await Effect.runPromise(taskRepo.listByProject(projectId)).catch(() => [] as unknown[]); return (rows as unknown as Array<{ id: string; key: string; title: string; priority: string; dueAt: string | null; archivedAt: string | null; description: TipTapDoc }>).map((t) => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: docToMarkdown(t.description as TipTapDoc) })); },
-      listWikiPagesFull: async () => { const rows = await Effect.runPromise(wikiRepo.findFullByProject(projectId)).catch(() => [] as unknown[]); return (rows as unknown as Array<{ title: string; slug: string; content: TipTapDoc }>).map((p) => ({ title: p.title, slug: p.slug, content: p.content as TipTapDoc })); },
+      searchTasksByTitle: async (query: string, limit = 10) => { const rows = await Effect.runPromise(taskRepo.searchByTitle(projectId, query, limit)).catch(() => []); return rows.map((t) => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: t.description })); },
+      searchWikiPages: async (query: string, limit = 10) => { const rows = await Effect.runPromise(wikiRepo.search(projectId, query, limit)).catch(() => []); return rows.map((p) => ({ title: p.title, slug: p.slug, snippet: p.snippet })); },
+      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); return page ? { title: page.title, slug: page.slug, content: page.content } : null; },
+      listAllTasks: async () => { const rows = await Effect.runPromise(taskRepo.listByProject(projectId)).catch(() => []); return rows.map((t) => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: t.description })); },
+      listWikiPagesFull: async () => { const rows = await Effect.runPromise(wikiRepo.findFullByProject(projectId)).catch(() => []); return rows.map((p) => ({ title: p.title, slug: p.slug, content: p.content })); },
       getBoardStructure: async () => {
         const columns = (await dbAll<{ id: string; name: string; position: number; wip_limit: number | null; github_state: "open" | "closed" | null; is_done: number }>(`SELECT id, name, position, wip_limit, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`, projectId)).map((c) => ({ id: c.id, name: c.name, position: c.position, wipLimit: c.wip_limit, githubState: c.github_state, isDone: c.is_done !== 0 }));
         const swimlanes = (await dbAll<{ id: string; name: string; kind: "backlog" | "sprint"; start_at: string | null; due_at: string | null; archived_at: string | null; milestone_id: string | null }>(`SELECT id, name, kind, start_at, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`, projectId)).map((l) => ({ id: l.id, name: l.name, kind: l.kind, startAt: l.start_at, dueAt: l.due_at, archived: l.archived_at !== null, milestoneId: l.milestone_id }));
@@ -241,12 +261,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
       localWriteTracker,
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
-        if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
-        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId);
-        return { id: (t as unknown as { id: string }).id, key: (t as unknown as { key: string }).key, title: (t as unknown as { title: string }).title, columnName: col?.name ?? "", priority: (t as unknown as { priority: string }).priority, type: (t as unknown as { type: string }).type, dueAt: (t as unknown as { dueAt: string | null }).dueAt, assignees: (t as unknown as { assignees: string[] }).assignees, descriptionText: extractText((t as unknown as { description: TipTapDoc }).description as TipTapDoc), archivedAt: (t as unknown as { archivedAt: string | null }).archivedAt };
+        if (!t || t.projectId !== projectId) return null;
+        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, t.columnId);
+        return { id: t.id, key: t.key, title: t.title, columnName: col?.name ?? "", priority: t.priority, type: t.type, dueAt: t.dueAt, assignees: t.assignees, description: t.description, archivedAt: t.archivedAt };
       },
       findColumn: async (id: string) => (await dbFirst<{ id: string; name: string }>(`SELECT id, name FROM columns WHERE id = ?`, id)) ?? null,
-      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); if (!page) return null; return { slug: (page as unknown as { slug: string }).slug, title: (page as unknown as { title: string }).title, text: extractText((page as unknown as { content: TipTapDoc }).content as TipTapDoc) }; },
+      findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); return page ? { slug: page.slug, title: page.title, text: page.content } : null; },
       findMilestone: async (id: string) => { const m = await dbFirst<{ id: string; name: string; due_at: string | null; archived_at: string | null }>(`SELECT id, name, due_at, archived_at FROM milestones WHERE id = ?`, id); return m ? { id: m.id, name: m.name, dueAt: m.due_at, archivedAt: m.archived_at } : null; },
       findSwimlane: async (id: string) => { const l = await dbFirst<{ id: string; name: string; kind: "backlog" | "milestone" | "sprint"; archived_at: string | null; milestone_id: string | null }>(`SELECT id, name, kind, archived_at, milestone_id FROM swimlanes WHERE id = ?`, id); return l ? { id: l.id, name: l.name, kind: l.kind, archivedAt: l.archived_at, milestoneId: l.milestone_id } : null; },
       countSprints: async (milestoneId) => { const r = await dbFirst<{ c: number }>(`SELECT COUNT(*) AS c FROM swimlanes WHERE milestone_id = ? AND kind = 'sprint' AND archived_at IS NULL`, milestoneId); return r?.c ?? 0; },
@@ -361,13 +381,13 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const settingsRow = yield* getSettingsOrFail(req.projectId);
         const config = configFromRow(settingsRow);
         const env = yield* currentEnv;
-        const loadDocumentText = makeDocumentTextLoader();
+        const loadDocumentText = makeDocumentTextLoader(req.projectId, chatId, userId, env.AI);
         const attachments = req.attachments ?? [];
         const imageAttachments = attachments.filter((a) => isChatImageMime(a.mimeType));
         // Kill switch refuses sends carrying any attachment regardless of the
         // capability flag (D5).
         if (attachments.length > 0 && !chatAttachmentsEnabled(env)) return yield* new ChatAttachmentsDisabled();
-        yield* validateAttachments(req.projectId, attachments);
+        yield* validateAttachments(req.projectId, chatId, userId, attachments);
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
         // Documents do not need vision; only image attachments gate on it.
         if (imageAttachments.length > 0 && imageMode === "none") return yield* new VisionNotConfigured();
@@ -382,8 +402,10 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
         const boundSkills = yield* Effect.promise(() => loadBoundSkills("assistant"));
         const { skillMarkdowns, skillCatalog } = buildSkillPromptParts(req.message, boundSkills);
         yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
-        const existing = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
-        if (existing && existing.projectId !== req.projectId) return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: chatId });
+        const existing = yield* threadRepo.claimChat(chatId, userId, req.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId }))
+        );
+        if (existing.ownerUserId !== userId || existing.projectId !== req.projectId) return yield* new AssistantThreadNotFound({ documentType: "chat", documentId: chatId });
         // Turn-start mode capture (D2/D6): the send envelope overrides the
         // stored sticky value; the captured mode is persisted as the new sticky
         // value below and held constant for the whole turn (a mid-turn change
@@ -401,19 +423,8 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             if (orphanBatch !== null) return yield* new ApprovalsPending({ batchId: orphanBatch, remaining: 0 });
           }
         }
-        yield* queryFirst<{ one: number }>(db, `SELECT 1 AS one FROM assistant_threads WHERE document_type = 'chat' AND document_id = ? LIMIT 1`, chatId).pipe(
-          Effect.catchTag("RowNotFound", () =>
-            run(
-              db,
-              `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES ('chat', ?, ?, ?, '[]') ON CONFLICT(document_type, document_id) DO NOTHING`,
-              chatId, req.projectId, userId
-            ).pipe(Effect.asVoid)
-          ),
-          Effect.catchAll(() => Effect.succeed(undefined))
-        );
-        // Persist the captured mode as the thread's sticky value (row exists
-        // after the upsert above). Best-effort: a write failure must not abort
-        // the turn.
+        // Persist captured mode as thread's sticky value. Best-effort: write failure
+        // must not abort turn; ownership was verified by claimChat above.
         yield* threadRepo.setPermissionMode("chat", chatId, permissionMode).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
         const memoryHits = yield* memoryRepo.searchByProject(req.projectId, extractMemoryTerms(req.message, ""));
@@ -451,12 +462,12 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(req.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: req.projectId, ...input }), localWriteTracker,
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions,
           userContent, tools: (() => {
-            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } });
+            const base = buildAssistantTools({ ...buildToolDeps(req.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env.AI), onCitation: (c) => { citations = collectCitation(citations, c); } });
             const writeSet = buildWriteToolset(settingsRow, { projectId: req.projectId, documentType: "chat", documentId: chatId, ownerUserId: userId }, permissionMode, localWriteTracker);
             chatWriteDrain = writeSet.drain;
             const mcpTools = mcp?.tools ?? [];
-            return visionConfig !== null ? [...base, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: chatId }, loadImageBase64: loadImageBase64For(req.projectId), resolveMimeType: (key) => resolveMimeType(req.projectId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
-          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(req.projectId), loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, writeMode: permissionMode, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
+            return visionConfig !== null ? [...base, buildAnalyzeImageTool({ config: { ...visionConfig, sessionId: chatId }, loadImageBase64: loadImageBase64For(req.projectId, chatId, userId), resolveMimeType: (key) => resolveMimeType(req.projectId, chatId, userId, key), fetchImpl: fetch }), ...writeSet.tools, ...mcpTools] : [...base, ...writeSet.tools, ...mcpTools];
+          })(), toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(req.projectId, chatId, userId), loadDocumentText, imageMode: imageAttachments.length > 0 ? imageMode : "inline", ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}), writeTools: enabledWriteTools, writeMode: permissionMode, historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread("chat", chatId, { projectId: req.projectId, ownerUserId: userId, title, agentId: req.agentId ?? null, skillId: null, messages, summary, summarizedCount })).then(() => {}),
           onDone: () => Promise.resolve(), onFail: () => Promise.resolve(), onCancel: () => Promise.resolve(),
         });
@@ -495,9 +506,10 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
           }
         }));
         return yield* Effect.gen(function* () {
-          const loadDocumentText = makeDocumentTextLoader();
+          const env = yield* currentEnv;
           yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
           const thread = yield* threadRepo.loadChat(chatId, userId).pipe(Effect.catchTag("RowNotFound", () => new AssistantThreadNotFound({ documentType: "chat", documentId: chatId })));
+          const loadDocumentText = makeDocumentTextLoader(thread.projectId, chatId, userId, env.AI);
           const settingsRow = yield* getSettingsOrFail(thread.projectId);
           yield* pendingWritesRepo.sweepExpired().pipe(Effect.catchAll(() => Effect.succeed(0)));
           const batchId = requestedBatchId ?? findNewestPendingBatch(thread.messages);
@@ -568,8 +580,8 @@ export class AssistantChatService extends Effect.Service<AssistantChatService>()
             keyId: chatId, idField: "chatId", threadId: chatId, registry: activeChats, config, resolveCompactionConfig: () => Effect.runPromise(gateway.resolveProviderConfig(thread.projectId)), gatewayStream: (input) => gateway.streamChat({ projectId: thread.projectId, ...input }), localWriteTracker,
             systemPrompts, history, userTs: new Date().toISOString(), getCitations: () => citations, modelOptions: modelOptionsForTurn(resolveReasoningEffort(settingsEffort), config.kind),
             userContent: "", skipUserEntry: true, approvalResults: results, ...(resumeResultsNote !== "" ? { resumeResultsNote } : {}), ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools, writeMode: thread.permissionMode,
-            tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
-            toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
+            tools: [...buildAssistantTools({ ...buildToolDeps(thread.projectId, allowlist, (settingsRow as unknown as { search_api_key: string | null }).search_api_key, jevConfig, boundSkills, env.AI), onCitation: (c) => { citations = collectCitation(citations, c); } }), ...writeSet.tools, ...(mcp?.tools ?? [])],
+            toolRoundCap: MAX_CHAT_TOOL_ROUNDS, loadImageBase64: loadImageBase64For(thread.projectId, chatId, userId), loadDocumentText, imageMode, historySummary: () => thread.summary, historySummarizedCount: () => thread.summarizedCount, onDispose: async () => { try { if (mcp) await mcp.close(); } finally { release(); } },
             persist: (messages, summary, summarizedCount) => {
               const tail = messages.at(-1) as { role?: string; toolLog?: Array<{ name: string; detail?: string }> } | undefined;
               const canonical = resumeToolLog.length > 0 && tail?.role === "assistant"

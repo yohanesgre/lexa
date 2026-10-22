@@ -1,4 +1,4 @@
-import type { Editor } from "@tiptap/core";
+import type { MarkdownSource } from "../../editor/MarkdownEditorPane";
 import { useAssistantPanel } from "../../../lib/use-assistant-panel";
 import { AssistantPanelHeader } from "./AssistantPanelHeader";
 import { AssistantPanelBody } from "./AssistantPanelBody";
@@ -13,8 +13,8 @@ import type { AssistantReviewIdentity } from "../../../lib/useAssistantReview";
 // closing the popover does NOT stop the run; reopening reattaches to the
 // live/final state. Session logic lives in useAssistantPanel; markup in the
 // AssistantPanel* view files.
-export function AssistantPanel({ editor, slug, documentType, documentId, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId }: {
-  editor: Editor;
+export function AssistantPanel({ sourceRef, slug, documentType, documentId, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId }: {
+  sourceRef: { current: MarkdownSource | null };
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
@@ -24,7 +24,7 @@ export function AssistantPanel({ editor, slug, documentType, documentId, onClose
   appliedTaskId?: string | null | undefined;
   rejectedTaskId?: string | null | undefined;
 }) {
-  const panel = useAssistantPanel({ editor, slug, documentType, documentId });
+  const panel = useAssistantPanel({ sourceRef, slug, documentType, documentId });
   // null after load = PROVIDER_NOT_CONFIGURED → empty state + disabled Generate.
   const providerMissing = !panel.settingsLoading && panel.settings === null;
 
@@ -52,7 +52,6 @@ export function AssistantPanel({ editor, slug, documentType, documentId, onClose
         onRetry={panel.generate}
         onStop={panel.stop}
         onDismiss={panel.dismiss}
-        editor={editor}
         onClose={onClose}
         // ADR-0005 W3: the SSE tier has no socket to reconnect — a dropped
         // fetch kills the turn (partial persists). The panel keeps the

@@ -221,16 +221,16 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
 
     // --- pure helpers (v1's PolicyService, folded in) ---
 
-    // TipTap emptiness: a doc with no text-bearing nodes is empty.
-    // ('{}' default is truthy — v1's check never fired.)
-    const isEmptyDoc = (json: string): boolean => { /* walk nodes, any text? */ };
+    // Markdown emptiness: visible text, nonempty code, safe images, rules, or
+    // tables with meaningful cell content count; whitespace and empty markers do not.
+    const isMarkdownEmpty = (source: string): boolean => { /* shared/markdown.ts */ };
 
     const validateRequiredFields = (task: Task, column: Column) =>
       Effect.gen(function* () {
         const required = JSON.parse(column.requiredFields) as string[];
         for (const field of required) {
           const empty =
-            field === "description" ? isEmptyDoc(task.description)
+            field === "description" ? isMarkdownEmpty(task.description)
             : field === "assignee"    ? !task.assignees || task.assignees.length === 0
             : !(task as any)[field];
           if (empty)
@@ -418,7 +418,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           }
         }),
 
-      // Lexa → GitHub content push (title + body, TipTap → Markdown). Runs
+      // Lexa → GitHub content push (canonical Markdown source). Runs
       // AFTER the mutation commits, best-effort, non-blocking — called from
       // REST updateTask when title/description changed.
       // Per link: skip when pushed_title/pushed_body already match
@@ -440,7 +440,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
 
       createTaskFromIssue: (actor: Actor, slug: string, repo: string, issueNumber: number) =>
         Effect.gen(function* () {
-          // creates task in first/Backlog column from issue (Markdown → TipTap),
+          // creates a task from GitHub issue Markdown source,
           // auto-links, respects required_fields like a normal create; returns
           // { taskId, activity }
         }),
@@ -496,7 +496,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             //    differ → apply title only (payload has it), skip body;
             //    match → skip entirely.
             // 3. Non-echo: taskService.update(actor { kind:'system', label:
-            //    'github' }, task.id, { title, description: markdownToDoc(body) })
+            //    'github' }, task.id, { title, description: body })
             //    — external edits win; the update emits field_changed rows in
             //    the SAME transaction (emission invariant).
             const link = task.githubs.find((g) => g.issueId === nodeId);
@@ -505,7 +505,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             if (fetched && !isEcho(link, fetched)) {
               yield* taskService.update({ kind: "system", label: "github", userId: null }, task.id, {
                 title: fetched.title,
-                description: markdownToDoc(fetched.body),
+                description: fetched.body,
               }).pipe(Effect.catchAll((e) => Effect.logWarning("webhook edit apply failed", e)));
             } else if (!fetched && normalizeMarkdownForEcho(link.pushed_title) !== normalizeMarkdownForEcho(payload.issue?.title)) {
               yield* taskService.update({ kind: "system", label: "github", userId: null }, task.id, { title: payload.issue?.title });
@@ -718,10 +718,10 @@ class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string
 export class CommentService extends Effect.Service<CommentService>()("Lexa/CommentService", {
   dependencies: [CommentRepo.Default, ActivityRepo.Default, TaskRepo.Default, UserProjectRoleRepo.Default],
   effect: Effect.gen(function* () {
-    // create(taskId, actor, body: TipTapDoc) → { comment, activity }
-    //   validateBody (TipTap doc + isEmptyDoc + ≤64KB) → CommentInvalid;
-    //   existence pre-check → TaskNotFound (never a raw FK violation);
-    //   comment insert + 'commented' activity in one atomic batch.
+    // create(taskId, actor, body: string) → { comment, activity }
+    //   validateBody (non-whitespace text + JSON.stringify(body).length ≤65,536)
+    //   → CommentInvalid; insert + 'commented' activity in one atomic batch.
+    //   Existence pre-check → TaskNotFound (never a raw FK violation).
     // edit(commentId, identity, body) → author-only (authorKind 'user' AND
     //   authorId === identity.userId) else CommentEditForbidden. Sets
     //   edited_at; NO activity row (marker only).
@@ -733,6 +733,29 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
   }),
 }) {}
 ```
+
+### Canonical Markdown content
+
+Task descriptions, wiki page/revision content, and comment bodies are
+canonical Markdown strings. Persist source unchanged; API object payloads are
+rejected, and saves do not parse or reserialize source. `markdownToText`
+extracts plain text without image alt text; `isMarkdownEmpty` accepts meaningful
+text/code, safe images, horizontal rules, and meaningful tables. Comments
+require non-whitespace text and retain the serialized-JavaScript-character
+cap: `JSON.stringify(body).length <= 65,536`.
+
+`normalizeMarkdownForEcho` is comparison-only for GitHub (trim + CRLF→LF).
+`safeImageSrc` owns safe image URL classification. Runtime Markdown semantics
+live in `shared/markdown.ts`; legacy TipTap serialization is isolated in
+`server/db/legacy-tiptap.ts` for the explicit offline upgrade only. Unsupported
+or malformed legacy structures block apply rather than losing content; there
+is no runtime JSON guessing or public TipTap shim. `assertMarkdownReady(db)`
+gates request traffic on `settings.key='documents.format'` equaling
+`markdown-v1`.
+
+The one-time migration is explicit operator audit/apply, never startup work.
+`_markdown_migration` stores only row identifiers and source/target hashes;
+source CAS updates and journal markers commit in the same bounded batch.
 
 **Emission invariant (the core rule):** every task mutation appends
 `task_activity` row(s) in the SAME transaction as the mutation — one row per
@@ -813,6 +836,25 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
   }),
 }) {}
 ```
+
+**Chat document conversion:** `resolveChatAttachmentMime` classifies bytes, not
+client MIME or filename. Supported document types are PDF, DOCX, XLSX/XLSM/XLSB/XLS,
+ODT/ODS, CSV, HTML/HTM, XML, MD/MARKDOWN, and TXT. ZIP/CFB require validated
+package/root-stream structure; ambiguous files, SVG, Numbers, ET, and PPTX reject.
+Only the optional Workers `AI.toMarkdown` binding converts binary documents;
+MD/MARKDOWN/TXT bypass it and require strict UTF-8. Missing binding and conversion
+errors are explicit (no local fallback); extracted Markdown is request context,
+not persisted content. Existing image signatures and vision routing are unchanged.
+
+**Chat attachment authorization:** private context is scoped to both the current
+chat and its authenticated owner, with no project/team admin or superadmin bypass.
+Upload, list, serve and delete enforce that scope before blob access; send
+validation and lazy history/resume/image/document loaders enforce it again before
+conversion or model dispatch. Null/unbound identities are not private-chat owners.
+Task/wiki attachment rows remain project artifacts: an independent authorized
+project row may grant access to the same content-addressed bytes, but a private
+chat row never grants project-wide access. `read_s3_file` reads project attachment
+rows only, and document-lane image tools cannot read private chat uploads.
 
 **Actor resolution (attribution ≠ authorization):** browser users → the
 Better Auth session user (`actorFromIdentity` maps it to kind 'user'); API
@@ -1502,8 +1544,8 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   SSRF-guarded `fetch_url` (allowlist-enforced, PDF-capable),
   `read_s3_file` via `Lexa/Storage`, PM reads (`get_task` accepts the
   `PREFIX-n` alias, `search_tasks`), wiki reads (`search_wiki` FTS-scoped
-  to the project, `read_wiki_page` by slug — TipTap→markdown via
-  `shared/markdown.ts`, ~8k-char output cap), plus bulk reads
+  to the project, `read_wiki_page` by slug returns stored Markdown directly
+  (~8k-char output cap), plus bulk reads
   (`get_all_tasks` — full markdown per task, 60k-char total cap;
   `get_all_wiki_pages` — ~8k per page, 60k total; `get_board_structure` —
   columns/swimlanes/milestones projection); bulk outputs carry
@@ -1531,7 +1573,7 @@ export class AssistantTaskService extends Effect.Service<AssistantTaskService>()
   delete subtask guard on one task does not abort the rest; zero applied →
   error). Placement on the provider tools nudges `refs` for many tasks.
   Diffs are server-computed plain-text projections (`AssistantWriteDiff` in
-  `shared/assistant.ts`, TipTap-aware text extraction) — what the approver
+  `shared/assistant.ts`, derived from Markdown) — what the approver
   sees; raw args ride the row for execution. The text-bearing kinds (wiki
   edit before/after, wiki create + comment body) carry the **full** text — the
   approval card scrolls it, never shows a truncated change — while short
@@ -1729,7 +1771,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `TaskHasChildren` | 409 | task delete hits a constraint (defensive — subtask links CASCADE) |
 | `NeighborNotInColumn` | 422 | beforeTaskId/afterTaskId not in target column |
 | `GithubIssueAlreadyLinked` | 409 | |
-| `RequiredFieldMissing` | 422 | TipTap-aware emptiness; enforced on create/move/update |
+| `RequiredFieldMissing` | 422 | Markdown semantic emptiness; enforced on create/move/update |
 | `OptionInUse` | 409 | delete priority/type option still referenced by tasks |
 | `InvalidOption` | 422 | unknown/foreign option id, duplicate label, or empty list |
 | `SourceNotFound` | 404 | delete a source that doesn't exist |
@@ -1776,7 +1818,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `CommentNotFound` | 404 | |
 | `CommentEditForbidden` | 403 | edit another user's comment |
 | `CommentDeleteForbidden` | 403 | delete without author/admin authority |
-| `CommentInvalid` | 422 | invalid body (empty TipTap doc / >64KB) |
+| `CommentInvalid` | 422 | non-whitespace Markdown text; JSON.stringify(body).length ≤65,536 |
 | `AttachmentNotFound` | 404 | unknown attachment id, or blob missing, or attachment outside the shared subtree on the share route |
 | `PayloadTooLarge` | 413 | upload exceeds `LXK_MAX_UPLOAD_MB` (default 25) — route-level cap; the global body cap stays `BODY_TOO_LARGE` |
 | `AttachmentDeleteForbidden` | 403 | delete without uploader/admin authority |

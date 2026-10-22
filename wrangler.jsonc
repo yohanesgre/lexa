@@ -10,6 +10,9 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	"ai": {
+		"binding": "AI"
+	},
 	// Raw from-source bundling. `main` points at source
 	// (server/workers-entry.ts), so a `wrangler deploy` that resolves this
 	// root `main` with no Vite build output bundles from source and needs

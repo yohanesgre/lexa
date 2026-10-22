@@ -150,6 +150,25 @@ export class AssistantThreadRepo extends Effect.Service<AssistantThreadRepo>()("
           userId
         ).pipe(Effect.map(rowToThread)),
 
+      claimChat: (chatId: string, userId: string, projectId: string): Effect.Effect<AssistantThread, RowNotFound | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          yield* run(
+            db,
+            `INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+             VALUES ('chat', ?, ?, ?, '[]')
+             ON CONFLICT(document_type, document_id) DO NOTHING`,
+            chatId,
+            projectId,
+            userId
+          );
+          return yield* queryFirst<AssistantThreadRow>(
+            db,
+            `SELECT * FROM assistant_threads WHERE document_type = 'chat' AND document_id = ? AND owner_user_id = ?`,
+            chatId,
+            userId
+          ).pipe(Effect.map(rowToThread));
+        }),
+
       // Atomic append — the prior transcript is read and rewritten in ONE
       // statement (no read-compute-write window, so a concurrent append cannot
       // be lost). `json_valid`/`json_type` guard a malformed or non-array

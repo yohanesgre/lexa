@@ -1,13 +1,12 @@
 import { toolDefinition, type ToolExecutionContext } from "@tanstack/ai";
 import { z } from "zod";
-import { extractText } from "../../shared/tiptap-text";
-import type { TipTapDoc } from "../../shared/types";
+import { markdownToText } from "../../shared/markdown";
 import type { ApprovalPartial, AssistantWriteDiff } from "../../shared/assistant";
 import { ASSISTANT_WRITE_DENIED_ERROR } from "../../shared/assistant";
 import { withToolTimeout } from "./tool-caps";
 
 const DIFF_TEXT_CAP = 2000;
-const COMMENT_BODY_BYTES = 64 * 1024;
+const COMMENT_BODY_LENGTH = 65_536;
 
 import {
   APPROVAL_TTL_HOURS,
@@ -41,13 +40,12 @@ export function parseWriteTools(raw: string | null | undefined): string[] {
 }
 
 const cap = (s: string, n = DIFF_TEXT_CAP): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const docText = (doc: TipTapDoc | undefined | null): string => extractText(doc ?? ({ type: "doc", content: [] } as TipTapDoc));
 
 // ── Diff builders (pure — unit-tested directly) ──
 
 export function buildTaskCreateDiff(input: {
   title: string;
-  description?: TipTapDoc | undefined;
+  description?: string | undefined;
   priority?: string | undefined;
   type?: string | undefined;
   dueAt?: string | undefined;
@@ -55,7 +53,7 @@ export function buildTaskCreateDiff(input: {
   parentTitle?: string | null | undefined;
 }): Extract<AssistantWriteDiff, { type: "task_create" }> {
   const fields: Record<string, string | null> = {};
-  if (input.description !== undefined) fields.description = docText(input.description);
+  if (input.description !== undefined) fields.description = input.description;
   if (input.priority !== undefined) fields.priority = input.priority;
   if (input.type !== undefined) fields.type = input.type;
   if (input.dueAt !== undefined) fields.dueAt = input.dueAt;
@@ -73,7 +71,7 @@ export interface WriteTaskSnapshot {
   type: string;
   dueAt: string | null;
   assignees: string[];
-  descriptionText: string;
+  description: string;
   archivedAt: string | null;
 }
 
@@ -86,7 +84,7 @@ export function buildTaskUpdateDiff(
   const beforeOf = (field: TaskUpdateChange["field"]): string | null => {
     switch (field) {
       case "title": return task.title;
-      case "description": return task.descriptionText || null;
+      case "description": return task.description;
       case "priority": return task.priority;
       case "type": return task.type;
       case "dueAt": return task.dueAt;
@@ -100,12 +98,12 @@ export function buildTaskUpdateDiff(
     changes: changes.map((c) => ({
       field: c.field,
       before: beforeOf(c.field),
-      after: c.after === "" ? null : c.after,
+      after: c.field === "description" ? c.after : c.after === "" ? null : c.after,
     })),
   };
 }
 
-export function buildWikiEditDiff(page: { slug: string; title: string; text: string }, next: { title?: string | undefined; content: TipTapDoc }): Extract<AssistantWriteDiff, { type: "wiki_edit" }> {
+export function buildWikiEditDiff(page: { slug: string; title: string; text: string }, next: { title?: string | undefined; content: string }): Extract<AssistantWriteDiff, { type: "wiki_edit" }> {
   return {
     type: "wiki_edit",
     slug: page.slug,
@@ -114,7 +112,7 @@ export function buildWikiEditDiff(page: { slug: string; title: string; text: str
     // whole change the user is approving. `args` already holds the whole
     // proposal; the diff is display, so it must not lie about it.
     beforeText: page.text,
-    afterText: extractText(next.content),
+    afterText: next.content,
   };
 }
 
@@ -446,11 +444,7 @@ export function buildDenyWriteRecord(): AssistantWriteToolDeps["record"] {
   return async () => ({ error: ASSISTANT_WRITE_DENIED_ERROR });
 }
 
-const tipTapDoc = z
-  .looseObject({
-    type: z.literal("doc"),
-    content: z.array(z.looseObject({ type: z.string() })).optional(),
-  }) as unknown as z.ZodType<TipTapDoc, TipTapDoc>;
+const markdownSource = z.string();
 
 // Single-task ref in two shapes: exactly one of `ref` (one task, legacy) or
 // `refs` (1..MAX_BULK_TASK_REFS tasks in one call). Passing both is rejected —
@@ -538,7 +532,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         "Propose creating a task in this project. The write is NOT applied until the user approves it. The task lands in the project's first column (or the given sprint/parent).",
       inputSchema: z.object({
         title: z.string().min(1).max(300),
-        description: tipTapDoc.optional(),
+        description: markdownSource.optional(),
         priorityId: z.string().optional(),
         typeId: z.string().optional(),
         dueAt: z.string().optional(),
@@ -584,7 +578,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       inputSchema: z.object({
         ref: z.string().min(1).describe("Task id or PREFIX-n key"),
         title: z.string().min(1).max(300).optional(),
-        description: tipTapDoc.optional(),
+        description: markdownSource.optional(),
         priorityId: z.string().optional(),
         typeId: z.string().optional(),
         dueAt: z.string().nullable().optional(),
@@ -596,7 +590,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       if (!task.ok) return { proposed: false, error: task.error };
       const changes: Array<Pick<TaskUpdateChange, "field" | "after">> = [];
       if (args.title !== undefined) changes.push({ field: "title", after: args.title });
-      if (args.description !== undefined) changes.push({ field: "description", after: docText(args.description) });
+      if (args.description !== undefined) changes.push({ field: "description", after: args.description });
       if (args.priorityId !== undefined) changes.push({ field: "priority", after: args.priorityId });
       if (args.typeId !== undefined) changes.push({ field: "type", after: args.typeId });
       if (args.dueAt !== undefined) changes.push({ field: "dueAt", after: args.dueAt });
@@ -698,23 +692,22 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
   tools.push(
     toolDefinition({
       name: "add_comment",
-      description: "Propose adding a comment to a task. Body is a TipTap doc (≤64KB). Requires user approval.",
+      description: "Propose adding a Markdown comment to a task (≤65,536 serialized characters). Requires user approval.",
       inputSchema: z.object({
         ref: z.string().min(1).describe("Task id or PREFIX-n key"),
-        body: tipTapDoc,
+        body: markdownSource,
       }),
       outputSchema: writeToolOutputSchema,
     }).server(async (args, context) => {
       const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
       if (!task.ok) return { proposed: false, error: task.error };
-      if (JSON.stringify(args.body).length > COMMENT_BODY_BYTES) {
-        return err("comment body exceeds 64KB");
-      }
+      if (markdownToText(args.body).trim().length === 0) return err("comment body is empty");
+      if (JSON.stringify(args.body).length > COMMENT_BODY_LENGTH) return err("comment body exceeds 64KB");
       const diff: AssistantWriteDiff = {
         type: "comment",
         taskRef: task.value.key,
         taskTitle: task.value.title,
-        bodyText: extractText(args.body),
+        bodyText: markdownToText(args.body),
       };
       const r = await record(deps, {
         name: "add_comment",
@@ -731,11 +724,11 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
   tools.push(
     toolDefinition({
       name: "create_wiki_page",
-      description: "Propose creating a wiki page (slug must be free). Content is a TipTap doc. Requires user approval.",
+      description: "Propose creating a wiki page (slug must be free). Content is Markdown. Requires user approval.",
       inputSchema: z.object({
         slug: z.string().min(1).max(80).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "lowercase kebab-case slug"),
         title: z.string().min(1).max(300),
-        content: tipTapDoc,
+        content: markdownSource,
         parentId: z.string().optional(),
       }),
       outputSchema: writeToolOutputSchema,
@@ -746,7 +739,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
         type: "wiki_create",
         slug: args.slug,
         title: args.title,
-        bodyText: extractText(args.content),
+        bodyText: markdownToText(args.content),
       };
       const r = await record(deps, { name: "create_wiki_page", args, diff, detail: `Create page "${cap(args.title, 60)}"` }, context);
       if (!r.ok) return { proposed: false, error: r.error };
@@ -762,7 +755,7 @@ export function buildAssistantWriteTools(deps: AssistantWriteToolDeps) {
       inputSchema: z.object({
         slug: z.string().min(1),
         title: z.string().min(1).max(300).optional(),
-        content: tipTapDoc,
+        content: markdownSource,
       }),
       outputSchema: writeToolOutputSchema,
     }).server(async (args, context) => {

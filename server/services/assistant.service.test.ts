@@ -26,7 +26,6 @@ import {
 import { summaryWindow, SUMMARY_WINDOW } from "../assistant/summarize";
 import type { JevQuestions, JevRuntimeConfig } from "../assistant/jev";
 import type { AssistantThread } from "../repos/assistant-thread.repo";
-import type { TipTapDoc } from "../../shared/types";
 
 const providerMock = vi.hoisted(() => ({
   script: [] as Array<Record<string, unknown>>,
@@ -70,6 +69,7 @@ function toolDeps(overrides: Partial<AssistantToolDeps> = {}): AssistantToolDeps
     searchApiKey: null,
     fetchImpl: fetch,
     storageGet: async () => new Uint8Array(),
+    resolveStorageFile: async () => null,
     projectOwnsStorageKey: async () => true,
     findTaskByRef: async () => null,
     searchTasksByTitle: async () => [],
@@ -90,10 +90,7 @@ function tool(depsOverrides: Partial<AssistantToolDeps>, name: string): Exec {
   return (t as unknown as { execute: Exec }).execute;
 }
 
-const doc = (text: string): TipTapDoc => ({
-  type: "doc",
-  content: [{ type: "paragraph", content: [{ type: "text", text }] }],
-});
+const doc = (text: string): string => text;
 
 describe("Assistant toolset (read-only surface)", () => {
   it("carries the read tools and never a write tool name", () => {

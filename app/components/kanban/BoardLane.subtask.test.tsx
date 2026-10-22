@@ -63,7 +63,7 @@ function makeTask(overrides: Partial<Task>): Task {
     columnId: "c1",
     swimlaneId: "s1",
     title: "Task",
-    description: { type: "doc", content: [] },
+    description: "",
     priority: "p1",
     type: "ty1",
     assignees: [],

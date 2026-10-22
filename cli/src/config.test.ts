@@ -234,7 +234,7 @@ describe("LexaClient (request building + error mapping)", () => {
     projectId: "p1",
     title: "Old Title",
     slug: "old-slug",
-    content: { type: "doc", content: [] },
+    content: "",
     parentId: null,
     position: 0,
     updatedBy: null,

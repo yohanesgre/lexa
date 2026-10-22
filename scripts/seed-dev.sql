@@ -151,11 +151,11 @@ VALUES ('seed-sw-min-0', 'seed-proj-minimal', 'Backlog', '', 0, 'backlog');
 
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position)
 VALUES
-  ('seed-task-min-0', 'seed-proj-minimal', 'seed-col-min-0', 'seed-sw-min-0', 'Unassigned backlog bug', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"A bug sitting in backlog with no owner."}]}]}', 'seed-prio-min-1', 'seed-type-min-1', 'Zz'),
-  ('seed-task-min-1', 'seed-proj-minimal', 'seed-col-min-0', 'seed-sw-min-0', 'Low priority feature idea', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Nice to have someday."}]}]}', 'seed-prio-min-3', 'seed-type-min-0', 'a0'),
-  ('seed-task-min-2', 'seed-proj-minimal', 'seed-col-min-1', 'seed-sw-min-0', 'WIP task with assignee', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Should be movable since assignee field present."}]}]}', 'seed-prio-min-2', 'seed-type-min-2', 'a0'),
-  ('seed-task-min-3', 'seed-proj-minimal', 'seed-col-min-1', 'seed-sw-min-0', 'At WIP limit second task', '{"type":"doc","content":[]}', 'seed-prio-min-2', 'seed-type-min-2', 'a1'),
-  ('seed-task-min-4', 'seed-proj-minimal', 'seed-col-min-2', 'seed-sw-min-0', 'Shipped feature', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Done and gone."}]}]}', 'seed-prio-min-2', 'seed-type-min-0', 'a0');
+  ('seed-task-min-0', 'seed-proj-minimal', 'seed-col-min-0', 'seed-sw-min-0', 'Unassigned backlog bug', 'A bug sitting in backlog with no owner.', 'seed-prio-min-1', 'seed-type-min-1', 'Zz'),
+  ('seed-task-min-1', 'seed-proj-minimal', 'seed-col-min-0', 'seed-sw-min-0', 'Low priority feature idea', 'Nice to have someday.', 'seed-prio-min-3', 'seed-type-min-0', 'a0'),
+  ('seed-task-min-2', 'seed-proj-minimal', 'seed-col-min-1', 'seed-sw-min-0', 'WIP task with assignee', 'Should be movable since assignee field present.', 'seed-prio-min-2', 'seed-type-min-2', 'a0'),
+  ('seed-task-min-3', 'seed-proj-minimal', 'seed-col-min-1', 'seed-sw-min-0', 'At WIP limit second task', '', 'seed-prio-min-2', 'seed-type-min-2', 'a1'),
+  ('seed-task-min-4', 'seed-proj-minimal', 'seed-col-min-2', 'seed-sw-min-0', 'Shipped feature', 'Done and gone.', 'seed-prio-min-2', 'seed-type-min-0', 'a0');
 
 INSERT INTO task_assignees (task_id, user_name)
 VALUES
@@ -192,79 +192,79 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, p
 VALUES
   ('seed-task-f-01', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-0',
    'Critical crash on dashboard load',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"App crashes when opening the dashboard with a large board. "},{"type":"text","marks":[{"type":"bold"}],"text":"100% repro rate"},{"type":"text","text":" on all browsers."}]},{"type":"paragraph","content":[{"type":"text","text":"Stack trace points to the task-list virtualizer."}]}]}',
+   'App crashes when opening the dashboard with a large board. **100% repro rate** on all browsers.' || char(10) || char(10) || 'Stack trace points to the task-list virtualizer.',
    'seed-prio-full-0', 'seed-type-full-1', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-02', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-0',
    'Design onboarding flow',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Onboarding Flow Design"}]},{"type":"paragraph","content":[{"type":"text","text":"Define the welcome sequence from signup to first board."}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Welcome email: 1 day after signup"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"First-project wizard: 3 steps"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Invite prompt: after first task created"}]}]}]}]}',
+   '## Onboarding Flow Design' || char(10) || char(10) || 'Define the welcome sequence from signup to first board.' || char(10) || char(10) || '- Welcome email: 1 day after signup' || char(10) || '- First-project wizard: 3 steps' || char(10) || '- Invite prompt: after first task created',
    'seed-prio-full-1', 'seed-type-full-0', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-03', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-1',
    'Create landing page illustrations',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Illustrations for the marketing page hero and feature sections. 2 variants each."}]}]}',
+   'Illustrations for the marketing page hero and feature sections. 2 variants each.',
    'seed-prio-full-2', 'seed-type-full-3', 'a2', 'github_issue_42', 42, 'acme/nimbus', 'open'),
 
   ('seed-task-f-04', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-0',
-   'Empty description task', '{"type":"doc","content":[]}',
+   'Empty description task', '',
    'seed-prio-full-3', 'seed-type-full-2', 'a3', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-05', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-2',
    'Write launch blog post',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Announcement post covering the kanban board, wiki, and AI assistant. 800-1200 words."}]}]}',
+   'Announcement post covering the kanban board, wiki, and AI assistant. 800-1200 words.',
    'seed-prio-full-3', 'seed-type-full-3', 'a4', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-06', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-0',
    'Fix memory leak in notification queue',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Queue grows unbounded under high activity (>30 events/sec)."}]},{"type":"codeBlock","attrs":{"language":"ts"},"content":[{"type":"text","text":"// Current problematic code\nif (queue.size() > MAX_QUEUE) {\n    queue.back()->Retire();  // callback re-triggers enqueue!\n    queue.pop_back();\n}"}]},{"type":"paragraph","content":[{"type":"text","text":"Solution: orphan the entry first, then Retire() outside the queue lock."}]}]}',
+   'Queue grows unbounded under high activity (>30 events/sec).' || char(10) || char(10) || '```ts' || char(10) || '// Current problematic code' || char(10) || 'if (queue.size() > MAX_QUEUE) {' || char(10) || '    queue.back()->Retire();  // callback re-triggers enqueue!' || char(10) || '    queue.pop_back();' || char(10) || '}' || char(10) || '```' || char(10) || char(10) || 'Solution: orphan the entry first, then Retire() outside the queue lock.',
    'seed-prio-full-0', 'seed-type-full-1', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-07', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-1',
    'Implement keyboard navigation',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Full arrow-key board navigation with screen-reader labels."}]}]}',
+   'Full arrow-key board navigation with screen-reader labels.',
    'seed-prio-full-1', 'seed-type-full-0', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-08', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-0',
    'Refactor task-list pagination',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Current offset pagination is O(n) on large boards. Needs cursor-based keyset pagination."}]}]}',
+   'Current offset pagination is O(n) on large boards. Needs cursor-based keyset pagination.',
    'seed-prio-full-2', 'seed-type-full-2', 'a2', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-09', 'seed-proj-full', 'seed-col-f-2', 'seed-sw-f-0',
    'Role-based access control',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Review Checklist"}]},{"type":"taskList","content":[{"type":"taskItem","attrs":{"checked":true},"content":[{"type":"paragraph","content":[{"type":"text","text":"Admins can invite members"}]}]},{"type":"taskItem","attrs":{"checked":true},"content":[{"type":"paragraph","content":[{"type":"text","text":"Members can edit tasks and wiki pages"}]}]},{"type":"taskItem","attrs":{"checked":false},"content":[{"type":"paragraph","content":[{"type":"text","text":"Add tests for role escalation"}]}]}]}]}',
+   '### Review Checklist' || char(10) || char(10) || '- [x] Admins can invite members' || char(10) || '- [x] Members can edit tasks and wiki pages' || char(10) || '- [ ] Add tests for role escalation',
    'seed-prio-full-1', 'seed-type-full-0', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-10', 'seed-proj-full', 'seed-col-f-2', 'seed-sw-f-2',
    'Email links broken in shared sessions',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Invite links 404 when opened in a second session — token parser skips the last 4 chars."}]}]}',
+   'Invite links 404 when opened in a second session — token parser skips the last 4 chars.',
    'seed-prio-full-2', 'seed-type-full-1', 'a1', 'github_issue_99', 99, 'acme/nimbus', 'closed'),
 
   ('seed-task-f-11', 'seed-proj-full', 'seed-col-f-3', 'seed-sw-f-0',
    'Dark mode toggle',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Full theme switch with persisted preference. Shipped in v0.3."}]}]}',
+   'Full theme switch with persisted preference. Shipped in v0.3.',
    'seed-prio-full-2', 'seed-type-full-0', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-12', 'seed-proj-full', 'seed-col-f-3', 'seed-sw-f-1',
-   'Export OpenAPI 3.1 spec', '{"type":"doc","content":[]}',
+   'Export OpenAPI 3.1 spec', '',
    'seed-prio-full-3', 'seed-type-full-2', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-13', 'seed-proj-full', 'seed-col-f-3', 'seed-sw-f-2',
    'Design system color tokens',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Neutral, brand, success, warning, danger. Each 8 shades."}]}]}',
+   'Neutral, brand, success, warning, danger. Each 8 shades.',
    'seed-prio-full-2', 'seed-type-full-3', 'a2', 'github_issue_77', 77, 'acme/nimbus', 'closed'),
 
   ('seed-task-f-14', 'seed-proj-full', 'seed-col-f-4', 'seed-sw-f-0',
    'Integrate new billing provider',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Waiting for the payments team to deliver sandbox keys (ETA next sprint)."}]},{"type":"paragraph","content":[{"type":"text","text":"All code is ready — just need credentials."}]}]}',
+   'Waiting for the payments team to deliver sandbox keys (ETA next sprint).' || char(10) || char(10) || 'All code is ready — just need credentials.',
    'seed-prio-full-1', 'seed-type-full-2', 'a0', NULL, NULL, NULL, NULL),
 
    ('seed-task-f-15', 'seed-proj-full', 'seed-col-f-4', 'seed-sw-f-0',
-    'Unblocked but no owner', '{"type":"doc","content":[]}',
+    'Unblocked but no owner', '',
     'seed-prio-full-2', 'seed-type-full-1', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-16', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-1',
    'Document the auth flow with screenshots',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Sign-in sequence with the new team-scoped project picker:"}]},{"type":"paragraph","content":[{"type":"image","attrs":{"src":"https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&q=60","alt":"Team sign-in flow diagram"}}]},{"type":"paragraph","content":[{"type":"text","text":"The picker only lists projects owned by your team. Cross-team grants appear under a separate section."}]}]}',
+   'Sign-in sequence with the new team-scoped project picker:' || char(10) || char(10) || '![Team sign-in flow diagram](https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&q=60)' || char(10) || char(10) || 'The picker only lists projects owned by your team. Cross-team grants appear under a separate section.',
    'seed-prio-full-1', 'seed-type-full-2', 'a3', NULL, NULL, NULL, NULL);
 
 INSERT INTO task_assignees (task_id, user_name)
@@ -295,61 +295,61 @@ INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, pare
 VALUES
   ('seed-wiki-00', 'seed-proj-full',
    'Product Overview', 'product-overview',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Nimbus Product Overview"}]},{"type":"paragraph","content":[{"type":"text","text":"A web app for small teams to plan and ship. "},{"type":"text","marks":[{"type":"bold"}],"text":"Plan, track, and ship"},{"type":"text","text":" — boards, docs, and AI help in one place."}]},{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Core Pillars"}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Kanban boards with swimlanes and WIP limits"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Nested wiki for living documentation"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"AI-assisted task writing and review"}]}]}]}]}',
+   '# Nimbus Product Overview' || char(10) || char(10) || 'A web app for small teams to plan and ship. **Plan, track, and ship** — boards, docs, and AI help in one place.' || char(10) || char(10) || '## Core Pillars' || char(10) || char(10) || '- Kanban boards with swimlanes and WIP limits' || char(10) || '- Nested wiki for living documentation' || char(10) || '- AI-assisted task writing and review',
    'Nimbus Product Overview\nA web app for small teams to plan and ship. Plan, track, and ship — boards, docs, and AI help in one place.\nCore Pillars\nKanban boards with swimlanes and WIP limits\nNested wiki for living documentation\nAI-assisted task writing and review',
    NULL, 0),
 
   ('seed-wiki-01', 'seed-proj-full',
    'Design System', 'design-system',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Color tokens: warm neutrals with a blue brand accent. Component spacing uses a 4px grid. Dark mode ships with the v0.3 theme refresh."}]}]}',
+   'Color tokens: warm neutrals with a blue brand accent. Component spacing uses a 4px grid. Dark mode ships with the v0.3 theme refresh.',
    'Design System\nColor tokens: warm neutrals with a blue brand accent. Component spacing uses a 4px grid. Dark mode ships with the v0.3 theme refresh.',
    NULL, 1),
 
   ('seed-wiki-02', 'seed-proj-full',
    'Auth & Permissions', 'auth-permissions',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Access Model"}]},{"type":"paragraph","content":[{"type":"text","text":"Nimbus access revolves around two roles. Admins can "},{"type":"text","marks":[{"type":"bold"}],"text":"invite members"},{"type":"text","text":" and manage projects; members can "},{"type":"text","marks":[{"type":"bold"}],"text":"edit tasks and wiki pages"},{"type":"text","text":"."}]}]}',
+   '## Access Model' || char(10) || char(10) || 'Nimbus access revolves around two roles. Admins can **invite members** and manage projects; members can **edit tasks and wiki pages**.',
    'Access Model\nNimbus access revolves around two roles. Admins can invite members and manage projects; members can edit tasks and wiki pages.',
    'seed-wiki-00', 0),
 
   ('seed-wiki-03', 'seed-proj-full',
    'RBAC Model', 'rbac-model',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Role checks: admin can delete projects, member can move tasks."}]},{"type":"codeBlock","attrs":{"language":"ts"},"content":[{"type":"text","text":"enum Role { ADMIN, MEMBER }"}]}]}',
+   'Role checks: admin can delete projects, member can move tasks.' || char(10) || char(10) || '```ts' || char(10) || 'enum Role { ADMIN, MEMBER }' || char(10) || '```',
    'RBAC Model\nRole checks: admin can delete projects, member can move tasks.\nenum Role { ADMIN, MEMBER }',
    'seed-wiki-02', 0),
 
   ('seed-wiki-04', 'seed-proj-full',
    'Permission Matrix', 'permission-matrix',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Who can do what:"}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Admin: full access"},{"type":"text","marks":[{"type":"textStyle","attrs":{"color":"#ef4444"}}],"text":" OWN"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Member: tasks + wiki edit"},{"type":"text","marks":[{"type":"textStyle","attrs":{"color":"#3b82f6"}}],"text":" EDIT"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Guest: read-only (planned)"},{"type":"text","marks":[{"type":"textStyle","attrs":{"color":"#10b981"}}],"text":" VIEW"}]}]}]}]}',
+   'Who can do what:' || char(10) || char(10) || '- Admin: full access — **OWN**' || char(10) || '- Member: tasks + wiki edit — **EDIT**' || char(10) || '- Guest: read-only (planned) — **VIEW**',
    'Permission Matrix\nWho can do what:\nAdmin: full access OWN\nMember: tasks + wiki edit EDIT\nGuest: read-only (planned) VIEW',
    'seed-wiki-02', 1),
 
   ('seed-wiki-05', 'seed-proj-full',
    'API Design', 'api-design',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"REST surface: /api/projects, /api/projects/:slug/tasks. Pagination is cursor-based; errors follow the error catalog."}]}]}',
+   'REST surface: /api/projects, /api/projects/:slug/tasks. Pagination is cursor-based; errors follow the error catalog.',
    'API Design\nREST surface: /api/projects, /api/projects/:slug/tasks. Pagination is cursor-based; errors follow the error catalog.',
    'seed-wiki-00', 1),
 
   ('seed-wiki-06', 'seed-proj-full',
    'Roadmap', 'roadmap',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Quarterly themes with mid-quarter re-planning. Key milestones: open beta, GitHub sync GA, mobile layout."}]}]}',
+   'Quarterly themes with mid-quarter re-planning. Key milestones: open beta, GitHub sync GA, mobile layout.',
    'Roadmap\nQuarterly themes with mid-quarter re-planning. Key milestones: open beta, GitHub sync GA, mobile layout.',
    'seed-wiki-00', 2),
 
   ('seed-wiki-07', 'seed-proj-full',
    'Brand & Voice', 'brand-and-voice',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Tone: direct, human, no hype. Docs voice matches the product: short sentences, concrete examples."}]}]}',
+   'Tone: direct, human, no hype. Docs voice matches the product: short sentences, concrete examples.',
    'Brand & Voice\nTone: direct, human, no hype. Docs voice matches the product: short sentences, concrete examples.',
    NULL, 2),
 
   ('seed-wiki-08', 'seed-proj-full',
    'Empty Page', 'empty-page',
-   '{"type":"doc","content":[]}',
+   '',
    '',
    'seed-wiki-01', 0),
 
   ('seed-wiki-09', 'seed-proj-full',
    'Release Checklist', 'release-checklist',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Release Checklist"}]},{"type":"paragraph","content":[{"type":"text","text":"Every release runs through these gates. The table tracks owners and status; the diagram below is the release pipeline."}]},{"type":"table","content":[{"type":"tableRow","content":[{"type":"tableHeader","content":[{"type":"paragraph","content":[{"type":"text","text":"Gate"}]}]},{"type":"tableHeader","content":[{"type":"paragraph","content":[{"type":"text","text":"Owner"}]}]},{"type":"tableHeader","content":[{"type":"paragraph","content":[{"type":"text","text":"Status"}]}]}]},{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Changelog entries"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"PM"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","marks":[{"type":"bold"}],"text":"Done"}]}]}]},{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Wireframes committed"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Design"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","marks":[{"type":"bold"}],"text":"Done"}]}]}]},{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"tsc + vitest green"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Eng"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Pending"}]}]}]}]},{"type":"paragraph","content":[{"type":"image","attrs":{"src":"https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&q=60","alt":"Release pipeline diagram"}}]}]}',
+   '## Release Checklist' || char(10) || char(10) || 'Every release runs through these gates. The table tracks owners and status; the diagram below is the release pipeline.' || char(10) || char(10) || '| Gate | Owner | Status |' || char(10) || '| --- | --- | --- |' || char(10) || '| Changelog entries | PM | Done |' || char(10) || '| Wireframes committed | Design | Done |' || char(10) || '| tsc + vitest green | Eng | Pending |',
    'Release Checklist\nEvery release runs through these gates. The table tracks owners and status; the diagram below is the release pipeline.\nGate Owner Status\nChangelog entries PM Done\nWireframes committed Design Done\ntsc + vitest green Eng Pending',
    'seed-wiki-00', 3);
 
@@ -360,17 +360,17 @@ INSERT INTO wiki_page_revisions (id, page_id, title, slug, content, content_text
 VALUES
   ('seed-rev-00', 'seed-wiki-00',
    'Product Overview', 'product-overview',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Initial draft of the product overview."}]}]}',
+   'Initial draft of the product overview.',
    'Initial draft of the product overview.',
    'manual', datetime('now', '-5 days')),
   ('seed-rev-01', 'seed-wiki-00',
    'Product Overview', 'product-overview',
-   '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Nimbus Product Overview"}]},{"type":"paragraph","content":[{"type":"text","text":"A web app for small teams to plan and ship."}]}]}',
+   '# Nimbus Product Overview' || char(10) || char(10) || 'A web app for small teams to plan and ship.',
    'Nimbus Product Overview\nA web app for small teams to plan and ship.',
    'manual', datetime('now', '-3 days')),
    ('seed-rev-02', 'seed-wiki-02',
     'Auth & Permissions', 'auth-permissions',
-    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Draft access notes — work in progress."}]}]}',
+    'Draft access notes — work in progress.',
     'Draft access notes — work in progress.',
     'autosave', datetime('now', '-1 day'));
 

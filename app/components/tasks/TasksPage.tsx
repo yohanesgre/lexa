@@ -26,7 +26,7 @@ import { DatePicker } from "../ui/DatePicker";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { cn } from "../ui/cn";
 import type { MoveTarget } from "../kanban/KanbanBoard";
-import type { BoardTask, Task, TipTapDoc, FieldConfig, Column, Swimlane } from "../../../shared/types";
+import type { BoardTask, Task, FieldConfig, Column, Swimlane } from "../../../shared/types";
 import { boardTaskToTask } from "../../../shared/types";
 import { TaskDetail } from "../TaskDetail";
 
@@ -532,7 +532,10 @@ export function TasksPage({ slug, search }: TasksPageProps) {
     await moveTask.mutateAsync({ id: taskId, ...target });
   };
   const handleUpdate = (id: string, data: Partial<Task>) => {
-    updateTask.mutate({ id, ...data });
+    updateTask.mutate({ id, ...data, projectSlug: slug });
+  };
+  const handleSaveDescription = async (id: string, data: { description: string }) => {
+    await updateTask.mutateAsync({ id, ...data, projectSlug: slug });
   };
   const handleDelete = (id: string) => runTaskMutation(
     () => deleteTask.mutateAsync({ id }),
@@ -571,7 +574,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
     priority: string;
     type: string;
     assignees: string[];
-    description: TipTapDoc;
+    description: string;
     dueAt?: string | null | undefined;
     swimlaneId?: string | undefined;
   }) => {
@@ -754,6 +757,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
           fieldConfig={board.fieldConfig}
           onClose={handleClose}
           onUpdate={handleUpdate}
+          onSaveDescription={handleSaveDescription}
           onMove={handleMove}
           onDelete={handleDelete}
           onArchive={handleArchive}

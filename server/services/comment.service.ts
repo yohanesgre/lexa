@@ -5,13 +5,13 @@ import { ActivityRepo } from "../repos/activity.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { rowToComment, rowToActivityEvent, type CommentRow, type ActivityRow } from "../../shared/db";
-import { TipTapDoc, Actor, TaskComment, ActivityEvent } from "../../shared/types";
+import type { Actor, TaskComment, ActivityEvent } from "../../shared/types";
 import type { AuthIdentityShape } from "../api/auth";
 import { TaskNotFound, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "../api/errors";
-import { isEmptyDoc } from "../../shared/tiptap-text";
+import { markdownToText } from "../../shared/markdown";
 import * as msg from "../activity-messages";
 
-const MAX_COMMENT_BYTES = 65536;
+const MAX_COMMENT_LENGTH = 65_536;
 
 export class CommentService extends Effect.Service<CommentService>()("Lexa/CommentService", {
   dependencies: [CommentRepo.Default, ActivityRepo.Default, TaskRepo.Default, UserProjectRoleRepo.Default],
@@ -22,18 +22,18 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
     const roleRepo = yield* UserProjectRoleRepo;
     const db = yield* Db;
 
-    const validateBody = (body: TipTapDoc): Effect.Effect<void, CommentInvalid> =>
+    const validateBody = (body: string): Effect.Effect<void, CommentInvalid> =>
       Effect.gen(function* () {
-        if (!body || typeof body !== "object" || body.type !== "doc") {
-          return yield* new CommentInvalid({ reason: "body must be a TipTap doc" });
+        if (typeof body !== "string") {
+          return yield* new CommentInvalid({ reason: "body must be a string" });
         }
-        if (isEmptyDoc(body)) return yield* new CommentInvalid({ reason: "comment body is empty" });
-        if (JSON.stringify(body).length > MAX_COMMENT_BYTES) {
+        if (markdownToText(body).trim().length === 0) return yield* new CommentInvalid({ reason: "comment body is empty" });
+        if (JSON.stringify(body).length > MAX_COMMENT_LENGTH) {
           return yield* new CommentInvalid({ reason: "comment body exceeds 64KB" });
         }
       });
 
-    const create = (taskId: string, actor: Actor, body: TipTapDoc, opts?: { viaAssistant?: boolean }): Effect.Effect<{ comment: TaskComment; activity: ActivityEvent }, TaskNotFound | CommentInvalid | DbError | ConstraintViolation | RowNotFound> =>
+    const create = (taskId: string, actor: Actor, body: string, opts?: { viaAssistant?: boolean }): Effect.Effect<{ comment: TaskComment; activity: ActivityEvent }, TaskNotFound | CommentInvalid | DbError | ConstraintViolation | RowNotFound> =>
       Effect.gen(function* () {
         yield* validateBody(body);
         // Existence pre-check — a bare insert would surface a raw FK
@@ -45,7 +45,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
           const [commentRes, activityRes] = yield* batchResults(db, [
             commentRepo.insertStmt({
               taskId, authorId: actor.userId ?? null, authorKind: actor.kind,
-              authorLabel: actor.label, body: JSON.stringify(body),
+              authorLabel: actor.label, body,
               viaAssistant: opts?.viaAssistant === true,
             }),
             activityRepo.insertStmt({
@@ -73,7 +73,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         return mapping?.role === "admin";
       });
 
-    const edit = (commentId: number, identity: AuthIdentityShape, body: TipTapDoc, taskId: string): Effect.Effect<TaskComment, CommentNotFound | CommentEditForbidden | CommentInvalid | DbError | RowNotFound> =>
+    const edit = (commentId: number, identity: AuthIdentityShape, body: string, taskId: string): Effect.Effect<TaskComment, CommentNotFound | CommentEditForbidden | CommentInvalid | DbError | RowNotFound> =>
       Effect.gen(function* () {
         yield* validateBody(body);
         const comment = yield* commentRepo.findById(commentId).pipe(
@@ -83,7 +83,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         if (comment.authorKind !== "user" || comment.authorId !== identity.userId) {
           return yield* new CommentEditForbidden({ id: commentId });
         }
-        return yield* commentRepo.updateBody(commentId, JSON.stringify(body)).pipe(
+        return yield* commentRepo.updateBody(commentId, body).pipe(
           Effect.catchTag("RowNotFound", () => new CommentNotFound({ id: commentId }))
         );
       });

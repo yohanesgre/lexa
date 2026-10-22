@@ -1,3 +1,4 @@
+import { DOCUMENT_ACCEPT as SHARED_DOCUMENT_ACCEPT, DOCUMENT_FORMATS, DOCUMENT_MIME_TYPES } from "../../shared/document-formats";
 // Chat attachment model + caps (LX-2). Images and documents share ONE count;
 // the composer picker, chips, meter and error copy are all driven from here.
 // `assistant-image.ts` keeps its name for historical reasons (the surface grew
@@ -55,14 +56,14 @@ export const CHAT_ATTACHMENT_CAPS: ChatAttachmentCaps = {
 };
 
 export const CHAT_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-export const CHAT_DOCUMENT_TYPES = ["application/pdf", "text/markdown", "text/plain", "text/csv"];
+export const CHAT_DOCUMENT_TYPES = [...DOCUMENT_MIME_TYPES];
 
-// Extensions the native picker offers; the server SNIFFS the real mime, so the
-// client filter is a convenience, never the security boundary.
+// The shared format registry is the client picker policy; the server still
+// validates file contents before extraction.
 export const IMAGE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp";
-export const DOCUMENT_ACCEPT = "application/pdf,text/markdown,text/plain,text/csv,.pdf,.txt,.md,.markdown,.csv";
+export const DOCUMENT_ACCEPT = `${CHAT_DOCUMENT_TYPES.join(",")},${SHARED_DOCUMENT_ACCEPT}`;
 
-const DOCUMENT_EXTENSIONS = new Set(["pdf", "txt", "md", "markdown", "csv"]);
+const DOCUMENT_EXTENSIONS = new Set(DOCUMENT_FORMATS.map(({ extension }) => extension.slice(1)));
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -91,7 +92,8 @@ export function formatMegaBytes(bytes: number): string {
 // The fixed rejection copy (wireframe): name interpolated, limit read from the
 // running values, never hand-rounded.
 export function unsupportedMessage(name: string): string {
-  return `${name} — unsupported file type. Images: png, jpeg, gif, webp · Documents: pdf, txt, md, csv.`;
+  const extensions = [...DOCUMENT_EXTENSIONS].join(", ");
+  return `${name}: unsupported file type. Images: png, jpeg, gif, webp · Documents: ${extensions}.`;
 }
 
 export function oversizeMessage(name: string, size: number, caps: ChatAttachmentCaps): string {

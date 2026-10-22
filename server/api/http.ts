@@ -11,6 +11,7 @@ import seedMinimalSql from "../../scripts/seed-minimal.sql?raw";
 import { LoggerLayer } from "../logging/logger";
 import { Db, run, queryAll, batch, batchResults, requireRow, type BatchStmt, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
 import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
+import { assertMarkdownReady } from "../db/document-format";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
@@ -100,7 +101,6 @@ import { CommentService } from "../services/comment.service";
 import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
-import { extractText } from "../../shared/tiptap-text";
 import type { ActivityEvent, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 
 const ApiKeySchema = Schema.Struct({
@@ -547,7 +547,7 @@ const TaskCommentSchema = Schema.Struct({
   authorId: Schema.NullOr(Schema.String),
   authorKind: Schema.Literal("user", "agent", "system"),
   authorLabel: Schema.String,
-  body: Schema.Any,
+  body: Schema.String,
   viaAssistant: Schema.Boolean,
   editedAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -639,7 +639,7 @@ const WikiPageSchema = Schema.Struct({
   projectId: Schema.String,
   title: Schema.String,
   slug: Schema.String,
-  content: Schema.Any,
+  content: Schema.String,
   contentText: Schema.optional(Schema.String),
   parentId: Schema.NullOr(Schema.String),
   position: Schema.Number,
@@ -667,13 +667,13 @@ const WikiPageCreatePayload = Schema.Struct({
   parentId: Schema.optional(Schema.NullOr(Schema.String)),
   title: Schema.String,
   slug: Schema.optional(Schema.String),
-  content: Schema.optional(Schema.Any),
+  content: Schema.optional(Schema.String),
 });
 
 const WikiPageUpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   slug: Schema.optional(Schema.String),
-  content: Schema.optional(Schema.Any),
+  content: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.NullOr(Schema.String)),
   position: Schema.optional(Schema.Number),
   saveType: Schema.optional(Schema.Literal("autosave", "manual")),
@@ -703,7 +703,7 @@ const WikiPageRevisionSchema = Schema.Struct({
   pageId: Schema.String,
   title: Schema.String,
   slug: Schema.String,
-  content: Schema.Any,
+  content: Schema.String,
   contentText: Schema.String,
   saveType: Schema.Literal("autosave", "manual"),
   createdAt: Schema.String,
@@ -737,13 +737,12 @@ const WikiShareCreatePayload = Schema.Struct({
 const ShareLinkPath = Schema.Struct({ slug: Schema.String, linkId: Schema.String });
 
 // Public share surface: children typed loosely — the service owns the
-// recursive shape; content follows the same TipTap-JSON boundary as
-// WikiPageSchema (Schema.Any precedent).
+// recursive shape; content is a strict Markdown string response.
 const SharedPageNodeSchema = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   slug: Schema.String,
-  content: Schema.Any,
+  content: Schema.String,
   updatedAt: Schema.String,
   children: Schema.Array(Schema.Any),
 });
@@ -810,7 +809,7 @@ const TaskSchema = Schema.Struct({
   columnId: Schema.String,
   swimlaneId: Schema.NullOr(Schema.String),
   title: Schema.String,
-  description: Schema.Any,
+  description: Schema.String,
   priority: Schema.String,        // priority_options.id
   type: Schema.String,            // type_options.id
   assignees: Schema.Array(Schema.String),
@@ -839,7 +838,7 @@ const CreateTaskPayload = Schema.Struct({
   columnId: Schema.String,
   swimlaneId: Schema.optional(Schema.String),
   title: Schema.String,
-  description: Schema.optional(Schema.Any),
+  description: Schema.optional(Schema.String),
   priority: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.String),
@@ -849,7 +848,7 @@ const CreateTaskPayload = Schema.Struct({
 
 const UpdateTaskPayload = Schema.Struct({
   title: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.Any),
+  description: Schema.optional(Schema.String),
   priority: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   assignees: Schema.optional(Schema.Array(Schema.String)),
@@ -900,7 +899,7 @@ const GithubLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String, i
 const ActivityItemSchema = Schema.Union(ActivityEventSchema, TaskCommentSchema);
 const ActivityPageSchema = Schema.Struct({ data: Schema.Array(ActivityItemSchema), nextCursor: Schema.NullOr(Schema.String) });
 
-const CommentPayloadSchema = Schema.Struct({ body: Schema.Any });
+const CommentPayloadSchema = Schema.Struct({ body: Schema.String });
 const CommentIdPath = Schema.Struct({ slug: Schema.String, id: Schema.String, commentId: Schema.NumberFromString });
 const CommentCreateResponseSchema = Schema.Struct({
   data: Schema.Struct({ comment: TaskCommentSchema, activity: ActivityEventSchema }),
@@ -2680,12 +2679,10 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const wikiService = yield* WikiService;
         const identity = yield* AuthIdentity;
         const project = yield* requireProjectRead(req.path.slug);
-        const contentText = req.payload.content ? extractText(req.payload.content) : undefined;
         const page = yield* wikiService.create(project.id, {
           title: req.payload.title,
           ...(req.payload.slug !== undefined ? { slug: req.payload.slug } : {}),
           ...(req.payload.content !== undefined ? { content: req.payload.content } : {}),
-          ...(contentText !== undefined ? { contentText } : {}),
           ...(req.payload.parentId !== undefined ? { parentId: req.payload.parentId } : {}),
           updatedBy: identity.userId ?? null,
         });
@@ -2727,14 +2724,13 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const identity = yield* AuthIdentity;
         const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
-        const updateInput: { title?: string; slug?: string; parentId?: string | null; position?: number; content?: string; contentText?: string } = {};
+        const updateInput: { title?: string; slug?: string; parentId?: string | null; position?: number; content?: string } = {};
         if (req.payload.title !== undefined) updateInput.title = req.payload.title;
         if (req.payload.slug !== undefined) updateInput.slug = req.payload.slug;
         if (req.payload.parentId !== undefined) updateInput.parentId = req.payload.parentId;
         if (req.payload.position !== undefined) updateInput.position = req.payload.position;
         if (req.payload.content !== undefined) {
-          updateInput.content = JSON.stringify(req.payload.content);
-          updateInput.contentText = extractText(req.payload.content);
+          updateInput.content = req.payload.content;
         }
         const saveType = req.payload.saveType ?? "autosave";
         const updated = yield* wikiService.update(page.id, updateInput, saveType, identity.userId ?? null);
@@ -2956,15 +2952,15 @@ const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) 
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         const attachmentService = yield* AttachmentService;
-        const serve = yield* attachmentService.serve(req.path.id);
+        const row = yield* attachmentService.findAttachment(req.path.id);
         if (identity.role !== "admin" && identity.userId) {
           const authz = yield* AuthorizationService;
-          const access = yield* authz.projectAccess(identity.userId, serve.row.project_id);
+          const access = yield* authz.projectAccess(identity.userId, row.project_id);
           if (!access) {
-            return yield* new ProjectAccessDenied({ project: serve.row.project_id, role: "member" });
+            return yield* new ProjectAccessDenied({ project: row.project_id, role: "member" });
           }
         }
-        return attachmentHttpResponse(serve);
+        return attachmentHttpResponse(yield* attachmentService.serve(req.path.id));
       }))
     )
     .handle("deleteAttachment", (req) =>
@@ -3003,15 +2999,15 @@ const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) 
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         const attachmentService = yield* AttachmentService;
-        const serve = yield* attachmentService.serveChat(req.path.id, identity);
-        if (identity.role !== "admin" && identity.userId) {
+        const row = yield* attachmentService.findChatAttachment(req.path.id, identity);
+        if (identity.userId) {
           const authz = yield* AuthorizationService;
-          const access = yield* authz.projectAccess(identity.userId, serve.row.project_id);
+          const access = yield* authz.projectAccess(identity.userId, row.project_id);
           if (!access) {
-            return yield* new ProjectAccessDenied({ project: serve.row.project_id, role: "member" });
+            return yield* new ProjectAccessDenied({ project: row.project_id, role: "member" });
           }
         }
-        return attachmentHttpResponse(serve);
+        return attachmentHttpResponse(yield* attachmentService.serveChat(req.path.id, identity));
       }))
     )
     .handle("deleteChatAttachment", (req) =>
@@ -3400,13 +3396,21 @@ function withResponseSecurityHeaders(res: Response): Response {
   return res;
 }
 
+const isMarkdownReadinessExemptPath = (pathname: string): boolean =>
+  pathname === "/health" || pathname === "/api/health" ||
+  pathname === "/setup" || pathname.startsWith("/setup/") ||
+  pathname === "/api/setup" || pathname.startsWith("/api/setup/") ||
+  pathname === "/auth" || pathname.startsWith("/auth/") ||
+  pathname === "/api/auth" || pathname.startsWith("/api/auth/");
+
 export function createApiHandler(dbPath: string, env?: RuntimeEnv) {
   const ready = bootOrCrash(buildBunApp(dbPath, env));
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
     try {
-      const { handler } = await ready;
+      const { handler, driver } = await ready;
+      if (!isMarkdownReadinessExemptPath(url.pathname)) await Effect.runPromise(assertMarkdownReady(driver));
       const res = await handler(req);
       const level = res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO";
       console.log(JSON.stringify({ level, service: "http", method: req.method, path: url.pathname, status: res.status, duration: Date.now() - start, timestamp: new Date().toISOString() }));

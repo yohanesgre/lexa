@@ -48,7 +48,7 @@ plus `lxk_` API keys — that external scripts and agents drive.
 
 Confirmed capability: Kanban with swimlanes/sprints, WIP limits, drag reorder, archive/restore,
 per-project priority/type configuration, required-field gates, immutable ticket keys; tasks with
-TipTap descriptions, assignees, activity timeline, comments, attachments, subtask/blocked-by/
+canonical Markdown descriptions, assignees, activity timeline, comments, attachments, subtask/blocked-by/
 related links; nested wiki with full-text search, revisions and restore, public share links;
 milestones with target dates, progress and timeline; streaming AI Assistant with threads,
 review-in-editor generation, multi-provider gateway and an approval flow for task/wiki writes;
@@ -66,6 +66,15 @@ Durable constraints (must survive future work):
 - The fourteen architectural invariants in `AGENTS.md` are constraints, not preferences.
 - Design tokens are PHOSPHOR CSS variables; no raw hex outside `app/styles/phosphor.css`.
 - `lx` is operate-only — no deploy commands.
+- Task descriptions, wiki pages and revisions, and comment bodies use canonical Markdown strings
+  across storage, the API, the CLI, GitHub sync, and Assistant document arguments. Submitted source
+  is preserved, not rendered and reserialized on save. CodeMirror edits source; TanStack Markdown
+  renders preview and read views under each surface's existing link/image permissions.
+- The document cutover is explicit and coordinated. Unknown, malformed, or unapproved lossy legacy
+  content blocks the offline upgrade before data writes; there is no public dual-format contract
+  or on-read format guessing. Task required descriptions preserve meaningful text, code, images,
+  rules, and tables; comments require nonempty text and retain the 65,536 serialized-JavaScript-
+  character input cap, not a new UTF-8 byte limit.
 
 Explicitly undecided / not established at init: pricing or licensing posture beyond the repo's
 current licence, a hosted multi-tenant offering, native mobile apps, and any second deploy target.

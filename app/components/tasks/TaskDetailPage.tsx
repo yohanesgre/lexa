@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import type { Task, TipTapDoc } from "../../../shared/types";
+import type { Task } from "../../../shared/types";
 import { useBoard, useTask, useMoveTask, useUpdateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import { TaskDetail } from "../TaskDetail";
 import { TaskPageBar } from "../TaskPageBar";
@@ -98,7 +98,10 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
     await moveTask.mutateAsync({ id, ...target });
   };
   const handleUpdate = (id: string, data: Partial<Task>) => {
-    updateTask.mutate({ id, ...data });
+    updateTask.mutate({ id, ...data, projectSlug: slug });
+  };
+  const handleSaveDescription = async (id: string, data: { description: string }) => {
+    await updateTask.mutateAsync({ id, ...data, projectSlug: slug });
   };
   const handleDelete = async (id: string) => {
     try {
@@ -137,7 +140,7 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
     priority: string;
     type: string;
     assignees: string[];
-    description: TipTapDoc;
+    description: string;
   }): Promise<void> => {};
 
   const taskError = taskQuery.error;
@@ -196,6 +199,7 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
         fieldConfig={board.fieldConfig}
         onClose={backToOrigin}
         onUpdate={handleUpdate}
+        onSaveDescription={handleSaveDescription}
         onMove={handleMove}
         onDelete={handleDelete}
         onArchive={handleArchive}

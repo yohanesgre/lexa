@@ -11,7 +11,7 @@ import { DbBunLive } from "../db/db";
 import { WikiService } from "./wiki.service";
 import { WikiShareService } from "./wiki-share.service";
 import { ShareLinkNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent } from "../api/errors";
-import type { TipTapDoc } from "../../shared/types";
+// Documents use their persisted Markdown source directly.
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -46,7 +46,7 @@ beforeEach(() => {
 });
 
 
-const DOC: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] };
+const DOC = "hello";
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1'), ('p2','P2','p2')").run();
@@ -119,7 +119,7 @@ describe("WikiService revisions", () => {
   it("listRevisions returns newest-first summaries with saveType; getRevision returns full revision", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "P", content: DOC, contentText: "hello" }));
+    const page = await Effect.runPromise(svc.create("p1", { title: "P", content: DOC }));
     await Effect.runPromise(svc.update(page.id, { title: "P2" }, "manual"));
     const summaries = await Effect.runPromise(svc.listRevisions("p", "p1"));
     expect(summaries).toHaveLength(1);
@@ -138,9 +138,9 @@ describe("WikiService revisions", () => {
   it("restores an earlier revision (and rejects a revision owned by another page)", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "Guide", content: DOC, contentText: "old text" }));
+    const page = await Effect.runPromise(svc.create("p1", { title: "Guide", content: DOC }));
+    await Effect.runPromise(svc.update(page.id, { title: "Guide edited", content: "Changed source" }));
     const other = await Effect.runPromise(svc.create("p1", { title: "Other" }));
-    await Effect.runPromise(svc.update(page.id, { title: "Guide 2", contentText: "new text" }));
     await Effect.runPromise(svc.update(other.id, { title: "Other 2" }));
 
     const [rev] = await Effect.runPromise(svc.listRevisions("guide", "p1"));
@@ -191,36 +191,40 @@ describe("WikiService.delete", () => {
 });
 
 describe("WikiService.search", () => {
-  it("FTS5 finds pages by contentText with a snippet", async () => {
+  it("keeps search projection current across direct content updates and revision restore", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = await Effect.runPromise(svc.create("p1", { title: "Indexing", content: DOC, contentText: "fractional indexing keeps keys short" }));
-    const results = await Effect.runPromise(Effect.either(svc.search("p1", "fractional")));
-    expect(Either.isRight(results)).toBe(true);
-    if (Either.isRight(results)) {
-      expect(results.right).toHaveLength(1);
-      expect(results.right[0]!.id).toBe(page.id);
-      expect(results.right[0]!.snippet).toContain("fractional");
-    }
+    const page = await Effect.runPromise(svc.create("p1", { title: "Guide", content: "alpha source" }));
+
+    await Effect.runPromise(svc.update(page.id, { content: "beta source" }));
+    expect(await Effect.runPromise(svc.search("p1", "alpha"))).toHaveLength(0);
+    const updated = await Effect.runPromise(svc.search("p1", "beta"));
+    expect(updated).toHaveLength(1);
+    expect(updated[0]!.content).toBe("beta source");
+
+    const [original] = await Effect.runPromise(svc.listRevisions("guide", "p1"));
+    const restored = await Effect.runPromise(svc.restoreRevision(original!.id, "guide", "p1"));
+    expect(restored.content).toBe("alpha source");
+    expect(await Effect.runPromise(svc.search("p1", "beta"))).toHaveLength(0);
+    const originalMatches = await Effect.runPromise(svc.search("p1", "alpha"));
+    expect(originalMatches).toHaveLength(1);
+    expect(originalMatches[0]!.content).toBe("alpha source");
   });
 });
 
 // ── wiki share service (absorbed from wiki-share.service.test.ts) ──────────
-const ROOT_DOC = {
-  type: "doc",
-  content: [{ type: "paragraph", content: [{ type: "text", text: "root text" }] }],
-};
+const ROOT_DOC = "root text";
 
 function seedShare(db: Database) {
   db.prepare("INSERT INTO users (id, email, name) VALUES ('u1', 'u1@test.dev', 'User One')").run();
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1'), ('p2','P2','p2')").run();
-  const emptyDoc = JSON.stringify({ type: "doc", content: [] });
+  const emptyDoc = "";
   db.prepare(
     `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES
        ('w-root', 'p1', 'Root', 'root', ?, 'root text', NULL, 0),
        ('w-child', 'p1', 'Child', 'child', ?, '', 'w-root', 0),
        ('w-other', 'p2', 'Other', 'other', ?, '', NULL, 0)`
-  ).run(JSON.stringify(ROOT_DOC), emptyDoc, emptyDoc);
+  ).run(ROOT_DOC, emptyDoc, emptyDoc);
 }
 
 function makeShareService(db: Database) {
@@ -314,7 +318,7 @@ describe("WikiShareService.revoke", () => {
 });
 
 describe("WikiShareService.resolvePublic", () => {
-  it("valid token returns root + descendants with parsed JSON content", async () => {
+  it("returns raw Markdown content for valid tokens", async () => {
     seedShare(db);
     const svc = makeShareService(db);
     const created = await createLink(svc);
@@ -327,10 +331,10 @@ describe("WikiShareService.resolvePublic", () => {
       expect(root.title).toBe("Root");
       expect(root.slug).toBe("root");
       expect(typeof root.updatedAt).toBe("string");
-      expect(root.content).toEqual(ROOT_DOC);
+      expect(root.content).toBe(ROOT_DOC);
       expect(root.children).toHaveLength(1);
       expect(root.children[0]!.id).toBe("w-child");
-      expect(root.children[0]!.content).toEqual({ type: "doc", content: [] });
+      expect(root.children[0]!.content).toBe("");
       expect(root.children[0]!.children).toEqual([]);
     }
   });

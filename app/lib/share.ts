@@ -1,11 +1,11 @@
 import { createIsomorphicFn } from "@tanstack/react-start";
-import type { TipTapDoc } from "../../shared/types";
+import { markdownToText } from "../../shared/markdown";
 
 export interface SharedPageNode {
   id: string;
   title: string;
   slug: string;
-  content: TipTapDoc | Record<string, never>;
+  content: string;
   updatedAt: string;
   children: SharedPageNode[];
 }
@@ -14,30 +14,11 @@ export interface SharedTree {
   root: SharedPageNode;
 }
 
-// Plain-text snippet for the share page's description / og:description.
 export function extractSnippet(tree: SharedTree | null): string | null {
-  if (!tree?.root.content || typeof tree.root.content !== "object") return null;
-  const doc = tree.root.content as TipTapDoc;
-  if (!Array.isArray(doc.content)) return null;
-  const texts: string[] = [];
-  let totalLen = 0;
-  const walk = (nodes: unknown[]) => {
-    for (const n of nodes) {
-      if (totalLen > 160) break;
-      if (!n || typeof n !== "object") continue;
-      const node = n as { text?: string; content?: unknown[] };
-      if (typeof node.text === "string" && node.text.trim()) {
-        const t = node.text.trim();
-        texts.push(t);
-        totalLen += t.length + 1;
-      }
-      if (Array.isArray(node.content)) walk(node.content);
-    }
-  };
-  walk(doc.content);
-  const joined = texts.join(" ").replace(/\s+/g, " ").trim();
-  if (!joined) return null;
-  return joined.length > 160 ? `${joined.slice(0, 157)}...` : joined;
+  if (!tree?.root.content) return null;
+  const text = markdownToText(tree.root.content).replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text;
 }
 
 // Head meta for /share/$token. Runs server-side during SSR (so link unfurlers

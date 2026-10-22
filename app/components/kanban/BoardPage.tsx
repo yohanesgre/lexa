@@ -6,7 +6,7 @@ import { useToast } from "../ui/Toast";
 import { KanbanBoard } from "./KanbanBoard";
 import { TaskDetail } from "../TaskDetail";
 import type { MoveTarget } from "./KanbanBoard";
-import type { BoardTask, Task, TipTapDoc } from "../../../shared/types";
+import type { BoardTask, Task } from "../../../shared/types";
 import { boardTaskToTask } from "../../../shared/types";
 
 // ?milestone=none is the explicit "No milestone" choice — without it the
@@ -146,7 +146,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
     priority: string;
     type: string;
     assignees: string[];
-    description: TipTapDoc;
+    description: string;
   }) => {
     if (!createTarget) return;
     try {
@@ -161,7 +161,10 @@ export function BoardPage({ slug, search }: BoardPageProps) {
   };
 
   const handleUpdate = (id: string, data: Partial<Task>) => {
-    updateTask.mutate({ id, ...data });
+    updateTask.mutate({ id, ...data, projectSlug: slug });
+  };
+  const handleSaveDescription = async (id: string, data: { description: string }) => {
+    await updateTask.mutateAsync({ id, ...data, projectSlug: slug });
   };
 
   const handleDelete = async (id: string) => {
@@ -251,6 +254,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
           fieldConfig={board.fieldConfig}
           onClose={handleClose}
           onUpdate={handleUpdate}
+          onSaveDescription={handleSaveDescription}
           onMove={handleMove}
           onDelete={handleDelete}
           onArchive={handleArchive}

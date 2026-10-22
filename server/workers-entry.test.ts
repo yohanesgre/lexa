@@ -14,6 +14,7 @@ import { createBunSqliteDriver } from "./db/drivers/bun-sqlite";
 import { batch } from "./db/db";
 import { runMigrations } from "./db/migrate";
 import { getEnvFromWorkers } from "./env";
+import { LexaChatSupervisor } from "./assistant/chat-supervisor";
 import { fetchSharedTreeServer } from "../app/lib/share.server";
 import { extractSnippet, shareHeadMeta, type SharedTree } from "../app/lib/share";
 import {
@@ -168,6 +169,30 @@ function d1Stub(handlers: {
     batch: async (stmts: unknown[]) => stmts.map(() => ({ success: true, results: [], meta: {} })),
   };
 }
+function sqliteD1Binding(db: Database): Record<string, unknown> {
+  return {
+    prepare(sql: string) {
+      let params: unknown[] = [];
+      const statement = {
+        bind(...values: unknown[]) {
+          params = values;
+          return statement;
+        },
+        async all<T>() {
+          return { results: db.prepare(sql).all(...params) as T[] };
+        },
+        async first<T>() {
+          return (db.prepare(sql).get(...params) as T | undefined) ?? null;
+        },
+        async run() {
+          const result = db.prepare(sql).run(...params);
+          return { success: true, meta: { changes: result.changes } };
+        },
+      };
+      return statement;
+    },
+  };
+}
 
 function workerEnv(db: Record<string, unknown>): WorkersEnv {
   return {
@@ -268,8 +293,12 @@ describe("pre-boot health", () => {
 const SECRET = "workers-entry-test-secret";
 const settingsAll = (sql: string, params: unknown[]): Array<Record<string, unknown>> =>
   sql.includes("FROM settings") && params[0] === "github_webhook_secret" ? [{ value: SECRET }] : [];
-const configDb = (queries?: string[]): Record<string, unknown> =>
-  d1Stub({ all: settingsAll, ...(queries ? { queries } : {}) });
+const configDb = (queries?: string[], documentFormat = "markdown-v1"): Record<string, unknown> =>
+  d1Stub({
+    all: settingsAll,
+    first: (sql, params) => sql.includes("FROM settings") && params[0] === "documents.format" ? { value: documentFormat } : null,
+    ...(queries ? { queries } : {}),
+  });
 
 function webhookRequest(headers: Record<string, string>, body: string): never {
   return new Request("http://localhost/api/webhooks/github", { method: "POST", headers, body }) as never;
@@ -288,7 +317,7 @@ describe("webhook handler", () => {
       const { tasks, ctx } = execCtx();
       const invalid = await workersEntry.fetch!(
         webhookRequest({ "x-hub-signature-256": "sha256=deadbeef", "x-github-delivery": "d-invalid", "x-github-event": "issues" }, issuePayload("n-invalid")),
-        workerEnv(configDb()) as never,
+        workerEnv(configDb(undefined, "migrating")) as never,
         ctx
       );
       expect(invalid.status).toBe(401);
@@ -311,6 +340,21 @@ describe("webhook handler", () => {
       warn.mockRestore();
       error.mockRestore();
     }
+  });
+  it("does not acknowledge or schedule a valid delivery while document format is migrating", async () => {
+    resetRequestLayersCache();
+    const { tasks, ctx } = execCtx();
+    const queries: string[] = [];
+    const body = issuePayload("n-maintenance");
+    const res = await workersEntry.fetch!(
+      webhookRequest({ "x-hub-signature-256": sign(body), "x-github-delivery": "d-maintenance", "x-github-event": "issues" }, body),
+      workerEnv(configDb(queries, "migrating")) as never,
+      ctx
+    );
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: { code: "INTERNAL", message: "Internal error" } });
+    expect(tasks).toHaveLength(0);
+    expect(queries.some((sql) => sql.includes("INSERT OR IGNORE INTO webhook_events"))).toBe(false);
   });
 
   it("acks a valid HMAC delivery 200, processes it in waitUntil, and records the delivery only after success", async () => {
@@ -355,7 +399,8 @@ describe("webhook handler", () => {
     const db = d1Stub({
       all: settingsAll,
       queries,
-      first: (sql) => {
+      first: (sql, params) => {
+        if (sql.includes("FROM settings") && params[0] === "documents.format") return { value: "markdown-v1" };
         if (sql.includes("FROM tasks")) throw new Error("task lookup boom");
         return null;
       },
@@ -378,6 +423,40 @@ describe("webhook handler", () => {
     }
   });
 });
+describe("chat supervisor readiness", () => {
+  it("blocks during migration, then handles malformed payload normally after readiness", async () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE assistant_threads (document_id TEXT PRIMARY KEY);
+        CREATE TABLE tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL);
+      `);
+      db.prepare("INSERT INTO settings (key, value) VALUES ('documents.format', 'migrating-markdown-v1')").run();
+      const supervisor = new LexaChatSupervisor(
+        { waitUntil: () => {} },
+        { DB: sqliteD1Binding(db) as never }
+      );
+      const request = () => supervisor.fetch(new Request("https://chat-supervisor/run", {
+        method: "POST",
+        body: "not-json",
+      }));
+
+      const blocked = await request();
+      expect(blocked.status).toBe(500);
+      await expect(blocked.json()).resolves.toEqual({ error: { code: "INTERNAL", message: "Internal error" } });
+
+      db.prepare("UPDATE settings SET value = 'markdown-v1' WHERE key = 'documents.format'").run();
+      const ready = await request();
+      expect(ready.status).toBe(400);
+      await expect(ready.json()).resolves.toMatchObject({ error: { code: "INVALID_ARGS" } });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM assistant_threads").get()).toEqual({ count: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS count FROM tasks").get()).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+});
 
 // Carried from the absorbed server/share-ssr.test.ts.
 // A full handler-level render test (calling the TanStack Start handler) cannot
@@ -388,19 +467,14 @@ describe("webhook handler", () => {
 // per-response HTML patch. The Bun serving gate (non-share → shell, /share/*
 // → SSR) is covered by the W3 smoke against a built server, since
 // server/entry.ts boots a Bun.serve at import time and is not importable here.
-const MIGRATIONS = fileURLToPath(new URL("../migrations", import.meta.url));
-
-const ROOT_DOC = {
-  type: "doc" as const,
-  content: [{ type: "paragraph", content: [{ type: "text", text: "hello share" }] }],
-};
+const ROOT_DOC = "hello share";
 
 let dir: string;
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), "lexa-share-ssr-"));
   const dbPath = join(dir, "lexa.db");
-  runMigrations(dbPath, MIGRATIONS);
+  runMigrations(dbPath);
   const db = new Database(dbPath);
   db.exec("PRAGMA foreign_keys = OFF");
   db.prepare("INSERT INTO users (id, email, name) VALUES ('u1','u1@test.dev','User One')").run();
@@ -409,7 +483,7 @@ beforeAll(() => {
     `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES
        ('w-root','p1','Root Page','home',?,'hello share',NULL,0),
        ('w-child','p1','Child Page','child',?,'','w-root',0)`
-  ).run(JSON.stringify(ROOT_DOC), JSON.stringify({ type: "doc", content: [] }));
+  ).run(ROOT_DOC, "");
   db.prepare("INSERT INTO wiki_share_links (id, page_id, token, expires_at, created_by) VALUES ('l1','w-root','tok-live',NULL,'u1')").run();
   db.prepare("INSERT INTO wiki_share_links (id, page_id, token, expires_at, created_by) VALUES ('l2','w-root','tok-expired','2000-01-01T00:00:00.000Z','u1')").run();
   db.close();
@@ -459,13 +533,13 @@ describe("share head meta (server-rendered OG)", () => {
     const longTree: SharedTree = {
       root: {
         id: "w1", title: "T", slug: "t",
-        content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: long }] }] },
+        content: long,
         updatedAt: "2026-08-21T10:00:00.000Z", children: [],
       },
     };
     expect(extractSnippet(longTree)).toBe(`${long.slice(0, 157)}...`);
     const emptyTree: SharedTree = {
-      root: { id: "w2", title: "E", slug: "e", content: { type: "doc", content: [] }, updatedAt: "2026-08-21T10:00:00.000Z", children: [] },
+      root: { id: "w2", title: "E", slug: "e", content: "", updatedAt: "2026-08-21T10:00:00.000Z", children: [] },
     };
     expect(extractSnippet(emptyTree)).toBeNull();
     expect(extractSnippet(null)).toBeNull();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { HeadingOutline } from "../components/tiptap-render";
+import type { HeadingOutline } from "./markdownToReact";
 import { hasMatchMedia } from "./viewport";
 
 // The reading line: the section being read is the last heading whose top edge

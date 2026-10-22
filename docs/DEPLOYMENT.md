@@ -142,10 +142,13 @@ bun x wrangler secret put LXK_SECRETS_MASTER_KEY --config wrangler.staging.local
   `workers-install.ts` generates: worker `lexa-staging`, D1 `lexa-staging`, R2
   `lexa-staging-blobs`, KV, `main`/`assets` from the built `dist/`, `no_bundle`
   plus the ESModule rule, and the observability block from the root
-  `wrangler.jsonc`. The retired assistant executor and bound `env.AI` provider
-  path are not used. The `*/15` cron is retained for prune/retention only; it
-  does not create snapshots or run assistant schedules. The optional chat
-  supervisor requires the `CHAT_DO` binding and its Durable Object class
+  `wrangler.jsonc`. Every generated deploy carries `ai: { "binding": "AI" }` for
+  managed binary-document conversion. This is separate from the `workers_ai`
+  model-provider HTTP path, which remains unchanged. Bun keeps direct Markdown
+  and image handling but has no binary-conversion binding; deployed Worker
+  conversion requires its `AI` binding. The `*/15` cron is retained for
+  prune/retention only and does not create snapshots or run assistant schedules.
+  The optional chat supervisor requires `CHAT_DO` and its Durable Object class
   migration plus `LXK_CHAT_SUPERVISOR=1`; the flag is off unless explicitly
   opted in. This binding/class migration does not modify D1 tables or journals.
   Fill `<ACCOUNT_ID>` (multi-account tokens only),

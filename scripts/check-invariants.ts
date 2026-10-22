@@ -472,13 +472,20 @@ const results: Invariant[] = [];
 }
 
 // #7 Markdown at the boundary — marked/unpdf only in server/ or shared/ or
-// the dedicated transcript renderer.
+// the dedicated transcript renderer; TipTap is isolated to offline upgrade.
 {
-  const allowed = new Set([
-    `app${sep}lib${sep}markdownToReact.tsx`,
-    `app${sep}lib${sep}tiptap-render.tsx`,
-  ]);
-  const violations: string[] = [];
+  const allowed: Record<string, true> = {
+    [`app${sep}lib${sep}markdownToReact.tsx`]: true,
+    [`app${sep}lib${sep}tiptap-render.tsx`]: true,
+  };
+  const legacyUpgrade: Record<string, true> = {
+    [`server${sep}db${sep}legacy-tiptap.ts`]: true,
+    [`server${sep}db${sep}markdown-upgrade.ts`]: true,
+    [`server${sep}db${sep}markdown-upgrade.test.ts`]: true,
+  };
+  const boundaryViolations: string[] = [];
+  const tiptapViolations: string[] = [];
+  const tiptapRuntime = /\b(?:TipTapDoc|TipTapNode|TipTapMark|isTipTapDoc|parseTipTapDoc|markdownToDoc|docToMarkdown|carryNonMarkdownContent|extractText|isEmptyDoc)\b/;
   for (const f of FILES) {
     if (f.endsWith(".ts") || f.endsWith(".tsx")) {
       const rel = relative(ROOT, f);
@@ -486,19 +493,23 @@ const results: Invariant[] = [];
       if (/from\s+["']marked["']/.test(text) || /from\s+["']unpdf["']/.test(text)) {
         const inServer = rel.startsWith(`server${sep}`);
         const inShared = rel.startsWith(`shared${sep}`);
-        const inAllowedApp = allowed.has(rel);
-        if (!inServer && !inShared && !inAllowedApp) {
-          violations.push(rel);
-        }
+        const inAllowedApp = Object.hasOwn(allowed, rel);
+        if (!inServer && !inShared && !inAllowedApp) boundaryViolations.push(rel);
       }
+      // A retired helper's name can also be a third-party export (the PDF
+      // extractor's own function name is one), so drop third-party import
+      // clauses before the scan; genuine reintroductions still fail.
+      const withoutThirdPartyImports = text.replace(/import\s*\{[^}]*\}\s*from\s*["'](?:unpdf|marked)["'];?/g, "");
+      if (tiptapRuntime.test(withoutThirdPartyImports) && !Object.hasOwn(legacyUpgrade, rel)) tiptapViolations.push(rel);
     }
   }
+  const violations = [...boundaryViolations, ...tiptapViolations.map((f) => `${f} (runtime TipTap)`)];
   results.push({
     id: "#7",
-    title: "Markdown at the boundary (marked/unpdf only in server/shared or transcript renderer)",
+    title: "Markdown at the boundary; TipTap isolated to offline upgrade",
     status: violations.length === 0 ? "ok" : "fail",
     evidence: violations.length === 0
-      ? "no off-boundary marked/unpdf imports"
+      ? "no off-boundary marked/unpdf imports or runtime TipTap callers outside offline upgrade"
       : violations.join("; "),
   });
 }

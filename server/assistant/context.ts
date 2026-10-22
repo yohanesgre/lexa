@@ -23,8 +23,7 @@ import {
   milestoneMentionSublabel,
   swimlaneMentionSublabel,
 } from "../../shared/mention-entities";
-import { extractText } from "../../shared/tiptap-text";
-import type { TipTapDoc } from "../../shared/types";
+import { markdownToText } from "../../shared/markdown";
 
 // Per-message skill context: the ≤3 `$mentioned` skills bound to the agent,
 // injected under `## Skill: {name}`, plus the compact catalog of every bound
@@ -90,13 +89,13 @@ export interface MentionTaskHit {
   projectId: string;
   key: string;
   title: string;
-  description: TipTapDoc;
+  description: string;
 }
 
 export interface MentionWikiHit {
   id: string;
   title: string;
-  content: TipTapDoc;
+  content: string;
 }
 
 export interface MentionResolverDeps {
@@ -171,7 +170,7 @@ export async function resolveMentionContext(
         t = null;
       }
       if (!t || t.projectId !== projectId) continue;
-      add({ kind: "task", id: t.id, label: `${t.key} — ${t.title}`, text: extractText(t.description) });
+      add({ kind: "task", id: t.id, label: `${t.key} — ${t.title}`, text: markdownToText(t.description) });
     } else {
       const slug = token.toLowerCase();
       let page: MentionWikiHit | null = null;
@@ -189,7 +188,7 @@ export async function resolveMentionContext(
         }
       }
       if (page) {
-        add({ kind: "wiki", id: page.id, label: page.title, text: extractText(page.content) });
+        add({ kind: "wiki", id: page.id, label: page.title, text: markdownToText(page.content) });
       }
       if (entities === null) entities = await loadEntities();
       const target = mentionSlug(token);

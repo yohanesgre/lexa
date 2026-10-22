@@ -589,6 +589,16 @@ The form language is printed map furniture. Section panels and the profile card 
 
 **The Surveyed-Redraw Rule.** Motion is a redraw of surveyed lines, once per mount: 180ms for the Route Trace, 220ms for the profile runs, both linear, both inside the 180 to 260ms band. Nothing loops, breathes, or eases in ambiently except the loading skeleton pulse, and reduced motion snaps every draw to its final state.
 
+**The Source-Is-the-Document Rule.** A document editor owns one current Markdown draft. Preview,
+outline, search text, and Assistant diffs are projections, never a replacement source model. View
+switching and save actions read the latest draft without rewriting it or resetting selection and
+undo history. Cancel invalidates pending work for that edit session; a late response cannot restore
+discarded text or replace another document. Assistant review keeps the original draft until an
+explicit acceptance, including formatting-only changes. Preserve each surface's save and keyboard
+contract; composition and inner picker/review Escape handling take priority over submit or cancel.
+The interaction details live in `.impeccable/surfaces/markdown-first-documents.md`; the rule changes
+neither PHOSPHOR tokens nor surrounding layout.
+
 ## Do's and Don'ts
 
 ### Do:

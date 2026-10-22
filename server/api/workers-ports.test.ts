@@ -270,8 +270,12 @@ function buildWorkersHandler() {
   const db = new Database(":memory:");
   // The middleware re-reads `users.role` per session request; seed the minimal
   // row so the injected session identity resolves (a missing row → 401).
-  db.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'member')");
+  db.exec(`
+    CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'member');
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `);
   db.prepare("INSERT INTO users (id, role) VALUES ('u1', 'member')").run();
+  db.prepare("INSERT INTO settings (key, value) VALUES ('documents.format', 'markdown-v1')").run();
   const fsRoot = mkdtempSync(join(tmpdir(), "lexa-sessions-workers-"));
   const storage: StorageConfigShape = { driver: "fs", fsRoot, s3: null, r2: null, maxUploadBytes: 25 * 1024 * 1024 };
   const listSessions = vi.fn(async (_headers: Headers) => [SESSION_A, SESSION_B]);

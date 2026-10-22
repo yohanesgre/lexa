@@ -1,29 +1,44 @@
-import type { Editor } from "@tiptap/core";
-import { markdownToDoc, docToMarkdown } from "../../../../shared/markdown";
-import type { Attachment, TipTapDoc } from "../../../../shared/types";
+import { parseMarkdown } from "@tanstack/markdown/parser";
+import type { BlockNode, InlineNode } from "@tanstack/markdown";
+import type { MarkdownSource } from "../../editor/MarkdownEditorPane";
+import type { Attachment } from "../../../../shared/types";
 import { ASSISTANT_AGENT_ID } from "../../../lib/assistant-agent";
 
-// Embedded /api/attachments/<uuid> image nodes in the open document are the
-// only image source for an Assistant run (herald-popover.html State 1/5) — same
-// exact-shape uuid rule as shared/markdown.ts safeImageSrc.
 const ATTACHMENT_SRC_RE = /^\/api\/attachments\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 
-export function docAttachmentIds(editor: Editor): string[] {
+export function markdownAttachmentIds(source: string): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
-  const walk = (node: unknown): void => {
-    if (!node || typeof node !== "object") return;
-    const n = node as { type?: unknown; attrs?: Record<string, unknown> | null; content?: unknown };
-    if (n.type === "image" && typeof n.attrs?.src === "string") {
-      const m = ATTACHMENT_SRC_RE.exec(n.attrs.src.trim());
-      if (m && !seen.has(m[1]!)) {
-        seen.add(m[1]!);
-        ids.push(m[1]!);
+  const addInline = (nodes: InlineNode[]) => {
+    for (const node of nodes) {
+      if (node.type === "image") {
+        const id = ATTACHMENT_SRC_RE.exec(node.src.trim())?.[1];
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          ids.push(id);
+        }
+      } else if ("children" in node) {
+        addInline(node.children);
       }
     }
-    if (Array.isArray(n.content)) n.content.forEach(walk);
   };
-  walk(editor.state.doc.toJSON());
+  const addBlocks = (blocks: BlockNode[]) => {
+    for (const block of blocks) {
+      if (block.type === "heading" || block.type === "paragraph") {
+        addInline(block.children);
+      } else if (block.type === "blockquote" || block.type === "callout" || block.type === "component") {
+        addBlocks(block.children);
+      } else if (block.type === "list") {
+        for (const item of block.items) addBlocks(item.children);
+      } else if (block.type === "table") {
+        for (const cell of block.header) addInline(cell.children);
+        for (const row of block.rows) for (const cell of row) addInline(cell.children);
+      } else if (block.type === "footnotes") {
+        for (const item of block.items) addBlocks(item.children);
+      }
+    }
+  };
+  addBlocks(parseMarkdown(source, { allowHtml: false, frontmatter: false }).children);
   return ids;
 }
 
@@ -35,8 +50,6 @@ export function pickAttachmentRows(
   return documentType === "task" ? taskRows : wikiRows;
 }
 
-// Each attachment query only targets rows of its own document type — the
-// other call gets an empty id (hook treats "" as disabled).
 export function attachmentQueryId(documentType: "task" | "wiki", wanted: "task" | "wiki", documentId: string): string {
   return documentType === wanted ? documentId : "";
 }
@@ -55,12 +68,7 @@ export function buildRunRequest(args: {
     documentId: args.documentId,
     prompt: args.prompt.trim(),
     agentId: ASSISTANT_AGENT_ID,
-    // Auto mode: no skillId — the assistant picks suitable skill(s) itself
-    // from its bound catalog (herald-popover.html).
     ...(args.selection.trim() ? { selection: args.selection } : {}),
-    // Attachment rows expose sha256 but not storage_key; Lexa/Storage keys
-    // are deterministic (storageKeyFor → blobs/<sha256>) so the ref is
-    // rebuilt here until the API exposes storage_key directly.
     ...(args.docImages.length
       ? {
           attachments: args.docImages.map((a) => ({
@@ -73,40 +81,18 @@ export function buildRunRequest(args: {
   };
 }
 
-export function toDocImages(
-  attachmentRows: Attachment[] | undefined,
-  editor: Editor
-): Attachment[] {
-  const byId = new Map((attachmentRows ?? []).map((a) => [a.id, a]));
-  return docAttachmentIds(editor)
+export function toDocImages(attachmentRows: Attachment[] | undefined, source: string): Attachment[] {
+  const byId = new Map((attachmentRows ?? []).map((attachment) => [attachment.id, attachment]));
+  return markdownAttachmentIds(source)
     .map((id) => byId.get(id))
-    .filter((a): a is Attachment => a !== undefined);
+    .filter((attachment): attachment is Attachment => attachment !== undefined);
 }
 
-// The selection rides along as Markdown so Assistant can preserve and mirror
-// the document's formatting (the editor popover contract).
-export function selectionToMarkdown(editor: Editor): string {
-  try {
-    const slice = editor.state.doc.slice(editor.state.selection.from, editor.state.selection.to);
-    return docToMarkdown({ type: "doc", content: slice.content.toJSON() } as TipTapDoc);
-  } catch {
-    return "";
-  }
+export function getSelection(source: MarkdownSource | null): { text: string; markdown: string } {
+  const text = source?.getSelection() ?? "";
+  return { text, markdown: text };
 }
 
-export function getSelection(editor: Editor): { text: string; markdown: string } {
-  const text = editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, "\n");
-  return { text, markdown: text ? selectionToMarkdown(editor) : "" };
-}
-
-// No selection → no Selected-text instruction: the run sends selection only
-// when the user actually selected text (herald-popover.html State 1). The
-// former polish-only whole-document fallback is retired with the picker.
 export function resolveRunSelection(selection: { markdown: string }): string {
   return selection.markdown;
-}
-
-export function insertMarkdown(editor: Editor, text: string): void {
-  const doc = markdownToDoc(text);
-  editor.chain().focus().insertContent(doc.content ?? []).run();
 }

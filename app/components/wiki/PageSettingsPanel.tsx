@@ -94,7 +94,6 @@ export function PageSettingsPanel({
   useOverlayFocusTrap(open, panelRef, suppressReturnFocusRef);
 
   const { data: revisions, isLoading, error, refetch } = useRevisions(slug, pageSlug, 20);
-  const activeRevisionId = selectedRevisionId ?? revisions?.[0]?.id ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -160,7 +159,7 @@ export function PageSettingsPanel({
             <RevisionItem
               key={rev.id}
               rev={rev}
-              isActive={rev.id === activeRevisionId}
+              isActive={rev.id === selectedRevisionId}
               onSelectRevision={selectRevision}
             />
           ))}
@@ -179,7 +178,7 @@ export function PageSettingsPanel({
             type="button"
             className="btn btn-ghost"
             style={{ flex: 1 }}
-            disabled={activeRevisionId === null}
+            disabled={selectedRevisionId === null}
             onClick={onClosePreview}
           >
             Close preview

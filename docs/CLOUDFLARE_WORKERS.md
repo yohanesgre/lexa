@@ -4,6 +4,13 @@
 > now merged into this file). Researched 2026-08-22 against current Cloudflare/TanStack/Effect
 > docs; decision accepted 2026-08-25. This doc is the canonical HOW (library/quirk
 > reference) and now also carries the WHY/decision summary — see §Decision summary below.
+> **Current implementation note:** The decision summary below preserves the
+> historical Workers-flavor rationale; it is not the current runtime status.
+> `docs/ARCHITECTURE.md` records current hosting status. Document upgrades use
+> prepared Wrangler D1 bindings via `getPlatformProxy`, not SQL in argv (see
+> `docs/BACKUPS.md`). Optional PDF/DOCX conversion uses the AI binding in this
+> same Worker and does not replace REST model-provider configuration or add a
+> second deployed Worker.
 
 ## Decision summary (merged from ADR-0002)
 
@@ -294,6 +301,30 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   `assistant_threads` remains the canonical transcript store.
   The assistant exists on Bun and Workers alike — no external runner to host;
   outbound subrequest budget 50/request free, 1000 paid.
+
+## Managed document conversion
+
+The Worker declares `ai: { "binding": "AI" }` in Wrangler config. `server/document-conversion.ts` calls the Workers AI `AI.toMarkdown([{ name, blob }])` binding only for validated binary documents; it does not change `workers_ai` model-provider dispatch. `.md`, `.markdown`, and `.txt` decode as strict UTF-8 without a service call. Missing binding, thrown request, service error, missing result, and empty output fail explicitly. There is no OCR, LLM, or parser fallback, and conversion never persists a second document representation. Images keep their existing vision path.
+
+Enabled conversion formats and server classifiers:
+
+| Format | MIME | Content proof |
+|---|---|---|
+| PDF | `application/pdf` | `%PDF-` signature |
+| DOCX | OOXML Word MIME | ZIP directory + `[Content_Types].xml`, document and relationship entries |
+| XLSX / XLSM / XLSB | OOXML spreadsheet MIME | ZIP directory + manifest/workbook relationship paths; workbook binary and VBA members distinguish enabled subtypes |
+| ODT / ODS | ODF MIME | ZIP directory + first, stored `mimetype` entry + `content.xml` and manifest |
+| XLS | `application/vnd.ms-excel` | CFB v3/v4 header, bounded FAT/directory chains, and a direct root `Workbook`/`Book` stream; generic OLE and nested workbook streams reject |
+| CSV | `text/csv` | Strict UTF-8 with a valid quoted-field scan and delimiter |
+| HTML / HTM | `text/html` | Strict UTF-8 with recognized HTML document/element structure |
+| XML | `application/xml` | Strict UTF-8 with an XML root element and matching close |
+| MD / MARKDOWN / TXT | `text/markdown` / `text/plain` | Strict UTF-8 direct text |
+
+ZIP checks cap central-directory metadata at 64 KiB and 256 entries; no entry data is decompressed. Arbitrary ZIPs, malformed directories, encrypted entries, and unsupported containers reject. XLS classification examines only root-level CFB directory children, never embedded Word object streams. Numbers and ET are excluded because no reliable content classifier was demonstrated without adding a proprietary parser. PPTX and other presentation formats remain out of scope despite Cloudflare support. The live service format list is broader than the set exercised by Lexa; only PDF, DOCX/table, and malformed-PDF responses have current live smoke evidence. Format membership does not imply identical extraction fidelity; scanned/encrypted files may fail.
+
+The Bun host has no `AI` binding: text and images remain usable, while binary conversion fails with an explicit missing-binding error. Local Worker development disables remote bindings, so it does not prove managed conversion. Generated installer configs copy the root `ai` binding; staging config declares it separately because Wrangler does not inherit it into named environments. No Cloudflare credential or AI token belongs in config.
+
+Cloudflare binding API: [Workers AI Markdown Conversion binding](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/usage/binding/).
 
 ## Object storage (R2)
 

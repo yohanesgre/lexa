@@ -1,6 +1,4 @@
 import { Data, Effect, Schedule, Schema, Fiber } from "effect";
-import * as Option from "effect/Option";
-import { TipTapDocSchema } from "../../shared/schema";
 
 export class ApiError extends Data.TaggedError("ApiError")<{ code: string; message: string }> {}
 
@@ -48,13 +46,6 @@ export function withRetry<A, E, R>(
   return Effect.retry(effect, schedule as unknown as Schedule.Schedule<never, E>) as unknown as Effect.Effect<A, E, R>;
 }
 
-export function decodeTipTapDoc(doc: unknown): Effect.Effect<import("../../shared/types").TipTapDoc, ApiError> {
-  return Effect.try({
-    try: () => Schema.decodeUnknownSync(TipTapDocSchema)(doc) as import("../../shared/types").TipTapDoc,
-    catch: (e) => new ApiError({ code: "DECODE_FAILED", message: e instanceof Error ? e.message : String(e) }),
-  });
-}
-
 export interface DebouncedEffect<A> {
   trigger: (value: A) => void;
   cancel: () => void;
@@ -63,12 +54,12 @@ export interface DebouncedEffect<A> {
 }
 
 export function createWikiAutosaveEffect(
-  saveFn: (doc: import("../../shared/types").TipTapDoc) => Effect.Effect<void, ApiError>,
+  saveFn: (content: string) => Effect.Effect<void, ApiError>,
   delayMs: number = 800
-): DebouncedEffect<import("../../shared/types").TipTapDoc> {
+): DebouncedEffect<string> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let fiber: Fiber.Fiber<void, ApiError> | null = null;
-  let pendingValue: import("../../shared/types").TipTapDoc | null = null;
+  let pendingValue: string | null = null;
   let hasPending = false;
 
   const interruptFiber = () => {
@@ -79,18 +70,17 @@ export function createWikiAutosaveEffect(
     }
   };
 
-  const trigger = (doc: import("../../shared/types").TipTapDoc): void => {
-    pendingValue = doc;
+  const trigger = (content: string): void => {
+    pendingValue = content;
     hasPending = true;
     if (timer !== null) clearTimeout(timer);
     interruptFiber();
     timer = setTimeout(() => {
       timer = null;
-      const arg = pendingValue as import("../../shared/types").TipTapDoc;
+      const arg = pendingValue;
       pendingValue = null;
       hasPending = false;
-      const effect = Effect.flatMap(decodeTipTapDoc(arg as unknown), (decoded) => saveFn(decoded));
-      fiber = Effect.runFork(effect);
+      if (arg !== null) fiber = Effect.runFork(saveFn(arg));
     }, delayMs);
   };
 
@@ -106,5 +96,3 @@ export function createWikiAutosaveEffect(
 
   return { trigger, cancel, destroy: cancel, pending: () => hasPending || timer !== null };
 }
-
-export { Option };

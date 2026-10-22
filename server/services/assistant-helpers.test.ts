@@ -86,49 +86,34 @@ describe("assertChatAttachmentCaps (D4)", () => {
   });
 });
 
-// Minimal single-page PDF (Helvetica text object) with a correctly offset xref
-// table — enough for pdfjs/unpdf to parse and extract the text.
-function buildPdf(text: string): Uint8Array {
-  const stream = `BT /F1 24 Tf 72 720 Td (${text}) Tj ET`;
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-  ];
-  let out = "%PDF-1.4\n";
-  const offsets: number[] = [];
-  objects.forEach((obj, i) => {
-    offsets.push(out.length);
-    out += `${i + 1} 0 obj\n${obj}\nendobj\n`;
-  });
-  const xrefStart = out.length;
-  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  for (const off of offsets) out += `${String(off).padStart(10, "0")} 00000 n \n`;
-  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
-  return new TextEncoder().encode(out);
-}
 
 describe("extractDocumentText", () => {
-  it("decodes markdown and plain text directly", async () => {
-    expect(await extractDocumentText(new TextEncoder().encode("# Title\n\nbody"), "text/markdown"))
+  it("decodes Markdown and plain text directly", async () => {
+    expect(await extractDocumentText(new TextEncoder().encode("# Title\n\nbody"), "text/markdown", "notes.md"))
       .toBe("# Title\n\nbody");
-    expect(await extractDocumentText(new TextEncoder().encode("just words"), "text/plain"))
+    expect(await extractDocumentText(new TextEncoder().encode("just words"), "text/plain", "notes.txt"))
       .toBe("just words");
   });
 
-  it("extracts text from a PDF via unpdf", async () => {
-    const text = await extractDocumentText(buildPdf("Hello PDF world"), "application/pdf");
-    expect(text).toContain("Hello PDF world");
+  it("converts supported binary documents through the managed binding", async () => {
+    const binding = {
+      toMarkdown: async (files: Array<{ name: string; blob: Blob }>) => {
+        expect(files[0]?.name).toBe("report.pdf");
+        expect(files[0]?.blob.type).toBe("application/pdf");
+        return { format: "markdown" as const, data: "# Hello PDF", name: "report.pdf", mimetype: "application/pdf", id: "1" };
+      },
+    };
+    expect(await extractDocumentText(new Uint8Array([1, 2, 3]), "application/pdf", "report.pdf", binding))
+      .toBe("# Hello PDF");
   });
 
-  it("returns null on unreadable bytes and unsupported types", async () => {
-    expect(await extractDocumentText(new TextEncoder().encode("not a pdf"), "application/pdf")).toBeNull();
-    expect(await extractDocumentText(new Uint8Array([0xff, 0xfe, 0x00]), "text/markdown")).toBeNull();
-    expect(await extractDocumentText(new TextEncoder().encode("x"), "image/png")).toBeNull();
+  it("returns null on unreadable bytes, unavailable conversion, and unsupported types", async () => {
+    expect(await extractDocumentText(new TextEncoder().encode("not a pdf"), "application/pdf", "bad.pdf")).toBeNull();
+    expect(await extractDocumentText(new Uint8Array([0xff, 0xfe, 0x00]), "text/markdown", "bad.md")).toBeNull();
+    expect(await extractDocumentText(new TextEncoder().encode("x"), "image/png", "image.png")).toBeNull();
   });
 });
+
 
 describe("capDocumentText", () => {
   it("leaves text at or under the limit untouched", () => {
@@ -144,7 +129,7 @@ describe("capDocumentText", () => {
   });
 
   it("caps markdown extraction at the limit", async () => {
-    const text = await extractDocumentText(new TextEncoder().encode("b".repeat(DOCUMENT_TEXT_MAX_CHARS + 3)), "text/markdown");
+    const text = await extractDocumentText(new TextEncoder().encode("b".repeat(DOCUMENT_TEXT_MAX_CHARS + 3)), "text/markdown", "long.md");
     expect(text).not.toBeNull();
     expect(text!.endsWith("…[truncated: 3 chars omitted]")).toBe(true);
   });

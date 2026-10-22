@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { InvalidArgs, TaskNotFound, WikiPageNotFound, Forbidden, errorCodeMap } from "../api/errors";
 import type { AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
 import type { AssistantWriteToolName } from "./write-tools";
-import type { TipTapDoc, Actor } from "../../shared/types";
+import type { Actor } from "../../shared/types";
 import type { DbDriver } from "../db/db";
 import type { TaskRepo } from "../repos/task.repo";
 import type { WikiRepo } from "../repos/wiki.repo";
@@ -147,7 +147,7 @@ export const applyAssistantWrite = (input: AssistantWriteApplyInput, ctx: Assist
               projectId: input.projectId,
               columnId: first.id,
               title: str(args.title ?? ""),
-              ...(args.description !== undefined ? { description: args.description as TipTapDoc } : {}),
+              ...(args.description !== undefined ? { description: str(args.description) } : {}),
               ...(args.priorityId !== undefined ? { priority: str(args.priorityId) } : {}),
               ...(args.typeId !== undefined ? { type: str(args.typeId) } : {}),
               ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
@@ -165,7 +165,7 @@ export const applyAssistantWrite = (input: AssistantWriteApplyInput, ctx: Assist
             (t as unknown as { id: string }).id,
             {
               ...(args.title !== undefined ? { title: str(args.title) } : {}),
-              ...(args.description !== undefined ? { description: args.description as TipTapDoc } : {}),
+              ...(args.description !== undefined ? { description: str(args.description) } : {}),
               ...(args.priorityId !== undefined ? { priority: str(args.priorityId) } : {}),
               ...(args.typeId !== undefined ? { type: str(args.typeId) } : {}),
               ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
@@ -206,20 +206,20 @@ export const applyAssistantWrite = (input: AssistantWriteApplyInput, ctx: Assist
         }
         case "add_comment": {
           const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
-          return yield* (ctx.commentService as unknown as { create(a: string, b: Actor, c: TipTapDoc, d: unknown): Effect.Effect<unknown, unknown> }).create((t as unknown as { id: string }).id, actor, args.body as TipTapDoc, { viaAssistant: true }).pipe(protectMutation);
+          return yield* (ctx.commentService as unknown as { create(a: string, b: Actor, c: string, d: unknown): Effect.Effect<unknown, unknown> }).create((t as unknown as { id: string }).id, actor, str(args.body), { viaAssistant: true }).pipe(protectMutation);
         }
         case "create_wiki_page":
           return yield* (ctx.wikiService as unknown as { create(a: string, b: unknown): Effect.Effect<unknown, unknown> }).create(input.projectId, {
             title: str(args.title ?? ""),
             ...(args.slug !== undefined ? { slug: str(args.slug) } : {}),
-            ...(args.content !== undefined ? { content: args.content as TipTapDoc } : {}),
+            ...(args.content !== undefined ? { content: str(args.content) } : {}),
             ...(args.parentId !== undefined ? { parentId: str(args.parentId) } : {}),
           }).pipe(protectMutation);
         case "edit_wiki_page": {
           const page = yield* ctx.wikiRepo.findBySlug(input.projectId, str(args.slug ?? "")).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") })), preExecutionRead);
           return yield* (ctx.wikiService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown> }).update((page as unknown as { id: string }).id, {
             ...(args.title !== undefined ? { title: str(args.title) } : {}),
-            ...(args.content !== undefined ? { content: JSON.stringify(args.content) } : {}),
+            ...(args.content !== undefined ? { content: str(args.content) } : {}),
           }).pipe(protectMutation);
         }
         case "create_milestone":

@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +36,6 @@ import {
   withContinuationBoundary,
 } from "../assistant/approval-carrier";
 import { resolveMentionContext, firstUserText, lastUserText, type MentionResolverDeps } from "../assistant/context";
-import type { TipTapDoc } from "../../shared/types";
 import { ASSISTANT_APPROVAL_DATA_PART, ASSISTANT_MAX_OUTPUT_TOKENS, type AssistantWriteDiff, type StreamFrame } from "../../shared/assistant";
 import type { UIMessage } from "ai";
 import type { RuntimeEnv } from "../env";
@@ -73,6 +72,23 @@ vi.mock("../assistant/provider", async (importOriginal) => {
   };
 });
 
+vi.mock("../storage/drivers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../storage/drivers")>();
+  return {
+    ...actual,
+    createFsDriver: (root: string) => {
+      const driver = actual.createFsDriver(root);
+      return {
+        ...driver,
+        get: async (key: string) => {
+          storageReads.push(key);
+          return driver.get(key);
+        },
+      };
+    },
+  };
+});
+
 type FetchCall = { url: string; init: RequestInit };
 
 let dir: string;
@@ -81,6 +97,7 @@ let driver: DbDriver;
 let service: AssistantChatService;
 let env: RuntimeEnv;
 const jevCalls: FetchCall[] = [];
+const storageReads: string[] = [];
 
 // Jev is DB-only now: the config, the envelope-encrypted key, and the project
 // opt-in all live in the registry, and the master key comes from RuntimeEnv.
@@ -208,6 +225,7 @@ function runStream(chatId: string, message: string) {
 beforeEach(() => {
   jevCalls.length = 0;
   providerMock.calls.length = 0;
+  storageReads.length = 0;
   providerMock.hold = undefined;
 });
 
@@ -941,7 +959,7 @@ describe("carried — continuation boundary text probes (LX-124)", () => {
 });
 
 describe("carried — mention resolution scoping, slug retry, fail-open", () => {
-  const doc: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "body" }] }] };
+  const doc = "body";
   const deps = (over: Partial<MentionResolverDeps> = {}): MentionResolverDeps => ({
     dbAll: async () => [],
     findTaskByKey: async () => null,
@@ -997,7 +1015,7 @@ describe("carried — write-tools scope, budget, bulk schema, auto dedupe", () =
     type: "bug",
     dueAt: null,
     assignees: [],
-    descriptionText: "body",
+    description: "body",
     archivedAt: null,
   };
 
@@ -1137,5 +1155,200 @@ describe("chat model options reach the provider request (M2)", () => {
     setup();
     await drain(await runStream("c1", "hello"));
     expect(providerMock.calls.at(-1)?.modelOptions).toEqual({ max_tokens: ASSISTANT_MAX_OUTPUT_TOKENS });
+  });
+});
+describe("chat attachment ownership", () => {
+  it("allows current-thread uploads and project history attachments, denies other-thread uploads before model access", async () => {
+    setup({ jev: "no-project" });
+    db.exec(`
+INSERT INTO users (id, email, name, role) VALUES ('u2', 'b@lexa.test', 'B', 'superadmin');
+INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id) VALUES
+  ('chat', 'c1', 'p1', 'u1'),
+  ('chat', 'c-same-owner', 'p1', 'u1'),
+  ('chat', 'c-foreign-owner', 'p1', 'u2'),
+  ('chat', 'c-history', 'p1', 'u1');
+`);
+    const addChatUpload = (documentId: string, key: string) => {
+      db.prepare(`INSERT INTO chat_attachments
+        (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+        VALUES (?, 'p1', 'chat', ?, ?, 'text/plain', 16, ?, ?, ?)`)
+        .run(`att-${documentId}`, documentId, `${documentId}.txt`, key, key, documentId === "c-foreign-owner" ? "u2" : "u1");
+    };
+    addChatUpload("c1", "blobs/current-thread");
+    addChatUpload("c-same-owner", "blobs/same-owner-other-thread");
+    addChatUpload("c-foreign-owner", "blobs/foreign-owner-thread");
+    mkdirSync(join(dir, "blobs", "blobs"), { recursive: true });
+    writeFileSync(join(dir, "blobs", "blobs", "current-thread"), "private current thread text");
+    stubUnreachable();
+
+    const accepted = await run(Effect.either(service.runChatStream("c1", "u1", {
+      projectId: "p1", chatId: "c1", message: "summarize",
+      attachments: [{ storageKey: "blobs/current-thread", mimeType: "text/plain", name: "current.txt" }],
+    })));
+    expect(accepted._tag).toBe("Right");
+    if (accepted._tag === "Right") await drain(accepted.right);
+    expect(providerMock.calls).toHaveLength(1);
+
+    providerMock.calls.length = 0;
+    for (const storageKey of ["blobs/foreign-owner-thread", "blobs/same-owner-other-thread"]) {
+      const denied = await run(Effect.either(service.runChatStream("c1", "u1", {
+        projectId: "p1", chatId: "c1", message: "summarize",
+        attachments: [{ storageKey, mimeType: "text/plain", name: "private.txt" }],
+      })));
+      expect(denied._tag).toBe("Left");
+      expect(denied).toMatchObject({ left: { _tag: "InvalidArgs" } });
+    }
+    expect(providerMock.calls).toHaveLength(0);
+
+    const projectKey = "blobs/project-history";
+    db.prepare(`INSERT INTO attachments
+      (id, project_id, task_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+      VALUES ('project-doc', 'p1', 't1', 'project.txt', 'text/plain', 20, 'project-hash', ?, 'u1')`).run(projectKey);
+    writeFileSync(join(dir, "blobs", "blobs", "project-history"), "project attachment body");
+    db.prepare(`UPDATE assistant_threads SET messages = ? WHERE document_type = 'chat' AND document_id = 'c-history'`)
+      .run(JSON.stringify([{ role: "user", content: [{ type: "document-ref", storageKey: projectKey, mimeType: "text/plain", name: "project.txt" }] }]));
+    const projectHistory = await run(service.runChatStream("c-history", "u1", {
+      projectId: "p1", chatId: "c-history", message: "continue",
+    }));
+    await drain(projectHistory);
+    expect(JSON.stringify(providerMock.calls.at(-1)?.messages)).toContain("project attachment body");
+  });
+});
+
+describe("chat history attachment boundaries", () => {
+  const refs = [
+    { type: "document-ref", storageKey: "blobs/current-history-doc", mimeType: "text/plain", name: "current.txt" },
+    { type: "image-ref", storageKey: "blobs/current-history-image", mimeType: "image/png" },
+    { type: "document-ref", storageKey: "blobs/project-history", mimeType: "text/plain", name: "project.txt" },
+    { type: "document-ref", storageKey: "blobs/foreign-history-doc", mimeType: "text/plain", name: "foreign.txt" },
+    { type: "image-ref", storageKey: "blobs/foreign-history-image", mimeType: "image/png" },
+    { type: "document-ref", storageKey: "blobs/sibling-history-doc", mimeType: "text/plain", name: "sibling.txt" },
+    { type: "image-ref", storageKey: "blobs/sibling-history-image", mimeType: "image/png" },
+  ];
+  const privateKeys = [
+    "blobs/foreign-history-doc",
+    "blobs/foreign-history-image",
+    "blobs/sibling-history-doc",
+    "blobs/sibling-history-image",
+  ];
+
+  function seedHistory(withResume = false): void {
+    db.exec(`
+      INSERT INTO users (id, email, name, role) VALUES ('u2', 'b@lexa.test', 'B', 'superadmin');
+      INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages) VALUES
+        ('chat', 'c1', 'p1', 'u1', '[]'),
+        ('chat', 'c-same-owner', 'p1', 'u1', '[]'),
+        ('chat', 'c-foreign-owner', 'p1', 'u2', '[]');
+    `);
+    const uploads = [
+      ["ca-current-doc", "c1", "current-history-doc", "current.txt", "text/plain", "u1"],
+      ["ca-current-image", "c1", "current-history-image", "current.png", "image/png", "u1"],
+      ["ca-foreign-doc", "c-foreign-owner", "foreign-history-doc", "foreign.txt", "text/plain", "u2"],
+      ["ca-foreign-image", "c-foreign-owner", "foreign-history-image", "foreign.png", "image/png", "u2"],
+      ["ca-sibling-doc", "c-same-owner", "sibling-history-doc", "sibling.txt", "text/plain", "u1"],
+      ["ca-sibling-image", "c-same-owner", "sibling-history-image", "sibling.png", "image/png", "u1"],
+    ] as const;
+    const insertUpload = db.prepare(
+      `INSERT INTO chat_attachments
+       (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES (?, 'p1', 'chat', ?, ?, ?, 1, ?, ?, ?)`
+    );
+    for (const [id, threadId, keyPart, filename, mime, ownerId] of uploads) {
+      const key = `blobs/${keyPart}`;
+      insertUpload.run(id, threadId, filename, mime, keyPart, key, ownerId);
+    }
+    db.prepare(
+      `INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ('pa-history', 'p1', 't1', 'project.txt', 'text/plain', 1, 'project-history', 'blobs/project-history', 'u1')`
+    ).run();
+    mkdirSync(join(dir, "blobs", "blobs"), { recursive: true });
+    writeFileSync(join(dir, "blobs", "blobs", "current-history-doc"), "current-thread history text");
+    writeFileSync(join(dir, "blobs", "blobs", "current-history-image"), "current thread image bytes");
+    writeFileSync(join(dir, "blobs", "blobs", "project-history"), "project artifact history text");
+    writeFileSync(join(dir, "blobs", "blobs", "foreign-history-doc"), "foreign-owner secret text");
+    writeFileSync(join(dir, "blobs", "blobs", "foreign-history-image"), "foreign owner image bytes");
+    writeFileSync(join(dir, "blobs", "blobs", "sibling-history-doc"), "same-owner sibling secret");
+    writeFileSync(join(dir, "blobs", "blobs", "sibling-history-image"), "sibling image bytes");
+    const messages = [
+      { role: "user", content: [{ type: "text", content: "previous request" }, ...refs] },
+      ...(withResume
+        ? [{ role: "assistant", content: "proposal", pendingBatch: { batchId: "b-history", approvals: [{ approvalId: "ap-history", seq: 0, name: "no_such_write_tool" }] } }]
+        : []),
+    ];
+    db.prepare("UPDATE assistant_threads SET messages = ? WHERE document_type = 'chat' AND document_id = 'c1'").run(JSON.stringify(messages));
+    if (withResume) {
+      db.prepare(
+        `INSERT INTO assistant_pending_writes (id, project_id, document_type, document_id, owner_user_id, batch_id, seq, tool_name, args, diff, status, expires_at)
+         VALUES ('ap-history', 'p1', 'chat', 'c1', 'u1', 'b-history', 0, 'no_such_write_tool', '{}', '{}', 'approved', '2099-01-01 00:00:00')`
+      ).run();
+    }
+  }
+
+  it("keeps foreign-owner and same-owner sibling document/image refs out of stream model input", async () => {
+    setup({ jev: "no-project" });
+    seedHistory();
+
+    await drain(await runStream("c1", "continue"));
+
+    const messages = JSON.stringify(providerMock.calls.at(-1)?.messages);
+    expect(messages).toContain("current-thread history text");
+    expect(messages).toContain("project artifact history text");
+    expect(messages).toContain(Buffer.from("current thread image bytes").toString("base64"));
+    expect(messages).not.toContain("foreign-owner secret text");
+    expect(messages).not.toContain("same-owner sibling secret");
+    expect(messages).not.toContain(Buffer.from("foreign owner image bytes").toString("base64"));
+    expect(messages).not.toContain(Buffer.from("sibling image bytes").toString("base64"));
+    expect(storageReads).toContain("blobs/current-history-doc");
+    expect(storageReads).toContain("blobs/current-history-image");
+    expect(storageReads).toContain("blobs/project-history");
+    for (const key of privateKeys) expect(storageReads).not.toContain(key);
+  });
+
+  it("keeps private history refs out of decided resume model input and storage reads", async () => {
+    setup({ jev: "no-project" });
+    seedHistory(true);
+
+    await drain(await run(service.resumeChatStream("c1", "u1")));
+
+    const messages = JSON.stringify(providerMock.calls.at(-1)?.messages);
+    expect(messages).toContain("current-thread history text");
+    expect(messages).toContain("project artifact history text");
+    expect(messages).toContain(Buffer.from("current thread image bytes").toString("base64"));
+    expect(messages).not.toContain("foreign-owner secret text");
+    expect(messages).not.toContain("same-owner sibling secret");
+    expect(messages).not.toContain(Buffer.from("foreign owner image bytes").toString("base64"));
+    expect(messages).not.toContain(Buffer.from("sibling image bytes").toString("base64"));
+    for (const key of privateKeys) expect(storageReads).not.toContain(key);
+  });
+});
+
+describe("chat read_s3_file tool ownership", () => {
+  it("denies private-only chat storage before blob access, then reads same key once project artifact exists", async () => {
+    setup({ jev: "no-project" });
+    const key = "blobs/private-only";
+    mkdirSync(join(dir, "blobs", "blobs"), { recursive: true });
+    writeFileSync(join(dir, "blobs", "blobs", "private-only"), "project artifact text");
+    await drain(await runStream("c1", "open"));
+    db.prepare(
+      `INSERT INTO chat_attachments
+       (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ('ca-private-only', 'p1', 'chat', 'c1', 'private.txt', 'text/plain', 21, 'private-only', ?, 'u1')`
+    ).run(key);
+
+    const tools = providerMock.calls.at(-1)?.tools as Array<{ name: string; execute?: (args: { key: string }) => Promise<unknown> }>;
+    const readTool = tools.find((tool) => tool.name === "read_s3_file");
+    expect(readTool?.execute).toBeTypeOf("function");
+    const denied = await readTool!.execute!({ key });
+    expect(denied).toMatchObject({ content: "", error: expect.any(String) });
+    expect(storageReads).not.toContain(key);
+
+    db.prepare(
+      `INSERT INTO attachments
+       (id, project_id, task_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+       VALUES ('pa-private-only', 'p1', 't1', 'artifact.txt', 'text/plain', 21, 'private-key-project', ?, 'u1')`
+    ).run(key);
+    const allowed = await readTool!.execute!({ key });
+    expect(allowed).toMatchObject({ content: "project artifact text", mimeType: "text/plain" });
+    expect(storageReads.filter((readKey) => readKey === key)).toHaveLength(1);
   });
 });

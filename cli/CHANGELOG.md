@@ -175,7 +175,7 @@ forward. Self-hosting a fresh install still goes through
   `compile:cli` is a plain `bun build --compile` — no embedded daemon or
   daemon bundle.
 - External harness contract documented: read/write work items through
-  `lx task …` / `lx wiki …` only; `--json`, TipTap→Markdown, `PREFIX-N`
+  `lx task …` / `lx wiki …` only; `--json`, Markdown source, `PREFIX-N`
   aliases.
 - `--json` is a READ-side flag: `task`/`wiki` `list` + `get`, the planning
   `list` reads (`project`, `column`, `swimlane`, `milestone`), and

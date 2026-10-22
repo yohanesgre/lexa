@@ -1,3 +1,4 @@
+import { parser } from "@lezer/markdown";
 import { Effect } from "effect";
 import { GitHubClient } from "../github/client";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
@@ -12,26 +13,37 @@ import { GithubIssueAlreadyLinked, TaskNotFound, GithubApiError, ProjectNotFound
 import { Db, batchResults, requireRow, DbError, ConstraintViolation, RowNotFound } from "../db/db";
 import { rowToActivityEvent, type ActivityRow } from "../../shared/db";
 import { PUBLIC_URL } from "../auth";
-import { extractText } from "../../shared/tiptap-text";
+import { normalizeMarkdownForEcho } from "../../shared/markdown";
+import { isSameOriginPath } from "../../shared/safe-href";
 import * as msg from "../activity-messages";
 import type { Actor, ActivityEvent } from "../../shared/types";
 
-// `shared/markdown` pulls the `marked` parser at module scope. It is imported
-// lazily at the call sites so github.service no longer pulls `marked` at module
-// scope. Promise-memo per module, reset on rejection so a failed import can
-// retry (same pattern as tiktoken.ts).
-type MarkdownModule = typeof import("../../shared/markdown");
-
-let markdownModule: Promise<MarkdownModule> | null = null;
-
-function loadMarkdown(): Promise<MarkdownModule> {
-  markdownModule ??= import("../../shared/markdown").catch((e: unknown) => {
-    markdownModule = null;
-    throw e;
+function githubMarkdown(source: string): string {
+  const replacements: { from: number; to: number; value: string }[] = [];
+  parser.parse(source).iterate({
+    enter(node) {
+      if (node.name !== "URL") return;
+      const raw = source.slice(node.from, node.to);
+      const wrapped = raw.startsWith("<") && raw.endsWith(">");
+      const from = node.from + (wrapped ? 1 : 0);
+      const to = node.to - (wrapped ? 1 : 0);
+      const destination = source.slice(from, to).replace(/\\([!-/:-@\[-`{-~])/g, "$1");
+      if (!isSameOriginPath(destination)) return;
+      const url = new URL(destination, PUBLIC_URL);
+      const isAttachment = /^\/api\/attachments\/[0-9a-f-]+$/i.test(url.pathname);
+      const isTaskLink = /^\/[^/]+\/board$/.test(url.pathname) && url.searchParams.has("task");
+      const isWikiLink = /^\/[^/]+\/wiki\/[^/]+$/.test(url.pathname);
+      if (isAttachment || isTaskLink || isWikiLink) {
+        replacements.push({ from, to, value: url.href });
+      }
+    },
   });
-  return markdownModule;
+  let result = source;
+  for (const replacement of replacements.reverse()) {
+    result = `${result.slice(0, replacement.from)}${replacement.value}${result.slice(replacement.to)}`;
+  }
+  return result;
 }
-
 // Short-lived per-repo cache for the autocomplete listing (core API is cheap,
 // but a keystroke-per-request against GitHub is wasteful). A brand-new issue
 // appears after ≤ TTL — accepted (see design edge #5).
@@ -80,19 +92,12 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
       // failure only flags push_failed so the next save retries naturally.
       syncContentFromLexa: (taskId: string) =>
         Effect.gen(function* () {
-          const { docToMarkdown, normalizeMarkdownForEcho } = yield* Effect.promise(() => loadMarkdown());
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
-          // Mention deep links need the project slug in the URL.
-          const project = yield* projectRepo.findById(task.projectId).pipe(
-            Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-          );
-          const body = docToMarkdown(task.description, {
-            baseUrl: PUBLIC_URL,
-            ...(project && "slug" in project && (project as { slug: string }).slug !== undefined ? { projectSlug: String((project as { slug: string }).slug) } : {}),
-          });
           const links = yield* taskRepo.findGithubLinks(taskId);
+          if (links.length === 0) return;
+          const body = githubMarkdown(task.description);
           for (const link of links) {
             const titleChanged = normalizeMarkdownForEcho(link.pushed_title) !== normalizeMarkdownForEcho(task.title);
             const bodyChanged = normalizeMarkdownForEcho(link.pushed_body) !== normalizeMarkdownForEcho(body);
@@ -156,7 +161,6 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             // Content sync, GitHub → Lexa (title + body), echo-suppressed.
             // The edited payload carries the new TITLE but not the body — the
             // body always comes from an API fetch.
-            const { markdownToDoc, normalizeMarkdownForEcho } = yield* Effect.promise(() => loadMarkdown());
             const title = payload.issue?.title;
             if (!title) {
               yield* webhookEvents.recordDelivery(deliveryId);
@@ -185,12 +189,12 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
                 yield* webhookEvents.recordDelivery(deliveryId);
                 return;
               }
-              // External edit — apply title + description (Markdown → TipTap).
+              // External edit — apply title + exact Markdown source.
               // field_changed rows are emitted inside the update, in the same
               // transaction (emission invariant).
               yield* taskService.update(actor, task.id, {
                 title: fetched.title,
-                description: markdownToDoc(fetched.body),
+                description: fetched.body,
               }).pipe(
                 Effect.catchAll((e) => Effect.logWarning(`[GitHub] webhook edit apply failed for task ${task.id}`, e))
               );
@@ -305,7 +309,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
               message: `Repo '${repo}' is not a workspace repo of this project`,
             });
           }
-          const issue = yield* client.createIssue(repo, task.title, extractText(task.description));
+          const issue = yield* client.createIssue(repo, task.title, githubMarkdown(task.description));
           const [, activityRes] = yield* batchResults(db, [
             taskRepo.setGithubLinkStmt(taskId, {
               issueId: issue.nodeId,
@@ -364,13 +368,12 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
         }),
 
       // Pick up a GitHub issue as a Lexa task: creates the task (title from
-      // the issue, description from the body via Markdown → TipTap) in the
+      // the issue, description from the body as Markdown source) in the
       // project's first column, then links it. required_fields behave exactly
       // like a normal create — no special-casing. An issue already linked to
       // ANY task is rejected (UNIQUE(issue_id)).
       createTaskFromIssue: (actor: Actor, slug: string, repo: string, issueNumber: number): Effect.Effect<{ taskId: string; activity: ActivityEvent[] }, ProjectNotFound | GithubApiError | GithubIssueAlreadyLinked | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
-          const { markdownToDoc } = yield* Effect.promise(() => loadMarkdown());
           const project = yield* projectService.findBySlug(slug);
           const repos = yield* reposRepo.listByProject(project.id);
           if (!repos.some((r) => r.repo === repo && r.workspaceRole)) {
@@ -395,7 +398,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             projectId: project.id,
             columnId: first.id,
             title: issue.title,
-            description: markdownToDoc(issue.body),
+            description: issue.body,
           });
           const [, activityRes] = yield* batchResults(db, [
             taskRepo.setGithubLinkStmt(task.id, {

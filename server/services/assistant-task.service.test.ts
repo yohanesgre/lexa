@@ -123,7 +123,7 @@ INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, position, created_at, key, number)
-  VALUES ('t1', 'p1', 'c1', 's-backlog', 'Fix login', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"The login button is broken."}]}]}', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
+  VALUES ('t1', 'p1', 'c1', 's-backlog', 'Fix login', 'The login button is broken.', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'Test Agent', '', 'Be precise.', 0);
 INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'Test Polish', '', 'Polish the text.', 0);
 INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('a1', 'sk1');
@@ -213,6 +213,42 @@ afterEach(() => {
   vi.unstubAllGlobals();
   try { db?.close(); } catch {}
   if (dir) rmSync(dir, { recursive: true, force: true });
+});
+
+it("does not expose private chat images to document tools until a project attachment authorizes the bytes", async () => {
+  setup({ jev: "no-project" });
+  db.exec(`
+    UPDATE assistant_settings SET vision_model = 'test-model' WHERE project_id = 'p1';
+    INSERT INTO assistant_threads (document_type, document_id, project_id, owner_user_id, messages)
+      VALUES ('chat', 'private-images', 'p1', 'u1', '[]');
+    INSERT INTO chat_attachments (id, project_id, document_type, document_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+      VALUES ('private-image', 'p1', 'chat', 'private-images', 'private.png', 'image/png', 8, 'private-image-hash', 'blobs/private-image', 'u1');
+  `);
+  const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await run(Effect.gen(function* () { yield* (yield* Storage).put("blobs/private-image", bytes); }));
+  stubFetch(() => Promise.resolve(new Response(JSON.stringify({
+    choices: [{ message: { content: "A project-visible screenshot." } }],
+  }), { headers: { "content-type": "application/json" } })));
+  queueRun("private-image-check");
+  await drain(await runStream("private-image-check"));
+  const tools = providerMock.calls[0]!.tools as Array<{
+    name: string;
+    execute: (input: { storageKey: string; question: string }) => Promise<{ description: string; error?: string }>;
+  }>;
+  const analyze = tools.find((tool) => tool.name === "analyze_image");
+  if (!analyze) throw new Error("Missing image tool for configured vision provider");
+  const denied = await analyze.execute({ storageKey: "blobs/private-image", question: "Describe the image" });
+  expect(denied.description).toBe("");
+  expect(denied.error).toEqual(expect.any(String));
+  expect(jevCalls).toHaveLength(0);
+
+  db.exec(`
+    INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_bytes, sha256, storage_key, uploaded_by)
+      VALUES ('project-image', 'p1', 't1', 'project.png', 'image/png', 8, 'private-image-hash', 'blobs/private-image', 'u1');
+  `);
+  const allowed = await analyze.execute({ storageKey: "blobs/private-image", question: "Describe the image" });
+  expect(allowed).not.toHaveProperty("error");
+  expect(jevCalls).toHaveLength(1);
 });
 
   it("settles a claimed task and releases its controller when setup fails before streaming", async () => {

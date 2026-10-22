@@ -2,18 +2,13 @@ import { useTaskActivity, useProjectMembers, useUpdateComment, useDeleteComment,
 import { ActivityTimeline, type CurrentUser } from "./ActivityTimeline";
 import { CommentComposer } from "./CommentComposer";
 
-// The Activity tab: step-rail timeline + composer, per wireframes/src/task-detail.html.
-// Identity: the session user (GET /api/auth/get-session) resolved against the
-// project members list to get the acting user's id + role — comment actions
-// key off it (author → edit+delete, admin → delete on others, agents none).
-
 function useCurrentUser(slug: string | undefined): CurrentUser {
   const members = useProjectMembers(slug ?? "");
   const { data: session } = useSession();
   const lxk = session?.user ?? null;
   const member = members.data?.find((m) => m.email === lxk?.email) ?? null;
   return {
-    id: member?.id ?? null,
+    id: lxk?.id ?? null,
     email: lxk?.email ?? null,
     name: member?.name ?? lxk?.name ?? null,
     role: member?.role ?? null,
@@ -59,8 +54,8 @@ export function ActivityTab({ slug, taskId, isArchived }: ActivityTabProps) {
           items={items}
           members={memberList}
           currentUser={currentUser}
-          onDeleteComment={(commentId) => deleteComment.mutate(commentId)}
-          onUpdateComment={(commentId, body) => updateComment.mutateAsync({ commentId, body }).then(() => undefined)}
+          onDeleteComment={(commentId) => deleteComment.mutate({ commentId, projectSlug: slug ?? "", taskId })}
+          onUpdateComment={(commentId, body) => updateComment.mutateAsync({ commentId, body, projectSlug: slug ?? "", taskId }).then(() => undefined)}
         />
       )}
       {isArchived ? (

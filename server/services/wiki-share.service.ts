@@ -10,7 +10,7 @@ export interface SharedPageNode {
   id: string;
   title: string;
   slug: string;
-  content: unknown;
+  content: string;
   updatedAt: string;
   children: SharedPageNode[];
 }
@@ -25,7 +25,7 @@ export class WikiShareService extends Effect.Service<WikiShareService>()("Lexa/W
       id: row.id,
       title: row.title,
       slug: row.slug,
-      content: JSON.parse(row.content),
+      content: row.content,
       updatedAt: row.updated_at,
       children: [],
     });

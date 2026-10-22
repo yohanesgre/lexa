@@ -131,8 +131,8 @@ describe("tasks route swimlane param", () => {
     },
     links: [],
     tasks: [
-      { id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "sp1", title: "Task in Sprint 7", description: { type: "doc", content: [] }, priority: "pr1", type: "tp1", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
-      { id: "t2", projectId: "p1", columnId: "c1", swimlaneId: "sp2", title: "Task in Sprint 8", description: { type: "doc", content: [] }, priority: "pr1", type: "tp1", assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
+      { id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "sp1", title: "Task in Sprint 7", description: "", priority: "pr1", type: "tp1", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
+      { id: "t2", projectId: "p1", columnId: "c1", swimlaneId: "sp2", title: "Task in Sprint 8", description: "", priority: "pr1", type: "tp1", assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
     ],
   };
 

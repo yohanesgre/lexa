@@ -19,6 +19,7 @@ import { TaskService } from "./task.service";
 import { ProjectService } from "./project.service";
 import { ActivityService } from "./activity.service";
 import type { Actor } from "../../shared/types";
+import { PUBLIC_URL } from "../auth";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -56,7 +57,7 @@ function seed() {
   db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p1','P','p1','EG')").run();
   db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c-todo','p1','Todo',0,'open'), ('c-done','p1','Done',1,'closed')").run();
   db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1','p1','Default',0,'backlog')").run();
-  db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES ('t1','p1','c-todo','s1','T','{\"type\":\"doc\",\"content\":[]}','prio-1','type-1','a0','2026-01-01 10:00:00')").run();
+  db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES ('t1','p1','c-todo','s1','T','# Existing\n\n- [x] done','prio-1','type-1','a0','2026-01-01 10:00:00')").run();
   db.prepare("INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES ('t1','ghi1',7,'owner/repo','closed')").run();
 }
 
@@ -101,6 +102,48 @@ describe("GitHubService.handleWebhook delivery recording", () => {
     expect(deliveryCount("del-echo")).toBe(1);
   });
 
+  it("does not reapply an unchanged fetched Markdown body", async () => {
+    seed();
+    db.prepare("UPDATE task_github_issues SET pushed_title = ?, pushed_body = ? WHERE task_id = 't1'")
+      .run("T", "# Existing\r\n\r\n- [x] done");
+    const svc = makeService(db, {
+      getIssue: () => Effect.succeed({
+        nodeId: "ghi1",
+        number: 7,
+        state: "open",
+        title: "T",
+        body: "# Existing\r\n\r\n- [x] done",
+      }),
+    });
+
+    await Effect.runPromise(svc.handleWebhook("del-markdown-echo", "issues", { action: "edited", issue: { node_id: "ghi1", title: "T" } }));
+
+    expect((db.prepare("SELECT title, description FROM tasks WHERE id = 't1'").get() as { title: string; description: string }))
+      .toEqual({ title: "T", description: "# Existing\n\n- [x] done" });
+    expect((db.prepare("SELECT COUNT(*) AS n FROM task_activity WHERE task_id = 't1'").get() as { n: number }).n).toBe(0);
+    expect(deliveryCount("del-markdown-echo")).toBe(1);
+  });
+
+  it("stores changed fetched GitHub Markdown exactly", async () => {
+    seed();
+    const body = "## Remote\r\n\r\n` exact `  \r\n";
+    const svc = makeService(db, {
+      getIssue: () => Effect.succeed({
+        nodeId: "ghi1",
+        number: 7,
+        state: "open",
+        title: "Remote title",
+        body,
+      }),
+    });
+
+    await Effect.runPromise(svc.handleWebhook("del-markdown-change", "issues", { action: "edited", issue: { node_id: "ghi1", title: "Remote title" } }));
+
+    expect((db.prepare("SELECT title, description FROM tasks WHERE id = 't1'").get() as { title: string; description: string }))
+      .toEqual({ title: "Remote title", description: body });
+    expect(deliveryCount("del-markdown-change")).toBe(1);
+  });
+
   it("records a delivery that has no mapped target column", async () => {
     seed();
     db.prepare("UPDATE task_github_issues SET synced_state = 'open' WHERE task_id = 't1'").run();
@@ -112,11 +155,116 @@ describe("GitHubService.handleWebhook delivery recording", () => {
   });
 });
 
+describe("GitHubService.syncContentFromLexa", () => {
+  it("pushes exact Markdown, records successful body, and skips CRLF-only echo changes", async () => {
+    seed();
+    const body = "## Exact\r\n\r\n- [x] source  \n";
+    db.prepare("UPDATE tasks SET title = ?, description = ? WHERE id = 't1'").run("New title", body);
+    db.prepare("UPDATE task_github_issues SET pushed_title = ?, pushed_body = ? WHERE task_id = 't1'").run("Old title", "Old body");
+    const calls: Array<{ title: string; body: string }> = [];
+    const svc = makeService(db, {
+      updateIssueContent: (_repo: string, _number: number, content: { title: string; body: string }) => {
+        calls.push(content);
+        return Effect.succeed(undefined);
+      },
+    });
+
+    await Effect.runPromise(svc.syncContentFromLexa("t1"));
+
+    expect(calls).toEqual([{ title: "New title", body }]);
+    expect(db.prepare("SELECT pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = 't1'").get())
+      .toEqual({ pushed_title: "New title", pushed_body: body, push_failed: 0 });
+
+    db.prepare("UPDATE task_github_issues SET pushed_body = ? WHERE task_id = 't1'").run(body.replace(/\r\n/g, "\n"));
+    await Effect.runPromise(svc.syncContentFromLexa("t1"));
+    expect(calls).toHaveLength(1);
+  });
+  it("rewrites only parsed Lexa destinations and stores the exact pushed Markdown", async () => {
+    seed();
+    const attachment = "/api/attachments/123e4567-e89b-12d3-a456-426614174000";
+    const source = [
+      `[file](${attachment} "title") [task](/p1/board?task=t1) [wiki](</p1/wiki/guide> "title")`,
+      `![image](${attachment})`,
+      "[escaped wiki](/p1/wiki/getting\\-started)",
+      `\`${attachment} /p1/board?task=t1 /p1/wiki/guide\``,
+      "```md",
+      `${attachment} /p1/board?task=t1 /p1/wiki/guide`,
+      "```",
+      `\\[escaped](/p1/board?task=t1)`,
+      "[external](//outside.invalid/p1/wiki/guide)",
+      "[backslash](/\\outside.invalid/p1/wiki/guide)",
+      "[reference][task-link]",
+      "",
+      "[task-link]: /p1/board?task=t1",
+    ].join("\n");
+    db.prepare("UPDATE tasks SET description = ? WHERE id = 't1'").run(source);
+    db.prepare("UPDATE task_github_issues SET pushed_title = ?, pushed_body = ? WHERE task_id = 't1'").run("Old title", "Old body");
+    const calls: Array<{ title: string; body: string }> = [];
+    const svc = makeService(db, {
+      updateIssueContent: (_repo: string, _number: number, content: { title: string; body: string }) => {
+        calls.push(content);
+        return Effect.succeed(undefined);
+      },
+    });
+    const attachmentUrl = new URL(attachment, PUBLIC_URL).href;
+    const taskUrl = new URL("/p1/board?task=t1", PUBLIC_URL).href;
+    const wikiUrl = new URL("/p1/wiki/guide", PUBLIC_URL).href;
+    const expected = [
+      `[file](${attachmentUrl} "title") [task](${taskUrl}) [wiki](<${wikiUrl}> "title")`,
+      `![image](${attachmentUrl})`,
+      `[escaped wiki](${new URL("/p1/wiki/getting-started", PUBLIC_URL).href})`,
+      `\`${attachment} /p1/board?task=t1 /p1/wiki/guide\``,
+      "```md",
+      `${attachment} /p1/board?task=t1 /p1/wiki/guide`,
+      "```",
+      `\\[escaped](/p1/board?task=t1)`,
+      "[external](//outside.invalid/p1/wiki/guide)",
+      "[backslash](/\\outside.invalid/p1/wiki/guide)",
+      "[reference][task-link]",
+      "",
+      `[task-link]: ${taskUrl}`,
+    ].join("\n");
+
+    await Effect.runPromise(svc.syncContentFromLexa("t1"));
+
+    expect(calls).toEqual([{ title: "T", body: expected }]);
+    expect(db.prepare("SELECT description FROM tasks WHERE id = 't1'").get()).toEqual({ description: source });
+    expect(db.prepare("SELECT pushed_body FROM task_github_issues WHERE task_id = 't1'").get()).toEqual({ pushed_body: expected });
+
+    await Effect.runPromise(svc.syncContentFromLexa("t1"));
+    expect(calls).toHaveLength(1);
+  });
+
+
+  it("retries failed content pushes without replacing last successful bookkeeping", async () => {
+    seed();
+    const body = "## Retry\n\nSource stays exact.";
+    db.prepare("UPDATE tasks SET title = ?, description = ? WHERE id = 't1'").run("Retry title", body);
+    db.prepare("UPDATE task_github_issues SET pushed_title = ?, pushed_body = ? WHERE task_id = 't1'").run("Last title", "Last body");
+    let attempts = 0;
+    const svc = makeService(db, {
+      updateIssueContent: () => {
+        attempts += 1;
+        return attempts === 1 ? Effect.fail(new Error("offline")) : Effect.succeed(undefined);
+      },
+    });
+
+    await Effect.runPromise(svc.syncContentFromLexa("t1"));
+    expect(db.prepare("SELECT pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = 't1'").get())
+      .toEqual({ pushed_title: "Last title", pushed_body: "Last body", push_failed: 1 });
+
+    await Effect.runPromise(svc.syncContentFromLexa("t1"));
+    expect(attempts).toBe(2);
+    expect(db.prepare("SELECT pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = 't1'").get())
+      .toEqual({ pushed_title: "Retry title", pushed_body: body, push_failed: 0 });
+  });
+});
+
 describe("GitHubService.createLinkedIssue link atomicity", () => {
   const actor: Actor = { kind: "agent", label: "bot" };
 
   function seedSecondTask() {
-    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES ('t2','p1','c-todo','s1','T2','{\"type\":\"doc\",\"content\":[]}','prio-1','type-1','a1','2026-01-02 10:00:00')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES ('t2','p1','c-todo','s1','T2','# Second\n\n- [ ] verify','prio-1','type-1','a1','2026-01-02 10:00:00')").run();
     db.prepare("INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES ('pr1','p1','owner/repo',0,1)").run();
   }
 
@@ -132,6 +280,66 @@ describe("GitHubService.createLinkedIssue link atomicity", () => {
     expect(res.activity[0]!.type).toBe("github_linked");
     expect(db.prepare("SELECT COUNT(*) n FROM task_github_issues WHERE task_id = 't2'").get()).toEqual({ n: 1 });
     expect(db.prepare("SELECT COUNT(*) n FROM task_activity WHERE task_id = 't2'").get()).toEqual({ n: 1 });
+  });
+  it("pushes absolute Lexa links when creating an issue without changing source or code", async () => {
+    seed();
+    seedSecondTask();
+    const attachment = "/api/attachments/123e4567-e89b-12d3-a456-426614174000";
+    const source = [
+      `See [file](${attachment}). [task](/p1/board?task=t2) [wiki](</p1/wiki/guide>).`,
+      "`[task](/p1/board?task=t2)`",
+      "```md",
+      "[wiki](/p1/wiki/guide)",
+      "```",
+      "\\[escaped](/p1/board?task=t2)",
+    ].join("\n");
+    db.prepare("UPDATE tasks SET description = ? WHERE id = 't2'").run(source);
+    let pushedBody = "";
+    const client = {
+      createIssue: (_repo: string, _title: string, body: string) => {
+        pushedBody = body;
+        return Effect.succeed({ nodeId: "ghi-attachment", number: 11 });
+      },
+    };
+    const svc = makeService(db, client);
+
+    await Effect.runPromise(svc.createLinkedIssue(actor, "t2", "owner/repo"));
+
+    const attachmentUrl = new URL(attachment, PUBLIC_URL).href;
+    const taskUrl = new URL("/p1/board?task=t2", PUBLIC_URL).href;
+    const wikiUrl = new URL("/p1/wiki/guide", PUBLIC_URL).href;
+    expect(pushedBody).toBe([
+      `See [file](${attachmentUrl}). [task](${taskUrl}) [wiki](<${wikiUrl}>).`,
+      "`[task](/p1/board?task=t2)`",
+      "```md",
+      "[wiki](/p1/wiki/guide)",
+      "```",
+      "\\[escaped](/p1/board?task=t2)",
+    ].join("\n"));
+    expect((db.prepare("SELECT description FROM tasks WHERE id = 't2'").get() as { description: string }).description).toBe(source);
+  });
+  it("imports GitHub issue body as exact Markdown source", async () => {
+    seed();
+    seedSecondTask();
+    db.prepare("INSERT INTO priority_options (id, project_id, label, position) VALUES ('prio-default', 'p1', 'Medium', 0)").run();
+    db.prepare("INSERT INTO type_options (id, project_id, label, position) VALUES ('type-default', 'p1', 'Task', 0)").run();
+    const body = "## Imported\r\n\r\n`literal`  \n";
+    const svc = makeService(db, {
+      getIssue: () => Effect.succeed({
+        nodeId: "ghi-import",
+        number: 13,
+        state: "open",
+        title: "Imported title",
+        body,
+      }),
+    });
+
+    const result = await Effect.runPromise(svc.createTaskFromIssue(actor, "p1", "owner/repo", 13));
+
+    expect((db.prepare("SELECT title, description FROM tasks WHERE id = ?").get(result.taskId) as { title: string; description: string }))
+      .toEqual({ title: "Imported title", description: body });
+    expect(db.prepare("SELECT issue_id, repo FROM task_github_issues WHERE task_id = ?").get(result.taskId))
+      .toEqual({ issue_id: "ghi-import", repo: "owner/repo" });
   });
 
   it("rolls back the link and the activity when the created issue is already linked elsewhere", async () => {

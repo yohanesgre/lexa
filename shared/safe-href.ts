@@ -1,8 +1,5 @@
-// Link-href scheme allowlist, applied at every render/authoring sink.
-// Renderers drop disallowed hrefs entirely (text stays plain, no anchor);
-// markdownToDoc drops them at the authoring boundary so the payload is
-// never stored. `javascript:` (and friends) in a stored href would execute
-// in any viewer's session when clicked.
+// Canonical Markdown remains untrusted source. Renderers drop disallowed
+// schemes at the href sink, leaving the label as plain text.
 export function safeHref(href: unknown): string | null {
   if (typeof href !== "string") return null;
   const trimmed = href.trim();

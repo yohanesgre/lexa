@@ -1,15 +1,12 @@
-import type { TipTapDoc } from "../../../shared/types";
-import { cn } from "../ui/cn";
-import { hasText } from "../tiptap-render";
-import { renderCommentBody } from "../../lib/mention";
-import { TTNode } from "../tiptap-render";
+import { isMarkdownEmpty } from "../../../shared/markdown";
+import { MarkdownContent } from "../MarkdownContent";
+import { renderCommentText } from "../../lib/mention";
 
-// Comment body rendering: the doc-walk + mention splitting lives in
-// app/lib/mention.tsx (renderCommentBody); this component owns only the
-// wrapper element and the empty-doc guard.
-
-export function CommentBody({ body, members }: { body: TipTapDoc; members: string[] }) {
-  const nodes = body.content as TTNode[];
-  if (!hasText(nodes ?? [])) return null;
-  return <div className={cn("comment-text")}>{renderCommentBody(body, members)}</div>;
+export function CommentBody({ body, members }: { body: string; members: string[] }) {
+  if (isMarkdownEmpty(body)) return null;
+  return (
+    <div className="comment-text">
+      <MarkdownContent md={body} surface="comment" renderText={(text) => renderCommentText(text, members)} />
+    </div>
+  );
 }

@@ -73,10 +73,9 @@ if (dbPath) {
 //   * `CHECK (...)` constraints
 //   * `WITHOUT ROWID` tables
 //   * Generated columns (`GENERATED ALWAYS AS ... STORED`)
-// D1 does NOT support: `ALTER COLUMN`, `RENAME COLUMN`, `DROP COLUMN`.
-// No migration in the current chain needs those: 0004 is additive columns
-// and 0005 (`runtime` rename) uses only `ALTER TABLE ... RENAME TO`,
-// `DROP INDEX` + `CREATE INDEX`, and value `UPDATE`s. FK note: the
+// D1 supports the DROP/RENAME COLUMN path used by 0030; the real local D1
+// rehearsal verifies its defaults, triggers and foreign-key-safe execution.
+// Earlier migrations use additive columns and table renames. FK note: the
 // Bun runner disables foreign-key enforcement for the run, while the
 // Workers/D1 runner enforces it, so every migration must succeed under both
 // (0005's agent-id rebind is written FK-safe for exactly that reason).

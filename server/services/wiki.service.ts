@@ -5,8 +5,7 @@ import { UserRepo } from "../repos/user.repo";
 import { ConstraintViolation, DbError, RowNotFound, Db, batch, withTx, type BatchStmt } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, InvalidParent, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
-import type { TipTapDoc } from "../../shared/types";
-import { extractText } from "../../shared/tiptap-text";
+import { markdownToText } from "../../shared/markdown";
 
 export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService", {
   dependencies: [WikiRepo.Default, ProjectRepo.Default, UserRepo.Default],
@@ -49,8 +48,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         input: {
           title: string;
           slug?: string | undefined;
-          content?: TipTapDoc | undefined;
-          contentText?: string | undefined;
+          content?: string | undefined;
           parentId?: string | null | undefined;
           updatedBy?: string | null | undefined;
         }
@@ -60,15 +58,15 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           const slug = input.slug || slugify(input.title);
           const position = yield* repo.maxPosition(projectId, input.parentId ?? null);
           const id = crypto.randomUUID();
-          const contentJson = JSON.stringify(input.content ?? { type: "doc", content: [] });
-          const contentText = input.contentText ?? "";
+          const content = input.content ?? "";
+          const contentText = markdownToText(content);
           const page = yield* repo
             .create({
               id,
               projectId,
               title: input.title,
               slug,
-              content: contentJson,
+              content,
               contentText,
               parentId: input.parentId ?? null,
               position: position + 1,
@@ -128,7 +126,6 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           title?: string;
           slug?: string;
           content?: string;
-          contentText?: string;
           parentId?: string | null;
           position?: number;
         },
@@ -168,15 +165,24 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               current.id,
               current.title,
               current.slug,
-              JSON.stringify(current.content),
-              extractText(current.content),
+              current.content,
+              markdownToText(current.content),
               saveType
             ),
             // Prune: keep the newest 100 revisions per page (same batch as
             // the insert — no unbounded revision growth).
             repo.pruneRevisionsStmt(current.id),
           ];
-          const updateStmt = repo.updateStmt(id, { ...input, updatedBy });
+          const updateStmt = repo.updateStmt(id, {
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.slug !== undefined ? { slug: input.slug } : {}),
+            ...(input.content !== undefined
+              ? { content: input.content, contentText: markdownToText(input.content) }
+              : {}),
+            ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+            ...(input.position !== undefined ? { position: input.position } : {}),
+            updatedBy,
+          });
           if (updateStmt) stmts.push(updateStmt);
           yield* batch(db, stmts).pipe(
             Effect.catchIf(
@@ -226,12 +232,13 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             return yield* new WikiPageNotFound({ id: revisionId });
           }
           yield* Effect.logInfo(`[Wiki] Restored revision ${revisionId} for page ${page.id}`);
+          const contentText = markdownToText(revision.content);
           const stmts: BatchStmt[] = [];
           const updateStmt = repo.updateStmt(page.id, {
             title: revision.title,
             slug: revision.slug,
-            content: JSON.stringify(revision.content),
-            contentText: revision.contentText,
+            content: revision.content,
+            contentText,
             updatedBy,
           });
           if (updateStmt) stmts.push(updateStmt);
@@ -239,8 +246,8 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             page.id,
             revision.title,
             revision.slug,
-            JSON.stringify(revision.content),
-            revision.contentText,
+            revision.content,
+            contentText,
             "manual"
           ));
           yield* batch(db, stmts);

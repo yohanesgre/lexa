@@ -1,5 +1,5 @@
 import { cn } from "../ui/cn";
-import type { HeadingOutline } from "../tiptap-render";
+import type { HeadingOutline } from "../../lib/markdownToReact";
 
 interface OutlineListProps {
   headings: HeadingOutline[];

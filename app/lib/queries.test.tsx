@@ -28,7 +28,7 @@ const FIELD_CONFIG: FieldConfig = {
 };
 const TASK: Task = {
   id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1",
-  description: { type: "doc", content: [] }, priority: "prio-1", type: "type-1",
+  description: "", priority: "prio-1", type: "type-1",
   assignees: ["Maria"], position: "a0", githubs: [], dueAt: null, archivedAt: null,
   createdAt: "t", updatedAt: "t",
 };

@@ -1,37 +1,5 @@
 import { Schema } from "effect";
-import type { Board, BoardTask, Column, FieldConfig, FieldOption, GithubIssue, Milestone, Project, ProjectRepo, Swimlane, Task, TaskLink, TipTapDoc, TipTapMark, TipTapNode } from "./types";
-
-export const TipTapMarkSchema = Schema.Struct({
-  type: Schema.String,
-  attrs: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-}) as unknown as Schema.Schema<TipTapMark>;
-
-export const TipTapNodeSchema: Schema.Schema<TipTapNode> = Schema.suspend(() =>
-  Schema.Struct({
-    type: Schema.String,
-    attrs: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-    content: Schema.optional(Schema.Array(TipTapNodeSchema)),
-    text: Schema.optional(Schema.String),
-    marks: Schema.optional(Schema.Array(TipTapMarkSchema)),
-  }),
-) as unknown as Schema.Schema<TipTapNode>;
-
-export const TipTapDocSchema = Schema.Struct({
-  type: Schema.Literal("doc"),
-  content: Schema.Array(TipTapNodeSchema),
-}) as unknown as Schema.Schema<TipTapDoc>;
-
-export function isTipTapEmpty(doc: TipTapDoc): boolean {
-  function hasText(nodes: TipTapNode[]): boolean {
-    for (const n of nodes) {
-      if (typeof n.text === "string" && n.text.trim().length > 0) return true;
-      if (n.content && n.content.length > 0 && hasText(n.content)) return true;
-    }
-    return false;
-  }
-  if (!doc.content || doc.content.length === 0) return true;
-  return !hasText(doc.content);
-}
+import type { Board, BoardTask, Column, FieldConfig, FieldOption, GithubIssue, Milestone, Project, ProjectRepo, Swimlane, Task, TaskLink } from "./types";
 
 const ProjectRepoSchema = Schema.Struct({
   repo: Schema.String,
@@ -130,7 +98,7 @@ export const TaskSchema = Schema.Struct({
   columnId: Schema.String,
   swimlaneId: Schema.String,
   title: Schema.String,
-  description: TipTapDocSchema,
+  description: Schema.String,
   priority: Schema.String,
   type: Schema.String,
   assignees: Schema.Array(Schema.String),

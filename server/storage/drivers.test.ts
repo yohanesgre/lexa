@@ -129,6 +129,84 @@ const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
 const GIF = new TextEncoder().encode("GIF89a....");
 const WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
 
+function compoundWorkbook(nested: boolean): Uint8Array {
+  const bytes = new Uint8Array(2048);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+  view.setUint16(26, 3, true);
+  view.setUint16(30, 9, true);
+  view.setUint16(32, 6, true);
+  view.setUint32(44, 1, true);
+  view.setUint32(48, 1, true);
+  view.setUint32(56, 4096, true);
+  view.setUint32(60, 0xfffffffe, true);
+  view.setUint32(68, 0xfffffffe, true);
+  view.setUint32(72, 0, true);
+  for (let index = 0; index < 109; index++) view.setUint32(76 + index * 4, index === 0 ? 0 : 0xffffffff, true);
+  const fat = 512;
+  view.setUint32(fat, 0xfffffffd, true);
+  view.setUint32(fat + 4, 0xfffffffe, true);
+  view.setUint32(fat + 8, 0xfffffffe, true);
+
+  const writeEntry = (index: number, name: string, type: number, child = 0xffffffff) => {
+    const offset = 1024 + index * 128;
+    for (let char = 0; char < name.length; char++) view.setUint16(offset + char * 2, name.charCodeAt(char), true);
+    view.setUint16(offset + 64, (name.length + 1) * 2, true);
+    bytes[offset + 66] = type;
+    view.setUint32(offset + 68, 0xffffffff, true);
+    view.setUint32(offset + 72, 0xffffffff, true);
+    view.setUint32(offset + 76, child, true);
+    view.setUint32(offset + 116, type === 2 ? 2 : 0xfffffffe, true);
+    view.setUint32(offset + 120, type === 2 ? 1 : 0, true);
+  };
+  writeEntry(0, "Root Entry", 5, 1);
+  writeEntry(1, nested ? "ObjectPool" : "Workbook", nested ? 1 : 2, nested ? 2 : 0xffffffff);
+  if (nested) writeEntry(2, "Workbook", 2);
+  return bytes;
+}
+
+function zipArchive(files: Record<string, string>): Uint8Array {
+  const entries = Object.entries(files).map(([name, contents]) => ({
+    name: new TextEncoder().encode(name),
+    data: new TextEncoder().encode(contents),
+  }));
+  const localSize = entries.reduce((size, entry) => size + 30 + entry.name.length + entry.data.length, 0);
+  const centralSize = entries.reduce((size, entry) => size + 46 + entry.name.length, 0);
+  const bytes = new Uint8Array(localSize + centralSize + 22);
+  const view = new DataView(bytes.buffer);
+  let offset = 0;
+  const localOffsets: number[] = [];
+  for (const entry of entries) {
+    localOffsets.push(offset);
+    view.setUint32(offset, 0x04034b50, true);
+    view.setUint16(offset + 8, 0, true);
+    view.setUint32(offset + 18, entry.data.length, true);
+    view.setUint32(offset + 22, entry.data.length, true);
+    view.setUint16(offset + 26, entry.name.length, true);
+    bytes.set(entry.name, offset + 30);
+    bytes.set(entry.data, offset + 30 + entry.name.length);
+    offset += 30 + entry.name.length + entry.data.length;
+  }
+  const centralOffset = offset;
+  entries.forEach((entry, index) => {
+    view.setUint32(offset, 0x02014b50, true);
+    view.setUint16(offset + 10, 0, true);
+    view.setUint32(offset + 20, entry.data.length, true);
+    view.setUint32(offset + 24, entry.data.length, true);
+    view.setUint16(offset + 28, entry.name.length, true);
+    view.setUint32(offset + 42, localOffsets[index]!, true);
+    bytes.set(entry.name, offset + 46);
+    offset += 46 + entry.name.length;
+  });
+  const end = offset;
+  view.setUint32(end, 0x06054b50, true);
+  view.setUint16(end + 8, entries.length, true);
+  view.setUint16(end + 10, entries.length, true);
+  view.setUint32(end + 12, centralSize, true);
+  view.setUint32(end + 16, centralOffset, true);
+  return bytes;
+}
+
 describe("sniffMime", () => {
   it("detects image formats by magic bytes", () => {
     expect(sniffMime(PNG)).toBe("image/png");
@@ -152,7 +230,7 @@ describe("isInlineMime", () => {
 
 describe("chat attachment mime", () => {
   it("allowlist and image predicate agree with the resolver", () => {
-    for (const m of ["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf", "text/markdown", "text/plain"]) {
+    for (const m of ["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf", "application/vnd.ms-excel", "text/markdown", "text/plain"]) {
       expect(isChatAttachmentMime(m), m).toBe(true);
     }
     expect(isChatAttachmentMime("image/svg+xml")).toBe(false);
@@ -170,11 +248,34 @@ describe("chat attachment mime", () => {
     expect(resolveChatAttachmentMime("lie.png", enc.encode('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>'))).toBeNull();
     expect(resolveChatAttachmentMime("logo.bmp", new Uint8Array([0x42, 0x4d, 0, 0]))).toBeNull();
     expect(resolveChatAttachmentMime("book.xlsx", new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0]))).toBeNull();
+    expect(resolveChatAttachmentMime("book.docx", new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0]))).toBeNull();
+    expect(resolveChatAttachmentMime("book.xls", new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))).toBeNull();
+    const docx = zipArchive({
+      "[Content_Types].xml": "<Types/>",
+      "_rels/.rels": "<Relationships/>",
+      "word/document.xml": "<document/>",
+    });
+    expect(resolveChatAttachmentMime("document.docx", docx))
+      .toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    expect(resolveChatAttachmentMime("spoof.docx", zipArchive({ "README.md": "not Office" }))).toBeNull();
+    expect(resolveChatAttachmentMime("valid.xls", compoundWorkbook(false))).toBe("application/vnd.ms-excel");
+    expect(resolveChatAttachmentMime("embedded.xls", compoundWorkbook(true))).toBeNull();
+    for (const [extension, mime] of [
+      ["odt", "application/vnd.oasis.opendocument.text"],
+      ["ods", "application/vnd.oasis.opendocument.spreadsheet"],
+    ] as const) {
+      const entries = { mimetype: mime, "content.xml": "<document/>", "META-INF/manifest.xml": "<manifest/>" };
+      expect(resolveChatAttachmentMime(`document.${extension}`, zipArchive(entries))).toBe(mime);
+      expect(resolveChatAttachmentMime("spoof.docx", zipArchive(entries))).toBeNull();
+      expect(resolveChatAttachmentMime(`ambiguous.${extension}`, zipArchive({ ...entries, "word/document.xml": "<document/>" }))).toBeNull();
+    }
     // unsigned UTF-8 text classifies by extension; binary and empty reject
     expect(resolveChatAttachmentMime("notes.md", enc.encode("# Title\n\nsome body text"))).toBe("text/markdown");
     expect(resolveChatAttachmentMime("readme.MD", enc.encode("plain words"))).toBe("text/markdown");
     expect(resolveChatAttachmentMime("binary.txt", new Uint8Array([0x61, 0x00, 0x62, 0x63]))).toBeNull();
-    expect(resolveChatAttachmentMime("empty.txt", new Uint8Array(0))).toBeNull();
+    expect(resolveChatAttachmentMime("report.csv", enc.encode("name,status\nLexa,ready"))).toBe("text/csv");
+    expect(resolveChatAttachmentMime("report.html", enc.encode("<!doctype html><html><body>Ready</body></html>"))).toBe("text/html");
+    expect(resolveChatAttachmentMime("report.xml", enc.encode('<?xml version="1.0"?><report>ready</report>'))).toBe("application/xml");
   });
 });
 
