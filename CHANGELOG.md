@@ -7,6 +7,8 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.12.0] - 2026-10-22
+
 ### Added
 
 - **A wiki page can be deleted from the page itself, and its page-actions menu has a visible trigger.**

@@ -12,6 +12,12 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.7.0] - 2026-10-22
+
+### Changed
+
+- **Markdown documents are sent as source** — `task create/update --description` and `wiki create/update --content` now send Markdown strings directly instead of converting to TipTap JSON, and `task get` / `wiki get` print the stored Markdown. An explicit empty `wiki create --content ""` now creates an empty page instead of being rejected as an empty flag.
+
 ## [2026.6.4] - 2026-10-11
 
 ### Fixed
