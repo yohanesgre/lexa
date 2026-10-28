@@ -7,8 +7,16 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.13.0] - 2026-10-28
+
 ### Added
 
+- **Mobile Assistant composer folds.** The docked composer can collapse to a
+  single bar on phones without unmounting the draft, attachments, queue, or a
+  running reply; the folded bar keeps streaming status and Stop, and surfaces
+  conflict, queue, and attachment failures through an expand-to-fix notice.
+  Focus returns to the control that survives each toggle. Desktop and the
+  landing composer are unchanged.
 - **Remote MCP server (`/mcp`).** Lexa serves its own Model Context Protocol
   server over Streamable HTTP, so an external client (OpenBot or another MCP
   host) can operate one user's projects, tasks, activity, and wiki. The endpoint
