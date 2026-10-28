@@ -96,16 +96,20 @@ export function PersonalApiKeysSection() {
           <span>This key gives the client the same permissions as your account. Use a separate key for OpenBot so you can revoke it independently.</span>
         </div>
 
-        <p className="text-sm text-lx-text-secondary mt-3" style={{ maxWidth: 560 }}>
-          A key by itself is not a connection. In OpenBot:
-        </p>
-        <ol className="text-sm text-lx-text-secondary" style={{ listStyle: "decimal", paddingLeft: 20, margin: "4px 0 0", maxWidth: 560, lineHeight: 1.5 }}>
-          <li>Create a personal key named OpenBot below and copy it when it is shown.</li>
-          <li>Set Name to Lexa, Transport to Streamable HTTP, and Server URL to the MCP server URL above.</li>
-          <li>Add the header <KeyCode>Authorization</KeyCode> with the value <KeyCode>Bearer &lt;personal-api-key&gt;</KeyCode>.</li>
-          <li>Leave Sign-in app empty when using an API key.</li>
-          <li>Select Test connection, then ask OpenBot to list projects.</li>
-        </ol>
+        {mcpUrl && (
+          <>
+            <p className="text-sm text-lx-text-secondary mt-3" style={{ maxWidth: 560 }}>
+              A key by itself is not a connection. In OpenBot:
+            </p>
+            <ol className="text-sm text-lx-text-secondary" style={{ listStyle: "decimal", paddingLeft: 20, margin: "4px 0 0", maxWidth: 560, lineHeight: 1.5 }}>
+              <li>Create a personal key named OpenBot below and copy it when it is shown.</li>
+              <li>Set Name to Lexa, Transport to Streamable HTTP, and Server URL to the MCP server URL above.</li>
+              <li>Add the header <KeyCode>Authorization</KeyCode> with the value <KeyCode>Bearer &lt;personal-api-key&gt;</KeyCode>.</li>
+              <li>Leave Sign-in app empty when using an API key.</li>
+              <li>Select Test connection, then ask OpenBot to list projects.</li>
+            </ol>
+          </>
+        )}
         <div className="field-hint">Keys are shown only once. If you no longer have the key, create a new one.</div>
         {keysLoaded && keys.length === 0 && (
           <div className="field-hint">Create a key named OpenBot below, then paste it into OpenBot as an Authorization header.</div>
