@@ -197,6 +197,57 @@ applied at build time, before route matching and before body decode:
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
 
+### Inbound MCP server (`/mcp`)
+
+`/mcp` is the inbound counterpart to the Assistant's outbound MCP bridge
+(below), not part of the Assistant. It lets an external MCP client act as a
+specific Lexa user over Streamable HTTP, served by both hosts
+(`server/entry.ts`, `server/workers-entry.ts`) at the canonical origin from
+`resolvePublicUrl` (`LXK_PUBLIC_URL`).
+
+- **Stateless.** Every accepted `POST` builds one `McpServer` plus
+  `WebStandardStreamableHTTPServerTransport` (`@modelcontextprotocol/sdk`
+  1.30.1) and closes both after the response: no session id, no server-held
+  identity, no Durable Object, no registration. `GET`/`DELETE` answer 405
+  because no server-initiated stream or session exists.
+- **Personal bearer only.** Auth runs per request, before any protocol work:
+  `resolveApiKeyIdentity` (Bun) or `resolveApiKeyIdentityAsync` (Workers)
+  against a user-bound `lxk_` key. A key row with `user_id NULL` resolves to a
+  server-owned admin on REST but is refused here, and the session cookie is
+  never read. Nothing is cached, so revocation and removed project access take
+  effect on the next request.
+- **Rate, body, Origin.** One charge on the shared per-IP `apiRateLimiter`
+  precedes auth, exactly like `/api`. The transport enforces the shared
+  `LXK_MAX_BODY_MB` cap (`resolveMaxApiBody`) and the Origin allow-list from
+  `resolveTrustedOrigins`; an absent Origin is accepted for non-browser
+  clients.
+- **In-process REST reuse.** A tool call is an adapter over one approved REST
+  operation. `createRestDispatch` (`server/mcp/rest.ts`) synthesizes a `Request`
+  carrying only the caller's bearer, the JSON content type, and an internal
+  per-process nonce (generated lazily on first use inside a request, because
+  production workerd rejects module-scope randomness), then calls the same
+  authenticated handler `/api` uses. So authorization, WIP/required-field/
+  deadline guards, activity transactions, Markdown validation, wiki revisions,
+  and route-owned GitHub state sync on task update/move all run unchanged.
+  There is no self-fetch, no direct SQL, and no new service edge (invariant #1
+  holds without a new rule). The route middleware re-authenticates the bearer
+  and skips only its limiter for the matching nonce, so the outer `/mcp`
+  charge is the only one.
+- **Bounded tool surface.** The catalog is fixed at 22 `lexa_*` tools; unknown
+  tools and schema-invalid arguments are rejected by the SDK. Caller-controlled
+  path segments (project slug, task id, page slug) are percent-decoded and
+  checked before the `Request` is built, so a dot segment cannot retarget a tool
+  at a sibling route.
+- **Advertised URL.** `GET /api/capabilities` returns `mcpUrl`
+  (`resolvePublicUrl(RuntimeEnv) + "/mcp"`), which the Settings → Me → API Keys
+  guide copies. The value is configuration, never the request Host or
+  `window.location`.
+
+The 22-tool catalog and its REST mapping are canonical in
+[`docs/API.md`](API.md#inbound-mcp-server-mcp); the per-layer call graph and the
+internal-nonce trust rule are canonical in
+[`docs/LAYERS.md`](LAYERS.md#inbound-mcp-server-mcp--per-request-server-over-authenticated-routes).
+
 ## GitHub Integration
 
 ### GitHub App (pinned scope)

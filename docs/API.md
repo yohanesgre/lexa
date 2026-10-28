@@ -2530,8 +2530,8 @@ DELETE /mcp    405 — there is no session to terminate
   `enableJsonResponse`); SSE streaming is not used for requests.
 - **SDK/protocol.** `@modelcontextprotocol/sdk` 1.30.1,
   `WebStandardStreamableHTTPServerTransport`. Protocol version negotiation,
-  JSON-RPC framing, and `tools/list` pagination are the SDK's, not a hand-built
-  REST imitation.
+  JSON-RPC framing, and the `tools/list` result shape (all 22 tools in one
+  page) are the SDK's, not a hand-built REST imitation.
 - **Canonical URL.** `GET /api/capabilities` → `mcpUrl`, computed server-side as
   `resolvePublicUrl(RuntimeEnv) + "/mcp"` (`LXK_PUBLIC_URL`, dev default
   `http://localhost:5173`). The request Host/Origin and the browser location are

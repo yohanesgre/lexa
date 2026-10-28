@@ -89,6 +89,9 @@ Titles come from `scripts/check-invariants.ts`; evidence is grep-verified agains
   every mounted route plus 403 for the admin-scoped GET surface, so a new route that forgets the
   middleware fails a test instead of silently falling out of the per-file set.
 - **Security boundaries** — `server/assistant/{secrets,secrets-workers,mcp,ssrf}.test.ts`,
+  `server/mcp/mcp.test.ts` (inbound `/mcp`: personal-key/cookie/unbound rejection,
+  per-request revocation + access freshness, Origin/body/rate caps, path-segment
+  traversal, user isolation, persisted mutation results),
   `server/ssrf.test.ts`, `server/api/{auth-key,rate-limit}.test.ts`,
   `server/services/{wiki,workspace-invites}.test.ts`, `app/routes/share.$token.test.tsx`,
   `shared/safe-href.test.ts`.

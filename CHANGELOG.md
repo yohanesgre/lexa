@@ -7,6 +7,28 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Added
+
+- **Remote MCP server (`/mcp`).** Lexa serves its own Model Context Protocol
+  server over Streamable HTTP, so an external client (OpenBot or another MCP
+  host) can operate one user's projects, tasks, activity, and wiki. The endpoint
+  is the instance's canonical origin plus `/mcp`, served by both the Workers and
+  Bun entries with no new Worker binding, Durable Object, secret, dependency, or
+  schema. Authentication is a user-bound personal `lxk_` key on every request;
+  session cookies and unbound server keys are rejected, and a revoked key or
+  removed project access fails on the next request. The 22 approved
+  project/task/wiki tools replay the existing authenticated REST operations
+  in-process, so role checks, WIP/required-field/deadline guards, activity rows,
+  Markdown and wiki revision rules, and route-owned GitHub state sync are
+  inherited unchanged. Tool authority equals the key owner's permissions: there
+  are no per-key scopes and no OAuth, and a dedicated key only separates
+  revocation. One rate charge per request, the shared `LXK_MAX_BODY_MB` body
+  cap, an Origin allow-list, and path-segment validation guard the tool
+  boundary. Settings → Me → API Keys now carries the connection guide (copied
+  endpoint, Streamable HTTP, `Authorization: Bearer` header, empty Sign-in app).
+  No deployment is part of this change; connecting OpenBot and verifying
+  GitHub-issue acceptance remain manual checks.
+
 ## [2026.12.0] - 2026-10-22
 
 ### Added
