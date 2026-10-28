@@ -10,7 +10,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Cloudflare Workers + D1 + R2 — the only actively developed deploy target (Workers Paid, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`); Bun standalone HTTP server kept as a frozen flavor | Edge isolates host SSR + REST + webhooks and are the only target receiving new features. The Bun flavor keeps running at current features — existing installs keep working, no new work lands there (see ADR-0003) |
-| Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
+| Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP; Workers transactional mail only via the Cloudflare `send_email` binding (no SMTP) |
 | Machine auth | API keys (`lxk_` + base62(43B)) | CLI/webhooks/scripts: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
 | Styling      | Tailwind                      | Fast, tree-shaken |
@@ -80,20 +80,30 @@ Better Auth 1.6.27 (pinned, MIT) runs **in-process** on the Bun server
 `tanstackStartCookies` LAST, `baseURL` = `LXK_PUBLIC_URL`, secure cookies,
 trusted origins). Mounted at `/api/auth/*` **before** the API-key
 middleware. Email/password only — no social providers, no Google OAuth
-clients, no callback URIs, no SMTP anywhere.
+clients, no callback URIs, no SMTP transport. On Workers, transactional mail
+uses the native `send_email` binding only (`EMAIL` + `LXK_EMAIL_FROM`);
+Cloudflare Email Sending is Beta.
 
 - **Login/logout/set-password** — `/login`, `/set-password` pages; sessions
   are cookie-based, **7d sliding** (Better Auth defaults `expiresIn` 7d /
   `updateAge` 24h); logout, deactivate, and password change revoke sessions.
+- **Self-service recovery** — when `GET /api/capabilities` reports
+  `passwordRecovery: true`, the login page offers a request form;
+  `POST /api/auth/request-password-reset` is wrapped above the native Better
+  Auth handler so strict rolling address/IP admission runs in D1 before the
+  uniform acknowledgement, and the eligibility → native **30-minute** token →
+  fixed email job rides `ctx.waitUntil`. Unknown/banned/pending-invite
+  addresses get the same response and receive nothing.
 - **Provisioning** — the `/setup` wizard creates the first superadmin
   (email + password, no email needed); superadmin-issued **workspace invite
-  links** and **set-password links** onboard members (link-based, 7d expiry,
-  shared out-of-band — no email transport). **No public signup** — signup is
+  links** and **set-password links** onboard members (7d expiry, single use).
+  When email is configured, creation also attempts one delivery; the link and
+  row remain the authoritative result even when submission fails, so the
+  admin can always hand it over out-of-band. **No public signup** — signup is
   disabled (`disableSignUp`); provisioning is admin-curated (allow-list
   bootstrap + workspace invites). Teams are **intra-server workspaces, not
   multi-tenancy** — one server, one DB, one superadmin. Email addresses are
-  immutable (no verification without SMTP) — changing one means delete +
-  re-invite.
+  immutable — changing one means delete + re-invite.
 - **Roles** — `users.role` ∈ {superadmin, member}; superadmin is **env-only**
   (`LXK_ADMIN_EMAILS`, applied at provisioning), never edited at runtime.
   Team-admin authority comes from the org `member.role` (owner/admin) on the

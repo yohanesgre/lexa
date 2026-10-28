@@ -41,6 +41,7 @@ import type {
   Request as WorkersRequest,
   Response as WorkersResponse,
   ScheduledController,
+  SendEmail,
 } from "@cloudflare/workers-types";
 import { getEnvFromWorkers, legacyGithubEnvVars, resolvePublicUrl, resolveTrustedProxyCidrs, type RuntimeEnv } from "./env";
 import type { ManagedMarkdownBinding } from "./document-conversion";
@@ -66,6 +67,8 @@ import { GitHubClient, syncGitHubConfigFromDbAsync } from "./github/client";
 import { backfillProviderSecrets } from "./db/provider-secrets-backfill";
 import { GitHubService } from "./services/github.service";
 import { capabilitiesFromRuntimeEnv } from "./capabilities";
+import { emailDeliveryConfigured } from "./services/email.service";
+import { handlePasswordRecoveryRequest } from "./auth-recovery";
 import { sweepStaleAssistantTasks } from "./assistant/stale-runs";
 
 export interface WorkersEnv {
@@ -85,6 +88,10 @@ export interface WorkersEnv {
   LXK_RATE_LIMIT_MAX?: string;
   LXK_RATE_LIMIT_WINDOW_MS?: string;
   LXK_ASSISTANT_REPO_CAP?: string;
+  // Native Email Sending capability + bare verified-domain sender. Delivery
+  // requires both (and the canonical URL); absent/partial keeps manual links.
+  EMAIL?: SendEmail;
+  LXK_EMAIL_FROM?: string;
   // Managed secrets: the AES-GCM envelope key pair shared by MCP tokens,
   // provider keys, and Jev. Optional — an unset active key disables managed
   // secrets and leaves env:/file: refs as-is.
@@ -146,6 +153,11 @@ function ensureBoot(env: WorkersEnv): Promise<void> {
         console.warn(`[GitHub] legacy env config ignored (${legacyGithub.join(", ")}) — configure GitHub sync in Settings → Workspace → Integrations → GitHub Sync`);
       }
       const { runtimeEnv, driver } = requestLayers(env);
+      if (runtimeEnv.EMAIL !== undefined && !emailDeliveryConfigured(runtimeEnv)) {
+        console.warn(
+          "[Email] EMAIL binding is configured but LXK_EMAIL_FROM / LXK_PUBLIC_URL is missing, invalid, or not HTTPS — email delivery is disabled"
+        );
+      }
       await Effect.runPromise(
         Effect.gen(function* () {
           const mirrored = yield* mirrorSettingsFromEnvAsync(driver, stringEnvFromRuntimeEnv(runtimeEnv));
@@ -178,12 +190,18 @@ function securityHeaders(headers?: HeadersInit): Headers {
   const h = new Headers(headers);
   h.set("X-Content-Type-Options", "nosniff");
   h.set("Cache-Control", "no-store");
+  h.set("Referrer-Policy", "no-referrer");
   h.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   return h;
 }
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: securityHeaders({ "Content-Type": "application/json" }) });
+}
+
+function safeErrorName(error: unknown): string {
+  const name = error instanceof Error ? error.name : "";
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) ? name : "unknown";
 }
 
 // ─── Request routing ───────────────────────────────────────────────────
@@ -201,8 +219,12 @@ type BetterAuthApi = {
     createUser: (opts: { body: { email: string; password: string; name: string; data: { role: string } } }) => Promise<unknown>;
     listSessions: (opts: { headers: Headers }) => Promise<ReadonlyArray<{ id: string; token: string; ipAddress?: string | null; userAgent?: string | null; expiresAt: string | Date; createdAt: string | Date }>>;
     revokeSession: (opts: { body: { token: string }; headers: Headers }) => Promise<unknown>;
+    requestPasswordReset: (opts: { body: { email: string } }) => Promise<unknown>;
   };
   handler: (req: Request) => Promise<Response>;
+  // Better Auth resolves its async context on first use. Exposed so the Worker
+  // entry can keep that initialization alive for the current request lifetime.
+  $context?: Promise<unknown>;
 };
 
 // The full API stack (better-auth + service graph + web handler) is
@@ -213,7 +235,13 @@ type BetterAuthApi = {
 let apiCache: { fingerprint: string; handler: (req: Request) => Promise<Response> } | null = null;
 
 function apiFingerprint(runtimeEnv: RuntimeEnv): string {
-  return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? "", runtimeEnv.AI !== undefined]);
+  return JSON.stringify([
+    runtimeEnv.LXK_ENV ?? "",
+    runtimeEnv.LXK_PUBLIC_URL ?? "",
+    runtimeEnv.AI !== undefined,
+    runtimeEnv.EMAIL !== undefined,
+    runtimeEnv.LXK_EMAIL_FROM ?? "",
+  ]);
 }
 
 // better-auth is isolate-stable the same way the API stack is: build once per
@@ -511,6 +539,8 @@ export async function runScheduledCore(
     batchStmts(driver, [
       { sql: "DELETE FROM webhook_events WHERE received_at < datetime('now', '-7 days')", params: [] },
       { sql: "DELETE FROM device_login_requests WHERE expires_at < datetime('now')", params: [] },
+      // Admission rows are only useful for the longest rolling window (1h).
+      { sql: "DELETE FROM recovery_requests WHERE requested_at <= CAST(strftime('%s', 'now') AS INTEGER) - 3600", params: [] },
     ]).pipe(Effect.catchAll((e) => Effect.sync(() => console.error("[Workers] scheduled prune failed:", String(e)))))
   );
   if (runtimeEnv.LXK_BACKUP_ENABLED === "1" && blob) {
@@ -587,6 +617,29 @@ const handler: ExportedHandler<WorkersEnv> = {
       if (path === "/api/webhooks/github") {
         return (await handleWebhook(req, ctx, base, driver)) as unknown as WorkersResponse;
       }
+
+      // Better Auth's cached instance resolves its async `$context` on first
+      // use. A short human request (e.g. unknown-account recovery whose
+      // eligibility job exits immediately) must not orphan that initialization:
+      // attach the shared context promise to this request's waitUntil before
+      // the human /api branches, so workerd keeps it alive. Webhooks are HMAC
+      // only (handled above) and never initialize Better Auth; no master key
+      // means first-run setup/status stay reachable without it.
+      if (path.startsWith("/api/") && (runtimeEnv.LXK_SECRETS_MASTER_KEY ?? "").trim().length > 0) {
+        try {
+          const authInstance = getRuntimeAuth(runtimeEnv).auth;
+          if (authInstance.$context) {
+            ctx.waitUntil(
+              authInstance.$context.catch((error: unknown) => {
+                console.warn(`[Auth] context initialization failed category=${safeErrorName(error)}`);
+              })
+            );
+          }
+        } catch (error) {
+          console.error(`[Auth] initialization failed category=${safeErrorName(error)}`);
+        }
+      }
+
       if (path.startsWith("/api/auth/")) {
         // Same /api/auth/* middleware semantics as the Bun host (server/auth.ts):
         // per-IP throttle → body cap → sign-in email limiter → handler. The
@@ -594,6 +647,27 @@ const handler: ExportedHandler<WorkersEnv> = {
         // cap stay per request.
         const lexaAuth = getRuntimeAuth(runtimeEnv);
         const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+        // The native recovery endpoint is superseded by the Lexa-owned wrapper:
+        // same public path (trailing slashes normalized), but the existing
+        // /api/auth/* per-IP throttle + body cap still run first, then
+        // validation/origin/durable admission, and the issuance+send job rides
+        // this request's waitUntil. auth.ts also disables the native router
+        // path outright, so no alternate HTTP variant can issue around this.
+        if (req.method === "POST" && path.replace(/\/+$/, "") === "/api/auth/request-password-reset") {
+          const res = await handleAuthSurface(req as unknown as Request, {
+            ip,
+            maxBodyBytes: resolveMaxApiBody(runtimeEnv),
+            handler: (inner) =>
+              handlePasswordRecoveryRequest(inner, {
+                env: runtimeEnv,
+                auth: lexaAuth.auth,
+                driver,
+                ctx,
+                maxBodyBytes: resolveMaxApiBody(runtimeEnv),
+              }),
+          });
+          return res as unknown as WorkersResponse;
+        }
         const res = await handleAuthSurface(req as unknown as Request, {
           ip,
           handler: (r) => lexaAuth.auth.handler(r),

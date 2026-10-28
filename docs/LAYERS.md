@@ -31,7 +31,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync. The removed runtime tier's `RuntimeMachineService → RuntimeEventService` / `RuntimeService → SourceService` edges are gone with their services.
+**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. `EmailService` depends on nothing service-side: the workspace route layer and `server/auth-recovery.ts` call it directly after persistence/issuance, so email transport never creates a service edge or cycle. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync. The removed runtime tier's `RuntimeMachineService → RuntimeEventService` / `RuntimeService → SourceService` edges are gone with their services.
 
 ## Infrastructure
 
@@ -608,6 +608,58 @@ team, never from `users.role`.
 **Login rate limit (R17):** `/api/auth/*` failed logins are throttled by the
 Better Auth rate-limit plugin (in-memory; ~5 attempts/60s per email, 15 min
 lockout). The existing per-IP `/api/*` limiter is untouched.
+
+### Transactional email — `EmailService` (no provider framework)
+
+One-way service at `server/services/email.service.ts`, used by the workspace
+route layer (invitation + admin set-password emails) and by the Workers
+recovery path. It wraps the native Workers `EMAIL` (`send_email`) binding
+only: fixed text+HTML templates, `from = { name: "Lexa", email: LXK_EMAIL_FROM }`,
+links built from `resolvePublicUrl(RuntimeEnv)`. No SMTP, provider registry,
+Bun transport, retry, queue, outbox, or delivery table. Each send is bounded
+by a deadline and returns an outcome object
+(`accepted | failed | unknown | not_configured`) — `accepted` carries
+`messageId` when present; a definite rejection is `failed`; a deadline or
+ambiguous transport exception is `unknown` and is never retried. Logs carry
+only the outcome/category (never recipient, token URL, body, or raw provider
+payload). All templates live in the service; there is no user/config template
+override.
+
+### Self-service password recovery — `server/auth-recovery.ts`
+
+Workers-only request path, mounted above the native `/api/auth/*` handler in
+`server/workers-entry.ts`. It is plain async code (not an Effect service)
+because it must both answer and attach work to the request's
+`ExecutionContext.waitUntil`:
+
+```
+POST /api/auth/request-password-reset
+  body cap + JSON parse → capability/Origin check → strict rolling admission
+  (one conditional INSERT against recovery_requests, no per-isolate map)
+  → uniform 200 → ctx.waitUntil(
+       active-account re-check → auth.api.requestPasswordReset
+         (native 30-minute verification token; sendResetPassword re-checks
+          active status and reads the issued row's expiresAt)
+       → EmailService send
+     )
+```
+
+Unknown, banned, and pending-invite addresses produce the same acknowledgement
+and no token/send. Direct HTTP use of the native recovery endpoint hits this
+wrapper, so it cannot bypass the admission/IP/origin limits; when recovery is
+configured the native router path is also in `disabledPaths`, failing alternate
+HTTP variants closed. A D1 admission-store failure preserves the failure and
+returns the generic 500 `INTERNAL`, never a throttling response. The token is
+consumed only by the native `POST /api/auth/reset-password` (password policy,
+single use, session revocation, no auto-login). A same-instance before-hook
+rejects a token whose target account is deactivated or missing with the
+existing 400 `INVALID_TOKEN` before credential mutation, while active/expired/
+unknown tokens keep native semantics. A successful reset also expires
+the requester's own signed session cookies through the native
+`deleteSessionCookie` after-hook, so that browser must sign in again; copied or
+other pre-reset sessions keep the documented <=300s cookie-cache window.
+Sensitive routes and Lexa admin gates re-read D1 immediately. Admin-issued
+seven-day links reuse the same consume path.
 
 ### Device login (CLI pairing) — `DeviceLoginService`
 

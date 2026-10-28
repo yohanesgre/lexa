@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Database } from "bun:sqlite";
+import type { SendEmail } from "@cloudflare/workers-types";
 import { makeSignature } from "better-auth/crypto";
 import { runMigrations } from "./db/migrate";
 import { auth, createAuth, authIpLimiter, authLimiterSizes, loginLimiter, sweepAuthLimiters, handleAuthSurface } from "./auth";
@@ -95,6 +97,102 @@ describe("session cookie cache (perf/auth-cookie-cache)", () => {
     expect(options.session.cookieCache).toEqual({ enabled: true, maxAge: 300 });
     expect(options.session.freshAge).toBe(0);
     expect(options.advanced?.cookieCache).toBeUndefined();
+  });
+});
+
+describe("self-service recovery token (native)", () => {
+  type FactoryAuthApi = {
+    api: {
+      requestPasswordReset: (opts: { body: { email: string } }) => Promise<unknown>;
+    };
+  };
+
+  function fakeEmailBinding() {
+    const sent: Array<{ fromEmail: string; to: string | undefined }> = [];
+    const binding = {
+      send: async (message: { from: string | { email: string }; to?: unknown }) => {
+        const from = message.from;
+        sent.push({
+          fromEmail: typeof from === "string" ? from : from.email,
+          to: typeof message.to === "string" ? message.to : undefined,
+        });
+        return { messageId: "msg_factory" };
+      },
+    } as unknown as SendEmail; // test double for the native binding's structured builder
+    return { sent, binding };
+  }
+
+  it("issues a 30-minute token, sends from the configured sender, and skips a deactivated account", async () => {
+    const { sent, binding } = fakeEmailBinding();
+    const lexa = createAuth({
+      ...baseEnv(),
+      EMAIL: binding,
+      LXK_EMAIL_FROM: "noreply@factory.test",
+    });
+    const authApi = lexa.auth as FactoryAuthApi; // better-auth's instance surface is intentionally internal
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.prepare("INSERT INTO users (id, email, name, role, banned) VALUES (?, ?, ?, 'member', 0)").run(
+        "u-recovery",
+        "recovery@factory.test",
+        "Recovery"
+      );
+      await authApi.api.requestPasswordReset({ body: { email: "recovery@factory.test" } });
+
+      const row = sqlite
+        .prepare("SELECT identifier, expiresAt FROM verification WHERE identifier LIKE 'reset-password:%' ORDER BY createdAt DESC LIMIT 1")
+        .get() as { identifier: string; expiresAt: string };
+      expect(row.identifier).toMatch(/^reset-password:/);
+      const lifetimeMs = new Date(row.expiresAt).getTime() - Date.now();
+      expect(lifetimeMs).toBeGreaterThan(29 * 60_000);
+      expect(lifetimeMs).toBeLessThan(31 * 60_000);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.to).toBe("recovery@factory.test");
+      expect(sent[0]?.fromEmail).toBe("noreply@factory.test");
+
+      // A deactivation racing issuance must suppress submission (the native
+      // HTTP endpoint is wrapped publicly, but the send hook re-checks anyway).
+      sqlite.prepare("UPDATE users SET banned = 1 WHERE id = 'u-recovery'").run();
+      await authApi.api.requestPasswordReset({ body: { email: "recovery@factory.test" } });
+      expect(sent).toHaveLength(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("routes self-service delivery through the issuing instance, never the latest one", async () => {
+    const first = fakeEmailBinding();
+    const second = fakeEmailBinding();
+    const lexaFirst = createAuth({
+      ...baseEnv(),
+      EMAIL: first.binding,
+      LXK_EMAIL_FROM: "first@factory.test",
+    });
+    const otherDbPath = join(dir, "other-instance.db");
+    runMigrations(otherDbPath, MIGRATIONS);
+    // Creating the second instance last would hijack a module-global adapter.
+    createAuth({
+      ...baseEnv(),
+      DATABASE_PATH: otherDbPath,
+      EMAIL: second.binding,
+      LXK_EMAIL_FROM: "second@factory.test",
+    });
+    const firstApi = lexaFirst.auth as FactoryAuthApi; // better-auth's instance surface is intentionally internal
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.prepare("INSERT INTO users (id, email, name, role, banned) VALUES (?, ?, ?, 'member', 0)").run(
+        "u-multi",
+        "multi@factory.test",
+        "Multi"
+      );
+      await firstApi.api.requestPasswordReset({ body: { email: "multi@factory.test" } });
+      expect(first.sent).toHaveLength(1);
+      expect(first.sent[0]?.fromEmail).toBe("first@factory.test");
+      expect(first.sent[0]?.to).toBe("multi@factory.test");
+      expect(second.sent).toHaveLength(0);
+    } finally {
+      sqlite.close();
+    }
   });
 });
 
@@ -203,15 +301,16 @@ describe("capabilities (GET /api/capabilities)", () => {
 
   it("gates assistant on the master key and the rest on their kill switches, per flavor", () => {
     const mcpUrl = `${DEFAULT_PUBLIC_URL}/mcp`;
-    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true, mcpUrl });
-    expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({ assistant: true, flavor: "bun", chatAttachments: true, tasksBulk: true, mcpUrl });
-    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false, tasksBulk: true, mcpUrl });
+    expect(capabilities("bun", {})).toEqual({ assistant: false, flavor: "bun", chatAttachments: false, tasksBulk: true, mcpUrl, passwordRecovery: false });
+    expect(capabilities("bun", { LXK_SECRETS_MASTER_KEY: KEY })).toEqual({ assistant: true, flavor: "bun", chatAttachments: true, tasksBulk: true, mcpUrl, passwordRecovery: false });
+    expect(capabilities("workers", {})).toEqual({ assistant: false, flavor: "workers", chatAttachments: false, tasksBulk: true, mcpUrl, passwordRecovery: false });
     expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_CHAT_ATTACHMENTS: "1" })).toEqual({
       assistant: true,
       flavor: "workers",
       chatAttachments: false,
       tasksBulk: true,
       mcpUrl,
+      passwordRecovery: false,
     });
     expect(capabilities("workers", { LXK_SECRETS_MASTER_KEY: KEY, LXK_DISABLE_TASKS_BULK: "1" })).toEqual({
       assistant: true,
@@ -219,6 +318,7 @@ describe("capabilities (GET /api/capabilities)", () => {
       chatAttachments: true,
       tasksBulk: false,
       mcpUrl,
+      passwordRecovery: false,
     });
     expect(capabilities("bun", { LXK_PUBLIC_URL: "https://lexa.example.com/" })).toMatchObject({
       mcpUrl: "https://lexa.example.com/mcp",

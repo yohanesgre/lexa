@@ -1,7 +1,8 @@
 import { Effect, Data } from "effect";
 import { randomUUID } from "node:crypto";
 import { Db, DbError, ConstraintViolation, RowNotFound, queryAll, queryFirst, run } from "../db/db";
-import { PUBLIC_URL } from "../auth";
+import { resolvePublicUrl } from "../env";
+import { currentEnv } from "../runtime-env";
 import type { WorkspaceInvite } from "../../shared/types";
 
 export class InviteAlreadyPending extends Data.TaggedError("InviteAlreadyPending")<{ email: string }> {}
@@ -51,9 +52,11 @@ export class WorkspaceInvitesService extends Effect.Service<WorkspaceInvitesServ
         ).pipe(
           Effect.catchTag("ConstraintViolation", () => Effect.fail(new InviteAlreadyPending({ email: normalized })))
         );
+        const env = yield* currentEnv;
+        const publicUrl = resolvePublicUrl(env).replace(/\/+$/, "");
         return {
           invite: toInvite({ id, email: normalized, token, expires_at: expiresAt, accepted_at: null }),
-          link: `${PUBLIC_URL}/invite?token=${token}`,
+          link: `${publicUrl}/invite?token=${token}`,
         };
       });
 

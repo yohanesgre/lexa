@@ -1,7 +1,8 @@
 import { betterAuth } from "better-auth";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { organization, admin, createAccessControl } from "better-auth/plugins";
-import { createAuthEndpoint } from "better-auth/api";
+import { createAuthEndpoint, createAuthMiddleware } from "better-auth/api";
+import { deleteSessionCookie } from "better-auth/cookies";
 import { Effect } from "effect";
 import { z } from "zod";
 import type { D1Database } from "@cloudflare/workers-types";
@@ -10,6 +11,8 @@ import { queryFirst, run, type DbDriver } from "./db/db";
 import { createD1Driver } from "./db/drivers/d1";
 import { d1DatabaseToD1Like } from "./api/workers-ports";
 import { getEnv, resolveDatabasePath, resolvePublicUrl, resolveTrustedOrigins, type RuntimeEnv } from "./env";
+import { deliverSelfServiceReset, type ResetEmailAdapter } from "./auth-recovery";
+import { emailDeliveryConfigured } from "./services/email.service";
 
 // Bun-host compat aliases. Resolved once from the process env snapshot via
 // server/env.ts (no direct `process.env` reads here). Workers code MUST NOT
@@ -316,6 +319,31 @@ function makeLexaInvitesPlugin(db: Database, getAuth: () => LexaAuthApi) {
 
 const authRefMap = new WeakMap<object, { current: unknown }>();
 
+// The native `sendResetPassword` callback needs the issuing auth instance's
+// internal adapter (issued-row expiry + account re-read). The callback closes
+// over this options object's own authRef, so a callback from instance A can
+// never read instance B's adapter. Never request state.
+interface AuthContextProvider {
+  $context: Promise<ResetEmailAdapter>;
+}
+
+function isAuthContextProvider(value: unknown): value is AuthContextProvider {
+  return typeof value === "object" && value !== null && "$context" in value;
+}
+
+function nativeResetSucceeded(returned: unknown): boolean {
+  return typeof returned === "object" && returned !== null && "status" in returned && returned.status === true;
+}
+
+function hasDeactivatedFlag(user: unknown): boolean {
+  return (
+    typeof user === "object" &&
+    user !== null &&
+    "banned" in user &&
+    (user.banned === true || user.banned === 1)
+  );
+}
+
 export function buildAuthOptions(env: RuntimeEnv) {
   const publicUrl = resolvePublicUrl(env);
   const databasePath = resolveDatabasePath(env);
@@ -347,6 +375,11 @@ export function buildAuthOptions(env: RuntimeEnv) {
   const database = env.DB ? (env.DB as unknown as Database) : new Database(databasePath);
 
   const authRef: { current: unknown } = { current: null };
+  const recoveryAdapter = async (): Promise<ResetEmailAdapter | null> => {
+    const provider = authRef.current;
+    return isAuthContextProvider(provider) ? await provider.$context : null;
+  };
+  const recoveryEnabled = emailDeliveryConfigured(env);
 
   const invitesPlugin = env.DB
     ? makeLexaInvitesPluginD1(env.DB, () => authRef.current as LexaAuthApi)
@@ -357,10 +390,27 @@ export function buildAuthOptions(env: RuntimeEnv) {
     secret,
     trustedOrigins,
     database,
+    // Fail closed above the router: every native HTTP variant of the recovery
+    // request path (normalized trailing slashes included) is disabled on the
+    // Worker so no request can issue a token around the Lexa wrapper. The
+    // wrapper's internal `auth.api.requestPasswordReset` call bypasses the
+    // router and remains the only issuer.
+    ...(recoveryEnabled ? { disabledPaths: ["/request-password-reset"] } : {}),
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
       revokeSessionsOnPasswordReset: true,
+      // Self-service recovery exists only where delivery does. Without the
+      // binding/sender the native request endpoint stays RESET_PASSWORD_DISABLED
+      // and the public capability stays false (manual admin links remain).
+      ...(recoveryEnabled
+        ? {
+            resetPasswordTokenExpiresIn: 1800,
+            sendResetPassword: async ({ user, token }: { user: { id: string; email: string }; token: string }) => {
+              await deliverSelfServiceReset(env, { userId: user.id, userEmail: user.email, token }, recoveryAdapter);
+            },
+          }
+        : {}),
     },
     user: {
       modelName: "users",
@@ -422,6 +472,37 @@ export function buildAuthOptions(env: RuntimeEnv) {
       }),
       ...(env.DB ? [] : [tanstackStartCookies()]),
     ],
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/reset-password") return;
+        // Match native precedence exactly: body.token first, then query.token.
+        // A truthy non-string body token falls through to native validation,
+        // never to the query fallback.
+        const bodyToken =
+          typeof ctx.body === "object" && ctx.body !== null && "token" in ctx.body ? ctx.body.token : undefined;
+        const token = bodyToken || ctx.query?.token;
+        if (typeof token !== "string" || token.length === 0) return;
+        const verification = await ctx.context.internalAdapter.findVerificationValue(`reset-password:${token}`);
+        if (!verification) return;
+        const user = await ctx.context.internalAdapter.findUserById(verification.value);
+        // Deactivated or missing target: same 400 INVALID_TOKEN shape as an
+        // invalid/used/expired token, before credential mutation or session
+        // deletion. Active targets, expired tokens and unknown tokens fall
+        // through to native behavior unchanged.
+        if (!user || hasDeactivatedFlag(user)) {
+          throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
+        }
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== "/reset-password" || !nativeResetSucceeded(ctx.context.returned)) return;
+        // Native reset deletes the target user's DB sessions but leaves the
+        // caller's signed cookies. Expire only THIS browser's auth cookies so a
+        // token holder is signed out and must sign in fresh; copied/other
+        // sessions keep the documented <=300s cookie-cache window (no global
+        // cache disable, no auth redesign).
+        deleteSessionCookie(ctx);
+      }),
+    },
     advanced: { useSecureCookies: publicUrl.startsWith("https") },
   };
 

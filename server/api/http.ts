@@ -73,6 +73,7 @@ import { WorkspaceService } from "../services/workspace.service";
 import { AuthorizationService } from "../services/authorization.service";
 import { WorkspaceInvitesService } from "../services/workspace-invites.service";
 import { PasswordLinksService } from "../services/password-links.service";
+import { EmailService } from "../services/email.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 // Catalog only — the agents/skills catalog survives on both flavors. Every
@@ -1361,6 +1362,10 @@ async function buildBunApp(dbPath: string, env?: RuntimeEnv) {
   const driver = createBunSqliteDriver(db);
   const dbLayer = Layer.mergeAll(
     Layer.succeed(Db, driver),
+    // Explicit env only; with no env argument the services keep the original
+    // dynamic `currentEnv` → getEnv() fallback instead of snapshotting process
+    // env at handler construction (live secret/kill-switch behavior).
+    env ? RuntimeEnvLive(env) : Layer.empty,
     Layer.succeed(ApiAuthHooks, {
       createUser: (input) =>
         auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
@@ -3456,7 +3461,7 @@ export function buildBaseServiceLayerWithStorage(
     GitHubClient.Default, GitHubService.Default,
     DashboardService.Default,
     TeamsService.Default, WorkspaceService.Default, AuthorizationService.Default,
-    WorkspaceInvitesService.Default, PasswordLinksService.Default,
+    WorkspaceInvitesService.Default, PasswordLinksService.Default, EmailService.Default,
   );
 }
 

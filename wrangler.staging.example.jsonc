@@ -45,6 +45,15 @@
   "ai": {
     "binding": "AI"
   },
+  // Native Cloudflare Email Sending. Set LXK_EMAIL_FROM to a verified-domain
+  // sender (e.g. "Lexa <noreply@example.com>" is NOT accepted — use the bare
+  // address). Remove both the binding and vars.LXK_EMAIL_FROM to keep email
+  // disabled; the app then reports passwordRecovery=false.
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
   "no_bundle": true,
   "rules": [
     {
@@ -58,7 +67,8 @@
   },
   "vars": {
     "LXK_ENV": "production",
-    "LXK_PUBLIC_URL": "<PUBLIC_URL>"
+    "LXK_PUBLIC_URL": "<PUBLIC_URL>",
+    "LXK_EMAIL_FROM": "<VERIFIED_SENDER_EMAIL>"
   },
   "d1_databases": [
     {

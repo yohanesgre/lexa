@@ -1461,6 +1461,7 @@ async function buildBunFullApp(
   const driver = createBunSqliteDriver(db);
   const dbLayer = Layer.mergeAll(
     Layer.succeed(Db, driver),
+    env ? RuntimeEnvLive(env) : Layer.empty,
     Layer.succeed(ApiAuthHooks, {
       createUser: (input) =>
         auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),

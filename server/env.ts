@@ -9,7 +9,7 @@
 // Workers path (which has a per-request `env` binding) on the same shape so
 // the HTTP layer can construct its per-request runtime from either input.
 
-import type { D1Database, DurableObjectNamespace, KVNamespace, R2Bucket } from "@cloudflare/workers-types";
+import type { D1Database, DurableObjectNamespace, KVNamespace, R2Bucket, SendEmail } from "@cloudflare/workers-types";
 
 import type { ManagedMarkdownBinding } from "./document-conversion";
 
@@ -24,6 +24,10 @@ export const RUNTIME_ENV_STRING_KEYS = [
   "LXK_TRUSTED_ORIGINS",
   "LXK_TRUSTED_PROXY_CIDRS",
   "LXK_ADMIN_EMAILS",
+  // Transactional email (Workers): bare verified-domain sender address. The
+  // sending capability itself is the native EMAIL binding (below); both must
+  // be present before any send is attempted.
+  "LXK_EMAIL_FROM",
   // Storage drivers
   "LXK_STORAGE_DRIVER",
   "LXK_STORAGE_FS_ROOT",
@@ -76,6 +80,8 @@ export interface RuntimeEnv extends Partial<Record<RuntimeEnvStringKey, string |
   CHAT_DO?: DurableObjectNamespace | undefined;
   // Workers-only managed document conversion; Bun deliberately has no AI binding.
   AI?: ManagedMarkdownBinding | undefined;
+  // Workers-only native Email Sending binding (wrangler `send_email`).
+  EMAIL?: SendEmail | undefined;
 }
 
 const RUNTIME_ENV_STRING_KEY_SET: ReadonlySet<string> = new Set(RUNTIME_ENV_STRING_KEYS);
@@ -123,6 +129,7 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_TRUSTED_ORIGINS: source.LXK_TRUSTED_ORIGINS,
     LXK_TRUSTED_PROXY_CIDRS: source.LXK_TRUSTED_PROXY_CIDRS,
     LXK_ADMIN_EMAILS: source.LXK_ADMIN_EMAILS,
+    LXK_EMAIL_FROM: source.LXK_EMAIL_FROM,
     LXK_STORAGE_DRIVER: source.LXK_STORAGE_DRIVER,
     LXK_STORAGE_FS_ROOT: source.LXK_STORAGE_FS_ROOT,
     LXK_S3_BUCKET: source.LXK_S3_BUCKET,
@@ -167,6 +174,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_TRUSTED_ORIGINS: s("LXK_TRUSTED_ORIGINS"),
     LXK_TRUSTED_PROXY_CIDRS: s("LXK_TRUSTED_PROXY_CIDRS"),
     LXK_ADMIN_EMAILS: s("LXK_ADMIN_EMAILS"),
+    LXK_EMAIL_FROM: s("LXK_EMAIL_FROM"),
     LXK_STORAGE_DRIVER: "r2",
     LXK_STORAGE_FS_ROOT: undefined,
     LXK_S3_BUCKET: undefined,
@@ -195,6 +203,7 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     KV: env.KV as KVNamespace | undefined,
     CHAT_DO: env.CHAT_DO as DurableObjectNamespace | undefined,
     AI: env.AI as ManagedMarkdownBinding | undefined,
+    EMAIL: env.EMAIL as SendEmail | undefined,
     CRON_SECRET: s("CRON_SECRET"),
   };
 }
